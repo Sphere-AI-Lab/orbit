@@ -49,14 +49,18 @@ jobs:
       execute_command: "pytest tests/e2e/fsdp/test_qwen3_4B_fsdp_true_on_policy.py -x -v"
     secrets: inherit
 
-  # Stage B: Fast GPU tests (1 GPU, runs every PR)
+  # Stage B: Fast GPU tests (1 GPU)
   # For fast tests that require GPU (e.g. deterministic inference paths that
   # pull in flash_attn). Parallel with stage-b-sglang; one self-hosted daemon slot.
+  # Gated by `run-ci-fast-gpu` label: this fork has no self-hosted GPU runners
+  # registered (`runs-on: 8gpu`) — without the gate the job would queue forever
+  # on every PR. Remove the label check (or just keep adding the label) once
+  # GPU runners are attached to impossible-inc/miles-imp.
   stage-b-fast-gpu:
     needs: [stage-a-fast]
     if: |
       always() && !failure() && !cancelled() &&
-      ((github.event_name == 'workflow_dispatch') || (github.event.pull_request))
+      ((github.event_name == 'workflow_dispatch') || (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'run-ci-fast-gpu')))
     uses: ./.github/workflows/_run-ci.yml
     with:
       gpu_count: 1

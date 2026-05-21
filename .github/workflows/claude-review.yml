@@ -1,0 +1,94 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened]
+  issue_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+  pull_request_review_comment:
+    types: [created]
+
+jobs:
+  claude-review:
+    # Auto-run on PR open. Push-to-PR (synchronize) and reopen do NOT auto-run —
+    # ask for a fresh review by commenting `@claude` on the PR.
+    if: >
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - name: Resolve PR head ref
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR=${{ github.event.pull_request.number || github.event.issue.number }}
+          REF=$(gh pr view "$PR" --repo ${{ github.repository }} --json headRefName -q .headRefName)
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout PR branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.pr.outputs.ref }}
+          fetch-depth: 1
+
+      - name: Configure git identity
+        run: |
+          git config user.name "claude-code[bot]"
+          git config user.email "claude-code[bot]@users.noreply.github.com"
+
+      - name: Run Claude Code Review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          track_progress: true
+          claude_args: |
+            --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr checks:*),Bash(gh run view:*),Bash(gh run list:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git diff:*),Bash(git status:*),Bash(git log:*),Read,Edit,Write,Glob,Grep,WebFetch"
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+            PR BRANCH: ${{ steps.pr.outputs.ref }}
+
+            You operate in one of two modes based on the comment / PR body:
+
+            **APPLY mode** — if the request asks for a change ("fix", "rename", "add", "update", etc.):
+            1. Make the edits with Edit/Write.
+            2. `git add` the changed files, `git commit` with a concise message describing the change, and `git push` to the PR branch.
+            3. Post a brief PR comment summarising what was committed.
+            Do not reformat files as part of an APPLY — pre-commit (black/isort/ruff/autoflake)
+            handles formatting on the contributor side.
+
+            **REVIEW mode** — default for `pull_request` events and unclear requests:
+            Review the PR. Use `gh pr diff` to see the changed files. Focus on:
+
+            **Correctness & safety:**
+            - Logic bugs in the diff (off-by-one, wrong branch, missing await, race conditions).
+            - Resource leaks: GPU memory, file handles, subprocess teardown (especially around ray / sglang lifecycles).
+            - Error handling at system boundaries; do not flag missing handlers for impossible internal states.
+            - Hardcoded secrets / credentials / tokens. Hardcoded absolute paths under `/root/`, `/home/`, etc. are a smell — call them out.
+
+            **Miles-imp specific conventions:**
+            - **`mpu.get_*` ban**: direct calls to `mpu.get_*` are banned by pre-commit. Use the `ParallelState` wrapper instead. Exempt paths: `backends/megatron_utils/parallel.py`, `tools/convert_to_hf.py`, `miles_plugins/`, `examples/`.
+            - **Logging**: prefer `logging.info()` over `print()` in library code under `miles/`. Scripts under `scripts/` may use `print()` / `echo` freely.
+            - **Slurm launcher** (`scripts/slurm/`): if the PR touches `launch_miles.sbatch`, `submit.sh`, or `lib/*.sh`, cross-check against the rationale in `scripts/slurm/docs/launcher.md` (step memory cap, two-phase cleanup, healthcheck) — don't accept changes that break those invariants without an explicit justification in the PR description.
+            - **Skill files** (`.claude/skills/*/SKILL.md`): keep concise; user prefers terse skills over verbose ones.
+
+            **Tests & docs (if applicable):**
+            - New behaviour in `miles/` should ideally have a test in the matching test dir.
+            - Public-facing docs (`docs/`, `README.md`) should stay in sync with code-level changes that affect users.
+
+            For each issue, prefer GitHub suggestion blocks so the author can apply with one click:
+            ```suggestion
+            corrected code here
+            ```
+            Keep the review focused. A clean PR deserves a short "looks good" — don't manufacture nits.
+          show_full_output: true

@@ -13,7 +13,9 @@ from transformer_engine.pytorch.constants import TE_DType
 from miles.backends.megatron_utils.megatron_to_hf.processors.quantizer_mxfp8 import (
     _quantize_param as processor_quantize_mxfp8_param,
 )
-from miles.backends.megatron_utils.megatron_to_hf.processors.quantizer_mxfp8 import quantize_params_mxfp8
+from miles.backends.megatron_utils.megatron_to_hf.processors.quantizer_mxfp8 import (
+    quantize_params_mxfp8,
+)
 
 MXFP8_GROUP_SIZE = 32
 MXFP8_SHAPES = [

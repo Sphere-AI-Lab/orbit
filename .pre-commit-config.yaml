@@ -30,7 +30,7 @@ repos:
         args: [--remove-all-unused-imports, --in-place]
 
   - repo: https://github.com/pycqa/isort
-    rev: 5.13.2          # 选一个稳定版本
+    rev: 8.0.1          # 选一个稳定版本
     hooks:
       - id: isort
         args:
