@@ -15,6 +15,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!scripts/slurm/lib/
 lib64/
 parts/
 sdist/
@@ -192,3 +193,10 @@ glm/
 _examples_synced/
 .env
 .DS_Store
+
+# slurm launcher outputs (scripts/slurm/launch_miles.sbatch)
+/runs/
+/checkpoints/
+
+# prebuilt wheels cached by scripts/slurm/setup/install_env.sh
+/thirdparty/wheels/

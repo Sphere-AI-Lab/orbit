@@ -48,7 +48,13 @@ class WandbBackend(TrackingBackend):
     def log(self, metrics: dict[str, Any], step: int | None = None) -> None:
         import wandb
 
-        wandb.log(metrics)
+        # Pin wandb's `_step` so the default x-axis matches the logical
+        # step instead of auto-incrementing per wandb.log() call. Assumes
+        # num_steps_per_rollout == 1; revisit if K>1 trips monotonicity.
+        if step is not None:
+            wandb.log(metrics, step=step)
+        else:
+            wandb.log(metrics)
 
     def finish(self) -> None:
         import wandb
