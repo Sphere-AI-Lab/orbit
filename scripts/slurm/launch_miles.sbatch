@@ -260,11 +260,16 @@ NODE_PREAMBLE='
 # ---------- auto-convert HF -> torch_dist if missing ----------------------
 # Runs on the head node only. For large multi-node converts, pre-stage via
 # scripts/slurm/setup/convert_checkpoint.sh — see docs/launcher.md.
+#
+# Recipes opt out by leaving HF_TORCHDIST_DIR unset/empty (e.g. VLM
+# recipes that load HF format directly via --megatron-to-hf-mode bridge,
+# bypassing Megatron's torch_dist checkpoint flow).
 
-: "${HF_TORCHDIST_DIR:?recipe must define HF_TORCHDIST_DIR}"
 : "${HF_MODEL_DIR:?recipe must define HF_MODEL_DIR}"
 
-if [[ ! -f "$HF_TORCHDIST_DIR/latest_checkpointed_iteration.txt" ]]; then
+if [[ -z "${HF_TORCHDIST_DIR:-}" ]]; then
+    echo "[convert] HF_TORCHDIST_DIR empty — recipe opted out of torch_dist convert (loading HF directly)"
+elif [[ ! -f "$HF_TORCHDIST_DIR/latest_checkpointed_iteration.txt" ]]; then
     echo "[convert] $HF_TORCHDIST_DIR missing — converting on $HEAD_NODE"
     mkdir -p "$HF_TORCHDIST_DIR"
     MODEL_ARGS_STR=$(printf '%q ' "${MODEL_ARGS[@]}")

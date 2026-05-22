@@ -262,6 +262,12 @@ def forward_only(
         packed_seq_params = get_packed_seq_params(batch, args)
         total_lengths = batch["total_lengths"]
         response_lengths = batch["response_lengths"]
+        # The HF Qwen3-VL processor returns mm_token_type_ids, but the
+        # Megatron-Bridge Qwen3VL path derives image/video masks and mRoPE
+        # positions from input_ids plus image/video grids. Its language-model
+        # forward does not accept the HF-only field, so do not pass it through.
+        mm_inputs = batch["multimodal_train_inputs"] or {}
+        mm_inputs = {k: v for k, v in mm_inputs.items() if k != "mm_token_type_ids"}
         output_tensor = model(
             input_ids=tokens,
             position_ids=None,
@@ -269,7 +275,7 @@ def forward_only(
             labels=None,
             packed_seq_params=packed_seq_params,
             loss_mask=batch["full_loss_masks"],
-            **(batch["multimodal_train_inputs"] if batch["multimodal_train_inputs"] is not None else {}),
+            **mm_inputs,
         )
 
         return output_tensor, partial(
@@ -439,7 +445,9 @@ def train_one_step(
                 forward_kwargs["mtp_kwargs"] = {"mtp_labels": batch["tokens"]}
 
             if batch["multimodal_train_inputs"] is not None:
-                forward_kwargs.update(batch["multimodal_train_inputs"])
+                # Drop unknown keys (see forward_only note on mm_token_type_ids).
+                mm_inputs = {k: v for k, v in batch["multimodal_train_inputs"].items() if k != "mm_token_type_ids"}
+                forward_kwargs.update(mm_inputs)
 
             output_tensor = model(**forward_kwargs)
 

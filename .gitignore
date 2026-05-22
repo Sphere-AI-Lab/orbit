@@ -200,3 +200,6 @@ _examples_synced/
 
 # prebuilt wheels cached by scripts/slurm/setup/install_env.sh
 /thirdparty/wheels/
+
+# debug-time notes / WIP plans / bug logs — not committed unless explicitly requested
+/scripts/slurm/docs/debug-notes/

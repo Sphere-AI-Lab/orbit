@@ -1279,18 +1279,18 @@ def _compute_zero_std_metrics(args, all_samples: list[Sample]):
     all_sample_groups = group_by(all_samples, lambda s: s.group_index)
     interesting_sample_groups = [g for g in all_sample_groups.values() if _is_zero_std(g)]
 
-    interesting_rewards = [str(round(g[0].get_reward_value(args), 1)) for g in interesting_sample_groups]
+    interesting_rewards = [round(float(g[0].get_reward_value(args)), 1) for g in interesting_sample_groups]
 
     counts = {reward: len(items) for reward, items in group_by(interesting_rewards).items()}
-    log_dict = {f"zero_std/count_{reward}": count for reward, count in counts.items()}
+    log_dict = {f"zero_std/count_{reward:g}": count for reward, count in counts.items()}
 
     # Percentages over total groups, so "too hard" (all-0) and "too easy"
     # (all-1) rates are comparable across runs without needing to know the
     # rollout batch size.
     total_groups = len(all_sample_groups)
     if total_groups > 0:
-        log_dict["zero_std/all_zero_percentage"] = counts.get("0.0", 0) / total_groups
-        log_dict["zero_std/all_one_percentage"] = counts.get("1.0", 0) / total_groups
+        log_dict["zero_std/all_zero_percentage"] = counts.get(0.0, 0) / total_groups
+        log_dict["zero_std/all_one_percentage"] = counts.get(1.0, 0) / total_groups
 
     return log_dict
 

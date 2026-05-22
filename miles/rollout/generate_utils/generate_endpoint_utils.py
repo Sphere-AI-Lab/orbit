@@ -21,8 +21,9 @@ def compute_prompt_ids_from_sample(state, sample, tools=None):
         prompt_ids = processor_output["input_ids"][0]
 
         # TODO shall we move it to other places? then can make this function immutable
+        # Drop mm_token_type_ids; see sglang_rollout.py for rationale.
         sample.multimodal_train_inputs = {
-            k: v for k, v in processor_output.items() if k not in ["input_ids", "attention_mask"]
+            k: v for k, v in processor_output.items() if k not in ["input_ids", "attention_mask", "mm_token_type_ids"]
         } or None
 
         return prompt_ids

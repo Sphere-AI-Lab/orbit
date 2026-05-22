@@ -146,7 +146,15 @@ async def generate(args: Namespace, sample: Sample, sampling_params: dict[str, A
         processor_output = state.processor(text=sample.prompt, **processor_kwargs)
         prompt_ids = processor_output["input_ids"][0]
         sample.multimodal_train_inputs = {
-            k: v for k, v in processor_output.items() if k not in ["input_ids", "attention_mask"]
+            k: v
+            for k, v in processor_output.items()
+            # input_ids / attention_mask are passed separately by miles.
+            # mm_token_type_ids is emitted by HF Qwen3-VL processor
+            # (transformers>=5.0). Megatron-Bridge derives the same
+            # modality boundaries from input_ids plus image/video grids, and
+            # the HF-only field has variable per-sample seq_len that cannot
+            # be concatenated by data.py.
+            if k not in ["input_ids", "attention_mask", "mm_token_type_ids"]
         } or None
     else:
         prompt_ids = state.tokenizer.encode(sample.prompt, add_special_tokens=False)
