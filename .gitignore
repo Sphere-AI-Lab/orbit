@@ -203,3 +203,7 @@ _examples_synced/
 
 # debug-time notes / WIP plans / bug logs — not committed unless explicitly requested
 /scripts/slurm/docs/debug-notes/
+/scripts/slurm/docs/plan-notes/
+
+# Claude Code runtime lock for /loop and scheduled tasks
+.claude/scheduled_tasks.lock
