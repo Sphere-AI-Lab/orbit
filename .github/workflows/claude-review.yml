@@ -68,27 +68,31 @@ jobs:
             handles formatting on the contributor side.
 
             **REVIEW mode** — default for `pull_request` events and unclear requests:
-            Review the PR. Use `gh pr diff` to see the changed files. Focus on:
+            Review the PR. Use `gh pr diff` to see the changed files.
 
-            **Correctness & safety:**
+            **Output shape — read carefully, the reviewer values concision:**
+
+            1. **Always start with a short summary** of what the PR does in your own words. Aim for 1-2 sentences; up to 3-4 only if the PR genuinely changes several independent things. It must read as a *summary*, not a re-explanation of the diff. Plain prose, no bullet.
+            2. **Then either:**
+               - If nothing substantive needs attention: `**LGTM.**` on its own line. Stop.
+               - Otherwise: a flat bullet list of issues. No section headers, no "Substantive / Minor / Looks good" split, no positive recap of what the PR did well.
+            3. **Only raise issues that would change the merge decision or cause a real bug.** No hard count cap — write as many as the PR genuinely needs, but err on the side of fewer. If you're tempted to soften a bullet with "minor", "nit", "cosmetic", or "consider", drop it.
+
+            **What to flag:**
             - Logic bugs in the diff (off-by-one, wrong branch, missing await, race conditions).
             - Resource leaks: GPU memory, file handles, subprocess teardown (especially around ray / sglang lifecycles).
-            - Error handling at system boundaries; do not flag missing handlers for impossible internal states.
-            - Hardcoded secrets / credentials / tokens. Hardcoded absolute paths under `/root/`, `/home/`, etc. are a smell — call them out.
+            - Hardcoded secrets / credentials / tokens, or hardcoded absolute paths under `/root/`, `/home/`, etc.
+            - PR description claims that don't match the diff (e.g. "fixes X under `set -e`" when the script doesn't have `set -e`).
+            - **`mpu.get_*` ban**: direct calls to `mpu.get_*` are banned by pre-commit. Use the `ParallelState` wrapper. Exempt: `backends/megatron_utils/parallel.py`, `tools/convert_to_hf.py`, `miles_plugins/`, `examples/`.
+            - **Slurm launcher invariants** (`scripts/slurm/`): if the PR touches `launch_miles.sbatch`, `submit.sh`, or `lib/*.sh`, cross-check `scripts/slurm/docs/launcher.md` (step memory cap, two-phase cleanup, healthcheck). Don't accept changes that break these without explicit justification.
+            - **Tests & docs — only when genuinely necessary.** The bar is high: flag only if the PR introduces non-trivial new behavior in `miles/` that is reasonably testable and has no test, or makes a user-visible change that contradicts existing `docs/` or `README.md`. Do NOT ask for tests on: bug fixes, one-line changes, refactors with no behavior change, scripts under `scripts/`, infra/launcher changes, doc-only PRs. Do NOT ask for doc updates unless the existing doc is now wrong. When in doubt, skip it.
 
-            **Miles-imp specific conventions:**
-            - **`mpu.get_*` ban**: direct calls to `mpu.get_*` are banned by pre-commit. Use the `ParallelState` wrapper instead. Exempt paths: `backends/megatron_utils/parallel.py`, `tools/convert_to_hf.py`, `miles_plugins/`, `examples/`.
-            - **Logging**: prefer `logging.info()` over `print()` in library code under `miles/`. Scripts under `scripts/` may use `print()` / `echo` freely.
-            - **Slurm launcher** (`scripts/slurm/`): if the PR touches `launch_miles.sbatch`, `submit.sh`, or `lib/*.sh`, cross-check against the rationale in `scripts/slurm/docs/launcher.md` (step memory cap, two-phase cleanup, healthcheck) — don't accept changes that break those invariants without an explicit justification in the PR description.
-            - **Skill files** (`.claude/skills/*/SKILL.md`): keep concise; user prefers terse skills over verbose ones.
+            **Do not flag:**
+            - Missing error handlers for impossible internal states.
+            - Code that "could be more defensive" but is correct as written.
+            - Inconsistent quoting / formatting / naming if the change is internally consistent.
+            - Style / cosmetic / UTF-8-vs-byte / log-noise issues that don't cause incorrect behavior.
+            - "Consider also doing X" expansions of scope beyond what the PR set out to do.
 
-            **Tests & docs (if applicable):**
-            - New behaviour in `miles/` should ideally have a test in the matching test dir.
-            - Public-facing docs (`docs/`, `README.md`) should stay in sync with code-level changes that affect users.
-
-            For each issue, prefer GitHub suggestion blocks so the author can apply with one click:
-            ```suggestion
-            corrected code here
-            ```
-            Keep the review focused. A clean PR deserves a short "looks good" — don't manufacture nits.
+            If you use a `suggestion` block, it must compile and must fix something concrete — not just reword.
           show_full_output: true
