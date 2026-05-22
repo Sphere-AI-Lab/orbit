@@ -15,14 +15,23 @@
 #   RUN_DIR, MILES_REPO, MEGATRON_SRC, NODE_PREAMBLE,
 #   MILES_ARGS (bash array)
 #
+# Inputs (env, optional with defaults):
+#   RAY_STATUS_POLL_INTERVAL   seconds between probes      [15]
+#   RAY_STATUS_PROBE_TIMEOUT   per-probe timeout (s)       [10]
+#   RAY_STATUS_FAIL_GRACE      unreadable probes -> dead   [24]
+#                              (default 24 × 15s = 6 min)
+#
 # Outputs (env, set by this function):
 #   STATE  — SUCCEEDED | FAILED | STOPPED | CLUSTER_DEAD | DEADLINE | UNKNOWN
 #   JOB_RC — 0 on SUCCEEDED, 1 on FAILED, 2 on STOPPED, 3 on CLUSTER_DEAD,
 #            124 on DEADLINE
 #   RAY_ADDRESS — http://HEAD_IP:RAY_DASHBOARD_PORT (also exported)
 #
-# Side effects: writes $RUN_DIR/ray_head.log via the bg log tail; may
-# leave the ray cluster running on terminal exit (teardown trap in caller).
+# Side effects: streams Ray job logs to stdout, which sbatch --output
+# captures in $RUN_DIR/run.log. Per-probe diagnostics are kept on
+# node-local scratch while the job is running, so status polling does not
+# synchronously touch the shared run dir. May leave the ray cluster running
+# on terminal exit (teardown trap in caller).
 ray_submit_and_wait() {
     RAY_ADDRESS="http://${HEAD_IP}:${RAY_DASHBOARD_PORT}"
     echo "[submit] $(date -Is)  ray job submit --no-wait -> train.py"
@@ -65,27 +74,72 @@ EOF
     fi
     echo "[submit] job_id=$job_id"
 
-    # bg log tail — drives run.log so the monitor sees train.py output.
-    srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$HEAD_NODE" \
-         --export=ALL,RAY_ADDRESS="$RAY_ADDRESS",JOB_ID="$job_id" \
-         bash -c "$NODE_PREAMBLE"' ray job logs --follow --address "$RAY_ADDRESS" "$JOB_ID" 2>&1 || true' &
+    # Probe + log-follow run from the controller shell directly (conda env
+    # already active), NOT via recurring `srun --overlap` steps. This narrows
+    # CLUSTER_DEAD to Ray Jobs API/dashboard unavailability instead of Slurm
+    # step-launch transport failures. See docs/launcher.md "ray status poll".
+    local poll_interval=${RAY_STATUS_POLL_INTERVAL:-15}
+    local probe_timeout=${RAY_STATUS_PROBE_TIMEOUT:-10}
+    local fail_grace=${RAY_STATUS_FAIL_GRACE:-24}
+    local probe_dir="${TMPDIR:-/tmp}/miles-${JOBID}-${job_id}"
+    mkdir -p "$probe_dir"
+    local probe_log="$probe_dir/probe.log"
+    local probe_err="$probe_dir/probe.err"
+    local poll_done_marker="$probe_dir/poll_done"
+    rm -f "$poll_done_marker" "$probe_err"
+    : > "$probe_log"
+    echo "[submit] local probe diagnostics: $probe_log"
+
+    # bg log tail — local `ray job logs --follow`, reconnect if it drops
+    # unexpectedly (e.g. transient dashboard glitch). The wrapper tracks the
+    # active child so teardown can stop both the subshell and the Ray CLI.
+    (
+        log_child=""
+        cleanup_log_child() {
+            if [[ -n "${log_child:-}" ]]; then
+                kill "$log_child" 2>/dev/null || true
+                wait "$log_child" 2>/dev/null || true
+            fi
+        }
+        trap cleanup_log_child TERM INT EXIT
+
+        while [[ ! -f "$poll_done_marker" ]]; do
+            ray job logs --follow --address "$RAY_ADDRESS" "$job_id" 2>&1 &
+            log_child=$!
+            wait "$log_child"
+            rc=$?
+            log_child=""
+            [[ -f "$poll_done_marker" ]] && break
+            echo "[submit] WARN: ray job logs --follow exited rc=$rc, reconnecting in 2s"
+            sleep 2 &
+            log_child=$!
+            wait "$log_child" || true
+            log_child=""
+        done
+    ) &
     local log_tail_pid=$!
 
-    # fg status poll. timeout 10 per probe so a stuck dashboard can't hang
-    # the script. STATUS_FAIL_GRACE=6 ≈ 90s without a readable status → dead.
+    # fg status poll. timeout=$probe_timeout per probe so a stuck dashboard
+    # can't hang the script. $fail_grace × $poll_interval = grace window
+    # (default 24 × 15s = 6 min) before declaring CLUSTER_DEAD.
     JOB_RC=1
     STATE=UNKNOWN
     local status_fail_count=0
-    local status_fail_grace=6
     local deadline
     deadline=$(( ${SLURM_JOB_END_TIME:-$(( $(date +%s) + 86400 ))} - 120 ))
-    local status_out
+    local status_out status_rc err_summary
     while (( $(date +%s) < deadline )); do
-        sleep 15
-        status_out=$(timeout 10 srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$HEAD_NODE" \
-                         --export=ALL,RAY_ADDRESS="$RAY_ADDRESS",JOB_ID="$job_id" \
-                         bash -c "$NODE_PREAMBLE"' ray job status --address "$RAY_ADDRESS" "$JOB_ID" 2>&1 || true' \
-                     2>&1 || true)
+        sleep "$poll_interval"
+        # `if`-wrap the probe so `set -e` does NOT exit the script when the
+        # inner timeout/ray job status returns non-zero — that's the failure
+        # we're explicitly trying to count, not abort on.
+        if status_out=$(timeout "$probe_timeout" \
+                            ray job status --address "$RAY_ADDRESS" "$job_id" \
+                            2>"$probe_err"); then
+            status_rc=0
+        else
+            status_rc=$?
+        fi
         case "$status_out" in
             *SUCCEEDED*) STATE=SUCCEEDED; JOB_RC=0; break;;
             *FAILED*)    STATE=FAILED;    JOB_RC=1; break;;
@@ -95,8 +149,15 @@ EOF
                 ;;
             *)
                 status_fail_count=$((status_fail_count + 1))
-                if (( status_fail_count >= status_fail_grace )); then
-                    echo "[submit] $status_fail_grace consecutive unreadable status probes — declaring cluster dead"
+                err_summary=$(tr '\n' ' ' < "$probe_err" 2>/dev/null | cut -c1-300 || true)
+                {
+                    echo "[$(date -Is)] unreadable status probe ${status_fail_count}/${fail_grace} rc=$status_rc"
+                    echo "stdout: ${status_out:-<empty>}"
+                    echo "stderr: ${err_summary:-<empty>}"
+                } >> "$probe_log"
+                echo "[submit] WARN: unreadable probe ${status_fail_count}/${fail_grace} (rc=$status_rc, stderr=${err_summary:-<empty>})"
+                if (( status_fail_count >= fail_grace )); then
+                    echo "[submit] $fail_grace consecutive unreadable status probes (~$((fail_grace * poll_interval))s) — declaring cluster dead"
                     STATE=CLUSTER_DEAD
                     JOB_RC=3
                     break
@@ -111,8 +172,11 @@ EOF
         JOB_RC=124
     fi
 
+    # Signal bg log-follow to exit (no reconnect), then kill+wait.
+    touch "$poll_done_marker" 2>/dev/null || true
     kill "$log_tail_pid" 2>/dev/null || true
     wait "$log_tail_pid" 2>/dev/null || true
+    rm -f "$poll_done_marker" "$probe_err"
 
     echo "[submit] $(date -Is)  train.py terminal state: $STATE  job_rc=$JOB_RC"
 }

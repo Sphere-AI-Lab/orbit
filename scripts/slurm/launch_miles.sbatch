@@ -30,6 +30,10 @@
 #   HEALTHCHECK_TIMEOUT   per-node probe timeout (s)         [60]
 #   HEALTHCHECK_MAX_RESTARTS  auto-requeue cap for bad nodes [3]
 #   RAY_BRINGUP_TIMEOUT   cluster-ready timeout (s)          [300]
+#   RAY_STATUS_POLL_INTERVAL  ray job status poll period (s) [15]
+#   RAY_STATUS_PROBE_TIMEOUT  per-probe timeout (s)          [10]
+#   RAY_STATUS_FAIL_GRACE     unreadable-probe count -> dead [24]
+#                             (default 24 × 15s = 6 min)
 
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128

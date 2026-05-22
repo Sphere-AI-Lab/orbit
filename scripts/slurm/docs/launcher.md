@@ -80,17 +80,34 @@ underlying job's terminal state. That mismatch made one OOM look like
 a clean train-and-exit.
 
 The launcher now:
-1. `ray job submit --no-wait` to get a submission id immediately.
-2. Background `ray job logs --follow` to drive stdout into `run.log` for
-   the monitor.
-3. Foreground `ray job status` poll every 15 s, each probe wrapped in
-   `timeout 10`. Terminal states: `SUCCEEDED` (rc 0), `FAILED` (rc 1),
-   `STOPPED` (rc 2). If the dashboard goes silent for `STATUS_FAIL_GRACE`
-   (= 6) consecutive probes ≈ 90 s, we declare `CLUSTER_DEAD` (rc 3).
-   If the SLURM wall deadline is reached without a terminal state,
-   `DEADLINE` (rc 124).
-4. The bg log tail is killed after the poll exits, so teardown isn't
-   blocked waiting on it.
+1. `ray job submit --no-wait` (via `srun --overlap` once, to capture
+   submission id) to get a submission id immediately.
+2. Background `ray job logs --follow` runs locally in the controller
+   shell against `$RAY_ADDRESS` and streams stdout into `run.log`. If the
+   log stream drops unexpectedly mid-run, the wrapper reconnects after
+   2 s and keeps tailing.
+3. Foreground `ray job status` also runs locally, every
+   `RAY_STATUS_POLL_INTERVAL=15s`, with each probe wrapped in
+   `timeout $RAY_STATUS_PROBE_TIMEOUT=10s`. Terminal states: `SUCCEEDED`
+   (rc 0), `FAILED` (rc 1), `STOPPED` (rc 2). If the dashboard returns
+   unreadable output for `RAY_STATUS_FAIL_GRACE=24` consecutive probes
+   (= 6 min by default), we declare `CLUSTER_DEAD` (rc 3). If the SLURM
+   wall deadline is reached without a terminal state, `DEADLINE` (rc
+   124). Per-probe diagnostics are written to node-local scratch under
+   `${TMPDIR:-/tmp}`; `run.log` prints a one-line warning and the local
+   diagnostics path. This avoids synchronously opening files in
+   `$RUN_DIR` while deciding whether the Ray Jobs API is still readable.
+4. The bg log tail watches a node-local marker the fg poll touches when
+   finished, so teardown is fast and the active `ray job logs` child is
+   killed with the wrapper.
+
+Why the bg/fg probes use the local Ray CLI instead of recurring `srun
+--overlap`: the old shape created a fresh Slurm step every 15 s, so
+`CLUSTER_DEAD` conflated Ray Jobs API/dashboard unavailability with Slurm
+step launch or transport failures. Local CLI polling narrows that signal.
+It does not make the run resilient to real node or storage loss; e.g. a
+Weka mount outage on a trainer or sampler can still fail the Ray job and
+needs requeue/resume or longer-term Ray-level fault tolerance.
 
 Borrowed from M3TRL `cli/dispatch/submit_driver.py:_submit_ray_job`.
 

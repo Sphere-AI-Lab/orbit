@@ -149,7 +149,9 @@ if [[ -f "$ALERTS_FILE" ]]; then
     else
         echo "ALERTS      alerts.log: $COUNT entries"
         tail -5 "$ALERTS_FILE" | sed 's/^/  /'
-        (( COUNT > 5 )) && echo "  (showing last 5; older entries above)"
+        if (( COUNT > 5 )); then
+            echo "  (showing last 5; older entries above)"
+        fi
     fi
 else
     FAILS=$(tail -200 "$RUN_LOG" 2>/dev/null | grep -E "crash-debug|Traceback|FATAL|OOM|cudaError|FileNotFoundError|ActorDiedError|CUDA out of memory|srun: error|POISONED|terminal state: (FAILED|STOPPED|CLUSTER_DEAD|DEADLINE|OOM)" || true)
@@ -159,6 +161,8 @@ else
         echo "ALERTS      (no alerts.log; scanning last 200 run.log lines)"
         echo "$FAILS" | head -8 | sed 's/^/  /'
         REST=$(echo "$FAILS" | wc -l)
-        (( REST > 8 )) && echo "  ... and $((REST - 8)) more"
+        if (( REST > 8 )); then
+            echo "  ... and $((REST - 8)) more"
+        fi
     fi
 fi
