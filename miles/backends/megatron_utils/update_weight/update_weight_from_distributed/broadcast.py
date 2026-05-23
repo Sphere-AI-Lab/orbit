@@ -11,8 +11,10 @@ from ray.actor import ActorHandle
 from tqdm import tqdm
 
 from miles.backends.training_utils.parallel import get_parallel_state
-from miles.utils.distributed_utils import init_process_group
+from miles.utils.distributed_utils import get_gloo_group, init_process_group
+from miles.utils.timer import timer
 
+from ..hf_weight_iterator_base import HfWeightIteratorBase
 from .mixin import DistBucketedWeightUpdateMixin
 
 
@@ -41,6 +43,21 @@ class UpdateWeightFromDistributed(DistBucketedWeightUpdateMixin):
         self.quantization_config = quantization_config
         self.weight_version = 0
         self._model_update_groups = None
+        self.weights_getter = weights_getter
+        self.is_lora = is_lora
+        # Bridge mode delegates Megatron -> HF export to Megatron-Bridge
+        # AutoBridge. This covers model families such as Qwen3-VL whose vision
+        # and merger weights are not handled by the legacy convert_to_hf table;
+        # this class still owns the NCCL delivery to rollout engines.
+        self._bridge_mode = args.megatron_to_hf_mode == "bridge"
+        if self._bridge_mode:
+            self._hf_weight_iterator = HfWeightIteratorBase.create(
+                args=args,
+                model=model,
+                model_name=model_name,
+                quantization_config=quantization_config,
+                is_lora=is_lora,
+            )
 
     def connect_rollout_engines(
         self,
@@ -51,17 +68,23 @@ class UpdateWeightFromDistributed(DistBucketedWeightUpdateMixin):
     ) -> None:
         """
         Create NCCL "miles-pp_{pp_rank}" if PP source (DP=TP=0). Lock prevents concurrent broadcasts.
+
+        Raw mode creates one NCCL group per PP rank because each PP stage owns
+        different params. Bridge mode uses a single NCCL group ``miles-bridge``
+        rooted at the global source rank (PP=TP=DP=0) because
+        ``AutoBridge.export_hf_weights`` already gathers across PP and yields a
+        full HF weight stream.
         """
         self.rollout_engines = rollout_engines
         self.rollout_engine_lock = rollout_engine_lock
         self._engine_gpu_counts = engine_gpu_counts
 
-        # For TP:
-        #   1. AllGather parameters to rank 0
-        #   2. Broadcast parameters from rank 0 to all sglang engines
-        pp_rank = get_parallel_state().pp.rank
         if self._is_source:
-            self._group_name = f"miles-pp_{pp_rank}"
+            if self._bridge_mode:
+                self._group_name = "miles-bridge"
+            else:
+                pp_rank = get_parallel_state().pp.rank
+                self._group_name = f"miles-pp_{pp_rank}"
 
         if self._is_source:
             if self._model_update_groups is not None:
@@ -69,33 +92,80 @@ class UpdateWeightFromDistributed(DistBucketedWeightUpdateMixin):
                     self.args, self._group_name, self._model_update_groups, self.rollout_engines
                 )
             self._model_update_groups = connect_rollout_engines_from_distributed(
-                self.args, self._group_name, rollout_engines
+                self.args,
+                self._group_name,
+                rollout_engines,
+                engine_gpu_counts=engine_gpu_counts,
             )
 
     @property
     def _is_source(self):
-        """If it's the source gpu that broadcasting weights to rollout side"""
-        return get_parallel_state().intra_dp_cp.rank == 0 and get_parallel_state().tp.rank == 0
+        """Whether this rank broadcasts weights to rollout engines."""
+        pstate = get_parallel_state()
+        is_source = pstate.intra_dp_cp.rank == 0 and pstate.tp.rank == 0
+        if self._bridge_mode:
+            is_source = is_source and pstate.pp.rank == 0
+        return is_source
 
     def _update_weight_implementation(
         self, converted_named_tensors: list[tuple[str, torch.Tensor]], pbar: tqdm | None = None
     ) -> None:
-        """Lock → broadcast → clear → unlock. Lock prevents NCCL deadlock."""
-        # lock the rollout engines to prevent dead lock on broadcast.
+        """Serialize NCCL broadcasts and always release the rollout lock."""
         while not ray.get(self.rollout_engine_lock.acquire.remote()):
             time.sleep(0.1)
-        refs = update_weights_from_distributed(
-            self._group_name,
-            self._model_update_groups,
-            self.weight_version,
-            self.rollout_engines,
-            converted_named_tensors,
-        )
-        ray.get(refs)
-        converted_named_tensors.clear()
-        ray.get(self.rollout_engine_lock.release.remote())
+        try:
+            refs = update_weights_from_distributed(
+                self._group_name,
+                self._model_update_groups,
+                self.weight_version,
+                self.rollout_engines,
+                converted_named_tensors,
+            )
+            ray.get(refs)
+            converted_named_tensors.clear()
+        finally:
+            ray.get(self.rollout_engine_lock.release.remote())
         if pbar:
             pbar.update(1)
+
+    @torch.no_grad()
+    def update_weights(self) -> None:
+        """Run bridge-mode export + NCCL broadcast, or delegate raw mode to the mixin."""
+        if not self._bridge_mode:
+            super().update_weights()
+            return
+
+        # Delay rejection so debug/skip-sync runs can still construct the updater.
+        if self.is_lora:
+            raise NotImplementedError(
+                "bridge + LoRA is not supported on the non-colocated "
+                "broadcast path. Adapter sync would be silently dropped "
+                "(hf_weight_iterator_bridge filters LoRA out of base chunks). "
+                "Use the colocated UpdateWeightFromTensor path, or implement "
+                "a weight_type='lora' pass in UpdateWeightFromDistributed."
+            )
+
+        self.weight_version += 1
+
+        self._pause_and_prepare_engines()
+        dist.barrier(group=get_gloo_group())
+
+        with timer("update_weights_implementation"):
+            pbar = tqdm(desc=f"[{self._group_name}] Update weights", total=0) if self._is_source else None
+            megatron_local_weights = self.weights_getter()
+            is_source = self._is_source
+            for hf_named_tensors in self._hf_weight_iterator.get_hf_weight_chunks(
+                megatron_local_weights, weight_type="base"
+            ):
+                if is_source:
+                    self._update_weight_implementation(list(hf_named_tensors), pbar)
+                # Non-source ranks still drain AutoBridge collectives.
+                del hf_named_tensors
+            dist.barrier(group=get_gloo_group())
+
+        with timer("finalize_and_resume_engines"):
+            self._finalize_and_resume_engines()
+            dist.barrier(group=get_gloo_group())
 
 
 def connect_rollout_engines_from_distributed(

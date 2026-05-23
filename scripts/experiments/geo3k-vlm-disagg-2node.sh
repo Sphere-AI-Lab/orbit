@@ -1,26 +1,23 @@
 #!/bin/bash
 #
-# geo3k-vlm-disagg-2node — first VLM smoke test on the slinky slurm cluster.
+# geo3k-vlm-disagg-2node — 2-node disagg analogue of geo3k-vlm-colocate-1node.
 #
-# Recipe is orchestrator-agnostic (pure config, no side effects). Mirrors
-# the layout of qwen3-4B-disagg-2node.sh:
+# Recipe is orchestrator-agnostic (pure config, no side effects). Layout:
 #   - node 0: 8 GPUs Megatron training  (--actor-num-nodes 1 --actor-num-gpus-per-node 8)
-#   - node 1: 8 GPUs SGLang rollout     (--rollout-num-gpus 8, --rollout-num-gpus-per-engine 2)
+#   - node 1: 8 GPUs SGLang rollout     (--rollout-num-gpus 8, --rollout-num-gpus-per-engine 1)
 #
-# VLM-specific deltas vs. text-only disagg recipe (cross-check against
-# examples/geo3k_vlm/run_geo3k_vlm.sh, the upstream colocated reference):
-#   - MODEL_ARGS_ROTARY_BASE=5000000 before sourcing qwen3-8B.sh (VL needs
-#     a higher rotary base than text-only Qwen3-8B).
-#   - --megatron-to-hf-mode bridge appended into MODEL_ARGS — train.py loads
-#     HF weights directly via the bridge, no torch_dist conversion needed.
-#   - HF_TORCHDIST_DIR intentionally not set, so launch_miles.sbatch skips
-#     its HF->torch_dist auto-convert step (the offline converter doesn't
-#     know about ViT/merger weights). --load points at $HF_MODEL_DIR.
+# Disagg uses --megatron-to-hf-mode bridge end-to-end: pure disagg now wires
+# the bridge weight iterator into the distributed updater so megatron→HF
+# export goes through Megatron-Bridge's AutoBridge (with VL support) instead
+# of the legacy per-param convert_to_hf dispatch (text-only).
+#
+# VLM-specific (same as the 1-node colocate recipe):
+#   - MODEL_ARGS_ROTARY_BASE=5000000 before sourcing qwen3-1.7B.sh.
+#   - --megatron-to-hf-mode bridge in MODEL_ARGS.
 #   - --multimodal-keys '{"image": "images"}'.
-#   - No --ref-load and no --use-kl-loss — needs a Megatron-format ref
-#     policy that we'd have to convert; skip it for the smoke test (the
-#     upstream VLM recipe also runs without a KL term).
-#   - rm-type=math; geo3k uses shorter responses (4 k) than dapo-math (8 k).
+#   - HF_TORCHDIST_DIR intentionally unset; --load points at $HF_MODEL_DIR.
+#   - No --ref-load, no --use-kl-loss (matches upstream).
+#   - --qkv-format bshd and --micro-batch-size 1 (variable-resolution ViT).
 
 set -euo pipefail
 
@@ -39,11 +36,11 @@ EXPERIMENT_TIME=24:00:00
 # ---------------------------------------------------------------------------
 HF_CACHE_DIR=${HF_CACHE_DIR:-/data/shared/hf_cache}
 
-HF_MODEL_REPO="Qwen/Qwen3-VL-8B-Instruct"
+HF_MODEL_REPO="Qwen/Qwen3-VL-2B-Instruct"
 HF_DATASETS=(
     "chenhegu/geo3k_imgurl"
 )
-HF_MODEL_DIR="$HF_CACHE_DIR/models/Qwen3-VL-8B-Instruct"
+HF_MODEL_DIR="$HF_CACHE_DIR/models/Qwen3-VL-2B-Instruct"
 # HF_TORCHDIST_DIR intentionally unset — VLM loads HF directly via bridge.
 HF_TRAIN_DATA="$HF_CACHE_DIR/data/geo3k_imgurl/train.parquet"
 HF_EVAL_DATA="$HF_CACHE_DIR/data/geo3k_imgurl/test.parquet"
@@ -51,14 +48,9 @@ HF_EVAL_DATA="$HF_CACHE_DIR/data/geo3k_imgurl/test.parquet"
 # ---------------------------------------------------------------------------
 # train.py args
 # ---------------------------------------------------------------------------
-# VL needs rotary_base=5000000 (upstream run_geo3k_vlm.sh:190). Must be set
-# BEFORE sourcing the model file because it's read at source-time.
 MODEL_ARGS_ROTARY_BASE=5000000
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-8B.sh"
-# `bridge` is required to load Qwen3-VL HF weights into the Megatron model
-# (upstream run_geo3k_vlm.sh:183). Add it to MODEL_ARGS so it propagates to
-# both convert_hf_to_torch_dist.py and train.py.
+source "$MILES_REPO/scripts/models/qwen3-1.7B.sh"
 MODEL_ARGS+=( --megatron-to-hf-mode bridge )
 
 RUN_NAME=${SLURM_JOB_NAME:-$RECIPE_NAME}
@@ -105,8 +97,8 @@ PERF_ARGS=(
    --recompute-granularity full
    --recompute-method uniform
    --recompute-num-layers 1
-   --use-dynamic-batch-size
-   --max-tokens-per-gpu 4096
+   --qkv-format bshd
+   --micro-batch-size 1
 )
 
 GRPO_ARGS=(
@@ -129,7 +121,7 @@ OPTIMIZER_ARGS=(
 )
 
 SGLANG_ARGS=(
-   --rollout-num-gpus-per-engine 2
+   --rollout-num-gpus-per-engine 1
    --sglang-mem-fraction-static  0.6
 )
 

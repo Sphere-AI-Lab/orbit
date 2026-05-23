@@ -109,6 +109,6 @@ exec sbatch \
     --nodes="$NODES" --time="$TIME" \
     --job-name="$JOB_NAME" \
     --output="$RUN_DIR/run.log" \
-    --export=ALL,RECIPE="$RECIPE",RUN_DIR="$RUN_DIR" \
+    --export=ALL,MILES_REPO="$MILES_REPO",RECIPE="$RECIPE",RUN_DIR="$RUN_DIR" \
     $SBATCH_EXTRA \
     "$MILES_REPO/scripts/slurm/launch_miles.sbatch"
