@@ -1,0 +1,24 @@
+accelerate==1.13.0
+blobfile==3.0.0
+cachetools==7.1.1
+datasets==4.8.5
+fsspec==2026.2.0
+func_timeout==4.3.5
+httpx[http2]==0.28.1
+mcp[cli]==1.27.1
+memray  # needed for debugging (but is lightweight), we can put it to dev mode when using pyproject.toml
+omegaconf==2.3.0
+pillow==12.2.0
+pybase64==1.4.3
+pylatexenc==2.10
+pytest-asyncio
+pyyaml==6.0.3
+qwen_vl_utils==0.0.14 # for VLM
+ray[default]==2.55.1
+ring_flash_attn
+sglang-router==0.3.2
+starlette==0.52.1
+tensorboard==2.20.0
+timm==1.0.17
+transformers==4.57.1
+wandb==0.27.0

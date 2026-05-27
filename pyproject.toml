@@ -1,0 +1,183 @@
+[build-system]
+requires = [
+    "packaging",
+    "setuptools >= 49.4.0",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orbit"
+version = "0.2.1"
+description = "Orbit RL infrastructure for large-scale post-training"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Orbit Team" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3.12",
+    "Environment :: GPU :: NVIDIA CUDA",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: System :: Distributed Computing",
+]
+dependencies = [
+    "accelerate==1.13.0",
+    "blobfile==3.0.0",
+    "cachetools==7.1.1",
+    "datasets==4.8.5",
+    "deep-ep",
+    "fsspec==2026.2.0",
+    "func_timeout==4.3.5",
+    "httpx[http2]==0.28.1",
+    "mcp[cli]==1.27.1",
+    "megatron-bridge",
+    "megatron-core",
+    "memray",
+    "nvidia-resiliency-ext",
+    "omegaconf==2.3.0",
+    "pillow==12.2.0",
+    "pybase64==1.4.3",
+    "pylatexenc==2.10",
+    "pytest-asyncio",
+    "pyyaml==6.0.3",
+    "qwen_vl_utils==0.0.14",
+    "ray[default]==2.55.1",
+    "ring_flash_attn",
+    "sglang",
+    "sglang-router==0.3.2",
+    "starlette==0.52.1",
+    "tensorboard==2.20.0",
+    "timm==1.0.17",
+    "transformer-engine",
+    "transformers==4.57.1",
+    "wandb==0.27.0",
+]
+
+[project.optional-dependencies]
+fsdp = [
+    "torch==2.11.0",
+]
+
+[tool.uv]
+# Keep transitive packages from silently selecting an untested CUDA/Torch build.
+override-dependencies = [
+    "cuda-python==13.2.0",
+    "flashinfer-python==0.6.3",
+    "megatron-core",
+    "nvidia-cublas==13.4.1.1",
+    "nvidia-cuda-cupti==13.2.75",
+    "nvidia-cuda-nvrtc==13.2.78",
+    "nvidia-cuda-runtime==13.2.75",
+    "nvidia-cudnn-cu13==9.22.0.52",
+    "nvidia-cufft==12.2.0.46",
+    "nvidia-curand==10.4.2.55",
+    "nvidia-cusolver==12.2.0.1",
+    "nvidia-cusparse==12.7.10.1",
+    "nvidia-nccl-cu13==2.30.4",
+    "nvidia-nvjitlink==13.2.78",
+    "nvidia-nvtx==13.2.75",
+    "timm==1.0.17",
+    "transformers==4.57.1",
+    "torch==2.11.0",
+    "torchvision==0.26.0",
+    "torchaudio==2.11.0",
+    "triton==3.6.0",
+]
+no-build-isolation-package = [
+    "causal-conv1d",
+    "deep-ep",
+    "flash-linear-attention",
+    "mamba-ssm",
+    "transformer-engine",
+    "transformer-engine-torch",
+]
+
+[tool.uv.extra-build-dependencies]
+transformer-engine = ["pybind11"]
+
+[tool.uv.sources]
+deep-ep = { git = "https://github.com/deepseek-ai/DeepEP.git", rev = "d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb" }
+megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "fb886993a94de1ccc5f3835a6c92855e14797fab" }
+megatron-core = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git", rev = "06fbee5c6b8337784f83a49666fc74d81185329d" }
+nvidia-resiliency-ext = { git = "https://github.com/NVIDIA/nvidia-resiliency-ext.git", rev = "63154570cea17f8805a7fd15cc3b8cc2919ba575" }
+sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "59918f926c4ef6a57dad1eb52cab8988a4025443", subdirectory = "python" }
+transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", rev = "71bbefbf153418f943640df0f7373625dc93fa46" }
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = [
+    "orbit*",
+    "orbit_plugins*",
+    "tools*",
+]
+
+[tool.orbit.release.backend-pins.megatron-core]
+source = "https://github.com/Sphere-AI-Lab/Megatron-LM.git"
+tested-ref = "06fbee5c6b8337784f83a49666fc74d81185329d"
+
+[tool.orbit.release.backend-pins.megatron-bridge]
+source = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git"
+tested-ref = "fb886993a94de1ccc5f3835a6c92855e14797fab"
+
+[tool.orbit.release.backend-pins.sglang]
+source = "https://github.com/Sphere-AI-Lab/sglang.git"
+subdirectory = "python"
+tested-ref = "59918f926c4ef6a57dad1eb52cab8988a4025443"
+
+[tool.isort]
+profile = "black"  # black-compatible
+line_length = 119  # should match black parameters
+ignore_whitespace = true  # ignore whitespace for compatibility with the initial style
+py_version = 310  # python 3.10 as a target version
+sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
+default_section = "THIRDPARTY"
+extend_skip = ["setup.py"]
+known_first_party = ["orbit", "orbit_plugins"]
+known_third_party = ["megatron", "wandb", "ray", "transformers"]
+src_paths = ["orbit", "orbit_plugins"]
+
+
+[tool.black]
+line_length = 119
+
+[tool.ruff]
+line-length = 320  # Follow-up
+select = [
+    "E",      # Pycodestyle Errors (Structural/Fundamental Errors like bad indentation)
+    "F",      # Pyflakes (Core Errors: Unused imports, undefined names)
+    "B",      # Flake8-Bugbear (Logic Bugs: Variable shadowing, dangerous default arguments)
+    "UP",     # pyupgrade (Modernization and compatibility issues)
+]
+ignore = [
+    "E402", # module-import-not-at-top-of-file
+    "E501", # Line too long # Follow-up handle it later
+]
+
+[tool.pytest.ini_options]
+# durations=0 will display all tests execution time, sorted in ascending order starting from from the slowest one.
+# -vv will also display tests with duration = 0.00s
+addopts = "--verbose --pyargs --durations=0 --strict-markers"  # always add these arguments to pytest
+testpaths = ["./tests"]  # must be an explicit path to avoid importing another "tests" module
+# directories to ignore when discovering tests
+norecursedirs = [
+    "external",
+    "examples",
+    "docs",
+    "scripts",
+    "tools",
+    "tutorials",
+    "*.egg",
+    ".*",
+    "_darcs",
+    "build",
+    "CVS",
+    "dist",
+    "venv",
+    "{arch}",
+]
+asyncio_mode = "auto"
+# NOTE: we do not use pytest markers currently. tests are mainly separated by folders, i.e. tests/fast vs tests/e2e

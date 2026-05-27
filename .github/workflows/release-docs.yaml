@@ -1,0 +1,41 @@
+name: Release Documentation
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/**"
+      - "examples/**"
+      - "version.txt"
+  workflow_dispatch:
+
+concurrency:
+  group: release-docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.repository == 'radixark/orbit'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Verify public docs allow-list
+        run: |
+          python - <<'PY'
+          import subprocess
+
+          expected = ["docs/CUDA-13-install.md", "docs/troubleshooting.md"]
+          actual = subprocess.check_output(["git", "ls-files", "docs"], text=True).splitlines()
+          if actual != expected:
+              raise SystemExit(f"unexpected docs: {actual!r}")
+          PY
