@@ -7,11 +7,8 @@
 </p>
 
 <p align="center">
-  <a href="https://www.python.org/downloads/release/python-3120/"><img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-blue.svg"></a>
-  <a href="https://developer.nvidia.com/cuda-toolkit"><img alt="CUDA 13.2" src="https://img.shields.io/badge/CUDA-13.2-76B900.svg?logo=nvidia&logoColor=white"></a>
-  <a href="https://pytorch.org/"><img alt="PyTorch 2.11" src="https://img.shields.io/badge/PyTorch-2.11-EE4C2C.svg?logo=pytorch&logoColor=white"></a>
-  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache_2.0-green.svg"></a>
   <a href="docs/index.html"><img alt="Blog post" src="https://img.shields.io/badge/blog-spherelab.ai%2Forbit-8A2BE2.svg"></a>
+  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache_2.0-green.svg"></a>
 </p>
 
 ---
@@ -102,25 +99,6 @@ bash examples/high_precision/run-qwen3-4b-instruct-2507-bf16-math-oft.sh
 ```
 
 To inspect the final Python argv without starting Ray or loading the model, prepend `ORBIT_DRY_RUN_ARGV=1`.
-
-## What's in the box
-
-### Entry points
-
-| Path | Role |
-|---|---|
-| `train.py` | Synchronous training driver. |
-| `train_async.py` | Asynchronous driver. Supports adapter double-buffering for distributed SGLang rollout engines &mdash; see `examples/README.md`. |
-| `examples/high_precision/` | BF16 and high-precision launchers. |
-| `examples/low_precision/` | INT4, FP8, and NVFP4 launchers. |
-| `scripts/conversion/` | Checkpoint conversion entrypoints (HF &harr; Megatron). |
-| `tools/check_*_parity.py` | Checkpoint and runtime parity checks. |
-
-### Launcher contract
-
-Launchers are independent bash entrypoints. They own all model-specific defaults and pull only thin helpers from `scripts/lib/` for CUDA setup, private Ray lifecycle, W&B handling, eval toggles, checkpoint preflight, and common argument assembly. To tweak a recipe, edit its launcher directly.
-
-PEFT KL launchers compute reference log-probs with the loaded model while adapters are disabled &mdash; they pass `--load` and do **not** require `--ref-load` or a separate reference worker.
 
 ## Roadmap
 

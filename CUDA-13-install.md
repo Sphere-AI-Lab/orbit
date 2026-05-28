@@ -1,6 +1,6 @@
 # Install orbit + megatron + sglang (CUDA 13.2)
 
-Torch 2.11, SGLang 0.5.9, Python 3.12, ubuntu 22.04.
+Torch 2.11, SGLang 0.5.9, Python 3.12, Ubuntu 22.04, cudnn 9.22.
 
 This is the only supported public CUDA runtime path for Orbit launchers.
 
@@ -15,16 +15,27 @@ export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
 export ORBIT_BUILD_WHEELS=https://github.com/liulixinkerry/orbit-build-wheels/releases/download/cu132-torch211-ubuntu2204
 ```
 
-### 2. Create uv env
+### 2. Create uv env + Setup env path
 
 ```bash
 cd <workspace>/orbit
 uv python pin 3.12
 uv venv
 source .venv/bin/activate
+
+export SITE_PACKAGES="$(python - <<'PY'
+import site
+print(site.getsitepackages()[0])
+PY
+)"
+export CUDA_ROOT="${CUDA_HOME:?set CUDA_HOME to your CUDA 13.2 root}"
+export NCCL_ROOT="${SITE_PACKAGES}/nvidia/nccl"
+export CPATH="${NCCL_ROOT}/include:${NVSHMEM_ROOT}/include:${CUDA_ROOT}/targets/x86_64-linux/include/cccl:${CUDA_ROOT}/include${CPATH:+:$CPATH}"
+export LIBRARY_PATH="${NCCL_ROOT}/lib:${NVSHMEM_ROOT}/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+export LD_LIBRARY_PATH="${NCCL_ROOT}/lib:${NVSHMEM_ROOT}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 ```
 
-### 3. PyTorch + cuda-python +
+### 3. PyTorch + cuda-python + cudnn 9.22
 
 ```bash
 # Torch 2.11 + CUDA 13
@@ -35,6 +46,7 @@ echo "torch==2.11.0
 cuda-python==13.2" > overrides.txt
 uv pip install --override overrides.txt sglang==0.5.9
 rm -rf overrides.txt
+uv pip install nvidia-cudnn-cu13==9.22.0.52
 ```
 
 ### 4. Common libs
@@ -51,12 +63,13 @@ uv pip install "nvidia-ml-py>=12.560.30" "fastapi[standard]>=0.115.0" "optree>=0
 uv pip install nvidia-mathdx==25.6.0
 ```
 
-### 5. TransformerEngine
+### 5. TransformerEngine @ 71bbefbf153418f943640df0f7373625dc93fa46
 
 ```bash
 uv pip install pybind11
-export NVTE_FRAMEWORK=pytorch
-MAX_JOBS=16 NVTE_BUILD_THREADS_PER_JOB=2 uv pip install --reinstall --no-cache --no-build-isolation git+https://github.com/NVIDIA/TransformerEngine.git@71bbefbf153418f943640df0f7373625dc93fa46
+# export NVTE_FRAMEWORK=pytorch
+# MAX_JOBS=16 NVTE_BUILD_THREADS_PER_JOB=2 uv pip install --reinstall --no-cache --no-build-isolation git+https://github.com/NVIDIA/TransformerEngine.git@71bbefbf153418f943640df0f7373625dc93fa46
+uv pip install "$ORBIT_BUILD_WHEELS/transformer_engine-2.14.0-cp312-cp312-linux_x86_64.whl"
 ```
 
 ### 6. ML libs (open-clip, trl, math_verify, nvidia-resiliency, tilelang)
@@ -73,7 +86,7 @@ uv pip install git+https://github.com/NVIDIA/nvidia-resiliency-ext.git@63154570c
 uv pip install tilelang tile-kernels
 ```
 
-### 7. Apex (build from source, ~5 min)
+### 7. Apex
 
 ```bash
 # APEX commit: f199212da7234bf9be2244cad5b9bfa2f5fe2675
@@ -81,9 +94,6 @@ uv pip install "$ORBIT_BUILD_WHEELS/apex-0.1-cp312-cp312-linux_x86_64.whl"
 ```
 
 ### 8. Fast-hadamard-transform
-
-DeepEP is pinned in `pyproject.toml` / `uv.lock`. Export these build paths
-before running `uv sync --inexact` in step 14.
 
 ```bash
 # fast-hadamard-transform: e7706faf8d1c3b9f241e36860640ad1dac644ede
@@ -145,28 +155,29 @@ uv pip install -U \
     "nvidia-cusolver==12.2.0.1" \
     "nvidia-cusparse==12.7.10.1" \
     "nvidia-nvjitlink==13.2.78" \
-    "nvidia-nvtx==13.2.75"
+    "nvidia-nvtx==13.2.75" \
+    "nvidia-cudnn-cu13==9.22.0.52"
 ```
 
 ### 14. NCCL 2.30 + DeepEP V2 + DeepGEMM
 ```bash
 uv pip install "nvidia-nccl-cu13==2.30.4" --no-deps
-
-SITE_PACKAGES="$(python - <<'PY'
+export SITE_PACKAGES="$(python - <<'PY'
 import site
 print(site.getsitepackages()[0])
 PY
 )"
-CUDA_ROOT="${CUDA_HOME:?set CUDA_HOME to your CUDA 13.2 root}"
-NCCL_ROOT="${SITE_PACKAGES}/nvidia/nccl"
+
 NVSHMEM_ROOT="${SITE_PACKAGES}/nvidia/nvshmem"
 export EP_NCCL_ROOT_DIR="${NCCL_ROOT}"
 export EP_NVSHMEM_ROOT_DIR="${NVSHMEM_ROOT}"
+export TORCH_CUDA_ARCH_LIST='10.0'
+export MAX_JOBS=32
+export CUDA_ROOT="${CUDA_HOME:?set CUDA_HOME to your CUDA 13.2 root}"
+export NCCL_ROOT="${SITE_PACKAGES}/nvidia/nccl"
 export CPATH="${NCCL_ROOT}/include:${NVSHMEM_ROOT}/include:${CUDA_ROOT}/targets/x86_64-linux/include/cccl:${CUDA_ROOT}/include${CPATH:+:$CPATH}"
 export LIBRARY_PATH="${NCCL_ROOT}/lib:${NVSHMEM_ROOT}/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
 export LD_LIBRARY_PATH="${NCCL_ROOT}/lib:${NVSHMEM_ROOT}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export TORCH_CUDA_ARCH_LIST='10.0'
-export MAX_JOBS=32
 
 uv pip install --no-build-isolation --reinstall git+https://github.com/deepseek-ai/DeepEP.git@d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb
 
