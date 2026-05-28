@@ -10,7 +10,7 @@ resolution-markers = [
 overrides = [
     { name = "cuda-python", specifier = "==13.2.0" },
     { name = "flashinfer-python", specifier = "==0.6.3" },
-    { name = "megatron-core", git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git?rev=06fbee5c6b8337784f83a49666fc74d81185329d" },
+    { name = "megatron-core", git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git?rev=00eb75b0c803b0fc8e5413d736529d9d3b82b6bd" },
     { name = "nvidia-cublas", specifier = "==13.4.1.1" },
     { name = "nvidia-cuda-cupti", specifier = "==13.2.75" },
     { name = "nvidia-cuda-nvrtc", specifier = "==13.2.78" },
@@ -1966,7 +1966,7 @@ wheels = [
 [[package]]
 name = "megatron-bridge"
 version = "0.5.0+fb886993"
-source = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git?rev=fb886993a94de1ccc5f3835a6c92855e14797fab#fb886993a94de1ccc5f3835a6c92855e14797fab" }
+source = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git?rev=85c84cbc26d4c983a3d6e46c804f02e2a99af5a2#85c84cbc26d4c983a3d6e46c804f02e2a99af5a2" }
 dependencies = [
     { name = "accelerate" },
     { name = "causal-conv1d" },
@@ -2003,7 +2003,7 @@ dependencies = [
 [[package]]
 name = "megatron-core"
 version = "0.18.0rc0"
-source = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git?rev=06fbee5c6b8337784f83a49666fc74d81185329d#06fbee5c6b8337784f83a49666fc74d81185329d" }
+source = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git?rev=00eb75b0c803b0fc8e5413d736529d9d3b82b6bd#00eb75b0c803b0fc8e5413d736529d9d3b82b6bd" }
 dependencies = [
     { name = "numpy" },
     { name = "packaging" },
@@ -2840,8 +2840,8 @@ requires-dist = [
     { name = "func-timeout", specifier = "==4.3.5" },
     { name = "httpx", extras = ["http2"], specifier = "==0.28.1" },
     { name = "mcp", extras = ["cli"], specifier = "==1.27.1" },
-    { name = "megatron-bridge", git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git?rev=fb886993a94de1ccc5f3835a6c92855e14797fab" },
-    { name = "megatron-core", git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git?rev=06fbee5c6b8337784f83a49666fc74d81185329d" },
+    { name = "megatron-bridge", git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git?rev=85c84cbc26d4c983a3d6e46c804f02e2a99af5a2" },
+    { name = "megatron-core", git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git?rev=00eb75b0c803b0fc8e5413d736529d9d3b82b6bd" },
     { name = "memray" },
     { name = "nvidia-resiliency-ext", git = "https://github.com/NVIDIA/nvidia-resiliency-ext.git?rev=63154570cea17f8805a7fd15cc3b8cc2919ba575" },
     { name = "omegaconf", specifier = "==2.3.0" },
@@ -2853,7 +2853,7 @@ requires-dist = [
     { name = "qwen-vl-utils", specifier = "==0.0.14" },
     { name = "ray", extras = ["default"], specifier = "==2.55.1" },
     { name = "ring-flash-attn" },
-    { name = "sglang", git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=59918f926c4ef6a57dad1eb52cab8988a4025443" },
+    { name = "sglang", git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=9c83ae8be07cbb1eb6898ce608ae244e3be375b4" },
     { name = "sglang-router", specifier = "==0.3.2" },
     { name = "starlette", specifier = "==0.52.1" },
     { name = "tensorboard", specifier = "==2.20.0" },
@@ -3856,7 +3856,7 @@ wheels = [
 [[package]]
 name = "sglang"
 version = "0.0.0.dev9873+g59918f926"
-source = { git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=59918f926c4ef6a57dad1eb52cab8988a4025443#59918f926c4ef6a57dad1eb52cab8988a4025443" }
+source = { git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=9c83ae8be07cbb1eb6898ce608ae244e3be375b4#9c83ae8be07cbb1eb6898ce608ae244e3be375b4" }
 dependencies = [
     { name = "aiohttp" },
     { name = "anthropic" },

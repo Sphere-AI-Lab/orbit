@@ -1,49 +1,40 @@
 # Install orbit + megatron + sglang (CUDA 13.2)
 
-Torch 2.11, SGLang 0.5.9, Python 3.12.
+Torch 2.11, SGLang 0.5.9, Python 3.12, ubuntu 22.04.
 
 This is the only supported public CUDA runtime path for Orbit launchers.
 
-> Prerequisite: a user-provided CUDA 13 build workspace
-> (referred to as `$CUDA13_BUILD_ROOT` below) containing any source trees or
-> local wheels you choose to build outside `uv sync`.
-
 ## Setup env from scratch
 
-### 1. Load CUDA 13.2 + cuDNN modules
+### 1. Load CUDA 13.2
 
 ```bash
-export TMPDIR=<your_path>/tmp
-module load cuda/13.2
-module load nccl
-unset LD_LIBRARY_PATH
 export CUDA_HOME=<cuda-13.2-root>
-export CUDNN_HOME=<cudnn-root>
 export PATH=$CUDA_HOME/bin:$PATH
 export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
-export LD_LIBRARY_PATH=$CUDNN_HOME/lib:$LD_LIBRARY_PATH
-
-export CUDA13_BUILD_ROOT="<your_path>/software/cu13"
+export ORBIT_BUILD_WHEELS=https://github.com/liulixinkerry/orbit-build-wheels/releases/download/cu132-torch211-ubuntu2204
 ```
 
 ### 2. Create uv env
 
 ```bash
-UV_LINK_MODE=symlink
-echo "UV_LINK_MODE=$UV_LINK_MODE"
-export UV_LINK_MODE=$UV_LINK_MODE
 cd <workspace>/orbit
 uv python pin 3.12
 uv venv
 source .venv/bin/activate
 ```
 
-### 3. PyTorch + cuda-python
+### 3. PyTorch + cuda-python +
 
 ```bash
 # Torch 2.11 + CUDA 13
 uv pip install torch==2.11.0 torchvision==0.26.0 torchaudio==2.11.0
 uv pip install cuda-python==13.2
+
+echo "torch==2.11.0
+cuda-python==13.2" > overrides.txt
+uv pip install --override overrides.txt sglang==0.5.9
+rm -rf overrides.txt
 ```
 
 ### 4. Common libs
@@ -84,42 +75,19 @@ uv pip install tilelang tile-kernels
 
 ### 7. Apex (build from source, ~5 min)
 
-> IMPORTANT: If you face CUDA compatibility issues when compiling APEX, comment out the version check in https://github.com/NVIDIA/apex/blob/f199212da7234bf9be2244cad5b9bfa2f5fe2675/setup.py#L218
-
 ```bash
 # APEX commit: f199212da7234bf9be2244cad5b9bfa2f5fe2675
-cd "$CUDA13_BUILD_ROOT/apex" && \
-    NVCC_APPEND_FLAGS="--threads 4" APEX_PARALLEL_BUILD=8 APEX_CPP_EXT=1 APEX_CUDA_EXT=1 uv pip install -v --no-build-isolation . && \
-    cd -
+uv pip install "$ORBIT_BUILD_WHEELS/apex-0.1-cp312-cp312-linux_x86_64.whl"
 ```
 
-### 8. DeepEP, fast-hadamard-transform, DeepGEMM
+### 8. Fast-hadamard-transform
 
 DeepEP is pinned in `pyproject.toml` / `uv.lock`. Export these build paths
 before running `uv sync --inexact` in step 14.
 
 ```bash
-SITE_PACKAGES="$(python - <<'PY'
-import site
-print(site.getsitepackages()[0])
-PY
-)"
-CUDA_ROOT="${CUDA_HOME:?set CUDA_HOME to your CUDA 13.2 root}"
-NCCL_ROOT="${SITE_PACKAGES}/nvidia/nccl"
-NVSHMEM_ROOT="${SITE_PACKAGES}/nvidia/nvshmem"
-export EP_NCCL_ROOT_DIR="${NCCL_ROOT}"
-export EP_NVSHMEM_ROOT_DIR="${NVSHMEM_ROOT}"
-export CPATH="${NCCL_ROOT}/include:${NVSHMEM_ROOT}/include:${CUDA_ROOT}/targets/x86_64-linux/include/cccl:${CUDA_ROOT}/include${CPATH:+:$CPATH}"
-export LIBRARY_PATH="${NCCL_ROOT}/lib:${NVSHMEM_ROOT}/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
-export LD_LIBRARY_PATH="${NCCL_ROOT}/lib:${NVSHMEM_ROOT}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export TORCH_CUDA_ARCH_LIST='10.0'
-export MAX_JOBS=8
-
 # fast-hadamard-transform: e7706faf8d1c3b9f241e36860640ad1dac644ede
-cd "$CUDA13_BUILD_ROOT/fast-hadamard-transform" && uv pip install --no-build-isolation -v . && cd -
-
-# DeepGEMM: 891d57b4db1071624b5c8fa0d1e51cb317fa709f
-cd "$CUDA13_BUILD_ROOT/DeepGEMM" && ./install.sh && cd -
+uv pip install --no-build-isolation -v git+https://github.com/Dao-AILab/fast-hadamard-transform.git@e7706faf8d1c3b9f241e36860640ad1dac644ede
 ```
 
 ### 9. Flash Attention (FA2 + FA3)
@@ -128,11 +96,10 @@ cd "$CUDA13_BUILD_ROOT/DeepGEMM" && ./install.sh && cd -
 uv pip install --no-build-isolation flash_attn==2.8.3
 
 # FA3: 28ef22c99a135b234fb54bc33cfb638078bacb65
-cd "$CUDA13_BUILD_ROOT/flash-attention/hopper" && uv pip install -v --no-build-isolation . && cd -
-
-# Optional: copy the FA3 python interface into the installed package dir
-# python_path=$(python -c "import site; print(site.getsitepackages()[0])") && mkdir -p $python_path/flash_attn_3 && \
-#     cp "$CUDA13_BUILD_ROOT/flash-attention/hopper/flash_attn_interface.py" $python_path/flash_attn_3/flash_attn_interface.py
+uv pip install "$ORBIT_BUILD_WHEELS/flash_attn_3-3.0.0-cp39-abi3-linux_x86_64.whl" --no-deps
+# copy the FA3 python interface into the installed package dir
+python_path=$(python -c "import site; print(site.getsitepackages()[0])") && mkdir -p $python_path/flash_attn_3 && \
+   curl -fSL https://raw.githubusercontent.com/Dao-AILab/flash-attention/28ef22c99a135b234fb54bc33cfb638078bacb65/hopper/flash_attn_interface.py -o $python_path/flash_attn_3/flash_attn_interface.py
 ```
 
 ### 10. Linear attention (causal-conv1d, mamba, FLA)
@@ -143,9 +110,11 @@ uv pip install --no-build-isolation mamba-ssm==2.3.1
 uv pip install --no-build-isolation flash-linear-attention==0.4.1
 ```
 
-### 11. HF stack + observability
+### 11. Megatron-Bridge Dependency + HF stack + observability
 
 ```bash
+uv pip install git+https://github.com/NVIDIA-NeMo/Megatron-Bridge.git@fad15ab214efc77155282a057c0ca139cad1ebc9
+uv pip uninstall sglang megatron-bridge
 uv pip install huggingface-hub==0.36.2 flashinfer-python==0.6.3 timm==1.0.17 transformers==4.57.1
 uv pip install opentelemetry-api==1.41.1 opentelemetry-sdk==1.41.1 opentelemetry-semantic-conventions==0.62b1
 uv pip install linkify-it-py==2.1.0 mdit-py-plugins==0.5.0 memray==1.19.3 pytest-asyncio==1.3.0 textual==8.2.4 uc-micro-py==2.0.0 ring-flash-attn==0.1.8
@@ -156,20 +125,11 @@ uv pip install git+https://github.com/fzyzcjy/torch_memory_saver.git@dc687690583
 
 ```bash
 uv pip uninstall sglang_router sgl-kernel
-uv pip install sglang-router==0.3.2
+uv pip install https://github.com/zhuzilin/sgl-router/releases/download/v0.3.2-5f8d397/sglang_router-0.3.2-cp38-abi3-manylinux_2_28_x86_64.whl
 
 uv pip install scikit-build-core isort black wheel
 uv pip install -U "cmake>=3.31"
-export TORCH_CUDA_ARCH_LIST="8.0 9.0a 10.0a"
-
-# To rebuild sgl-kernel from source instead of using the prebuilt wheel:
-# git clone https://github.com/sgl-project/DeepGEMM DeepGEMM-sgl
-# cd DeepGEMM-sgl && git checkout ffe2b6b
-# cd <sglang-checkout>/sgl-kernel
-# TORCH_CUDA_ARCH_LIST="8.0 9.0a 10.0a" make build CMAKE_ARGS="-DFETCHCONTENT_SOURCE_DIR_REPO-DEEPGEMM=$CUDA13_BUILD_ROOT/DeepGEMM-sgl"
-
-# To install a prebuilt local wheel:
-# uv pip install "${SGL_KERNEL_WHEEL:?set SGL_KERNEL_WHEEL to a local sgl-kernel wheel}" --force-reinstall --no-deps
+uv pip install "$ORBIT_BUILD_WHEELS/sgl_kernel-0.3.21-cp310-abi3-linux_x86_64.whl" --no-deps
 ```
 
 ### 13. Pin NVIDIA CUDA 13.2 runtime libraries
@@ -188,7 +148,33 @@ uv pip install -U \
     "nvidia-nvtx==13.2.75"
 ```
 
-### 14. Orbit and backend sources
+### 14. NCCL 2.30 + DeepEP V2 + DeepGEMM
+```bash
+uv pip install "nvidia-nccl-cu13==2.30.4" --no-deps
+
+SITE_PACKAGES="$(python - <<'PY'
+import site
+print(site.getsitepackages()[0])
+PY
+)"
+CUDA_ROOT="${CUDA_HOME:?set CUDA_HOME to your CUDA 13.2 root}"
+NCCL_ROOT="${SITE_PACKAGES}/nvidia/nccl"
+NVSHMEM_ROOT="${SITE_PACKAGES}/nvidia/nvshmem"
+export EP_NCCL_ROOT_DIR="${NCCL_ROOT}"
+export EP_NVSHMEM_ROOT_DIR="${NVSHMEM_ROOT}"
+export CPATH="${NCCL_ROOT}/include:${NVSHMEM_ROOT}/include:${CUDA_ROOT}/targets/x86_64-linux/include/cccl:${CUDA_ROOT}/include${CPATH:+:$CPATH}"
+export LIBRARY_PATH="${NCCL_ROOT}/lib:${NVSHMEM_ROOT}/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+export LD_LIBRARY_PATH="${NCCL_ROOT}/lib:${NVSHMEM_ROOT}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export TORCH_CUDA_ARCH_LIST='10.0'
+export MAX_JOBS=32
+
+uv pip install --no-build-isolation --reinstall git+https://github.com/deepseek-ai/DeepEP.git@d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb
+
+# deep_gemm_official
+uv pip install --no-build-isolation git+https://github.com/liulixinkerry/DeepGEMM.git@18db30e9db9703b906e9ab3803fbbc1a64be1520
+```
+
+### 15. Orbit and backend sources
 
 Orbit's uv manifest installs Megatron-LM, Megatron-Bridge, and SGLang from
 immutable public Git refs recorded under `tool.orbit.release.backend-pins` in
@@ -206,3 +192,47 @@ uv sync --inexact
 
 Use `uv sync --inexact` for metadata refreshes so uv does not prune the
 CUDA/Torch packages installed by this guide.
+
+
+# Troubleshooting
+
+## `uv sync` Cannot Resolve A Backend Repo
+
+Orbit installs the backend forks from immutable public Git refs recorded in
+`pyproject.toml`. If `uv sync` cannot resolve one of them, check that the refs are
+reachable:
+
+```bash
+git ls-remote https://github.com/Sphere-AI-Lab/Megatron-Bridge.git 85c84cbc26d4c983a3d6e46c804f02e2a99af5a2
+git ls-remote https://github.com/Sphere-AI-Lab/Megatron-LM.git 00eb75b0c803b0fc8e5413d736529d9d3b82b6bd
+git ls-remote https://github.com/Sphere-AI-Lab/sglang.git 9c83ae8be07cbb1eb6898ce608ae244e3be375b4
+```
+
+If a command prints no commit, the release ref has not been published.
+
+## CUDA Imports Fail
+
+Verify that the environment is using Python 3.12 and the CUDA 13 stack from `docs/CUDA-13-install.md`:
+
+```bash
+uv run python - <<'PY'
+import importlib.metadata as md
+import torch
+import cuda.bindings
+
+print(torch.__version__, torch.version.cuda)
+print(md.version("cuda-python"))
+PY
+```
+
+## Launchers Fail Before Training
+
+Public launchers require model, checkpoint, and data paths from the user. Set the required variables before running a launcher:
+
+```bash
+export HF_CKPT=/path/to/hf/checkpoint
+export MEGATRON_LOAD=/path/to/megatron/torch_dist
+export TRAIN_JSONL=/path/to/train.jsonl
+export TEST_JSONL=/path/to/test.jsonl
+export ENABLE_WANDB=0
+```

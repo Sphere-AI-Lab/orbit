@@ -99,10 +99,10 @@ transformer-engine = ["pybind11"]
 
 [tool.uv.sources]
 deep-ep = { git = "https://github.com/deepseek-ai/DeepEP.git", rev = "d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb" }
-megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "fb886993a94de1ccc5f3835a6c92855e14797fab" }
-megatron-core = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git", rev = "06fbee5c6b8337784f83a49666fc74d81185329d" }
+megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "85c84cbc26d4c983a3d6e46c804f02e2a99af5a2" }
+megatron-core = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git", rev = "00eb75b0c803b0fc8e5413d736529d9d3b82b6bd" }
 nvidia-resiliency-ext = { git = "https://github.com/NVIDIA/nvidia-resiliency-ext.git", rev = "63154570cea17f8805a7fd15cc3b8cc2919ba575" }
-sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "59918f926c4ef6a57dad1eb52cab8988a4025443", subdirectory = "python" }
+sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "9c83ae8be07cbb1eb6898ce608ae244e3be375b4", subdirectory = "python" }
 transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", rev = "71bbefbf153418f943640df0f7373625dc93fa46" }
 
 [tool.setuptools]
@@ -117,16 +117,16 @@ include = [
 
 [tool.orbit.release.backend-pins.megatron-core]
 source = "https://github.com/Sphere-AI-Lab/Megatron-LM.git"
-tested-ref = "06fbee5c6b8337784f83a49666fc74d81185329d"
+tested-ref = "00eb75b0c803b0fc8e5413d736529d9d3b82b6bd"
 
 [tool.orbit.release.backend-pins.megatron-bridge]
 source = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git"
-tested-ref = "fb886993a94de1ccc5f3835a6c92855e14797fab"
+tested-ref = "85c84cbc26d4c983a3d6e46c804f02e2a99af5a2"
 
 [tool.orbit.release.backend-pins.sglang]
 source = "https://github.com/Sphere-AI-Lab/sglang.git"
 subdirectory = "python"
-tested-ref = "59918f926c4ef6a57dad1eb52cab8988a4025443"
+tested-ref = "9c83ae8be07cbb1eb6898ce608ae244e3be375b4"
 
 [tool.isort]
 profile = "black"  # black-compatible

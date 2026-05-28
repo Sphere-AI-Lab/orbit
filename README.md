@@ -1,77 +1,98 @@
 <div align="center">
-  <img src="assets/orbit_logo.png" alt="Orbit" width="500"/>
+  <img src="assets/orbit-logo.png" alt="Orbit" width="500"/>
 </div>
 
-# Orbit
+<p align="center">
+  A lightweight, ultra-scale RL post-training framework built around low-precision bases and BF16 adapters &mdash; so frontier-scale RL fits on a single node.
+</p>
 
-A lightweight, ultra-scale RL infrastructure framework for post-training on trillions of parameters. 
+<p align="center">
+  <a href="https://www.python.org/downloads/release/python-3120/"><img alt="Python 3.12" src="https://img.shields.io/badge/python-3.12-blue.svg"></a>
+  <a href="https://developer.nvidia.com/cuda-toolkit"><img alt="CUDA 13.2" src="https://img.shields.io/badge/CUDA-13.2-76B900.svg?logo=nvidia&logoColor=white"></a>
+  <a href="https://pytorch.org/"><img alt="PyTorch 2.11" src="https://img.shields.io/badge/PyTorch-2.11-EE4C2C.svg?logo=pytorch&logoColor=white"></a>
+  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache_2.0-green.svg"></a>
+  <a href="docs/index.html"><img alt="Blog post" src="https://img.shields.io/badge/blog-spherelab.ai%2Forbit-8A2BE2.svg"></a>
+</p>
+
+---
+
+## Why Orbit
+
+Today's leading LLMs cross the trillion-parameter mark, and the conventional RL post-training recipe demands high-precision, multi-node, full-parameter updates. Orbit takes a different route: hold the base at its **deployment precision** (INT4 / FP4 / FP8) and put gradients on a tiny **BF16 OFT or LoRA adapter**. The result &mdash; RL post-training of 1T-class models on a single 8&times;B200 node, with no precision gap between training and rollout.
+
+We have used Orbit to run stable, end-to-end RL on **Kimi-K2.6 (~1T)**, **DeepSeek V4-Flash**, **DeepSeek V4-Pro (~1.6T)**, and the **Qwen3 MoE** family &mdash; all on a single-node setup.
+
+## Highlights
+
+|   | Capability | What it means |
+|---|---|---|
+| 🪶 | **Adapter-first RL** | BF16 OFT/LoRA adapters on a frozen low-precision base. Same kernels and quantization scheme at train and serve time. |
+| 🛰️ | **Single-node trillion-scale** | 1T-class models fit on a single 8&times;B200 node. No cross-node orchestration, no precision drift. |
+| ⚡ | **Low-precision native** | First-class support for INT4, NVFP4, FP8, and BF16, with parity preflight gates between Megatron and SGLang. |
+| 🧩 | **PEFT-native** | LoRA and OFT adapters; PEFT KL launchers compute reference log-probs in-model (no separate reference workers), with async adapter double-buffering. |
 
 ## Installation
 
-Orbit's release environment targets Python 3.12 and CUDA 13.2. The public
-launchers and helper scripts support only this CUDA 13.2 runtime path. See
-[docs/CUDA-13-install.md](docs/CUDA-13-install.md) for the supported install
-flow. See [docs/troubleshooting.md](docs/troubleshooting.md) for common
-resolver, import, and launcher smoke failures. The interim local release expects
-sibling backend checkouts next to Orbit:
+> **Supported runtime:** Python 3.12, CUDA 13.2, PyTorch 2.11. This is currently the only path the public launchers and helper scripts target.
 
-```bash
+Orbit expects sibling backend checkouts next to it:
+
+```text
 <workspace>/orbit
 <workspace>/Megatron-Bridge
 <workspace>/Megatron-Bridge/3rdparty/Megatron-LM
 <workspace>/sglang
 ```
 
-Keep those checkouts at the refs recorded in `pyproject.toml` under
-`tool.orbit.release.backend-pins`. Orbit's `tool.uv.sources` uses local path
-sources for those repos now; when the repos are public, replace the paths with
-public Git URLs and the same `rev` values.
+Keep these checkouts at the refs recorded in `pyproject.toml` under `tool.orbit.release.backend-pins`. `tool.uv.sources` currently points at local paths; when the backend repos are public, swap those entries for Git URLs at the same `rev` values.
 
-Release maintainers can verify a public clean-room install with
-`scripts/release/clean_room_gate.sh` after setting `PUBLIC_ORBIT_URL`. This gate
-is for the future public Git-ref release after backend repositories are uploaded;
-it is not expected to pass against the interim local-path backend sources.
+### Set up the environment
 
-Install the CUDA-specific Torch layer and compiled extensions from the CUDA 13.2
-guide into the Orbit environment, then sync Orbit and the backend sources:
+1. **Install the CUDA/Torch layer.** Follow [CUDA-13-install.md](CUDA-13-install.md) end-to-end first.
+2. **Sync Orbit and the backend sources:**
+
+   ```bash
+   cd orbit
+   uv python pin 3.12
+   uv venv
+   source .venv/bin/activate
+   uv sync --inexact
+   ```
+
+The manifest pins core CUDA/Torch packages so transitive dependencies can't silently swap in an untested build. `uv sync --inexact` preserves the CUDA/Torch packages installed by the CUDA guide.
+
+> **Release maintainers:** verify a public clean-room install with `scripts/release/clean_room_gate.sh` after setting `PUBLIC_ORBIT_URL`. This gate targets the future public Git-ref release; it is not expected to pass against the interim local-path backend sources.
+
+## Quickstart
+
+Run any recipe under `examples/` &mdash; each launcher is an independent bash entrypoint with all hyperparameters inlined.
 
 ```bash
-cd orbit
-uv python pin 3.12
-uv venv
-source .venv/bin/activate
-# install the CUDA/Torch layer from docs/CUDA-13-install.md
-uv sync --inexact
+# A high-precision BF16 OFT run on Qwen3-4B
+bash examples/high_precision/run-qwen3-4b-instruct-2507-bf16-math-oft.sh
+
+# A low-precision FP8 OFT run on Qwen3-4B
+bash examples/low_precision/run-qwen3-4b-fp8-math-oft.sh
 ```
 
-The manifest intentionally prevents transitive dependencies from selecting an
-untested Torch build during `uv sync`; `uv sync --inexact` also avoids pruning
-the CUDA/Torch packages installed by the CUDA guide.
+Site-specific paths are passed in through environment variables. The most common ones:
 
-## Active Entry Points
+| Variable | Required | Purpose |
+|---|:---:|---|
+| `ORBIT_VENV` | usually | Python environment with Orbit + backends. |
+| `CUDA_HOME` | usually | CUDA 13.2 toolkit root. |
+| `TRAIN_JSONL` | yes | Training prompt JSONL. |
+| `HF_CKPT` | yes | HuggingFace checkpoint directory (quantized for low-precision recipes). |
+| `MEGATRON_LOAD` | yes | Megatron distributed checkpoint root. |
+| `TEST_JSONL` | if eval is on | Eval JSONL. Skip with `DISABLE_EVAL=1`. |
+| `SAVE_DIR` | no | Output checkpoint directory. |
+| `ENABLE_WANDB` | no | `auto` enables W&B if `$HOME/.wandb_key` exists; `0` disables. |
 
-- `train.py`: synchronous training driver.
-- `train_async.py`: asynchronous training driver. For async PEFT adapter
-  double buffering, see `examples/README.md`.
-- `examples/high_precision/`: BF16 and high-precision training launchers.
-- `examples/low_precision/`: int4, fp8, and nvfp4 training launchers.
-- `scripts/conversion/`: checkpoint conversion entrypoints.
-- `tools/check_*_parity.py`: checkpoint and runtime parity checks.
+See [`examples/README.md`](examples/README.md) for the full environment knob reference and the async PEFT double-buffer notes.
 
-## Launcher Contract
+### One-step smoke test
 
-Launchers are independent bash entrypoints. They own model-specific defaults and
-source shared helpers from `scripts/lib/` for CUDA setup, private Ray lifecycle,
-W&B handling, eval toggles, checkpoint preflight, and common argument assembly.
-
-PEFT KL launchers compute reference log-probs with the loaded model while
-adapters are disabled. They pass `--load` and do not require `--ref-load` or
-separate reference workers.
-
-## Useful Smoke Settings
-
-Use these environment variables to shrink a launcher for command-path smoke
-tests:
+To exercise the command path without spending real cycles:
 
 ```bash
 NUM_ROLLOUT=1 TOTAL_EPOCHS=1 TRAIN_ROWS=1 \
@@ -80,12 +101,66 @@ DISABLE_EVAL=1 ENABLE_WANDB=0 \
 bash examples/high_precision/run-qwen3-4b-instruct-2507-bf16-math-oft.sh
 ```
 
+To inspect the final Python argv without starting Ray or loading the model, prepend `ORBIT_DRY_RUN_ARGV=1`.
+
+## What's in the box
+
+### Entry points
+
+| Path | Role |
+|---|---|
+| `train.py` | Synchronous training driver. |
+| `train_async.py` | Asynchronous driver. Supports adapter double-buffering for distributed SGLang rollout engines &mdash; see `examples/README.md`. |
+| `examples/high_precision/` | BF16 and high-precision launchers. |
+| `examples/low_precision/` | INT4, FP8, and NVFP4 launchers. |
+| `scripts/conversion/` | Checkpoint conversion entrypoints (HF &harr; Megatron). |
+| `tools/check_*_parity.py` | Checkpoint and runtime parity checks. |
+
+### Launcher contract
+
+Launchers are independent bash entrypoints. They own all model-specific defaults and pull only thin helpers from `scripts/lib/` for CUDA setup, private Ray lifecycle, W&B handling, eval toggles, checkpoint preflight, and common argument assembly. To tweak a recipe, edit its launcher directly.
+
+PEFT KL launchers compute reference log-probs with the loaded model while adapters are disabled &mdash; they pass `--load` and do **not** require `--ref-load` or a separate reference worker.
+
+## Roadmap
+
+Orbit is under active development. On deck:
+
+- [ ] **More launcher recipes** &mdash; broader model coverage (additional Qwen, Llama, GLM, and DeepSeek variants), more datasets, and more precision combinations.
+- [ ] **Docker / containerized environments** &mdash; reproducible images and a documented env-setup path so getting a launcher running takes minutes, not a CUDA-13.2 module hunt.
+- [ ] **On-policy distillation** &mdash; recipes and reference runs for `ADVANTAGE_ESTIMATOR=on_policy_distillation`, including teacher/student preflight.
+- [ ] **Public Git-ref backends** &mdash; flip `tool.uv.sources` from local paths to public Git URLs for Megatron-Bridge, Megatron-LM, and SGLang once the upstream repos land.
+- [ ] **Troubleshooting & ops docs** &mdash; common resolver, import, and launcher smoke failures, plus a multi-node story for sites that have capacity beyond a single 8&times;B200 box.
+
+Have a request? Open an issue or PR.
+## Citation
+
+```bib
+@article{spherelab2026orbit,
+  author = {Qiu, Zeju and Chen, Le and Liu, Lixin and Xiao, Tim Z.
+            and Feng, Yao and Huang, Yangyi and Liu, Zhen and Shi, Han
+            and Wen, Yandong and Yu, Zhouliang and Sch{\"o}lkopf, Bernhard
+            and Liu, Weiyang},
+  title  = {Orbit: Stable and Efficient Reinforcement Learning for Trillion-Parameter LLMs},
+  journal = {SphereLab Blog},
+  year   = {2026},
+  note   = {https://spherelab.ai/orbit}
+}
+```
+
 ## Acknowledgements
 
-Orbit is built upon the excellent work of the following projects:
+Orbit stands on the shoulders of these excellent projects:
 
+- [MILES](https://github.com/radixark/miles)
 - [verl](https://github.com/volcengine/verl)
 - [slime](https://github.com/THUDM/slime)
-- [MILES](https://github.com/radixark/miles)
 - [SGLang](https://github.com/sgl-project/sglang)
 - [Megatron-Bridge](https://github.com/NVIDIA/Megatron-Bridge)
+- [Megatron-LM](https://github.com/NVIDIA/Megatron-LM)
+- [DeepSeek-V4](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/tree/main)
+- [PyTorch](https://github.com/pytorch/pytorch)
+
+## License
+
+Orbit is released under the [Apache License 2.0](LICENSE).
