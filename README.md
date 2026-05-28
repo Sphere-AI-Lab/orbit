@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="docs/index.html"><img alt="Blog post" src="https://img.shields.io/badge/blog-spherelab.ai%2Forbit-8A2BE2.svg"></a>
+  <a href="https://spherelab.ai/orbit/"><img alt="Blog post" src="https://img.shields.io/badge/blog-spherelab.ai%2Forbit-8A2BE2.svg"></a>
   <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache_2.0-green.svg"></a>
 </p>
 
