@@ -1552,7 +1552,11 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 default=None,
                 help=(
                     "Path to the rollout all samples process function that "
-                    "can process all samples including filtered ones."
+                    "can process all samples including filtered ones. "
+                    "Signature: `fn(args, samples, data_source, **kwargs)` where "
+                    "kwargs may include is_eval, rollout_id, eval_dataset_name, "
+                    "and n_samples_per_group; legacy 3-positional impls without "
+                    "**kwargs are soft-called with only what they declare."
                 ),
             )
             parser.add_argument(

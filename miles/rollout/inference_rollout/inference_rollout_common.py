@@ -15,7 +15,7 @@ from miles.rollout.base_types import (
     RolloutFnTrainOutput,
 )
 from miles.rollout.generate_hub.single_turn import generate
-from miles.rollout.inference_rollout.compatibility import load_generate_function
+from miles.rollout.inference_rollout.compatibility import call_all_samples_process_fn, load_generate_function
 from miles.rollout.rm_hub import async_rm, batched_async_rm
 from miles.utils.processing_utils import load_processor, load_tokenizer
 from miles.utils.types import Sample
@@ -191,6 +191,7 @@ class InferenceRolloutFn:
 
     async def _call_eval(self, input: RolloutFnEvalInput) -> RolloutFnEvalOutput:
         from miles.rollout.inference_rollout.inference_rollout_eval import eval_rollout_single_dataset
+        from miles.utils.misc import load_function
 
         assert not self.state.args.group_rm, "Group RM is not supported for eval rollout"
 
@@ -199,4 +200,32 @@ class InferenceRolloutFn:
             coros.append(eval_rollout_single_dataset(self.state, dataset_cfg, self.eval_prompt_dataset_cache))
         results_list = await asyncio.gather(*coros)
         results = {k: v for r in results_list for k, v in r.items()}
+
+        # Mirror the train hook for eval. See sglang_rollout.eval_rollout for
+        # the rationale — one invocation per eval dataset so each dataset's
+        # samples land in its own folder. Forward `n_samples_per_eval_prompt`
+        # as `n_samples_per_group` so dump impls can name files by
+        # (prompt, rollout-in-group) for both train and eval uniformly.
+        args = self.state.args
+        if getattr(args, "rollout_all_samples_process_path", None):
+            if f := load_function(args.rollout_all_samples_process_path):
+                eval_ds_cfgs = {getattr(cfg, "name", None): cfg for cfg in (getattr(args, "eval_datasets", []) or [])}
+                for ds_name, ds_result in results.items():
+                    ds_samples = ds_result.get("samples") if isinstance(ds_result, dict) else None
+                    if not ds_samples:
+                        continue
+                    ds_cfg = eval_ds_cfgs.get(ds_name)
+                    n_eval = getattr(ds_cfg, "n_samples_per_eval_prompt", None) if ds_cfg else None
+                    # Soft-call: kwargs filtered to what the hook accepts.
+                    call_all_samples_process_fn(
+                        f,
+                        args,
+                        ds_samples,
+                        None,
+                        is_eval=True,
+                        eval_dataset_name=ds_name,
+                        rollout_id=input.rollout_id,
+                        n_samples_per_group=n_eval or 1,
+                    )
+
         return RolloutFnEvalOutput(data=results)

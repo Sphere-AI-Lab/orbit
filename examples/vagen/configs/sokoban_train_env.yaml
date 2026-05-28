@@ -1,0 +1,16 @@
+# Sokoban train EnvSpec — VAGEN-main hyperparams with one deliberate
+# deviation: prompt_format=free_think (VAGEN-main env default is "wm").
+# Drop the prompt_format line below to revert to the strict 4-tag wm mirror.
+# Active reward terms: format_reward=0.1, success_reward=1.0 (env defaults;
+# gym_sokoban's step_reward is ignored by VAGEN's wrapper).
+# See examples/vagen/docs/dataset.md.
+envs:
+  - name: Sokoban
+    n_envs: 10000
+    seed: [1, 10000, 1]
+    max_turns: 5
+    response_length_per_turn: 512
+    config:
+      render_mode: vision
+      min_solution_steps: [1, 5]
+      prompt_format: free_think

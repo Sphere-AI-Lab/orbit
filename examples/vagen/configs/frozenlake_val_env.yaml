@@ -1,0 +1,19 @@
+# FrozenLake eval candidate pool (4096 seeds [20001,24096]) — filtered
+# down to 256 map-disjoint-from-train seeds by
+# examples/vagen/scripts/frozenlake-main.sh. Env knobs match the train yaml
+# so env_uuid is the same function from seeds; only the seed range and
+# `--exclude-data` filter distinguish this split.
+# See examples/vagen/docs/dataset.md (heldout strategy).
+envs:
+  - name: FrozenLake
+    n_envs: 4096
+    seed: [20001, 24096, 1]
+    max_turns: 5
+    response_length_per_turn: 512
+    config:
+      render_mode: vision
+      size: 4
+      p: 0.8
+      is_slippery: false
+      slip_prob: 0.0
+      max_actions_per_step: 5

@@ -1,0 +1,17 @@
+# Sokoban eval candidate pool (4096 seeds [20001,24096]) — filtered down
+# to 256 map-disjoint-from-train seeds by
+# examples/vagen/scripts/sokoban-main.sh. Pool sized ~4× the target because
+# Sokoban's small state space makes seed→map many-to-one (~76% overlap
+# measured on the naive 256-seed eval set; ~24% post-filter yield).
+# Env knobs match the train yaml; only the seed range and `--exclude-data`
+# filter distinguish this split. See examples/vagen/docs/dataset.md.
+envs:
+  - name: Sokoban
+    n_envs: 4096
+    seed: [20001, 24096, 1]
+    max_turns: 5
+    response_length_per_turn: 512
+    config:
+      render_mode: vision
+      min_solution_steps: [1, 5]
+      prompt_format: free_think

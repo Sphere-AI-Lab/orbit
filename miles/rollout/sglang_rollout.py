@@ -16,7 +16,7 @@ from tqdm import tqdm
 from miles.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME, is_lora_enabled
 from miles.rollout.base_types import GenerateFnInput, RolloutFnEvalOutput, RolloutFnTrainOutput
 from miles.rollout.filter_hub.base_types import MetricGatherer, call_dynamic_filter
-from miles.rollout.inference_rollout.compatibility import load_generate_function
+from miles.rollout.inference_rollout.compatibility import call_all_samples_process_fn, load_generate_function
 from miles.utils import dumper_utils
 from miles.utils.async_utils import run
 from miles.utils.data import Dataset
@@ -474,7 +474,17 @@ async def generate_rollout_async(
     # There can be circumstances where users want to process all samples including filtered ones.
     if args.rollout_all_samples_process_path is not None:
         process_func = load_function(args.rollout_all_samples_process_path)
-        process_func(args, all_samples, data_source)
+        # Soft-call: kwargs filtered to what the hook accepts so legacy
+        # `fn(args, samples, data_source)` impls keep working.
+        call_all_samples_process_fn(
+            process_func,
+            args,
+            all_samples,
+            data_source,
+            is_eval=False,
+            rollout_id=rollout_id,
+            n_samples_per_group=getattr(args, "n_samples_per_prompt", None),
+        )
 
     await recompute_samples_rollout_logprobs_via_prefill(
         args,
@@ -499,6 +509,32 @@ async def eval_rollout(args: Namespace, rollout_id: int) -> tuple[dict[str, dict
     results = {}
     for r in results_list:
         results.update(r)
+
+    # Mirror the train path's `--rollout-all-samples-process-path` hook so
+    # custom dumpers (e.g. examples/vagen/debug_dump.dump_samples) can persist
+    # eval trajectories alongside train ones. One invocation per eval dataset
+    # so each dataset's samples land in its own folder. Also forward
+    # `n_samples_per_eval_prompt` as `n_samples_per_group` — eval has its own
+    # per-prompt rollout count distinct from train's `n_samples_per_prompt`.
+    if getattr(args, "rollout_all_samples_process_path", None):
+        process_func = load_function(args.rollout_all_samples_process_path)
+        eval_ds_cfgs = {getattr(cfg, "name", None): cfg for cfg in (getattr(args, "eval_datasets", []) or [])}
+        for ds_name, ds_result in results.items():
+            ds_samples = ds_result.get("samples") if isinstance(ds_result, dict) else None
+            if not ds_samples:
+                continue
+            ds_cfg = eval_ds_cfgs.get(ds_name)
+            n_eval = getattr(ds_cfg, "n_samples_per_eval_prompt", None) if ds_cfg else None
+            process_func(
+                args,
+                ds_samples,
+                None,  # no data_source on the eval side
+                is_eval=True,
+                eval_dataset_name=ds_name,
+                rollout_id=rollout_id,
+                n_samples_per_group=n_eval or 1,
+            )
+
     return RolloutFnEvalOutput(data=results), []
 
 

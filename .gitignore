@@ -197,6 +197,7 @@ _examples_synced/
 # slurm launcher outputs (scripts/slurm/launch_miles.sbatch)
 /runs/
 /checkpoints/
+/data/
 
 # prebuilt wheels cached by scripts/slurm/setup/install_env.sh
 /thirdparty/wheels/

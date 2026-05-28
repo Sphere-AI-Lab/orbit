@@ -10,6 +10,7 @@ from tqdm import tqdm
 from miles.rollout.base_types import RolloutFnTrainOutput
 from miles.rollout.filter_hub.base_types import MetricGatherer, call_dynamic_filter
 from miles.rollout.generate_utils.prefill_logprobs import recompute_samples_rollout_logprobs_via_prefill
+from miles.rollout.inference_rollout.compatibility import call_all_samples_process_fn
 from miles.rollout.inference_rollout.inference_rollout_common import GenerateState, generate_and_rm_group
 from miles.utils import dumper_utils
 from miles.utils.http_utils import get, post
@@ -151,7 +152,17 @@ async def generate_rollout_async(
         f(args, data)
     # There can be circumstances where users want to process all samples including filtered ones.
     if f := load_function(args.rollout_all_samples_process_path):
-        f(args, all_samples, data_source)
+        # Soft-call: kwargs filtered to what the hook accepts. See the
+        # matching sglang_rollout.generate_rollout_async patch.
+        call_all_samples_process_fn(
+            f,
+            args,
+            all_samples,
+            data_source,
+            is_eval=False,
+            rollout_id=rollout_id,
+            n_samples_per_group=getattr(args, "n_samples_per_prompt", None),
+        )
 
     await recompute_samples_rollout_logprobs_via_prefill(
         args,
