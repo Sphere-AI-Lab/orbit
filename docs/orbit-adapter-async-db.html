@@ -1,0 +1,1011 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Orbit rollout architectures — animated timelines</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="shortcut icon" href="./orbit_icon.png">
+<link rel="stylesheet" href="css/fonts.css">
+<link rel="stylesheet" href="css/common.css">
+<style>
+  /* ===================================================================
+     THEME — match index.html (TML light look)
+     CSS variables from css/common.css: --bg, --fg, --fg1..--fg4,
+     --font-serif, --font-sans, --bg_code.
+     =================================================================== */
+  :root {
+    /* Demo-local variables (additive on top of common.css) */
+    --panel-bg:      color-mix(in srgb, var(--fg4) 4%,  var(--bg) 96%);
+    --panel-border:  color-mix(in srgb, var(--fg4) 18%, var(--bg) 82%);
+    --soft-border:   color-mix(in srgb, var(--fg4) 14%, var(--bg) 86%);
+    --grid:          color-mix(in srgb, var(--fg4) 11%, var(--bg) 89%);
+    --muted:         var(--fg3);
+
+    --lane-bg:       color-mix(in srgb, var(--fg4) 5%,  var(--bg) 95%);
+    --lane-border:   color-mix(in srgb, var(--fg4) 14%, var(--bg) 86%);
+    --lane-label:    var(--fg2);
+
+    /* activity colors — light-theme palette, mirroring the teaser in index.html */
+    --c-gen-v0:      #2563eb;
+    --c-gen-v1:      #16a34a;
+    --c-gen-v2:      #d97706;
+    --c-gen-v3:      #db2777;
+    --c-gen-v4:      #7c3aed;
+    --c-train:       #3b82f6;
+    --c-push-full:   #ef4444;
+    --c-push-adp:    #f59e0b;
+    --c-stage:       #6b7280;
+    --c-flip:        #111827;
+    --c-pause:       rgba(239, 68, 68, 0.18);
+    --c-idle:        rgba(0, 0, 0, 0.04);
+    --c-wait:        rgba(239, 68, 68, 0.14);
+    --c-wait-stroke: #ef4444;
+    --c-buffer:      #2563eb;
+    --c-buffer-line: #1d4ed8;
+    --c-buffer-in:   #16a34a;
+    --c-buffer-out:  #d97706;
+    --c-playhead:    #111827;
+
+    --accent:        #2563eb;
+
+    /* Compatibility aliases for inline styles that reference the old
+       variable names (--text / --panel) — preserves body content verbatim. */
+    --text:          var(--fg);
+    --panel:         var(--bg);
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-serif);
+    margin: 0;
+    padding: 0;
+    line-height: 1.7;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 40px 28px 80px; }
+
+  h1 {
+    font-family: var(--font-serif);
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--fg);
+    margin: 0 0 6px;
+    line-height: 1.25;
+  }
+  h2 {
+    font-family: var(--font-serif);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--fg);
+    margin: 0;
+    line-height: 1.3;
+  }
+  .sub {
+    font-family: var(--font-serif);
+    color: var(--fg2);
+    font-size: 17px;
+    line-height: 1.7;
+    margin: 0 0 22px;
+    max-width: 880px;
+  }
+  .sub b { color: var(--fg); font-weight: 600; }
+  .sub i { color: var(--fg); }
+
+  /* ----- controls ----- */
+  .controls {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    background: color-mix(in srgb, var(--bg) 92%, transparent);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin: 22px 0 28px;
+    position: sticky; top: 12px; z-index: 10;
+    backdrop-filter: blur(6px);
+    font-family: var(--font-sans);
+  }
+  .controls button {
+    background: var(--bg); color: var(--fg2);
+    border: 1px solid var(--panel-border);
+    padding: 5px 13px; border-radius: 999px;
+    font-size: 13px; cursor: pointer;
+    font-family: var(--font-sans); font-weight: 500;
+    line-height: 1; transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+  }
+  .controls button:hover {
+    color: var(--fg);
+    border-color: color-mix(in srgb, var(--fg) 50%, var(--bg) 50%);
+    background: color-mix(in srgb, var(--fg) 4%, var(--bg) 96%);
+  }
+  .controls button.primary {
+    background: var(--accent); color: white; border-color: var(--accent);
+  }
+  .controls button.primary:hover { background: #1d4ed8; border-color: #1d4ed8; color: white; }
+  .controls label { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .controls input[type="range"] { vertical-align: middle; }
+  .controls .time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; min-width: 80px; }
+
+  /* ----- scenario panel (mirrors figure.bordered in index.html) ----- */
+  .scenario {
+    background: var(--bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 22px 26px 16px;
+    margin-bottom: 28px;
+  }
+  .scenario-header {
+    display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px;
+    flex-wrap: wrap;
+  }
+  /* tag chip — matches #main.post .tag in index.html */
+  .scenario-tag {
+    display: inline-block;
+    font-family: var(--font-sans);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border: 1px solid color-mix(in srgb, var(--fg4) 35%, var(--bg) 65%);
+    border-radius: 99px;
+    color: var(--fg2);
+    font-weight: 500;
+    line-height: 1.4;
+    background: var(--bg);
+  }
+  .scenario h2 .scn-sub {
+    color: var(--muted);
+    font-weight: 400;
+    font-size: 15px;
+  }
+  .scenario p.desc {
+    font-family: var(--font-serif);
+    color: var(--fg1);
+    font-size: 16px;
+    line-height: 1.7;
+    margin: 10px 0 14px;
+    max-width: 880px;
+  }
+  .scenario p.desc code,
+  .scenario .stats code,
+  .scenario .legend code {
+    background: var(--bg_code);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: var(--font-sans);
+    color: var(--fg);
+  }
+
+  /* ----- stats — spec-table style ----- */
+  .scenario .stats {
+    display: flex; gap: 18px; flex-wrap: wrap;
+    font-family: var(--font-sans);
+    font-size: 13px;
+    color: var(--fg2);
+    margin-top: 8px;
+    border-top: 1px solid var(--soft-border);
+    padding-top: 10px;
+  }
+  .scenario .stats b { color: var(--fg); font-variant-numeric: tabular-nums; }
+
+  /* ----- legend ----- */
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 8px 18px;
+    font-family: var(--font-sans);
+    font-size: 12.5px; color: var(--muted);
+    margin: 10px 0 0;
+  }
+  .legend .item { display: flex; align-items: center; gap: 6px; }
+  .legend .sw {
+    display: inline-block; width: 14px; height: 10px; border-radius: 2px;
+    border: 1px solid rgba(0,0,0,0.15);
+  }
+
+  /* ----- svg timelines (bordered figure style) ----- */
+  svg.timeline {
+    width: 100%; height: auto; display: block;
+    background: var(--panel-bg);
+    border: 1px solid var(--soft-border);
+    border-radius: 4px;
+    margin: 6px 0 2px;
+  }
+  .activity { transition: opacity 0.15s; }
+  .activity.dim { opacity: 0.22; }
+  .lane-bg { fill: var(--lane-bg); stroke: var(--lane-border); stroke-width: 1; }
+  .lane-label { fill: var(--lane-label); font: 12px/1 var(--font-sans); }
+  .axis text { fill: var(--muted); font: 10px/1 var(--font-sans); }
+  .axis line { stroke: var(--grid); }
+  .playhead { stroke: var(--c-playhead); stroke-width: 1.3; opacity: 0.7; }
+  .activity text { fill: white; font: 10px/1 var(--font-sans); pointer-events: none; }
+  .pause-band { fill: var(--c-pause); }
+  .flip-marker { stroke: var(--c-flip); stroke-width: 1.5; }
+  .arrow { stroke: var(--muted); stroke-width: 1; fill: none; marker-end: url(#arr); opacity: 0.4; }
+
+  footer { color: var(--muted); font-size: 13px; margin-top: 30px; font-family: var(--font-sans); }
+  footer code { background: var(--bg_code); padding: 1px 6px; border-radius: 4px; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Orbit rollout architectures</h1>
+  <p class="sub">One axis, five panels on one shared clock. Start fully serial. A detour panel
+    tests <i>"is the heavy push the bottleneck?"</i> by swapping it for an adapter push while keeping the loop
+    serial — turns out, not really. Then add <b>overlap</b> (async), <b>adapter-native</b> push, and
+    finally a non-blocking <b>double-buffered</b> swap. Press play.</p>
+
+  <div class="controls">
+    <button id="playBtn" class="primary">▶ Play</button>
+    <button id="resetBtn">↺ Reset</button>
+    <label>Speed
+      <input id="speedInput" type="range" min="0.25" max="4" step="0.25" value="1" />
+      <span id="speedLabel">1.0×</span>
+    </label>
+    <label>Scrub
+      <input id="scrubInput" type="range" min="0" max="1000" step="1" value="0" style="width: 240px;" />
+    </label>
+    <span class="time" id="timeLabel">t = 0.0</span>
+  </div>
+
+  <!-- ============== SCENARIO 1 — Sync RL ============== -->
+  <div class="scenario" data-id="sync">
+    <div class="scenario-header">
+      <span class="scenario-tag">Baseline</span>
+      <h2>Sync RL <span style="color:var(--muted);font-weight:400;font-size:15px;">— serial, full-weight</span></h2>
+    </div>
+    <p class="desc">
+      The naive loop: generate a full batch, train, push the <b>full model</b>, repeat — with
+      <i>no overlap</i>. The two GPU pools take turns, so each sits idle while the other works. And a
+      batch can't close until its <i>slowest</i> sample finishes, so fast slots stall at the barrier
+      (hatched). That straggler waste, plus the serial structure, is the
+      <b>motivation for everything that follows</b>. Rollouts are on-policy (staleness 0).
+    </p>
+    <svg class="timeline" id="svg-sync" viewBox="0 0 1100 220"></svg>
+    <div class="legend">
+      <span class="item"><span class="sw" style="background:var(--c-gen-v0)"></span> gen @ v0</span>
+      <span class="item"><span class="sw" style="background:var(--c-gen-v1)"></span> gen @ v1</span>
+      <span class="item"><span class="sw" style="background:var(--c-gen-v2)"></span> gen @ v2</span>
+      <span class="item"><span class="sw" style="background:var(--c-train)"></span> gradient step</span>
+      <span class="item"><span class="sw" style="background:var(--c-buffer);opacity:0.4"></span> queue depth · <span style="color:var(--c-buffer-in)">▼</span> in · <span style="color:var(--c-buffer-out)">▲</span> out</span>
+      <span class="item"><span class="sw" style="background:var(--c-push-full)"></span> full-model weight push</span>
+      <span class="item"><span class="sw" style="background:var(--c-wait);border-color:var(--c-wait-stroke)"></span> waiting on straggler (wasted)</span>
+    </div>
+    <div class="stats">
+      <span>Rollout utilization: <b id="util-sync-r">—</b></span>
+      <span>Trainer utilization: <b id="util-sync-t">—</b></span>
+      <span>Weight push payload: <b>full model</b></span>
+      <span>Staleness: <b>0 (on-policy)</b></span>
+    </div>
+    <div class="stats">
+      <span style="color:var(--muted)"><i>No direct Qwen3-4B measurement — full-weight push not benched in this batch.
+        Implied lower bound: step time ≥ adapter sync's <b>8.651 s</b>, since this path pays the same
+        serial loop cost plus a much larger push.</i></span>
+    </div>
+  </div>
+
+  <!-- ============== SCENARIO 2 — Adapter-native sync (detour) ============== -->
+  <div class="scenario" data-id="adapter-sync">
+    <div class="scenario-header">
+      <span class="scenario-tag">detour · swap push payload</span>
+      <h2>Adapter-native sync <span style="color:var(--muted);font-weight:400;font-size:15px;">— serial, adapter-only</span></h2>
+    </div>
+    <p class="desc">
+      Hypothesis: maybe the heavy <i>full-model push</i> is what makes Sync RL slow — so swap it for a
+      tiny OFT adapter push and keep everything else the same. The push <i>does</i> get cheap (warm
+      <code>update_weights</code> ≈ <b>0.105 s</b>), but the loop is still serial: the trainer waits for
+      rollout generation, offload, onload, and the adapter sync before it can step. <b>Warm train wait
+      stays at ≈ 7.142 s</b>, and warm step time is <b>≈ 8.651 s</b> — not meaningfully better than
+      full-weight sync, because the push wasn't the bottleneck; the <i>serial loop</i> was. This is the
+      panel that motivates overlap (the next step).
+    </p>
+    <svg class="timeline" id="svg-adapter-sync" viewBox="0 0 1100 220"></svg>
+    <div class="legend">
+      <span class="item"><span class="sw" style="background:var(--c-gen-v0)"></span> gen @ v0</span>
+      <span class="item"><span class="sw" style="background:var(--c-gen-v1)"></span> gen @ v1</span>
+      <span class="item"><span class="sw" style="background:var(--c-gen-v2)"></span> gen @ v2</span>
+      <span class="item"><span class="sw" style="background:var(--c-train)"></span> gradient step</span>
+      <span class="item"><span class="sw" style="background:var(--c-buffer);opacity:0.4"></span> queue depth · <span style="color:var(--c-buffer-in)">▼</span> in · <span style="color:var(--c-buffer-out)">▲</span> out</span>
+      <span class="item"><span class="sw" style="background:var(--c-push-adp)"></span> adapter push (tiny)</span>
+      <span class="item"><span class="sw" style="background:var(--c-wait);border-color:var(--c-wait-stroke)"></span> waiting on straggler (wasted)</span>
+    </div>
+    <div class="stats">
+      <span>Rollout utilization: <b id="util-adapter-sync-r">—</b></span>
+      <span>Trainer utilization: <b id="util-adapter-sync-t">—</b></span>
+      <span>Weight push payload: <b>adapter only</b></span>
+      <span>Staleness: <b>0 (on-policy)</b></span>
+    </div>
+    <div class="stats">
+      <span style="color:var(--text)"><b>Measured (Qwen3-4B OFT, 4-GPU colocated sync, warm rollouts 1–4):</b></span>
+      <span><code>update_weights</code> <b>0.105 s</b> (small ✓)</span>
+      <span>Train wait <b style="color:#f85149">7.142 s</b> (still huge)</span>
+      <span>Step time <b style="color:#f85149">8.651 s</b></span>
+    </div>
+  </div>
+
+  <!-- ============== SCENARIO 3 — Async RL (full-weight) ============== -->
+  <div class="scenario" data-id="async-full">
+    <div class="scenario-header">
+      <span class="scenario-tag">+ overlap (async)</span>
+      <h2>Async RL <span style="color:var(--muted);font-weight:400;font-size:15px;">— still full-weight</span></h2>
+    </div>
+    <p class="desc">
+      A background producer keeps generation in flight while the trainer takes gradient steps — they
+      now <b>overlap</b>, so the trainer stays busy and slots never wait at a barrier. But the push is
+      still the <b>full model</b>, so each <code>update_weights()</code> forces a long pause where the
+      engine can't accept work. Pushes are too expensive to do often, so the engine <i>lags</i> the
+      trainer by several versions (v0 then jumps to v2). That gap between the gen colors and the
+      current version is <b>staleness</b> (≈ 2 here).
+    </p>
+    <svg class="timeline" id="svg-async-full" viewBox="0 0 1100 220"></svg>
+    <div class="legend">
+      <span class="item"><span class="sw" style="background:var(--c-gen-v0)"></span> gen @ v0</span>
+      <span class="item"><span class="sw" style="background:var(--c-gen-v1)"></span> gen @ v1</span>
+      <span class="item"><span class="sw" style="background:var(--c-gen-v2)"></span> gen @ v2</span>
+      <span class="item"><span class="sw" style="background:var(--c-train)"></span> gradient step</span>
+      <span class="item"><span class="sw" style="background:var(--c-buffer);opacity:0.4"></span> queue depth · <span style="color:var(--c-buffer-in)">▼</span> in · <span style="color:var(--c-buffer-out)">▲</span> out</span>
+      <span class="item"><span class="sw" style="background:var(--c-push-full)"></span> full-model weight push</span>
+      <span class="item"><span class="sw" style="background:var(--c-pause)"></span> engine paused</span>
+    </div>
+    <div class="stats">
+      <span>Rollout utilization: <b id="util-async-full-r">—</b></span>
+      <span>Trainer utilization: <b id="util-async-full-t">—</b></span>
+      <span>Weight push payload: <b>full model</b></span>
+      <span>Staleness: <b>≈ 2 (engine lags)</b></span>
+    </div>
+    <div class="stats">
+      <span style="color:var(--muted)"><i>No direct Qwen3-4B measurement — full-weight push not benched in this batch.
+        Implied: better than sync thanks to overlap, but each push still pauses generation for
+        seconds (vs the <b>0.169 s</b> adapter push), so the engine lags the trainer by several
+        versions.</i></span>
+    </div>
+  </div>
+
+  <!-- ============== SCENARIO 4 — Adapter-native async ============== -->
+  <div class="scenario" data-id="adapter-async">
+    <div class="scenario-header">
+      <span class="scenario-tag">+ adapter-native</span>
+      <h2>Adapter-native async <span style="color:var(--muted);font-weight:400;font-size:15px;">— single slot</span></h2>
+    </div>
+    <p class="desc">
+      Only LoRA/OFT deltas cross the wire, so the push is tiny. With a single adapter slot,
+      <code>UpdateWeightFromTensor.update_weights</code> still has to <b>pause_generation</b> →
+      flush_cache → overwrite → <b>continue_generation</b>, but the stall is brief instead of a
+      full-model pause. Cheap syncs can run every step, so the engine keeps up with the trainer and
+      rollouts stay fresh (staleness ≈ 1).
+    </p>
+    <svg class="timeline" id="svg-adapter-async" viewBox="0 0 1100 220"></svg>
+    <div class="legend">
+      <span class="item"><span class="sw" style="background:var(--c-gen-v0)"></span> gen @ v0</span>
+      <span class="item"><span class="sw" style="background:var(--c-gen-v1)"></span> gen @ v1</span>
+      <span class="item"><span class="sw" style="background:var(--c-gen-v2)"></span> gen @ v2</span>
+      <span class="item"><span class="sw" style="background:var(--c-gen-v3)"></span> gen @ v3</span>
+      <span class="item"><span class="sw" style="background:var(--c-gen-v4)"></span> gen @ v4</span>
+      <span class="item"><span class="sw" style="background:var(--c-train)"></span> gradient step</span>
+      <span class="item"><span class="sw" style="background:var(--c-buffer);opacity:0.4"></span> queue depth · <span style="color:var(--c-buffer-in)">▼</span> in · <span style="color:var(--c-buffer-out)">▲</span> out</span>
+      <span class="item"><span class="sw" style="background:var(--c-push-adp)"></span> adapter overwrite</span>
+      <span class="item"><span class="sw" style="background:var(--c-pause)"></span> brief engine pause</span>
+    </div>
+    <div class="stats">
+      <span>Rollout utilization: <b id="util-adapter-async-r">—</b></span>
+      <span>Trainer utilization: <b id="util-adapter-async-t">—</b></span>
+      <span>Weight push payload: <b>adapter only</b></span>
+      <span>Adapter swap: <b>pause → overwrite → resume</b></span>
+    </div>
+    <div class="stats">
+      <span style="color:var(--text)"><b>Measured (Qwen3-4B OFT, 2+2 GPU async single-slot, warm rollouts 1–4):</b></span>
+      <span><code>update_weights</code> <b>0.169 s</b></span>
+      <span>Train wait <b style="color:#2ea043">2.048 s</b> (overlap helps)</span>
+      <span>Rollout throughput <b>1402.9 tok/GPU/s</b></span>
+      <span>Step time <b style="color:#2ea043">3.165 s</b> (vs 8.651 s sync ↑)</span>
+    </div>
+  </div>
+
+  <!-- ============== SCENARIO 5 — + double-buffer ============== -->
+  <div class="scenario" data-id="adapter-async-db">
+    <div class="scenario-header">
+      <span class="scenario-tag">+ double-buffer</span>
+      <h2>Adapter-native async + double-buffered rollout</h2>
+    </div>
+    <p class="desc">
+      All three stacked. The new adapter is <b>broadcast</b> into the inactive slot while the active
+      slot keeps serving in-flight requests, so the long sync no longer blocks generation. Orbit
+      still wraps the swap with the standard updater lifecycle —
+      <code>pause_generation → flush_cache → activate → continue_generation</code> — so there is a
+      <b>brief pause</b> at the flip point, but the activation itself is essentially instant (no
+      tensors crossing the wire). Measured: warm <code>update_weights</code> drops from
+      <b>0.169 s</b> (single-slot) to <b>0.118 s</b> (double-buffer), a ~30% reduction, and the
+      knock-on effect is what matters — warm rollout throughput climbs <b>+50.2%</b> and warm train
+      wait drops <b>-81.2%</b>. Gens that span a flip keep their start-version (older color); that
+      residual is the staleness the <code>fully_async</code> metrics track (≈ 1).
+    </p>
+    <svg class="timeline" id="svg-adapter-async-db" viewBox="0 0 1100 260"></svg>
+    <div class="legend">
+      <span class="item"><span class="sw" style="background:var(--c-gen-v0)"></span> gen @ v0</span>
+      <span class="item"><span class="sw" style="background:var(--c-gen-v1)"></span> gen @ v1</span>
+      <span class="item"><span class="sw" style="background:var(--c-gen-v2)"></span> gen @ v2</span>
+      <span class="item"><span class="sw" style="background:var(--c-gen-v3)"></span> gen @ v3</span>
+      <span class="item"><span class="sw" style="background:var(--c-gen-v4)"></span> gen @ v4</span>
+      <span class="item"><span class="sw" style="background:var(--c-train)"></span> gradient step</span>
+      <span class="item"><span class="sw" style="background:var(--c-buffer);opacity:0.4"></span> queue depth · <span style="color:var(--c-buffer-in)">▼</span> in · <span style="color:var(--c-buffer-out)">▲</span> out</span>
+      <span class="item"><span class="sw" style="background:var(--c-stage)"></span> broadcast to inactive slot</span>
+      <span class="item"><span class="sw" style="background:var(--c-flip)"></span> atomic activate (flip)</span>
+      <span class="item"><span class="sw" style="background:var(--c-pause)"></span> brief pause (flush + activate)</span>
+    </div>
+    <div class="stats">
+      <span>Rollout utilization: <b id="util-adapter-async-db-r">—</b></span>
+      <span>Trainer utilization: <b id="util-adapter-async-db-t">—</b></span>
+      <span>Weight push payload: <b>adapter only</b></span>
+      <span>Adapter swap: <b>broadcast staged + brief pause for flush/activate</b></span>
+    </div>
+    <div class="stats">
+      <span style="color:var(--text)"><b>Measured (Qwen3-4B OFT, 2+2 GPU async double-buffer, warm rollouts 1–4):</b></span>
+      <span><code>update_weights</code> <b>0.118 s</b> <span style="color:#2ea043">(−30.4%)</span></span>
+      <span>Train wait <b style="color:#2ea043">0.384 s</b> (−81.2%)</span>
+      <span>Rollout throughput <b style="color:#2ea043">2106.9 tok/GPU/s</b> (+50.2%)</span>
+      <span>Step time <b style="color:#2ea043">2.531 s</b> (−20.0%)</span>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* =====================================================================
+   CONFIG — EDIT ME
+   Each scenario defines its lanes and the activities placed on them.
+   Time units are arbitrary "ticks" rendered onto a 0..T_MAX axis.
+   ===================================================================== */
+
+const T_MAX     = 30;     // total timeline length (ticks)
+const SVG_W     = 1100;
+const PAD_L     = 110;    // left padding for lane labels
+const PAD_R     = 20;
+const PAD_T     = 22;     // top padding for axis
+const LANE_H    = 38;     // height of a lane row
+const LANE_GAP  = 8;
+
+// Rollout queue model: each completed `gen` enqueues +1 group; each `train`
+// step dequeues `DEFAULT_BATCH_SIZE` groups FIFO (consume-once — this is the
+// output_queue handoff, not an off-policy replay buffer). Scenarios may
+// override the batch via `scn.batchSize`. Depth is clamped at 0 (no negative
+// queue); `scn.warmup_depth` pre-fills it to model the async producer's head
+// start before the trainer is ready.
+const DEFAULT_BATCH_SIZE = 2;
+
+const VERSION_COLORS = [
+  'var(--c-gen-v0)', 'var(--c-gen-v1)', 'var(--c-gen-v2)',
+  'var(--c-gen-v3)', 'var(--c-gen-v4)',
+];
+
+/* ---------- Scenario 1 — Sync RL (serial, full-weight) ----------
+   Baseline. No overlap: generate → train → full push → repeat. A batch can't
+   close until its slowest sample finishes, so fast slots stall at the barrier
+   (the `wait` blocks). Each gen uses the freshly-pushed version → staleness 0. */
+const SCN_SYNC = {
+  id: 'sync',
+  lanes: [
+    { id: 'engine',  label: 'SGLang engine' },
+    { id: 'trainer', label: 'Trainer' },
+    { id: 'wpush',   label: 'Weight push' },
+  ],
+  activities: [
+    // ---- Round 0 (engine @ v0): slot 0 long, slot 1 short → straggler ----
+    { lane:'engine', start: 0,  end: 9,  kind:'gen',  v:0, row:0 },
+    { lane:'engine', start: 0,  end: 5,  kind:'gen',  v:0, row:1 },
+    { lane:'engine', start: 5,  end: 9,  kind:'wait', row:1, label:'waiting on straggler' },
+    { lane:'trainer', start: 9,  end:12, kind:'train', label:'∇ v0→v1' },
+    { lane:'wpush',   start:12,  end:16, kind:'push-full', label:'full model' },
+    // ---- Round 1 (engine @ v1): roles flip, slot 0 is now the straggler ----
+    { lane:'engine', start:16,  end:21,  kind:'gen',  v:1, row:0 },
+    { lane:'engine', start:16,  end:25,  kind:'gen',  v:1, row:1 },
+    { lane:'engine', start:21,  end:25,  kind:'wait', row:0, label:'waiting on straggler' },
+    { lane:'trainer', start:25,  end:28, kind:'train', label:'∇ v1→v2' },
+    { lane:'wpush',   start:28,  end:30, kind:'push-full', label:'full model' },
+  ],
+  rows: { engine: 2, trainer: 1, wpush: 1 },  // engine lane has 2 parallel slots
+};
+
+/* ---------- Scenario 2 — Adapter-native sync (detour) ----------
+   Same serial loop as Scenario 1, but the push payload is an adapter delta
+   instead of the full model — so the push lane is *thin*. The cycle is still
+   gen → train → push → gen, and the straggler barrier still wastes the fast
+   slot, so warm step time barely improves (measured 8.65 s vs the equivalent
+   full-weight sync). This panel exists to show that shrinking the push alone
+   doesn't fix the loop; you need overlap (Scenario 3). */
+const SCN_ADAPTER_SYNC = {
+  id: 'adapter-sync',
+  lanes: [
+    { id: 'engine',  label: 'SGLang engine' },
+    { id: 'trainer', label: 'Trainer' },
+    { id: 'wpush',   label: 'Adapter push' },
+  ],
+  activities: [
+    // ---- Round 0 (engine @ v0): slot 0 long, slot 1 short → straggler ----
+    { lane:'engine', start: 0,  end: 8,  kind:'gen',  v:0, row:0 },
+    { lane:'engine', start: 0,  end: 4,  kind:'gen',  v:0, row:1 },
+    { lane:'engine', start: 4,  end: 8,  kind:'wait', row:1, label:'waiting on straggler' },
+    { lane:'trainer', start: 8,  end:11, kind:'train', label:'∇ v0→v1' },
+    { lane:'wpush',   start:11,  end:12, kind:'push-adp', label:'Δθ' },
+    // ---- Round 1 (engine @ v1): roles flip ----
+    { lane:'engine', start:12,  end:16,  kind:'gen',  v:1, row:0 },
+    { lane:'engine', start:12,  end:20,  kind:'gen',  v:1, row:1 },
+    { lane:'engine', start:16,  end:20,  kind:'wait', row:0, label:'waiting on straggler' },
+    { lane:'trainer', start:20,  end:23, kind:'train', label:'∇ v1→v2' },
+    { lane:'wpush',   start:23,  end:24, kind:'push-adp', label:'Δθ' },
+    // ---- Round 2 (engine @ v2): partial — shows the loop continues ----
+    { lane:'engine', start:24,  end:30,  kind:'gen',  v:2, row:0 },
+    { lane:'engine', start:24,  end:28,  kind:'gen',  v:2, row:1 },
+    { lane:'engine', start:28,  end:30,  kind:'wait', row:1, label:'waiting on straggler' },
+  ],
+  rows: { engine: 2, trainer: 1, wpush: 1 },
+};
+
+/* ---------- Scenario 3 — Async RL (full-weight) ----------
+   + overlap. Trainer runs continuously; its local version climbs ahead of the
+   engine. Full-model pushes are expensive, so they're rare and the engine lags
+   (serves v0, then jumps to v2). Samples generated at the lagging engine version
+   are stale relative to the trainer → staleness ≈ 2. */
+const SCN_ASYNC_FULL = {
+  id: 'async-full',
+  lanes: [
+    { id: 'engine',  label: 'SGLang engine' },
+    { id: 'trainer', label: 'Trainer' },
+    { id: 'wpush',   label: 'Weight push' },
+  ],
+  activities: [
+    // engine — continuous gen, but long pauses for the full-model push.
+    // Active version: v0 on [0,17), v2 on [17,30) — v1 is skipped (never pushed).
+    { lane:'engine', start: 0,  end: 5,  kind:'gen', v:0, row:0 },
+    { lane:'engine', start: 5,  end: 9,  kind:'gen', v:0, row:0 },
+    { lane:'engine', start: 9,  end:14,  kind:'gen', v:0, row:0 },
+    { lane:'engine', start:14,  end:17,  kind:'pause', label:'paused (full push)' },
+    { lane:'engine', start:17,  end:23,  kind:'gen', v:2, row:0 },
+    { lane:'engine', start:23,  end:28,  kind:'gen', v:2, row:0 },
+    { lane:'engine', start:28,  end:30,  kind:'pause', label:'paused' },
+    { lane:'engine', start: 0,  end: 6,  kind:'gen', v:0, row:1 },
+    { lane:'engine', start: 6,  end:10,  kind:'gen', v:0, row:1 },
+    { lane:'engine', start:10,  end:14,  kind:'gen', v:0, row:1 },
+    { lane:'engine', start:17,  end:22,  kind:'gen', v:2, row:1 },
+    { lane:'engine', start:22,  end:28,  kind:'gen', v:2, row:1 },
+    // trainer — continuous; local version runs ahead of the engine
+    { lane:'trainer', start: 3,  end: 7,  kind:'train', label:'∇ v0→v1' },
+    { lane:'trainer', start:10,  end:14,  kind:'train', label:'∇ v1→v2' },
+    { lane:'trainer', start:17,  end:21,  kind:'train', label:'∇ v2→v3' },
+    { lane:'trainer', start:24,  end:28,  kind:'train', label:'∇ v3→v4' },
+    // full-model push (long) — only affordable occasionally
+    { lane:'wpush',   start:14,  end:17,  kind:'push-full', label:'full → v2' },
+    { lane:'wpush',   start:28,  end:30,  kind:'push-full', label:'full → v4' },
+  ],
+  rows: { engine: 2, trainer: 1, wpush: 1 },
+  warmup_depth: 2,  // async producer had a head start before t=0
+};
+
+/* ---------- Scenario 4 — Adapter-native async (single slot, no double-buffer) ----------
+   + adapter-native. Push is tiny (LoRA/OFT deltas), so update_weights can
+   pause_generation → flush_cache → overwrite → continue_generation cheaply on
+   every step. The engine keeps up with the trainer → staleness ≈ 1. */
+const SCN_ADAPTER_ASYNC = {
+  id: 'adapter-async',
+  lanes: [
+    { id: 'engine',  label: 'SGLang engine' },
+    { id: 'trainer', label: 'Trainer' },
+    { id: 'wpush',   label: 'Adapter push' },
+  ],
+  activities: [
+    // engine — continuous, brief pause per adapter overwrite.
+    // Active version: v0[0,8) v1[8,15) v2[15,22) v3[22,29) v4[29,30).
+    { lane:'engine', start: 0,  end: 7,  kind:'gen', v:0, row:0 },
+    { lane:'engine', start: 7,  end: 8,  kind:'pause', label:'pause' },
+    { lane:'engine', start: 8,  end:14,  kind:'gen', v:1, row:0 },
+    { lane:'engine', start:14,  end:15,  kind:'pause', label:'pause' },
+    { lane:'engine', start:15,  end:21,  kind:'gen', v:2, row:0 },
+    { lane:'engine', start:21,  end:22,  kind:'pause', label:'pause' },
+    { lane:'engine', start:22,  end:28,  kind:'gen', v:3, row:0 },
+    { lane:'engine', start:28,  end:29,  kind:'pause', label:'pause' },
+    { lane:'engine', start:29,  end:30,  kind:'gen', v:4, row:0 },
+    { lane:'engine', start: 0,  end: 7,  kind:'gen', v:0, row:1 },
+    { lane:'engine', start: 8,  end:14,  kind:'gen', v:1, row:1 },
+    { lane:'engine', start:15,  end:21,  kind:'gen', v:2, row:1 },
+    { lane:'engine', start:22,  end:28,  kind:'gen', v:3, row:1 },
+    { lane:'engine', start:29,  end:30,  kind:'gen', v:4, row:1 },
+    // trainer — continuous; engine tracks it within ~1 version
+    { lane:'trainer', start: 3,  end: 7,  kind:'train', label:'∇ v0→v1' },
+    { lane:'trainer', start:10,  end:14,  kind:'train', label:'∇ v1→v2' },
+    { lane:'trainer', start:16,  end:20,  kind:'train', label:'∇ v2→v3' },
+    { lane:'trainer', start:23,  end:27,  kind:'train', label:'∇ v3→v4' },
+    // adapter push (brief) during each engine pause
+    { lane:'wpush',   start: 7,  end: 8,  kind:'push-adp', label:'Δθ v1' },
+    { lane:'wpush',   start:14,  end:15,  kind:'push-adp', label:'Δθ v2' },
+    { lane:'wpush',   start:21,  end:22,  kind:'push-adp', label:'Δθ v3' },
+    { lane:'wpush',   start:28,  end:29,  kind:'push-adp', label:'Δθ v4' },
+  ],
+  rows: { engine: 2, trainer: 1, wpush: 1 },
+  warmup_depth: 2,
+};
+
+/* ---------- Scenario 5 — Adapter-native async + double-buffered ----------
+   + double-buffer. Broadcast into the inactive slot while the active slot
+   keeps serving (the long sync overlaps with gen). The outer updater
+   lifecycle still wraps the swap, so at the flip there is a *brief* engine
+   pause for flush_cache → activate → continue_generation — measured warm
+   `update_weights` ≈ 0.118 s here vs 0.169 s for the single-slot path.
+   Version = active version at gen START, so gens that span a flip keep the
+   older version (residual staleness ≈ 1). Flips at t=8,15,22,29. */
+const SCN_ADAPTER_ASYNC_DB = {
+  id: 'adapter-async-db',
+  lanes: [
+    { id: 'engine',   label: 'SGLang engine' },
+    { id: 'trainer',  label: 'Trainer' },
+    { id: 'staging',  label: 'Inactive slot' },
+    { id: 'activate', label: 'Activate (flip)' },
+  ],
+  activities: [
+    // engine — gens span the flips, with a *brief* pause overlay at each flip
+    // for flush_cache + activate + continue_generation (the broadcast itself
+    // is overlapped via the inactive slot, so it does NOT pause the engine).
+    { lane:'engine', start: 0,  end: 5,  kind:'gen', v:0, row:0 },
+    { lane:'engine', start: 5,  end:11,  kind:'gen', v:0, row:0 },  // spans flip→still v0 (stale)
+    { lane:'engine', start:11,  end:17,  kind:'gen', v:1, row:0 },  // spans flip→still v1 (stale)
+    { lane:'engine', start:17,  end:24,  kind:'gen', v:2, row:0 },  // spans flip→still v2 (stale)
+    { lane:'engine', start:24,  end:30,  kind:'gen', v:3, row:0 },
+    { lane:'engine', start: 0,  end: 7,  kind:'gen', v:0, row:1 },
+    { lane:'engine', start: 7,  end:13,  kind:'gen', v:0, row:1 },  // spans flip→still v0 (stale)
+    { lane:'engine', start:13,  end:19,  kind:'gen', v:1, row:1 },  // spans flip→still v1 (stale)
+    { lane:'engine', start:19,  end:26,  kind:'gen', v:2, row:1 },  // spans flip→still v2 (stale)
+    { lane:'engine', start:26,  end:30,  kind:'gen', v:3, row:1 },
+    // brief engine pauses at each flip (~0.118 s in real wall-clock).
+    // Width is ~0.4 ticks here — visibly thinner than Scenario 3's full-tick pauses.
+    { lane:'engine', start: 8.0, end: 8.4,  kind:'pause', label:'' },
+    { lane:'engine', start:15.0, end:15.4,  kind:'pause', label:'' },
+    { lane:'engine', start:22.0, end:22.4,  kind:'pause', label:'' },
+    { lane:'engine', start:29.0, end:29.4,  kind:'pause', label:'' },
+    // trainer — continuous, overlaps rollout
+    { lane:'trainer', start: 2,  end: 6,  kind:'train', label:'∇ v0→v1' },
+    { lane:'trainer', start: 9,  end:13,  kind:'train', label:'∇ v1→v2' },
+    { lane:'trainer', start:16,  end:20,  kind:'train', label:'∇ v2→v3' },
+    { lane:'trainer', start:23,  end:27,  kind:'train', label:'∇ v3→v4' },
+    // staging — adapter broadcast into inactive slot. The broadcast itself is
+    // fast (warm update_weights ≈ 0.118 s, of which the on-wire send is only a
+    // fraction), so the bar is 1 tick wide — same width as Scenario 4's Δθ
+    // push. The overlap-with-generation point is conveyed by the bar sitting
+    // in a separate lane while the engine row above is still serving.
+    { lane:'staging', start: 7,  end: 8,  kind:'stage', label:'Δθ v1' },
+    { lane:'staging', start:14,  end:15,  kind:'stage', label:'Δθ v2' },
+    { lane:'staging', start:21,  end:22,  kind:'stage', label:'Δθ v3' },
+    { lane:'staging', start:28,  end:29,  kind:'stage', label:'Δθ v4' },
+    // activate — atomic flips at the start of the brief engine pause
+    { lane:'activate', start: 8,    end: 8.15, kind:'flip', label:'⇅' },
+    { lane:'activate', start:15,    end:15.15, kind:'flip', label:'⇅' },
+    { lane:'activate', start:22,    end:22.15, kind:'flip', label:'⇅' },
+    { lane:'activate', start:29,    end:29.15, kind:'flip', label:'⇅' },
+  ],
+  rows: { engine: 2, trainer: 1, staging: 1, activate: 1 },
+  warmup_depth: 2,
+};
+
+const SCENARIOS = [SCN_SYNC, SCN_ADAPTER_SYNC, SCN_ASYNC_FULL, SCN_ADAPTER_ASYNC, SCN_ADAPTER_ASYNC_DB];
+
+// Insert a "Rollout queue" lane between engine and trainer in every scenario,
+// so the producer/consumer story is consistent across all four panels.
+// (This models the consume-once output_queue, NOT an off-policy replay buffer.)
+for (const scn of SCENARIOS) {
+  if (!scn.lanes.some(l => l.id === 'buffer')) {
+    const engineIdx = scn.lanes.findIndex(l => l.id === 'engine');
+    scn.lanes.splice(engineIdx + 1, 0, { id: 'buffer', label: 'Rollout queue' });
+    scn.rows.buffer = 1;
+  }
+}
+
+/* =====================================================================
+   RENDERING
+   ===================================================================== */
+const xScale = t => PAD_L + (t / T_MAX) * (SVG_W - PAD_L - PAD_R);
+
+function activityColor(a) {
+  switch (a.kind) {
+    case 'gen':       return VERSION_COLORS[a.v % VERSION_COLORS.length];
+    case 'train':     return 'var(--c-train)';
+    case 'push-full': return 'var(--c-push-full)';
+    case 'push-adp':  return 'var(--c-push-adp)';
+    case 'stage':     return 'var(--c-stage)';
+    case 'flip':      return 'var(--c-flip)';
+    case 'pause':     return 'var(--c-pause)';
+    case 'idle':      return 'var(--c-idle)';
+    case 'wait':      return 'var(--c-wait)';
+    default:          return '#888';
+  }
+}
+
+// Approx character width for our 10px sans-serif text.
+// Anything narrower than this per-char is illegible; we hide instead.
+const CHAR_W       = 5.6;
+const MIN_BOX_PAD  = 6;
+const SQUISH_LIMIT = 1.35;   // allow up to 35% horizontal compression
+
+// Returns an SVG fragment (text element string) or '' if the label can't fit.
+// `cx`, `cy` are the desired center; `boxW` is the available width inside the rect.
+function fitLabelInBox(label, cx, cy, boxW, fill = 'white', extraAttrs = '') {
+  if (!label) return '';
+  const ideal = label.length * CHAR_W;
+  const avail = boxW - MIN_BOX_PAD;
+  if (avail < CHAR_W * 1.2) return '';                 // box truly too small
+  if (ideal <= avail) {
+    return `<text x="${cx}" y="${cy}" text-anchor="middle" fill="${fill}" ${extraAttrs}>${escapeXml(label)}</text>`;
+  }
+  if (ideal <= avail * SQUISH_LIMIT) {
+    // squish horizontally via textLength
+    return `<text x="${cx}" y="${cy}" text-anchor="middle" fill="${fill}" ${extraAttrs} textLength="${avail}" lengthAdjust="spacingAndGlyphs">${escapeXml(label)}</text>`;
+  }
+  return ''; // give up; tooltip will surface the full label
+}
+
+function escapeXml(s) {
+  return String(s).replace(/[<>&"']/g, c => (
+    { '<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;', "'":'&apos;' }[c]
+  ));
+}
+
+// Compute buffer-depth events for one scenario:
+//   gen completion  → +1 enqueue
+//   train start     → −batchSize dequeue (clamped at 0)
+// `scn.warmup_depth` pre-populates the buffer at t=0 to represent the async
+// producer's head start (it ran briefly before the trainer was ready).
+function computeBuffer(scn) {
+  const batchSize = scn.batchSize || DEFAULT_BATCH_SIZE;
+  const warmup = scn.warmup_depth || 0;
+  const events = [];
+  for (const a of scn.activities) {
+    if (a.kind === 'gen')   events.push({ t: a.end,   delta: +1,         kind: 'in',  v: a.v });
+    if (a.kind === 'train') events.push({ t: a.start, delta: -batchSize, kind: 'out' });
+  }
+  // sort: at same t, enqueues happen before dequeues (producer wins ties)
+  events.sort((a, b) => (a.t - b.t) || (b.delta - a.delta));
+  let depth = warmup, maxDepth = Math.max(1, warmup);
+  const points = [{ t: 0, d: warmup }];
+  const out    = [];
+  for (const ev of events) {
+    points.push({ t: ev.t, d: depth });                   // before
+    depth = Math.max(0, depth + ev.delta);
+    maxDepth = Math.max(maxDepth, depth);
+    points.push({ t: ev.t, d: depth });                   // after
+    out.push({ ...ev, depthAfter: depth });
+  }
+  points.push({ t: T_MAX, d: depth });
+  return { points, events: out, maxDepth, batchSize };
+}
+
+function renderBufferLane(scn, yTop, h) {
+  const { points, events, maxDepth, batchSize } = computeBuffer(scn);
+  const yMax  = Math.max(2, maxDepth + 0.5);
+  const yFloor = yTop + h - 5;
+  const yTopChart = yTop + 10;
+  const yOf = d => yTopChart + (1 - d / yMax) * (yFloor - yTopChart);
+
+  // step-area polygon
+  let poly = `${xScale(0)},${yFloor}`;
+  for (const p of points) poly += ` ${xScale(p.t)},${yOf(p.d)}`;
+  poly += ` ${xScale(T_MAX)},${yFloor}`;
+  // Clip the depth curve to the playhead so it reveals with time instead of
+  // drawing the whole future run up front. render() resizes the clip rect.
+  let html = `<clipPath id="bufclip-${scn.id}"><rect id="bufclip-rect-${scn.id}" x="${PAD_L}" y="0" width="0" height="${yTop + h + 12}"/></clipPath>`;
+  html += `<polygon class="buffer-area" clip-path="url(#bufclip-${scn.id})" points="${poly}" fill="var(--c-buffer)" fill-opacity="0.18" stroke="var(--c-buffer-line)" stroke-width="1.3"/>`;
+
+  // event markers — small triangles above (enqueue, green) / below (dequeue, orange)
+  for (const ev of events) {
+    const x = xScale(ev.t);
+    if (ev.kind === 'in') {
+      const title = `+1  (gen v${ev.v} → buffer)  depth=${ev.depthAfter}`;
+      html += `<g><title>${escapeXml(title)}</title>`
+            + `<text x="${x}" y="${yTop + 11}" text-anchor="middle" font-size="9" fill="var(--c-buffer-in)" class="activity" data-start="${ev.t.toFixed(3)}" data-end="${ev.t}">▼</text>`
+            + `</g>`;
+    } else {
+      const title = `−${batchSize}  (trainer pulled batch)  depth=${ev.depthAfter}`;
+      html += `<g><title>${escapeXml(title)}</title>`
+            + `<text x="${x}" y="${yFloor + 8}" text-anchor="middle" font-size="9" fill="var(--c-buffer-out)" class="activity" data-start="${ev.t.toFixed(3)}" data-end="${ev.t}">▲</text>`
+            + `</g>`;
+    }
+  }
+
+  // peak-depth annotation on the right
+  html += `<text x="${SVG_W - PAD_R - 4}" y="${yTop + 11}" text-anchor="end" font-size="9" fill="var(--muted)">peak depth ${maxDepth} · batch ${batchSize}</text>`;
+  return html;
+}
+
+function buildScenario(scn) {
+  const svg = document.getElementById('svg-' + scn.id);
+  svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+
+  // diagonal hatch pattern for "waiting on straggler" blocks
+  const defs = `<defs>
+    <pattern id="hatch-${scn.id}" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+      <rect width="6" height="6" fill="var(--c-wait)"/>
+      <line x1="0" y1="0" x2="0" y2="6" stroke="var(--c-wait-stroke)" stroke-width="1" opacity="0.55"/>
+    </pattern>
+  </defs>`;
+
+  // compute lane y positions
+  const laneY = {};
+  let y = PAD_T;
+  for (const lane of scn.lanes) {
+    laneY[lane.id] = y;
+    y += LANE_H * (scn.rows[lane.id] || 1) + LANE_GAP;
+  }
+  const totalH = y + 8;
+  svg.setAttribute('viewBox', `0 0 ${SVG_W} ${totalH}`);
+
+  let html = defs;
+
+  // axis grid (every 5 ticks)
+  html += `<g class="axis">`;
+  for (let t = 0; t <= T_MAX; t += 5) {
+    const x = xScale(t);
+    html += `<line x1="${x}" y1="${PAD_T - 4}" x2="${x}" y2="${totalH - 4}" />`;
+    html += `<text x="${x}" y="${PAD_T - 8}" text-anchor="middle">${t}</text>`;
+  }
+  html += `</g>`;
+
+  // lane backgrounds + labels
+  for (const lane of scn.lanes) {
+    const rows = scn.rows[lane.id] || 1;
+    const h = LANE_H * rows;
+    html += `<rect class="lane-bg" x="${PAD_L}" y="${laneY[lane.id]}" width="${SVG_W - PAD_L - PAD_R}" height="${h}" rx="3"/>`;
+    html += `<text class="lane-label" x="${PAD_L - 10}" y="${laneY[lane.id] + h / 2 + 4}" text-anchor="end">${lane.label}</text>`;
+  }
+
+  // activities
+  for (const a of scn.activities) {
+    const x0 = xScale(a.start);
+    const x1 = xScale(a.end);
+    const w = Math.max(2, x1 - x0);
+    const baseY = laneY[a.lane];
+    const row = a.row || 0;
+    const yA = baseY + row * LANE_H + 4;
+    const hA = LANE_H - 8;
+    const color = activityColor(a);
+    const startKey = `${a.start.toFixed(3)}`;
+    const dataAttrs = `data-start="${startKey}" data-end="${a.end}"`;
+
+    // every activity wraps in a <g> so we can attach a <title> tooltip
+    let inner = '';
+
+    if (a.kind === 'pause') {
+      const fullH = LANE_H * (scn.rows[a.lane] || 1) - 2;
+      inner += `<rect class="activity pause-band" ${dataAttrs} x="${x0}" y="${baseY + 1}" width="${w}" height="${fullH}" rx="2"/>`;
+      inner += fitLabelInBox(a.label || 'paused', (x0 + x1) / 2, baseY + LANE_H / 2 + 3, w, '#f85149', `class="activity" ${dataAttrs} font-size="11" font-weight="600"`);
+    } else if (a.kind === 'idle') {
+      inner += `<rect class="activity" ${dataAttrs} x="${x0}" y="${yA}" width="${w}" height="${hA}" rx="3" fill="${color}" stroke="var(--lane-border)" stroke-dasharray="3 3"/>`;
+      inner += fitLabelInBox(a.label || '', (x0 + x1) / 2, yA + hA / 2 + 3, w, 'var(--muted)', `class="activity" ${dataAttrs}`);
+    } else if (a.kind === 'wait') {
+      // "waiting on straggler" — clearly wasted GPU time
+      inner += `<rect class="activity" ${dataAttrs} x="${x0}" y="${yA}" width="${w}" height="${hA}" rx="3" fill="url(#hatch-${scn.id})" stroke="var(--c-wait-stroke)" stroke-opacity="0.45" stroke-dasharray="3 2"/>`;
+      inner += fitLabelInBox(a.label || 'waiting', (x0 + x1) / 2, yA + hA / 2 + 3, w, 'var(--c-wait-stroke)', `class="activity" ${dataAttrs} font-weight="600"`);
+    } else if (a.kind === 'flip') {
+      const xF = xScale(a.start);
+      inner += `<line class="activity flip-marker" ${dataAttrs} x1="${xF}" y1="${yA - 2}" x2="${xF}" y2="${yA + hA + 2}"/>`;
+      // flip marker label is intentionally a single glyph that always fits
+      inner += `<text class="activity" ${dataAttrs} x="${xF}" y="${yA + hA / 2 + 4}" text-anchor="middle" fill="${color}" font-size="14" font-weight="700">${escapeXml(a.label || '⇅')}</text>`;
+    } else {
+      inner += `<rect class="activity" ${dataAttrs} x="${x0}" y="${yA}" width="${w}" height="${hA}" rx="3" fill="${color}"/>`;
+      const labelText = a.label
+        || (a.kind === 'gen'    ? `v${a.v}` :
+            a.kind === 'train'  ? '∇' :
+            a.kind === 'stage'  ? 'stage' :
+            '');
+      inner += fitLabelInBox(labelText, (x0 + x1) / 2, yA + hA / 2 + 3, w, 'white', `class="activity" ${dataAttrs}`);
+    }
+
+    // full tooltip = explicit label or computed kind+version+timing
+    const tipLabel = a.label
+      || (a.kind === 'gen' ? `gen v${a.v}` : a.kind);
+    const tip = `${tipLabel} · ${a.lane} · t=${a.start}–${a.end}`;
+    html += `<g><title>${escapeXml(tip)}</title>${inner}</g>`;
+  }
+
+  // buffer-depth chart (if the scenario has a buffer lane)
+  if (laneY['buffer'] != null) {
+    html += renderBufferLane(scn, laneY['buffer'], LANE_H);
+  }
+
+  // playhead
+  html += `<line class="playhead" id="ph-${scn.id}" x1="${PAD_L}" y1="${PAD_T - 6}" x2="${PAD_L}" y2="${totalH - 4}"/>`;
+
+  svg.innerHTML = html;
+
+  // utilization stats
+  const enginePeriod = T_MAX * (scn.rows.engine || 1);
+  let engineBusy = 0;
+  // Pause activities on the engine lane represent time the engine isn't serving.
+  // When a gen explicitly stops/resumes around a pause (Scenario 3), there's no
+  // overlap to subtract; when a gen spans a brief pause (Scenario 4's flush+activate),
+  // the overlap is exactly the pause width and gets removed below.
+  const enginePauses = scn.activities.filter(a => a.lane === 'engine' && a.kind === 'pause');
+  for (const a of scn.activities) {
+    if (a.lane === 'engine' && a.kind === 'gen') {
+      let busy = a.end - a.start;
+      for (const p of enginePauses) {
+        const overlap = Math.max(0, Math.min(a.end, p.end) - Math.max(a.start, p.start));
+        busy -= overlap;
+      }
+      engineBusy += busy;
+    }
+  }
+  let trainerBusy = 0;
+  for (const a of scn.activities) {
+    if (a.lane === 'trainer' && a.kind === 'train') trainerBusy += (a.end - a.start);
+  }
+  const utilR = document.getElementById(`util-${scn.id}-r`);
+  const utilT = document.getElementById(`util-${scn.id}-t`);
+  if (utilR) utilR.textContent = Math.round((engineBusy / enginePeriod) * 100) + '%';
+  if (utilT) utilT.textContent = Math.round((trainerBusy / T_MAX) * 100) + '%';
+}
+
+SCENARIOS.forEach(buildScenario);
+
+/* =====================================================================
+   ANIMATION — single playhead time, all scenarios sync'd
+   ===================================================================== */
+let t = 0;
+let playing = true;
+let speed = 1;
+let lastFrame = performance.now();
+
+const playBtn   = document.getElementById('playBtn');
+const resetBtn  = document.getElementById('resetBtn');
+const speedIn   = document.getElementById('speedInput');
+const speedLbl  = document.getElementById('speedLabel');
+const scrubIn   = document.getElementById('scrubInput');
+const timeLbl   = document.getElementById('timeLabel');
+
+playBtn.addEventListener('click', () => {
+  playing = !playing;
+  playBtn.textContent = playing ? '⏸ Pause' : '▶ Play';
+  lastFrame = performance.now();
+});
+resetBtn.addEventListener('click', () => {
+  t = 0;
+  scrubIn.value = 0;
+  render();
+});
+speedIn.addEventListener('input', e => {
+  speed = parseFloat(e.target.value);
+  speedLbl.textContent = speed.toFixed(2) + '×';
+});
+scrubIn.addEventListener('input', e => {
+  playing = false;
+  playBtn.textContent = '▶ Play';
+  t = (parseFloat(e.target.value) / 1000) * T_MAX;
+  render();
+});
+
+function render() {
+  timeLbl.textContent = 't = ' + t.toFixed(1);
+  scrubIn.value = Math.round((t / T_MAX) * 1000);
+  for (const scn of SCENARIOS) {
+    const ph = document.getElementById('ph-' + scn.id);
+    if (ph) ph.setAttribute('x1', xScale(t)), ph.setAttribute('x2', xScale(t));
+    // reveal the buffer-depth curve up to the playhead
+    const bufClip = document.getElementById('bufclip-rect-' + scn.id);
+    if (bufClip) bufClip.setAttribute('width', Math.max(0, xScale(t) - PAD_L));
+    // dim activities not yet started
+    const svg = document.getElementById('svg-' + scn.id);
+    svg.querySelectorAll('.activity[data-start]').forEach(el => {
+      const s = parseFloat(el.getAttribute('data-start'));
+      el.classList.toggle('dim', s > t);
+    });
+  }
+}
+
+function frame(now) {
+  const dt = (now - lastFrame) / 1000;
+  lastFrame = now;
+  if (playing) {
+    t += dt * speed * 3;  // 3 timeline-ticks per real second at 1×
+    if (t > T_MAX) t = 0;
+    render();
+  }
+  requestAnimationFrame(frame);
+}
+render();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -1,0 +1,1399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="author" content="Orbit Team">
+<meta name="description" content="Orbit — Ultra-efficient RL Pipeline">
+<title>Orbit - Ultra-efficient RL Pipeline</title>
+
+<link rel="shortcut icon" href="./orbit_icon.png">
+<link rel="stylesheet" href="css/fonts.css">
+<link rel="stylesheet" href="css/common.css">
+<link rel="stylesheet" href="css/typography.css">
+<link rel="stylesheet" href="css/blog-post.css">
+<link rel="stylesheet" href="css/ui.css">
+<link rel="stylesheet" href="css/syntax.css">
+
+<style>
+  /* Small adjustments specific to the Orbit page. We keep the TML look and only
+     add a handful of utility rules for the bits the original stylesheet
+     doesn't cover (a four-up "key contributions" grid, hardware tag chips,
+     a couple of table tweaks). */
+
+  /* Light border around the data-heavy plot figures so they sit cleanly on
+     the white page background. TML uses a similar .figure-light-border. */
+  #main.post figure.bordered img {
+    border: 1px solid color-mix(in srgb, var(--fg4) 18%, var(--bg) 82%);
+    border-radius: 4px;
+  }
+
+  /* Contributions grid */
+  #main.post .contrib-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border: 1px solid color-mix(in srgb, var(--fg4) 18%, var(--bg) 82%);
+    border-radius: 4px;
+    margin: 1.6rem 0 2rem;
+    overflow: hidden;
+  }
+  #main.post .contrib-grid .contrib {
+    padding: 1.1rem 1.25rem;
+    border-right: 1px solid color-mix(in srgb, var(--fg4) 14%, var(--bg) 86%);
+    border-bottom: 1px solid color-mix(in srgb, var(--fg4) 14%, var(--bg) 86%);
+    background: var(--bg);
+  }
+  #main.post .contrib-grid .contrib:nth-child(2n) { border-right: 0; }
+  #main.post .contrib-grid .contrib:nth-last-child(-n+2) { border-bottom: 0; }
+  #main.post .contrib-grid .contrib-num {
+    font-family: var(--font-sans);
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--fg4);
+    font-weight: 500;
+    margin-bottom: 0.35rem;
+  }
+  #main.post .contrib-grid .contrib-title {
+    font-family: 'Iowan Old Style BT', Georgia, serif;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.3;
+    margin-bottom: 0.3rem;
+  }
+  #main.post .contrib-grid .contrib-text {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--fg3);
+    margin: 0;
+  }
+  @media (max-width: 640px) {
+    #main.post .contrib-grid { grid-template-columns: 1fr; }
+    #main.post .contrib-grid .contrib { border-right: 0 !important; border-bottom: 1px solid color-mix(in srgb, var(--fg4) 14%, var(--bg) 86%); }
+    #main.post .contrib-grid .contrib:last-child { border-bottom: 0; }
+  }
+
+  /* Inline "spec" tables (Model / Hardware / Training precision …) */
+  #main.post .spec-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.2rem 0 1.8rem;
+    font-family: var(--font-sans);
+    font-size: 14px;
+  }
+  #main.post .spec-table td {
+    padding: 0.55rem 0.9rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--fg4) 14%, var(--bg) 86%);
+    vertical-align: top;
+    color: var(--fg2);
+  }
+  #main.post .spec-table td:first-child {
+    width: 30%;
+    color: var(--fg);
+    font-weight: 500;
+  }
+  #main.post .spec-table tr:last-child td { border-bottom: 0; }
+
+  /* Method comparison table */
+  #main.post table.method-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-sans);
+    font-size: 14px;
+    margin: 1.2rem 0 1.8rem;
+  }
+  #main.post table.method-table thead th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--fg);
+    padding: 0.6rem 0.9rem;
+    border-bottom: 1.5px solid var(--fg);
+    font-size: 13px;
+  }
+  #main.post table.method-table tbody td {
+    padding: 0.6rem 0.9rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--fg4) 14%, var(--bg) 86%);
+    color: var(--fg2);
+    vertical-align: top;
+  }
+  #main.post table.method-table tbody tr.row-highlight td {
+    background: color-mix(in srgb, var(--fg_code) 8%, var(--bg) 92%);
+    color: var(--fg);
+  }
+
+  /* Small inline tag chip */
+  #main.post .tag {
+    display: inline-block;
+    font-family: var(--font-sans);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border: 1px solid color-mix(in srgb, var(--fg4) 35%, var(--bg) 65%);
+    border-radius: 99px;
+    color: var(--fg2);
+    font-weight: 500;
+    margin-left: 4px;
+    vertical-align: middle;
+    line-height: 1.4;
+  }
+
+  /* Bring publish-metadata closer to TML's column-of-spans look for our extended meta */
+  #main.post .publish-metadata.orbit-meta { gap: 0.15rem; }
+  #main.post .publish-metadata.orbit-meta .meta-sub {
+    color: var(--fg3);
+    font-size: 13.5px;
+    padding-top: 0;
+  }
+
+  /* Link-row sitting just below the metadata: GitHub / W&B / paper buttons */
+  #main.post .post-links {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin: 0.9rem 0 0;
+    flex-wrap: wrap;
+  }
+  #main.post .post-links a.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 5px 13px 5px 11px;
+    border: 1px solid color-mix(in srgb, var(--fg4) 35%, var(--bg) 65%);
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--fg2);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1;
+    text-decoration: none;
+    transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+  }
+  #main.post .post-links a.btn:hover {
+    color: var(--fg);
+    border-color: color-mix(in srgb, var(--fg) 50%, var(--bg) 50%);
+    background: color-mix(in srgb, var(--fg) 4%, var(--bg) 96%);
+  }
+  #main.post .post-links a.btn svg {
+    width: 15px;
+    height: 15px;
+    flex-shrink: 0;
+  }
+
+  /* Make the cover Orbit logo sit comfortably */
+  #main.post .post-cover img.orbit-cover {
+    display: block;
+    width: 100%;
+    max-width: 380px;
+    height: auto;
+    margin: 0.5rem auto 0.5rem;
+  }
+
+  /* Slight emphasis colour for the lead paragraph (kept very subtle) */
+  #main.post article.content p.lead {
+    font-size: 1.05rem;
+    line-height: 1.7;
+    color: var(--fg1);
+  }
+
+  /* BibTex-ish citation block uses the same TML code-block style;
+     no overrides needed. */
+
+  /* ---- Embedded rollout-architectures teaser ----
+     A compact, light-theme reskin of the standalone orbit-adapter-async-db.html
+     demo. All custom rules live under .orbit-rollout-demo so they can't leak. */
+  #main.post .orbit-rollout-demo {
+    --rd-bg:            var(--bg);
+    --rd-panel-bg:      color-mix(in srgb, var(--fg4)  5%, var(--bg) 95%);
+    --rd-panel-border:  color-mix(in srgb, var(--fg4) 18%, var(--bg) 82%);
+    --rd-muted:         var(--fg3);
+    --rd-accent:        #2563eb;
+    --rd-grid:          color-mix(in srgb, var(--fg4) 11%, var(--bg) 89%);
+    --rd-lane-bg:       color-mix(in srgb, var(--fg4)  6%, var(--bg) 94%);
+    --rd-lane-border:   color-mix(in srgb, var(--fg4) 14%, var(--bg) 86%);
+
+    --c-gen-v0:      #2563eb;
+    --c-gen-v1:      #16a34a;
+    --c-gen-v2:      #d97706;
+    --c-gen-v3:      #db2777;
+    --c-gen-v4:      #7c3aed;
+    --c-train:       #3b82f6;
+    --c-push-full:   #ef4444;
+    --c-push-adp:    #f59e0b;
+    --c-stage:       #6b7280;
+    --c-flip:        #111827;
+    --c-pause:       rgba(239, 68, 68, 0.18);
+    --c-wait:        rgba(239, 68, 68, 0.14);
+    --c-wait-stroke: #ef4444;
+    --c-playhead:    #111827;
+
+    border: 1px solid var(--rd-panel-border);
+    border-radius: 5px;
+    padding: 14px 16px 12px;
+    margin: 1.4rem 0 1.8rem;
+    background: var(--bg);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+  }
+  #main.post .orbit-rollout-demo .rd-heading {
+    font-family: 'Iowan Old Style BT', Georgia, serif;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--fg);
+    margin: 0 0 4px;
+  }
+  #main.post .orbit-rollout-demo .rd-sub {
+    font-size: 13px;
+    color: var(--rd-muted);
+    margin: 0 0 12px;
+    font-family: var(--font-sans);
+    line-height: 1.5;
+    max-width: 940px;
+  }
+  #main.post .orbit-rollout-demo .rd-sub b { color: var(--fg); font-weight: 600; }
+  #main.post .orbit-rollout-demo .rd-sub i { color: var(--fg); }
+  #main.post .orbit-rollout-demo .rd-sub a {
+    color: var(--rd-accent); text-decoration: none;
+  }
+  #main.post .orbit-rollout-demo .rd-sub a:hover { text-decoration: underline; }
+  #main.post .orbit-rollout-demo .rd-controls {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 5px 10px;
+    background: var(--rd-panel-bg);
+    border: 1px solid var(--rd-panel-border);
+    border-radius: 4px;
+    margin-bottom: 8px;
+    font-size: 12px;
+  }
+  #main.post .orbit-rollout-demo .rd-controls button {
+    background: var(--bg); color: var(--fg);
+    border: 1px solid var(--rd-panel-border);
+    padding: 3px 9px; border-radius: 3px;
+    font-size: 12px; cursor: pointer;
+    font-family: var(--font-sans);
+  }
+  #main.post .orbit-rollout-demo .rd-controls button:hover {
+    background: var(--rd-panel-bg);
+  }
+  #main.post .orbit-rollout-demo .rd-controls button.primary {
+    background: var(--rd-accent); color: white; border-color: var(--rd-accent);
+  }
+  #main.post .orbit-rollout-demo .rd-controls button.primary:hover {
+    background: #1d4ed8;
+  }
+  #main.post .orbit-rollout-demo .rd-controls label {
+    font-size: 12px; color: var(--rd-muted);
+    display: flex; align-items: center; gap: 5px;
+  }
+  #main.post .orbit-rollout-demo .rd-controls .rd-time {
+    font-variant-numeric: tabular-nums; color: var(--rd-muted);
+    font-size: 11px; min-width: 64px;
+  }
+  #main.post .orbit-rollout-demo svg.rd-timeline {
+    width: 100%; height: auto; display: block;
+    background: var(--rd-panel-bg);
+    border: 1px solid var(--rd-panel-border);
+    border-radius: 4px;
+  }
+  #main.post .orbit-rollout-demo .rd-lane-bg {
+    fill: var(--rd-lane-bg); stroke: var(--rd-lane-border); stroke-width: 0.6;
+  }
+  #main.post .orbit-rollout-demo .rd-scn-label {
+    fill: var(--fg); font: 600 11.5px/1.2 var(--font-sans);
+  }
+  #main.post .orbit-rollout-demo .rd-scn-tag {
+    fill: var(--rd-muted); font: 10px/1.2 var(--font-sans);
+  }
+  #main.post .orbit-rollout-demo .rd-lane-label {
+    fill: var(--rd-muted); font: 9px/1 var(--font-sans);
+  }
+  #main.post .orbit-rollout-demo .rd-axis text {
+    fill: var(--rd-muted); font: 9.5px/1 var(--font-sans);
+  }
+  #main.post .orbit-rollout-demo .rd-axis line { stroke: var(--rd-grid); }
+  #main.post .orbit-rollout-demo .rd-playhead {
+    stroke: var(--c-playhead); stroke-width: 1.3; opacity: 0.7;
+  }
+  #main.post .orbit-rollout-demo .rd-activity { transition: opacity 0.15s; }
+  #main.post .orbit-rollout-demo .rd-activity.dim { opacity: 0.18; }
+  #main.post .orbit-rollout-demo .rd-pause-band { fill: var(--c-pause); }
+  #main.post .orbit-rollout-demo .rd-flip-marker { stroke: var(--c-flip); stroke-width: 1.4; }
+
+  #main.post .orbit-rollout-demo .rd-legend {
+    display: flex; flex-wrap: wrap; gap: 5px 14px;
+    font-size: 11px; color: var(--rd-muted);
+    margin: 7px 2px 0;
+    font-family: var(--font-sans);
+  }
+  #main.post .orbit-rollout-demo .rd-legend .item { display: flex; align-items: center; gap: 5px; }
+  #main.post .orbit-rollout-demo .rd-legend .sw {
+    display: inline-block; width: 12px; height: 8px; border-radius: 2px;
+    border: 1px solid rgba(0,0,0,0.15);
+  }
+  #main.post .orbit-rollout-demo .rd-takeaway {
+    font-size: 12.5px; color: var(--fg2);
+    margin: 9px 0 0; line-height: 1.55;
+    font-family: var(--font-sans);
+  }
+  #main.post .orbit-rollout-demo .rd-takeaway b    { color: var(--fg); font-weight: 600; }
+  #main.post .orbit-rollout-demo .rd-takeaway code {
+    background: var(--rd-panel-bg);
+    padding: 0 4px; border-radius: 3px;
+    font-size: 11.5px;
+  }
+  #main.post .orbit-rollout-demo .rd-takeaway a {
+    color: var(--rd-accent); text-decoration: none;
+  }
+  #main.post .orbit-rollout-demo .rd-takeaway a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div id="wrapper">
+
+  <header id="header">
+    <div id="site-header" class="site-header">
+      <div class="navbar-logo">
+        <a href="http://spherelab.ai/blog">Rotating Sphere</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="post post-orbit">
+
+    <div class="post-heading">
+      <h1 class="post-title" style="font-size: 28px;">Orbit: Stable and Efficient Reinforcement Learning for Trillion-Parameter LLMs</h1>
+
+      <div class="publish-metadata orbit-meta">
+        <span class="author">
+          <strong>Zeju Qiu</strong><sup>*+</sup>,
+          <strong>Le Chen</strong><sup>*+</sup>,
+          <strong>Lixin Liu</strong><sup>*+</sup>,
+          <strong>Tim Z. Xiao</strong><sup>+</sup>,
+          Yao Feng,
+          Yangyi Huang,<br>
+          Zhen Liu,
+          Han Shi,
+          Yandong Wen,
+          Zhouliang Yu,
+          Bernhard Sch&ouml;lkopf,
+          <strong>Weiyang Liu</strong><sup>+✉</sup>.
+        </span>
+        <span><sup>*</sup>Joint first author, equal contribution &nbsp;&nbsp;&nbsp; <sup>+</sup>Core contributor &nbsp;&nbsp;&nbsp; <sup>✉</sup>Corresponding author</span>
+        <span>May 2026</span>
+      </div>
+
+      <div class="post-links">
+        <a class="btn" href="https://github.com/Sphere-AI-Lab/orbit" target="_blank" rel="noopener noreferrer" aria-label="GitHub repository">
+          <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" fill="currentColor">
+            <path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0016 8c0-4.42-3.58-8-8-8z"></path>
+          </svg>
+          <span>GitHub</span>
+        </a>
+      </div>
+    </div>
+
+    <div class="post-cover">
+      <img class="orbit-cover" src="assets/orbit-logo.png" alt="Orbit logo">
+    </div>
+
+    <div class="post-content-shell">
+
+      <nav id="left-toc" class="left-toc has-active-marker" aria-label="Table of contents">
+        <ul class="toc-list">
+          <li class="toc-item is-marker-target is-active"><a href="#introduction" class="is-active" aria-current="location">Introduction</a></li>
+          <li class="toc-item"><a href="#abstract">Abstract</a></li>
+          <li class="toc-item"><a href="#what-orbit-is">What Orbit offers</a></li>
+          <li class="toc-item"><a href="#weight-state-memory">Weight-state memory</a></li>
+          <li class="toc-item"><a href="#kimi">1T Kimi-K2.6</a></li>
+          <li class="toc-item"><a href="#v4-flash">DeepSeek V4-Flash</a></li>
+          <li class="toc-item"><a href="#v4-pro">DeepSeek V4-Pro 1.6T</a></li>
+          <li class="toc-item"><a href="#qwen3">Why Orbit uses OFT</a></li>
+          <li class="toc-item"><a href="#technical-details">Technical details</a></li>
+          <li class="toc-item"><a href="#authors">Authors</a></li>
+          <li class="toc-item"><a href="#citation">Citation</a></li>
+        </ul>
+        <span class="toc-active-marker" aria-hidden="true" style="--toc-active-marker-y: 0px;"></span>
+      </nav>
+
+      <article class="content">
+
+        <blockquote class="epigraph">
+          Orbit is an open-source RL framework for memory-efficient post-training of trillion-parameter LLMs. By minimizing the train-rollout gap in RL, Orbit is able to effortlessly <b>train Kimi-K2.6 and DeepSeek V4-pro at a single-node setting</b>.
+        </blockquote>
+
+        <section class="orbit-rollout-demo" aria-label="Rollout architectures animated teaser">
+          <div class="rd-heading">Five rollout architectures, one shared clock, clear win for Orbit's design</div>
+          <p class="rd-sub">
+            Watch the bottleneck move. We start fully serial with a full-weight push (basesline 1 below), then test
+            the tokens <i>"is the heavy push the bottleneck?"</i>. We gradually turn the baseline into Orbit's final design (+ <b>overlap</b> (async); + <b>adapter-native</b>
+            push; + a non-blocking <b>double-buffered</b> swap; method 5 below). For the full version with detailed measured numbers, see <a href="orbit-adapter-async-db.html">here</a>.
+          </p>
+
+          <div class="rd-controls">
+            <button id="rd-playBtn" class="primary">&#9654; Play</button>
+            <button id="rd-resetBtn">&#8634; Reset</button>
+            <label>Speed
+              <input id="rd-speedInput" type="range" min="0.25" max="4" step="0.25" value="1" style="width: 90px;">
+              <span id="rd-speedLabel">1.0&times;</span>
+            </label>
+            <label>Scrub
+              <input id="rd-scrubInput" type="range" min="0" max="1000" step="1" value="0" style="width: 180px;">
+            </label>
+            <span class="rd-time" id="rd-timeLabel">t = 0.0</span>
+          </div>
+
+          <svg class="rd-timeline" id="rd-svg-all" viewBox="0 0 1100 380"></svg>
+
+          <div class="rd-legend">
+            <span class="item"><span class="sw" style="background:var(--c-gen-v0)"></span> gen @ v0</span>
+            <span class="item"><span class="sw" style="background:var(--c-gen-v1)"></span> v1</span>
+            <span class="item"><span class="sw" style="background:var(--c-gen-v2)"></span> v2</span>
+            <span class="item"><span class="sw" style="background:var(--c-gen-v3)"></span> v3</span>
+            <span class="item"><span class="sw" style="background:var(--c-gen-v4)"></span> v4</span>
+            <span class="item"><span class="sw" style="background:var(--c-train)"></span> trainer &nabla;</span>
+            <span class="item"><span class="sw" style="background:var(--c-push-full)"></span> full-weight push</span>
+            <span class="item"><span class="sw" style="background:var(--c-push-adp)"></span> adapter push</span>
+            <span class="item"><span class="sw" style="background:var(--c-stage)"></span> staged broadcast</span>
+            <span class="item"><span class="sw" style="background:var(--c-flip)"></span> atomic flip</span>
+            <span class="item"><span class="sw" style="background:var(--c-pause);border-color:var(--c-wait-stroke)"></span> engine paused</span>
+            <span class="item"><span class="sw" style="background:var(--c-wait);border-color:var(--c-wait-stroke)"></span> straggler waste</span>
+          </div>
+
+          <p class="rd-takeaway">
+            <b>Measured (Qwen3-4B + OFT, warm rollouts):</b> swapping the push payload alone
+            (row 2) leaves step time at <b>8.65 s</b> &mdash; the serial loop, not the push, was
+            the bottleneck. Adding overlap + cheap <code>update_weights</code> (row 4) drops
+            step time to <b>3.17 s</b>; non-blocking activation (row 5) drops it to
+            <b>2.53 s</b> with <b>+50.2%</b> rollout throughput and <b>&minus;81.2%</b> train
+            wait.
+          </p>
+        </section>
+
+        <p id="introduction" class="lead">
+          Today’s leading large language models contain over a trillion parameters, and
+          the prevailing recipe for RL post-training of such models calls for high-precision,
+          multi-node, full-parameter updates. This is extremely challenging for RL infrastructures. Orbit takes a different route:
+          treat the base model as <em>fixed at deployment precision</em>, and put the
+          gradient signal where it is actually needed &mdash; on a tiny BF16 OFT adapter<label for="sn12" class="sidenote-number"></label><input type="checkbox" id="sn12" class="margin-toggle"><span class="sidenote"><a href="https://arxiv.org/abs/2306.07280" target="_blank" rel="noopener noreferrer">Controlling Text-to-Image Diffusion by Orthogonal Finetuning</a> (Qiu, Liu, et al, NeurIPS 2023)</span><label for="sn12" class="sidenote-number"></label><input type="checkbox" id="sn12" class="margin-toggle"><span class="sidenote"><a href="https://arxiv.org/abs/2311.06243" target="_blank" rel="noopener noreferrer">Parameter-Efficient Orthogonal Finetuning via Butterfly Factorization</a> (Liu, Qiu, et al, ICLR 2024)</span><label for="sn12" class="sidenote-number"></label><input type="checkbox" id="sn12" class="margin-toggle"><span class="sidenote"><a href="https://arxiv.org/abs/2506.19847" target="_blank" rel="noopener noreferrer">Orthogonal Finetuning Made Scalable</a> (Qiu, Liu, et al, EMNLP 2025)</span>.
+        </p>
+
+        <p>
+          The result is that RL post-training of 1T-class models fits on a single node with
+          8&times;B200 GPUs<label for="sn12" class="sidenote-number"></label><input type="checkbox" id="sn12" class="margin-toggle"><span class="sidenote">For the public record, <a href="https://macaron.im/mindlab/research/building-trillion-parameter-reasoning-rl-with-10-gpus" target="_blank" rel="noopener noreferrer">Macaron AI</a> used 8 nodes × 8× NVIDIA H800 (80GB) GPUs (64 GPUs total) to RL post-train 1T LLMs (Kimi-K2 1.04T).</span>, the precision mismatch between the <em>training</em> base
+          and the <em>serving</em> base disappears by construction, and most of the
+          orchestration tax that comes with multi-node full-finetuning vanishes
+          along the way. We have used Orbit to successfully run stable, end-to-end RL on
+          Kimi-K2.6 (~1T), DeepSeek V4-Flash, DeepSeek V4-Pro (~1.6T), and Qwen3 MoE,
+          on a single node setting.
+        </p>
+
+        <h2 id="abstract"><span class="heading-text">Abstract<a class="heading-anchor" href="#abstract" aria-label="Link to this section" title="Link to this section">#</a></span></h2>
+
+        <p>
+          Orbit moves RL post-training of frontier-scale models away from the
+          conventional recipe (high-precision, multi-node, full-parameter
+          updates) toward a deployment-aligned, low-precision PEFT-centric pipeline.
+          The base model is held at its <strong>deployment precision</strong>
+          (INT4 / FP4) during both training and rollout, and only a small
+          <strong>BF16 adapter</strong><label for="sn12" class="sidenote-number"></label><input type="checkbox" id="sn12" class="margin-toggle"><span class="sidenote">We primarily use OFT in Orbit due to its better stability under low-bit base models, but LoRA is also supported.</span> receives gradient updates.
+          RL post-training of 1T-class models then fits on a single 8&times;B200 node,
+          and the precision mismatch between the training base and the serving base, which is typically idenitifed as a chronic source of instability in low-precision RL, disappears by construction.
+        </p>
+
+
+        <h2 id="what-orbit-is"><span class="heading-text">What Orbit offers<a class="heading-anchor" href="#what-orbit-is" aria-label="Link to this section" title="Link to this section">#</a></span></h2>
+
+        <p>
+          Orbit is an adapter-first system for frontier-scale RL. Four properties
+          set it apart from the conventional full-finetuning pipeline:
+        </p>
+
+        <div class="contrib-grid">
+          <div class="contrib">
+            <div class="contrib-title">Training stability</div>
+            <p class="contrib-text">
+              RL is sensitive to policy log-prob drift and base precision. Orbit
+              trains a BF16 adapter on top of a low-precision frozen base; reward
+              and eval rise steadily, and train-rollout log-prob difference stays
+              bounded. Moreover, we observe no performance drop compared to full-parameter RL.
+            </p>
+          </div>
+          <div class="contrib">
+            <div class="contrib-title">Single-node trillion-scale RL</div>
+            <p class="contrib-text">
+              Trillion-scale RL can be reduced from complex multi-node orchestration to a single 8×B200 node, eliminating cross-node communication, simplifying scheduling, and greatly reducing the failure-recovery surface area. For the first time, 1T LLMs can be RL post-trained with a single node.
+            </p>
+          </div>
+          <div class="contrib">
+            <div class="contrib-title">Deployment-aligned RL</div>
+            <p class="contrib-text">
+              The training base and the rollout / serving base are the <em>same</em>
+              low-precision weights. No silent precision gap between what is
+              optimized and what is shipped.
+            </p>
+          </div>
+          <div class="contrib">
+            <div class="contrib-title">Budget-constrained efficiency</div>
+            <p class="contrib-text">
+              Under the same hardware budget, Orbit supports larger models,
+              longer responses, and larger update sizes than full-finetuning
+              baselines.
+            </p>
+          </div>
+        </div>
+
+        <h2 id="weight-state-memory"><span class="heading-text">Weight-state memory: why a single node is enough<a class="heading-anchor" href="#weight-state-memory" aria-label="Link to this section" title="Link to this section">#</a></span></h2>
+
+        <p>
+          The starting point is a simple memory counting. For any RL recipe, the
+          weight and gradient footprint of training is a function of the base
+          model size and the precision strategy. Modern RL
+          design space consists of four common recipes:
+        </p>
+
+        <table class="method-table">
+          <thead>
+            <tr>
+              <th style="width:34%;">Method</th>
+              <th>Training</th>
+              <th>Rollout</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Traditional RL full-FT</td>
+              <td>BF16 forward + BF16 backward</td>
+              <td>FP8</td>
+            </tr>
+            <tr>
+              <td>Low-precision RL full-FT</td>
+              <td>FP8 forward + BF16 backward</td>
+              <td>FP8</td>
+            </tr>
+            <tr>
+              <td>Modern low-precision RL full-FT (most commonly used)</td>
+              <td>FP8 forward + FP8 backward</td>
+              <td>INT4 / FP4</td>
+            </tr>
+            <tr class="row-highlight">
+              <td><strong>Orbit's PEFT-centric RL</strong></td>
+              <td>INT4 / FP4 (frozen) + BF16 adapter</td>
+              <td>same INT4 / FP4 + BF16 adapter</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p>
+          The slope ratios make the gap explicit. For training (weight + grad), the
+          four recipes scale as <code>(16+16) : (8+16) : (8+8) : (4 + 2&middot;adapter)</code>;
+          for rollout, as <code>8 : 8 : 4 : (4 + adapter)</code>, where
+          <code>adapter &approx; 0.04</code> bits/parameter.
+          Orbit's curve is essentially the 4-bit base alone. For fair comparison, for all the compared 
+          RL recipes, we use exactly the same training settings on each base model.
+        </p>
+
+        <figure id="fig:memory-scaling" class="bordered">
+          <img src="assets/memory-scaling.png" alt="Weight-state memory scaling across full-ft and Orbit PEFT recipes">
+          <figcaption>
+            Theoretical lower bound on weight + gradient footprint (4-bit base; baselines
+            scaled by precision ratio; Orbit adds a BF16 adapter at &approx; 0.04 bit/param).
+            At Kimi-K2.6 (~1.03T), full-ft requires &approx; 4,120 GB &mdash; more than 2.6&times;
+            a single 8&times;B200 node (1,536 GB HBM). Orbit's footprint at the same scale
+            is &approx; 528 GB. Activation and optimizer state are not included; the gap
+            widens further once they are.
+          </figcaption>
+        </figure>
+
+        <h2 id="kimi"><span class="heading-text">Kimi-K2.6 1T: stable RL on a trillion-parameter model<a class="heading-anchor" href="#kimi" aria-label="Link to this section" title="Link to this section">#</a></span></h2>
+
+        <p>
+          Our first end-to-end result is a 200-step RL run on Kimi-K2.6 (~1.03T)<label for="sn12" class="sidenote-number"></label><input type="checkbox" id="sn12" class="margin-toggle"><span class="sidenote"><a href="https://www.kimi.com/blog/kimi-k2-6" target="_blank" rel="noopener noreferrer">Kimi K2.6: Advancing Open-Source Coding</a> (Moonshot AI, 2026)</span>
+          using an INT4 frozen base with a BF16 adapter, run entirely on a single
+          8&times;B200 node. Reward, eval accuracy, and training-set pass@k all rise;
+          the train&ndash;rollout log-prob diff stays bounded throughout the run.
+        </p>
+
+        <table class="spec-table">
+          <tbody>
+            <tr><td>Model</td><td>Kimi-K2.6 <span class="tag">~1.03T</span></td></tr>
+            <tr><td>Hardware</td><td>single 8&times;B200</td></tr>
+            <tr><td>Training precision</td><td>INT4 base + BF16 adapter</td></tr>
+            <tr><td>Rollout precision</td><td>same INT4 base + BF16 adapter</td></tr>
+          </tbody>
+        </table>
+
+        <figure id="fig:kimi-curves" class="bordered">
+          <img src="assets/kimi-rl-curves.png" alt="1T Kimi-K2.6 RL training curves">
+          <figcaption>
+            Kimi-K2.6 single-node stable RL (8&times;B200, INT4 base + BF16 adapter).
+            <em>(a)</em> Training reward climbs from 0.33 to 0.88.
+            <em>(b)</em> Eval accuracy on AIME24, AMC23, MATH500 rises consistently.
+            <em>(c)</em> pass@1/2/4/8 on the training set increases over &asymp;220 RL steps.
+            <em>(d)</em> Train&ndash;rollout |&Delta; log-prob| stays in
+            <code>0.0066&ndash;0.0104</code> with no drift.
+          </figcaption>
+        </figure>
+
+        <figure id="fig:kimi-mem" class="bordered">
+          <img src="assets/kimi-memory.png" alt="1T Kimi-K2.6 GPU memory stability over 27 hours">
+          <figcaption>
+            Single-node GPU memory stability over 27 hours / &asymp;220 steps.
+            Mean &approx; 160 GB, peak &approx; 191 GB out of the 192 GB B200 HBM.
+            Bounded, no upward drift &mdash; the 1T model genuinely fits on one node.
+          </figcaption>
+        </figure>
+
+        <h2 id="v4-flash"><span class="heading-text">DeepSeek V4-Flash: not Kimi-only<a class="heading-anchor" href="#v4-flash" aria-label="Link to this section" title="Link to this section">#</a></span></h2>
+
+        <p>
+          To show that deployment-aligned low-precision RL is not specific to one
+          model family, we ran the same recipe on DeepSeek V4-Flash<label for="sn12" class="sidenote-number"></label><input type="checkbox" id="sn12" class="margin-toggle"><span class="sidenote"><a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/main/DeepSeek_V4.pdf" target="_blank" rel="noopener noreferrer">DeepSeek-V4: Towards Highly Efficient Million-Token Context Intelligence</a> (DeepSeek AI, 2026)</span> with an FP4
+          base. Reward, eval, and pass@k all improve; log-prob diff is again
+          bounded.
+        </p>
+
+        <table class="spec-table">
+          <tbody>
+            <tr><td>Model</td><td>DeepSeek V4-Flash</td></tr>
+            <tr><td>Hardware</td><td>single 8&times;B200</td></tr>
+            <tr><td>Training precision</td><td>FP4 base + BF16 adapter</td></tr>
+            <tr><td>Rollout precision</td><td>same FP4 base + BF16 adapter</td></tr>
+          </tbody>
+        </table>
+
+        <figure id="fig:v4flash-curves" class="bordered">
+          <img src="assets/v4flash-rl-curves.png" alt="DeepSeek V4-Flash RL training curves">
+          <figcaption>
+            DeepSeek V4-Flash single-node stable RL (8&times;B200, FP4 + FP8 base + BF16
+            adapter). Training reward rises from 0.62 to 0.84; pass@k climbs
+            steadily; log-prob diff stays inside <code>0.0161&ndash;0.0247</code>
+            with no drift over 160 steps.
+          </figcaption>
+        </figure>
+
+        <figure id="fig:v4flash-mem" class="bordered">
+          <img src="assets/v4flash-memory.png" alt="DeepSeek V4-Flash GPU memory stability">
+          <figcaption>
+            V4-Flash memory: mean &approx; 119 GB, peak &approx; 190 GB. Headroom
+            remains under the 192 GB cap, with no growth over the 27-hour run.
+          </figcaption>
+        </figure>
+
+        <h2 id="v4-pro"><span class="heading-text">System validation on DeepSeek V4-Pro-1.6T<a class="heading-anchor" href="#v4-pro" aria-label="Link to this section" title="Link to this section">#</a></span></h2>
+
+        <p>
+          DeepSeek V4-Pro (~1.59T)<label for="sn12" class="sidenote-number"></label><input type="checkbox" id="sn12" class="margin-toggle"><span class="sidenote"><a href="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/blob/main/DeepSeek_V4.pdf" target="_blank" rel="noopener noreferrer">DeepSeek-V4: Towards Highly Efficient Million-Token Context Intelligence</a> (DeepSeek AI, 2026)</span> pushes Orbit into MoE territory beyond 1.6T
+          parameters. We treat this section as a <strong>system capability proof</strong>,
+          not a quality benchmark &mdash; the base model is already very strong and
+          the present RL data cannot effectively improve its accuracy further. However, what really matters here is
+          that a 1.6T LLM can well fit in a single GPU node (8&times;B200), RL post-training stays very stable in the whole time, and the train-rollout log-prob difference is also quite small.
+        </p>
+
+        <figure id="fig:v4pro" class="bordered">
+          <img src="assets/v4pro-validation.png" alt="DeepSeek V4-Pro 1.6T single-node systems validation">
+          <figcaption>
+            DeepSeek V4-Pro (1.6T) single-node systems validation (8&times;B200, FP4 + FP8
+            base + BF16 adapter).
+            <em>(a)</em> Train&ndash;rollout log-prob diff stays in
+            <code>0.030&ndash;0.040</code> with no drift at 1.6T scale.
+            <em>(b)</em> pass@k during the validation run.
+            <em>(c)</em> GPU memory bounded; mean &approx; 156 GB, peak &approx; 188 GB
+            / 192 GB &mdash; 1.6T fits and stays bounded on a single 8&times;B200 node.
+          </figcaption>
+        </figure>
+
+        <h2 id="qwen3"><span class="heading-text">Why Orbit uses OFT<a class="heading-anchor" href="#qwen3" aria-label="Link to this section" title="Link to this section">#</a></span></h2>
+
+        <p>
+          Our previous PEFT-Arena benchmark<label for="sn12" class="sidenote-number"></label><input type="checkbox" id="sn12" class="margin-toggle"><span class="sidenote"><a href="https://spherelab.ai/PEFT-Arena/" target="_blank" rel="noopener noreferrer">PEFT-Arena: Understanding Parameter-Efficient Finetuning from a Stability-Plasticity Perspective</a> (Huang, et al, preprint 2026)</span> has performed a conprehensive evaluation on 
+          existing PEFT methods. We can observe from the following figure that OFT achieves
+          better performance than full-finetuning and LoRA (on both downstream adaptation 
+          and pretraining knowledge preservation). Most importanly, we find that OFT can 
+          consistently outperform full-parameter finetuning in the RLVR settings, while LoRA cannot. We also 
+          note that OFT, as a supervised finetuning method, also works well. These results 
+          motivate us to use OFT as Orbit's default PEFT method.
+        </p>
+
+        <figure id="fig:qwen3" class="bordered">
+          <img src="assets/peftarena-results.png" alt="PEFF-Arena Results">
+          <figcaption>
+            Performance on PEFT-Arena to evaluate PEFT's statbility-plasticity trade-off. The 
+            y-axis shows the performance on target downstream tasks (for evaluating the adaptation 
+            effectiveness) and the x-axis shows the performance on general tasks (for evaluating 
+            the general capability preservation).
+          </figcaption>
+        </figure>
+
+        <p>
+          To compare OFT and LoRA in a larger-scale setting, we use Qwen3-30B-A3B as our base 
+          model, and perform RL with OFT or LoRA (under the same parameter budget). The results are given below. We
+          study adapter choices in the standard BF16 regime. On Qwen3-30B-A3B (MoE) we 
+          compare LoRA r16/a32 against OFT b64 under the PEFT-Arena train&ndash;eval setting. 
+          OFT outperforms LoRA on both training reward and eval accuracy while producing log-prob 
+          difference at the same scale.
+        </p>
+
+        <figure id="fig:qwen3" class="bordered">
+          <img src="assets/qwen3-loravsoft.png" alt="Qwen3-30B-A3B LoRA vs OFT">
+          <figcaption>
+            Qwen3-30B-A3B (MoE, BF16) &mdash; LoRA vs OFT over 500 RL
+            steps. OFT shows a consistent advantage on training reward,
+            eval avg accuracy, and pass@8, with comparable log-prob diff.
+          </figcaption>
+        </figure>
+
+        <p>
+          Beyond accuracy, OFT also has two system-level properties that
+          make it a better fit than LoRA for adapter-first RL on
+          frontier-scale models:
+        </p>
+
+        <ul>
+          <li>
+            <p><strong>Zero additional network communication overhead when serving OFT.</strong>
+            While optimized approaches like S-LoRA<label for="sn12" class="sidenote-number"></label><input type="checkbox" id="sn12" class="margin-toggle"><span class="sidenote"><a href="https://arxiv.org/abs/2311.03285" target="_blank" rel="noopener noreferrer">S-LoRA: Serving Thousands of Concurrent LoRA Adapters</a> (Sheng, et al. preprint 2023)</span> attempt to mitigate LoRA's
+            inherent communication costs (which scale as
+            <code>5(N&minus;1)Br / N</code>, <code>N</code> is the number of devices, <code>B</code> is the number of tokens, <code>h</code> is the hidden size, and <code>r</code> is the LoRA's rank) by cleverly fusing the adapter's
+            all-reduce steps with those of the base model, OFT's localized matrix
+            design inherently bypasses the need for these extra cross-device
+            reductions altogether, entirely avoiding this &ldquo;communication
+            wall&rdquo; and making it fundamentally faster than LoRA architectures
+            during distributed inference.</p>
+          </li>
+          <li>
+            <p><strong>Custom kernels for split-projection adapters on fused layers.</strong>
+            Modern high-throughput transformers fuse logically-independent
+            projections &mdash; Q/K/V in attention, gate/up in SwiGLU MLPs
+            &mdash; into single GEMMs to saturate tensor cores and memory
+            bandwidth. Naively attaching an adapter to such a fused tensor
+            shares one set of adapter parameters across distinct subspaces,
+            degrading quality; the typical LoRA workaround couples the two
+            halves through a shared low-rank <em>A</em>, effectively wasting
+            half of the adapter capacity. We engineered custom split-projection
+            kernels that natively apply separate orthogonal rotations to each
+            subspace. Taking Kimi as an example, during inference, fused INT4
+            weights are dynamically sliced and repacked at load time to run as
+            precise half-size GEMMs, avoiding discarded compute and cutting
+            kernel time by &asymp;35%. On the training side, a split-aware
+            Triton dequantization kernel paired with custom autograd hooks
+            minimizes memory overhead.</p>
+          </li>
+        </ul>
+
+        <h2 id="technical-details"><span class="heading-text">Technical details of Orbit<a class="heading-anchor" href="#technical-details" aria-label="Link to this section" title="Link to this section">#</a></span></h2>
+
+        <h3 id="adapter-first-design"><span class="heading-text">PEFT adapters as first-class citizens in RL infrastructure<a class="heading-anchor" href="#adapter-first-design" aria-label="Link to this section" title="Link to this section">#</a></span></h3>
+
+        <p>
+          The architectural shift from full-parameter to adapter-only updates is
+          what unlocks single-node trillion-scale RL. Five properties of the
+          adapter-first design matter most:
+        </p>
+
+        <ul>
+          <li>
+            <p><strong>Trivial weight sync.</strong> Only megabyte-scale adapter deltas move
+            between the trainer and the rollout engines &mdash; no gigabyte-scale
+            weight exports, format conversions, or serving rebuilds on the hot
+            path.</p>
+          </li>
+          <li>
+            <p><strong>Persistent rollout servers.</strong> Because the base model never
+            changes, inference engines stay constantly active across the training
+            lifecycle. The cyclic engine restart between generation and
+            optimization disappears.</p>
+          </li>
+          <li>
+            <p><strong>Viable trillion-parameter scaling.</strong> The memory-heavy
+            optimizer state is bounded to the tiny adapter while the frozen base
+            rests in low-precision memory; massive MoE models become
+            single-node-feasible.</p>
+          </li>
+          <li>
+            <p><strong>Free reference policy.</strong> The KL-divergence reference simply
+            evaluates the frozen base <em>without</em> the adapter applied
+            &mdash; instantly recovering the memory normally wasted on a
+            separate snapshot of the actor.</p>
+          </li>
+          <li>
+            <p><strong>Adapter-native async with double-buffered rollout.</strong> Orbit's
+            versioned adapter runtime makes async RL cheap. Each adapter delta
+            is stamped with a monotonic version; SGLang streams the next version
+            into an inactive slot while the active slot keeps serving in-flight
+            requests, and activation flips atomically &mdash; zero rollout
+            bubble. On Qwen3-4B + OFT (8&times;B200, TP=2), this yields a
+            <strong>1.42&times; step-time speedup</strong> and
+            <strong>44% higher rollout throughput</strong>, with eval accuracy
+            unchanged within run-to-run noise.</p>
+          </li>
+        </ul>
+
+        <h3 id="low-precision-moe"><span class="heading-text">Low-precision MoE expert modules<a class="heading-anchor" href="#low-precision-moe" aria-label="Link to this section" title="Link to this section">#</a></span></h3>
+
+        <p>
+          <strong>Active-expert-chunked dequantization</strong> dynamically groups only
+          the router-selected experts into fixed-size batches, temporarily
+          dequantizing them for grouped GEMMs and immediately releasing the
+          high-precision weights. The hybrid reaches the throughput of fully
+          grouped matrix multiplications while strictly bounding peak transient
+          memory to a single small chunk &mdash; preventing OOM on massive
+          low-precision MoE models during training.
+        </p>
+
+        <h3 id="deepseek-optimizations"><span class="heading-text">DeepSeek-V4 specific optimizations<a class="heading-anchor" href="#deepseek-optimizations" aria-label="Link to this section" title="Link to this section">#</a></span></h3>
+
+        <p>
+          Full CUDA-graph decoding support, DeepGEMM + DeepEP V2 integration, and
+          hand-written <code>tilelang</code> / <code>triton</code> / CUDA kernels for
+          attention backward and fusion. An adapter-aware
+          <em>bypass-base-weight-grad</em> GEMM backward kernel exploits the fact
+          that the base is frozen. A 6-layer debug model with debug ops enabled
+          lands at <code>1e-5</code>-level log-prob diff; step-0 log-prob diff in
+          real V4-Flash training is <code>0.02</code>.
+        </p>
+
+        <h2 id="authors"><span class="heading-text">Authors<a class="heading-anchor" href="#authors" aria-label="Link to this section" title="Link to this section">#</a></span></h2>
+
+        <p>
+          <strong>Zeju Qiu</strong><sup>*+</sup>,
+          <strong>Le Chen</strong><sup>*+</sup>,
+          <strong>Lixin Liu</strong><sup>*+</sup>,
+          <strong>Tim Z. Xiao</strong><sup>+</sup>,
+          Yao Feng,
+          Yangyi Huang,
+          Zhen Liu,
+          Han Shi,
+          Yandong Wen,
+          Zhouliang Yu,
+          Bernhard Sch&ouml;lkopf,
+          <strong>Weiyang Liu</strong><sup>+</sup>.
+        </p>
+        <p style="font-family: var(--font-sans); font-size: 13px; color: var(--fg3);">
+          The Chinese University of Hong Kong &nbsp;&middot;&nbsp; Max Planck Institute for Intelligent Systems
+        </p>
+
+        <h2 id="citation"><span class="heading-text">Citation<a class="heading-anchor" href="#citation" aria-label="Link to this section" title="Link to this section">#</a></span></h2>
+
+        <p>Please cite this work as:</p>
+
+        <div class="code-block-wrapper"><pre tabindex="0"><code>@article{spherelab2026orbit,
+  author = {Qiu, Zeju and Chen, Le and Liu, Lixin and Xiao, Tim Z.
+            and Feng, Yao and Huang, Yangyi and Liu, Zhen and Shi, Han
+            and Wen, Yandong and Yu, Zhouliang and Sch{\"o}lkopf, Bernhard
+            and Liu, Weiyang},
+  title  = {Orbit: Stable and Efficient Reinforcement Learning for Trillion-Parameter LLMs},
+  journal = {SphereLab Blog},
+  year   = {2026},
+  note   = {https://spherelab.ai/orbit}
+}
+</code></pre></div>
+
+      </article>
+    </div>
+
+    <div class="paginator">
+      <a class="link" href="#">back to top</a>
+    </div>
+
+  </main>
+
+</div>
+
+<script>
+/*
+ * Scroll-tracking marker for the left TOC.
+ *
+ * Picks the section closest to (and at or above) the top of the viewport and
+ * highlights the matching TOC entry. The 4px dot slides to the new entry via
+ * the `--toc-active-marker-y` CSS variable, which the stylesheet wires up to
+ * the marker's `translate3d`.
+ *
+ * Also runs on resize so the marker stays aligned if the TOC reflows.
+ */
+(function () {
+  const toc = document.getElementById('left-toc');
+  if (!toc) return;
+
+  const marker = toc.querySelector('.toc-active-marker');
+  const tocLinks = Array.from(toc.querySelectorAll('a[href^="#"]'));
+  if (!tocLinks.length || !marker) return;
+
+  // Map each TOC link to the section it points at.
+  const linkToSection = new Map();
+  const sections = [];
+  tocLinks.forEach((a) => {
+    const id = a.getAttribute('href').slice(1);
+    const target = document.getElementById(id);
+    if (target) {
+      linkToSection.set(a, target);
+      sections.push({ a, target });
+    }
+  });
+  if (!sections.length) return;
+
+  let activeLink = null;
+
+  function setActive(link) {
+    if (link === activeLink) return;
+    activeLink = link;
+
+    tocLinks.forEach((a) => {
+      const li = a.closest('.toc-item');
+      const isActive = (a === link);
+      a.classList.toggle('is-active', isActive);
+      if (isActive) {
+        a.setAttribute('aria-current', 'location');
+      } else {
+        a.removeAttribute('aria-current');
+      }
+      if (li) {
+        li.classList.toggle('is-active', isActive);
+        li.classList.toggle('is-marker-target', isActive);
+      }
+    });
+
+    positionMarker(link);
+  }
+
+  function positionMarker(link) {
+    if (!link) return;
+    const tocRect = toc.getBoundingClientRect();
+    const linkRect = link.getBoundingClientRect();
+    // Centre of the link relative to the TOC's top, accounting for scrolling inside the TOC.
+    const y = (linkRect.top - tocRect.top) + (linkRect.height / 2) + toc.scrollTop;
+    marker.style.setProperty('--toc-active-marker-y', y.toFixed(2) + 'px');
+  }
+
+  function getHeaderOffset() {
+    const styles = getComputedStyle(document.documentElement);
+    const raw = styles.getPropertyValue('--site-header-height').trim() || '54px';
+    const num = parseFloat(raw);
+    return Number.isFinite(num) ? num : 54;
+  }
+
+  function updateActive() {
+    // Find the last section whose top is at or above (header + 24px buffer).
+    const offset = getHeaderOffset() + 24;
+    let current = sections[0].a;
+    for (const { a, target } of sections) {
+      const top = target.getBoundingClientRect().top;
+      if (top - offset <= 0) {
+        current = a;
+      } else {
+        break;
+      }
+    }
+    // Near the bottom of the page, snap to the very last section.
+    const nearBottom =
+      window.innerHeight + window.scrollY >=
+      document.documentElement.scrollHeight - 4;
+    if (nearBottom) {
+      current = sections[sections.length - 1].a;
+    }
+    setActive(current);
+  }
+
+  // Throttle to one update per animation frame.
+  let scheduled = false;
+  function onScroll() {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      updateActive();
+    });
+  }
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  window.addEventListener('resize', () => {
+    onScroll();
+    if (activeLink) positionMarker(activeLink);
+  });
+
+  // First paint
+  toc.classList.add('has-active-marker');
+  updateActive();
+  // Re-position once after fonts & images settle so geometry is correct.
+  window.addEventListener('load', () => {
+    if (activeLink) positionMarker(activeLink);
+  });
+})();
+</script>
+
+<!-- ====================================================================
+     Rollout-architectures teaser — animated demo.
+     Self-contained IIFE; nothing leaks to the page globals.
+     ==================================================================== -->
+<script>
+(function () {
+  const root = document.getElementById('rd-svg-all');
+  if (!root) return;
+
+  const T_MAX    = 30;
+  const SVG_W    = 1100;
+  const PAD_L    = 144;
+  const PAD_R    = 16;
+  const PAD_T    = 22;
+  const LANE_H   = 12;
+  const LANE_GAP = 1;
+  const SCN_GAP  = 10;
+
+  const VERSION_COLORS = [
+    'var(--c-gen-v0)', 'var(--c-gen-v1)', 'var(--c-gen-v2)',
+    'var(--c-gen-v3)', 'var(--c-gen-v4)',
+  ];
+
+  const SCN_SYNC = {
+    id: 'sync',
+    lanes: [
+      { id: 'engine',  label: 'engine' },
+      { id: 'trainer', label: 'trainer' },
+      { id: 'wpush',   label: 'push' },
+    ],
+    activities: [
+      { lane:'engine', start: 0,  end: 9,  kind:'gen',  v:0, row:0 },
+      { lane:'engine', start: 0,  end: 5,  kind:'gen',  v:0, row:1 },
+      { lane:'engine', start: 5,  end: 9,  kind:'wait', row:1 },
+      { lane:'trainer', start: 9, end:12, kind:'train' },
+      { lane:'wpush',   start:12, end:16, kind:'push-full' },
+      { lane:'engine', start:16, end:21, kind:'gen',  v:1, row:0 },
+      { lane:'engine', start:16, end:25, kind:'gen',  v:1, row:1 },
+      { lane:'engine', start:21, end:25, kind:'wait', row:0 },
+      { lane:'trainer', start:25, end:28, kind:'train' },
+      { lane:'wpush',   start:28, end:30, kind:'push-full' },
+    ],
+    rows: { engine: 2, trainer: 1, wpush: 1 },
+  };
+
+  const SCN_ADAPTER_SYNC = {
+    id: 'adapter-sync',
+    lanes: [
+      { id: 'engine',  label: 'engine' },
+      { id: 'trainer', label: 'trainer' },
+      { id: 'wpush',   label: 'push' },
+    ],
+    activities: [
+      { lane:'engine', start: 0,  end: 8,  kind:'gen',  v:0, row:0 },
+      { lane:'engine', start: 0,  end: 4,  kind:'gen',  v:0, row:1 },
+      { lane:'engine', start: 4,  end: 8,  kind:'wait', row:1 },
+      { lane:'trainer', start: 8, end:11, kind:'train' },
+      { lane:'wpush',   start:11, end:12, kind:'push-adp' },
+      { lane:'engine', start:12, end:16, kind:'gen',  v:1, row:0 },
+      { lane:'engine', start:12, end:20, kind:'gen',  v:1, row:1 },
+      { lane:'engine', start:16, end:20, kind:'wait', row:0 },
+      { lane:'trainer', start:20, end:23, kind:'train' },
+      { lane:'wpush',   start:23, end:24, kind:'push-adp' },
+      { lane:'engine', start:24, end:30, kind:'gen',  v:2, row:0 },
+      { lane:'engine', start:24, end:28, kind:'gen',  v:2, row:1 },
+      { lane:'engine', start:28, end:30, kind:'wait', row:1 },
+    ],
+    rows: { engine: 2, trainer: 1, wpush: 1 },
+  };
+
+  const SCN_ASYNC_FULL = {
+    id: 'async-full',
+    lanes: [
+      { id: 'engine',  label: 'engine' },
+      { id: 'trainer', label: 'trainer' },
+      { id: 'wpush',   label: 'push' },
+    ],
+    activities: [
+      { lane:'engine', start: 0,  end: 5,  kind:'gen', v:0, row:0 },
+      { lane:'engine', start: 5,  end: 9,  kind:'gen', v:0, row:0 },
+      { lane:'engine', start: 9,  end:14,  kind:'gen', v:0, row:0 },
+      { lane:'engine', start:14,  end:17,  kind:'pause' },
+      { lane:'engine', start:17,  end:23,  kind:'gen', v:2, row:0 },
+      { lane:'engine', start:23,  end:28,  kind:'gen', v:2, row:0 },
+      { lane:'engine', start:28,  end:30,  kind:'pause' },
+      { lane:'engine', start: 0,  end: 6,  kind:'gen', v:0, row:1 },
+      { lane:'engine', start: 6,  end:10,  kind:'gen', v:0, row:1 },
+      { lane:'engine', start:10,  end:14,  kind:'gen', v:0, row:1 },
+      { lane:'engine', start:17,  end:22,  kind:'gen', v:2, row:1 },
+      { lane:'engine', start:22,  end:28,  kind:'gen', v:2, row:1 },
+      { lane:'trainer', start: 3, end: 7, kind:'train' },
+      { lane:'trainer', start:10, end:14, kind:'train' },
+      { lane:'trainer', start:17, end:21, kind:'train' },
+      { lane:'trainer', start:24, end:28, kind:'train' },
+      { lane:'wpush',   start:14, end:17, kind:'push-full' },
+      { lane:'wpush',   start:28, end:30, kind:'push-full' },
+    ],
+    rows: { engine: 2, trainer: 1, wpush: 1 },
+  };
+
+  const SCN_ADAPTER_ASYNC = {
+    id: 'adapter-async',
+    lanes: [
+      { id: 'engine',  label: 'engine' },
+      { id: 'trainer', label: 'trainer' },
+      { id: 'wpush',   label: 'push' },
+    ],
+    activities: [
+      { lane:'engine', start: 0,  end: 7,  kind:'gen', v:0, row:0 },
+      { lane:'engine', start: 7,  end: 8,  kind:'pause' },
+      { lane:'engine', start: 8,  end:14,  kind:'gen', v:1, row:0 },
+      { lane:'engine', start:14,  end:15,  kind:'pause' },
+      { lane:'engine', start:15,  end:21,  kind:'gen', v:2, row:0 },
+      { lane:'engine', start:21,  end:22,  kind:'pause' },
+      { lane:'engine', start:22,  end:28,  kind:'gen', v:3, row:0 },
+      { lane:'engine', start:28,  end:29,  kind:'pause' },
+      { lane:'engine', start:29,  end:30,  kind:'gen', v:4, row:0 },
+      { lane:'engine', start: 0,  end: 7,  kind:'gen', v:0, row:1 },
+      { lane:'engine', start: 8,  end:14,  kind:'gen', v:1, row:1 },
+      { lane:'engine', start:15,  end:21,  kind:'gen', v:2, row:1 },
+      { lane:'engine', start:22,  end:28,  kind:'gen', v:3, row:1 },
+      { lane:'engine', start:29,  end:30,  kind:'gen', v:4, row:1 },
+      { lane:'trainer', start: 3,  end: 7,  kind:'train' },
+      { lane:'trainer', start:10,  end:14,  kind:'train' },
+      { lane:'trainer', start:16,  end:20,  kind:'train' },
+      { lane:'trainer', start:23,  end:27,  kind:'train' },
+      { lane:'wpush',   start: 7,  end: 8,  kind:'push-adp' },
+      { lane:'wpush',   start:14,  end:15,  kind:'push-adp' },
+      { lane:'wpush',   start:21,  end:22,  kind:'push-adp' },
+      { lane:'wpush',   start:28,  end:29,  kind:'push-adp' },
+    ],
+    rows: { engine: 2, trainer: 1, wpush: 1 },
+  };
+
+  const SCN_ADAPTER_ASYNC_DB = {
+    id: 'adapter-async-db',
+    lanes: [
+      { id: 'engine',   label: 'engine' },
+      { id: 'trainer',  label: 'trainer' },
+      { id: 'staging',  label: 'inactive slot' },
+      { id: 'activate', label: 'flip' },
+    ],
+    activities: [
+      { lane:'engine', start: 0,  end: 5,  kind:'gen', v:0, row:0 },
+      { lane:'engine', start: 5,  end:11,  kind:'gen', v:0, row:0 },
+      { lane:'engine', start:11,  end:17,  kind:'gen', v:1, row:0 },
+      { lane:'engine', start:17,  end:24,  kind:'gen', v:2, row:0 },
+      { lane:'engine', start:24,  end:30,  kind:'gen', v:3, row:0 },
+      { lane:'engine', start: 0,  end: 7,  kind:'gen', v:0, row:1 },
+      { lane:'engine', start: 7,  end:13,  kind:'gen', v:0, row:1 },
+      { lane:'engine', start:13,  end:19,  kind:'gen', v:1, row:1 },
+      { lane:'engine', start:19,  end:26,  kind:'gen', v:2, row:1 },
+      { lane:'engine', start:26,  end:30,  kind:'gen', v:3, row:1 },
+      { lane:'engine', start: 8.0, end: 8.4,  kind:'pause' },
+      { lane:'engine', start:15.0, end:15.4,  kind:'pause' },
+      { lane:'engine', start:22.0, end:22.4,  kind:'pause' },
+      { lane:'engine', start:29.0, end:29.4,  kind:'pause' },
+      { lane:'trainer', start: 2,  end: 6,  kind:'train' },
+      { lane:'trainer', start: 9,  end:13,  kind:'train' },
+      { lane:'trainer', start:16,  end:20,  kind:'train' },
+      { lane:'trainer', start:23,  end:27,  kind:'train' },
+      { lane:'staging', start: 7,  end: 8,  kind:'stage' },
+      { lane:'staging', start:14,  end:15,  kind:'stage' },
+      { lane:'staging', start:21,  end:22,  kind:'stage' },
+      { lane:'staging', start:28,  end:29,  kind:'stage' },
+      { lane:'activate', start: 8,    end: 8.15, kind:'flip' },
+      { lane:'activate', start:15,    end:15.15, kind:'flip' },
+      { lane:'activate', start:22,    end:22.15, kind:'flip' },
+      { lane:'activate', start:29,    end:29.15, kind:'flip' },
+    ],
+    rows: { engine: 2, trainer: 1, staging: 1, activate: 1 },
+  };
+
+  const SCENARIOS = [SCN_SYNC, SCN_ADAPTER_SYNC, SCN_ASYNC_FULL, SCN_ADAPTER_ASYNC, SCN_ADAPTER_ASYNC_DB];
+
+  const SCN_LABELS = {
+    'sync':             { name: '1. Sync RL',           sub: 'serial · full-weight' },
+    'adapter-sync':     { name: '2. Adapter sync',      sub: 'detour · serial' },
+    'async-full':       { name: '3. Async RL',          sub: '+overlap · full-weight' },
+    'adapter-async':    { name: '4. Adapter async',     sub: '+adapter · single slot' },
+    'adapter-async-db': { name: '5. + double-buffer',   sub: 'non-blocking flip' },
+  };
+
+  const xScale = t => PAD_L + (t / T_MAX) * (SVG_W - PAD_L - PAD_R);
+
+  function activityColor(a) {
+    switch (a.kind) {
+      case 'gen':       return VERSION_COLORS[a.v % VERSION_COLORS.length];
+      case 'train':     return 'var(--c-train)';
+      case 'push-full': return 'var(--c-push-full)';
+      case 'push-adp':  return 'var(--c-push-adp)';
+      case 'stage':     return 'var(--c-stage)';
+      case 'flip':      return 'var(--c-flip)';
+      case 'pause':     return 'var(--c-pause)';
+      case 'wait':      return 'var(--c-wait)';
+      default:          return '#888';
+    }
+  }
+  function escapeXml(s) {
+    return String(s).replace(/[<>&"']/g, c => (
+      { '<':'&lt;', '>':'&gt;', '&':'&amp;', '"':'&quot;', "'":'&apos;' }[c]
+    ));
+  }
+
+  function buildAll() {
+    let y = PAD_T + 6;
+    const scnY = {};
+    const scnH = {};
+    for (const scn of SCENARIOS) {
+      scnY[scn.id] = y;
+      let h = 0;
+      for (const lane of scn.lanes) {
+        h += LANE_H * (scn.rows[lane.id] || 1) + LANE_GAP;
+      }
+      scnH[scn.id] = h;
+      y += h + SCN_GAP;
+    }
+    const totalH = y;
+    root.setAttribute('viewBox', `0 0 ${SVG_W} ${totalH}`);
+
+    let html = '<defs>';
+    for (const scn of SCENARIOS) {
+      html += `<pattern id="rd-hatch-${scn.id}" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+        <rect width="6" height="6" fill="var(--c-wait)"/>
+        <line x1="0" y1="0" x2="0" y2="6" stroke="var(--c-wait-stroke)" stroke-width="1" opacity="0.55"/>
+      </pattern>`;
+    }
+    html += '</defs>';
+
+    html += '<g class="rd-axis">';
+    for (let t = 0; t <= T_MAX; t += 5) {
+      const x = xScale(t);
+      html += `<line x1="${x}" y1="${PAD_T - 4}" x2="${x}" y2="${totalH - 4}" />`;
+      html += `<text x="${x}" y="${PAD_T - 8}" text-anchor="middle">${t}</text>`;
+    }
+    html += '</g>';
+
+    for (const scn of SCENARIOS) {
+      html += renderScenario(scn, scnY[scn.id], scnH[scn.id]);
+    }
+
+    html += `<line class="rd-playhead" id="rd-ph-all" x1="${PAD_L}" y1="${PAD_T - 6}" x2="${PAD_L}" y2="${totalH - 4}"/>`;
+
+    root.innerHTML = html;
+  }
+
+  function renderScenario(scn, yStart, scnH) {
+    let html = '';
+    const laneY = {};
+    let yy = yStart;
+    for (const lane of scn.lanes) {
+      laneY[lane.id] = yy;
+      yy += LANE_H * (scn.rows[lane.id] || 1) + LANE_GAP;
+    }
+
+    const lbl = SCN_LABELS[scn.id];
+    const midY = yStart + scnH / 2;
+    html += `<text class="rd-scn-label" x="${PAD_L - 12}" y="${midY - 2}" text-anchor="end">${escapeXml(lbl.name)}</text>`;
+    html += `<text class="rd-scn-tag"   x="${PAD_L - 12}" y="${midY + 11}" text-anchor="end">${escapeXml(lbl.sub)}</text>`;
+
+    for (const lane of scn.lanes) {
+      const rows = scn.rows[lane.id] || 1;
+      const h = LANE_H * rows;
+      html += `<rect class="rd-lane-bg" x="${PAD_L}" y="${laneY[lane.id]}" width="${SVG_W - PAD_L - PAD_R}" height="${h}" rx="2"/>`;
+      html += `<text class="rd-lane-label" x="${SVG_W - PAD_R - 6}" y="${laneY[lane.id] + h / 2 + 3}" text-anchor="end" opacity="0.6">${escapeXml(lane.label)}</text>`;
+    }
+
+    for (const a of scn.activities) {
+      const x0 = xScale(a.start);
+      const x1 = xScale(a.end);
+      const w = Math.max(1.5, x1 - x0);
+      const baseY = laneY[a.lane];
+      const row = a.row || 0;
+      const yA = baseY + row * LANE_H + 1.5;
+      const hA = LANE_H - 3;
+      const color = activityColor(a);
+      const startKey = a.start.toFixed(3);
+      const dataAttrs = `data-start="${startKey}" data-end="${a.end}"`;
+
+      let inner = '';
+      if (a.kind === 'pause') {
+        const fullH = LANE_H * (scn.rows[a.lane] || 1) - 1;
+        inner += `<rect class="rd-activity rd-pause-band" ${dataAttrs} x="${x0}" y="${baseY + 0.5}" width="${w}" height="${fullH}" rx="2"/>`;
+      } else if (a.kind === 'wait') {
+        inner += `<rect class="rd-activity" ${dataAttrs} x="${x0}" y="${yA}" width="${w}" height="${hA}" rx="2" fill="url(#rd-hatch-${scn.id})" stroke="var(--c-wait-stroke)" stroke-opacity="0.45" stroke-dasharray="2 2"/>`;
+      } else if (a.kind === 'flip') {
+        const xF = xScale(a.start);
+        inner += `<line class="rd-activity rd-flip-marker" ${dataAttrs} x1="${xF}" y1="${yA - 1}" x2="${xF}" y2="${yA + hA + 1}"/>`;
+      } else {
+        inner += `<rect class="rd-activity" ${dataAttrs} x="${x0}" y="${yA}" width="${w}" height="${hA}" rx="2" fill="${color}"/>`;
+      }
+
+      const tipLabel = a.kind === 'gen' ? `gen v${a.v}` :
+                       a.kind === 'train' ? 'gradient step' :
+                       a.kind === 'push-full' ? 'full-model weight push' :
+                       a.kind === 'push-adp' ? 'adapter push' :
+                       a.kind === 'stage' ? 'broadcast to inactive slot' :
+                       a.kind === 'flip' ? 'atomic activate (flip)' :
+                       a.kind === 'pause' ? 'engine paused' :
+                       a.kind === 'wait' ? 'waiting on straggler' : a.kind;
+      const tip = `${tipLabel} · ${a.lane} · t=${a.start}–${a.end}`;
+      html += `<g><title>${escapeXml(tip)}</title>${inner}</g>`;
+    }
+
+    return html;
+  }
+
+  buildAll();
+
+  /* ----- animation ----- */
+  let t = 0;
+  let playing = true;
+  let speed = 1;
+  let lastFrame = performance.now();
+
+  const playBtn  = document.getElementById('rd-playBtn');
+  const resetBtn = document.getElementById('rd-resetBtn');
+  const speedIn  = document.getElementById('rd-speedInput');
+  const speedLbl = document.getElementById('rd-speedLabel');
+  const scrubIn  = document.getElementById('rd-scrubInput');
+  const timeLbl  = document.getElementById('rd-timeLabel');
+
+  playBtn.addEventListener('click', () => {
+    playing = !playing;
+    playBtn.textContent = playing ? '⏸ Pause' : '▶ Play';
+    lastFrame = performance.now();
+  });
+  resetBtn.addEventListener('click', () => {
+    t = 0;
+    scrubIn.value = 0;
+    render();
+  });
+  speedIn.addEventListener('input', e => {
+    speed = parseFloat(e.target.value);
+    speedLbl.textContent = speed.toFixed(2) + '×';
+  });
+  scrubIn.addEventListener('input', e => {
+    playing = false;
+    playBtn.textContent = '▶ Play';
+    t = (parseFloat(e.target.value) / 1000) * T_MAX;
+    render();
+  });
+
+  function render() {
+    timeLbl.textContent = 't = ' + t.toFixed(1);
+    scrubIn.value = Math.round((t / T_MAX) * 1000);
+    const ph = document.getElementById('rd-ph-all');
+    if (ph) {
+      ph.setAttribute('x1', xScale(t));
+      ph.setAttribute('x2', xScale(t));
+    }
+    root.querySelectorAll('.rd-activity[data-start]').forEach(el => {
+      const s = parseFloat(el.getAttribute('data-start'));
+      el.classList.toggle('dim', s > t);
+    });
+  }
+
+  function frame(now) {
+    const dt = (now - lastFrame) / 1000;
+    lastFrame = now;
+    if (playing) {
+      t += dt * speed * 3;
+      if (t > T_MAX) t = 0;
+      render();
+    }
+    requestAnimationFrame(frame);
+  }
+  render();
+  requestAnimationFrame(frame);
+})();
+</script>
+
+</body>
+</html>
