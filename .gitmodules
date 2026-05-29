@@ -8,13 +8,13 @@
 	branch = miles-swe-agent
 [submodule "thirdparty/Megatron-LM"]
 	path = thirdparty/Megatron-LM
-	url = https://github.com/radixark/Megatron-LM.git
+	url = https://github.com/impossible-inc/Megatron-LM.git
 	branch = miles-main
 [submodule "thirdparty/sglang"]
 	path = thirdparty/sglang
-	url = https://github.com/sgl-project/sglang.git
+	url = https://github.com/impossible-inc/sglang.git
 	branch = sglang-miles
 [submodule "thirdparty/Megatron-Bridge"]
 	path = thirdparty/Megatron-Bridge
-	url = https://github.com/radixark/Megatron-Bridge.git
+	url = https://github.com/impossible-inc/Megatron-Bridge.git
 	branch = bridge
