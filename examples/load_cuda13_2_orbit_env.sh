@@ -156,6 +156,15 @@ if [[ -d "${CUDNN_PATH}/lib" ]]; then
     done
 fi
 
+# nvidia-modelopt (imported by megatron.bridge) dlopens libz3.so.4.15 by soname.
+# The z3-solver wheel ships it under site-packages/z3/lib but does not put it on the
+# loader path, so megatron.bridge import fails without this.
+Z3_LIB="${ORBIT_VENV}/lib/${PYTHON_SITE_VERSION}/site-packages/z3/lib"
+if [[ -d "${Z3_LIB}" ]]; then
+    export LD_LIBRARY_PATH="${Z3_LIB}:${LD_LIBRARY_PATH:-}"
+fi
+unset Z3_LIB
+
 export PYTHON_BIN="${PYTHON_BIN:-${ORBIT_VENV}/bin/python}"
 # Keep FlashInfer JIT outputs out of shared caches. The home cache can contain
 # stale kernels from other CUDA runtimes, and Lustre does not support the locks FlashInfer needs

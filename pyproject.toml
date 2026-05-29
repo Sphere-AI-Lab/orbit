@@ -59,10 +59,47 @@ dependencies = [
 fsdp = [
     "torch==2.11.0",
 ]
+# Opt-in one-shot install: `uv sync --extra allinone` (with `source env.sh`) builds
+# the full CUDA-13 kernel + ML layer that CUDA-13-install.md otherwise installs by
+# hand, so no manual layer is needed. Default `uv sync` is unchanged by this extra.
+# Build sources/flags for these live in [tool.uv.sources], no-build-isolation-package,
+# and [tool.uv.extra-build-dependencies] below. (numpy<2 is pinned globally in
+# [tool.uv] override-dependencies because orbit/Megatron require numpy 1.x regardless.)
+allinone = [
+    # CUDA kernels — source-built against the pinned torch 2.11 / CUDA 13 layer.
+    "flash-attn==2.8.3",
+    "mamba-ssm==2.3.1",
+    "causal-conv1d==1.6.2.post1",
+    "flash-linear-attention==0.5.0",
+    "fast-hadamard-transform",
+    "deep-gemm-official",
+    "sgl-kernel==0.3.21",
+    "torch-memory-saver==0.0.9",
+    "apex",
+    "tilelang==0.1.10",
+    # ML libs (CUDA-13-install.md steps 6/11)
+    "open-clip-torch==3.3.0",
+    "trl",
+    "math-verify==0.9.0",
+    "latex2sympy2-extended==1.11.0",
+    "liger-kernel==0.8.0",
+    "ftfy",
+    "nvtx",
+    # megatron.bridge imports modelopt at module load (the manual path gets it via the
+    # NVIDIA-NeMo Megatron-Bridge priming step).
+    "nvidia-modelopt==0.44.0",
+    # build-time tools for the no-build-isolation source builds
+    "ninja",
+    "pybind11",
+    "cmake>=3.31",
+    "scikit-build-core",
+]
 
 [tool.uv]
 # Keep transitive packages from silently selecting an untested CUDA/Torch build.
 override-dependencies = [
+    # Megatron requires numpy 1.x; pin hard so no transitive dep pulls 2.x back.
+    "numpy==1.26.4",
     "cuda-python==13.2.0",
     "flashinfer-python==0.6.3",
     "megatron-core",
@@ -88,14 +125,28 @@ override-dependencies = [
 no-build-isolation-package = [
     "causal-conv1d",
     "deep-ep",
+    "deep-gemm-official",
+    "fast-hadamard-transform",
+    "flash-attn",
     "flash-linear-attention",
     "mamba-ssm",
+    "sgl-kernel",
+    "torch-memory-saver",
     "transformer-engine",
     "transformer-engine-torch",
 ]
 
 [tool.uv.extra-build-dependencies]
-transformer-engine = ["pybind11"]
+transformer-engine = ["pybind11", "setuptools", "torch", "wheel"]
+fast-hadamard-transform = ["setuptools", "torch", "wheel", "packaging"]
+flash-attn = ["setuptools", "torch", "wheel", "packaging", "psutil", "ninja"]
+mamba-ssm = ["setuptools", "torch", "wheel", "packaging", "ninja"]
+causal-conv1d = ["setuptools", "torch", "wheel", "packaging", "ninja"]
+deep-gemm-official = ["setuptools", "torch", "wheel", "packaging"]
+deep-ep = ["setuptools", "torch", "wheel", "packaging"]
+sgl-kernel = ["setuptools", "torch", "wheel", "scikit-build-core", "cmake", "ninja"]
+torch-memory-saver = ["setuptools", "torch", "wheel", "packaging"]
+flash-linear-attention = ["setuptools", "torch", "wheel"]
 
 [tool.uv.sources]
 deep-ep = { git = "https://github.com/deepseek-ai/DeepEP.git", rev = "d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb" }
@@ -103,7 +154,20 @@ megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git"
 megatron-core = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git", rev = "00eb75b0c803b0fc8e5413d736529d9d3b82b6bd" }
 nvidia-resiliency-ext = { git = "https://github.com/NVIDIA/nvidia-resiliency-ext.git", rev = "63154570cea17f8805a7fd15cc3b8cc2919ba575" }
 sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "9c83ae8be07cbb1eb6898ce608ae244e3be375b4", subdirectory = "python" }
+# TransformerEngine built from source (verified end-to-end). The orbit-build-wheels
+# prebuilt is cu13/torch-2.11-correct too, but swapping it in perturbed libcudart load
+# order and exposed a flaky tilelang<->flashinfer find_loaded_library("libcudart")
+# race (tilelang's libcudart_stub.so shadows the real lib). Keep source build until
+# that orbit/tilelang issue is fixed.
+# (Prebuilt alt: { url = "https://github.com/liulixinkerry/orbit-build-wheels/releases/download/cu132-torch211-ubuntu2204/transformer_engine-2.14.0-cp312-cp312-linux_x86_64.whl" })
 transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", rev = "71bbefbf153418f943640df0f7373625dc93fa46" }
+fast-hadamard-transform = { git = "https://github.com/Dao-AILab/fast-hadamard-transform.git", rev = "e7706faf8d1c3b9f241e36860640ad1dac644ede" }
+deep-gemm-official = { git = "https://github.com/liulixinkerry/DeepGEMM.git", rev = "18db30e9db9703b906e9ab3803fbbc1a64be1520" }
+sgl-kernel = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "9c83ae8be07cbb1eb6898ce608ae244e3be375b4", subdirectory = "sgl-kernel" }
+torch-memory-saver = { git = "https://github.com/fzyzcjy/torch_memory_saver.git", rev = "dc6876905830430b5054325fa4211ff302169c6b" }
+sglang-router = { url = "https://github.com/zhuzilin/sgl-router/releases/download/v0.3.2-5f8d397/sglang_router-0.3.2-cp38-abi3-manylinux_2_28_x86_64.whl" }
+# apex orbit-build-wheels prebuilt is cu13-clean; source build needs fragile --config-settings, so use the public wheel.
+apex = { url = "https://github.com/liulixinkerry/orbit-build-wheels/releases/download/cu132-torch211-ubuntu2204/apex-0.1-cp312-cp312-linux_x86_64.whl" }
 
 [tool.setuptools]
 include-package-data = true

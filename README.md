@@ -45,20 +45,26 @@ Keep these checkouts at the refs recorded in `pyproject.toml` under `tool.orbit.
 
 ### Set up the environment
 
-1. **Install the CUDA/Torch layer.** Follow [CUDA-13-install.md](CUDA-13-install.md) end-to-end first.
-2. **Sync Orbit and the backend sources:**
+The whole CUDA/Torch + kernel stack builds from a single `uv sync`. `env.sh` carries
+the bits that can't live in `pyproject.toml` (site CUDA paths, build toggles, runtime
+loader paths), all auto-detected:
 
-   ```bash
-   cd orbit
-   uv python pin 3.12
-   uv venv
-   source .venv/bin/activate
-   uv sync --inexact
-   ```
+```bash
+cd orbit
+uv python pin 3.12
+source env.sh                    # auto-detects CUDA_HOME / GPU arch / python
+uv sync --extra allinone         # builds torch, TE, sglang, megatron, deep-ep, sgl-kernel, flash-attn, ... from source
+```
 
-The manifest pins core CUDA/Torch packages so transitive dependencies can't silently swap in an untested build. `uv sync --inexact` preserves the CUDA/Torch packages installed by the CUDA guide.
+The first build compiles everything from source — budget **~1–2 h on a CUDA 13.2 +
+B200 machine**. Override knobs before `source env.sh` (`CUDA_HOME`, `TORCH_CUDA_ARCH_LIST`,
+`MAX_JOBS`, `UV_CACHE_DIR`).
 
-> **Release maintainers:** verify a public clean-room install with `scripts/release/clean_room_gate.sh` after setting `PUBLIC_ORBIT_URL`. This gate targets the future public Git-ref release; it is not expected to pass against the interim local-path backend sources.
+> Alternatively, [CUDA-13-install.md](CUDA-13-install.md) installs the layer from prebuilt wheels.
+
+> **Release maintainers:** verify a public clean-room install with `scripts/release/clean_room_gate.sh`
+> after setting `PUBLIC_ORBIT_URL`. This gate targets the future public Git-ref release; it is not
+> expected to pass against the interim local-path backend sources.
 
 ## Quickstart
 

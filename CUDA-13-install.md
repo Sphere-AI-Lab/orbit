@@ -76,14 +76,14 @@ uv pip install "$ORBIT_BUILD_WHEELS/transformer_engine-2.14.0-cp312-cp312-linux_
 
 ```bash
 uv pip install ftfy
-uv pip install --no-deps open-clip-torch==3.2.0
+uv pip install --no-deps open-clip-torch==3.3.0
 
 uv pip install --no-deps trl
-uv pip install nvtx matplotlib liger_kernel
-uv pip install math_verify latex2sympy2_extended
+uv pip install nvtx matplotlib liger-kernel==0.8.0
+uv pip install math-verify==0.9.0 latex2sympy2-extended==1.11.0
 uv pip install git+https://github.com/NVIDIA/nvidia-resiliency-ext.git@63154570cea17f8805a7fd15cc3b8cc2919ba575
 
-uv pip install tilelang tile-kernels
+uv pip install tilelang==0.1.10 tile-kernels
 ```
 
 ### 7. Apex
@@ -103,7 +103,10 @@ uv pip install --no-build-isolation -v git+https://github.com/Dao-AILab/fast-had
 ### 9. Flash Attention (FA2 + FA3)
 
 ```bash
-uv pip install --no-build-isolation flash_attn==2.8.3
+# FLASH_ATTENTION_FORCE_BUILD forces a source build. Without it, flash-attn's setup.py
+# auto-downloads a prebuilt wheel built against an older torch ABI, which then fails at
+# import with `undefined symbol: ...c10_cuda_check_implementation...`.
+FLASH_ATTENTION_FORCE_BUILD=TRUE uv pip install --no-build-isolation flash_attn==2.8.3
 
 # FA3: 28ef22c99a135b234fb54bc33cfb638078bacb65
 uv pip install "$ORBIT_BUILD_WHEELS/flash_attn_3-3.0.0-cp39-abi3-linux_x86_64.whl" --no-deps
@@ -115,9 +118,9 @@ python_path=$(python -c "import site; print(site.getsitepackages()[0])") && mkdi
 ### 10. Linear attention (causal-conv1d, mamba, FLA)
 
 ```bash
-uv pip install --no-build-isolation causal-conv1d==1.6.1
+uv pip install --no-build-isolation causal-conv1d==1.6.2.post1
 uv pip install --no-build-isolation mamba-ssm==2.3.1
-uv pip install --no-build-isolation flash-linear-attention==0.4.1
+uv pip install --no-build-isolation flash-linear-attention==0.5.0
 ```
 
 ### 11. Megatron-Bridge Dependency + HF stack + observability
@@ -198,12 +201,16 @@ also installs the locked DeepEP commit using the build paths exported in step 8.
 
 ```bash
 cd <workspace>/orbit
-uv sync --inexact
+uv sync --inexact \
+    --no-install-package transformer-engine \
+    --no-install-package sgl-kernel
 ```
 
 Use `uv sync --inexact` for metadata refreshes so uv does not prune the
-CUDA/Torch packages installed by this guide.
-
+CUDA/Torch packages installed by this guide. The manifest pins `transformer-engine`
+and `sgl-kernel` to git sources (for the one-command `--extra allinone` build), so
+`--no-install-package` for both keeps the prebuilt TE (step 5) and local cu13
+sgl-kernel (step 12) from being rebuilt from source here.
 
 # Troubleshooting
 
@@ -235,6 +242,20 @@ print(torch.__version__, torch.version.cuda)
 print(md.version("cuda-python"))
 PY
 ```
+
+## `megatron.bridge` Import Fails (`libz3.so.4.15`)
+
+`megatron.bridge` imports `nvidia-modelopt`, which dlopens `libz3.so.4.15` by soname.
+`env.sh` and `examples/load_cuda13_2_orbit_env.sh` add `site-packages/z3/lib` to
+`LD_LIBRARY_PATH` for this; if you do not use either loader, add it yourself.
+
+## `sgl-kernel` / `torch-memory-saver` Import Fails (ABI mismatch)
+
+The `$ORBIT_BUILD_WHEELS` prebuilts must match this torch 2.11 / CUDA 13 layer (the
+TransformerEngine wheel is correct). If `sgl-kernel` or `torch-memory-saver` fail to
+import (`undefined symbol: ...c10_cuda_check_implementation...` or `libcudart.so.12`),
+they were built against an older torch ABI / cu12 — rebuild them from source against
+this layer.
 
 ## Launchers Fail Before Training
 
