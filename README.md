@@ -45,26 +45,20 @@ Keep these checkouts at the refs recorded in `pyproject.toml` under `tool.orbit.
 
 ### Set up the environment
 
-The whole CUDA/Torch + kernel stack builds from a single `uv sync`. `env.sh` carries
-the bits that can't live in `pyproject.toml` (site CUDA paths, build toggles, runtime
-loader paths), all auto-detected:
+The whole CUDA stack builds from a single `uv sync`. `env.sh` carries the bits that can't live in `pyproject.toml` (site CUDA paths, build toggles, runtime loader paths), all auto-detected:
 
 ```bash
 cd orbit
 uv python pin 3.12
 source env.sh                    # auto-detects CUDA_HOME / GPU arch / python
-uv sync --extra allinone         # builds torch, TE, sglang, megatron, deep-ep, sgl-kernel, flash-attn, ... from source
+uv sync --extra allinone         # builds torch, TE, sglang, megatron, deep-ep, deep-gemm, sgl-kernel, flash-attn, ... from source
 ```
 
-The first build compiles everything from source — budget **~1–2 h on a CUDA 13.2 +
-B200 machine**. Override knobs before `source env.sh` (`CUDA_HOME`, `TORCH_CUDA_ARCH_LIST`,
-`MAX_JOBS`, `UV_CACHE_DIR`).
+The first build compiles everything from source, budget **around 1–2 hours on a CUDA 13.2 + B200 machine**. Override knobs before `source env.sh` (`CUDA_HOME`, `TORCH_CUDA_ARCH_LIST`, `MAX_JOBS`, `UV_CACHE_DIR`).
 
 > Alternatively, [CUDA-13-install.md](CUDA-13-install.md) installs the layer from prebuilt wheels.
 
-> **Release maintainers:** verify a public clean-room install with `scripts/release/clean_room_gate.sh`
-> after setting `PUBLIC_ORBIT_URL`. This gate targets the future public Git-ref release; it is not
-> expected to pass against the interim local-path backend sources.
+> **Release maintainers:** verify a public clean-room install with `scripts/release/clean_room_gate.sh` after setting `PUBLIC_ORBIT_URL`. This gate targets the future public Git-ref release; it is not expected to pass against the interim local-path backend sources.
 
 ## Quickstart
 
