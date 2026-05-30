@@ -2983,6 +2983,7 @@ allinone = [
     { name = "pybind11" },
     { name = "scikit-build-core" },
     { name = "sgl-kernel" },
+    { name = "tile-kernels" },
     { name = "tilelang" },
     { name = "torch-memory-saver" },
     { name = "trl" },
@@ -3038,7 +3039,8 @@ requires-dist = [
     { name = "sglang-router", url = "https://github.com/zhuzilin/sgl-router/releases/download/v0.3.2-5f8d397/sglang_router-0.3.2-cp38-abi3-manylinux_2_28_x86_64.whl" },
     { name = "starlette", specifier = "==0.52.1" },
     { name = "tensorboard", specifier = "==2.20.0" },
-    { name = "tilelang", marker = "extra == 'allinone'", specifier = "==0.1.10" },
+    { name = "tile-kernels", marker = "extra == 'allinone'", specifier = "==1.0.0" },
+    { name = "tilelang", marker = "extra == 'allinone'", specifier = "==0.1.9" },
     { name = "timm", specifier = "==1.0.17" },
     { name = "torch", marker = "extra == 'fsdp'", specifier = "==2.11.0" },
     { name = "torch-memory-saver", marker = "extra == 'allinone'", git = "https://github.com/fzyzcjy/torch_memory_saver.git?rev=dc6876905830430b5054325fa4211ff302169c6b" },
@@ -4462,8 +4464,21 @@ wheels = [
 ]
 
 [[package]]
+name = "tile-kernels"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tilelang" },
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/17/70/f0f62438b89c96bfe36d6ed95bfcc101b75df12f771a800cb6feb0fa9337/tile_kernels-1.0.0.tar.gz", hash = "sha256:259b7d70219cce6afa868f724c3032936c6ae331239285b1111554c4baa46eb3", size = 107895, upload-time = "2026-04-23T09:01:30.093Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d3/74/7511421ab2a2f292ca2c147a7af78eaec90e39bd6d6703283a4ba8fd7dfc/tile_kernels-1.0.0-py3-none-any.whl", hash = "sha256:9f1e09c1bccde32f3189d1ff32ba9725f86fc04ac1d0ac93284e16fcab1a5666", size = 120627, upload-time = "2026-04-23T09:01:28.287Z" },
+]
+
+[[package]]
 name = "tilelang"
-version = "0.1.10"
+version = "0.1.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "apache-tvm-ffi" },
@@ -4478,12 +4493,11 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "z3-solver" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/77/5c/07146b4527656102e48d21c2599aa80477e83ea3f149ac0df3b15a247bd4/tilelang-0.1.10.tar.gz", hash = "sha256:d8813e668fcf75843bc2d68c633c352b419c1e292895a6038a4aadd943e56c2b", size = 93184128, upload-time = "2026-05-25T03:58:57.006Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/56/70/5051f65821baa30a3d61fc48f8ba10c776490315e8c90f82559b92089756/tilelang-0.1.9.tar.gz", hash = "sha256:287f727c913bb648fcf6c1968809ba3390e55eeed257a5c6bb9a80bc05966af4", size = 93395292, upload-time = "2026-04-22T09:19:11.988Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/76/0f/e5e01399adb5110bf885e19e879229e3fc578e1e035939f601365305c825/tilelang-0.1.10-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:246084babf0f6801ad2b8ac1d58cead37520974ae399247c89d42b68872d2cf9", size = 38492226, upload-time = "2026-05-25T03:55:30.729Z" },
-    { url = "https://files.pythonhosted.org/packages/b0/66/ab4301dc38ca9f09832df2936c73388c611c198dc938634acb6ce80dfa74/tilelang-0.1.10-cp38-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:85180d1a96defeecdf52d5d075a31c3fc551d8485981e6b636762a9cd7eb02fe", size = 49768455, upload-time = "2026-05-25T03:56:17.081Z" },
-    { url = "https://files.pythonhosted.org/packages/92/af/a3dfc43dad228a6e560863f071865d5a27c35b050a9fc431641cb07135d1/tilelang-0.1.10-cp38-abi3-manylinux_2_34_aarch64.whl", hash = "sha256:15437e5f0daa0863ac9a5386007847c94070f5ab3234d040bc947afdf2f57100", size = 45629488, upload-time = "2026-05-25T03:57:00.374Z" },
-    { url = "https://files.pythonhosted.org/packages/c3/36/2096dce95c20e13be5b5ce852190ca4b4ac41c7fd9b91a0be98353598153/tilelang-0.1.10-cp38-abi3-win_amd64.whl", hash = "sha256:93dd078113d275352698a6e72a91e80e5b0263d22a005109b3db2c1c016ea105", size = 33692452, upload-time = "2026-05-25T03:57:32.576Z" },
+    { url = "https://files.pythonhosted.org/packages/90/db/4dd76da8c8585c605639a21bc098d504e317fe324a72f01ce3c7370250b4/tilelang-0.1.9-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:00ed594fdeb229c5505b9ffa895c3c5daeb28641c78f783fa1f724cf1e08cecd", size = 36599020, upload-time = "2026-04-22T09:14:39.366Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/8a/1cbeee79d62abaa02441c2d00621554e41aa62dbf3b94a4feb3867184b01/tilelang-0.1.9-cp38-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:4bbccfe9035aed775ffafb6dc25a5994504b24e2c5d95d0f39643edfafa7bf12", size = 45419374, upload-time = "2026-04-22T09:15:56.014Z" },
+    { url = "https://files.pythonhosted.org/packages/c6/a7/f4bfb86f87e107703146e703204cec2c0eae2492b633e0052b0ace3febb6/tilelang-0.1.9-cp38-abi3-manylinux_2_34_aarch64.whl", hash = "sha256:77ab0ee2f40f66ea015b6b21426d482751e28cbc635ef9d1198cbd6502454a7c", size = 42110365, upload-time = "2026-04-22T09:17:18.292Z" },
 ]
 
 [[package]]

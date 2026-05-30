@@ -76,7 +76,8 @@ allinone = [
     "sgl-kernel==0.3.21",
     "torch-memory-saver==0.0.9",
     "apex",
-    "tilelang==0.1.10",
+    "tilelang==0.1.9",
+    "tile-kernels==1.0.0",
     # ML libs (CUDA-13-install.md steps 6/11)
     "open-clip-torch==3.3.0",
     "trl",

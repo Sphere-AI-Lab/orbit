@@ -83,7 +83,7 @@ uv pip install nvtx matplotlib liger-kernel==0.8.0
 uv pip install math-verify==0.9.0 latex2sympy2-extended==1.11.0
 uv pip install git+https://github.com/NVIDIA/nvidia-resiliency-ext.git@63154570cea17f8805a7fd15cc3b8cc2919ba575
 
-uv pip install tilelang==0.1.10 tile-kernels
+uv pip install tilelang==0.1.9 tile-kernels
 ```
 
 ### 7. Apex

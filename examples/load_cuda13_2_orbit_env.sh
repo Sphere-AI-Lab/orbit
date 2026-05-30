@@ -156,6 +156,14 @@ if [[ -d "${CUDNN_PATH}/lib" ]]; then
     done
 fi
 
+_SP_DIR="${ORBIT_VENV}/lib/${PYTHON_SITE_VERSION}/site-packages"
+_REAL_LIBCUDART="$(ls "${_SP_DIR}/nvidia"/*/lib/libcudart.so.* 2>/dev/null | grep -v stub | head -1)"
+if [[ -n "${_REAL_LIBCUDART}" && -e "${_SP_DIR}/tilelang/__init__.py" ]]; then
+    _TL_STUB="$(dirname "$(readlink -f "${_SP_DIR}/tilelang/__init__.py")")/lib/libcudart_stub.so"
+    [[ -e "${_TL_STUB}" || -L "${_TL_STUB}" ]] && ln -sfn "${_REAL_LIBCUDART}" "${_TL_STUB}"
+fi
+unset _SP_DIR _REAL_LIBCUDART _TL_STUB
+
 # nvidia-modelopt (imported by megatron.bridge) dlopens libz3.so.4.15 by soname.
 # The z3-solver wheel ships it under site-packages/z3/lib but does not put it on the
 # loader path, so megatron.bridge import fails without this.
