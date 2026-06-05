@@ -208,3 +208,5 @@ _examples_synced/
 
 # Claude Code runtime lock for /loop and scheduled tasks
 .claude/scheduled_tasks.lock
+
+.humanize/
