@@ -1,0 +1,349 @@
+---
+name: sglang-sync
+description: "Advance the thirdparty/sglang submodule to the current sgl-project/sglang@sglang-miles line, mirror it to impossible-inc/sglang, and realign the ACTIVE sglang pin bundle (MILES_WHEELS_TAG + torch). Run it TOGETHER with /miles-sync (the default — miles code and sglang move as one bundle), or standalone for an sglang-only bump. Hard rules: (1) on a version-bump rebase, re-apply local mirror patches (e.g. the geo3k VLM mrope gate) onto the new target, then advance the mirror by ARCHIVING the old sglang-miles tip (branch + date tag) and force-pushing the rebased tip (as sgl-project itself maintains the branch); STOP on any mirror-only commit you can't classify, a patch that won't re-apply, or an unconfirmed force; (2) pushes (impossible-inc/sglang + the PR) happen ONLY after explicit user approval."
+---
+
+# sglang-sync — advance the sglang dependency bundle
+
+Bring `thirdparty/sglang` up to the current miles sglang line and realign the
+ACTIVE pin bundle (`MILES_WHEELS_TAG`, torch, router) so a fresh `install_env.sh`
+builds a consistent env. Designed to run **together with `/miles-sync`** — the
+sglang version, torch ABI, and prebuilt wheels are one atomic bundle, so the
+miles code and the sglang it targets should move in the same PR.
+
+## ⚠️⚠️⚠️ HARD RULES ⚠️⚠️⚠️
+
+1. **STOP on mirror-only commits; never silently drop a local patch.** A
+   non-fast-forward is EXPECTED on a version bump (upstream rebases `sglang-miles`
+   onto the new release tag). Step 3 MUST list the mirror-only commits and you MUST
+   get explicit confirmation of which are LOCAL miles patches vs old-upstream-line
+   commits. Every local patch (e.g. the geo3k VLM mrope gate) must be RE-APPLIED onto
+   the rebased target (Step 3, after checkout) — never lost. STOP if you can't classify
+   a commit, a patch won't re-apply cleanly, or it may no longer be needed (ask). The
+   mirror's `sglang-miles` is advanced by ARCHIVING the old tip (branch + date tag),
+   then FORCE-PUSHING the rebased tip (Step 8) — as sgl-project does, but archived first
+   so our SHA-pinned gitlinks still resolve.
+2. **No outward pushes until the user says so.** That means BOTH the
+   `impossible-inc/sglang` branch push AND the miles-imp PR. Do all local work
+   (fetch, ff, gitlink bump, pin edits), show the combined diff, and wait for an
+   explicit "push it".
+3. **One bundle, one commit.** The sglang gitlink bump + `pins.env` + the
+   `WHEELS_STACK` row in `extract_pins.py` go in a single commit (folded into the
+   miles-sync "our changes" commit when run together).
+4. **`extract_pins.py --check` must end at exit 0 with no `[sglang-sync pending]`**
+   — that is the definition of done: ACTIVE == UPSTREAM and torch-ABI consistent.
+
+## Topology (validated)
+
+- The miles sglang line is the **`sglang-miles` branch on `sgl-project/sglang`**
+  (the official sglang repo hosts it; it is *not* a radixark fork). That is the
+  submodule's `upstream` remote.
+- `thirdparty/sglang` `origin` = `impossible-inc/sglang` (our mirror; what
+  `.gitmodules` points at and what fresh clones fetch from). The pinned commit
+  MUST exist here, so the mirror is updated **before the miles PR branch is
+  published** (the push itself still waits for approval — Step 8).
+- `impossible-inc/sglang` is a **private https** remote. The plain `git fetch
+  origin` / `git push origin` FAIL non-interactively ("could not read Username") —
+  both must use a token-injected URL: `https://x-access-token:$GH_TOKEN@github.com/impossible-inc/sglang.git`.
+  Treat the stale `refs/remotes/origin/sglang-miles` as unreliable until you have
+  fetched it through that URL.
+- **The `sglang-miles` line is rebased upstream on version bumps** (the v0.5.10
+  patches are re-applied onto v0.5.12, etc.). So across a bump our old pin is NOT an
+  ancestor of the new target. We advance our mirror the way sgl-project does — by
+  FORCE-PUSHING `sglang-miles` to the rebased tip (`$NEWPIN` = target + re-applied local
+  patches) — but FIRST archive the old tip as a branch (`sglang-miles-<base>-final`) +
+  a date tag, because our mirror is consumed by SHA-pinned gitlinks (old miles commits
+  pin the old SHA) and the archive keeps it reachable. Within a version (v0.5.12-23 →
+  v0.5.12-50) it's a plain fast-forward of `sglang-miles` itself (no archive needed).
+- `impossible-inc/sglang@sglang-miles` is **NOT a pure mirror** — it carries local
+  miles patches on top of the upstream line. Currently ONE: `[sglang-miles]
+  forward_batch: gate mrope text-only path on rl_on_policy_target` (geo3k VLM fix,
+  authored locally; sgl-project's rebase does NOT carry it forward and v0.5.12 does
+  NOT subsume it). On every version bump these local patches MUST be re-applied onto
+  the rebased target (Step 3) — the new pin is `target + re-applied patch(es)`, not the
+  bare target. Step 3 surfaces the mirror-only commits and STOPs so you can tell local
+  patches from old-upstream-line commits.
+- The torch ABI + prebuilt wheels live in `yueming-yuan/miles-wheels` under the
+  tag `cu129-x86_64[-v<sglang>]`; `WHEELS_STACK` in `extract_pins.py` maps tag →
+  `{sglang, torch, router}`.
+
+## Usage
+
+```
+/sglang-sync                       # discover target from sgl-project/sglang@sglang-miles base version
+/sglang-sync cu129-x86_64-v0.5.12  # explicit target wheels tag (miles-sync passes its UPSTREAM_WHEELS_TAG here)
+```
+
+## Workflow
+
+### Step 0 — Ensure submodule remotes
+
+```bash
+S=thirdparty/sglang
+git -C "$S" remote get-url upstream >/dev/null 2>&1 \
+    || git -C "$S" remote add upstream https://github.com/sgl-project/sglang.git
+git -C "$S" remote get-url origin    # expect https://github.com/impossible-inc/sglang.git
+```
+
+### Step 1 — Fetch + analyze the target line
+
+```bash
+S=thirdparty/sglang
+# Explicit refspec — a bare `fetch upstream sglang-miles` only guarantees FETCH_HEAD;
+# this guarantees refs/remotes/upstream/sglang-miles is the fresh tip (not stale).
+git -C "$S" fetch upstream sglang-miles:refs/remotes/upstream/sglang-miles
+
+PIN=$(git -C "$S" rev-parse HEAD)
+TGT=$(git -C "$S" rev-parse upstream/sglang-miles)
+echo "pin:    $(git -C "$S" describe --tags "$PIN")"
+echo "target: $(git -C "$S" describe --tags "$TGT")  (+$(git -C "$S" rev-list --count ${PIN}..${TGT}) commits)"
+
+SGLANG_BASE=$(git -C "$S" describe --tags --abbrev=0 "$TGT")          # e.g. v0.5.12
+NEW_TORCH=$(git -C "$S" show "$TGT:python/pyproject.toml" | grep -oE '"torch==[^"]+"' | head -1 | tr -d '"' | cut -d= -f3)
+echo "sglang base: $SGLANG_BASE   torch: $NEW_TORCH (current $(grep -oE '"torch==[^"]+"' "$S/python/pyproject.toml" | head -1))"
+```
+
+Show the user the base-version jump, the torch jump, and commit count. Optionally
+skim `git -C "$S" log --oneline ${PIN}..${TGT} | grep -i '\[sglang-miles\]'` for
+the miles-specific patches landing.
+
+### Step 2 — Determine + verify the wheels bundle
+
+```bash
+ARG="${1:-}"
+if [[ -n "$ARG" ]]; then
+    TAG="$ARG"                       # miles-sync passes UPSTREAM_WHEELS_TAG
+else
+    # No-arg: reverse-lookup the tag for this sglang base in WHEELS_STACK — this
+    # handles the legacy suffix-less v0.5.10 tag correctly (don't string-concat known
+    # bases). For a BRAND-NEW base not yet in WHEELS_STACK, fall back to the miles-wheels
+    # release naming convention `cu129-x86_64-<base>`: the release-view below proves the
+    # tag exists, and Step 4 adds the WHEELS_STACK row for it before Step 5's --write
+    # needs it — so no-arg works for a fresh bump (no chicken-and-egg). For a non-cu129
+    # bump (e.g. a future cu130 line), pass the explicit wheels tag instead.
+    TAG=$(python3 scripts/slurm/setup/extract_pins.py --tag-for-sglang "$SGLANG_BASE" 2>/dev/null) \
+        || TAG="cu129-x86_64-${SGLANG_BASE}"
+fi
+echo "[sglang] target wheels tag: $TAG"
+
+# The miles-wheels release for this tag MUST exist (install_env.sh fetches FA/apex/
+# sglang_router from it) and its torch MUST match the submodule's pyproject torch.
+gh release view "$TAG" --repo yueming-yuan/miles-wheels --json name,assets \
+    --jq '.name, ([.assets[].name] | join(", "))'
+```
+
+Confirm the release name's torch (e.g. "SGLang v0.5.12 / torch 2.11.0") equals
+`$NEW_TORCH`. If the release is missing or the torch disagrees, **STOP** — the
+bundle isn't ready; fall back to recording `[sglang-sync pending]` (see "Not ready").
+
+### Step 3 — Advance the mirror (rebase-aware; uses the TRUE origin state)
+
+The `sglang-miles` line is rebased upstream on version bumps, so do NOT assume a
+fast-forward and do NOT trust the cached `origin/sglang-miles` ref — fetch origin
+through the token URL first to learn the real mirror state.
+
+```bash
+S=thirdparty/sglang
+OURL="https://x-access-token:$GH_TOKEN@github.com/impossible-inc/sglang.git"
+# upstream: explicit refspec so the remote-tracking ref (not just FETCH_HEAD) is fresh.
+git -C "$S" fetch upstream sglang-miles:refs/remotes/upstream/sglang-miles  # target (public)
+TGT=$(git -C "$S" rev-parse refs/remotes/upstream/sglang-miles)
+# origin: anonymous token URL (no configured refspec) → only writes FETCH_HEAD, so read
+# MIRROR right after, before anything else overwrites it. This is the TRUE mirror state
+# (the cached refs/remotes/origin/sglang-miles is stale — origin is private https).
+git -C "$S" fetch "$OURL" sglang-miles
+MIRROR=$(git -C "$S" rev-parse FETCH_HEAD)
+
+if git -C "$S" merge-base --is-ancestor "$MIRROR" "$TGT"; then
+    echo "[sglang] fast-forward: mirror $MIRROR is an ancestor of target $TGT"
+    FORCE=0
+else
+    echo "[sglang] NON-fast-forward (upstream rebased, or mirror diverged)."
+    echo "  Commits on the mirror NOT in the target (must all be old-upstream-line,"
+    echo "  NOT local patches you authored — else STOP and preserve them):"
+    git -C "$S" log --oneline "$TGT".."$MIRROR"
+    FORCE=1
+fi
+```
+
+- `FORCE=0` (ancestor) → clean fast-forward; the Step 8 push needs no `--force`.
+- `FORCE=1` (non-ancestor) → expected on a version bump (rebase). **Show the user
+  the `$TGT..$MIRROR` list and get explicit confirmation** of which commits are local
+  miles patches vs old-upstream-line commits. Local patches are NOT carried forward by
+  sgl-project's rebase — they must be re-applied below. **STOP** if you can't classify
+  a commit or a patch is ambiguous.
+
+Pin/checkout the target, then RE-APPLY the local patches so the pin = target + patches
+(the gitlink in Step 5 records this `$NEWPIN`):
+
+```bash
+git -C "$S" checkout --detach "$TGT"      # start from the exact rebased target
+# For each LOCAL patch from the $TGT..$MIRROR list that the rebase didn't carry and the
+# new base doesn't subsume, re-apply it — and verify it's still needed against the new base:
+#   git -C "$S" cherry-pick <sha>          # or hand-port if context changed; preserve --author
+NEWPIN=$(git -C "$S" rev-parse HEAD)       # = $TGT if there are NO local patches
+```
+
+The submodule HEAD `$NEWPIN` (target + re-applied local patches) is the pin. Step 8
+archives the old tip, then force-pushes `sglang-miles` to `$NEWPIN`.
+
+### Step 4 — Add the WHEELS_STACK row if the tag is new
+
+```bash
+python3 scripts/slurm/setup/extract_pins.py --resolve "$TAG" >/dev/null 2>&1 \
+    && echo "WHEELS_STACK already has $TAG" \
+    || echo "ADD a row for $TAG in extract_pins.py: {sglang: $SGLANG_BASE, torch: $NEW_TORCH, router: <from release>}"
+```
+
+If missing, edit `WHEELS_STACK` in `scripts/slurm/setup/extract_pins.py` — add
+`"$TAG": {"sglang": "<base>", "torch": "<pyproject torch>", "router": "<release router version>"}`.
+(`router` = version in the `sglang_router-*.whl` asset of the release.)
+
+### Step 5 — Bump the gitlink + realign ACTIVE pins
+
+```bash
+git add thirdparty/sglang        # records the advanced submodule commit
+
+# Set ACTIVE to the target tag (the ONE hand-owned pin), then re-derive everything:
+sed -i "s|^MILES_WHEELS_TAG=.*|MILES_WHEELS_TAG=\${MILES_WHEELS_TAG:-$TAG}|" scripts/slurm/setup/pins.env
+python3 scripts/slurm/setup/extract_pins.py --write    # re-derives torch/sglang/router + refreshes UPSTREAM_*
+```
+
+`--write` reads `TORCH_VERSION` from the now-bumped submodule pyproject and the
+derived fields from `WHEELS_STACK[$TAG]`; it **refuses (exit 2)** if they disagree
+(submodule not actually bumped, or WHEELS_STACK row wrong). Fix before continuing.
+
+### Step 6 — Confirm done (match what install_env.sh fails closed on)
+
+`extract_pins.py --check` only validates torch-ABI + ACTIVE/UPSTREAM tag. But
+`install_env.sh` *also* fail-closes on (a) the submodule base tag == the bundle's
+sglang, and (b) the `sglang_router` wheel version. So "done" must verify all three,
+or you'll declare success and watch the install abort:
+
+Each check **aborts** on failure (`exit 1`) — otherwise the block ends on a
+`git diff` that returns 0 and the flow would commit/push past a failed check.
+
+```bash
+# 1. pins self-consistent AND no residual pending. NOTE: --check exits 0 on a bare
+#    [sglang-sync pending] (it's deferrable for CI), so the exit code alone does NOT
+#    catch it — capture the output and grep. In the together/default flow (and any
+#    same-base bump) ACTIVE must == UPSTREAM, i.e. NO pending; if one remains the
+#    advance didn't take. (Exception: a deliberate standalone bump AHEAD of a
+#    not-yet-bumped miles Dockerfile — only then is a reverse pending acceptable;
+#    the operator confirms that case and skips this grep.)
+check_out=$(python3 scripts/slurm/setup/extract_pins.py --check 2>&1) \
+    || { printf '%s\n' "$check_out" >&2; echo "STOP: --check not clean (ABI/drift)" >&2; exit 1; }
+printf '%s\n' "$check_out"
+grep -qF '[sglang-sync pending]' <<<"$check_out" \
+    && { echo "STOP: [sglang-sync pending] remains — ACTIVE != UPSTREAM, advance incomplete" >&2; exit 1; } || true
+
+# 2. submodule base == the sglang the ACTIVE tag implies (install_env.sh fails closed on this)
+eval "$(python3 scripts/slurm/setup/extract_pins.py --resolve "$TAG")"   # sets MILES_WHEELS_{SGLANG,...}_VERSION
+sub_base=$(git -C thirdparty/sglang describe --tags --abbrev=0 HEAD)
+[[ "$sub_base" == "$MILES_WHEELS_SGLANG_VERSION" ]] \
+    && echo "✓ submodule $sub_base == $MILES_WHEELS_SGLANG_VERSION" \
+    || { echo "STOP: submodule $sub_base != $MILES_WHEELS_SGLANG_VERSION — gitlink/tag mismatch" >&2; exit 1; }
+
+# 3. the release ships sglang_router-$SGLANG_ROUTER_VERSION (install_env.sh fetches it by
+#    prefix and FAILS CLOSED — exit 1 — on a version mismatch, so this must hold)
+gh release view "$TAG" --repo yueming-yuan/miles-wheels --json assets \
+    --jq '[.assets[].name] | map(select(startswith("sglang_router-'"$SGLANG_ROUTER_VERSION"'-"))) | length' \
+    | grep -qx 1 \
+    && echo "✓ release has sglang_router-$SGLANG_ROUTER_VERSION" \
+    || { echo "STOP: release sglang_router != $SGLANG_ROUTER_VERSION — fix WHEELS_STACK router field" >&2; exit 1; }
+
+git diff --cached --stat            # thirdparty/sglang + pins.env + extract_pins.py
+```
+
+All three green = the bundle install_env.sh will build is consistent. (Standalone
+with ACTIVE deliberately ahead of a not-yet-bumped miles Dockerfile → a *reverse*
+pending notice is acceptable; note it.)
+
+### Step 7 — Stage + commit (fold into miles-sync's commit when combined)
+
+Standalone: one commit.
+
+```bash
+git add scripts/slurm/setup/pins.env scripts/slurm/setup/extract_pins.py thirdparty/sglang
+git commit -m "[sglang] sync sglang-miles $SGLANG_BASE (torch $NEW_TORCH); ACTIVE -> $TAG"
+```
+
+When invoked by `/miles-sync`: do NOT commit separately — these staged changes are
+folded into miles-sync's single "our changes" commit (Step 6 there), so the PR has
+the miles merge + one combined bundle commit.
+
+### Step 8 — Publish: sync branch now, archive + force-advance sglang-miles later (ONLY after explicit approval)
+
+⛔ No outward push without an explicit "push it". The gitlink points at `$NEWPIN`
+(= `$TGT` + re-applied local patches), which must be fetchable from
+`impossible-inc/sglang` BEFORE the miles PR is published (so the submodule resolves for
+anyone who fetches it). Push the dated sync branch first — it anchors the pin (gc-safe +
+fetchable + reviewable) before we touch `sglang-miles`:
+
+```bash
+OURL="https://x-access-token:$GH_TOKEN@github.com/impossible-inc/sglang.git"
+S=thirdparty/sglang
+NEWPIN=$(git -C "$S" rev-parse HEAD)
+BR="sync-${SGLANG_BASE}-$(date +%Y%m%d)"          # e.g. sync-v0.5.12-20260603
+git -C "$S" checkout -B "$BR" "$NEWPIN"            # anchor the pin on a branch (gc-safe)
+git -C "$S" push "$OURL" "refs/heads/$BR:refs/heads/$BR"   # NON-force; sglang-miles untouched
+```
+
+That push alone makes the pin durable AND resolvable (`git submodule update` fetches
+`$NEWPIN` from `$BR`). **Defer here if asked ("branch out but don't PR yet").**
+
+To land it on `sglang-miles`, advance by Step 3's `$FORCE`. A review PR (`$BR ->
+sglang-miles`) is optional — once the new tip lands it auto-marks **Merged** (its head
+becomes the base tip), so it's just a review surface.
+
+**`$FORCE=0` (within-version bump — `sglang-miles` IS an ancestor of `$NEWPIN`):** plain
+fast-forward. Push directly (or "Rebase and merge" the review PR) — both keep it linear:
+
+```bash
+git -C "$S" push "$OURL" "$NEWPIN:refs/heads/sglang-miles"   # fast-forward, no --force
+```
+
+**`$FORCE=1` (version bump — upstream rebased `sglang-miles`; `$NEWPIN` diverges, the
+GitHub UI can't auto-merge):** force-push `sglang-miles` to `$NEWPIN`, exactly as
+sgl-project maintains the branch — but ARCHIVE the old tip FIRST so SHA-pinned gitlinks
+(old miles commits) still resolve:
+
+```bash
+OLD=$(git -C "$S" ls-remote "$OURL" sglang-miles | awk '{print $1}')   # TRUE current tip
+OLD_BASE=$(git -C "$S" describe --tags --abbrev=0 "$OLD"); D=$(date +%Y%m%d)
+# 1. archive old tip — branch (robust for `git submodule update`) + date tag
+git -C "$S" push "$OURL" "$OLD:refs/heads/sglang-miles-${OLD_BASE}-final"
+git -C "$S" tag "sglang-miles-${OLD_BASE}-$D" "$OLD" && git -C "$S" push "$OURL" "sglang-miles-${OLD_BASE}-$D"
+# 2. force-advance (lease-guarded to the archived OLD) + date-tag the new tip
+git -C "$S" push --force-with-lease=sglang-miles:"$OLD" "$OURL" "$NEWPIN:refs/heads/sglang-miles"
+git -C "$S" tag "sglang-miles-${SGLANG_BASE}-$D" "$NEWPIN" && git -C "$S" push "$OURL" "sglang-miles-${SGLANG_BASE}-$D"
+```
+
+NOTE: `.gitmodules` sets `branch = sglang-miles`, so `git submodule update --remote`
+follows the new tip; default gitlink updates (`PULL_REMOTE=0`) use the pinned SHA.
+
+Then the miles-imp branch + PR (standalone), or hand back to miles-sync Step 9 (combined).
+
+### Test plan (always — torch jumps are heavyweight)
+
+A torch minor/major bump (e.g. 2.9.1 → 2.11.0) can break Megatron-LM / TE / apex /
+flash-attn. Put these in the PR body:
+
+- [ ] `bash scripts/slurm/setup/install_env.sh` in a fresh GPU salloc (full rebuild — torch changed).
+- [ ] `python scripts/slurm/setup/verify_env.py` passes.
+- [ ] Sanity-launch a recipe to first eval.
+
+## Not ready → fall back to pending
+
+If Step 2 finds the wheels release missing, or Step 1 shows `sgl-project/sglang@sglang-miles`
+is still on the OLD base (sgl-project hasn't rebased to the version miles wants yet),
+the bundle can't be advanced. Do NOT force it. Leave ACTIVE where it is, let
+`extract_pins.py --check` keep emitting `[sglang-sync pending]`, and tell the user to
+retry sglang-sync once upstream is ready. This is the safe fallback the install-time
+ABI guard backstops.
+
+## See also
+
+- [`/miles-sync`](../miles-sync/SKILL.md) — invokes this at its Step 5d pending gate (sync-together).
+- [`scripts/slurm/setup/extract_pins.py`](../../../scripts/slurm/setup/extract_pins.py) — `WHEELS_STACK`, `--resolve`, `--check`.
+- [`scripts/slurm/docs/debug-notes/upstream-sync-design.md`](../../../scripts/slurm/docs/debug-notes/upstream-sync-design.md) — ACTIVE/UPSTREAM model + sglang topology.

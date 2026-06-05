@@ -66,6 +66,35 @@ export INSTALL_FLASH_ATTN INSTALL_FLASH_ATTN_3 INSTALL_APEX
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/pins.env"
 
+# Re-derive the sglang-stack fields from the EFFECTIVE MILES_WHEELS_TAG. pins.env
+# bakes MILES_WHEELS_TORCH_VERSION / MILES_WHEELS_SGLANG_VERSION / SGLANG_ROUTER_VERSION
+# as a static snapshot, but MILES_WHEELS_TAG is independently overridable at runtime
+# (`MILES_WHEELS_TAG=... bash install_env.sh`). Without re-deriving, an override of the
+# tag would leave the torch/sglang fields stale and the ABI guard below would pass while
+# _fetch_miles_wheel pulls a mismatched-ABI wheel set. WHEELS_STACK in extract_pins.py is
+# the single source of truth; resolve against it so the tag is always authoritative.
+_resolved=$(python3 "$SCRIPT_DIR/extract_pins.py" --resolve "$MILES_WHEELS_TAG") || {
+    echo "FATAL: could not resolve MILES_WHEELS_TAG=$MILES_WHEELS_TAG via extract_pins.py --resolve" >&2
+    echo "       (unknown wheels tag, or python3 unavailable). Add a WHEELS_STACK row, or use a known tag." >&2
+    exit 1
+}
+eval "$_resolved"
+unset _resolved
+
+# sglang-stack torch-ABI guard (fail closed). The prebuilt flash-attn /
+# flash-attn-3 / apex wheels in $MILES_WHEELS_TAG are compiled against a specific
+# torch C++ ABI; MILES_WHEELS_TORCH_VERSION (derived from the tag) MUST equal the
+# torch we install (TORCH_VERSION, from the sglang submodule's pyproject). Mismatch
+# = torch-X wheels into a torch-Y env = ImportError/segfault. Placed before the GPU
+# preflight so a pins/override check fails on the real cause, not a missing GPU.
+if [[ -n "${MILES_WHEELS_TORCH_VERSION:-}" && "$MILES_WHEELS_TORCH_VERSION" != "$TORCH_VERSION" ]]; then
+    echo "FATAL: MILES_WHEELS_TAG=$MILES_WHEELS_TAG ships torch-$MILES_WHEELS_TORCH_VERSION wheels," >&2
+    echo "       but TORCH_VERSION=$TORCH_VERSION. flash-attn/apex are torch-ABI-bound — this would" >&2
+    echo "       build an ImportError/segfault env. Run sglang-sync to realign pins + submodule," >&2
+    echo "       or set MILES_WHEELS_TAG to the release built for torch $TORCH_VERSION." >&2
+    exit 1
+fi
+
 # Non-fatal drift check — warn if pins.env hasn't been regenerated since the
 # Dockerfile bumped. CI / `--check` makes it hard. Skipped if sources missing
 # (e.g. fresh clone without submodules — install_env.sh inits them later).
@@ -190,6 +219,49 @@ echo "[preflight] CUDA_HOME=$CUDA_HOME"
 
 mkdir -p "$THIRDPARTY_DIR"
 
+# ---------- submodules: init + fail-closed validation BEFORE env mutation -
+# Init the source tree and validate the sglang/torch line HERE — before the
+# torch install below mutates a (possibly reused) conda env. A wrong submodule
+# vs MILES_WHEELS_TAG, or a TORCH_VERSION override that disagrees with the
+# submodule's pyproject, must abort before we touch torch. Needs only git +
+# pins.env values; no conda/torch dependency, so it is safe this early.
+echo "[src] initialising submodules under $THIRDPARTY_DIR"
+git -C "$MILES_REPO" submodule update --init --recursive \
+    thirdparty/Megatron-LM thirdparty/sglang thirdparty/Megatron-Bridge
+
+if [[ "$PULL_REMOTE" == "1" ]]; then
+    echo "[src] PULL_REMOTE=1 — bumping submodules to branch HEAD"
+    git -C "$MILES_REPO" submodule update --remote --recursive \
+        thirdparty/Megatron-LM thirdparty/sglang thirdparty/Megatron-Bridge
+fi
+
+MEGATRON_SRC="$THIRDPARTY_DIR/Megatron-LM"
+SGLANG_SRC="$THIRDPARTY_DIR/sglang"
+MEGATRON_BRIDGE_SRC="$THIRDPARTY_DIR/Megatron-Bridge"
+
+# Fail closed on submodule ↔ ACTIVE-pins mismatch (needs the actual submodule
+# HEAD, which only git can see — complements the file-derivable preflight ABI
+# guard up top). The sglang line just checked out must match the wheels bundle
+# the ACTIVE pins describe, else we'd build sglang vX but install vY's torch-ABI
+# wheels. Skipped if `git describe` finds no tag (shallow/odd clone).
+sub_sglang_base=$(git -C "$SGLANG_SRC" describe --tags --abbrev=0 2>/dev/null || echo "")
+if [[ -n "${MILES_WHEELS_SGLANG_VERSION:-}" && -n "$sub_sglang_base" \
+      && "$sub_sglang_base" != "$MILES_WHEELS_SGLANG_VERSION" ]]; then
+    echo "FATAL: thirdparty/sglang is at $sub_sglang_base but pins.env expects $MILES_WHEELS_SGLANG_VERSION" >&2
+    echo "       (MILES_WHEELS_TAG=$MILES_WHEELS_TAG). The wheels won't match the sglang you build." >&2
+    echo "       Run sglang-sync to realign, or set MILES_WHEELS_TAG to the matching release." >&2
+    exit 1
+fi
+# The submodule's own torch pin must equal TORCH_VERSION (catches a hand-set
+# TORCH_VERSION override that disagrees with what sglang was built against).
+sub_torch=$(grep -oE '"torch==[0-9][^"]*"' "$SGLANG_SRC/python/pyproject.toml" 2>/dev/null \
+            | head -1 | tr -d '"' | cut -d= -f3)
+if [[ -n "$sub_torch" && "$sub_torch" != "$TORCH_VERSION" ]]; then
+    echo "FATAL: thirdparty/sglang pyproject pins torch==$sub_torch but TORCH_VERSION=$TORCH_VERSION." >&2
+    echo "       Regenerate pins: python scripts/slurm/setup/extract_pins.py --write" >&2
+    exit 1
+fi
+
 # shellcheck disable=SC1091
 source "$CONDA_ROOT/etc/profile.d/conda.sh"
 
@@ -211,21 +283,8 @@ UV="uv pip install --python $CONDA_PREFIX/bin/python"
 echo "[torch] torch==$TORCH_VERSION + torchvision from $TORCH_INDEX_URL"
 $UV --index-url "$TORCH_INDEX_URL" "torch==$TORCH_VERSION" torchvision
 
-# ---------- patched Megatron-LM + sglang (git submodules, source install) -
-
-echo "[src] initialising submodules under $THIRDPARTY_DIR"
-git -C "$MILES_REPO" submodule update --init --recursive \
-    thirdparty/Megatron-LM thirdparty/sglang thirdparty/Megatron-Bridge
-
-if [[ "$PULL_REMOTE" == "1" ]]; then
-    echo "[src] PULL_REMOTE=1 — bumping submodules to branch HEAD"
-    git -C "$MILES_REPO" submodule update --remote --recursive \
-        thirdparty/Megatron-LM thirdparty/sglang thirdparty/Megatron-Bridge
-fi
-
-MEGATRON_SRC="$THIRDPARTY_DIR/Megatron-LM"
-SGLANG_SRC="$THIRDPARTY_DIR/sglang"
-MEGATRON_BRIDGE_SRC="$THIRDPARTY_DIR/Megatron-Bridge"
+# ---------- patched Megatron-LM + sglang (editable source installs) -------
+# (submodules were init'd + validated above, before the torch install)
 
 # Megatron-Core's pyproject deps are just `torch>=2.6.0, numpy, packaging`,
 # all already satisfied. --no-deps avoids any chance of pip re-resolving torch.
@@ -241,6 +300,24 @@ PY_SITE=$(python -c "import site; print(site.getsitepackages()[0])")
 echo "$MEGATRON_SRC" > "$PY_SITE/miles-megatron-source-root.pth"
 echo "[src] miles-megatron-source-root.pth -> $MEGATRON_SRC"
 
+# sglang's pyproject (post-2026-05) declares a setuptools-rust extension that
+# builds `thirdparty/sglang/rust/sglang-grpc` via cargo + protoc. The
+# `lmsysorg/sglang` docker image installs both via apt; we don't have root, so
+# put rustup in $HOME/.cargo and protoc in the conda env's bin/.
+# Idempotent: rustup -y is a no-op if already installed; conda install ditto.
+if ! command -v cargo &>/dev/null && [[ ! -x "$HOME/.cargo/bin/cargo" ]]; then
+    echo "[deps] installing rustup (sglang setuptools-rust ext build dep)"
+    curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 2 -sSf https://sh.rustup.rs | sh -s -- -y
+fi
+export PATH="$HOME/.cargo/bin:$PATH"
+command -v cargo >/dev/null \
+    || { echo "FATAL: cargo still not on PATH after rustup install" >&2; exit 1; }
+
+if ! command -v protoc >/dev/null; then
+    echo "[deps] installing libprotobuf + protobuf into $MILES_ENV_NAME (sglang-grpc build dep)"
+    "$CONDA_ROOT/bin/conda" install -n "$MILES_ENV_NAME" -c conda-forge -y libprotobuf protobuf
+fi
+
 # SGLang's pyproject declares the full runtime tree (fastapi/uvicorn/orjson/
 # flashinfer_python/sglang-kernel/flash-attn-4/cuda-python/...). We DON'T use
 # --no-deps because we're not starting from `lmsysorg/sglang:v0.5.10` — pip
@@ -255,6 +332,9 @@ $UV -e "$SGLANG_SRC/python[all]" \
     --extra-index-url "$FLASHINFER_INDEX_URL" \
     --extra-index-url "$TORCH_INDEX_URL" \
     --index-strategy unsafe-first-match
+
+# sglang_router is installed from the miles-wheels release (NOT PyPI) in the
+# prebuilt-wheels section below, to match the upstream Dockerfile's wheel source.
 
 # ---------- recipe-required runtime deps (not in requirements.txt) -------
 
@@ -342,6 +422,26 @@ if [[ "$INSTALL_APEX" == "1" ]]; then
     $UV "$apex_wheel"
 fi
 
+# sglang_router from the SAME miles-wheels release as FA/apex — NOT from PyPI.
+# The release wheel may be a radixark/patched build; a PyPI `sglang-router==X`
+# can share the version number yet diverge from what the upstream Dockerfile
+# installs (it COPYs /tmp/wheels/sglang_router-*.whl from this release). miles
+# code version-gates on sglang_router.__version__, so provenance matters. Rust/
+# abi3 wheel — NOT torch-ABI-bound — installed here (after the editable sglang
+# above) so it wins over any sglang_router pulled transitively from an index.
+router_wheel=$(_fetch_miles_wheel sglang_router-)
+echo "[deps] sglang_router <- $(basename "$router_wheel") (release wheel, matches Dockerfile source)"
+case "$(basename "$router_wheel")" in
+    sglang_router-"$SGLANG_ROUTER_VERSION"-*) : ;;
+    *)
+        echo "FATAL: release sglang_router wheel $(basename "$router_wheel") does not match pinned $SGLANG_ROUTER_VERSION." >&2
+        echo "       Update WHEELS_STACK in extract_pins.py for MILES_WHEELS_TAG=$MILES_WHEELS_TAG," >&2
+        echo "       or use a miles-wheels release that ships sglang_router-$SGLANG_ROUTER_VERSION." >&2
+        exit 1
+        ;;
+esac
+$UV "$router_wheel"
+
 # ---------- sgl-model-gateway binary -------------------------------------
 # Standalone Rust binary that fronts multiple sglang servers (multi-replica
 # disagg rollout routing). Docker drops it into /usr/local/bin/; bare-metal we
@@ -365,8 +465,12 @@ if [[ "$INSTALL_SGL_GATEWAY" == "1" ]]; then
         tar xzf "$gateway_tarball" -C "$CONDA_PREFIX/bin/"
         chmod +x "$CONDA_PREFIX/bin/sgl-model-gateway"
     else
+        # EXPLICIT HOST EXCEPTION (not an sglang-stack pin issue): the gateway is a
+        # standalone Rust binary, NOT torch-ABI-bound, so it's exempt from the ABI
+        # guards above. It's skipped purely because this host's GLIBC predates the
+        # prebuilt's 2.38 floor. Only needed for multi-server sglang routing.
         echo "[deps] sgl-model-gateway: skipping — host GLIBC $GLIBC_VER < 2.38 (prebuilt needs 2.38+)"
-        echo "[deps] sgl-model-gateway: only needed for multi-server sglang routing; build from source if you need it"
+        echo "[deps] sgl-model-gateway: build from source (SGL_ROUTER_USE_WHEELS=0 path) if you need routing"
     fi
 fi
 
