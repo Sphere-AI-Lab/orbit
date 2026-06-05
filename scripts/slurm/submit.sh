@@ -19,6 +19,13 @@
 #   TIME         # overrides EXPERIMENT_TIME
 #   JOB_NAME     # overrides the slurm job name (defaults to experiment name)
 #   SBATCH_EXTRA # extra args spliced into sbatch, e.g. "--exclude=slinky-15"
+#
+# Passed straight through to the run via sbatch --export=ALL (not parsed here):
+#   SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK=true
+#                # REQUIRED for the v0.5.12 sync on the torch-2.9.1 env — the
+#                # sglang engine asserts sglang-kernel>=0.4.2.post2 at launch,
+#                # which the (working) 0.4.1 kernel fails. See docs/launcher.md
+#                # "Running the v0.5.12 sync".
 
 set -euo pipefail
 
