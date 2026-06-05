@@ -1,7 +1,7 @@
 # miles upstream PRs report
 
 **Period**: since `7a6cf48e6` (`2026-05-19` — "add Code of Conduct (#1145)")
-**Upstream tip**: `1e1679706` "Support atomic weight update groups (#1264)"
+**Synced upstream snapshot**: through `1e1679706` (commit date 2026-06-01) "Support atomic weight update groups (#1264)"
 **Total commits**: 100 (~99 PRs)
 **Flagged (touch files we've modified)**: 9 files
 **Watchlist hits (touch pin-source files)**: 1 (sglang bump), +2 requirements.txt (test-infra)
@@ -22,12 +22,12 @@
 - `SGLANG_IMAGE_TAG`: `v0.5.10` → `v0.5.12-cu129`
 - `WHEELS_TAG`: `cu129-x86_64` → `cu129-x86_64-v0.5.12`
 
-⇒ This is the **sglang-sync trigger**. After the merge, `extract_pins.py --write`
-will move `UPSTREAM_SGLANG_IMAGE_TAG`/`UPSTREAM_WHEELS_TAG` forward and print
-`[sglang-sync pending]`. ACTIVE (`cu129-x86_64`, sglang v0.5.10, torch 2.9.1) stays
-put until `/sglang-sync cu129-x86_64-v0.5.12` advances it (target: sglang v0.5.12,
-torch 2.11.0, router 0.3.2). The target tag `cu129-x86_64-v0.5.12` is **already in
-`WHEELS_STACK`**, so the line is ready → **sync together** (miles-sync default).
+⇒ Pre-decision analysis: this is the **sglang-sync trigger**. In the normal
+sync-together path, `/sglang-sync cu129-x86_64-v0.5.12` would advance ACTIVE to
+sglang v0.5.12 / torch 2.11.0 / router 0.3.2. For this PR, that recommendation was
+superseded by the Outcome below: torch 2.11 proved not bare-metal-viable on this
+cu129 / CUDA-12.8 host, so ACTIVE stays on the torch-2.9.1 wheel bundle and only
+the sglang source submodule moves ahead.
 
 ### PRs #1084, #1259 — `requirements.txt` (test-infra, low risk)
 - #1084 "Add real-Ray integration tests for RolloutManager" — adds a test dep.
@@ -111,7 +111,7 @@ not a blocker. We have not modified `requirements.txt` → clean merge expected.
 - **Model support**: DeepSeek v3.2 (#963, #1213, #1273, #1278 v4), Kimi 2.5 full+lora
   (#1219–#1223), GLM-5 (#1189, #1191), qwen3.5 (#1215), npu qwen3-4b (#1125), gemma.
 - **Indexer / replay**: #1248–#1257 (replay registration, GLM5 indexer replay).
-- **Atomic weight update groups**: #1264 (upstream tip).
+- **Atomic weight update groups**: #1264 (synced snapshot tip).
 - **fp8**: #1182 "Select SGLang FP8 block quant kernel to match inference".
 - **CI**: #1149, #1173, #1191, #1227, #1259, #1270, #1274.
 - **TITO session refactor**: #1142.
@@ -120,15 +120,16 @@ not a blocker. We have not modified `requirements.txt` → clean merge expected.
 
 ---
 
-## Recommendation
+## Recommendation (pre-decision; superseded by Outcome)
 
 Proceed with the merge. Expect conflicts on the 9 both-changed files above — the
 `miles/ray/rollout.py` modify/delete is the one that needs real thought (port our
 `_compute_zero_std_metrics` tweak forward). Per HARD RULE 1 the skill STOPS at the
 conflict and surfaces everything before resolving.
 
-After the merge resolves, the sglang gate fires: `[sglang-sync pending]` → drive
-`/sglang-sync cu129-x86_64-v0.5.12` in the same PR (line is ready).
+The original pre-merge recommendation was to drive `/sglang-sync
+cu129-x86_64-v0.5.12` in the same PR. The final decision changed after the torch
+2.11 bare-metal validation failed; see the Outcome below for the shipped plan.
 
 ---
 

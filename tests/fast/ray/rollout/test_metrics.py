@@ -26,8 +26,8 @@ class TestComputeZeroStdMetrics:
         args = make_args(advantage_estimator="grpo", reward_key=None)
         samples = make_samples_grouped(3, 4, rewards=[1.0] * 4 + [0.0] * 4 + [0.0, 1.0, 0.0, 1.0])
         out = _compute_zero_std_metrics(args, samples)
-        assert out["zero_std/count_1.0"] == 1
-        assert out["zero_std/count_0.0"] == 1
+        assert out["zero_std/count_1"] == 1
+        assert out["zero_std/count_0"] == 1
         assert out["zero_std/all_zero_percentage"] == pytest.approx(1 / 3)
         assert out["zero_std/all_one_percentage"] == pytest.approx(1 / 3)
 

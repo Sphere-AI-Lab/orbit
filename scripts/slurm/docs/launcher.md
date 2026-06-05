@@ -8,7 +8,8 @@ the script do X" questions.
 
 ## Running the v0.5.12 sync: torch-2.9.1 env + `SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK`
 
-The 2026-06 upstream sync bumped the sglang **source** to v0.5.12 (submodule
+The 2026-06 upstream sync through `radixark/miles@1e1679706` (commit date
+2026-06-01) bumped the sglang **source** to v0.5.12 (submodule
 `thirdparty/sglang`), but we keep running it on the **existing torch-2.9.1
 `miles` conda env** — we do *not* rebuild to torch 2.11. Upstream v0.5.12 pairs
 with torch 2.11, whose `sgl-kernel` / `deep_gemm` are published **cu13-only**;

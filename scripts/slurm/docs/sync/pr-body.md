@@ -1,8 +1,9 @@
 ## Summary
 
-Sync with upstream `radixark/miles` — **100 upstream commits** merged (merge-base
-`7a6cf48e6` → `1e1679706`). Brings in the **sglang v0.5.10 → v0.5.12** source bump
-(upstream's Dockerfile moved the sglang line and the merged miles code targets it).
+Sync with upstream `radixark/miles` through commit `1e1679706` (commit date
+2026-06-01) — **100 upstream commits** merged (merge-base `7a6cf48e6` →
+`1e1679706`). Brings in the **sglang v0.5.10 → v0.5.12** source bump (upstream's
+Dockerfile moved the sglang line and the merged miles code targets it).
 
 > **Scope note:** upstream pairs v0.5.12 with torch 2.11, which is **not bare-metal-viable**
 > on this cu129 / CUDA-12.8 host (its `sgl-kernel` / `deep_gemm` are published cu13-only). So

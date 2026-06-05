@@ -406,7 +406,9 @@ class TestMultimodal:
         expected_mti = {
             k: v
             for k, v in processor(text=PROMPT, **multimodal_inputs).items()
-            if k not in ["input_ids", "attention_mask"]
+            # our rollout path drops mm_token_type_ids (the megatron forward rejects it,
+            # see backends/megatron_utils/model.py); mirror that here.
+            if k not in ["input_ids", "attention_mask", "mm_token_type_ids"]
         }
 
         result = _run_generate(variant, generation_env, _make_sample(multimodal_inputs=multimodal_inputs))
