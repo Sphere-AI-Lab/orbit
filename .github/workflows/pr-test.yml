@@ -117,11 +117,16 @@ jobs:
         ${{ (github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run-ci-image') || contains(github.event.pull_request.labels.*.name, 'run-ci-all')) && '--match-all-labels' || '' }}
     secrets: inherit
 
+  # Stage C: heavy multi-GPU suites (8-GPU H100 / 4-GPU H200 / 2-GPU H200).
+  # Gated by `run-ci-full-gpu` for the same reason as Stage B: this fork has no
+  # self-hosted GPU runners, so without the gate these jobs would queue forever
+  # on every PR. Remove the label check (or just keep adding the label) once GPU
+  # runners are attached to impossible-inc/miles-imp.
   stage-c-8-gpu-h100:
     needs: [resolve-ci-image, stage-a-cpu]
     if: |
       always() && !failure() && !cancelled() &&
-      ((github.event_name == 'workflow_dispatch') || (github.event.pull_request))
+      ((github.event_name == 'workflow_dispatch') || (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'run-ci-full-gpu')))
     strategy:
       fail-fast: false
       matrix:
@@ -141,7 +146,7 @@ jobs:
     needs: [resolve-ci-image, stage-a-cpu]
     if: |
       always() && !failure() && !cancelled() &&
-      ((github.event_name == 'workflow_dispatch') || (github.event.pull_request))
+      ((github.event_name == 'workflow_dispatch') || (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'run-ci-full-gpu')))
     strategy:
       fail-fast: false
       matrix:
@@ -161,7 +166,7 @@ jobs:
     needs: [resolve-ci-image, stage-a-cpu]
     if: |
       always() && !failure() && !cancelled() &&
-      ((github.event_name == 'workflow_dispatch') || (github.event.pull_request))
+      ((github.event_name == 'workflow_dispatch') || (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'run-ci-full-gpu')))
     strategy:
       fail-fast: false
       matrix:

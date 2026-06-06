@@ -63,10 +63,12 @@ does not fail the PR.) Full rationale: `docs/launcher.md` → "Running the v0.5.
   `pr-test.yml` (took upstream's `stage-b-2-gpu-h200`, kept our `run-ci-fast-gpu` gate),
   `miles/ray/rollout.py` modify/delete (our `_compute_zero_std_metrics` tweak ported to the
   new `miles/ray/rollout/metrics.py`).
-- **CI follow-up:** upstream's new `stage-c-{8gpu-h100,4gpu-h200,2gpu-h200}` jobs are
-  **ungated** (`if: pull_request`) and will queue on this runner-less fork. Only
-  `stage-b-2-gpu-h200` was gated behind `run-ci-fast-gpu` in this PR; the stage-c jobs were
-  left upstream-exact. Gate or attach runners before relying on PR CI.
+- **GPU CI gating:** this fork has no self-hosted GPU runners, so every GPU job is opt-in
+  by PR label — `stage-b-2-gpu-h200` behind `run-ci-fast-gpu`, and upstream's new
+  `stage-c-{8gpu-h100,4gpu-h200,2gpu-h200}` jobs behind `run-ci-full-gpu` (gated in this
+  PR). A default PR triggers **no** GPU jobs; the CPU stages run on `ubuntu-latest` and
+  `workflow_dispatch` still runs everything. Drop the label checks (or keep applying the
+  labels) once GPU runners are attached to impossible-inc/miles-imp.
 
 ## Divergence from upstream after sync
 
