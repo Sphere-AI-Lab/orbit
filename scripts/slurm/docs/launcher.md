@@ -6,6 +6,58 @@ Why the slurm launcher is shaped the way it is. The main script is
 `.claude/skills/slurm-launch/SKILL.md` — this file is for "why does
 the script do X" questions.
 
+## Running the v0.5.12 sync: torch-2.9.1 env + `SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK`
+
+The 2026-06 upstream sync through `radixark/miles@1e1679706` (commit date
+2026-06-01) bumped the sglang **source** to v0.5.12 (submodule
+`thirdparty/sglang`), but we keep running it on the **existing torch-2.9.1
+`miles` conda env** — we do *not* rebuild to torch 2.11. Upstream v0.5.12 pairs
+with torch 2.11, whose `sgl-kernel` / `deep_gemm` are published **cu13-only**;
+this host is CUDA 12.8, so those kernels can't load. The torch-2.9.1 env (cu12
+`sgl-kernel` 0.4.1) runs the v0.5.12 source fine — validated end-to-end on geo3k
+and VAGEN (FrozenLake / Sokoban), smoke through multi-step training (Sokoban eval
+0.48 → 0.70 over 20 rollouts).
+
+**Required knob — pass `SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK=true` when you
+submit.** v0.5.12's engine startup asserts `sglang-kernel >= 0.4.2.post2` (and,
+for the flashinfer attention backend, `flashinfer >= 0.6.11.post1`) in
+`sglang/srt/entrypoints/engine.py:_set_envs_and_config`. The env has 0.4.1 /
+0.6.7.post2 — below those floors but functionally fine: the assert is a *version
+guard*, not a real ABI gate (cuda-graph capture, rollout, and training all pass).
+Without the skip, every `SGLangEngine` subprocess dies at launch with
+`sglang-kernel is installed with version 0.4.1, which is less than the minimum
+required version 0.4.2.post2`.
+
+`--export=ALL` carries the var `submit.sh` → `sbatch` → ray-start `srun` →
+`ray start` → the engine subprocess, so setting it on the submit line is enough:
+
+```bash
+SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK=true \
+  bash scripts/slurm/submit.sh <experiment-name>
+```
+
+Caveats:
+- **`verify_env.py --imports-only` does not catch this** — the assert fires at
+  engine *launch*, not import, so it passes (24/24) while the engine would still
+  die. The runtime smoke is the real gate.
+- **Do not** `pip install -U sglang-kernel` / `deep_gemm` / `flashinfer` to
+  satisfy the assert — that pulls the cu13 / torch-2.11 build, which won't load
+  on this host.
+- **The pin-model intentionally rejects this combo — don't regenerate or
+  fresh-install.** `setup/{pins.env,extract_pins.py,install_env.sh}` are left
+  exactly as `main` (the #12 pin bundle), so `pins.env` still pins the working
+  torch-2.9.1 / `cu129-x86_64` wheels — which is what the `miles` env actually
+  runs. But the submodule is now v0.5.12 (pyproject `torch==2.11`), *ahead* of
+  that wheel bundle, so `extract_pins.py --check` and `install_env.sh` **fail
+  closed with an ABI mismatch** (`wheels torch 2.9.1 != submodule torch 2.11`).
+  That is expected: the source is deliberately ahead of the wheels. **Do not**
+  `extract_pins.py --write` and **do not** fresh-install for this sync — use the
+  prebuilt `miles` env. (These guards are dev tooling, not CI-gated, so they do
+  not fail the PR.) A clean-room installer for "torch-2.9.1 binaries + v0.5.12
+  source" needs the parked torch-constraint work
+  (`docs/debug-notes/miles-sync-2026-06-02/setup-scripts-vs-main.patch`) and is
+  follow-up.
+
 ## Step memory cap (`--mem=0` on every srun)
 
 `#SBATCH --mem=0` only sizes the job allocation. `srun --overlap` child
@@ -221,6 +273,8 @@ a new module — we keep the launcher boundary thin on purpose.
   to actually launch a run (filesystem layout, recipe pattern, dispatch flow).
 - [`rl-monitor-loop` SKILL.md](../../../.claude/skills/rl-monitor-loop/SKILL.md)
   — adaptive-cadence Claude-driven monitor that wraps `check_run.sh`.
+- [`sync/`](sync/) — upstream-sync trail (`prs.md`, `pr-body.md`,
+  `divergence.patch` / `.stat`) for the v0.5.10 → v0.5.12 sglang sync.
 - Upstream miles docs: [`docs/getting-started/installation.md`](../../../docs/getting-started/installation.md)
   + [`docker/Dockerfile`](../../../docker/Dockerfile) — the canonical install
   reference that `setup/install_env.sh` mirrors.
