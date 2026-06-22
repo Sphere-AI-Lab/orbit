@@ -4,18 +4,32 @@ Launchable training recipes:
 
 - `high_precision/`: BF16 and high-precision training launchers.
 - `low_precision/`: int4, fp8, and nvfp4 training launchers.
+- `sft/`: supervised fine-tuning launchers and dataset conversion recipes.
 
-Each launcher is an independent bash entrypoint that defines its argument
-arrays inline. The only shared code is `scripts/lib/` utilities for CUDA setup,
-private Ray lifecycle, W&B handling, eval toggles, and checkpoint preflight.
-To change a recipe value (batch size, learning rate, etc.), edit the launcher
-file directly.
+Launchers are independent bash entrypoints that define their recipe-specific
+argument arrays inline, including dataset defaults for SFT recipes. Shared
+orchestration code lives in
+`scripts/lib/` utilities for CUDA setup, private Ray lifecycle, W&B handling,
+eval toggles, and checkpoint preflight. To change a recipe value (batch size,
+learning rate, etc.), edit the relevant launcher file directly.
 
 ## Running
 
 ```bash
 bash examples/low_precision/run-qwen3-4b-int4-math-oft.sh
 ```
+
+## Supervised Fine-Tuning
+
+Orbit remains RL-first: the default training mode is `rl`. SFT is available as
+an explicit opt-in mode with `--training-mode sft`, which reuses the Megatron
+training, PEFT, checkpointing, dynamic batching, and logging stack while
+skipping SGLang rollout engines for plain SFT runs.
+
+Use chat-format JSONL with full conversations including assistant turns, and
+point `--input-key` at that field. The dedicated `sft/` folder has dataset
+conversion commands and dataset-specific Qwen/Llama launchers for NuminaMath,
+Magicoder, CommonsenseQA, SocialIQA, and text-only ScienceQA.
 
 Cross-cutting orchestration knobs can still be overridden inline:
 

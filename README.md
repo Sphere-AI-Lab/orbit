@@ -72,6 +72,14 @@ bash examples/high_precision/run-qwen3-4b-instruct-2507-bf16-math-oft.sh
 bash examples/low_precision/run-qwen3-4b-fp8-math-oft.sh
 ```
 
+Orbit is RL-first, but supervised fine-tuning is available as an explicit
+opt-in mode. See [`examples/sft/README.md`](examples/sft/README.md) for SFT
+data conversion, Qwen/Llama launchers, and deterministic JSONL splitting.
+
+OFT adapters trained from compatible Orbit runs can be merged with OrthoMerge
+and exported as HF PEFT adapters, Megatron-native adapters, or dense HF models.
+See [`tools/README_merge_oft.md`](tools/README_merge_oft.md).
+
 Site-specific paths are passed in through environment variables. The most common ones:
 
 | Variable | Required | Purpose |
