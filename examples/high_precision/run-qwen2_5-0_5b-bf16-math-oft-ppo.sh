@@ -136,6 +136,8 @@ SGLANG_ARGS=(
     --sglang-mem-fraction-static 0.60
     --sglang-max-running-requests 1024
     --sglang-force-native-ops
+    --sglang-attention-backend triton
+    --sglang-sampling-backend pytorch
     --router-disable-circuit-breaker
 )
 
