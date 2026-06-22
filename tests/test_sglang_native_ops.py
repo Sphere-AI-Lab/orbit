@@ -1,4 +1,4 @@
-from orbit.backends.sglang_utils.sglang_engine import _force_native_forward_after_init
+from orbit.backends.sglang_utils.native_ops import force_native_forward_after_init
 
 
 def test_force_native_forward_after_init_uses_native_forward():
@@ -12,7 +12,7 @@ def test_force_native_forward_after_init_uses_native_forward():
         def forward_native(self):
             return "native"
 
-    _force_native_forward_after_init(Op)
+    force_native_forward_after_init(Op)
 
     assert Op()._forward_method() == "native"
 
@@ -31,8 +31,8 @@ def test_force_native_forward_after_init_is_idempotent():
         def forward_native(self):
             return "native"
 
-    _force_native_forward_after_init(Op)
-    _force_native_forward_after_init(Op)
+    force_native_forward_after_init(Op)
+    force_native_forward_after_init(Op)
     instance = Op()
 
     assert instance._forward_method() == "native"

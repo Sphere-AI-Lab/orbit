@@ -4,6 +4,7 @@ import logging
 import multiprocessing
 import os
 import time
+from pathlib import Path
 from urllib.parse import quote
 
 import requests
@@ -16,11 +17,13 @@ from urllib3.exceptions import NewConnectionError
 from orbit.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME
 from orbit.backends.megatron_utils.oft_utils import OFT_ADAPTER_NAME
 from orbit.backends.megatron_utils.peft_utils import convert_target_modules_to_hf, get_peft_method
+from orbit.backends.sglang_utils.native_ops import patch_sglang_native_ops
 from orbit.ray.ray_actor import RayActor
 from orbit.utils.env_report import collect_and_print_node_env_report
 from orbit.utils.http_utils import get_host_info
 
 logger = logging.getLogger(__name__)
+_COMPAT_SITE_DIR = Path(__file__).resolve().parent / "compat_site"
 
 
 def get_base_gpu_id(args, rank):
@@ -54,37 +57,25 @@ def _to_local_gpu_id(physical_gpu_id: int) -> int:
     )
 
 
-def _force_native_forward_after_init(cls):
-    if getattr(cls, "_orbit_force_native_ops_patched", False):
+def _prepend_pythonpath(path: Path):
+    current = os.environ.get("PYTHONPATH", "")
+    entries = [entry for entry in current.split(os.pathsep) if entry]
+    path_str = str(path)
+    if path_str not in entries:
+        os.environ["PYTHONPATH"] = os.pathsep.join([path_str, *entries])
+
+
+def _prepare_child_native_ops_env(force_native_ops: bool):
+    if not force_native_ops:
         return
 
-    original_init = cls.__init__
-
-    def patched_init(self, *args, **kwargs):
-        original_init(self, *args, **kwargs)
-        self._forward_method = self.forward_native
-
-    cls.__init__ = patched_init
-    cls._orbit_force_native_ops_patched = True
-
-
-def _patch_sglang_native_ops():
-    from sglang.srt.layers import activation, layernorm, rotary_embedding
-
-    for cls in (
-        activation.GeluAndMul,
-        activation.SiluAndMul,
-        layernorm.Gemma3RMSNorm,
-        layernorm.GemmaRMSNorm,
-        layernorm.RMSNorm,
-        rotary_embedding.RotaryEmbedding,
-    ):
-        _force_native_forward_after_init(cls)
+    os.environ["ORBIT_SGLANG_FORCE_NATIVE_OPS"] = "1"
+    _prepend_pythonpath(_COMPAT_SITE_DIR)
 
 
 def _launch_server_with_orbit_compat(server_args: ServerArgs, force_native_ops: bool):
     if force_native_ops:
-        _patch_sglang_native_ops()
+        patch_sglang_native_ops()
 
     from sglang.srt.entrypoints.http_server import launch_server
 
@@ -95,6 +86,7 @@ def launch_server_process(server_args: ServerArgs, force_native_ops: bool = Fals
 
     multiprocessing.set_start_method("spawn", force=True)
     server_args.host = server_args.host.strip("[]")
+    _prepare_child_native_ops_env(force_native_ops)
     p = multiprocessing.Process(target=_launch_server_with_orbit_compat, args=(server_args, force_native_ops))
     p.start()
 
