@@ -41,10 +41,32 @@ def import_hf_to_megatron(
     if trust_remote_code:
         kwargs["trust_remote_code"] = True
 
-    AutoBridge.import_ckpt(
-        hf_model_id=hf_model,
-        megatron_path=megatron_path,
-        **kwargs,
+    bridge = AutoBridge.from_hf_pretrained(hf_model, **kwargs)
+    provider = bridge.to_megatron_provider()
+    if hasattr(provider, "gradient_accumulation_fusion"):
+        provider.gradient_accumulation_fusion = False
+    if hasattr(provider, "finalize"):
+        provider.finalize()
+
+    megatron_model = provider.provide_distributed_model(
+        wrap_with_ddp=False,
+        use_cpu_initialization=True,
+    )
+
+    hf_tokenizer_kwargs = {}
+    if hasattr(bridge._model_bridge, "get_hf_tokenizer_kwargs"):
+        hf_tokenizer_kwargs = bridge._model_bridge.get_hf_tokenizer_kwargs()
+    if kwargs.get("trust_remote_code"):
+        if hf_tokenizer_kwargs is None:
+            hf_tokenizer_kwargs = {}
+        hf_tokenizer_kwargs.setdefault("trust_remote_code", True)
+
+    bridge.save_megatron_model(
+        megatron_model,
+        megatron_path,
+        hf_tokenizer_path=hf_model,
+        hf_tokenizer_kwargs=hf_tokenizer_kwargs,
+        low_memory_save=True,
     )
 
 

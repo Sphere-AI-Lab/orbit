@@ -9,7 +9,7 @@ from tqdm.auto import tqdm
 
 from orbit.utils import tracking_utils
 from orbit.ray.placement_group import create_placement_groups, create_rollout_manager, create_training_models
-from orbit.utils.arguments import parse_args
+from orbit.utils.arguments import parse_args, uses_rollout_engines
 from orbit.utils.async_utils import eager_create_task
 from orbit.utils.logging_utils import configure_logger
 from orbit.utils.metric_utils import compute_rollout_step
@@ -55,6 +55,7 @@ def _timed_block(prefix: str, name: str, *, timing_raw: dict | None = None, star
 async def train(args):
     configure_logger()
     startup_timing: dict[str, float] = {}
+    rollout_engines_enabled = uses_rollout_engines(args)
 
     # allocate the GPUs
     with _timed_block("startup", "placement groups", timing_raw=startup_timing):
@@ -71,18 +72,19 @@ async def train(args):
     async with _timed_phase("startup", "create training models", timing_raw=startup_timing):
         actor_model, critic_model = await create_training_models(args, pgs, rollout_manager)
 
-    if args.offload_rollout:
+    if rollout_engines_enabled and args.offload_rollout:
         async with _timed_phase("startup", "onload rollout weights", timing_raw=startup_timing):
             await rollout_manager.onload_weights.remote()
 
     # always update weight first so that sglang has the loaded weights from training.
-    async with _timed_phase("startup", "actor update_weights", timing_raw=startup_timing):
-        await actor_model.update_weights()
+    if rollout_engines_enabled:
+        async with _timed_phase("startup", "actor update_weights", timing_raw=startup_timing):
+            await actor_model.update_weights()
 
-    if args.check_weight_update_equal:
+    if rollout_engines_enabled and args.check_weight_update_equal:
         await rollout_manager.check_weights.remote(action="compare")
 
-    if args.offload_rollout:
+    if rollout_engines_enabled and args.offload_rollout:
         async with _timed_phase("startup", "onload rollout kv", timing_raw=startup_timing):
             await rollout_manager.onload_kv.remote()
 
@@ -146,7 +148,7 @@ async def train(args):
         async with _timed_phase(prefix, "generate", timing_raw=timing_raw):
             rollout_data_ref = await rollout_manager.generate.remote(rollout_id)
 
-        if args.offload_rollout:
+        if rollout_engines_enabled and args.offload_rollout:
             offload_tags = [GPU_MEMORY_TYPE_CUDA_GRAPH]
             if "kv_cache" in args.offload_rollout_level:
                 offload_tags.append(GPU_MEMORY_TYPE_KV_CACHE)
@@ -177,12 +179,13 @@ async def train(args):
 
         async with _timed_phase(prefix, "offload/clear train", timing_raw=timing_raw):
             await offload_train()
-        if args.offload_rollout:
+        if rollout_engines_enabled and args.offload_rollout:
             async with _timed_phase(prefix, "onload rollout weights", timing_raw=timing_raw):
                 await rollout_manager.onload_weights.remote()
-        async with _timed_phase(prefix, "actor update_weights", timing_raw=timing_raw):
-            await actor_model.update_weights()
-        if args.offload_rollout:
+        if rollout_engines_enabled:
+            async with _timed_phase(prefix, "actor update_weights", timing_raw=timing_raw):
+                await actor_model.update_weights()
+        if rollout_engines_enabled and args.offload_rollout:
             async with _timed_phase(prefix, "onload rollout kv", timing_raw=timing_raw):
                 await rollout_manager.onload_kv.remote()
 

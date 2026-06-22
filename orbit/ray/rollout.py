@@ -26,6 +26,7 @@ from orbit.rollout.base_types import (
 from orbit.rollout.inference_rollout.compatibility import call_rollout_function, load_rollout_function
 from orbit.rollout.rm_hub.math_alignment import compute_math_alignment_metrics, is_math_alignment_sample
 from orbit.utils import dumper_utils, tracking_utils
+from orbit.utils.arguments import uses_rollout_engines
 from orbit.utils.environ import enable_experimental_rollout_refactor
 from orbit.utils.health_monitor import RolloutHealthMonitor
 from orbit.utils.http_utils import (
@@ -377,7 +378,7 @@ class RolloutManager:
         logger.info(f"import {self.args.rollout_function_path} as generate_rollout function.")
         logger.info(f"import {self.args.eval_function_path} as eval_generate_rollout function.")
 
-        if self.args.debug_train_only:
+        if self.args.debug_train_only or not uses_rollout_engines(self.args):
             self.servers: dict[str, RolloutServer] = {}
         else:
             init_http_client(args)

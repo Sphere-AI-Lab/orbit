@@ -9,8 +9,12 @@ def get_response_lengths(loss_masks: list[list[int]]) -> list[int]:
 class MultiTurnLossMaskGenerator:
     def __init__(self, tokenizer: AutoTokenizer, tokenizer_type: str = "qwen"):
         self.tokenizer = tokenizer
-        self.system_message_length, self.gen_token_length = self.get_system_message_length()
         self.tokenizer_type = tokenizer_type
+        if tokenizer_type == "response_only":
+            self.system_message_length = 0
+            self.gen_token_length = 0
+        else:
+            self.system_message_length, self.gen_token_length = self.get_system_message_length()
 
     def get_response_lengths(self, loss_masks: list[list[int]]) -> list[int]:
         return get_response_lengths(loss_masks)
@@ -44,6 +48,43 @@ class MultiTurnLossMaskGenerator:
 
         system_message_length = idx_1 - ((idx_2 - idx_1) - end_interval - len(raw_token_ids))
         return system_message_length, gen_token_length
+
+    def _format_llama_messages_without_chat_template(
+        self,
+        messages: list[dict],
+        add_generation_prompt: bool = False,
+    ) -> str:
+        parts = ["<|begin_of_text|>"]
+        for message in messages:
+            role = message["role"]
+            content = message.get("content", "")
+            parts.append(f"<|start_header_id|>{role}<|end_header_id|>\n\n{content}<|eot_id|>")
+        if add_generation_prompt:
+            parts.append("<|start_header_id|>assistant<|end_header_id|>\n\n")
+        return "".join(parts)
+
+    def _apply_chat_template_or_llama_fallback(
+        self,
+        messages: list[dict],
+        tools: list[dict] = None,
+        add_generation_prompt: bool = False,
+    ) -> str:
+        try:
+            return self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=add_generation_prompt,
+                tools=tools,
+            )
+        except (AttributeError, ValueError) as exc:
+            if isinstance(exc, ValueError) and "chat_template" not in str(exc):
+                raise
+            if tools:
+                raise ValueError("response_only Llama fallback does not support tools without a chat template") from exc
+            return self._format_llama_messages_without_chat_template(
+                messages,
+                add_generation_prompt=add_generation_prompt,
+            )
 
     def gen_multi_turn_loss_mask_qwen(
         self, messages: list[dict], tools: list[dict] = None
@@ -130,6 +171,26 @@ class MultiTurnLossMaskGenerator:
             loss_mask = [0] * len(token_ids)
         return token_ids, loss_mask
 
+    def gen_response_only_loss_mask(
+        self, messages: list[dict], tools: list[dict] = None
+    ) -> tuple[list[int], list[int]]:
+        if not messages or messages[-1].get("role") != "assistant":
+            raise ValueError("response_only loss mask requires the final message to be from assistant")
+
+        prompt = self._apply_chat_template_or_llama_fallback(
+            messages[:-1], tools=tools, add_generation_prompt=True
+        )
+        response = messages[-1]["content"]
+        prompt_tokens = self.tokenizer(prompt, add_special_tokens=False)["input_ids"]
+        response_tokens = self.tokenizer(response, add_special_tokens=False)["input_ids"]
+
+        token_ids = prompt_tokens + response_tokens
+        loss_mask = [0] * len(prompt_tokens) + [1] * len(response_tokens)
+
+        if messages[-1].get("step_loss_mask", 1) != 1:
+            loss_mask = [0] * len(token_ids)
+        return token_ids, loss_mask
+
     def get_loss_mask(self, messages: list[dict], tools: list[dict] = None) -> tuple[list[int], list[int]]:
         if self.tokenizer_type == "qwen":
             if "<｜Assistant｜>" in self.tokenizer.get_added_vocab():
@@ -140,6 +201,8 @@ class MultiTurnLossMaskGenerator:
             return self.gen_multi_turn_loss_mask_qwen3(messages, tools)
         elif self.tokenizer_type == "distill_qwen":
             return self.gen_multi_turn_loss_mask_distill_qwen(messages, tools)
+        elif self.tokenizer_type == "response_only":
+            return self.gen_response_only_loss_mask(messages, tools)
         else:
             raise ValueError(f"Unsupported tokenizer type: {self.tokenizer_type}")
 

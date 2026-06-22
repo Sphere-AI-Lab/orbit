@@ -35,6 +35,64 @@ _PEFT_OFT_DEFAULTS = {
     "oft_adapter_path": None,
 }
 _PEFT_METHODS = {"none", "oft", "lora"}
+SFT_ROLLOUT_FUNCTION_PATH = "orbit.rollout.sft_rollout.generate_rollout"
+DEFAULT_ROLLOUT_FUNCTION_PATHS = {
+    "orbit.rollout.sglang_rollout.generate_rollout",
+    "orbit.rollout.inference_rollout.inference_rollout_common.InferenceRolloutFn",
+}
+
+
+def uses_rollout_engines(args) -> bool:
+    """Whether this run needs SGLang rollout engines and weight sync."""
+    return bool(getattr(args, "use_rollout_engines", True))
+
+
+def _is_default_rollout_function_path(path: str | None) -> bool:
+    return path is None or path in DEFAULT_ROLLOUT_FUNCTION_PATHS
+
+
+def _apply_training_mode_args(args) -> None:
+    training_mode = getattr(args, "training_mode", "rl")
+    if training_mode not in {"rl", "sft"}:
+        raise ValueError(f"--training-mode must be one of ['rl', 'sft'], got {training_mode!r}.")
+
+    if training_mode == "rl":
+        args.use_rollout_engines = getattr(args, "use_rollout_engines", True)
+        return
+
+    if getattr(args, "debug_rollout_only", False):
+        raise ValueError("--training-mode sft is incompatible with --debug-rollout-only.")
+
+    if getattr(args, "advantage_estimator", "grpo") == "ppo":
+        raise ValueError("--training-mode sft is incompatible with --advantage-estimator ppo.")
+    if getattr(args, "kl_coef", 0) != 0 or getattr(args, "use_kl_loss", False):
+        raise ValueError("--training-mode sft is incompatible with KL reward/loss settings.")
+    if getattr(args, "use_rollout_logprobs", False):
+        raise ValueError("--training-mode sft is incompatible with --use-rollout-logprobs.")
+    if getattr(args, "dynamic_sampling_filter_path", None) is not None:
+        raise ValueError("--training-mode sft is incompatible with --dynamic-sampling-filter-path.")
+
+    if _is_default_rollout_function_path(getattr(args, "rollout_function_path", None)):
+        args.rollout_function_path = SFT_ROLLOUT_FUNCTION_PATH
+
+    args.loss_type = "sft_loss"
+    args.compute_advantages_and_returns = False
+    args.n_samples_per_prompt = 1
+    args.advantage_estimator = "grpo"
+
+    eval_enabled = getattr(args, "eval_interval", None) is not None
+    if eval_enabled and getattr(args, "eval_function_path", None) is None:
+        raise ValueError(
+            "--training-mode sft with --eval-interval requires an explicit --eval-function-path "
+            "for generation-based evaluation."
+        )
+
+    args.use_rollout_engines = eval_enabled
+    if not args.use_rollout_engines:
+        args.rollout_num_gpus = 0
+        args.offload_rollout = False
+        if hasattr(args, "check_weight_update_equal"):
+            args.check_weight_update_equal = False
 
 
 def _is_peft_enabled(args) -> bool:
@@ -340,6 +398,13 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
                 choices=["megatron"],
                 default="megatron",
                 help="The backend for training.",
+            )
+            parser.add_argument(
+                "--training-mode",
+                type=str,
+                choices=["rl", "sft"],
+                default="rl",
+                help="Training objective mode. RL is the default; SFT is an explicit opt-in mode.",
             )
             parser.add_argument(
                 "--qkv-format",
@@ -2174,6 +2239,11 @@ def _apply_custom_config_args(args) -> None:
 
 def orbit_validate_args(args):
     _apply_custom_config_args(args)
+    _apply_training_mode_args(args)
+    _common_orbit_validate_args(args)
+
+
+def _common_orbit_validate_args(args):
     args.eval_datasets = _resolve_eval_datasets(args)
 
     # Normalize --tito-allowed-append-roles: lowercase + deduplicate.
@@ -2351,7 +2421,7 @@ def orbit_validate_args(args):
             getattr(args, "prefill_num_servers", None) is None
         ), "P2P weight transfer mode has not been tested when PD is enabled."
 
-    if args.colocate:
+    if args.colocate and uses_rollout_engines(args):
         if args.offload_train is None:
             args.offload_train = True
         if args.offload_rollout is None:

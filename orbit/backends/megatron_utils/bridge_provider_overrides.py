@@ -34,6 +34,11 @@ def apply_bridge_provider_overrides(
     _maybe_set_provider_attr(provider, "recompute_method", getattr(args, "recompute_method", None))
     _maybe_set_provider_attr(provider, "recompute_granularity", getattr(args, "recompute_granularity", None))
     _maybe_set_provider_attr(provider, "recompute_num_layers", getattr(args, "recompute_num_layers", None))
+    _maybe_set_provider_attr(
+        provider,
+        "gradient_accumulation_fusion",
+        getattr(args, "gradient_accumulation_fusion", None),
+    )
     _maybe_set_provider_attr(provider, "cuda_graph_impl", getattr(args, "cuda_graph_impl", None))
     cuda_graph_scope_val = getattr(args, "cuda_graph_scope", None)
     if cuda_graph_scope_val:  # argparse default is [] which is falsy

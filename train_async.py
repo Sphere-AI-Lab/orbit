@@ -11,6 +11,7 @@ from orbit.utils.tracking_utils import init_tracking
 # The framework supports other asynchronous approaches such as fully async (which is shown in examples/full_async).
 async def train(args):
     assert not args.colocate, "Colocation is not supported for async training."
+    assert args.training_mode != "sft", "SFT mode is supported by train.py; train_async.py is RL rollout-only."
     configure_logger()
     # allocate the GPUs
     pgs = create_placement_groups(args)

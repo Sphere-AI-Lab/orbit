@@ -8,6 +8,13 @@ path.
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
+
+
+_repo_root = str(Path(__file__).resolve().parents[1])
+sys.path = [p for p in sys.path if p != _repo_root]
+sys.path.insert(0, _repo_root)
 
 
 def parse_legacy_args(argv: list[str] | None = None):

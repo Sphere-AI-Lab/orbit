@@ -12,6 +12,7 @@ from transformers import AutoConfig
 
 from orbit.ray.train_actor import TrainRayActor
 from orbit.utils import train_dump_utils
+from orbit.utils.arguments import uses_rollout_engines
 from orbit.utils.context_utils import with_defer
 from orbit.utils.distributed_utils import get_gloo_group, init_process_group
 from orbit.utils.memory_utils import clear_memory, print_memory
@@ -625,7 +626,7 @@ class MegatronTrainRayActor(TrainRayActor):
 
     @timer
     def update_weights(self) -> None:
-        if self.args.debug_train_only or self.args.debug_rollout_only:
+        if self.args.debug_train_only or self.args.debug_rollout_only or not uses_rollout_engines(self.args):
             return
 
         if self.args.use_fault_tolerance:

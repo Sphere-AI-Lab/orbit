@@ -6,6 +6,7 @@ from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from orbit.utils.async_utils import eager_create_task
+from orbit.utils.arguments import uses_rollout_engines
 
 from ..utils.ray_utils import compute_ray_pin_head_options
 from .actor_group import RayTrainGroup
@@ -83,7 +84,7 @@ def create_placement_groups(args):
     """Create placement groups for actor and rollout engines."""
 
     num_gpus = 0
-    if args.debug_train_only:
+    if args.debug_train_only or not uses_rollout_engines(args):
         num_gpus = args.actor_num_nodes * args.actor_num_gpus_per_node
         rollout_offset = 0
         if args.use_critic:
@@ -194,7 +195,7 @@ def create_rollout_manager(args, pg):
         args.num_rollout = num_rollout_per_epoch * args.num_epoch
         assert args.num_rollout > 0
 
-    if args.check_weight_update_equal:
+    if uses_rollout_engines(args) and args.check_weight_update_equal:
         ray.get(rollout_manager.check_weights.remote(action="snapshot"))
         ray.get(rollout_manager.check_weights.remote(action="reset_tensors"))
 
