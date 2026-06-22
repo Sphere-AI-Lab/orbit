@@ -135,6 +135,7 @@ SGLANG_ARGS=(
     --rollout-num-gpus "${ROLLOUT_NUM_GPUS}"
     --sglang-mem-fraction-static 0.60
     --sglang-max-running-requests 1024
+    --sglang-force-native-ops
     --router-disable-circuit-breaker
 )
 

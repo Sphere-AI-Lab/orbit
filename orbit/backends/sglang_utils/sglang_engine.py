@@ -54,12 +54,48 @@ def _to_local_gpu_id(physical_gpu_id: int) -> int:
     )
 
 
-def launch_server_process(server_args: ServerArgs) -> multiprocessing.Process:
+def _force_native_forward_after_init(cls):
+    if getattr(cls, "_orbit_force_native_ops_patched", False):
+        return
+
+    original_init = cls.__init__
+
+    def patched_init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        self._forward_method = self.forward_native
+
+    cls.__init__ = patched_init
+    cls._orbit_force_native_ops_patched = True
+
+
+def _patch_sglang_native_ops():
+    from sglang.srt.layers import activation, layernorm, rotary_embedding
+
+    for cls in (
+        activation.GeluAndMul,
+        activation.SiluAndMul,
+        layernorm.Gemma3RMSNorm,
+        layernorm.GemmaRMSNorm,
+        layernorm.RMSNorm,
+        rotary_embedding.RotaryEmbedding,
+    ):
+        _force_native_forward_after_init(cls)
+
+
+def _launch_server_with_orbit_compat(server_args: ServerArgs, force_native_ops: bool):
+    if force_native_ops:
+        _patch_sglang_native_ops()
+
     from sglang.srt.entrypoints.http_server import launch_server
+
+    launch_server(server_args)
+
+
+def launch_server_process(server_args: ServerArgs, force_native_ops: bool = False) -> multiprocessing.Process:
 
     multiprocessing.set_start_method("spawn", force=True)
     server_args.host = server_args.host.strip("[]")
-    p = multiprocessing.Process(target=launch_server, args=(server_args,))
+    p = multiprocessing.Process(target=_launch_server_with_orbit_compat, args=(server_args, force_native_ops))
     p.start()
 
     if server_args.node_rank != 0:
@@ -215,7 +251,10 @@ class SGLangEngine(RayActor):
 
     def _init_normal(self, server_args_dict):
         logger.info(f"Launch HttpServerEngineAdapter at: {self.server_host}:{self.server_port}")
-        self.process = launch_server_process(ServerArgs(**server_args_dict))
+        self.process = launch_server_process(
+            ServerArgs(**server_args_dict),
+            force_native_ops=getattr(self.args, "sglang_force_native_ops", False),
+        )
 
         if self.node_rank == 0 and self.router_ip and self.router_port:
             if parse(sglang_router.__version__) <= parse("0.2.1") or self.args.use_orbit_router:

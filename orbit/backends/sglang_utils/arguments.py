@@ -125,6 +125,15 @@ def add_sglang_arguments(parser):
         ),
     )
     parser.add_argument(
+        "--sglang-force-native-ops",
+        action="store_true",
+        default=False,
+        help=(
+            "Orbit compatibility override: force selected SGLang MultiPlatformOp "
+            "layers onto PyTorch-native forwards inside spawned rollout servers."
+        ),
+    )
+    parser.add_argument(
         "--sglang-config",
         type=str,
         default=None,
