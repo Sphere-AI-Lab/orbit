@@ -145,6 +145,7 @@ MISC_ARGS=(
     --attention-backend flash
     --accumulate-allreduce-grads-in-fp32
     --attention-softmax-in-fp32
+    --no-gradient-accumulation-fusion
     --no-offload-train
     --no-offload-train-async
     --no-offload-rollout

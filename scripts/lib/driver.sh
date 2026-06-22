@@ -177,5 +177,7 @@ finally:
     if _driver_debug:
         print("[orbit-driver-debug] ray.shutdown returned", flush=True)
 PY
-    return "${PIPESTATUS[0]:-$?}"
+    local driver_rc="${PIPESTATUS[0]:-$?}"
+    echo "Training driver exited with code ${driver_rc}"
+    return "${driver_rc}"
 }

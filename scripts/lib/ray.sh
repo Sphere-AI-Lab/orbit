@@ -459,7 +459,11 @@ start_ray_head() {
             fi
             sleep 1
         done
-        if ! _ray_status_ready; then
+        set +e
+        _ray_status_ready
+        local ray_ready_rc=$?
+        set -e
+        if (( ray_ready_rc != 0 )); then
             echo "Timed out waiting for private Ray head at ${ORBIT_RAY_ADDRESS}; log follows:" >&2
             cat "${RAY_START_LOG}" >&2 || true
             exit 1

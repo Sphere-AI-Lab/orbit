@@ -62,6 +62,7 @@ configure_process_env() {
     # are owned by tool_env.sh, which leaf launchers source first.
     set -e
     export PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
+    export PYTHONFAULTHANDLER=${PYTHONFAULTHANDLER:-1}
 
     ORBIT_LAUNCHER_XTRACE=${ORBIT_LAUNCHER_XTRACE:-0}
     if is_true "${ORBIT_LAUNCHER_XTRACE}"; then
