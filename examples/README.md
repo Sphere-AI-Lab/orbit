@@ -31,6 +31,25 @@ point `--input-key` at that field. The dedicated `sft/` folder has dataset
 conversion commands and dataset-specific Qwen/Llama launchers for NuminaMath,
 Magicoder, CommonsenseQA, SocialIQA, and text-only ScienceQA.
 
+## PPO
+
+PPO is selected with `--advantage-estimator ppo`. Unlike GRPO/GSPO, PPO
+allocates a separate full-model critic. The starter recipe
+`high_precision/run-qwen2_5-0_5b-bf16-math-oft-ppo.sh` uses an 8-GPU layout:
+2 actor GPUs, 2 critic GPUs, and 4 rollout GPUs.
+
+```bash
+HF_CKPT=/path/to/hf/Qwen2.5-0.5B-Instruct \
+MEGATRON_LOAD=/path/to/megatron/Qwen2.5-0.5B-Instruct \
+TRAIN_JSONL=/path/to/math/train.jsonl \
+TEST_JSONL=/path/to/math/test.jsonl \
+bash examples/high_precision/run-qwen2_5-0_5b-bf16-math-oft-ppo.sh
+```
+
+Orbit's Megatron critic currently does not support `--offload-train`, so PPO
+recipes should allocate explicit actor, critic, and rollout GPU slots instead
+of relying on colocated train offload.
+
 Cross-cutting orchestration knobs can still be overridden inline:
 
 ```bash

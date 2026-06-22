@@ -40,7 +40,12 @@ misc_module = types.ModuleType("orbit.utils.misc")
 misc_module.load_function = lambda path: None
 sys.modules.setdefault("orbit.utils.misc", misc_module)
 
-from orbit.utils.arguments import SFT_ROLLOUT_FUNCTION_PATH, orbit_validate_args  # noqa: E402
+from orbit.utils.arguments import (  # noqa: E402
+    SFT_ROLLOUT_FUNCTION_PATH,
+    _apply_critic_args,
+    _validate_ppo_args,
+    orbit_validate_args,
+)
 
 
 def _base_args(**overrides):
@@ -102,3 +107,40 @@ def test_sft_mode_requires_explicit_eval_function_when_eval_is_enabled(monkeypat
 
     with pytest.raises(ValueError, match="--eval-function-path"):
         orbit_validate_args(args)
+
+
+def test_sft_mode_rejects_ppo(monkeypatch):
+    monkeypatch.setattr("orbit.utils.arguments._common_orbit_validate_args", lambda args: None)
+    args = _base_args(training_mode="sft", advantage_estimator="ppo")
+
+    with pytest.raises(ValueError, match="--advantage-estimator ppo"):
+        orbit_validate_args(args)
+
+
+def test_ppo_applies_critic_defaults():
+    args = Namespace(
+        advantage_estimator="ppo",
+        actor_num_gpus_per_node=2,
+        actor_num_nodes=1,
+        critic_num_gpus_per_node=None,
+        critic_num_nodes=None,
+        critic_load=None,
+        critic_lr=None,
+        load="/tmp/actor",
+        lr=1e-6,
+    )
+
+    _apply_critic_args(args)
+
+    assert args.use_critic is True
+    assert args.critic_num_gpus_per_node == 2
+    assert args.critic_num_nodes == 1
+    assert args.critic_load == "/tmp/actor"
+    assert args.critic_lr == 1e-6
+
+
+def test_ppo_rejects_train_offload():
+    args = Namespace(use_critic=True, offload_train=True)
+
+    with pytest.raises(ValueError, match="incompatible with --offload-train"):
+        _validate_ppo_args(args)

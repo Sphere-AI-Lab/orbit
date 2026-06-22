@@ -2219,6 +2219,29 @@ def _finalize_train_offload_args(args) -> None:
         raise AssertionError(_MEGATRON_FULL_MODEL_OFFLOAD_ERROR)
 
 
+def _apply_critic_args(args) -> None:
+    args.use_critic = args.advantage_estimator == "ppo"
+    if getattr(args, "critic_num_gpus_per_node", None) is None:
+        args.critic_num_gpus_per_node = args.actor_num_gpus_per_node
+    if getattr(args, "critic_num_nodes", None) is None:
+        args.critic_num_nodes = args.actor_num_nodes
+    if getattr(args, "critic_load", None) is None:
+        args.critic_load = args.load
+    if getattr(args, "critic_lr", None) is None:
+        args.critic_lr = args.lr
+
+
+def _validate_ppo_args(args) -> None:
+    if not getattr(args, "use_critic", False):
+        return
+    if getattr(args, "offload_train", False):
+        raise ValueError(
+            "--advantage-estimator ppo is incompatible with --offload-train in Orbit's "
+            "Megatron backend because the critic is a full-model trainer. Remove "
+            "--offload/--offload-train and allocate separate actor, critic, and rollout GPUs."
+        )
+
+
 def _apply_custom_config_args(args) -> None:
     if not getattr(args, "custom_config_path", None):
         return
@@ -2380,15 +2403,7 @@ def _common_orbit_validate_args(args):
         )
         args.debug_train_only = True
 
-    args.use_critic = args.advantage_estimator == "ppo"
-    if args.critic_num_gpus_per_node is None:
-        args.critic_num_gpus_per_node = args.actor_num_gpus_per_node
-    if args.critic_num_nodes is None:
-        args.critic_num_nodes = args.actor_num_nodes
-    if args.critic_load is None:
-        args.critic_load = args.load
-    if args.critic_lr is None:
-        args.critic_lr = args.lr
+    _apply_critic_args(args)
 
     if args.offload:
         args.offload_train = True
@@ -2448,6 +2463,7 @@ def _common_orbit_validate_args(args):
                 args.rollout_num_gpus += args.critic_num_gpus_per_node * args.critic_num_nodes
 
     _finalize_train_offload_args(args)
+    _validate_ppo_args(args)
 
     if args.eval_function_path is None:
         args.eval_function_path = args.rollout_function_path

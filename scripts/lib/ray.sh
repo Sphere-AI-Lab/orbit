@@ -33,6 +33,53 @@ _ray_array_value_after() {
     return 1
 }
 
+_ray_array_value_after_any() {
+    local flag="$1"
+    shift
+    local array_name
+
+    for array_name in "$@"; do
+        if declare -p "${array_name}" >/dev/null 2>&1; then
+            _ray_array_value_after "${array_name}" "${flag}" && return 0
+        fi
+    done
+    return 1
+}
+
+_ray_advantage_estimator() {
+    if [[ -n "${ADVANTAGE_ESTIMATOR:-}" ]]; then
+        printf '%s\n' "${ADVANTAGE_ESTIMATOR}"
+        return 0
+    fi
+    if declare -p RL_ARGS >/dev/null 2>&1; then
+        _ray_array_value_after RL_ARGS --advantage-estimator && return 0
+    fi
+    printf 'grpo\n'
+}
+
+_ray_critic_num_gpus() {
+    local actor_gpus="$1"
+    local estimator
+    estimator="$(_ray_advantage_estimator)"
+    if [[ "${estimator}" != "ppo" ]]; then
+        printf '0\n'
+        return 0
+    fi
+
+    local critic_gpus_per_node="${CRITIC_NUM_GPUS_PER_NODE:-}"
+    local critic_num_nodes="${CRITIC_NUM_NODES:-}"
+    if [[ -z "${critic_gpus_per_node}" ]]; then
+        critic_gpus_per_node="$(_ray_array_value_after_any --critic-num-gpus-per-node CKPT_ARGS ROLLOUT_ARGS OPTIMIZER_ARGS RL_ARGS LOSS_ARGS WANDB_ARGS PERF_ARGS EVAL_ARGS SGLANG_ARGS MISC_ARGS DEBUG_ARGS PEFT_ARGS COLOCATE_ARGS || true)"
+    fi
+    if [[ -z "${critic_num_nodes}" ]]; then
+        critic_num_nodes="$(_ray_array_value_after_any --critic-num-nodes CKPT_ARGS ROLLOUT_ARGS OPTIMIZER_ARGS RL_ARGS LOSS_ARGS WANDB_ARGS PERF_ARGS EVAL_ARGS SGLANG_ARGS MISC_ARGS DEBUG_ARGS PEFT_ARGS COLOCATE_ARGS || true)"
+    fi
+
+    critic_gpus_per_node="${critic_gpus_per_node:-${actor_gpus}}"
+    critic_num_nodes="${critic_num_nodes:-1}"
+    printf '%s\n' "$((critic_gpus_per_node * critic_num_nodes))"
+}
+
 _ray_launcher_is_colocated() {
     case "${ORBIT_COLOCATE:-}" in
         0|false|False|FALSE|no|No|NO|off|Off|OFF)
@@ -143,12 +190,14 @@ apply_ray_defaults() {
     RAY_NUM_CPUS=${RAY_NUM_CPUS:-64}
     if [[ -z "${RAY_NUM_GPUS:-}" ]]; then
         local actor_gpus="${GPUS_PER_NODE:-0}"
+        local critic_gpus
+        critic_gpus="$(_ray_critic_num_gpus "${actor_gpus}")"
         if _ray_launcher_is_colocated; then
-            RAY_NUM_GPUS="${actor_gpus}"
+            RAY_NUM_GPUS=$((actor_gpus + critic_gpus))
         else
             local rollout_gpus
             rollout_gpus="$(_ray_rollout_num_gpus)"
-            RAY_NUM_GPUS=$((actor_gpus + rollout_gpus))
+            RAY_NUM_GPUS=$((actor_gpus + critic_gpus + rollout_gpus))
         fi
     fi
 }
