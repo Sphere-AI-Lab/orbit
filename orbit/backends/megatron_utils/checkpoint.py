@@ -103,7 +103,15 @@ logger = logging.getLogger(__name__)
 __all__ = ["save_checkpoint", "save_checkpoint_with_peft", "load_checkpoint"]
 
 
-def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, checkpointing_context, skip_load_to_model_and_opt):
+def load_checkpoint(
+    ddp_model,
+    optimizer,
+    opt_param_scheduler,
+    checkpointing_context,
+    skip_load_to_model_and_opt,
+    *,
+    is_value_model: bool = False,
+):
     # ref: how megatron `load_checkpoint` gets directory
     args = get_args()
     if getattr(args, "megatron_to_hf_mode", None) == "bridge":
@@ -120,6 +128,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, checkpointing_con
             optimizer=optimizer,
             args=args,
             load_path=load_path,
+            is_value_model=is_value_model,
         )
     elif _is_megatron_checkpoint(load_path):
         result = _load_checkpoint_megatron(
@@ -189,10 +198,10 @@ def _is_megatron_checkpoint(path: str | Path) -> bool:
     return is_legacy_megatron_checkpoint(path)
 
 
-def _load_checkpoint_dist(ddp_model, optimizer, args, load_path: str):
+def _load_checkpoint_dist(ddp_model, optimizer, args, load_path: str, *, is_value_model: bool = False):
     logger.info("Load checkpoint from Megatron distributed checkpoint (path=%s)", load_path)
 
-    load_dist_checkpoint(ddp_model, load_path)
+    load_dist_checkpoint(ddp_model, load_path, is_value_model=is_value_model)
 
     if (args.fp16 or args.bf16) and optimizer is not None:
         assert not args.load_main_params_from_ckpt
