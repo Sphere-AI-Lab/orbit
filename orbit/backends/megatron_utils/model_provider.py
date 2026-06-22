@@ -57,6 +57,11 @@ class LinearForLastLayer(torch.nn.Linear):
         return logits, None
 
 
+def replace_output_layer_with_value_head(model: torch.nn.Module, config: TransformerConfig) -> torch.nn.Module:
+    model.output_layer = LinearForLastLayer(input_size=config.hidden_size, output_size=1, config=config)
+    return model
+
+
 def get_model_provider_func(
     args: argparse.Namespace,
     role: Literal["actor", "critic"] = "actor",
@@ -81,9 +86,7 @@ def get_model_provider_func(
                 model = custom_model_provider(pre_process=pre_process, post_process=post_process)
             # Apply critic output layer if needed
             if post_process and role == "critic":
-                model.output_layer = LinearForLastLayer(
-                    input_size=model.config.hidden_size, output_size=1, config=model.config
-                )
+                replace_output_layer_with_value_head(model, model.config)
             return model
 
         return wrapped_model_provider
@@ -106,7 +109,10 @@ def get_model_provider_func(
             pg_collection=None,
         ) -> GPTModel:
             assert config is None, "orbit builds the config from args, so it expects config to be None"
-            return provider.provide(pre_process=pre_process, post_process=post_process, vp_stage=vp_stage)
+            model = provider.provide(pre_process=pre_process, post_process=post_process, vp_stage=vp_stage)
+            if post_process and role == "critic":
+                replace_output_layer_with_value_head(model, model.config)
+            return model
 
         return wrapped_bridge_provider
 
@@ -229,7 +235,7 @@ def get_model_provider_func(
             model = GPTModel(**kwargs)
 
         if post_process and role == "critic":
-            model.output_layer = LinearForLastLayer(input_size=config.hidden_size, output_size=1, config=config)
+            replace_output_layer_with_value_head(model, config)
 
         return model
 

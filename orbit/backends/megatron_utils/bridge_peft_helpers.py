@@ -9,6 +9,7 @@ from __future__ import annotations
 from argparse import Namespace
 from collections import Counter
 import logging
+from types import SimpleNamespace
 import torch
 
 from .bridge_provider_overrides import apply_bridge_provider_overrides
@@ -183,7 +184,9 @@ def _assert_peft_wrapped_modules(
 def _make_value_model_hook(hidden_size: int, sequence_parallel: bool):
     """Create a pre-wrap hook that replaces the output layer with a value head."""
     from megatron.core import parallel_state
-    from .model_provider import LinearForLastLayer
+    from .model_provider import replace_output_layer_with_value_head
+
+    value_config = SimpleNamespace(hidden_size=hidden_size, sequence_parallel=sequence_parallel)
 
     def hook(model):
         model_post_process = []
@@ -202,11 +205,7 @@ def _make_value_model_hook(hidden_size: int, sequence_parallel: bool):
         for index, model_chunk in enumerate(model_list):
             if not model_post_process[index]:
                 continue
-            model_chunk.output_layer = LinearForLastLayer(
-                input_size=hidden_size,
-                output_size=1,
-                sequence_parallel=sequence_parallel,
-            )
+            replace_output_layer_with_value_head(model_chunk, value_config)
 
     return hook
 
