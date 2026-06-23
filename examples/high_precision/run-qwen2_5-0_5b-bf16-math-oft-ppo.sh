@@ -166,7 +166,7 @@ PEFT_ARGS=(
     --peft-method oft
     --peft-variant standard
     --oft-type canonical_oft
-    --oft-block-size 128
+    --oft-block-size 32
     --oft-eps 6e-5
     --target-modules all-linear
 )
