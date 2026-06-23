@@ -17,6 +17,33 @@ from .peft_utils import (
 
 OFT_ADAPTER_NAME = "orbit_oft"
 logger = logging.getLogger(__name__)
+_BRIDGE_OFT_EMBEDDING_WEIGHT_PROXY_PATCHED = False
+
+
+def _patch_bridge_oft_embedding_weight_proxy() -> None:
+    """Expose the wrapped embedding weight on Bridge's OFT embedding wrapper.
+
+    Megatron reads ``embedding.word_embeddings.weight`` when embeddings and
+    output weights are tied. Bridge's ``OFTVocabParallelEmbedding`` stores the
+    real embedding module in ``to_wrap`` but does not proxy ``weight``, so
+    ``--target-modules all`` can fail after wrapping ``word_embeddings``.
+    """
+    global _BRIDGE_OFT_EMBEDDING_WEIGHT_PROXY_PATCHED
+    if _BRIDGE_OFT_EMBEDDING_WEIGHT_PROXY_PATCHED:
+        return
+
+    from megatron.bridge.peft.oft_layers import OFTVocabParallelEmbedding
+
+    current = getattr(OFTVocabParallelEmbedding, "weight", None)
+    if current is None:
+        OFTVocabParallelEmbedding.weight = property(lambda self: self.to_wrap.weight)
+    elif not isinstance(current, property):
+        logger.warning(
+            "OFTVocabParallelEmbedding already exposes non-property weight=%r; "
+            "leaving Bridge behavior unchanged.",
+            current,
+        )
+    _BRIDGE_OFT_EMBEDDING_WEIGHT_PROXY_PATCHED = True
 
 
 def _oft_type(args: Namespace) -> str:
@@ -45,6 +72,8 @@ def create_oft_instance(args: Namespace):
     per-module OFT wrappers. ``--oft-type oft`` intentionally selects the
     legacy shared-R ``OFT`` wrapper.
     """
+    _patch_bridge_oft_embedding_weight_proxy()
+
     variant = detect_peft_variant(args)
     adapter_dtype = (
         torch.float16
