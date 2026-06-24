@@ -146,6 +146,39 @@ elif [[ -n "${ORBIT_VENV}" ]] && ! command -v ray >/dev/null 2>&1 && [[ -x "${OR
     export PATH="${ORBIT_VENV}/bin:${PATH}"
 fi
 
+prepend_ld_library_paths() {
+    local dir
+    local dirs=()
+
+    for dir in "$@"; do
+        [[ -d "${dir}" ]] || continue
+        case ":${LD_LIBRARY_PATH:-}:" in
+            *":${dir}:"*) ;;
+            *) dirs+=("${dir}") ;;
+        esac
+    done
+
+    if ((${#dirs[@]} > 0)); then
+        local IFS=:
+        export LD_LIBRARY_PATH="${dirs[*]}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    fi
+}
+
+if [[ -n "${ORBIT_VENV}" ]]; then
+    _orbit_old_nullglob="$(shopt -p nullglob || true)"
+    shopt -s nullglob
+    for _orbit_site_packages in "${ORBIT_VENV}"/lib/python*/site-packages; do
+        prepend_ld_library_paths \
+            "${_orbit_site_packages}/nvidia/cu13/lib" \
+            "${_orbit_site_packages}/nvidia/cudnn/lib" \
+            "${_orbit_site_packages}/nvidia/nccl/lib" \
+            "${_orbit_site_packages}/nvidia/nvshmem/lib" \
+            "${_orbit_site_packages}/nvidia/cusparselt/lib"
+    done
+    eval "${_orbit_old_nullglob}"
+    unset _orbit_old_nullglob _orbit_site_packages
+fi
+
 export CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTIONS:-1}
 export CUDA_DEVICE_ORDER=${CUDA_DEVICE_ORDER:-PCI_BUS_ID}
 export HYDRA_FULL_ERROR=${HYDRA_FULL_ERROR:-1}
