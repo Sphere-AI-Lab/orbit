@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from orbit.backends.sglang_utils.native_ops import force_native_forward_after_init
 from orbit.backends.sglang_utils.sglang_engine import (
-    _configure_peft_runtime_kwargs,
+    _configure_peft_cache_kwargs,
     _prepare_child_peft_cache_env,
 )
 
@@ -70,42 +70,25 @@ def test_prepare_child_peft_cache_env_leaves_non_peft_server_unchanged(monkeypat
     assert os.environ["SGLANG_EXPERIMENTAL_CPP_RADIX_TREE"] == "1"
 
 
-def test_configure_peft_runtime_kwargs_disables_radix_for_oft():
+def test_configure_peft_cache_kwargs_disables_radix_for_oft():
     kwargs = {"disable_radix_cache": False}
 
-    _configure_peft_runtime_kwargs(kwargs, "oft")
+    _configure_peft_cache_kwargs(kwargs, "oft")
 
     assert kwargs["disable_radix_cache"] is True
 
 
-def test_configure_peft_runtime_kwargs_disables_radix_for_lora():
+def test_configure_peft_cache_kwargs_disables_radix_for_lora():
     kwargs = {}
 
-    _configure_peft_runtime_kwargs(kwargs, "lora")
+    _configure_peft_cache_kwargs(kwargs, "lora")
 
     assert kwargs["disable_radix_cache"] is True
 
 
-def test_configure_peft_runtime_kwargs_disables_cuda_graph_for_oft():
-    kwargs = {"disable_cuda_graph": False}
-
-    _configure_peft_runtime_kwargs(kwargs, "oft")
-
-    assert kwargs["disable_cuda_graph"] is True
-
-
-def test_configure_peft_runtime_kwargs_leaves_cuda_graph_enabled_for_lora():
+def test_configure_peft_cache_kwargs_leaves_non_peft_unchanged():
     kwargs = {}
 
-    _configure_peft_runtime_kwargs(kwargs, "lora")
-
-    assert "disable_cuda_graph" not in kwargs
-
-
-def test_configure_peft_runtime_kwargs_leaves_non_peft_unchanged():
-    kwargs = {}
-
-    _configure_peft_runtime_kwargs(kwargs, None)
+    _configure_peft_cache_kwargs(kwargs, None)
 
     assert "disable_radix_cache" not in kwargs
-    assert "disable_cuda_graph" not in kwargs
