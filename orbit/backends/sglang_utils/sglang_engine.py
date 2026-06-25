@@ -93,16 +93,22 @@ def _prepare_child_peft_cache_env(server_args: ServerArgs):
     os.environ["SGLANG_EXPERIMENTAL_CPP_RADIX_TREE"] = "0"
 
 
-def _configure_peft_cache_kwargs(kwargs: dict, peft_method: str | None):
-    if peft_method not in {"lora", "oft"}:
-        return
+def _configure_peft_runtime_kwargs(kwargs: dict, peft_method: str | None):
+    if peft_method in {"lora", "oft"}:
+        if kwargs.get("disable_radix_cache") is not True:
+            logger.warning(
+                "Disabling SGLang radix cache for PEFT rollout; cached prefixes can "
+                "produce stale adapter activations and train-inference mismatch."
+            )
+        kwargs["disable_radix_cache"] = True
 
-    if kwargs.get("disable_radix_cache") is not True:
-        logger.warning(
-            "Disabling SGLang radix cache for PEFT rollout; cached prefixes can "
-            "produce stale adapter activations and train-inference mismatch."
-        )
-    kwargs["disable_radix_cache"] = True
+    if peft_method == "oft":
+        if kwargs.get("disable_cuda_graph") is not True:
+            logger.warning(
+                "Disabling SGLang CUDA graph for OFT rollout; captured OFT adapter "
+                "state can produce train-inference log-prob mismatch."
+            )
+        kwargs["disable_cuda_graph"] = True
 
 
 def _launch_server_with_orbit_compat(server_args: ServerArgs, force_native_ops: bool):
@@ -979,7 +985,7 @@ def _compute_server_args(
         if hasattr(args, f"sglang_{attr.name}") and attr.name not in kwargs:
             kwargs[attr.name] = getattr(args, f"sglang_{attr.name}")
 
-    _configure_peft_cache_kwargs(kwargs, peft_method)
+    _configure_peft_runtime_kwargs(kwargs, peft_method)
     _configure_megatron_moe_parity_kwargs(kwargs, args, sglang_overrides)
 
     unused_keys = set(kwargs.keys()) - server_arg_fields
