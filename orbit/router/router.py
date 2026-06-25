@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 
 import httpx
 import setproctitle
@@ -45,6 +46,7 @@ class OrbitRouter:
         # Quarantined workers excluded from routing pool
         self.dead_workers: set[str] = set()
         self.max_weight_version = None
+        self._debug_peft_request_count = 0
 
         max_connections = getattr(args, "orbit_router_max_connections", None)
         if max_connections is None:
@@ -71,7 +73,10 @@ class OrbitRouter:
         """Setup all the HTTP routes except catch-all proxy"""
         # sglang-router api
         self.app.post("/add_worker")(self.add_worker)
+        self.app.post("/remove_worker")(self.remove_worker)
         self.app.get("/list_workers")(self.list_workers)
+        self.app.get("/workers")(self.workers)
+        self.app.post("/workers")(self.add_worker)
         # Catch-all route for proxying to SGLang - must be registered LAST
         self.app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])(self.proxy)
 
@@ -154,6 +159,19 @@ class OrbitRouter:
         if body is not None:
             headers = {k: v for k, v in headers.items() if k.lower() not in ("content-length", "transfer-encoding")}
 
+        if os.environ.get("ORBIT_DEBUG_PEFT_REQUEST") and path == "generate":
+            limit = int(os.environ.get("ORBIT_DEBUG_PEFT_REQUEST_LIMIT", "16"))
+            if self._debug_peft_request_count < limit:
+                body_text = body.decode("utf-8", errors="replace") if body else ""
+                logger.info(
+                    "[orbit-router] generate payload has_lora_path=%s has_oft_path=%s body_bytes=%d content_type=%s",
+                    '"lora_path"' in body_text,
+                    '"oft_path"' in body_text,
+                    len(body or b""),
+                    headers.get("content-type") or headers.get("Content-Type"),
+                )
+                self._debug_peft_request_count += 1
+
         try:
             response = await self.client.request(request.method, url, content=body, headers=headers)
             content = await response.aread()
@@ -162,6 +180,21 @@ class OrbitRouter:
                 "response_body": content,
                 "status_code": response.status_code,
                 "headers": dict(response.headers),
+            }
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "[orbit-router] Upstream request failed path=%s worker_url=%s error=%s",
+                path,
+                worker_url,
+                repr(exc),
+            )
+            return {
+                "request_body": body,
+                "response_body": json.dumps(
+                    {"error": f"upstream request failed: {type(exc).__name__}"}
+                ).encode(),
+                "status_code": 502,
+                "headers": {"content-type": "application/json"},
             }
         finally:
             self._finish_url(worker_url)
@@ -209,9 +242,35 @@ class OrbitRouter:
 
         return {"status": "success", "worker_urls": self.worker_request_counts}
 
+    async def remove_worker(self, request: Request):
+        """Remove a worker from the router."""
+        worker_url = request.query_params.get("url") or request.query_params.get("worker_url")
+        if not worker_url:
+            body = await request.body()
+            payload = json.loads(body) if body else {}
+            worker_url = payload.get("url") or payload.get("worker_url")
+
+        if not worker_url:
+            return JSONResponse(
+                status_code=400, content={"error": "worker_url is required (use query ?url=... or JSON body)"}
+            )
+
+        self.worker_request_counts.pop(worker_url, None)
+        self.worker_failure_counts.pop(worker_url, None)
+        self.dead_workers.discard(worker_url)
+        return {"status": "success", "worker_urls": self.worker_request_counts}
+
     async def list_workers(self, request: Request):
         """List all registered workers"""
         return {"urls": list(self.worker_request_counts.keys())}
+
+    async def workers(self, request: Request):
+        """SGLang-router compatible worker listing."""
+        workers = [
+            {"id": str(i), "url": url, "worker_type": "regular"}
+            for i, url in enumerate(self.worker_request_counts)
+        ]
+        return {"workers": workers, "urls": [worker["url"] for worker in workers]}
 
     def _use_url(self):
         """Select worker URL with minimal active requests."""
