@@ -17,12 +17,12 @@ import sglang_router
 from packaging.version import parse
 from tqdm import tqdm
 
-from orbit.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME
-from orbit.backends.megatron_utils.oft_utils import OFT_ADAPTER_NAME
-from orbit.backends.megatron_utils.peft_utils import get_peft_method
 from orbit.rollout.base_types import RolloutFnEvalOutput, RolloutFnTrainOutput
 from orbit.rollout.filter_hub.base_types import MetricGatherer, call_dynamic_filter
-from orbit.rollout.generate_utils.generate_endpoint_utils import should_request_rollout_logprobs
+from orbit.rollout.generate_utils.generate_endpoint_utils import (
+    attach_peft_request_payload,
+    should_request_rollout_logprobs,
+)
 from orbit.utils import dumper_utils
 from orbit.utils.async_utils import run
 from orbit.utils.data import Dataset
@@ -398,12 +398,7 @@ async def generate(
         "return_logprob": should_request_rollout_logprobs(args, evaluation),
     }
 
-    peft_method = get_peft_method(args)
-    if peft_method == "lora":
-        payload["lora_path"] = LORA_ADAPTER_NAME
-    elif peft_method == "oft":
-        if not os.environ.get("ORBIT_DSV4_DISABLE_OFT_REQUEST"):
-            payload["oft_path"] = OFT_ADAPTER_NAME
+    attach_peft_request_payload(args, payload)
 
     if args.use_rollout_routing_replay:
         payload["return_routed_experts"] = True

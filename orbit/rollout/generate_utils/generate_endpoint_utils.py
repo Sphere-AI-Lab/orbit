@@ -2,12 +2,16 @@
 Utils to integrate SGLang's `/generate` endpoint with RL things like Sample.
 """
 
+import os
 from copy import deepcopy
 from typing import Any
 
 import numpy as np
 import pybase64
 
+from orbit.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME
+from orbit.backends.megatron_utils.oft_utils import OFT_ADAPTER_NAME
+from orbit.backends.megatron_utils.peft_utils import get_peft_method
 from orbit.utils.processing_utils import encode_image_for_rollout_engine
 from orbit.utils.types import Sample
 
@@ -58,7 +62,18 @@ def compute_request_payload(
     if image_data := (multimodal_inputs or {}).get("images"):
         payload["image_data"] = [encode_image_for_rollout_engine(image) for image in image_data]
 
+    attach_peft_request_payload(args, payload)
+
     return payload, None
+
+
+def attach_peft_request_payload(args, payload: dict[str, Any]) -> dict[str, Any]:
+    peft_method = get_peft_method(args)
+    if peft_method == "lora":
+        payload["lora_path"] = LORA_ADAPTER_NAME
+    elif peft_method == "oft" and not os.environ.get("ORBIT_DSV4_DISABLE_OFT_REQUEST"):
+        payload["oft_path"] = OFT_ADAPTER_NAME
+    return payload
 
 
 def should_request_rollout_logprobs(args, evaluation: bool = False) -> bool:
