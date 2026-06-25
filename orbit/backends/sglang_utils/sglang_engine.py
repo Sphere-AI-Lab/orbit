@@ -73,7 +73,29 @@ def _prepare_child_native_ops_env(force_native_ops: bool):
     _prepend_pythonpath(_COMPAT_SITE_DIR)
 
 
+def _server_args_enable_peft(server_args: ServerArgs) -> bool:
+    return bool(getattr(server_args, "enable_lora", False) or getattr(server_args, "enable_oft", False))
+
+
+def _prepare_child_peft_cache_env(server_args: ServerArgs):
+    if not _server_args_enable_peft(server_args):
+        return
+
+    # PEFT rollout requests rely on SGLang's adapter/version extra_key when
+    # matching prefix cache entries. In the tested SGLang build, the Python
+    # radix cache honors it while the experimental C++ radix tree drops it.
+    previous = os.environ.get("SGLANG_EXPERIMENTAL_CPP_RADIX_TREE")
+    if previous not in (None, "", "0", "false", "False"):
+        logger.warning(
+            "Disabling SGLang experimental C++ radix tree for PEFT rollout; "
+            "the Python radix cache preserves adapter-specific prefix keys."
+        )
+    os.environ["SGLANG_EXPERIMENTAL_CPP_RADIX_TREE"] = "0"
+
+
 def _launch_server_with_orbit_compat(server_args: ServerArgs, force_native_ops: bool):
+    _prepare_child_peft_cache_env(server_args)
+
     if force_native_ops:
         patch_sglang_native_ops()
 
