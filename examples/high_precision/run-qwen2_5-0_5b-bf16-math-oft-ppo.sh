@@ -25,10 +25,10 @@ TEST_JSONL=${TEST_JSONL:-}
 # === Resources ===
 # PPO uses a separate full-model critic. This recipe fits one 8-GPU node as:
 # actor=2 GPUs, critic=2 GPUs, rollout=4 GPUs.
-GPUS_PER_NODE=2
-CRITIC_NUM_GPUS_PER_NODE=2
-ROLLOUT_NUM_GPUS=4
-RAY_NUM_CPUS=32
+GPUS_PER_NODE="${GPUS_PER_NODE:-2}"
+CRITIC_NUM_GPUS_PER_NODE="${CRITIC_NUM_GPUS_PER_NODE:-2}"
+ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-4}"
+RAY_NUM_CPUS="${RAY_NUM_CPUS:-32}"
 
 # === Model args ===
 source "${ORBIT_ROOT}/orbit_plugins/model_args/qwen2.5-0.5B.sh"   # provides MODEL_ARGS=(...)
@@ -38,6 +38,7 @@ TOTAL_EPOCHS="${TOTAL_EPOCHS:-15}"
 ROLLOUT_BATCH_SIZE="${ROLLOUT_BATCH_SIZE:-64}"
 N_SAMPLES_PER_PROMPT="${N_SAMPLES_PER_PROMPT:-4}"
 GLOBAL_BATCH_SIZE="${GLOBAL_BATCH_SIZE:-64}"
+ROLLOUT_MAX_RESPONSE_LEN="${ROLLOUT_MAX_RESPONSE_LEN:-1024}"
 TRAIN_ROWS=${TRAIN_ROWS:-$(wc -l < "${TRAIN_JSONL}")}
 NUM_ROLLOUT=${NUM_ROLLOUT:-$(( (TRAIN_ROWS * TOTAL_EPOCHS + ROLLOUT_BATCH_SIZE - 1) / ROLLOUT_BATCH_SIZE ))}
 
@@ -66,7 +67,7 @@ ROLLOUT_ARGS=(
     --num-rollout "${NUM_ROLLOUT}"
     --rollout-batch-size "${ROLLOUT_BATCH_SIZE}"
     --n-samples-per-prompt "${N_SAMPLES_PER_PROMPT}"
-    --rollout-max-response-len 1024
+    --rollout-max-response-len "${ROLLOUT_MAX_RESPONSE_LEN}"
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
 )
@@ -114,7 +115,7 @@ PERF_ARGS=(
     --expert-model-parallel-size 1
     --expert-tensor-parallel-size 1
     --use-dynamic-batch-size
-    --max-tokens-per-gpu 8192
+    --max-tokens-per-gpu "${MAX_TOKENS_PER_GPU:-8192}"
     --recompute-granularity full
     --recompute-method uniform
     --recompute-num-layers 1
@@ -133,8 +134,8 @@ EVAL_ARGS=(
 SGLANG_ARGS=(
     --rollout-num-gpus-per-engine 1
     --rollout-num-gpus "${ROLLOUT_NUM_GPUS}"
-    --sglang-mem-fraction-static 0.60
-    --sglang-max-running-requests 1024
+    --sglang-mem-fraction-static "${SGLANG_MEM_FRACTION_STATIC:-0.60}"
+    --sglang-max-running-requests "${SGLANG_MAX_RUNNING_REQUESTS:-1024}"
     --sglang-force-native-ops
     --sglang-attention-backend triton
     --sglang-sampling-backend pytorch
@@ -164,6 +165,7 @@ DEBUG_ARGS=(
 
 PEFT_ARGS=(
     --peft-method oft
+    --peft-distributed-transport "${PEFT_DISTRIBUTED_TRANSPORT:-nccl}"
     --peft-variant standard
     --oft-type canonical_oft
     --oft-block-size 32

@@ -145,8 +145,10 @@ ADAPTER_DOUBLE_BUFFER=1 \
     bash examples/high_precision/run-qwen3-4b-instruct-2507-bf16-math-oft-async.sh
 ```
 
-The default is off. In the current benchmark results, OFT async benefits from
-double buffering on the tested 4B config, while LoRA async is roughly neutral.
+The generic async launchers default this off. The Search-R1 and Tau-bench PPO
+wrappers default PEFT distributed sync to NCCL and enable double buffering for
+LoRA/OFT because long-horizon rollouts can leave retiring adapters active during
+single-slot Ray reloads.
 
 ## Env-knob reference
 
@@ -272,6 +274,7 @@ each leaf launcher may pin its own values for the recipe.
 | `SGLANG_DISABLE_CUDA_GRAPH` / `SGLANG_ENFORCE_EAGER` | Disable CUDA graph capture (debugging). |
 | `SGLANG_FP8_GEMM_BACKEND` | FP8 GEMM kernel selection (FP8 recipes). |
 | `SGLANG_TORCHAO_CONFIG` | Path to a torchao quant config (if applicable). |
+| `TAU_BENCH_DYNAMIC_SAMPLING_FILTER_PATH` | Tau-bench PPO dynamic-sampling filter path; set to `none` for smoke/debug runs. |
 
 ### Eval
 
@@ -296,7 +299,7 @@ each leaf launcher may pin its own values for the recipe.
 | `OFT_COFT` | `1` enables Cayley-OFT (orthogonality via Cayley transform). |
 | `OFT_BLOCK_SHARE` | `1` ties the rotation matrix across blocks. |
 | `LORA_RANK` / `LORA_ALPHA` / `LORA_DROPOUT` | LoRA hyperparameters. |
-| `ADAPTER_DOUBLE_BUFFER` | `1` enables `--adapter-double-buffer` for async distributed PEFT rollout engines. Default is `0`. |
+| `ADAPTER_DOUBLE_BUFFER` | `1` enables `--adapter-double-buffer` for async distributed PEFT rollout engines. Generic async launchers default to `0`; Search-R1/Tau-bench PPO PEFT wrappers default to `1` when `PEFT_DISTRIBUTED_TRANSPORT=nccl`. |
 
 ### Quantization (FP8)
 

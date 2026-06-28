@@ -133,6 +133,11 @@ def _normalize_peft_args(args):
 
     if getattr(args, "adapter_double_buffer", False) and peft_method == "none":
         raise AssertionError("--adapter-double-buffer requires --peft-method lora or oft.")
+    peft_distributed_transport = getattr(args, "peft_distributed_transport", "nccl")
+    if peft_distributed_transport not in {"nccl", "ray"}:
+        raise AssertionError("--peft-distributed-transport must be one of nccl or ray.")
+    if getattr(args, "adapter_double_buffer", False) and peft_distributed_transport != "nccl":
+        raise AssertionError("--adapter-double-buffer requires --peft-distributed-transport nccl.")
 
     target_modules = getattr(args, "target_modules", None)
     exclude_modules = getattr(args, "exclude_modules", None)
@@ -1408,6 +1413,17 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
                 help=(
                     "Enable fixed two-slot adapter double buffering for distributed PEFT rollout engines. "
                     "Only supported with --peft-method lora or oft on the NCCL PEFT transport."
+                ),
+            )
+            parser.add_argument(
+                "--peft-distributed-transport",
+                type=str,
+                choices=["nccl", "ray"],
+                default=os.getenv("ORBIT_PEFT_DISTRIBUTED_TRANSPORT", "nccl"),
+                help=(
+                    "Transport for distributed PEFT adapter updates. 'nccl' broadcasts adapter tensors "
+                    "through the SGLang update group; 'ray' serializes CPU adapter tensors through Ray "
+                    "and SGLang tensor-load endpoints."
                 ),
             )
             parser.add_argument(

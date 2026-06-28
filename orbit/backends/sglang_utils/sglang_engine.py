@@ -11,7 +11,7 @@ import requests
 import sglang_router
 from packaging.version import parse
 from sglang.srt.server_args import ServerArgs
-from sglang.srt.utils import kill_process_tree
+from sglang.srt.utils import MultiprocessingSerializer, kill_process_tree
 from urllib3.exceptions import NewConnectionError
 
 from orbit.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME
@@ -431,6 +431,33 @@ class SGLangEngine(RayActor):
             payload,
         )
 
+    def load_lora_adapter_from_ray_tensors(
+        self,
+        lora_name: str,
+        tensors: dict,
+        config_dict: dict,
+        load_format: str | None = None,
+        pinned: bool = False,
+        added_tokens_config: dict | None = None,
+    ):
+        """Load LoRA tensors received through Ray.
+
+        The SGLang HTTP endpoint deserializes tensors inside the scheduler
+        process with ``MultiprocessingSerializer``. Serializing in the trainer
+        actor can embed multiprocessing resource-sharer handles with a
+        different auth key, so distributed Ray transport serializes here,
+        inside the SGLangEngine actor that owns the server process.
+        """
+        serialized_tensors = MultiprocessingSerializer.serialize(tensors, output_str=True)
+        return self.load_lora_adapter_from_tensors(
+            lora_name=lora_name,
+            serialized_tensors=serialized_tensors,
+            config_dict=config_dict,
+            load_format=load_format,
+            pinned=pinned,
+            added_tokens_config=added_tokens_config,
+        )
+
     def load_oft_adapter_from_tensors(
         self,
         oft_name: str,
@@ -451,6 +478,31 @@ class SGLangEngine(RayActor):
             "pinned": pinned,
         }
         return self._make_request("load_oft_adapter_from_tensors", payload)
+
+    def update_oft_adapter_from_ray_tensor(
+        self,
+        *,
+        flat_tensor,
+        metadata: dict,
+        entries: list,
+        load_format: str,
+        adapter_config: dict,
+        adapter_name: str,
+    ):
+        """Update OFT tensors received through Ray via SGLang's streamed loader."""
+        inner = (
+            "flattened_oft_payload",
+            MultiprocessingSerializer.serialize(flat_tensor),
+            metadata,
+            entries,
+        )
+        serialized = MultiprocessingSerializer.serialize(inner, output_str=True)
+        return self.update_weights_from_tensor(
+            serialized_named_tensors=[serialized],
+            load_format=load_format,
+            adapter_config=adapter_config,
+            adapter_name=adapter_name,
+        )
 
     def flush_cache(self):
         """Flush the cache of the server."""

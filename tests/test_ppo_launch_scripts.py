@@ -11,9 +11,9 @@ def test_ppo_launcher_exists_and_uses_separate_critic_resources():
     content = PPO_LAUNCHER.read_text(encoding="utf-8")
 
     assert "COLOCATE_ARGS=()" in content
-    assert "GPUS_PER_NODE=2" in content
-    assert "CRITIC_NUM_GPUS_PER_NODE=2" in content
-    assert "ROLLOUT_NUM_GPUS=4" in content
+    assert 'GPUS_PER_NODE="${GPUS_PER_NODE:-2}"' in content
+    assert 'CRITIC_NUM_GPUS_PER_NODE="${CRITIC_NUM_GPUS_PER_NODE:-2}"' in content
+    assert 'ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-4}"' in content
     assert "--advantage-estimator ppo" in content
     assert "--critic-load" in content
     assert "--critic-save" in content
@@ -78,6 +78,8 @@ def test_ppo_launcher_dry_run_prints_ppo_argv(tmp_path):
 
     assert "--advantage-estimator" in argv
     assert "ppo" in argv
+    assert "--peft-distributed-transport" in argv
+    assert "nccl" in argv
     assert "--critic-num-gpus-per-node" in argv
     assert "2" in argv
     assert "--rollout-num-gpus" in argv

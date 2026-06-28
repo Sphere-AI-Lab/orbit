@@ -64,6 +64,16 @@ configure_process_env() {
     export PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
     export PYTHONFAULTHANDLER=${PYTHONFAULTHANDLER:-1}
 
+    # Megatron's torch-dist checkpoint writer creates multiprocessing manager
+    # sockets under tempfile.gettempdir(); long worktree paths can exceed the
+    # AF_UNIX socket length limit during saves.
+    ORBIT_TMPDIR=${ORBIT_TMPDIR:-"/tmp/orbit-${USER:-$(id -u)}"}
+    mkdir -p "${ORBIT_TMPDIR}"
+    export ORBIT_TMPDIR
+    export TMPDIR="${ORBIT_TMPDIR}"
+    export TMP="${TMPDIR}"
+    export TEMP="${TMPDIR}"
+
     ORBIT_LAUNCHER_XTRACE=${ORBIT_LAUNCHER_XTRACE:-0}
     if is_true "${ORBIT_LAUNCHER_XTRACE}"; then
         set -x

@@ -110,9 +110,20 @@ import ray._private.services as services
 train_path = sys.argv[1]
 sys.argv = [train_path, *sys.argv[2:]]
 
-_proxy_env = {
+_runtime_env_vars = {
     k: os.environ[k]
-    for k in ("no_proxy", "NO_PROXY", "http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY")
+    for k in (
+        "no_proxy",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ORBIT_TMPDIR",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+    )
     if k in os.environ
 }
 
@@ -144,7 +155,7 @@ _log_to_driver = os.environ.get("ORBIT_RAY_LOG_TO_DRIVER", "0").lower() in ("1",
 _ray_init_kwargs = {
     "address": os.environ["ORBIT_RAY_ADDRESS"],
     "log_to_driver": _log_to_driver,
-    "runtime_env": {"env_vars": _proxy_env} if _proxy_env else None,
+    "runtime_env": {"env_vars": _runtime_env_vars} if _runtime_env_vars else None,
 }
 _driver_debug = os.environ.get("ORBIT_DRIVER_DEBUG", "0").lower() in ("1", "true", "yes", "y", "on")
 

@@ -46,6 +46,10 @@ def build_peft_transport(
         runtime_mode=runtime_mode,
     )
     if use_distribute:
+        if runtime_mode.transport == "ray":
+            from .backends.ray_object import RayObjectBackend
+
+            return RayObjectBackend(**common_kwargs)
         # Late import — NcclBackend imported lazily so colocate-only deployments
         # never need to touch torch.distributed init paths.
         from .backends.nccl import NcclBackend
