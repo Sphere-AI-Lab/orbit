@@ -32,6 +32,14 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 MILES_REPO="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
+# Scrub any inherited SLURM_* env. If submit.sh is run from inside an
+# salloc/srun, `sbatch --export=ALL` below would otherwise leak the caller's
+# allocation (SLURM_JOB_ID / SLURM_NODELIST / SLURM_*_GPUS / ...) into the new
+# batch job. That poisons launch_miles.sbatch's healthcheck `srun --jobid=...
+# --overlap` step, which then fails with "Requested node configuration is not
+# available" and false-marks every allocated node BAD at startup.
+unset $(compgen -v | grep '^SLURM_') 2>/dev/null || true
+
 if [[ $# -ne 1 ]]; then
     echo "Usage: bash $0 <experiment-name>" >&2
     echo "Available experiments:" >&2

@@ -143,12 +143,16 @@ The launcher now:
    `timeout $RAY_STATUS_PROBE_TIMEOUT=10s`. Terminal states: `SUCCEEDED`
    (rc 0), `FAILED` (rc 1), `STOPPED` (rc 2). If the dashboard returns
    unreadable output for `RAY_STATUS_FAIL_GRACE=24` consecutive probes
-   (= 6 min by default), we declare `CLUSTER_DEAD` (rc 3). If the SLURM
-   wall deadline is reached without a terminal state, `DEADLINE` (rc
-   124). Per-probe diagnostics are written to node-local scratch under
-   `${TMPDIR:-/tmp}`; `run.log` prints a one-line warning and the local
-   diagnostics path. This avoids synchronously opening files in
-   `$RUN_DIR` while deciding whether the Ray Jobs API is still readable.
+   (= 6 min by default), we first check `$RUN_DIR/train_status.json`,
+   which `train.py` writes from inside the Ray job. A completed sentinel
+   resolves the run as `SUCCEEDED`; a failed sentinel resolves it as
+   `FAILED`; no terminal sentinel falls through to `CLUSTER_DEAD` (rc 3).
+   If the SLURM wall deadline is reached without a terminal state,
+   `DEADLINE` (rc 124). Per-probe diagnostics are written to node-local
+   scratch under `${TMPDIR:-/tmp}`; `run.log` prints a one-line warning
+   and the local diagnostics path. This avoids synchronously opening files
+   in `$RUN_DIR` on every poll while still giving the launcher an
+   independent completion signal when the Ray Jobs API becomes unreadable.
 4. The bg log tail watches a node-local marker the fg poll touches when
    finished, so teardown is fast and the active `ray job logs` child is
    killed with the wrapper.

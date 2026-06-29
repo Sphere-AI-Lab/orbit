@@ -32,9 +32,40 @@
 # node-local scratch while the job is running, so status polling does not
 # synchronously touch the shared run dir. May leave the ray cluster running
 # on terminal exit (teardown trap in caller).
+read_train_status_sentinel() {
+    local path="$RUN_DIR/train_status.json"
+    [[ -f "$path" ]] || return 1
+    python3 - "$path" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    with open(path, encoding="utf-8") as f:
+        payload = json.load(f)
+except Exception:
+    sys.exit(1)
+
+state = str(payload.get("state", "")).lower()
+try:
+    rc = int(payload.get("rc", 1))
+except (TypeError, ValueError):
+    rc = 1
+
+if state == "completed" and rc == 0:
+    print("SUCCEEDED 0")
+    sys.exit(0)
+if state == "failed":
+    print(f"FAILED {rc if rc != 0 else 1}")
+    sys.exit(0)
+sys.exit(1)
+PY
+}
+
 ray_submit_and_wait() {
     RAY_ADDRESS="http://${HEAD_IP}:${RAY_DASHBOARD_PORT}"
     echo "[submit] $(date -Is)  ray job submit --no-wait -> train.py"
+    rm -f "$RUN_DIR/train_status.json" "$RUN_DIR"/train_status.json.tmp.* 2>/dev/null || true
     local submit_out submit_rc
     submit_out=$(srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$HEAD_NODE" \
          --export=ALL,RAY_ADDRESS="$RAY_ADDRESS",MILES_ARGS_STR="$(printf '%q ' "${MILES_ARGS[@]}")" \
@@ -50,6 +81,7 @@ print(json.dumps({"env_vars": {
     "HF_HOME": os.environ["HF_HOME"],
     "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
     "WANDB_API_KEY": os.environ.get("WANDB_API_KEY", ""),
+    "MILES_RUN_DIR": os.environ.get("RUN_DIR", ""),
 }}))
 EOF
 )
@@ -127,7 +159,7 @@ EOF
     local status_fail_count=0
     local deadline
     deadline=$(( ${SLURM_JOB_END_TIME:-$(( $(date +%s) + 86400 ))} - 120 ))
-    local status_out status_rc err_summary
+    local status_out status_rc err_summary sentinel_out
     while (( $(date +%s) < deadline )); do
         sleep "$poll_interval"
         # `if`-wrap the probe so `set -e` does NOT exit the script when the
@@ -157,9 +189,15 @@ EOF
                 } >> "$probe_log"
                 echo "[submit] WARN: unreadable probe ${status_fail_count}/${fail_grace} (rc=$status_rc, stderr=${err_summary:-<empty>})"
                 if (( status_fail_count >= fail_grace )); then
-                    echo "[submit] $fail_grace consecutive unreadable status probes (~$((fail_grace * poll_interval))s) — declaring cluster dead"
-                    STATE=CLUSTER_DEAD
-                    JOB_RC=3
+                    if sentinel_out=$(read_train_status_sentinel); then
+                        STATE=${sentinel_out%% *}
+                        JOB_RC=${sentinel_out##* }
+                        echo "[submit] train_status.json resolved unreadable Ray status as $STATE job_rc=$JOB_RC"
+                    else
+                        echo "[submit] $fail_grace consecutive unreadable status probes (~$((fail_grace * poll_interval))s) — declaring cluster dead"
+                        STATE=CLUSTER_DEAD
+                        JOB_RC=3
+                    fi
                     break
                 fi
                 ;;

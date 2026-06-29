@@ -1,0 +1,16 @@
+# Envpack FrozenLake eval candidate pool.
+# The build script filters this 4096-seed candidate pool down to 256
+# env_uuid-heldout rows against the train split.
+envs:
+  - name: FrozenLake
+    n_envs: 4096
+    seed: [20001, 24096, 1]
+    profile: vision_free_think_local
+    pool_id: frozenlake-vision
+    config:
+      render_mode: vision
+      size: 4
+      p: 0.8
+      is_slippery: false
+      slip_prob: 0.0
+      max_actions_per_step: 5

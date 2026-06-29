@@ -34,6 +34,11 @@
 #   RAY_STATUS_PROBE_TIMEOUT  per-probe timeout (s)          [10]
 #   RAY_STATUS_FAIL_GRACE     unreadable-probe count -> dead [24]
 #                             (default 24 × 15s = 6 min)
+#   ENVPACK_SERVER_NODE_COUNT  nodes reserved for one envpack server [0]
+#   ENVPACK_SERVER_ENV_NAME    conda env for envpack server [$MILES_ENV_NAME]
+#   ENVPACK_SERVER_WAIT_TIMEOUT envpack server readiness timeout (s) [60]
+#   ENVPACK_SERVER_WATCHDOG_INTERVAL envpack server health poll interval (s) [15]
+#   ENVPACK_SERVER_WATCHDOG_FAILURES consecutive health failures before requeue [3]
 
 #SBATCH --gres=gpu:8
 #SBATCH --cpus-per-task=128
@@ -55,6 +60,12 @@ RAY_DASHBOARD_PORT=${RAY_DASHBOARD_PORT:-8265}
 HEALTHCHECK_TIMEOUT=${HEALTHCHECK_TIMEOUT:-${PREFLIGHT_TIMEOUT:-60}}
 HEALTHCHECK_MAX_RESTARTS=${HEALTHCHECK_MAX_RESTARTS:-3}
 RAY_BRINGUP_TIMEOUT=${RAY_BRINGUP_TIMEOUT:-300}
+ENVPACK_SERVER_NODE_COUNT=${ENVPACK_SERVER_NODE_COUNT:-0}
+ENVPACK_SERVER_ENV_NAME=${ENVPACK_SERVER_ENV_NAME:-$MILES_ENV_NAME}
+ENVPACK_SERVER_WAIT_TIMEOUT=${ENVPACK_SERVER_WAIT_TIMEOUT:-60}
+ENVPACK_SERVER_WATCHDOG_INTERVAL=${ENVPACK_SERVER_WATCHDOG_INTERVAL:-15}
+ENVPACK_SERVER_WATCHDOG_FAILURES=${ENVPACK_SERVER_WATCHDOG_FAILURES:-3}
+LAUNCHER_PID=$$
 
 : "${RECIPE:?RECIPE must be the absolute path to a recipe file (scripts/experiments/*.sh)}"
 
@@ -160,11 +171,40 @@ if (( ${#BAD_NODES[@]} > 0 )); then
     exit 75   # EX_TEMPFAIL → slurm requeue per --requeue
 fi
 
-HEAD_NODE="${GOOD_NODES[0]}"
+if ! [[ "$ENVPACK_SERVER_NODE_COUNT" =~ ^[0-9]+$ ]]; then
+    echo "[topology] FATAL: ENVPACK_SERVER_NODE_COUNT must be an integer, got '$ENVPACK_SERVER_NODE_COUNT'" >&2
+    exit 78
+fi
+if (( ENVPACK_SERVER_NODE_COUNT > 1 )); then
+    echo "[topology] FATAL: ENVPACK_SERVER_NODE_COUNT=$ENVPACK_SERVER_NODE_COUNT is not supported yet; use 0 or 1" >&2
+    exit 78
+fi
+if (( ENVPACK_SERVER_NODE_COUNT >= ${#GOOD_NODES[@]} )); then
+    echo "[topology] FATAL: ENVPACK_SERVER_NODE_COUNT=$ENVPACK_SERVER_NODE_COUNT leaves no nodes for Miles/Ray" >&2
+    exit 78
+fi
+
+MILES_NODE_COUNT=$(( ${#GOOD_NODES[@]} - ENVPACK_SERVER_NODE_COUNT ))
+RAY_NODES=( "${GOOD_NODES[@]:0:$MILES_NODE_COUNT}" )
+ENVPACK_NODES=( "${GOOD_NODES[@]:$MILES_NODE_COUNT}" )
+
+HEAD_NODE="${RAY_NODES[0]}"
 HEAD_IP=$(getent ahostsv4 "$HEAD_NODE" | awk 'NR==1{print $1}')
-WORKER_NODES=( "${GOOD_NODES[@]:1}" )
-EXPECTED_GPUS=$(( ${#GOOD_NODES[@]} * 8 ))
-echo "[topology] head=$HEAD_NODE ($HEAD_IP)  workers=${WORKER_NODES[*]:-<none>}  gpus=$EXPECTED_GPUS"
+WORKER_NODES=( "${RAY_NODES[@]:1}" )
+EXPECTED_GPUS=$(( ${#RAY_NODES[@]} * 8 ))
+
+if (( ENVPACK_SERVER_NODE_COUNT > 0 )); then
+    ENVPACK_SERVER_NODE="${ENVPACK_NODES[0]}"
+    ENVPACK_SERVER_IP=$(getent ahostsv4 "$ENVPACK_SERVER_NODE" | awk 'NR==1{print $1}')
+    ENVPACK_SERVER_PORT=${ENVPACK_SERVER_PORT:-18081}
+    export ENVPACK_SERVER_NODE ENVPACK_SERVER_IP ENVPACK_SERVER_PORT
+    export ENVPACK_SERVER_URL="http://${ENVPACK_SERVER_IP}:${ENVPACK_SERVER_PORT}"
+fi
+
+echo "[topology] miles_head=$HEAD_NODE ($HEAD_IP)  miles_workers=${WORKER_NODES[*]:-<none>}  miles_gpus=$EXPECTED_GPUS"
+if (( ENVPACK_SERVER_NODE_COUNT > 0 )); then
+    echo "[topology] envpack_nodes=${ENVPACK_NODES[*]}  envpack_url=${ENVPACK_SERVER_URL}"
+fi
 
 # ---------- stale-process cleanup ----------------------------------------
 # Two-phase SIGTERM → SIGKILL + D-state / leftover-GPU-mem gate.
@@ -257,6 +297,38 @@ NODE_PREAMBLE='
     export PYTHONUNBUFFERED=1
 '
 
+ENVPACK_NODE_PREAMBLE='
+    set -euo pipefail
+    source '"$CONDA_ROOT"'/etc/profile.d/conda.sh
+    conda activate '"$ENVPACK_SERVER_ENV_NAME"'
+    export HF_HOME='"$HF_HOME"'
+    export PYTHONUNBUFFERED=1
+'
+
+envpack_healthcheck() {
+    local health_url="$1"
+    if [[ -n "${ENVPACK_AUTH_TOKEN:-}" ]]; then
+        curl -sf -H "Authorization: Bearer ${ENVPACK_AUTH_TOKEN}" "$health_url" >/dev/null 2>&1
+    else
+        curl -sf "$health_url" >/dev/null 2>&1
+    fi
+}
+
+validate_positive_integer() {
+    local name="$1"
+    local value="${!name}"
+    if ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+        echo "[envpack-server] FATAL: $name must be a positive integer, got '$value'" >&2
+        exit 78
+    fi
+}
+
+validate_envpack_server_timing() {
+    validate_positive_integer ENVPACK_SERVER_WAIT_TIMEOUT
+    validate_positive_integer ENVPACK_SERVER_WATCHDOG_INTERVAL
+    validate_positive_integer ENVPACK_SERVER_WATCHDOG_FAILURES
+}
+
 # ---------- auto-convert HF -> torch_dist if missing ----------------------
 # Runs on the head node only. For large multi-node converts, pre-stage via
 # scripts/slurm/setup/convert_checkpoint.sh — see docs/launcher.md.
@@ -292,6 +364,118 @@ else
     echo "[convert] torch_dist present: $HF_TORCHDIST_DIR"
 fi
 
+# ---------- optional: envpack session server -----------------------------
+# envpack HTTP session recipes that want a same-node server export
+# ENVPACK_LOCAL_SERVER_CMD (and ENVPACK_LOCAL_SERVER_HEALTH). This batch script
+# body runs on the head node, so a background server here listens on the head
+# node's localhost — reachable by the colocated rollout actors. 1-node only:
+# with worker nodes, actors off the head node cannot reach 127.0.0.1. Torn down
+# with the rest of the job via teardown().
+#
+# Two-node recipes reserve one node with ENVPACK_SERVER_NODE_COUNT=1 and export
+# ENVPACK_REMOTE_SERVER_CMD. The launcher runs that command via srun on the
+# reserved envpack node and points Miles at ENVPACK_SERVER_URL.
+ENVPACK_SERVER_PID=""
+ENVPACK_SERVER_WATCHDOG_PID=""
+if [[ -n "${ENVPACK_LOCAL_SERVER_CMD:-}" && -n "${ENVPACK_REMOTE_SERVER_CMD:-}" ]]; then
+    echo "[envpack-server] FATAL: set only one of ENVPACK_LOCAL_SERVER_CMD or ENVPACK_REMOTE_SERVER_CMD" >&2
+    exit 78
+fi
+if [[ -n "${ENVPACK_LOCAL_SERVER_CMD:-}" || -n "${ENVPACK_REMOTE_SERVER_CMD:-}" ]]; then
+    validate_envpack_server_timing
+fi
+if [[ -n "${ENVPACK_LOCAL_SERVER_CMD:-}" ]]; then
+    echo "[envpack-server] $HEAD_NODE: $ENVPACK_LOCAL_SERVER_CMD"
+    bash -c "$ENVPACK_LOCAL_SERVER_CMD" >"$RUN_DIR/envpack_server.log" 2>&1 &
+    ENVPACK_SERVER_PID=$!
+    ENVPACK_SERVER_HEALTH_URL=${ENVPACK_LOCAL_SERVER_HEALTH:-http://127.0.0.1:18081/v1/health}
+    ENVPACK_SERVER_READY=0
+    for _ in $(seq 1 "$ENVPACK_SERVER_WAIT_TIMEOUT"); do
+        if envpack_healthcheck "$ENVPACK_SERVER_HEALTH_URL"; then
+            ENVPACK_SERVER_READY=1
+            echo "[envpack-server] healthy ($ENVPACK_SERVER_HEALTH_URL)"
+            break
+        fi
+        if ! kill -0 "$ENVPACK_SERVER_PID" 2>/dev/null; then
+            echo "[envpack-server] FATAL: server exited during startup; tail $RUN_DIR/envpack_server.log:"
+            tail -n 20 "$RUN_DIR/envpack_server.log" 2>/dev/null || true
+            write_manifest FAILED
+            exit 78
+        fi
+        sleep 1
+    done
+    if (( ENVPACK_SERVER_READY == 0 )); then
+        echo "[envpack-server] FATAL: not healthy after ${ENVPACK_SERVER_WAIT_TIMEOUT}s; tail $RUN_DIR/envpack_server.log:"
+        tail -n 20 "$RUN_DIR/envpack_server.log" 2>/dev/null || true
+        kill "$ENVPACK_SERVER_PID" 2>/dev/null || true
+        write_manifest FAILED
+        exit 78
+    fi
+fi
+if [[ -n "${ENVPACK_REMOTE_SERVER_CMD:-}" ]]; then
+    : "${ENVPACK_SERVER_NODE:?ENVPACK_SERVER_NODE_COUNT must reserve an envpack node}"
+    : "${ENVPACK_SERVER_URL:?ENVPACK_SERVER_URL must be set for remote envpack server}"
+    echo "[envpack-server] $ENVPACK_SERVER_NODE: $ENVPACK_REMOTE_SERVER_CMD"
+    srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$ENVPACK_SERVER_NODE" \
+         --export=ALL,ENVPACK_REMOTE_SERVER_CMD="$ENVPACK_REMOTE_SERVER_CMD" \
+         bash -c "$ENVPACK_NODE_PREAMBLE"'
+            cd "'"$MILES_REPO"'"
+            eval "$ENVPACK_REMOTE_SERVER_CMD"
+         ' >"$RUN_DIR/envpack_server_${ENVPACK_SERVER_NODE}.log" 2>&1 &
+    ENVPACK_SERVER_PID=$!
+    ENVPACK_SERVER_HEALTH_URL=${ENVPACK_REMOTE_SERVER_HEALTH:-${ENVPACK_SERVER_URL%/}/v1/health}
+    ENVPACK_SERVER_READY=0
+    for _ in $(seq 1 "$ENVPACK_SERVER_WAIT_TIMEOUT"); do
+        if envpack_healthcheck "$ENVPACK_SERVER_HEALTH_URL"; then
+            ENVPACK_SERVER_READY=1
+            echo "[envpack-server] healthy ($ENVPACK_SERVER_HEALTH_URL)"
+            break
+        fi
+        if ! kill -0 "$ENVPACK_SERVER_PID" 2>/dev/null; then
+            echo "[envpack-server] FATAL: remote server exited during startup; tail $RUN_DIR/envpack_server_${ENVPACK_SERVER_NODE}.log:"
+            tail -n 20 "$RUN_DIR/envpack_server_${ENVPACK_SERVER_NODE}.log" 2>/dev/null || true
+            write_manifest FAILED
+            exit 78
+        fi
+        sleep 1
+    done
+    if (( ENVPACK_SERVER_READY == 0 )); then
+        echo "[envpack-server] FATAL: not healthy after ${ENVPACK_SERVER_WAIT_TIMEOUT}s; tail $RUN_DIR/envpack_server_${ENVPACK_SERVER_NODE}.log:"
+        tail -n 20 "$RUN_DIR/envpack_server_${ENVPACK_SERVER_NODE}.log" 2>/dev/null || true
+        kill "$ENVPACK_SERVER_PID" 2>/dev/null || true
+        write_manifest FAILED
+        exit 78
+    fi
+fi
+
+start_envpack_server_watchdog() {
+    local health_url="$1"
+    if [[ -z "$health_url" ]]; then
+        return 0
+    fi
+    validate_envpack_server_timing
+    trap 'echo "[envpack-server] watchdog failure - clean shutdown then requeue"; MANIFEST_EXTRA_JSON=$(printf '\''{"job_rc":75,"failure_reason":"envpack_server_unhealthy","ended_at":"%s"}'\'' "$(date -Is)") write_manifest FAILED; teardown; exit 75' USR1
+    (
+        failures=0
+        while true; do
+            sleep "$ENVPACK_SERVER_WATCHDOG_INTERVAL"
+            if envpack_healthcheck "$health_url"; then
+                failures=0
+                continue
+            fi
+            failures=$((failures + 1))
+            echo "[envpack-server] watchdog health failure $failures/$ENVPACK_SERVER_WATCHDOG_FAILURES ($health_url)" >&2
+            if (( failures >= ENVPACK_SERVER_WATCHDOG_FAILURES )); then
+                echo "[envpack-server] FATAL: watchdog marked envpack server unhealthy; requesting requeue" >&2
+                kill -USR1 "$LAUNCHER_PID" 2>/dev/null || true
+                exit 75
+            fi
+        done
+    ) &
+    ENVPACK_SERVER_WATCHDOG_PID=$!
+    echo "[envpack-server] watchdog started pid=$ENVPACK_SERVER_WATCHDOG_PID url=$health_url interval=${ENVPACK_SERVER_WATCHDOG_INTERVAL}s failures=$ENVPACK_SERVER_WATCHDOG_FAILURES"
+}
+
 # ---------- ray bring-up --------------------------------------------------
 
 echo "[ray] starting head on $HEAD_NODE"
@@ -323,6 +507,8 @@ done
 
 teardown() {
     echo "[teardown] $(date -Is)  stopping ray + killing srun children"
+    [[ -n "${ENVPACK_SERVER_WATCHDOG_PID:-}" ]] && kill "$ENVPACK_SERVER_WATCHDOG_PID" 2>/dev/null || true
+    [[ -n "${ENVPACK_SERVER_PID:-}" ]] && kill "$ENVPACK_SERVER_PID" 2>/dev/null || true
     for n in "${GOOD_NODES[@]}"; do
         srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$n" \
              bash -c "$NODE_PREAMBLE"' ray stop --force ' >/dev/null 2>&1 || true
@@ -331,6 +517,10 @@ teardown() {
 }
 trap 'echo "[signal] received — clean shutdown then exit"; write_manifest INTERRUPTED; teardown; exit 0' SIGTERM SIGINT
 trap teardown EXIT
+
+if [[ -n "${ENVPACK_SERVER_HEALTH_URL:-}" ]]; then
+    start_envpack_server_watchdog "$ENVPACK_SERVER_HEALTH_URL"
+fi
 
 # ---------- wait for cluster ready ---------------------------------------
 

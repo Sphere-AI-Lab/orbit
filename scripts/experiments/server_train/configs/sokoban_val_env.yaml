@@ -1,0 +1,13 @@
+# Envpack Sokoban eval candidate pool.
+# The build script filters this 4096-seed candidate pool down to 256
+# env_uuid-heldout rows against the train split.
+envs:
+  - name: Sokoban
+    n_envs: 4096
+    seed: [20001, 24096, 1]
+    profile: vision_free_think_local
+    pool_id: sokoban-vision
+    config:
+      render_mode: vision
+      min_solution_steps: [1, 5]
+      prompt_format: free_think

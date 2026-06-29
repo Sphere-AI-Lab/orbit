@@ -17,6 +17,7 @@ import logging
 import os
 import tempfile
 import threading
+from collections import Counter
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +182,7 @@ def _coerce_jsonable(value):
 
 def _build_record(sample, step: int, epoch_id: int, image_token_id: int | None) -> dict:
     meta_vagen = (getattr(sample, "metadata", None) or {}).get("vagen", {}) or {}
+    solver_metrics = meta_vagen.get("solver_metrics") or {}
     loss_mask = getattr(sample, "loss_mask", None) or []
     rollout_log_probs = getattr(sample, "rollout_log_probs", None) or []
     tokens = getattr(sample, "tokens", None) or []
@@ -203,6 +205,10 @@ def _build_record(sample, step: int, epoch_id: int, image_token_id: int | None) 
             "seed": meta_vagen.get("seed"),
             "max_turns": meta_vagen.get("max_turns"),
             "config": _coerce_jsonable(meta_vagen.get("config")),
+            "env_uuid": meta_vagen.get("env_uuid"),
+            "env_uuid_kind": meta_vagen.get("env_uuid_kind"),
+            "solver_metrics": _coerce_jsonable(solver_metrics),
+            "bucket_name": meta_vagen.get("bucket_name") or solver_metrics.get("bucket_name"),
         },
         "outcome": {
             "status": status_name,
@@ -293,6 +299,8 @@ def dump_samples(
     n_turn_action_valid = 0
     n_turn_action_effective = 0
     sum_turn_n_actions = 0
+    bucket_counts: Counter[str] = Counter()
+    bucket_success: Counter[str] = Counter()
     for sample in samples:
         # Pop PIL refs before _build_record runs (json.dump can't see PILs).
         meta_vagen = (getattr(sample, "metadata", None) or {}).get("vagen", {}) or {}
@@ -313,6 +321,13 @@ def dump_samples(
         sum_traj_turns += int(outcome.get("num_turns") or 0)
         if outcome.get("traj_success"):
             n_traj_success += 1
+        bucket_name = meta_vagen.get("bucket_name") or (
+            (meta_vagen.get("solver_metrics") or {}).get("bucket_name") if isinstance(meta_vagen, dict) else None
+        )
+        if bucket_name:
+            bucket_counts[str(bucket_name)] += 1
+            if outcome.get("traj_success"):
+                bucket_success[str(bucket_name)] += 1
         per_turn = outcome.get("per_turn") or []
         if any(t.get("format_correct") for t in per_turn):
             n_traj_any_format_correct += 1
@@ -420,6 +435,14 @@ def dump_samples(
         turn_action_effective_rate=turn_action_effective_rate,
         avg_turn_n_actions=avg_turn_n_actions,
     )
+    _log_wandb_bucket_solve_rates(
+        args,
+        prefix="eval_sokoban_bucket" if is_eval else "rollout_sokoban_bucket",
+        step_key=wandb_step_key,
+        step=step,
+        bucket_counts=bucket_counts,
+        bucket_success=bucket_success,
+    )
 
 
 def _log_wandb_turn_stats(args, *, prefix: str, step_key: str, step: int, **stats) -> None:
@@ -438,3 +461,31 @@ def _log_wandb_turn_stats(args, *, prefix: str, step_key: str, step: int, **stat
         tracking_utils.log(args, log_dict, step_key=step_key)
     except Exception as exc:
         logger.warning("dump_samples: wandb mirror failed at step=%d: %s", step, exc)
+
+
+def _log_wandb_bucket_solve_rates(
+    args,
+    *,
+    prefix: str,
+    step_key: str,
+    step: int,
+    bucket_counts: Counter[str],
+    bucket_success: Counter[str],
+) -> None:
+    if not bucket_counts or not getattr(args, "use_wandb", False):
+        return
+    try:
+        from miles.utils import tracking_utils
+    except Exception as exc:
+        logger.warning("dump_samples: tracking_utils import failed (%s); skipping bucket wandb mirror", exc)
+        return
+    log_dict = {
+        f"{prefix}/{bucket}/solve_rate": bucket_success.get(bucket, 0) / count
+        for bucket, count in sorted(bucket_counts.items())
+        if count > 0
+    }
+    log_dict[step_key] = step
+    try:
+        tracking_utils.log(args, log_dict, step_key=step_key)
+    except Exception as exc:
+        logger.warning("dump_samples: bucket wandb mirror failed at step=%d: %s", step, exc)

@@ -156,7 +156,8 @@ MISC_ARGS=(
 
 WANDB_ARGS=(
     --use-wandb
-    --wandb-project miles-imp
+    --wandb-team    M3TRL
+    --wandb-project vagen
     --wandb-group   "$RUN_NAME"
     --disable-wandb-random-suffix
 )

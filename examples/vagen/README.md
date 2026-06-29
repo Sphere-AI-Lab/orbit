@@ -54,6 +54,15 @@ checkout. Verify with `python -c "import vagen; print(vagen.__file__)"`.
 VAGEN's own `scripts/install_vllm_sglang_mcore.sh` is for VAGEN's training
 entry points — skip it; the miles env already has SGLang.
 
+> **On a freshly-built env** (e.g. miles' `install_env.sh`, which pulls the
+> latest `setuptools`): also run `pip install "setuptools<81"`. `gym-sokoban`
+> 0.0.6 does `import pkg_resources` at import time, and setuptools ≥81 removed
+> `pkg_resources` — without this the **Sokoban** env silently fails to register
+> (`Unknown env name: Sokoban`); FrozenLake is unaffected. Prefer
+> `pip install -e . --no-deps` followed by
+> `pip install gym-sokoban gymnasium "gymnasium[toy-text]" "setuptools<81"` so
+> VAGEN's `uvicorn<0.41` pin does not downgrade the env's SGLang-side uvicorn.
+
 ### 1. Build the dataset
 
 Each environment has one offline-builder shell script that produces two

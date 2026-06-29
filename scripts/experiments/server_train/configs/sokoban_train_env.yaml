@@ -1,0 +1,13 @@
+# Envpack Sokoban train EnvSpec.
+# Mirrors the VAGEN-main Sokoban recipe: vision mode, 10k train seeds,
+# and free_think prompt format.
+envs:
+  - name: Sokoban
+    n_envs: 10000
+    seed: [1, 10000, 1]
+    profile: vision_free_think_local
+    pool_id: sokoban-vision
+    config:
+      render_mode: vision
+      min_solution_steps: [1, 5]
+      prompt_format: free_think

@@ -18,3 +18,7 @@
 	path = thirdparty/Megatron-Bridge
 	url = https://github.com/impossible-inc/Megatron-Bridge.git
 	branch = bridge
+[submodule "thirdparty/envpack"]
+	path = thirdparty/envpack
+	url = https://github.com/impossible-inc/envpack.git
+	branch = RL/sokoban_frozenlake
