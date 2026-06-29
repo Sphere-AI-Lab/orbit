@@ -15,7 +15,7 @@ import json
 import logging
 import os
 import random
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -38,6 +38,8 @@ class EnvSpec:
     seed_list: list[int] | None = None
     profile: str | None = None
     pool_id: str | None = None
+    bucket_prefix: str | None = None
+    sampling: dict[str, Any] | None = None
 
 
 async def build_dataset(
@@ -238,17 +240,16 @@ async def _build_balanced_sokoban_dataset(
         from envpack.envs.sokoban.dataset import (
             SokobanDatasetSpec,
             build_balanced_sokoban_dataset,
+            parse_sampling_spec,
         )
         from envpack.envs.sokoban.dataset import sampling_meta as sokoban_sampling_meta
     except Exception as exc:
         raise RuntimeError("balanced Sokoban build requires envpack with Sokoban dataset helpers installed") from exc
 
-    if len(specs) != 1:
-        raise RuntimeError("balanced Sokoban build currently expects exactly one env spec")
-    spec = specs[0]
-    env_name = _normalize_env_name(spec.name)
-    if env_name != "sokoban":
-        raise RuntimeError("balanced sampling is currently implemented only for Sokoban")
+    for spec in specs:
+        env_name = _normalize_env_name(spec.name)
+        if env_name != "sokoban":
+            raise RuntimeError("balanced sampling is currently implemented only for Sokoban")
 
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(eval_output_dir, exist_ok=True)
@@ -263,6 +264,7 @@ async def _build_balanced_sokoban_dataset(
         {
             "sampling": sampling_payload,
             "eval_output_dir": os.path.abspath(eval_output_dir),
+            "num_env_specs": len(specs),
         }
     )
     if (
@@ -273,51 +275,167 @@ async def _build_balanced_sokoban_dataset(
         logger.info("balanced dataset already current: %s and %s", train_samples_path, eval_samples_path)
         return
 
-    profile = spec.profile or "vision_free_think_local"
-    pool_id = spec.pool_id or f"{env_name}:{profile}"
-    config = EnvpackAdapterConfig(
-        api="in_process",
-        pools=(
-            EnvpackPoolConfig(
-                env=env_name,
+    all_train_rows: list[dict[str, Any]] = []
+    all_eval_rows: list[dict[str, Any]] = []
+    family_reports: list[dict[str, Any]] = []
+    for spec_idx, spec in enumerate(specs):
+        env_name = _normalize_env_name(spec.name)
+        profile = spec.profile or "vision_free_think_local"
+        pool_id = spec.pool_id or f"{env_name}:{profile}"
+        config = EnvpackAdapterConfig(
+            api="in_process",
+            pools=(
+                EnvpackPoolConfig(
+                    env=env_name,
+                    profile=profile,
+                    pool_id=pool_id,
+                    runtime_config={"num_instances": 1, "max_active_episodes_per_instance": 1},
+                ),
+            ),
+            rollout=EnvpackRolloutConfig(),
+        )
+        bundle = build_in_process_client(config)
+        env_config = copy.deepcopy(bundle.env_config(pool_id))
+        env_config.update(copy.deepcopy(spec.config))
+        seeds = _generate_seeds_for_spec(spec, base_seed, spec_idx)
+        spec_sampling = sampling
+        spec_sampling_payload = sampling_payload
+        if spec.sampling:
+            spec_sampling = parse_sampling_spec({**sampling_payload, **copy.deepcopy(spec.sampling)})
+            spec_sampling_payload = sokoban_sampling_meta(spec_sampling)
+        result = await build_balanced_sokoban_dataset(
+            spec=SokobanDatasetSpec(
+                n_envs=spec.n_envs,
+                seeds=seeds,
+                env_config=env_config,
                 profile=profile,
                 pool_id=pool_id,
-                runtime_config={"num_instances": 1, "max_active_episodes_per_instance": 1},
+                env_name=env_name,
+                bucket_prefix=spec.bucket_prefix,
             ),
-        ),
-        rollout=EnvpackRolloutConfig(),
-    )
-    bundle = build_in_process_client(config)
-    env_config = copy.deepcopy(bundle.env_config(pool_id))
-    env_config.update(copy.deepcopy(spec.config))
-    seeds = _generate_seeds_for_spec(spec, base_seed, 0)
-    result = await build_balanced_sokoban_dataset(
-        spec=SokobanDatasetSpec(
-            n_envs=spec.n_envs,
-            seeds=seeds,
-            env_config=env_config,
-            profile=profile,
-            pool_id=pool_id,
-            env_name=env_name,
-        ),
-        sampling=sampling,
+            sampling=spec_sampling,
+        )
+        _annotate_family(result.train_rows, spec_idx=spec_idx, pool_id=pool_id)
+        _annotate_family(result.eval_rows, spec_idx=spec_idx, pool_id=pool_id)
+        all_train_rows.extend(result.train_rows)
+        all_eval_rows.extend(result.eval_rows)
+        family_reports.append(
+            {
+                "spec_idx": spec_idx,
+                "env_name": env_name,
+                "profile": profile,
+                "pool_id": pool_id,
+                "bucket_prefix": spec.bucket_prefix,
+                "sampling": spec_sampling_payload,
+                "env_config": env_config,
+                "n_train_rows": len(result.train_rows),
+                "n_eval_rows": len(result.eval_rows),
+                "capacity_report": result.capacity_report,
+            }
+        )
+
+    _validate_no_env_uuid_overlap(all_train_rows, all_eval_rows)
+    capacity_report = _merge_sokoban_capacity_reports(
+        family_reports=family_reports,
+        sampling_payload=sampling_payload,
     )
 
-    _write_rows(train_samples_path, result.train_rows)
-    _write_rows(eval_samples_path, result.eval_rows)
+    _write_rows(train_samples_path, all_train_rows)
+    _write_rows(eval_samples_path, all_eval_rows)
 
-    train_meta = {**balanced_meta, "split": "train", "rows_written": len(result.train_rows)}
-    eval_meta = {**balanced_meta, "split": "eval", "rows_written": len(result.eval_rows)}
+    train_meta = {**balanced_meta, "split": "train", "rows_written": len(all_train_rows)}
+    eval_meta = {**balanced_meta, "split": "eval", "rows_written": len(all_eval_rows)}
     _write_json(train_meta_path, train_meta)
     _write_json(eval_meta_path, eval_meta)
 
-    _write_json(capacity_report_path, result.capacity_report)
+    _write_json(capacity_report_path, capacity_report)
     logger.info(
         "wrote balanced Sokoban train=%d eval=%d report=%s",
-        len(result.train_rows),
-        len(result.eval_rows),
+        len(all_train_rows),
+        len(all_eval_rows),
         capacity_report_path,
     )
+
+
+def _annotate_family(rows: list[dict[str, Any]], *, spec_idx: int, pool_id: str) -> None:
+    for row in rows:
+        metadata = row.setdefault("metadata", {})
+        meta = metadata.setdefault("envpack", {})
+        meta["dataset_family_index"] = spec_idx
+        meta["dataset_family"] = pool_id
+
+
+def _validate_no_env_uuid_overlap(train_rows: list[dict[str, Any]], eval_rows: list[dict[str, Any]]) -> None:
+    train_seen: dict[str, int] = {}
+    eval_seen: dict[str, int] = {}
+    for idx, row in enumerate(train_rows):
+        env_uuid = _row_env_uuid(row)
+        if env_uuid in train_seen:
+            raise RuntimeError(f"duplicate train env_uuid {env_uuid!r} at rows {train_seen[env_uuid]} and {idx}")
+        train_seen[env_uuid] = idx
+    for idx, row in enumerate(eval_rows):
+        env_uuid = _row_env_uuid(row)
+        if env_uuid in eval_seen:
+            raise RuntimeError(f"duplicate eval env_uuid {env_uuid!r} at rows {eval_seen[env_uuid]} and {idx}")
+        eval_seen[env_uuid] = idx
+    overlap = sorted(set(train_seen).intersection(eval_seen))
+    if overlap:
+        raise RuntimeError(f"train/eval env_uuid overlap after concat: {overlap[:5]}")
+
+
+def _row_env_uuid(row: dict[str, Any]) -> str:
+    env_uuid = ((row.get("metadata") or {}).get("envpack") or {}).get("env_uuid")
+    if not env_uuid:
+        raise RuntimeError("balanced Sokoban row is missing metadata.envpack.env_uuid")
+    return str(env_uuid)
+
+
+def _merge_sokoban_capacity_reports(
+    *,
+    family_reports: list[dict[str, Any]],
+    sampling_payload: dict[str, Any],
+) -> dict[str, Any]:
+    numeric_sum_keys = (
+        "candidate_seeds",
+        "probed_candidates",
+        "unique_env_uuid",
+        "duplicate_env_uuid_count",
+        "out_of_range_count",
+        "generation_failed_count",
+        "accepted_candidates",
+        "selected_train",
+        "selected_eval",
+    )
+    aggregate: dict[str, Any] = {
+        "mode": "balanced_sokoban_concat",
+        "num_env_specs": len(family_reports),
+        "sampling": sampling_payload,
+        "families": family_reports,
+    }
+    for key in numeric_sum_keys:
+        aggregate[key] = sum(int(report["capacity_report"].get(key, 0)) for report in family_reports)
+
+    candidate_seeds = int(aggregate["candidate_seeds"])
+    duplicate_count = int(aggregate["duplicate_env_uuid_count"])
+    aggregate["duplicate_env_uuid_rate"] = duplicate_count / candidate_seeds if candidate_seeds else 0.0
+
+    for key in (
+        "solver_status_counts",
+        "min_solve_steps_histogram",
+        "critical_steps_histogram",
+        "bucket_available",
+        "bucket_selected",
+    ):
+        aggregate[key] = _sum_int_maps(report["capacity_report"].get(key, {}) for report in family_reports)
+    return aggregate
+
+
+def _sum_int_maps(items: Iterable[dict[str, Any]]) -> dict[str, int]:
+    merged: dict[str, int] = {}
+    for item in items:
+        for key, value in dict(item).items():
+            merged[str(key)] = merged.get(str(key), 0) + int(value)
+    return dict(sorted(merged.items()))
 
 
 def _write_rows(path: str, rows: list[dict[str, Any]]) -> None:
@@ -326,11 +444,6 @@ def _write_rows(path: str, rows: list[dict[str, Any]]) -> None:
         for row in rows:
             out_f.write(json.dumps(row, sort_keys=True) + "\n")
     os.replace(tmp_path, path)
-
-
-def _load_specs(path: str) -> list[EnvSpec]:
-    raw = _load_yaml_or_json(path)
-    return _load_specs_from_raw(raw, path)
 
 
 def _load_specs_from_raw(raw: dict[str, Any], path: str) -> list[EnvSpec]:
@@ -351,6 +464,8 @@ def _parse_spec(raw: dict[str, Any], idx: int) -> EnvSpec:
         seed_list=None if raw.get("seed_list") is None else [int(value) for value in raw["seed_list"]],
         profile=None if raw.get("profile") is None else str(raw["profile"]),
         pool_id=None if raw.get("pool_id") is None else str(raw["pool_id"]),
+        bucket_prefix=None if raw.get("bucket_prefix") is None else str(raw["bucket_prefix"]),
+        sampling=None if raw.get("sampling") is None else dict(raw["sampling"]),
     )
 
 

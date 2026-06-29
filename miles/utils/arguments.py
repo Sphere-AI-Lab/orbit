@@ -232,6 +232,26 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 ),
             )
             parser.add_argument(
+                "--freeze-vision-model",
+                action="store_true",
+                default=False,
+                help=(
+                    "For VLM bridge providers (e.g. Qwen2.5-VL / Qwen3-VL): freeze the vision encoder "
+                    "(patch_embed + transformer blocks) by setting requires_grad=False. The language model "
+                    "and the vision projection/merger stay trainable. Fails fast if a bridge provider does "
+                    "not expose vision-freeze support."
+                ),
+            )
+            parser.add_argument(
+                "--freeze-vision-projection",
+                action="store_true",
+                default=False,
+                help=(
+                    "For VLM bridge providers: freeze the vision projection/merger module. Independent of "
+                    "--freeze-vision-model. Fails fast if a bridge provider does not expose vision-freeze support."
+                ),
+            )
+            parser.add_argument(
                 "--recompute-loss-function",
                 action="store_true",
                 help="Whether to enable recompute loss function to save memory during training.",

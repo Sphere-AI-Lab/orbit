@@ -226,8 +226,20 @@ for n in "${GOOD_NODES[@]}"; do
                 pkill -9    -u "$USER" ray    || true
                 sleep 1
             } >/dev/null 2>&1
-            DSTATE=$(ps -eo state,user --no-headers 2>/dev/null \
+            # D-state must PERSIST to count as poison. On WekaFS, normal I/O
+            # (including this gate'\''s own ps/awk/wc pipeline) flickers a
+            # chenyang-owned process into uninterruptible sleep on ~20% of
+            # single samples, so a one-shot check false-poisons clean nodes.
+            # A genuinely stuck process stays D across every sample; transient
+            # noise does not. Re-sample up to 5x and clear on the first 0.
+            DSTATE=0
+            for _ in 1 2 3 4 5; do
+                d=$(ps -eo state,user --no-headers 2>/dev/null \
                        | awk -v u="$USER" "\$1==\"D\" && \$2==u" | wc -l)
+                if (( d == 0 )); then DSTATE=0; break; fi
+                DSTATE=$d
+                sleep 1
+            done
             GPUMEM=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null \
                        | awk "{s+=\$1} END {print s+0}")
             if (( DSTATE > 0 )) || (( GPUMEM > 500 )); then

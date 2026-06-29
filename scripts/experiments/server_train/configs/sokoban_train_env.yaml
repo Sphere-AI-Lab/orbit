@@ -1,13 +1,39 @@
 # Envpack Sokoban train EnvSpec.
-# Mirrors the VAGEN-main Sokoban recipe: vision mode, 10k train seeds,
-# and free_think prompt format.
+# Difficulty is effectively 1-D (critical_steps is a near-deterministic function
+# of min_solve_steps for 6x6/1-box), so we range only on min_solve_steps and let
+# critical_steps fall out naturally (it is observed/recorded, never a binning axis).
+#
+# The 6x6/1-box state space is small: ~9670 unique solvable boards total, ~5183
+# with min_solve_steps in [4,10]. We therefore use `allocation: full`, which takes
+# the entire de-duplicated in-range pool (train + held-out eval) rather than a
+# fixed count. `total_train` is an upper bound only and is ignored by `full`.
+# `n_envs` is the candidate seed pool (probed, then de-duplicated by board uuid).
 envs:
   - name: Sokoban
-    n_envs: 10000
-    seed: [1, 10000, 1]
+    n_envs: 50000
+    seed: [1, 50000, 1]
     profile: vision_free_think_local
     pool_id: sokoban-vision
+    # Optional for mixed training:
+    # bucket_prefix: 6x6_b1
+    # sampling:
+    #   total_train: 10000
     config:
       render_mode: vision
-      min_solution_steps: [1, 5]
+      sokoban_render_style: sprite
+      tiny_scale: 16
+      raw_plane_scale: 16
       prompt_format: free_think
+      dim_room: [6, 6]
+      num_boxes: 1
+      max_steps: 100
+      max_actions_per_step: 3
+      min_solution_bfs_max_depth: 200
+sampling:
+  total_train: 10000
+  validation_ratio: 0.05
+  preserve_validation_bucket_proportions: true
+  min_solve_steps: [4, 10]
+  allocation: full
+  sampling_policy: best_effort
+  probe_concurrency: 32

@@ -217,6 +217,23 @@ Environment rules such as Sokoban `max_steps`, board size, number of boxes, and
 prompt format remain in `metadata.envpack.env_config` because envpack needs
 them to reset and step the environment.
 
+Adapter pool `env_config` is applied as an explicit launch-time override after
+the JSONL row config. This field is validated as render-only on both JSONL and
+EnvSpec YAML paths. It is intended for presentation changes such as:
+
+```yaml
+env_config:
+  sokoban_render_style: tiny
+  tiny_scale: 16
+  raw_plane_scale: 16
+```
+
+Those fields change model input bytes but not the canonical Sokoban `env_uuid`,
+so puzzle rows can be reused across `sprite`, `tiny`, and `raw_planes` runs.
+Structural keys such as board size, box count, max steps, prompt format, or
+`render_mode` must live in the per-row `metadata.envpack.env_config` produced
+by the dataset builder, or in `envs[].config` for the direct EnvSpec YAML path.
+
 At rollout time, the live environment still comes from envpack:
 
 ```text
@@ -229,8 +246,18 @@ Build data before training:
 
 ```bash
 scripts/experiments/server_train/build-envpack-main.sh sokoban
-scripts/experiments/server_train/build-envpack-main.sh frozenlake
+scripts/experiments/server_train/build-envpack-main.sh sokoban_mix12
 ```
+
+For mixed Sokoban training, use the `sokoban_mix12` build target, whose EnvSpec
+is `configs/sokoban_mix12_train_env.yaml`. The builder treats each
+entry as a separate task family, builds it independently, concatenates the
+train/eval JSONL rows, and writes an aggregate `capacity_report.json` with the
+individual family reports preserved. Bucket names include board size and box
+count when solver metadata is present, so `6x6_b1_solve_5` and
+`7x7_b1_solve_5` stay separate in W&B. Each env entry may also set
+`bucket_prefix` to override the automatic family prefix, or a nested `sampling`
+block to override the top-level balanced sampling cap/range for that family.
 
 For strict environment separation, run the build in an envpack build/server
 environment that has simulator dependencies installed, then point Miles at the
@@ -288,11 +315,12 @@ Then launch Miles while pointing the adapter at that server:
 ```bash
 ENVPACK_API=session \
 ENVPACK_SERVER_URL=http://127.0.0.1:18081 \
-bash scripts/slurm/submit.sh server_train/envpack-sokoban-main-qwen25vl3b-colocate-1node
+bash scripts/slurm/submit.sh server_train/sokoban_1box/envpack-sokoban-1box-qwen3vl8b-frozenvit-colocate-1node
 ```
 
-The server_train scripts use W&B project `vagen` with run names prefixed by
-`http-`.
+The server_train scripts use W&B project `vagen`. Colocated and sprite remote
+recipes default to run names prefixed by `new-http-`; TinyWorld remote recipes
+default to `new-http-tinyworld`.
 
 ## Slurm Two-Node Remote Mode
 
@@ -300,9 +328,16 @@ For remote-server validation inside one Slurm job, use the `remote-2node`
 recipes:
 
 ```bash
-bash scripts/slurm/submit.sh server_train/envpack-sokoban-main-qwen25vl3b-remote-2node
-bash scripts/slurm/submit.sh server_train/envpack-frozenlake-main-qwen3vl2b-remote-2node
+bash scripts/slurm/submit.sh server_train/sokoban_1box/envpack-sokoban-1box-qwen3vl8b-remote-2node
+bash scripts/slurm/submit.sh server_train/sokoban_1box/envpack-sokoban-1box-qwen3vl8b-frozenvit-remote-2node
+bash scripts/slurm/submit.sh server_train/sokoban_1box/envpack-sokoban-1box-tinyworld-qwen3vl8b-frozenvit-remote-2node
+bash scripts/slurm/submit.sh server_train/sokoban_mix12/envpack-sokoban-mix12-qwen3vl8b-remote-2node
+bash scripts/slurm/submit.sh server_train/sokoban_mix12/envpack-sokoban-mix12-qwen3vl8b-frozenvit-remote-2node
+bash scripts/slurm/submit.sh server_train/sokoban_mix12/envpack-sokoban-mix12-tinyworld-qwen3vl8b-frozenvit-remote-2node
 ```
+
+The Qwen3-VL Sokoban recipes use `VAGEN_THINK_TAG=thinking` so the parser and
+prompt expect `<thinking>...</thinking>`.
 
 The launcher allocates two homogeneous GPU nodes, reserves the final healthy
 node for envpack, and excludes that node from the Ray cluster:
@@ -337,7 +372,7 @@ Set `ENVPACK_SERVER_ENV_NAME` if the server uses a separate conda env:
 
 ```bash
 ENVPACK_SERVER_ENV_NAME=envpack-sokoban-server \
-bash scripts/slurm/submit.sh server_train/envpack-sokoban-main-qwen25vl3b-remote-2node
+bash scripts/slurm/submit.sh server_train/sokoban_1box/envpack-sokoban-1box-qwen3vl8b-frozenvit-remote-2node
 ```
 
 This mode is intentionally a first remote validation path. It uses homogeneous

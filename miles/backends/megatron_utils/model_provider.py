@@ -110,6 +110,32 @@ def get_model_provider_func(
             provider.moe_router_bias_update_rate = args.moe_router_bias_update_rate
         if getattr(args, "moe_aux_loss_coeff", None) is not None:
             provider.moe_aux_loss_coeff = args.moe_aux_loss_coeff
+
+        # Optional VLM module freezing. VLM bridge providers (e.g. Qwen2.5-VL /
+        # Qwen3-VL) expose freeze_* fields that, when set, make provider.provide()
+        # call model.freeze(...) and set requires_grad=False on those modules.
+        # Default (False) reproduces the prior behavior: everything trainable.
+        freeze_vision_model = getattr(args, "freeze_vision_model", False)
+        freeze_vision_projection = getattr(args, "freeze_vision_projection", False)
+        if freeze_vision_model or freeze_vision_projection:
+            missing = [
+                name
+                for name, want in (
+                    ("freeze_vision_model", freeze_vision_model),
+                    ("freeze_vision_projection", freeze_vision_projection),
+                )
+                if want and not hasattr(provider, name)
+            ]
+            if missing:
+                raise ValueError(
+                    f"Requested {missing} but the bridge provider {type(provider).__name__} does not "
+                    "support vision freezing (not a VLM provider). Drop these flags for this model."
+                )
+            if freeze_vision_model:
+                provider.freeze_vision_model = True
+            if freeze_vision_projection:
+                provider.freeze_vision_projection = True
+
         provider.finalize()
 
         def wrapped_bridge_provider(

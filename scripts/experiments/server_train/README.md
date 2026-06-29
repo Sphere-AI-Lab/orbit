@@ -6,15 +6,24 @@ points plus the dataset builder and EnvSpec files they consume.
 ## Training scripts
 
 ```text
-envpack-sokoban-main-qwen25vl3b-colocate-1node.sh
-envpack-frozenlake-main-qwen3vl2b-colocate-1node.sh
-envpack-sokoban-main-qwen25vl3b-remote-2node.sh
-envpack-frozenlake-main-qwen3vl2b-remote-2node.sh
+_qwen3vl8b_common.sh
+
+sokoban_1box/
+  envpack-sokoban-1box-qwen3vl8b-frozenvit-colocate-1node.sh
+  envpack-sokoban-1box-qwen3vl8b-remote-2node.sh
+  envpack-sokoban-1box-qwen3vl8b-frozenvit-remote-2node.sh
+  envpack-sokoban-1box-tinyworld-qwen3vl8b-frozenvit-remote-2node.sh
+
+sokoban_mix12/
+  envpack-sokoban-mix12-qwen3vl8b-remote-2node.sh
+  envpack-sokoban-mix12-qwen3vl8b-frozenvit-remote-2node.sh
+  envpack-sokoban-mix12-tinyworld-qwen3vl8b-frozenvit-remote-2node.sh
 ```
 
-The `colocate-1node` scripts start a same-node envpack HTTP server through the
+The `colocate-1node` script starts a same-node envpack HTTP server through the
 Slurm launcher. The `remote-2node` scripts reserve one node for Miles/SGLang and
-one node for the envpack HTTP server.
+one node for the envpack HTTP server. The current maintained recipes are
+Qwen3-VL-8B Sokoban recipes with the updated envpack reward/rubric.
 
 ## Config ownership
 
@@ -32,9 +41,11 @@ There are three config/data layers:
      optimizer
      W&B
      adapter rollout/generation budgets
+     managed envpack server knobs
        TRAINING_SCHEDULE_ARGS
        INTERACTION_BUDGET_ARGS
        DAPO_ARGS
+       SOKOBAN_ENV_ARGS
 
 2. Envpack adapter runtime config
    file generated at runtime:
@@ -53,9 +64,7 @@ There are three config/data layers:
 3. Env task dataset config
    files:
      configs/sokoban_train_env.yaml
-     configs/sokoban_val_env.yaml
-     configs/frozenlake_train_env.yaml
-     configs/frozenlake_val_env.yaml
+     configs/sokoban_mix12_train_env.yaml
    consumed by:
      build-envpack-main.sh
      miles_plugins.envpack_adapter.build_env_dataset
@@ -63,12 +72,43 @@ There are three config/data layers:
      env name
      seed ranges
      env_config, such as render_mode, prompt_format, max_steps,
-     board size, and other environment-side task parameters
+     sokoban_render_style, board size, and other environment-side task
+     parameters
+     optional env-owned sampling policy for offline dataset construction
 ```
 
 The generated `samples.jsonl` contains task identity and env config only. It
 does not own model-generation budgets such as `max_turns` or
 `response_length_per_turn`.
+
+Sokoban uses the balanced dataset path by default. Difficulty is binned on
+`min_solve_steps` only (`critical_steps` is observed, never a binning axis). Its
+train EnvSpec contains a `sampling:` block with a `min_solve_steps` range and an
+`allocation` (`full` takes the whole de-duplicated in-range pool; `capped`
+water-fills a per-level cap). One build command writes both `train/samples.jsonl`
+and `eval/samples.jsonl`, plus `capacity_report.json`.
+
+For mixed Sokoban training, bucket names include board size and box count when
+the dataset builder has solver metadata, for example `6x6_b1_solve_5` and
+`7x7_b1_solve_5`. This keeps same-box-count task families from colliding in
+bucket-level metrics. Envpack balanced build supports the simple mixed-training
+path: list multiple Sokoban `envs:` entries in the train EnvSpec, each with its
+own board/box config, and the builder will build each family independently,
+concatenate the resulting train/eval rows, reject any train/eval `env_uuid`
+overlap, and write a `capacity_report.json` containing both aggregate and
+per-family reports. If the automatic family prefix is not the desired W&B name,
+set `bucket_prefix` on that env entry. If one family needs a different cap or
+range, add a nested `sampling:` block under that env entry to override the
+top-level balanced sampling fields for that family only.
+
+Envpack bucket logging is emitted under separate W&B namespaces:
+
+```text
+envpack_rollout_bucket/<env>/<bucket>/solve_rate
+envpack_eval_bucket/<env>/<bucket>/solve_rate
+```
+
+The default `rollout/` and `eval/` Miles dashboards are still logged unchanged.
 
 For normal use, edit the `Human-facing experiment config` block near the top of
 each training script. It uses Miles-style argument arrays, for example
@@ -80,14 +120,53 @@ Build datasets before training:
 
 ```bash
 scripts/experiments/server_train/build-envpack-main.sh sokoban
-scripts/experiments/server_train/build-envpack-main.sh frozenlake
+scripts/experiments/server_train/build-envpack-main.sh sokoban_mix12
 ```
 
 Run training:
 
 ```bash
-bash scripts/slurm/submit.sh server_train/envpack-sokoban-main-qwen25vl3b-colocate-1node
-bash scripts/slurm/submit.sh server_train/envpack-frozenlake-main-qwen3vl2b-colocate-1node
-bash scripts/slurm/submit.sh server_train/envpack-sokoban-main-qwen25vl3b-remote-2node
-bash scripts/slurm/submit.sh server_train/envpack-frozenlake-main-qwen3vl2b-remote-2node
+bash scripts/slurm/submit.sh server_train/sokoban_1box/envpack-sokoban-1box-qwen3vl8b-frozenvit-colocate-1node
+bash scripts/slurm/submit.sh server_train/sokoban_1box/envpack-sokoban-1box-qwen3vl8b-remote-2node
+bash scripts/slurm/submit.sh server_train/sokoban_1box/envpack-sokoban-1box-qwen3vl8b-frozenvit-remote-2node
+bash scripts/slurm/submit.sh server_train/sokoban_1box/envpack-sokoban-1box-tinyworld-qwen3vl8b-frozenvit-remote-2node
+bash scripts/slurm/submit.sh server_train/sokoban_mix12/envpack-sokoban-mix12-qwen3vl8b-remote-2node
+bash scripts/slurm/submit.sh server_train/sokoban_mix12/envpack-sokoban-mix12-qwen3vl8b-frozenvit-remote-2node
+bash scripts/slurm/submit.sh server_train/sokoban_mix12/envpack-sokoban-mix12-tinyworld-qwen3vl8b-frozenvit-remote-2node
 ```
+
+The Sokoban HTTP scripts default to W&B run names prefixed with `new-http-`.
+Qwen3-VL uses `VAGEN_THINK_TAG=thinking` for the `<thinking>` parser/prompt
+wrapper.
+
+The TinyWorld scripts are Qwen3-VL-8B, 2-node remote, ViT-frozen render
+ablations. They default to `WANDB_RUN_PREFIX=new-http-tinyworld` and set
+`SOKOBAN_RENDER_STYLE=tiny`; they reuse the same 1box or mix12 puzzle datasets.
+
+## Sokoban Render Styles
+
+Sokoban puzzle rows can be reused across visual styles because `env_uuid` is a
+canonical puzzle-state hash, not an image hash. The model input bytes still
+change, so record the style in the run name/config.
+
+The maintained scripts expose this in the human-facing config:
+
+```bash
+SOKOBAN_ENV_ARGS=(
+    render_style sprite      # sprite | tiny | raw_planes
+    tiny_scale 16
+    raw_plane_scale 16
+)
+```
+
+You can override at launch without rebuilding puzzle rows:
+
+```bash
+SOKOBAN_RENDER_STYLE=tiny \
+bash scripts/slurm/submit.sh server_train/sokoban_1box/envpack-sokoban-1box-qwen3vl8b-frozenvit-remote-2node
+```
+
+`sprite` is the default gym-sokoban tile render. `tiny` is donor TinyWorld
+color-cell rendering. `raw_planes` visualizes walls/goals/boxes/player planes as
+a four-panel PNG and is mainly a debug or symbolic baseline unless paired with a
+prompt that explains the panels.

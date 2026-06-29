@@ -81,6 +81,64 @@ envpack_prepare_adapter_config() {
     ENVPACK_REFILL_MAX_ATTEMPTS=${ENVPACK_REFILL_MAX_ATTEMPTS:-3}
     ENVPACK_REFILL_BACKOFF_S=${ENVPACK_REFILL_BACKOFF_S:-0.5}
 
+    # --- auto-size server concurrency from the real rollout demand ----------
+    # The server pool must hold one open episode per concurrently-rolled-out
+    # sample. Peak demand = max(train batch x n_samples, eval prompts x n_eval).
+    # If ENVPACK_DESIRED_CONCURRENCY is set explicitly but can't cover that, FAIL
+    # LOUD (otherwise the pool 429s mid-run, e.g. eval). If unset, auto-derive it
+    # with headroom so we never silently undersize the server again.
+    if [[ -n "${ROLLOUT_BATCH_SIZE:-}" && -n "${N_SAMPLES_PER_PROMPT:-}" ]]; then
+        local _train_batch=${EFFECTIVE_ROLLOUT_BATCH_SIZE:-$ROLLOUT_BATCH_SIZE}
+        local _train_demand=$(( _train_batch * N_SAMPLES_PER_PROMPT ))
+        local _eval_prompts=0
+        if [[ -f "${ENVPACK_EVAL_DATA:-}" ]]; then
+            _eval_prompts=$(grep -c . "$ENVPACK_EVAL_DATA" 2>/dev/null || echo 0)
+        fi
+        local _eval_nsamp=${N_SAMPLES_PER_EVAL_PROMPT:-1}
+        local _eval_demand=$(( _eval_prompts * _eval_nsamp ))
+        local _required=$_train_demand
+        (( _eval_demand > _required )) && _required=$_eval_demand
+        if [[ -n "${ENVPACK_DESIRED_CONCURRENCY:-}" ]]; then
+            if (( ENVPACK_DESIRED_CONCURRENCY < _required )); then
+                echo "[envpack] FATAL: ENVPACK_DESIRED_CONCURRENCY=$ENVPACK_DESIRED_CONCURRENCY < required concurrency $_required" \
+                     "(train ${_train_batch}x${N_SAMPLES_PER_PROMPT}=${_train_demand}, eval ${_eval_prompts}x${_eval_nsamp}=${_eval_demand})." \
+                     "The server pool would 429 mid-run. Raise ENVPACK_DESIRED_CONCURRENCY (>= $_required) or shrink the rollout/eval batch." >&2
+                exit 78
+            fi
+            echo "[envpack] server concurrency=$ENVPACK_DESIRED_CONCURRENCY (explicit) >= required=$_required (train=$_train_demand eval=$_eval_demand)"
+        else
+            local _margin=$(( _required / 4 )); (( _margin < 32 )) && _margin=32
+            export ENVPACK_DESIRED_CONCURRENCY=$(( _required + _margin ))
+            echo "[envpack] server concurrency auto-derived=$ENVPACK_DESIRED_CONCURRENCY" \
+                 "(required=$_required + margin=$_margin; train ${_train_batch}x${N_SAMPLES_PER_PROMPT}=${_train_demand}, eval ${_eval_prompts}x${_eval_nsamp}=${_eval_demand})"
+        fi
+    else
+        echo "[envpack] WARN: ROLLOUT_BATCH_SIZE/N_SAMPLES_PER_PROMPT unset; cannot auto-size server" \
+             "concurrency — falling back to ENVPACK_DESIRED_CONCURRENCY=${ENVPACK_DESIRED_CONCURRENCY:-256}" >&2
+    fi
+
+    # --- assert the rollout turn budget fits inside the env's own step limit -
+    # max_turns x max_actions_per_step must not exceed the env's max_steps, else
+    # the env terminates before the turn budget is spent (silently shorter
+    # episodes). Best-effort: reads the env_config from the first train sample.
+    if [[ -f "${ENVPACK_TRAIN_DATA:-}" ]]; then
+        local _envcfg
+        _envcfg=$(python3 -c "import json,sys; c=json.loads(sys.stdin.readline()).get('metadata',{}).get('envpack',{}).get('env_config',{}); print(c.get('max_steps') or 0, c.get('max_actions_per_step') or 1)" < "$ENVPACK_TRAIN_DATA" 2>/dev/null || echo "")
+        if [[ -n "$_envcfg" ]]; then
+            local _max_steps _max_act
+            read -r _max_steps _max_act <<<"$_envcfg"
+            local _turns=${ENVPACK_ADAPTER_MAX_TURNS:-0}
+            if (( _max_steps > 0 && _turns * _max_act > _max_steps )); then
+                echo "[envpack] FATAL: rollout budget ${_turns} turns x ${_max_act} actions/turn =" \
+                     "$(( _turns * _max_act )) env steps > env max_steps=${_max_steps}. The env will terminate" \
+                     "before the turn budget is used (silently shorter episodes). Lower --max-env-turns-per-sample" \
+                     "or raise the env's max_steps." >&2
+                exit 78
+            fi
+            (( _max_steps > 0 )) && echo "[envpack] turn budget ok: ${_turns} turns x ${_max_act} = $(( _turns * _max_act )) <= env max_steps=${_max_steps}"
+        fi
+    fi
+
     local server_config=""
     if [[ "$ENVPACK_API" == "session" ]]; then
         unset ENVPACK_LOCAL_SERVER_CMD ENVPACK_LOCAL_SERVER_HEALTH
@@ -132,6 +190,20 @@ EOF_RUNTIME
         fi
     fi
 
+    local env_config=""
+    if [[ "$env_name" == "sokoban" ]]; then
+        ENVPACK_SOKOBAN_RENDER_STYLE=${ENVPACK_SOKOBAN_RENDER_STYLE:-sprite}
+        ENVPACK_SOKOBAN_TINY_SCALE=${ENVPACK_SOKOBAN_TINY_SCALE:-16}
+        ENVPACK_SOKOBAN_RAW_PLANE_SCALE=${ENVPACK_SOKOBAN_RAW_PLANE_SCALE:-16}
+        env_config=$(cat <<EOF_ENV_CONFIG
+      env_config:
+        sokoban_render_style: $ENVPACK_SOKOBAN_RENDER_STYLE
+        tiny_scale: $ENVPACK_SOKOBAN_TINY_SCALE
+        raw_plane_scale: $ENVPACK_SOKOBAN_RAW_PLANE_SCALE
+EOF_ENV_CONFIG
+)
+    fi
+
     cat > "$ENVPACK_CONFIG_PATH" <<EOF
 envpack_adapter:
   api: $ENVPACK_API
@@ -148,6 +220,7 @@ $server_config
     - env: $env_name
       profile: $profile
       pool_id: $pool_id
+$env_config
 $runtime_config
   rollout:
     max_turns: $ENVPACK_ADAPTER_MAX_TURNS
@@ -156,10 +229,15 @@ EOF
 }
 
 envpack_set_rollout_args() {
+    local rollout_log_func=${ENVPACK_CUSTOM_ROLLOUT_LOG_FUNCTION_PATH:-miles_plugins.envpack_adapter.logging.log_rollout_data}
+    local eval_rollout_log_func=${ENVPACK_CUSTOM_EVAL_ROLLOUT_LOG_FUNCTION_PATH:-miles_plugins.envpack_adapter.logging.log_eval_rollout_data}
+
     ROLLOUT_ARGS=(
         --data-source-path miles_plugins.envpack_adapter.data_source.EnvpackDataSource
         --prompt-data       "$ENVPACK_TRAIN_DATA"
         --custom-generate-function-path miles_plugins.envpack_adapter.generate.generate
+        --custom-rollout-log-function-path "$rollout_log_func"
+        --custom-eval-rollout-log-function-path "$eval_rollout_log_func"
         --rollout-all-samples-process-path examples.vagen.debug_dump.dump_samples
         --custom-config-path "$ENVPACK_CONFIG_PATH"
         --rollout-shuffle

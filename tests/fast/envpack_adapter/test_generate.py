@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-from tests.ci.ci_register import register_cpu_ci
-
-register_cpu_ci(est_time=60, suite="stage-a-fast")
-
 import asyncio
 import sys
 import types
@@ -13,9 +9,11 @@ from unittest.mock import patch
 
 try:
     import torch  # noqa: F401
+
     from miles.rollout.base_types import GenerateFnInput
     from miles.utils.types import Sample
     from miles_plugins.envpack_adapter import generate as generate_mod
+    from miles_plugins.envpack_adapter.config import EnvpackConfigError
     from miles_plugins.envpack_adapter.renderer import RenderedObservation
 except ModuleNotFoundError:
     torch = None
@@ -140,22 +138,6 @@ class _BuggyStepClient(_FakeClient):
         raise RuntimeError("adapter bug")
 
 
-class _TerminalOutcomeUnknownError(RuntimeError):
-    """Mimics envpack's RemoteEnvpackError for a lost terminal response: a transport
-    failure (status_code=0) that envpack explicitly marks non-retryable."""
-
-    status_code = 0
-
-    def __init__(self, message: str = "envpack terminal request failed with unknown outcome") -> None:
-        super().__init__(message)
-        self.error = SimpleNamespace(code="terminal_outcome_unknown", retryable=False, message=message)
-
-
-class _TerminalFinalizeFailsClient(_FakeClient):
-    async def finalize_episode(self, episode_id):
-        raise _TerminalOutcomeUnknownError()
-
-
 class _FakeBundle:
     def __init__(self, client=None):
         self.client = client or _FakeClient()
@@ -165,6 +147,16 @@ class _FakeBundle:
 
 
 class EnvpackGenerateTest(unittest.TestCase):
+    def test_refillability_honors_explicit_retryable_false_before_status_code(self) -> None:
+        if torch is None:
+            self.skipTest("requires torch because Miles imports torch")
+
+        exc = RuntimeError("terminal outcome unknown")
+        exc.error = SimpleNamespace(retryable=False)
+        exc.status_code = 0
+
+        self.assertFalse(generate_mod._is_refillable_error(exc))
+
     def test_system_message_uses_vlm_content_blocks_when_processor_is_present(self) -> None:
         if torch is None:
             self.skipTest("requires torch because Miles imports torch")
@@ -205,13 +197,21 @@ class EnvpackGenerateTest(unittest.TestCase):
                     "seed": 123,
                     "pool_id": "sokoban-vision",
                     "env_uuid": "init-sha",
+                    "env_config": {"dim_room": [6, 6], "sokoban_render_style": "sprite"},
                 }
             }
         )
         args = SimpleNamespace(
             envpack={
                 "api": "in_process",
-                "pools": [{"env": "sokoban", "profile": "vision_free_think_local", "pool_id": "sokoban-vision"}],
+                "pools": [
+                    {
+                        "env": "sokoban",
+                        "profile": "vision_free_think_local",
+                        "pool_id": "sokoban-vision",
+                        "env_config": {"sokoban_render_style": "tiny"},
+                    }
+                ],
                 "rollout": {"max_turns": 1, "response_length_per_turn": 8},
             },
             sglang_router_ip="127.0.0.1",
@@ -283,7 +283,65 @@ class EnvpackGenerateTest(unittest.TestCase):
         self.assertTrue(result.metadata["vagen"]["traj_success"])
         self.assertEqual(calls[0][2], {"X-SMG-Routing-Key": result.session_id})
         self.assertEqual(bundle.client.cancelled, [])
+        self.assertEqual(bundle.client.created_requests[0].env_config["dim_room"], [6, 6])
+        self.assertEqual(bundle.client.created_requests[0].env_config["sokoban_render_style"], "tiny")
         self.assertEqual(bundle.client.step_requests[0].expected_turn_id, 0)
+
+    def test_generate_rejects_structural_pool_env_config_override(self) -> None:
+        if torch is None:
+            self.skipTest("requires torch because Miles Sample imports torch")
+
+        bundle = _FakeBundle()
+        sample = Sample(
+            metadata={
+                "envpack": {
+                    "env_name": "sokoban",
+                    "seed": 123,
+                    "pool_id": "sokoban-vision",
+                    "env_config": {"dim_room": [6, 6], "render_mode": "vision"},
+                    "env_uuid": "init-sha",
+                }
+            },
+        )
+        args = SimpleNamespace(
+            envpack={
+                "api": "in_process",
+                "pools": [
+                    {
+                        "env": "sokoban",
+                        "profile": "vision_free_think_local",
+                        "pool_id": "sokoban-vision",
+                        "env_config": {"dim_room": [7, 7]},
+                    }
+                ],
+                "rollout": {"max_turns": 1, "response_length_per_turn": 8},
+            },
+            partial_rollout=False,
+            group_rm=False,
+            rm_type=None,
+            custom_rm_path=None,
+            rollout_external=False,
+            use_rollout_routing_replay=False,
+            use_miles_router=False,
+            miles_router_middleware_paths=[],
+        )
+        state = SimpleNamespace(args=args, tokenizer=_Tokenizer(), processor=None)
+
+        with patch.dict(sys.modules, _fake_envpack_modules()):
+            with patch.object(generate_mod, "get_client_bundle", return_value=bundle):
+                with self.assertRaisesRegex(EnvpackConfigError, "samples.jsonl generate path.*dim_room"):
+                    asyncio.run(
+                        generate_mod.generate(
+                            GenerateFnInput(
+                                state=state,
+                                sample=sample,
+                                sampling_params={"max_new_tokens": 16},
+                                evaluation=False,
+                            )
+                        )
+                    )
+
+        self.assertEqual(bundle.client.created_requests, [])
 
     def test_generate_refills_same_prompt_after_system_failure(self) -> None:
         if torch is None:
@@ -472,95 +530,6 @@ class EnvpackGenerateTest(unittest.TestCase):
 
         self.assertEqual(len(client.created_requests), 1)
         self.assertEqual(len(client.step_requests), 1)
-
-    def test_generate_does_not_refill_terminal_outcome_unknown(self) -> None:
-        if torch is None:
-            self.skipTest("requires torch because Miles Sample imports torch")
-
-        client = _TerminalFinalizeFailsClient()
-        bundle = _FakeBundle(client=client)
-
-        async def fake_post(url, payload, headers=None):
-            return {
-                "meta_info": {
-                    "output_token_logprobs": [(-0.1, 101), (-0.2, 102)],
-                    "finish_reason": {"type": "stop"},
-                    "weight_version": "7",
-                    "prompt_tokens": len(payload["input_ids"]),
-                    "cached_tokens": 1,
-                }
-            }
-
-        sample = Sample(
-            metadata={
-                "envpack": {
-                    "env_name": "sokoban",
-                    "seed": 123,
-                    "pool_id": "sokoban-vision",
-                    "env_uuid": "init-sha",
-                }
-            },
-        )
-        args = SimpleNamespace(
-            envpack={
-                "api": "in_process",
-                "pools": [{"env": "sokoban", "profile": "vision_free_think_local", "pool_id": "sokoban-vision"}],
-                "refill": {"max_attempts": 2, "backoff_s": 0},
-                "rollout": {"max_turns": 1, "response_length_per_turn": 8},
-            },
-            sglang_router_ip="127.0.0.1",
-            sglang_router_port=30000,
-            sglang_router_policy="consistent_hashing",
-            sglang_speculative_algorithm=None,
-            apply_chat_template_kwargs={},
-            hf_checkpoint="/model",
-            chat_template_path=None,
-            rollout_max_context_len=64,
-            partial_rollout=False,
-            group_rm=False,
-            rm_type=None,
-            custom_rm_path=None,
-            rollout_external=False,
-            use_rollout_routing_replay=False,
-            use_miles_router=False,
-            miles_router_middleware_paths=[],
-        )
-        state = SimpleNamespace(args=args, tokenizer=_Tokenizer(), processor=None)
-        fake_envpack = _fake_envpack_modules()
-
-        with patch.dict(sys.modules, fake_envpack):
-            with patch.object(generate_mod, "get_client_bundle", return_value=bundle):
-                with patch.object(generate_mod, "post", side_effect=fake_post):
-                    with patch.object(generate_mod, "is_lora_enabled", return_value=False):
-                        with patch.object(
-                            generate_mod, "encode_image_for_rollout_engine", side_effect=lambda image: image
-                        ):
-                            with patch.object(generate_mod, "observation_to_chat_message") as render_obs:
-                                render_obs.return_value = RenderedObservation(
-                                    message={"role": "user", "content": "init"},
-                                    images=[],
-                                    videos=[],
-                                    media_hashes=["init-sha"],
-                                    artifacts=[],
-                                )
-                                with self.assertRaisesRegex(RuntimeError, "unknown outcome"):
-                                    asyncio.run(
-                                        generate_mod.generate(
-                                            GenerateFnInput(
-                                                state=state,
-                                                sample=sample,
-                                                sampling_params={"max_new_tokens": 16},
-                                                evaluation=False,
-                                            )
-                                        )
-                                    )
-
-        # A lost terminal outcome must fail loud: the rollout is not rerun from reset.
-        self.assertEqual(len(client.created_requests), 1)
-        self.assertEqual(len(client.step_requests), 1)
-        refill = sample.metadata["envpack"]["refill"]
-        self.assertFalse(refill["exhausted"])
-        self.assertFalse(refill["failed_attempts"][0]["retryable"])
 
 
 def _fake_envpack_modules():

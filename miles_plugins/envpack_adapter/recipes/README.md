@@ -40,7 +40,8 @@ The plugin helper deliberately does not set model, optimizer, W&B, or Slurm
 layout flags. Those remain experiment-level decisions.
 
 Training recipes should expose human-facing Miles-style arrays such as
-`TRAINING_SCHEDULE_ARGS` and `INTERACTION_BUDGET_ARGS`. `common.sh` provides
-small parsing helpers and maps the resulting values into the generated
-`envpack_adapter.rollout` YAML so users do not need to edit low-level
-`ENVPACK_ADAPTER_*` variables for normal experiments.
+`TRAINING_SCHEDULE_ARGS`, `INTERACTION_BUDGET_ARGS`, and
+`ENVPACK_SERVER_ARGS`. `common.sh` provides small parsing helpers and maps the
+resulting values into the generated `envpack_adapter.rollout` YAML and managed
+server launch command, so users do not need to edit low-level `ENVPACK_*`
+variables for normal experiments.

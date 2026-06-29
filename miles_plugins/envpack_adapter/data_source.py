@@ -21,7 +21,11 @@ import torch
 
 from miles.rollout.data_source import RolloutDataSource
 from miles.utils.types import Sample
-from miles_plugins.envpack_adapter.config import load_envpack_config, validate_runtime_args
+from miles_plugins.envpack_adapter.config import (
+    load_envpack_config,
+    validate_pool_env_config_overrides,
+    validate_runtime_args,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -198,8 +202,9 @@ def _materialize_envspec_yaml(path: str, args, adapter_config) -> list[Sample]:
             else adapter_config.pool_for_env(env_name)
         )
         seeds = _generate_seeds_for_spec(spec, base_seed, spec_idx)
-        env_config = copy.deepcopy(pool.env_config)
-        env_config.update(copy.deepcopy(spec.config))
+        pool_env_config = _validate_envspec_yaml_pool_env_config(env_name, pool.env_config)
+        env_config = copy.deepcopy(spec.config)
+        env_config.update(pool_env_config)
         for env_seed in seeds:
             samples.append(
                 Sample(
@@ -218,6 +223,10 @@ def _materialize_envspec_yaml(path: str, args, adapter_config) -> list[Sample]:
             )
     logger.info("EnvpackDataSource: materialized %d samples from EnvSpec yaml %s", len(samples), path)
     return samples
+
+
+def _validate_envspec_yaml_pool_env_config(env_name: str, pool_env_config: dict[str, Any]) -> dict[str, Any]:
+    return validate_pool_env_config_overrides(env_name, pool_env_config, context="EnvSpec YAML data-source path")
 
 
 def _parse_spec(raw: dict[str, Any], idx: int) -> EnvpackEnvSpec:

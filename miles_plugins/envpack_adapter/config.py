@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
 class EnvpackConfigError(ValueError):
     pass
+
+
+POOL_ENV_CONFIG_RENDER_ONLY_ALLOWLIST: dict[str, frozenset[str]] = {
+    "sokoban": frozenset({"sokoban_render_style", "tiny_scale", "raw_plane_scale"}),
+    "frozenlake": frozenset(),
+}
 
 
 ApiMode = Literal["in_process", "session"]
@@ -151,6 +158,24 @@ def validate_runtime_args(args, config: EnvpackAdapterConfig) -> None:
             "envpack generate path does not preserve R3 yet; disable use_rollout_routing_replay "
             "or implement routed-expert delegation before training"
         )
+
+
+def validate_pool_env_config_overrides(
+    env_name: str, pool_env_config: dict[str, Any], *, context: str
+) -> dict[str, Any]:
+    overrides = copy.deepcopy(pool_env_config or {})
+    if not overrides:
+        return overrides
+    env_name = _normalize_env_name(env_name)
+    allowed = POOL_ENV_CONFIG_RENDER_ONLY_ALLOWLIST.get(env_name, frozenset())
+    unsafe = sorted(set(overrides) - allowed)
+    if unsafe:
+        raise EnvpackConfigError(
+            f"{context} cannot apply structural pool.env_config overrides for env {env_name!r}: {unsafe}. "
+            "pool.env_config is reserved for render-only launch overrides. Move task-shaping keys into "
+            "samples.jsonl metadata.envpack.env_config or EnvSpec envs[].config."
+        )
+    return overrides
 
 
 def _parse_pools(raw: dict[str, Any], label: str) -> list[EnvpackPoolConfig]:

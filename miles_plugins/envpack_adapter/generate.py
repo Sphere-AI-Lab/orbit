@@ -27,7 +27,12 @@ from miles.utils.http_utils import post
 from miles.utils.processing_utils import encode_image_for_rollout_engine
 from miles.utils.types import Sample
 
-from miles_plugins.envpack_adapter.config import EnvpackConfigError, load_envpack_config, validate_runtime_args
+from miles_plugins.envpack_adapter.config import (
+    EnvpackConfigError,
+    load_envpack_config,
+    validate_pool_env_config_overrides,
+    validate_runtime_args,
+)
 from miles_plugins.envpack_adapter.renderer import RenderedObservation, observation_to_chat_message
 from miles_plugins.envpack_adapter.runtime import get_client_bundle
 
@@ -130,8 +135,16 @@ async def _generate_once(
     meta = _envpack_meta(sample)
     bundle = get_client_bundle(config, args=args)
     pool_id = str(meta.get("pool_id") or config.pool_for_env(meta["env_name"]).resolved_pool_id)
+    pool_config = config.pool_by_id(pool_id)
     env_config = bundle.env_config(pool_id)
     env_config.update(dict(meta.get("env_config") or {}))
+    # Treat adapter pool.env_config as an explicit launch-time override so
+    # render-only changes (e.g. sprite -> tiny) can reuse the same puzzle rows.
+    env_config.update(
+        validate_pool_env_config_overrides(
+            meta["env_name"], pool_config.env_config, context="samples.jsonl generate path"
+        )
+    )
 
     episode_id = str(
         episode_id_override or meta.get("episode_id") or sample.session_id or f"envpack-{uuid.uuid4().hex}"
@@ -194,12 +207,7 @@ async def _generate_once(
         sys_prefix = _compute_system_prompt_prefix(processor or tokenizer, apply_kwargs)
         sys_prefix_len = len(sys_prefix)
         budget = _compute_budget(args, sampling_params, sample)
-        max_turns = int(config.rollout.max_turns or meta.get("max_turns") or 1)
-        per_turn_cap = (
-            config.rollout.response_length_per_turn
-            if config.rollout.response_length_per_turn is not None
-            else meta.get("response_length_per_turn")
-        )
+        max_turns, per_turn_cap = _resolve_rollout_budget(config, meta)
         _seed_vagen_debug_metadata(
             sample,
             meta=meta,
@@ -453,10 +461,6 @@ def _is_refillable_error(exc: Exception) -> bool:
     ):
         return False
 
-    # Honor envpack's explicit retryability when the error carries it. A lost
-    # terminal response is surfaced as terminal_outcome_unknown (retryable=False,
-    # status_code=0); it must fail loud rather than rerun the rollout, so it has to
-    # short-circuit the status_code==0 transport-error heuristic below.
     error = getattr(exc, "error", None)
     retryable = getattr(error, "retryable", None)
     if retryable is not None:
@@ -592,12 +596,37 @@ def _compute_budget(args, sampling_params: dict[str, Any], sample: Sample) -> in
     return None
 
 
-def _turn_sampling_params(sampling_params: dict[str, Any], per_turn_cap, budget: int | None) -> dict[str, Any]:
+def _resolve_rollout_budget(config, meta: dict[str, Any]) -> tuple[int, int]:
+    raw_max_turns = config.rollout.max_turns
+    if raw_max_turns is None:
+        raw_max_turns = meta.get("max_turns")
+    if raw_max_turns is None:
+        raise EnvpackConfigError(
+            "envpack_adapter.rollout.max_turns is required for envpack custom generate; "
+            "server_train recipes set this through INTERACTION_BUDGET_ARGS"
+        )
+    max_turns = int(raw_max_turns)
+    if max_turns < 1:
+        raise EnvpackConfigError("envpack_adapter.rollout.max_turns must be >= 1")
+
+    raw_per_turn_cap = config.rollout.response_length_per_turn
+    if raw_per_turn_cap is None:
+        raw_per_turn_cap = meta.get("response_length_per_turn")
+    if raw_per_turn_cap is None:
+        raise EnvpackConfigError(
+            "envpack_adapter.rollout.response_length_per_turn is required for envpack custom generate; "
+            "server_train recipes set this through INTERACTION_BUDGET_ARGS"
+        )
+    per_turn_cap = int(raw_per_turn_cap)
+    if per_turn_cap < 1:
+        raise EnvpackConfigError("envpack_adapter.rollout.response_length_per_turn must be >= 1")
+    return max_turns, per_turn_cap
+
+
+def _turn_sampling_params(sampling_params: dict[str, Any], per_turn_cap: int, budget: int | None) -> dict[str, Any]:
     cur = dict(sampling_params)
     max_new = cur.get("max_new_tokens")
-    if per_turn_cap is not None:
-        cap = int(per_turn_cap)
-        max_new = min(max_new, cap) if max_new is not None else cap
+    max_new = min(max_new, per_turn_cap) if max_new is not None else per_turn_cap
     if budget is not None:
         max_new = min(max_new, budget) if max_new is not None else budget
     if max_new is not None:
