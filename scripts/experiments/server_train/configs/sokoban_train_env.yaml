@@ -3,11 +3,9 @@
 # of min_solve_steps for 6x6/1-box), so we range only on min_solve_steps and let
 # critical_steps fall out naturally (it is observed/recorded, never a binning axis).
 #
-# The 6x6/1-box state space is small: ~9670 unique solvable boards total, ~5183
-# with min_solve_steps in [4,10]. We therefore use `allocation: full`, which takes
-# the entire de-duplicated in-range pool (train + held-out eval) rather than a
-# fixed count. `total_train` is an upper bound only and is ignored by `full`.
-# `n_envs` is the candidate seed pool (probed, then de-duplicated by board uuid).
+# The 6x6/1-box state space is small enough to probe broadly. Use
+# `allocation: full` so the dataset contains every de-duplicated puzzle in the
+# requested solve range; capacity_report.json records the bucket composition.
 envs:
   - name: Sokoban
     n_envs: 50000
@@ -30,10 +28,11 @@ envs:
       max_actions_per_step: 3
       min_solution_bfs_max_depth: 200
 sampling:
+  # Kept for schema compatibility; allocation: full ignores total_train.
   total_train: 10000
   validation_ratio: 0.05
   preserve_validation_bucket_proportions: true
-  min_solve_steps: [4, 10]
+  min_solve_steps: [3, 10]
   allocation: full
   sampling_policy: best_effort
   probe_concurrency: 32

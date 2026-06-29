@@ -28,7 +28,7 @@ def _wandb_settings(**kwargs):
 def init_wandb_primary(args):
     if not args.use_wandb:
         args.wandb_run_id = None
-        return
+        return False
 
     # Set W&B mode if specified (overrides WANDB_MODE env var)
     if args.wandb_mode:
@@ -63,6 +63,9 @@ def init_wandb_primary(args):
         "name": run_name,
         "config": _compute_config_for_logging(args),
     }
+    if args.wandb_run_id:
+        init_kwargs["id"] = args.wandb_run_id
+        init_kwargs["resume"] = "allow"
 
     # Configure settings based on offline/online mode
     if offline:
@@ -83,6 +86,9 @@ def init_wandb_primary(args):
 
     # Set wandb_run_id in args for easy access throughout the training process
     args.wandb_run_id = wandb.run.id
+    os.environ["WANDB_RUN_ID"] = args.wandb_run_id
+    logger.info("Primary W&B run initialized: %s", args.wandb_run_id)
+    return True
 
 
 def _compute_config_for_logging(args):
@@ -103,9 +109,14 @@ def _compute_config_for_logging(args):
 
 # https://docs.wandb.ai/guides/track/log/distributed-training/#track-all-processes-to-a-single-run
 def init_wandb_secondary(args, router_addr=None):
-    wandb_run_id = getattr(args, "wandb_run_id", None)
+    wandb_run_id = getattr(args, "wandb_run_id", None) or os.environ.get("WANDB_RUN_ID")
     if wandb_run_id is None:
-        return
+        logger.warning(
+            "Skipping secondary W&B initialization because no wandb_run_id is available. "
+            "Rollout/train actor metrics from this process will not be logged."
+        )
+        return False
+    args.wandb_run_id = wandb_run_id
 
     # Set W&B mode if specified (same as primary)
     if args.wandb_mode:
@@ -155,6 +166,8 @@ def init_wandb_secondary(args, router_addr=None):
     wandb.init(**init_kwargs)
 
     _init_wandb_common()
+    logger.info("Secondary W&B run attached: %s", wandb_run_id)
+    return True
 
 
 def _init_wandb_common():
@@ -164,6 +177,10 @@ def _init_wandb_common():
     wandb.define_metric("rollout/*", step_metric="rollout/step")
     wandb.define_metric("multi_turn/*", step_metric="rollout/step")
     wandb.define_metric("passrate/*", step_metric="rollout/step")
+    wandb.define_metric("envpack_rollout_bucket/*", step_metric="rollout/step")
+    wandb.define_metric("envpack_rollout_pre_filter_bucket/*", step_metric="rollout/step")
+    wandb.define_metric("envpack_prompt_groups/*", step_metric="rollout/step")
     wandb.define_metric("eval/step")
     wandb.define_metric("eval/*", step_metric="eval/step")
+    wandb.define_metric("envpack_eval_bucket/*", step_metric="eval/step")
     wandb.define_metric("perf/*", step_metric="rollout/step")

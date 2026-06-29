@@ -15,7 +15,8 @@ from miles.rollout.base_types import (
     RolloutFnTrainOutput,
 )
 from miles.rollout.generate_hub.single_turn import generate
-from miles.rollout.inference_rollout.compatibility import call_all_samples_process_fn, load_generate_function
+from miles.rollout.inference_rollout.compatibility import load_generate_function
+from miles.rollout.inference_rollout.hook_utils import call_all_samples_process_fn
 from miles.rollout.rm_hub import async_rm, batched_async_rm
 from miles.utils.processing_utils import load_processor, load_tokenizer
 from miles.utils.types import Sample
@@ -183,6 +184,8 @@ class InferenceRolloutFn:
     async def _call_train(self, input: RolloutFnTrainInput) -> RolloutFnTrainOutput:
         from miles.rollout.inference_rollout.inference_rollout_train import generate_rollout_async
 
+        if hasattr(self.data_source, "set_rollout_step"):
+            self.data_source.set_rollout_step(input.rollout_id)
         output, aborted_samples = await generate_rollout_async(
             self.state, input.rollout_id, self.data_source.get_samples
         )

@@ -61,6 +61,17 @@ def get_responses(
 
     parallel_state = get_parallel_state()
     cp_size = parallel_state.cp.size
+
+    # Debug-only THD packing guard. Real tokens are front-contiguous and any
+    # padding is appended after them, so response slicing is valid as long as
+    # the real packed length fits inside the returned logits buffer.
+    if qkv_format == "thd" and cp_size == 1 and getattr(args, "dump_details", None) is not None:
+        _real_len = int(sum(total_lengths))
+        assert _real_len <= logits.size(0), (
+            f"[dump_details] THD pack overflow: sum(total_lengths)={_real_len} > "
+            f"logits.size(0)={logits.size(0)} — response slices would run off the buffer"
+        )
+
     end = 0
     seq_start = 0
     for i, (tokens, total_length, response_length) in enumerate(

@@ -206,7 +206,7 @@ async def _run_inference_step(url: str, tokens: list[int], sampling_params: dict
     else:
         new_tokens, new_log_probs = [], []
     finish_type = output["meta_info"]["finish_reason"]["type"]
-    return response_text, new_tokens, new_log_probs, finish_type
+    return response_text, new_tokens, new_log_probs, finish_type, output["meta_info"]
 
 
 def _process_env_step(env: BaseInteractionEnv, response_text: str, tokenizer, processor, args, sample_metadata):
@@ -326,9 +326,20 @@ async def generate(args: Any, sample: Sample, sampling_params) -> Sample:
             if budget is not None:
                 cur_sampling_params["max_new_tokens"] = budget
 
-            response_text, new_response_tokens, new_response_log_probs, finish_type = await _run_inference_step(
-                url, sample.tokens, cur_sampling_params, current_image_data, state.tokenizer
+            response_text, new_response_tokens, new_response_log_probs, finish_type, meta_info = (
+                await _run_inference_step(url, sample.tokens, cur_sampling_params, current_image_data, state.tokenizer)
             )
+            # Record this generation call's engine weight version. SGLang issues one call
+            # per turn, so we append each one (weight_versions is a list); the min across
+            # turns (Sample.oldest_weight_version) is what the fully-async staleness filter
+            # reads (examples/fully_async/fully_async_rollout.py). Without this the list
+            # stays empty -> oldest_weight_version is None -> the staleness filter silently
+            # never fires. We intentionally do NOT call the full Sample.update_from_meta_info
+            # here: its finish_reason->status mapping (incl. "stop" -> COMPLETED) is
+            # single-turn semantics and would fight this rollout's own multi-turn status
+            # state machine (_should_stop_on_finish / _finalize_sample).
+            if "weight_version" in meta_info:
+                sample.weight_versions.append(meta_info["weight_version"])
             _append_to_sample(sample, response_tokens, new_response_tokens, new_response_log_probs, loss_mask_val=1)
             budget = _update_budget(budget, len(new_response_tokens))
 

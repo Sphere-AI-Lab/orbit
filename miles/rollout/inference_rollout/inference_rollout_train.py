@@ -10,8 +10,12 @@ from tqdm import tqdm
 from miles.rollout.base_types import RolloutFnTrainOutput
 from miles.rollout.filter_hub.base_types import MetricGatherer, call_dynamic_filter
 from miles.rollout.generate_utils.prefill_logprobs import recompute_samples_rollout_logprobs_via_prefill
-from miles.rollout.inference_rollout.compatibility import call_all_samples_process_fn
+from miles.rollout.inference_rollout.hook_utils import call_all_samples_process_fn
 from miles.rollout.inference_rollout.inference_rollout_common import GenerateState, generate_and_rm_group
+from miles.rollout.inference_rollout.live_diagnostics import (
+    initial_live_log_at,
+    maybe_log_all_samples_live_diagnostics,
+)
 from miles.utils import dumper_utils
 from miles.utils.http_utils import get, post
 from miles.utils.misc import as_completed_async, load_function
@@ -92,6 +96,7 @@ async def generate_rollout_async(
     data = []
     all_data = []
     do_print = True
+    next_live_log_at = initial_live_log_at(args, target_data_size)
     pbar = tqdm(total=target_data_size * args.n_samples_per_prompt, desc="Rollout generation")
     while len(data) < target_data_size:
         while len(data) + len(pendings) < target_data_size:
@@ -130,6 +135,18 @@ async def generate_rollout_async(
                 data.append(group)
                 pbar.update(args.n_samples_per_prompt)
 
+        next_live_log_at = maybe_log_all_samples_live_diagnostics(
+            args,
+            rollout_id,
+            all_data,
+            data_source,
+            kept_groups=len(data),
+            target_groups=target_data_size,
+            pending_groups=len(pendings),
+            next_log_at=next_live_log_at,
+            extra_metrics=metric_gatherer.collect(),
+        )
+
     pbar.close()
     sample = data[-1][0][0] if isinstance(data[-1][0], list) else data[-1][0]
     logger.info(
@@ -150,11 +167,12 @@ async def generate_rollout_async(
 
     if f := load_function(args.rollout_sample_filter_path):
         f(args, data)
+    all_samples_metrics = {}
     # There can be circumstances where users want to process all samples including filtered ones.
     if f := load_function(args.rollout_all_samples_process_path):
         # Soft-call: kwargs filtered to what the hook accepts. See the
         # matching sglang_rollout.generate_rollout_async patch.
-        call_all_samples_process_fn(
+        maybe_metrics = call_all_samples_process_fn(
             f,
             args,
             all_samples,
@@ -163,6 +181,8 @@ async def generate_rollout_async(
             rollout_id=rollout_id,
             n_samples_per_group=getattr(args, "n_samples_per_prompt", None),
         )
+        if isinstance(maybe_metrics, dict):
+            all_samples_metrics.update(maybe_metrics)
 
     await recompute_samples_rollout_logprobs_via_prefill(
         args,
@@ -171,4 +191,6 @@ async def generate_rollout_async(
         sampling_params=state.sampling_params,
     )
 
-    return RolloutFnTrainOutput(samples=data, metrics=metric_gatherer.collect()), aborted_samples
+    metrics = metric_gatherer.collect()
+    metrics.update(all_samples_metrics)
+    return RolloutFnTrainOutput(samples=data, metrics=metrics), aborted_samples

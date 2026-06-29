@@ -19,6 +19,7 @@ from miles.rollout.inference_rollout.compatibility import (
     load_generate_function,
     load_rollout_function,
 )
+from miles.rollout.inference_rollout.hook_utils import call_all_samples_process_fn
 from miles.utils.async_utils import run
 from miles.utils.misc import function_registry
 
@@ -194,3 +195,32 @@ class TestSupportedGenerateFormats:
             assert isinstance(fn, MyGenerateFn)
             assert isinstance(result, GenerateFnOutput)
             assert result.samples == "my_sample"
+
+
+class TestAllSamplesProcessHook:
+    def test_returns_hook_metrics_and_filters_unknown_kwargs(self):
+        seen = {}
+
+        def hook(args, samples, data_source, *, rollout_id=None):
+            seen["args"] = args
+            seen["samples"] = samples
+            seen["data_source"] = data_source
+            seen["rollout_id"] = rollout_id
+            return {"rollout/pre_filter_metric": 0.5}
+
+        result = call_all_samples_process_fn(
+            hook,
+            "args",
+            ["sample"],
+            "data_source",
+            rollout_id=7,
+            is_eval=False,
+        )
+
+        assert result == {"rollout/pre_filter_metric": 0.5}
+        assert seen == {
+            "args": "args",
+            "samples": ["sample"],
+            "data_source": "data_source",
+            "rollout_id": 7,
+        }

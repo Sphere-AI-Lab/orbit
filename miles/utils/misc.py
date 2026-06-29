@@ -4,11 +4,6 @@ import re
 import subprocess
 from contextlib import contextmanager
 
-import ray
-from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
-
-from miles.utils.http_utils import is_port_available
-
 
 # Mainly used for test purpose where `load_function` needs to load many in-flight generated functions
 class FunctionRegistry:
@@ -96,7 +91,6 @@ def exec_command(cmd: str, capture_output: bool = False) -> str | None:
         return result.stdout
 
 
-@ray.remote(num_cpus=0.001)
 def _exec_command_on_node(cmd: str, capture_output: bool) -> str | None:
     return exec_command(f"unset CUDA_VISIBLE_DEVICES; {cmd}", capture_output=capture_output)
 
@@ -115,8 +109,12 @@ def exec_command_all_ray_node(
     Args:
         num_nodes: If set, only use the first `num_nodes` nodes instead of all alive nodes.
     """
+    import ray
+    from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
+
     ray.init(address="auto")
     try:
+        remote_exec_command_on_node = ray.remote(num_cpus=0.001)(_exec_command_on_node)
         current_ip = get_current_node_ip()
         nodes = sorted(
             [n for n in ray.nodes() if n.get("Alive")],
@@ -145,7 +143,7 @@ def exec_command_all_ray_node(
             }
             node_cmd = placeholder_pattern.sub(lambda m, s=substitutions: s[m.group(0)], cmd)
             refs.append(
-                _exec_command_on_node.options(
+                remote_exec_command_on_node.options(
                     scheduling_strategy=NodeAffinitySchedulingStrategy(
                         node_id=node["NodeID"],
                         soft=False,
@@ -158,6 +156,8 @@ def exec_command_all_ray_node(
 
 
 def get_current_node_ip():
+    import ray
+
     address = ray._private.services.get_node_ip_address()
     # strip ipv6 address
     address = address.strip("[]")
@@ -165,6 +165,8 @@ def get_current_node_ip():
 
 
 def get_free_port(start_port=10000, consecutive=1):
+    from miles.utils.http_utils import is_port_available
+
     # find the port where port, port + 1, port + 2, ... port + consecutive - 1 are all available
     port = start_port
     while not all(is_port_available(port + i) for i in range(consecutive)):

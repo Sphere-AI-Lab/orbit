@@ -16,7 +16,12 @@ from tqdm import tqdm
 from miles.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME, is_lora_enabled
 from miles.rollout.base_types import GenerateFnInput, RolloutFnEvalOutput, RolloutFnTrainOutput
 from miles.rollout.filter_hub.base_types import MetricGatherer, call_dynamic_filter
-from miles.rollout.inference_rollout.compatibility import call_all_samples_process_fn, load_generate_function
+from miles.rollout.inference_rollout.compatibility import load_generate_function
+from miles.rollout.inference_rollout.hook_utils import call_all_samples_process_fn
+from miles.rollout.inference_rollout.live_diagnostics import (
+    initial_live_log_at,
+    maybe_log_all_samples_live_diagnostics,
+)
 from miles.utils import dumper_utils
 from miles.utils.async_utils import run
 from miles.utils.data import Dataset
@@ -422,6 +427,7 @@ async def generate_rollout_async(
     data = []
     all_data = []
     do_print = True
+    next_live_log_at = initial_live_log_at(args, target_data_size)
     pbar = tqdm(total=target_data_size * args.n_samples_per_prompt, desc="Rollout generation")
     while len(data) < target_data_size:
         while state.remaining_batch_size < target_data_size:
@@ -455,6 +461,18 @@ async def generate_rollout_async(
                 data.append(group)
                 pbar.update(args.n_samples_per_prompt)
 
+        next_live_log_at = maybe_log_all_samples_live_diagnostics(
+            args,
+            rollout_id,
+            all_data,
+            data_source,
+            kept_groups=len(data),
+            target_groups=target_data_size,
+            pending_groups=len(state.pendings),
+            next_log_at=next_live_log_at,
+            extra_metrics=metric_gatherer.collect(),
+        )
+
     pbar.close()
     sample = data[-1][0][0] if isinstance(data[-1][0], list) else data[-1][0]
     logger.info(
@@ -476,12 +494,13 @@ async def generate_rollout_async(
         filter_func = load_function(x)
         filter_func(args, data)
 
+    all_samples_metrics = {}
     # There can be circumstances where users want to process all samples including filtered ones.
     if (x := args.rollout_all_samples_process_path) is not None:
         process_func = load_function(x)
         # Soft-call: kwargs filtered to what the hook accepts so legacy
         # `fn(args, samples, data_source)` impls keep working.
-        call_all_samples_process_fn(
+        maybe_metrics = call_all_samples_process_fn(
             process_func,
             args,
             all_samples,
@@ -490,6 +509,8 @@ async def generate_rollout_async(
             rollout_id=rollout_id,
             n_samples_per_group=getattr(args, "n_samples_per_prompt", None),
         )
+        if isinstance(maybe_metrics, dict):
+            all_samples_metrics.update(maybe_metrics)
 
     await recompute_samples_rollout_logprobs_via_prefill(
         args,
@@ -498,7 +519,9 @@ async def generate_rollout_async(
         sampling_params=state.sampling_params,
     )
 
-    return RolloutFnTrainOutput(samples=data, metrics=metric_gatherer.collect()), aborted_samples
+    metrics = metric_gatherer.collect()
+    metrics.update(all_samples_metrics)
+    return RolloutFnTrainOutput(samples=data, metrics=metrics), aborted_samples
 
 
 EVAL_PROMPT_DATASET = {}
@@ -667,6 +690,8 @@ def generate_rollout(
         output, _ = run(eval_rollout(args, rollout_id))
         return output
 
+    if hasattr(data_source, "set_rollout_step"):
+        data_source.set_rollout_step(rollout_id)
     output, aborted_samples = run(generate_rollout_async(args, rollout_id, data_source.get_samples))
     data_source.add_samples(aborted_samples)
     return output

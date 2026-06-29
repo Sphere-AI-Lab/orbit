@@ -17,7 +17,12 @@ if torch is not None:
 
 
 class EnvpackDataSourceTest(unittest.TestCase):
-    def make_args(self, prompt_data: str, pool_env_config: dict | None = None):
+    def make_args(
+        self,
+        prompt_data: str,
+        pool_env_config: dict | None = None,
+        curriculum: dict | None = None,
+    ):
         return SimpleNamespace(
             prompt_data=prompt_data,
             envpack={
@@ -30,6 +35,7 @@ class EnvpackDataSourceTest(unittest.TestCase):
                         "env_config": pool_env_config or {"sokoban_render_style": "sprite"},
                     }
                 ],
+                **({"curriculum": curriculum} if curriculum is not None else {}),
             },
             n_samples_per_prompt=2,
             rollout_shuffle=False,
@@ -180,6 +186,101 @@ class EnvpackDataSourceTest(unittest.TestCase):
             actual_order = [sample.metadata["envpack"]["seed"] for sample in actual._prompt_samples]
 
         self.assertEqual(actual_order, expected_order)
+
+    def test_curriculum_selects_samples_by_solve_step_stage(self) -> None:
+        if torch is None:
+            self.skipTest("requires torch because EnvpackDataSource creates Miles Sample objects")
+        with tempfile.TemporaryDirectory() as tmp:
+            data_path = Path(tmp) / "samples.jsonl"
+            rows = [
+                _jsonl_row(seed=30, solve_step=3),
+                _jsonl_row(seed=31, solve_step=3),
+                _jsonl_row(seed=50, solve_step=5),
+                _jsonl_row(seed=70, solve_step=7),
+                _jsonl_row(seed=80, solve_step=8),
+            ]
+            data_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+            args = self.make_args(
+                str(data_path),
+                curriculum={
+                    "enabled": True,
+                    "stages": [
+                        {"until": 2, "solve_steps": [3]},
+                        {"until": 3, "solve_steps": [5]},
+                        {"until": None, "solve_steps": [7, 8]},
+                    ],
+                },
+            )
+            args.n_samples_per_prompt = 1
+
+            data_source = EnvpackDataSource(args)
+            data_source.set_rollout_step(0)
+            first = data_source.get_samples(2)
+            second = data_source.get_samples(2)
+            data_source.set_rollout_step(2)
+            third = data_source.get_samples(1)
+            data_source.set_rollout_step(3)
+            fourth = data_source.get_samples(2)
+
+        self.assertEqual(_group_solve_steps(first), [3, 3])
+        self.assertEqual(_group_solve_steps(second), [3, 3])
+        self.assertEqual(_group_solve_steps(third), [5])
+        self.assertEqual(_group_solve_steps(fourth), [7, 8])
+
+    def test_curriculum_does_not_advance_on_dapo_refill_draws(self) -> None:
+        if torch is None:
+            self.skipTest("requires torch because EnvpackDataSource creates Miles Sample objects")
+        with tempfile.TemporaryDirectory() as tmp:
+            data_path = Path(tmp) / "samples.jsonl"
+            rows = [
+                _jsonl_row(seed=30, solve_step=3),
+                _jsonl_row(seed=31, solve_step=3),
+                _jsonl_row(seed=50, solve_step=5),
+                _jsonl_row(seed=51, solve_step=5),
+            ]
+            data_path.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+            args = self.make_args(
+                str(data_path),
+                curriculum={
+                    "enabled": True,
+                    "stages": [
+                        {"until": 1, "solve_steps": [3]},
+                        {"until": None, "solve_steps": [5]},
+                    ],
+                },
+            )
+            args.n_samples_per_prompt = 1
+
+            data_source = EnvpackDataSource(args)
+            data_source.set_rollout_step(0)
+            first_refill = data_source.get_samples(1)
+            second_refill = data_source.get_samples(1)
+            data_source.set_rollout_step(1)
+            next_rollout = data_source.get_samples(2)
+
+        self.assertEqual(_group_solve_steps(first_refill), [3])
+        self.assertEqual(_group_solve_steps(second_refill), [3])
+        self.assertEqual(_group_solve_steps(next_rollout), [5, 5])
+
+
+def _jsonl_row(*, seed: int, solve_step: int):
+    return {
+        "input": "envpack_placeholder",
+        "images": [],
+        "metadata": {
+            "envpack": {
+                "env_name": "sokoban",
+                "seed": seed,
+                "env_config": {"render_mode": "text"},
+                "solver_metrics": {"min_solve_steps": solve_step, "bucket_name": f"6x6_b1_solve_{solve_step}"},
+                "bucket_name": f"6x6_b1_solve_{solve_step}",
+            }
+        },
+    }
+
+
+def _group_solve_steps(groups):
+    return [int(group[0].metadata["envpack"]["solver_metrics"]["min_solve_steps"]) for group in groups]
 
 
 if __name__ == "__main__":

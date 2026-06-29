@@ -69,6 +69,11 @@ class EnvpackBuildDatasetTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "buckets"):
             parse_sampling_spec({"total_train": 10, "min_solve_steps": [4, 10], "buckets": [{"name": "a"}]})
 
+    def test_sampling_defaults_to_full_allocation(self) -> None:
+        sampling = parse_sampling_spec({"total_train": 10, "min_solve_steps": [3, 10]})
+
+        self.assertEqual(sampling.allocation, "full")
+
     def test_capped_selection_water_fills_and_split_preserves_counts(self) -> None:
         sampling = parse_sampling_spec(
             {
@@ -112,6 +117,8 @@ class EnvpackBuildDatasetTest(unittest.TestCase):
                         "selected_eval": 1,
                         "bucket_available": {"6x6_b1_solve_5": 5},
                         "bucket_selected": {"6x6_b1_solve_5": 5},
+                        "bucket_train_counts": {"6x6_b1_solve_5": 4},
+                        "bucket_eval_counts": {"6x6_b1_solve_5": 1},
                         "solver_status_counts": {"solved_within_depth": 8},
                     },
                 },
@@ -128,6 +135,8 @@ class EnvpackBuildDatasetTest(unittest.TestCase):
                         "selected_eval": 1,
                         "bucket_available": {"7x7_b2_solve_5": 6},
                         "bucket_selected": {"7x7_b2_solve_5": 6},
+                        "bucket_train_counts": {"7x7_b2_solve_5": 5},
+                        "bucket_eval_counts": {"7x7_b2_solve_5": 1},
                         "solver_status_counts": {"solved_within_depth": 18},
                     },
                 },
@@ -138,6 +147,8 @@ class EnvpackBuildDatasetTest(unittest.TestCase):
         self.assertEqual(report["candidate_seeds"], 30)
         self.assertEqual(report["selected_train"], 9)
         self.assertEqual(report["bucket_available"], {"6x6_b1_solve_5": 5, "7x7_b2_solve_5": 6})
+        self.assertEqual(report["bucket_train_counts"], {"6x6_b1_solve_5": 4, "7x7_b2_solve_5": 5})
+        self.assertEqual(report["bucket_eval_counts"], {"6x6_b1_solve_5": 1, "7x7_b2_solve_5": 1})
         self.assertEqual(len(report["families"]), 2)
 
     def test_concat_rejects_train_eval_uuid_overlap(self) -> None:

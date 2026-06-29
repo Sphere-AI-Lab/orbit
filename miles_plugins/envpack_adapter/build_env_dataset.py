@@ -425,6 +425,8 @@ def _merge_sokoban_capacity_reports(
         "critical_steps_histogram",
         "bucket_available",
         "bucket_selected",
+        "bucket_train_counts",
+        "bucket_eval_counts",
     ):
         aggregate[key] = _sum_int_maps(report["capacity_report"].get(key, {}) for report in family_reports)
     return aggregate

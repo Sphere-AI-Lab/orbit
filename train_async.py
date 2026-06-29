@@ -6,6 +6,7 @@ from miles.utils.async_utils import eager_create_task
 from miles.utils.logging_utils import configure_logger
 from miles.utils.misc import should_run_periodic_action
 from miles.utils.tracking_utils import finish_tracking, init_tracking
+from miles.utils.train_status import set_progress, start_heartbeat, write_train_status
 
 
 # The framework supports other asynchronous approaches such as fully async (which is shown in examples/full_async).
@@ -32,6 +33,11 @@ async def train(args):
     # async train loop.
     rollout_data_next_future = rollout_manager.generate.remote(args.start_rollout_id)
     for rollout_id in range(args.start_rollout_id, args.num_rollout):
+        # Progress signal: record the step + refresh the sentinel each iteration. The
+        # background heartbeat (start_heartbeat) covers process-liveness incl. warmup;
+        # this bump proves steps are advancing (see miles/utils/train_status.py).
+        set_progress(rollout_id)
+        write_train_status("running")
         # Sync the last generation
         if rollout_data_next_future is not None:
             rollout_data_curr_ref = await rollout_data_next_future
@@ -75,7 +81,19 @@ async def train(args):
 
 if __name__ == "__main__":
     args = parse_args()
+    write_train_status("running")
+    _stop_heartbeat = start_heartbeat()
     try:
         asyncio.run(train(args))
+    except BaseException as exc:
+        rc = exc.code if isinstance(exc, SystemExit) and isinstance(exc.code, int) else 1
+        state = "completed" if rc == 0 else "failed"
+        _stop_heartbeat()
+        write_train_status(state, rc, None if rc == 0 else exc)
+        raise
+    else:
+        _stop_heartbeat()
+        write_train_status("completed", 0)
     finally:
+        _stop_heartbeat()
         finish_tracking()

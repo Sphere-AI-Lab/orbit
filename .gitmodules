@@ -20,5 +20,5 @@
 	branch = bridge
 [submodule "thirdparty/envpack"]
 	path = thirdparty/envpack
-	url = git@github.com:impossible-inc/envpack.git
+	url = https://github.com/impossible-inc/envpack.git
 	branch = RL/arc-agi

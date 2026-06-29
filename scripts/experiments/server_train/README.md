@@ -13,11 +13,14 @@ sokoban_1box/
   envpack-sokoban-1box-qwen3vl8b-remote-2node.sh
   envpack-sokoban-1box-qwen3vl8b-frozenvit-remote-2node.sh
   envpack-sokoban-1box-tinyworld-qwen3vl8b-frozenvit-remote-2node.sh
+  envpack-sokoban-1box-tinyworld-dapo-qwen3vl8b-frozenvit-remote-2node.sh
+  envpack-sokoban-easy14-coldstart-diag-qwen3vl8b-frozenvit-remote-2node.sh
 
 sokoban_mix12/
   envpack-sokoban-mix12-qwen3vl8b-remote-2node.sh
   envpack-sokoban-mix12-qwen3vl8b-frozenvit-remote-2node.sh
   envpack-sokoban-mix12-tinyworld-qwen3vl8b-frozenvit-remote-2node.sh
+  envpack-sokoban-mix12-tinyworld-dapo-qwen3vl8b-frozenvit-remote-2node.sh
 ```
 
 The `colocate-1node` script starts a same-node envpack HTTP server through the
@@ -64,6 +67,8 @@ There are three config/data layers:
 3. Env task dataset config
    files:
      configs/sokoban_train_env.yaml
+     configs/sokoban_full110_train_env.yaml
+     configs/sokoban_easy14_diag_train_env.yaml
      configs/sokoban_mix12_train_env.yaml
    consumed by:
      build-envpack-main.sh
@@ -84,9 +89,35 @@ does not own model-generation budgets such as `max_turns` or
 Sokoban uses the balanced dataset path by default. Difficulty is binned on
 `min_solve_steps` only (`critical_steps` is observed, never a binning axis). Its
 train EnvSpec contains a `sampling:` block with a `min_solve_steps` range and an
-`allocation` (`full` takes the whole de-duplicated in-range pool; `capped`
-water-fills a per-level cap). One build command writes both `train/samples.jsonl`
-and `eval/samples.jsonl`, plus `capacity_report.json`.
+`allocation`. `full` takes the whole de-duplicated in-range pool; `capped` is an
+explicit ablation that water-fills a per-level cap. One build command writes
+both `train/samples.jsonl` and `eval/samples.jsonl`, plus `capacity_report.json`.
+The maintained DAPO 1box config uses `[1,10]` and `allocation: full` so the
+curriculum has solve_1/2 cold-start buckets. The older main config uses
+`[3,10]`; the easy diagnostic config uses `[1,4]`.
+
+`capacity_report.json` bucket fields are counts, not curriculum controls:
+`bucket_available` is discovered supply, `bucket_selected` is total selected
+rows, and `bucket_train_counts` / `bucket_eval_counts` show the final split.
+Training order is controlled by the Miles DataSource. Without curriculum it
+uses the JSONL order plus Miles `--rollout-shuffle`; with curriculum enabled,
+the DataSource chooses the active solve-step pool before applying normal
+shuffle inside that pool.
+
+The TinyWorld DAPO recipes enable the first unweighted solve-step curriculum in
+`EnvpackDataSource`. The unit is the Miles rollout step (`rollout_id`):
+
+```text
+rollout 0-9:      solve_1/2
+rollout 10-29:    solve_1/2/4
+rollout 30-99:    solve_1/2/3/4/5/6
+rollout 100+:     solve_1/2/3/4/5/6/7/8/9/10
+```
+
+The full dataset is still available on disk. Curriculum only changes which
+prompt pool the training DataSource samples from for that rollout step. DAPO
+may refill multiple times inside one rollout, but those refills stay in the same
+stage. Eval continues to use the held-out eval JSONL distribution.
 
 For mixed Sokoban training, bucket names include board size and box count when
 the dataset builder has solver metadata, for example `6x6_b1_solve_5` and
@@ -120,6 +151,8 @@ Build datasets before training:
 
 ```bash
 scripts/experiments/server_train/build-envpack-main.sh sokoban
+scripts/experiments/server_train/build-envpack-main.sh sokoban_full110
+scripts/experiments/server_train/build-envpack-main.sh sokoban_easy14
 scripts/experiments/server_train/build-envpack-main.sh sokoban_mix12
 ```
 
@@ -130,9 +163,12 @@ bash scripts/slurm/submit.sh server_train/sokoban_1box/envpack-sokoban-1box-qwen
 bash scripts/slurm/submit.sh server_train/sokoban_1box/envpack-sokoban-1box-qwen3vl8b-remote-2node
 bash scripts/slurm/submit.sh server_train/sokoban_1box/envpack-sokoban-1box-qwen3vl8b-frozenvit-remote-2node
 bash scripts/slurm/submit.sh server_train/sokoban_1box/envpack-sokoban-1box-tinyworld-qwen3vl8b-frozenvit-remote-2node
+bash scripts/slurm/submit.sh server_train/sokoban_1box/envpack-sokoban-1box-tinyworld-dapo-qwen3vl8b-frozenvit-remote-2node
+bash scripts/slurm/submit.sh server_train/sokoban_1box/envpack-sokoban-easy14-coldstart-diag-qwen3vl8b-frozenvit-remote-2node
 bash scripts/slurm/submit.sh server_train/sokoban_mix12/envpack-sokoban-mix12-qwen3vl8b-remote-2node
 bash scripts/slurm/submit.sh server_train/sokoban_mix12/envpack-sokoban-mix12-qwen3vl8b-frozenvit-remote-2node
 bash scripts/slurm/submit.sh server_train/sokoban_mix12/envpack-sokoban-mix12-tinyworld-qwen3vl8b-frozenvit-remote-2node
+bash scripts/slurm/submit.sh server_train/sokoban_mix12/envpack-sokoban-mix12-tinyworld-dapo-qwen3vl8b-frozenvit-remote-2node
 ```
 
 The Sokoban HTTP scripts default to W&B run names prefixed with `new-http-`.
@@ -142,6 +178,58 @@ wrapper.
 The TinyWorld scripts are Qwen3-VL-8B, 2-node remote, ViT-frozen render
 ablations. They default to `WANDB_RUN_PREFIX=new-http-tinyworld` and set
 `SOKOBAN_RENDER_STYLE=tiny`; they reuse the same 1box or mix12 puzzle datasets.
+
+The TinyWorld DAPO variants additionally set `ENABLE_DAPO=1` and default to
+`WANDB_RUN_PREFIX=new-http-tinyworld-dapo`. DAPO dynamic sampling uses
+`miles_plugins.envpack_adapter.filters.check_envpack_success_nonzero_std`: it
+keeps only prompt groups with envpack solve rate strictly between 0 and 1, and
+filters out groups where every rollout solved or no rollout solved. It reads
+explicit `sample.metadata["envpack"]["success"]` / reward-report success signals
+instead of shaped reward values. The TinyWorld DAPO recipes currently set
+`DAPO_OVER_SAMPLING_BATCH_SIZE=32` and keep `SGLANG_SERVER_CONCURRENCY=512`.
+In the current 8 single-GPU rollout-engine layout this permits up to 4096
+client-side active SGLang generate requests; server-side admission control such
+as SGLang `max_running_requests` is intentionally left to SGLang/server
+configuration. They also set `SOKOBAN_CURRICULUM_ENABLED=1` to enable the
+solve-step schedule above.
+
+For offline DAPO analysis from debug dumps:
+
+```bash
+python -m miles_plugins.envpack_adapter.analysis "$RUN_DIR/train" --format markdown
+```
+
+This reports `none_solved`, `mixed`, `all_solved`, DAPO keep rate, and solve
+rate per step and per envpack bucket.
+
+The same prompt-group distribution is logged online to W&B in the rollout panel.
+These train-side prompt-group metrics are computed from
+`--rollout-all-samples-process-path`, so under DAPO they use the oversampled
+pre-filter set, not only the mixed groups kept for optimization. The two primary
+diagnostics are:
+
+```text
+rollout/all_unsolved_prompt_frac
+rollout/all_solved_prompt_frac
+```
+
+These are prompt-group fractions, not trajectory fractions. The corresponding
+counts are `rollout/all_unsolved_prompts` and `rollout/all_solved_prompts`.
+Detailed bucket breakdowns are still logged under `envpack_prompt_groups/...`.
+The ordinary `rollout/solve_rate` metric is computed from samples kept for
+optimization. For comparison, the all-samples hook also logs
+`rollout/pre_filter_solve_rate` from the oversampled pre-filter set. Per-env
+and per-bucket details stay under envpack-owned namespaces such as
+`envpack_rollout_bucket/<env>/<bucket>/...` and
+`envpack_rollout_pre_filter_bucket/<env>/<bucket>/...`.
+
+When DAPO is refilling and has not yet produced a full kept batch, the same
+all-samples hook is called in live-diagnostics mode every `rollout_batch_size`
+completed candidate prompt groups by default. This makes cold-start failures
+visible in W&B before a normal rollout step finishes. The old Miles
+`rollout/zero_std/*` panels are computed from kept samples after filtering, so
+they can remain empty while the pre-filter envpack diagnostics already show why
+the refill loop is stuck.
 
 ## Sokoban Render Styles
 

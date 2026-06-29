@@ -464,6 +464,33 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 ),
             )
             parser.add_argument(
+                "--fully-async-prefetch-batches",
+                type=int,
+                default=1,
+                help=(
+                    "Number of rollout batches the fully async example worker keeps actively "
+                    "generating. The worker launches at most rollout_batch_size * "
+                    "fully_async_prefetch_batches running prompt-group tasks. Completed queued "
+                    "groups do not count against this active generation window; "
+                    "max_weight_staleness still controls whether completed groups are accepted "
+                    "for training or recycled."
+                ),
+            )
+            parser.add_argument(
+                "--fully-async-max-completed-queue-groups",
+                type=int,
+                default=2048,
+                help=(
+                    "Soft safety cap for completed prompt groups waiting in the fully async worker "
+                    "output queue. When the queue reaches this size, the worker temporarily stops "
+                    "launching new generation tasks until the trainer consumes queued groups. "
+                    "This prevents unbounded memory growth if training stalls; it is not part of "
+                    "the normal active sampler concurrency target. NOTE: this fixed count is a "
+                    "single-node memory budget placeholder; future work is to derive it from a live "
+                    "memory estimate (see examples/fully_async/README.md 'Scaling limits & roadmap')."
+                ),
+            )
+            parser.add_argument(
                 "--custom-generate-function-path",
                 type=str,
                 default=None,
@@ -606,14 +633,28 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
             parser.add_argument(
                 "--rollout-health-check-timeout",
                 type=float,
-                default=30.0,
-                help="Timeout in seconds to wait for a rollout engine /health_generate response before killing it.",
+                default=300.0,
+                help="Timeout in seconds to wait for a rollout engine /health_generate response before "
+                "killing it. Default 300s (raised from 30s): a busy engine — serving a large rollout, or "
+                "paused mid weight-update, especially in colocate where it shares GPUs with training — can "
+                "legitimately take far longer than 30s to answer, and a too-short timeout false-kills it.",
             )
             parser.add_argument(
                 "--rollout-health-check-first-wait",
                 type=float,
                 default=0,
                 help="Initial grace period (in seconds) before starting health checks. This allows time for model compilation and initialization. Increase this value significantly when using deepgemm.",
+            )
+            parser.add_argument(
+                "--rollout-health-check-max-consecutive-failures",
+                type=int,
+                default=3,
+                help="Number of CONSECUTIVE failed /health_generate checks (each bounded by "
+                "--rollout-health-check-timeout) required before an engine is declared dead and killed. "
+                "Default 3 (raised from 1): a busy engine, or one paused mid weight-update, can legitimately "
+                "exceed the timeout while still alive, and killing one engine cascades to whole-job death via "
+                "the broadcast collective. 1-strike false-positives killed runs 20862 (async) and "
+                "21091/21092 (colocate).",
             )
             return parser
 
@@ -1607,6 +1648,17 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                     "kwargs may include is_eval, rollout_id, eval_dataset_name, "
                     "and n_samples_per_group; legacy 3-positional impls without "
                     "**kwargs are soft-called with only what they declare."
+                ),
+            )
+            parser.add_argument(
+                "--rollout-all-samples-live-log-interval",
+                type=int,
+                default=None,
+                help=(
+                    "How many completed candidate prompt groups between live all-samples diagnostics "
+                    "while dynamic sampling is still refilling. None logs every rollout_batch_size groups "
+                    "when --dynamic-sampling-filter-path and --rollout-all-samples-process-path are set; "
+                    "0 disables live diagnostics."
                 ),
             )
             parser.add_argument(

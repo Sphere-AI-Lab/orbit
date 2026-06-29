@@ -60,6 +60,22 @@ SOKOBAN_RAW_PLANE_SCALE=${SOKOBAN_RAW_PLANE_SCALE:-$(envpack_recipe_arg_value ra
 SOKOBAN_PROFILE=${SOKOBAN_PROFILE:-vision_free_think_local}
 SOKOBAN_POOL_ID=${SOKOBAN_POOL_ID:-sokoban-vision}
 
+# Optional unweighted DataSource curriculum. Unit: rollout step (rollout_id).
+# DAPO TinyWorld recipes enable this by default; other recipes leave it off.
+# Cold-start floor measured 2026-06-09 (diag-easy14-cold, step 0, cold
+# Qwen3-VL-8B, tiny render): solve_1 keep 75% / solve 29%; solve_2 keep 14%;
+# solve_4 keep 0% — deadlocks DAPO success-variance filtering, so stages must
+# start at solve_1/2. Pools are cumulative so keep retains an easy-bucket
+# floor at every stage. Requires a dataset whose floor includes solve_1
+# (envpack-sokoban-full110); 6x6/1-box has no solve_3 puzzles.
+SOKOBAN_CURRICULUM_ENABLED=${SOKOBAN_CURRICULUM_ENABLED:-0}
+SOKOBAN_CURRICULUM_STAGES=(
+    "10:1,2"
+    "30:1,2,4"
+    "100:1,2,3,4,5,6"
+    "end:1,2,3,4,5,6,7,8,9,10"
+)
+
 TRAINING_SCHEDULE_ARGS=(
     --num-rollout             400
     --rollout-batch-size       32
@@ -75,10 +91,13 @@ INTERACTION_BUDGET_ARGS=(
 )
 
 ENABLE_DAPO=${ENABLE_DAPO:-0}
+DAPO_DYNAMIC_FILTER_PATH=${DAPO_DYNAMIC_FILTER_PATH:-miles_plugins.envpack_adapter.filters.check_envpack_success_nonzero_std}
+DAPO_OVER_SAMPLING_BATCH_SIZE=${DAPO_OVER_SAMPLING_BATCH_SIZE:-32}
+SGLANG_SERVER_CONCURRENCY=${SGLANG_SERVER_CONCURRENCY:-}
 DAPO_ARGS=(
     --eps-clip-high 0.28
-    --dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
-    --over-sampling-batch-size auto
+    --dynamic-sampling-filter-path "$DAPO_DYNAMIC_FILTER_PATH"
+    --over-sampling-batch-size "$DAPO_OVER_SAMPLING_BATCH_SIZE"
 )
 
 CKPT_ARGS=(
@@ -129,6 +148,9 @@ SGLANG_ARGS=(
     --rollout-num-gpus-per-engine 1
     --sglang-mem-fraction-static 0.5
 )
+if [[ -n "$SGLANG_SERVER_CONCURRENCY" ]]; then
+    SGLANG_ARGS+=( --sglang-server-concurrency "$SGLANG_SERVER_CONCURRENCY" )
+fi
 
 MISC_ARGS=(
     --colocate
@@ -206,7 +228,7 @@ if [[ "$ENABLE_DAPO" == "1" ]]; then
     fi
     GRPO_ARGS+=(
         --eps-clip-high "$(envpack_recipe_arg_value --eps-clip-high 0.28 "${DAPO_ARGS[@]}")"
-        --dynamic-sampling-filter-path "$(envpack_recipe_arg_value --dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "${DAPO_ARGS[@]}")"
+        --dynamic-sampling-filter-path "$(envpack_recipe_arg_value --dynamic-sampling-filter-path "$DAPO_DYNAMIC_FILTER_PATH" "${DAPO_ARGS[@]}")"
         --over-sampling-batch-size "$EFFECTIVE_ROLLOUT_BATCH_SIZE"
     )
 fi
@@ -214,6 +236,8 @@ fi
 export ENVPACK_SOKOBAN_RENDER_STYLE="$SOKOBAN_RENDER_STYLE"
 export ENVPACK_SOKOBAN_TINY_SCALE="$SOKOBAN_TINY_SCALE"
 export ENVPACK_SOKOBAN_RAW_PLANE_SCALE="$SOKOBAN_RAW_PLANE_SCALE"
+export ENVPACK_CURRICULUM_ENABLED="$SOKOBAN_CURRICULUM_ENABLED"
+ENVPACK_CURRICULUM_STAGES=("${SOKOBAN_CURRICULUM_STAGES[@]}")
 
 envpack_prepare_adapter_config sokoban "$SOKOBAN_PROFILE" "$SOKOBAN_POOL_ID" "$MAX_ENV_TURNS_PER_SAMPLE" "$MAX_MODEL_TOKENS_PER_TURN"
 envpack_set_rollout_args

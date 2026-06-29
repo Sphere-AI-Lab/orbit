@@ -59,6 +59,44 @@ envpack_recipe_arg_value() {
     printf '%s\n' "$default_value"
 }
 
+envpack_curriculum_yaml() {
+    if [[ "${ENVPACK_CURRICULUM_ENABLED:-0}" != "1" ]]; then
+        return 0
+    fi
+    if ! declare -p ENVPACK_CURRICULUM_STAGES >/dev/null 2>&1 || ((${#ENVPACK_CURRICULUM_STAGES[@]} == 0)); then
+        echo "error: ENVPACK_CURRICULUM_ENABLED=1 requires ENVPACK_CURRICULUM_STAGES" >&2
+        exit 64
+    fi
+
+    cat <<EOF_CURRICULUM_HEAD
+  curriculum:
+    enabled: true
+    stages:
+EOF_CURRICULUM_HEAD
+    local stage until steps steps_yaml
+    for stage in "${ENVPACK_CURRICULUM_STAGES[@]}"; do
+        if [[ "$stage" != *:* ]]; then
+            echo "error: curriculum stage must be '<until>:<comma-separated-steps>', got '$stage'" >&2
+            exit 64
+        fi
+        until=${stage%%:*}
+        steps=${stage#*:}
+        steps=${steps// /}
+        if [[ -z "$steps" ]]; then
+            echo "error: curriculum stage has empty solve_steps: '$stage'" >&2
+            exit 64
+        fi
+        steps_yaml="[${steps//,/, }]"
+        if [[ "$until" == "end" || "$until" == "*" || "$until" == "null" ]]; then
+            until="null"
+        fi
+        cat <<EOF_CURRICULUM_STAGE
+      - until: $until
+        solve_steps: $steps_yaml
+EOF_CURRICULUM_STAGE
+    done
+}
+
 envpack_prepare_adapter_config() {
     local env_name=${1:?env name is required}
     local profile=${2:?profile is required}
@@ -203,6 +241,8 @@ EOF_RUNTIME
 EOF_ENV_CONFIG
 )
     fi
+    local curriculum_config=""
+    curriculum_config=$(envpack_curriculum_yaml)
 
     cat > "$ENVPACK_CONFIG_PATH" <<EOF
 envpack_adapter:
@@ -216,6 +256,7 @@ $server_config
   refill:
     max_attempts: $ENVPACK_REFILL_MAX_ATTEMPTS
     backoff_s: $ENVPACK_REFILL_BACKOFF_S
+$curriculum_config
   pools:
     - env: $env_name
       profile: $profile
@@ -231,6 +272,7 @@ EOF
 envpack_set_rollout_args() {
     local rollout_log_func=${ENVPACK_CUSTOM_ROLLOUT_LOG_FUNCTION_PATH:-miles_plugins.envpack_adapter.logging.log_rollout_data}
     local eval_rollout_log_func=${ENVPACK_CUSTOM_EVAL_ROLLOUT_LOG_FUNCTION_PATH:-miles_plugins.envpack_adapter.logging.log_eval_rollout_data}
+    local all_samples_process_func=${ENVPACK_ROLLOUT_ALL_SAMPLES_PROCESS_PATH:-miles_plugins.envpack_adapter.logging.process_all_samples}
 
     ROLLOUT_ARGS=(
         --data-source-path miles_plugins.envpack_adapter.data_source.EnvpackDataSource
@@ -238,7 +280,7 @@ envpack_set_rollout_args() {
         --custom-generate-function-path miles_plugins.envpack_adapter.generate.generate
         --custom-rollout-log-function-path "$rollout_log_func"
         --custom-eval-rollout-log-function-path "$eval_rollout_log_func"
-        --rollout-all-samples-process-path examples.vagen.debug_dump.dump_samples
+        --rollout-all-samples-process-path "$all_samples_process_func"
         --custom-config-path "$ENVPACK_CONFIG_PATH"
         --rollout-shuffle
         --seed                    0

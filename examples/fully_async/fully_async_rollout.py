@@ -85,17 +85,66 @@ class AsyncRolloutWorker:
         self.data_buffer = data_buffer  # Directly save data_buffer reference
         self.concurrency = concurrency
         self.running = True
-        self.output_queue = queue.Queue(maxsize=1000)  # Continuous output queue
+        self.prefetch_batches = max(1, int(getattr(args, "fully_async_prefetch_batches", 1)))
+        self.max_concurrent_tasks = args.rollout_batch_size * self.prefetch_batches
+        self.max_completed_queue_groups = max(1, int(getattr(args, "fully_async_max_completed_queue_groups", 2048)))
+        # Continuous output queue for completed-but-not-yet-consumed groups.
+        # Keep this unbounded so task callbacks never block the worker event loop.
+        # max_completed_queue_groups is enforced as a soft launch cap below.
+        self.output_queue = queue.Queue()
         self.worker_thread = None
         self.state = GenerateState(args)
+
+        self._warn_if_prefetch_is_likely_wasteful()
+
+    def _warn_if_prefetch_is_likely_wasteful(self):
+        max_staleness = getattr(self.args, "max_weight_staleness", None)
+        if max_staleness is not None and self.prefetch_batches > max_staleness + 1:
+            logger.warning(
+                "fully_async_prefetch_batches=%s is larger than max_weight_staleness+1=%s. "
+                "Later prefetched groups are likely to become stale and be recycled before training.",
+                self.prefetch_batches,
+                max_staleness + 1,
+            )
+
+        request_window = self.max_concurrent_tasks * self.args.n_samples_per_prompt
+        request_limit = (
+            self.args.sglang_server_concurrency * self.args.rollout_num_gpus // self.args.rollout_num_gpus_per_engine
+        )
+        if request_window > request_limit:
+            logger.warning(
+                "Fully async prefetch window can launch up to %s sample requests "
+                "(%s groups * %s samples/group), above the SGLang client semaphore limit %s. "
+                "The semaphore will backpressure requests, but extra group tasks can increase memory and stale-work pressure.",
+                request_window,
+                self.max_concurrent_tasks,
+                self.args.n_samples_per_prompt,
+                request_limit,
+            )
+
+        if self.max_completed_queue_groups < self.max_concurrent_tasks:
+            logger.warning(
+                "fully_async_max_completed_queue_groups=%s is smaller than max active prompt groups=%s. "
+                "The soft queue cap can trigger quickly if the trainer falls behind; consider increasing it.",
+                self.max_completed_queue_groups,
+                self.max_concurrent_tasks,
+            )
 
     async def continuous_worker_loop(self):
         """Continuous work loop - constantly get data from data_buffer and process"""
         print("Continuous async rollout worker started")
 
         active_tasks = set()
-        max_concurrent_tasks = self.args.rollout_batch_size
+        max_concurrent_tasks = self.max_concurrent_tasks
         group_id_counter = 0
+        print(
+            "Fully async worker prefetch: "
+            f"rollout_batch_size={self.args.rollout_batch_size}, "
+            f"prefetch_batches={self.prefetch_batches}, "
+            f"max_active_groups={max_concurrent_tasks}, "
+            f"max_completed_queue_groups={self.max_completed_queue_groups}",
+            flush=True,
+        )
 
         while self.running:
             try:
@@ -109,8 +158,12 @@ class AsyncRolloutWorker:
                             print(f"Task failed with exception: {e}")
                     active_tasks -= done_tasks
 
-                # If active task count hasn't reached limit, try to get new data and start tasks
+                # Keep sampler-side generation saturated. Completed queued groups
+                # do not count against this active task window; the queue maxsize
+                # is only a safety cap for stalled trainers.
                 while len(active_tasks) < max_concurrent_tasks and self.running:
+                    if self.output_queue.qsize() >= self.max_completed_queue_groups:
+                        break
                     samples = self.data_buffer.get_samples(1)
 
                     for group in samples:
@@ -170,10 +223,10 @@ class AsyncRolloutWorker:
             self.worker_thread.join(timeout=5)
         print("Stopped async worker thread")
 
-    def get_completed_groups(self) -> list[tuple]:
-        """Get completed sample groups"""
+    def get_completed_groups(self, max_items: int | None = None) -> list[tuple]:
+        """Get completed sample groups without draining more than the caller can consume."""
         completed = []
-        while True:
+        while max_items is None or len(completed) < max_items:
             try:
                 result = self.output_queue.get_nowait()
                 completed.append(result)
@@ -184,6 +237,14 @@ class AsyncRolloutWorker:
     def get_queue_size(self) -> int:
         """Get current output queue size"""
         return self.output_queue.qsize()
+
+    def get_max_concurrent_tasks(self) -> int:
+        """Get the configured in-flight prompt-group window."""
+        return self.max_concurrent_tasks
+
+    def get_max_completed_queue_groups(self) -> int:
+        """Get the completed-group queue safety cap."""
+        return self.max_completed_queue_groups
 
 
 async def generate_rollout_async(args, rollout_id: int, data_buffer: DataSource) -> list[list[Sample]]:
@@ -207,7 +268,11 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer: DataSource)
     use_staleness_filter = getattr(args, "max_weight_staleness", None) is not None
 
     print(f"Starting async rollout generation for {target_data_size} groups")
-    print(f"Global worker queue size: {worker.get_queue_size()}")
+    print(
+        f"Global worker queue size: {worker.get_queue_size()}, "
+        f"max active groups: {worker.get_max_concurrent_tasks()}, "
+        f"max completed queue groups: {worker.get_max_completed_queue_groups()}"
+    )
     if use_staleness_filter:
         print(f"Staleness filter enabled: max_weight_staleness={args.max_weight_staleness}")
 
@@ -218,7 +283,11 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer: DataSource)
 
     while len(data) < target_data_size:
         # Collect completed results
-        completed = worker.get_completed_groups()
+        # Do not drain more completed groups than this rollout call can consume.
+        # Stale or aborted groups are reset and returned to the data buffer below;
+        # if that leaves the batch short, the next loop drains more completed groups.
+        # This avoids over-accepting valid groups and needing an accepted-overflow buffer.
+        completed = worker.get_completed_groups(max_items=target_data_size - len(data))
 
         made_progress = False
         for group_id, group in completed:

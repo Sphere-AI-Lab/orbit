@@ -55,12 +55,25 @@ class EnvpackRefillConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class EnvpackCurriculumStage:
+    until: int | None
+    solve_steps: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class EnvpackCurriculumConfig:
+    enabled: bool = False
+    stages: tuple[EnvpackCurriculumStage, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class EnvpackAdapterConfig:
     api: ApiMode
     pools: tuple[EnvpackPoolConfig, ...]
     rollout: EnvpackRolloutConfig
     http: EnvpackHttpConfig = field(default_factory=EnvpackHttpConfig)
     refill: EnvpackRefillConfig = field(default_factory=EnvpackRefillConfig)
+    curriculum: EnvpackCurriculumConfig = field(default_factory=EnvpackCurriculumConfig)
     server: str | None = None
     reject_group_rm: bool = True
     reject_partial_rollout: bool = True
@@ -96,7 +109,19 @@ def load_envpack_config(args) -> EnvpackAdapterConfig:
         raise EnvpackConfigError(f"`{label}` config must be a dict, got {type(raw).__name__}")
     _reject_unknown(
         raw,
-        {"api", "server", "env", "profile", "pool_id", "pools", "rollout", "http", "refill", "guards"},
+        {
+            "api",
+            "server",
+            "env",
+            "profile",
+            "pool_id",
+            "pools",
+            "rollout",
+            "http",
+            "refill",
+            "curriculum",
+            "guards",
+        },
         label,
     )
 
@@ -113,6 +138,7 @@ def load_envpack_config(args) -> EnvpackAdapterConfig:
     rollout = _parse_rollout(raw.get("rollout") or {}, label)
     http = _parse_http(raw.get("http") or {}, label)
     refill = _parse_refill(raw.get("refill") or {}, label)
+    curriculum = _parse_curriculum(raw.get("curriculum") or {}, label)
     guards = _parse_guards(raw.get("guards") or {}, label)
     return EnvpackAdapterConfig(
         api=api,
@@ -121,6 +147,7 @@ def load_envpack_config(args) -> EnvpackAdapterConfig:
         rollout=rollout,
         http=http,
         refill=refill,
+        curriculum=curriculum,
         **guards,
     )
 
@@ -263,6 +290,49 @@ def _parse_refill(raw: dict[str, Any], label: str) -> EnvpackRefillConfig:
     if backoff_s < 0:
         raise EnvpackConfigError(f"{label}.refill.backoff_s must be >= 0")
     return EnvpackRefillConfig(max_attempts=max_attempts, backoff_s=backoff_s)
+
+
+def _parse_curriculum(raw: dict[str, Any], label: str) -> EnvpackCurriculumConfig:
+    if not isinstance(raw, dict):
+        raise EnvpackConfigError(f"{label}.curriculum must be a dict")
+    _reject_unknown(raw, {"enabled", "stages"}, f"{label}.curriculum")
+    enabled = bool(raw.get("enabled", False))
+    raw_stages = raw.get("stages") or ()
+    if not enabled:
+        if raw_stages:
+            raise EnvpackConfigError(f"{label}.curriculum.stages requires enabled: true")
+        return EnvpackCurriculumConfig()
+    if not isinstance(raw_stages, list) or not raw_stages:
+        raise EnvpackConfigError(f"{label}.curriculum.stages must be a non-empty list when enabled")
+
+    stages: list[EnvpackCurriculumStage] = []
+    last_until = -1
+    for idx, item in enumerate(raw_stages):
+        if not isinstance(item, dict):
+            raise EnvpackConfigError(f"{label}.curriculum.stages[{idx}] must be a dict")
+        _reject_unknown(item, {"until", "solve_steps"}, f"{label}.curriculum.stages[{idx}]")
+        raw_until = item.get("until")
+        until = None if raw_until is None else int(raw_until)
+        if until is not None:
+            if until <= last_until:
+                raise EnvpackConfigError(f"{label}.curriculum.stages[{idx}].until must be increasing")
+            if until < 1:
+                raise EnvpackConfigError(f"{label}.curriculum.stages[{idx}].until must be >= 1")
+            last_until = until
+        elif idx != len(raw_stages) - 1:
+            raise EnvpackConfigError(f"{label}.curriculum only allows until: null on the final stage")
+
+        raw_steps = item.get("solve_steps")
+        if not isinstance(raw_steps, list) or not raw_steps:
+            raise EnvpackConfigError(f"{label}.curriculum.stages[{idx}].solve_steps must be a non-empty list")
+        solve_steps = tuple(sorted({int(value) for value in raw_steps}))
+        if any(value < 0 for value in solve_steps):
+            raise EnvpackConfigError(f"{label}.curriculum.stages[{idx}].solve_steps must be non-negative")
+        stages.append(EnvpackCurriculumStage(until=until, solve_steps=solve_steps))
+
+    if stages[-1].until is not None:
+        raise EnvpackConfigError(f"{label}.curriculum final stage must use until: null")
+    return EnvpackCurriculumConfig(enabled=True, stages=tuple(stages))
 
 
 def _parse_guards(raw: dict[str, Any], label: str) -> dict[str, bool]:

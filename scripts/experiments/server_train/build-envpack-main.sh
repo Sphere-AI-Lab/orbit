@@ -4,6 +4,8 @@
 #
 # Usage:
 #   scripts/experiments/server_train/build-envpack-main.sh sokoban
+#   scripts/experiments/server_train/build-envpack-main.sh sokoban_full110
+#   scripts/experiments/server_train/build-envpack-main.sh sokoban_easy14
 #   scripts/experiments/server_train/build-envpack-main.sh sokoban_mix12
 #
 # Requires thirdparty/envpack to be installed in the active Miles environment.
@@ -21,7 +23,7 @@ fi
 export PYTHONPATH="$ENVPACK_REPO${PYTHONPATH:+:$PYTHONPATH}"
 
 if [[ $# -ne 1 ]]; then
-    echo "Usage: $0 <sokoban|sokoban_mix12>" >&2
+    echo "Usage: $0 <sokoban|sokoban_full110|sokoban_easy14|sokoban_mix12>" >&2
     exit 64
 fi
 
@@ -31,12 +33,20 @@ case "$ENV_NAME" in
         DATASET_NAME=${ENVPACK_DATASET_NAME:-envpack-sokoban-main}
         TRAIN_YAML="$SCRIPT_DIR/configs/sokoban_train_env.yaml"
         ;;
+    sokoban_full110)
+        DATASET_NAME=${ENVPACK_DATASET_NAME:-envpack-sokoban-full110}
+        TRAIN_YAML="$SCRIPT_DIR/configs/sokoban_full110_train_env.yaml"
+        ;;
+    sokoban_easy14)
+        DATASET_NAME=${ENVPACK_DATASET_NAME:-envpack-sokoban-easy14}
+        TRAIN_YAML="$SCRIPT_DIR/configs/sokoban_easy14_diag_train_env.yaml"
+        ;;
     sokoban_mix12)
         DATASET_NAME=${ENVPACK_DATASET_NAME:-envpack-sokoban-mix12}
         TRAIN_YAML="$SCRIPT_DIR/configs/sokoban_mix12_train_env.yaml"
         ;;
     *)
-        echo "error: unknown env '$ENV_NAME'; expected sokoban or sokoban_mix12" >&2
+        echo "error: unknown env '$ENV_NAME'; expected sokoban, sokoban_full110, sokoban_easy14, or sokoban_mix12" >&2
         exit 64
         ;;
 esac

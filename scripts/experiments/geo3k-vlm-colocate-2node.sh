@@ -141,15 +141,20 @@ MISC_ARGS=(
 
 WANDB_ARGS=(
    --use-wandb
-   --wandb-project miles-imp
+   --wandb-team    M3TRL
+   --wandb-project async_envpack
    --wandb-group   "$RUN_NAME"
+   --disable-wandb-random-suffix
 )
 
 FT_ARGS=(
    --use-fault-tolerance
    --rollout-health-check-interval 30
-   --rollout-health-check-timeout  30
    --rollout-health-check-first-wait 60
+   # timeout (300s) + max-consecutive-failures (3) now come from the safe argparse
+   # defaults (raised from 30s/1). Colocate engines share GPUs and legitimately stall
+   # during big rollouts / weight updates; a 1-strike 30s check false-killed them and
+   # cascaded the whole job (j21091/21092: 10 engine kills, 0 steps, no real OOM/crash).
 )
 
 LAYOUT_ARGS=(

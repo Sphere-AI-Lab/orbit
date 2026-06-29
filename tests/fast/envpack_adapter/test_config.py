@@ -100,6 +100,29 @@ class EnvpackConfigTest(unittest.TestCase):
         self.assertEqual(config.refill.max_attempts, 4)
         self.assertEqual(config.refill.backoff_s, 0.2)
 
+    def test_loads_curriculum_config(self) -> None:
+        args = SimpleNamespace(
+            envpack={
+                "api": "in_process",
+                "env": "sokoban",
+                "curriculum": {
+                    "enabled": True,
+                    "stages": [
+                        {"until": 50, "solve_steps": [3, 4]},
+                        {"until": 150, "solve_steps": [3, 4, 5, 6]},
+                        {"until": None, "solve_steps": [3, 4, 5, 6, 7, 8, 9, 10]},
+                    ],
+                },
+            }
+        )
+
+        config = load_envpack_config(args)
+
+        self.assertTrue(config.curriculum.enabled)
+        self.assertEqual(config.curriculum.stages[0].until, 50)
+        self.assertEqual(config.curriculum.stages[0].solve_steps, (3, 4))
+        self.assertIsNone(config.curriculum.stages[-1].until)
+
     def test_runtime_guards_reject_r3_until_generate_preserves_it(self) -> None:
         args = SimpleNamespace(
             envpack={"api": "in_process", "env": "sokoban"},

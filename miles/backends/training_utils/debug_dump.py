@@ -36,12 +36,19 @@ def maybe_dump_policy_loss_debug(
     def to_cpu(tensor: torch.Tensor) -> torch.Tensor:
         return tensor.detach().float().cpu()
 
+    unconcat_tokens = batch.get("unconcat_tokens")
+
     samples = []
     for index, train_lp in enumerate(train_log_probs):
         sample = {
             "index": index,
             "total_length": batch["total_lengths"][index],
             "response_length": batch["response_lengths"][index],
+            # Full per-sample token ids (prompt+response) as the trainer sees them.
+            # Lets the analyzer verify the response slice tokens[-response_length:]
+            # line up with rollout_log_probs (alignment hypothesis A). Kept int (no
+            # float cast) so token ids are exact.
+            "tokens": (unconcat_tokens[index].detach().cpu() if unconcat_tokens is not None else None),
             "train_log_probs": to_cpu(train_lp),
             "old_log_probs": to_cpu(old_log_probs[index]),
             "advantages": to_cpu(advantages[index]),

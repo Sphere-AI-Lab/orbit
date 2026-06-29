@@ -7,8 +7,8 @@ This is the IMP-Miles compatibility path:
 - Envpack owns environment reset/step/finalize, episode state, parser, rubric,
   reward, credit metadata, and real multimodal observation bytes.
 
-The structure intentionally mirrors `examples.vagen.rollout.generate`; the
-environment calls are swapped for the envpack session client.
+The structure intentionally mirrors Miles' existing custom-generate contract;
+the environment calls are swapped for the envpack session client.
 """
 
 from __future__ import annotations
@@ -208,7 +208,7 @@ async def _generate_once(
         sys_prefix_len = len(sys_prefix)
         budget = _compute_budget(args, sampling_params, sample)
         max_turns, per_turn_cap = _resolve_rollout_budget(config, meta)
-        _seed_vagen_debug_metadata(
+        _seed_legacy_debug_metadata(
             sample,
             meta=meta,
             env_config=env_config,
@@ -361,6 +361,8 @@ async def _generate_once(
                 "final_status": final.status.value,
                 "reward_report": _plain_reward_report(final.reward_report),
                 "credit": _plain_credit(final.credit),
+                "success": traj_success,
+                "traj_success": traj_success,
                 "trace_summary": dict(final.trace_summary),
                 "per_turn": per_turn,
                 "media_hashes": media_hashes,
@@ -485,7 +487,7 @@ def _renderer_spec(args) -> dict[str, Any]:
     }
 
 
-def _seed_vagen_debug_metadata(
+def _seed_legacy_debug_metadata(
     sample: Sample,
     *,
     meta: dict[str, Any],
@@ -493,7 +495,7 @@ def _seed_vagen_debug_metadata(
     max_turns: int,
     response_length_per_turn,
 ) -> None:
-    """Populate enough VAGEN-shaped metadata for debug_dump on failed samples."""
+    """Populate legacy debug metadata for Miles' current all-samples dumper."""
 
     sample.metadata.setdefault("vagen", {}).update(
         {
@@ -531,9 +533,8 @@ def _system_message(prompt_bundle, *, content_blocks: bool) -> dict[str, Any] | 
         return None
     content: str | list[dict[str, str]]
     if content_blocks:
-        # VAGEN's multimodal rollout path sends system prompts through the
-        # same content-block shape as observations. Keep that shape for
-        # Qwen-VL processor/chat-template parity.
+        # Qwen-VL processors expect multimodal chat messages to keep system
+        # prompts in the same content-block shape as observations.
         content = [{"type": "text", "text": prompt_bundle.system}]
     else:
         content = prompt_bundle.system

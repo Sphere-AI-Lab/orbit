@@ -14,6 +14,7 @@ To add a new backend:
 from __future__ import annotations
 
 import logging
+import time
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -24,7 +25,7 @@ class TrackingBackend(ABC):
     # Interface every logging backend must satisfy.
 
     @abstractmethod
-    def init(self, args, *, primary: bool = True, **kwargs) -> None: ...
+    def init(self, args, *, primary: bool = True, **kwargs) -> bool | None: ...
 
     @abstractmethod
     def log(self, metrics: dict[str, Any], step: int | None = None) -> None: ...
@@ -37,24 +38,33 @@ class TrackingBackend(ABC):
 class WandbBackend(TrackingBackend):
     # Delegates to the existing ``wandb_utils`` helpers.
 
-    def init(self, args, *, primary: bool = True, **kwargs) -> None:
+    def __init__(self) -> None:
+        self._last_row_step = -1
+
+    def init(self, args, *, primary: bool = True, **kwargs) -> bool | None:
         from . import wandb_utils
 
         if primary:
-            wandb_utils.init_wandb_primary(args, **kwargs)
+            return wandb_utils.init_wandb_primary(args, **kwargs)
         else:
-            wandb_utils.init_wandb_secondary(args, **kwargs)
+            return wandb_utils.init_wandb_secondary(args, **kwargs)
 
     def log(self, metrics: dict[str, Any], step: int | None = None) -> None:
         import wandb
 
-        # Pin wandb's `_step` so the default x-axis matches the logical
-        # step instead of auto-incrementing per wandb.log() call. Assumes
-        # num_steps_per_rollout == 1; revisit if K>1 trips monotonicity.
-        if step is not None:
-            wandb.log(metrics, step=step)
-        else:
-            wandb.log(metrics)
+        # W&B has one global row step, while Miles has independent logical axes
+        # such as train/step, rollout/step, and eval/step. Use a monotonically
+        # increasing row id only for W&B history ordering; charts still use the
+        # logical axes declared via ``wandb.define_metric(..., step_metric=...)``.
+        row_step = self._next_row_step()
+        wandb.log(metrics, step=row_step)
+
+    def _next_row_step(self) -> int:
+        row_step = time.time_ns() // 1_000_000
+        if row_step <= self._last_row_step:
+            row_step = self._last_row_step + 1
+        self._last_row_step = row_step
+        return row_step
 
     def finish(self) -> None:
         import wandb
@@ -139,16 +149,28 @@ class TrackingManager:
 
     def __init__(self) -> None:
         self._backends: list[TrackingBackend] = []
+        self._tracking_requested = False
+        self._warned_no_backends = False
 
     def init(self, args, *, primary: bool = True, **kwargs) -> None:
         for name, (cls, flag) in BACKEND_REGISTRY.items():
             if getattr(args, flag, False):
+                self._tracking_requested = True
                 logger.info("Initialising tracking backend: %s", name)
                 backend = cls()
-                backend.init(args, primary=primary, **kwargs)
+                if backend.init(args, primary=primary, **kwargs) is False:
+                    logger.warning(
+                        "Tracking backend %s did not initialize; metrics for this process will be skipped", name
+                    )
+                    continue
                 self._backends.append(backend)
 
     def log(self, metrics: dict[str, Any], step: int | None = None) -> None:
+        if not self._backends:
+            if self._tracking_requested and not self._warned_no_backends:
+                logger.warning("Dropping tracking metrics because no backend is initialized: %s", sorted(metrics)[:8])
+                self._warned_no_backends = True
+            return
         for backend in self._backends:
             backend.log(metrics, step=step)
 

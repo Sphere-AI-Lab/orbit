@@ -1,23 +1,17 @@
-# Envpack Sokoban MIXED 1box+2box train EnvSpec (6x6, min_solve_steps [4,10]).
+# Envpack Sokoban MIXED 1box+2box train EnvSpec (6x6, min_solve_steps [1,10]).
 #
-# Difficulty-balanced mix experiment. Two env specs (1 box, 2 boxes), each built
-# INDEPENDENTLY by the balanced Sokoban builder (one build_balanced_sokoban_dataset
-# call per spec) and concatenated. Each spec inherits the global `sampling` below,
-# so `total_train: 3000` applies PER SPEC -> ~6000 train total (50:50 box ratio),
-# plus ~5% held-out eval each (~300 eval total). bucket_prefix keeps the two box
+# Mixed-family experiment. Two env specs (1 box, 2 boxes) are built
+# independently by the Sokoban builder and concatenated. With allocation: full,
+# total_train is ignored and final train/eval size depends on each family's
+# discovered unique in-range puzzle supply. bucket_prefix keeps the two box
 # counts in separate metric buckets (6x6_b1_solve_X / 6x6_b2_solve_X).
 #
-# allocation: capped uses water-fill per min_solve level: it trims the
-# over-represented EASY levels (solve 4-5) down to a single cap while taking the
-# rare HARD levels whole. Measured 50000-seed in-range [4,10] supply:
-#   box1: solve 4..10 = 1819 1952 499 310 449 97 57  (total 5183; starved at 7-10)
-#   box2: solve 4..10 = 2527 1544 2242 2245 1794 830 1475 (total 12657)
-# Capping each spec to 3000 -> box1 cap ~794, box2 flattened to ~428/level, giving
-# combined solve 4..10 ~ 1222 1222 927 739 878 526 486 (vs the pure-1box baseline
-# which is ~73% piled in solve 4-5 with ~0 at solve 9-10).
+# allocation: full keeps every de-duplicated puzzle in the requested solve range
+# for each family, then concatenates the families. Inspect capacity_report.json
+# for bucket_available, bucket_train_counts, and bucket_eval_counts before
+# launching a long run.
 #
-# 6000 train @ rollout-batch-size 32 = ~187 steps/epoch -> 400 rollouts ~= 2.13
-# epochs (comparable to the 1box baseline's ~2.6).
+# `total_train` is kept only for schema compatibility; allocation: full ignores it.
 envs:
   - name: Sokoban
     n_envs: 50000
@@ -54,10 +48,11 @@ envs:
       max_actions_per_step: 3
       min_solution_bfs_max_depth: 200
 sampling:
+  # Kept for schema compatibility; allocation: full ignores total_train.
   total_train: 3000
   validation_ratio: 0.05
   preserve_validation_bucket_proportions: true
-  min_solve_steps: [4, 10]
-  allocation: capped
+  min_solve_steps: [1, 10]
+  allocation: full
   sampling_policy: best_effort
   probe_concurrency: 32

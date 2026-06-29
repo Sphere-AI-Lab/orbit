@@ -29,7 +29,16 @@ class HfWeightIteratorBridge(HfWeightIteratorBase):
                 )
             elif weight_type == "base":
                 conversion_tasks = self._bridge.get_conversion_tasks(self.model)
-                conversion_tasks = _process_conversion_tasks(conversion_tasks, renamed_megatron_local_weights)
+                # Colocate offloads the actor's GPU weights during rollout, so the
+                # tasks built from self.model carry stale values that must be
+                # overwritten with the CPU-backed ("actor") weights from the
+                # weights_backuper. Disaggregated (e.g. fully-async) keeps the actor
+                # resident on the trainer GPUs, so get_conversion_tasks already
+                # captured the live, current weights -- the backup overwrite is then
+                # unnecessary AND crashes when no backup was taken (empty
+                # weights_backuper without --ref-load/--keep-old-actor/colocate).
+                if self.args.colocate:
+                    conversion_tasks = _process_conversion_tasks(conversion_tasks, renamed_megatron_local_weights)
                 named_weights = self._bridge.export_hf_weights(
                     self.model,
                     cpu=False,

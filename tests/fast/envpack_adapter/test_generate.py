@@ -275,6 +275,8 @@ class EnvpackGenerateTest(unittest.TestCase):
         self.assertEqual(result.metadata["envpack"]["model_generated_token_count"], 2)
         self.assertEqual(result.metadata["envpack"]["env_suffix_token_count"], 0)
         self.assertEqual(result.metadata["envpack"]["trainable_token_count"], 2)
+        self.assertTrue(result.metadata["envpack"]["success"])
+        self.assertTrue(result.metadata["envpack"]["traj_success"])
         self.assertEqual(result.metadata["vagen"]["adapter"], "envpack")
         self.assertEqual(result.metadata["vagen"]["env_name"], "sokoban")
         self.assertEqual(result.metadata["vagen"]["env_reward"], 1.0)

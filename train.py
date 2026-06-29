@@ -1,8 +1,4 @@
 import asyncio
-import json
-import os
-import sys
-from datetime import datetime, timezone
 
 from sglang.srt.constants import GPU_MEMORY_TYPE_CUDA_GRAPH, GPU_MEMORY_TYPE_KV_CACHE, GPU_MEMORY_TYPE_WEIGHTS
 
@@ -12,37 +8,8 @@ from miles.utils.async_utils import eager_create_task
 from miles.utils.logging_utils import configure_logger
 from miles.utils.misc import should_run_periodic_action
 from miles.utils.tracking_utils import finish_tracking, init_tracking
-
-
-def _write_train_status(state, rc=None, error=None):
-    run_dir = os.environ.get("MILES_RUN_DIR")
-    if not run_dir:
-        return
-
-    payload = {
-        "state": state,
-        "rc": rc,
-        "pid": os.getpid(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    if error is not None:
-        payload["error_type"] = type(error).__name__
-        payload["error"] = str(error)[:4000]
-
-    path = os.path.join(run_dir, "train_status.json")
-    tmp_path = f"{path}.tmp.{os.getpid()}"
-    try:
-        os.makedirs(run_dir, exist_ok=True)
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, sort_keys=True)
-            f.write("\n")
-        os.replace(tmp_path, path)
-    except Exception as write_error:
-        print(f"[train-status] WARN: failed to write {path}: {write_error}", file=sys.stderr)
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
+from miles.utils.train_status import set_progress, start_heartbeat
+from miles.utils.train_status import write_train_status as _write_train_status
 
 
 async def train(args):
@@ -102,6 +69,11 @@ async def train(args):
     # train loop.
     # note that for async training, one can change the position of the sync operation(ray.get).
     for rollout_id in range(args.start_rollout_id, args.num_rollout):
+        # Progress signal: record the step + refresh the sentinel each iteration. The
+        # background heartbeat (start_heartbeat) covers process-liveness incl. warmup;
+        # this bump proves steps are advancing (see miles/utils/train_status.py).
+        set_progress(rollout_id)
+        _write_train_status("running")
         if args.eval_interval is not None and rollout_id == 0 and not args.skip_eval_before_train:
             await rollout_manager.eval.remote(rollout_id)
 
@@ -142,14 +114,18 @@ async def train(args):
 if __name__ == "__main__":
     args = parse_args()
     _write_train_status("running")
+    _stop_heartbeat = start_heartbeat()
     try:
         asyncio.run(train(args))
     except BaseException as exc:
         rc = exc.code if isinstance(exc, SystemExit) and isinstance(exc.code, int) else 1
         state = "completed" if rc == 0 else "failed"
+        _stop_heartbeat()
         _write_train_status(state, rc, None if rc == 0 else exc)
         raise
     else:
+        _stop_heartbeat()
         _write_train_status("completed", 0)
     finally:
+        _stop_heartbeat()
         finish_tracking()

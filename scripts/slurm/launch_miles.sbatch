@@ -270,6 +270,22 @@ if [[ -z "${MILES_ARGS+x}" ]]; then
     echo "[recipe] FATAL: $RECIPE did not define MILES_ARGS"
     exit 78   # EX_CONFIG
 fi
+WANDB_RUN_ID_FILE="$RUN_DIR/wandb_run_id"
+if [[ -f "$WANDB_RUN_ID_FILE" ]]; then
+    WANDB_RUN_ID=$(tr -d '[:space:]' < "$WANDB_RUN_ID_FILE")
+fi
+if [[ -z "${WANDB_RUN_ID:-}" ]]; then
+    WANDB_RUN_ID="${SLURM_JOB_ID:-$JOBID}"
+fi
+if [[ ! -f "$WANDB_RUN_ID_FILE" || ! -s "$WANDB_RUN_ID_FILE" ]]; then
+    printf '%s\n' "$WANDB_RUN_ID" > "$WANDB_RUN_ID_FILE"
+fi
+if [[ -n "$WANDB_RUN_ID" ]]; then
+    MILES_ARGS+=( --wandb-run-id "$WANDB_RUN_ID" )
+    echo "[wandb] run_id=$WANDB_RUN_ID persisted at $WANDB_RUN_ID_FILE"
+else
+    echo "[wandb] WARN: empty wandb run id; W&B resume across requeue will not be stable"
+fi
 echo "[recipe] ${#MILES_ARGS[@]} flags loaded — full args dumped to $RUN_DIR/args.json"
 python3 - "${MILES_ARGS[@]}" >"$RUN_DIR/args.json" <<'PY'
 import json, sys

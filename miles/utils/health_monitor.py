@@ -32,6 +32,11 @@ class RolloutHealthMonitor:
         self._check_first_wait = args.rollout_health_check_first_wait
         self._need_first_wait = True  # Need to wait after each resume
         self._is_checking_enabled = False  # Track if health checking should be active
+        # Only declare an engine dead after this many CONSECUTIVE failed checks. A single
+        # timeout can be a transient stall (busy engine, or one paused mid weight-update), and
+        # killing one engine cascades to whole-job death via the broadcast collective.
+        self._max_consecutive_failures = max(1, int(getattr(args, "rollout_health_check_max_consecutive_failures", 1)))
+        self._consecutive_failures: dict[int, int] = {}
 
     def start(self) -> bool:
         """Start the health monitor thread. Called once during initialization.
@@ -96,6 +101,7 @@ class RolloutHealthMonitor:
             return
         logger.info("Resuming health monitor...")
         self._need_first_wait = True  # Need to wait after each resume
+        self._consecutive_failures.clear()  # fresh start; don't carry failures across a pause window
         self._pause_event.clear()
         self._is_checking_enabled = True
 
@@ -151,8 +157,19 @@ class RolloutHealthMonitor:
         try:
             ray.get(engine.actor_handle.health_generate.remote(timeout=self._check_timeout))
         except Exception as e:
+            fails = self._consecutive_failures.get(rollout_engine_id, 0) + 1
+            self._consecutive_failures[rollout_engine_id] = fails
+            if fails < self._max_consecutive_failures:
+                logger.warning(
+                    f"Health check failed for rollout engine {rollout_engine_id} "
+                    f"({fails}/{self._max_consecutive_failures} consecutive). Not killing yet; "
+                    f"will retry next interval. Exception: {e}"
+                )
+                return
             logger.error(
-                f"Health check failed for rollout engine {rollout_engine_id} (ray timeout or error). Killing actor. Exception: {e}"
+                f"Health check failed for rollout engine {rollout_engine_id} "
+                f"({fails}/{self._max_consecutive_failures} consecutive — threshold reached). "
+                f"Killing actor. Exception: {e}"
             )
             nodes_per_engine = self._server_group.nodes_per_engine
             self._server_group.stop_engines(
@@ -164,4 +181,10 @@ class RolloutHealthMonitor:
                 )
             )
         else:
+            if self._consecutive_failures.get(rollout_engine_id):
+                logger.info(
+                    f"Health check recovered for rollout engine {rollout_engine_id} "
+                    f"after {self._consecutive_failures[rollout_engine_id]} consecutive failure(s)."
+                )
+            self._consecutive_failures[rollout_engine_id] = 0
             logger.debug(f"Health check passed for rollout engine {rollout_engine_id}")

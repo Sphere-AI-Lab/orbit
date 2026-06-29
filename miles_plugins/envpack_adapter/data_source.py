@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import random
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -43,6 +44,15 @@ class EnvpackEnvSpec:
     pool_id: str | None = None
 
 
+@dataclass(slots=True)
+class _CurriculumPool:
+    solve_steps: tuple[int, ...]
+    origin_samples: list[Sample]
+    prompt_samples: list[Sample]
+    sample_offset: int = 0
+    epoch_id: int = 0
+
+
 class EnvpackDataSource(RolloutDataSource):
     def __init__(self, args):
         self.args = args
@@ -52,6 +62,10 @@ class EnvpackDataSource(RolloutDataSource):
         self.sample_group_index = 0
         self.sample_index = 0
         self.sample_offset = 0
+        # Curriculum stages are keyed by rollout step, not by how many times
+        # DAPO refills call get_samples() inside one rollout.
+        self.curriculum_step = 0
+        self._curriculum_pools: dict[tuple[int, ...], _CurriculumPool] = {}
         self.metadata: dict[str, Any] = {}
         self.dataset = None
 
@@ -59,13 +73,16 @@ class EnvpackDataSource(RolloutDataSource):
         if not self._origin_samples:
             raise RuntimeError(f"EnvpackDataSource: no samples loaded from {args.prompt_data!r}")
         self._prompt_samples = list(self._origin_samples)
-        if getattr(args, "rollout_shuffle", False):
+        if self.config.curriculum.enabled:
+            self._init_curriculum_pools()
+        elif getattr(args, "rollout_shuffle", False):
             self._shuffle_for_epoch(self.epoch_id)
         logger.info(
-            "EnvpackDataSource: loaded %d samples from %s (rollout_shuffle=%s)",
+            "EnvpackDataSource: loaded %d samples from %s (rollout_shuffle=%s, curriculum=%s)",
             len(self._origin_samples),
             args.prompt_data,
             getattr(args, "rollout_shuffle", False),
+            self.config.curriculum.enabled,
         )
 
     def _shuffle_for_epoch(self, epoch_id: int) -> None:
@@ -76,6 +93,31 @@ class EnvpackDataSource(RolloutDataSource):
         self._prompt_samples = [self._origin_samples[index] for index in indices]
 
     def get_samples(self, num_samples) -> list[list[Sample]]:
+        prompt_samples = (
+            self._draw_curriculum_prompt_samples(num_samples)
+            if self.config.curriculum.enabled
+            else self._draw_prompt_samples(num_samples)
+        )
+
+        groups: list[list[Sample]] = []
+        for prompt_sample in prompt_samples:
+            group: list[Sample] = []
+            for _ in range(self.args.n_samples_per_prompt):
+                sample = copy.deepcopy(prompt_sample)
+                sample.group_index = self.sample_group_index
+                sample.index = self.sample_index
+                self.sample_index += 1
+                group.append(sample)
+            self.sample_group_index += 1
+            groups.append(group)
+        return groups
+
+    def set_rollout_step(self, rollout_id: int) -> None:
+        """Select the curriculum stage for the current rollout step."""
+
+        self.curriculum_step = max(0, int(rollout_id))
+
+    def _draw_prompt_samples(self, num_samples: int) -> list[Sample]:
         sample_count = len(self._prompt_samples)
         if sample_count == 0:
             raise RuntimeError("EnvpackDataSource: empty prompt-sample pool")
@@ -97,19 +139,76 @@ class EnvpackDataSource(RolloutDataSource):
                 self.epoch_id += 1
                 if getattr(self.args, "rollout_shuffle", False):
                     self._shuffle_for_epoch(self.epoch_id)
+        return prompt_samples
 
-        groups: list[list[Sample]] = []
-        for prompt_sample in prompt_samples:
-            group: list[Sample] = []
-            for _ in range(self.args.n_samples_per_prompt):
-                sample = copy.deepcopy(prompt_sample)
-                sample.group_index = self.sample_group_index
-                sample.index = self.sample_index
-                self.sample_index += 1
-                group.append(sample)
-            self.sample_group_index += 1
-            groups.append(group)
-        return groups
+    def _draw_curriculum_prompt_samples(self, num_samples: int) -> list[Sample]:
+        stage = self._active_curriculum_stage()
+        pool = self._curriculum_pools[stage.solve_steps]
+        return self._draw_from_curriculum_pool(pool, num_samples)
+
+    def _draw_from_curriculum_pool(self, pool: _CurriculumPool, num_samples: int) -> list[Sample]:
+        sample_count = len(pool.prompt_samples)
+        if sample_count == 0:
+            raise RuntimeError(f"EnvpackDataSource: empty curriculum pool for solve_steps={pool.solve_steps}")
+
+        prompt_samples: list[Sample] = []
+        while len(prompt_samples) < num_samples:
+            need = num_samples - len(prompt_samples)
+            if pool.sample_offset + need <= sample_count:
+                prompt_samples += pool.prompt_samples[pool.sample_offset : pool.sample_offset + need]
+                pool.sample_offset += need
+                if pool.sample_offset == sample_count:
+                    pool.sample_offset = 0
+                    pool.epoch_id += 1
+                    self._shuffle_curriculum_pool(pool)
+            else:
+                prompt_samples += pool.prompt_samples[pool.sample_offset :]
+                pool.sample_offset = 0
+                pool.epoch_id += 1
+                self._shuffle_curriculum_pool(pool)
+        return prompt_samples
+
+    def _active_curriculum_stage(self):
+        for stage in self.config.curriculum.stages:
+            if stage.until is None or self.curriculum_step < stage.until:
+                return stage
+        return self.config.curriculum.stages[-1]
+
+    def _init_curriculum_pools(self) -> None:
+        samples_by_solve_step: dict[int, list[Sample]] = {}
+        for sample in self._origin_samples:
+            solve_step = _sample_min_solve_step(sample)
+            samples_by_solve_step.setdefault(solve_step, []).append(sample)
+
+        for stage in self.config.curriculum.stages:
+            if stage.solve_steps in self._curriculum_pools:
+                continue
+            samples: list[Sample] = []
+            for solve_step in stage.solve_steps:
+                samples.extend(samples_by_solve_step.get(solve_step, []))
+            if not samples:
+                raise RuntimeError(
+                    f"EnvpackDataSource: curriculum stage has no samples for solve_steps={stage.solve_steps}"
+                )
+            pool = _CurriculumPool(
+                solve_steps=stage.solve_steps,
+                origin_samples=list(samples),
+                prompt_samples=list(samples),
+            )
+            self._shuffle_curriculum_pool(pool)
+            self._curriculum_pools[stage.solve_steps] = pool
+
+    def _shuffle_curriculum_pool(self, pool: _CurriculumPool) -> None:
+        pool.prompt_samples = list(pool.origin_samples)
+        if not getattr(self.args, "rollout_shuffle", False):
+            return
+        seed = _curriculum_shuffle_seed(
+            base_seed=int(getattr(self.args, "rollout_seed", 0) or 0),
+            solve_steps=pool.solve_steps,
+            epoch_id=pool.epoch_id,
+        )
+        rng = random.Random(seed)
+        rng.shuffle(pool.prompt_samples)
 
     def add_samples(self, samples):
         if not samples:
@@ -125,6 +224,14 @@ class EnvpackDataSource(RolloutDataSource):
             "epoch_id": self.epoch_id,
             "sample_group_index": self.sample_group_index,
             "sample_index": self.sample_index,
+            "curriculum_step": self.curriculum_step,
+            "curriculum_pools": {
+                _curriculum_pool_key(pool.solve_steps): {
+                    "sample_offset": pool.sample_offset,
+                    "epoch_id": pool.epoch_id,
+                }
+                for pool in self._curriculum_pools.values()
+            },
         }
         path = os.path.join(self.args.save, f"rollout/envpack_data_source_state_{rollout_id}.pt")
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -142,8 +249,18 @@ class EnvpackDataSource(RolloutDataSource):
         self.epoch_id = state["epoch_id"]
         self.sample_group_index = state["sample_group_index"]
         self.sample_index = state["sample_index"]
-        if getattr(self.args, "rollout_shuffle", False):
+        self.curriculum_step = int(state.get("curriculum_step", 0))
+        if self.config.curriculum.enabled:
+            self._load_curriculum_pool_state(state.get("curriculum_pools") or {})
+        elif getattr(self.args, "rollout_shuffle", False):
             self._shuffle_for_epoch(self.epoch_id)
+
+    def _load_curriculum_pool_state(self, saved_pools: dict[str, dict[str, Any]]) -> None:
+        for pool in self._curriculum_pools.values():
+            saved = saved_pools.get(_curriculum_pool_key(pool.solve_steps)) or {}
+            pool.sample_offset = int(saved.get("sample_offset", 0))
+            pool.epoch_id = int(saved.get("epoch_id", 0))
+            self._shuffle_curriculum_pool(pool)
 
 
 def _load_samples(path: str, args, adapter_config) -> list[Sample]:
@@ -182,6 +299,31 @@ def _load_jsonl(path: str) -> list[Sample]:
             envpack["source_format"] = envpack.get("source_format") or "samples_jsonl"
             samples.append(Sample(prompt="", metadata={"envpack": envpack}))
     return samples
+
+
+def _sample_min_solve_step(sample: Sample) -> int:
+    envpack = (sample.metadata or {}).get("envpack") or {}
+    solver_metrics = envpack.get("solver_metrics")
+    if isinstance(solver_metrics, dict) and solver_metrics.get("min_solve_steps") is not None:
+        return int(solver_metrics["min_solve_steps"])
+    bucket_name = envpack.get("bucket_name")
+    if bucket_name:
+        match = re.search(r"(?:^|_)solve_(\d+)$", str(bucket_name))
+        if match:
+            return int(match.group(1))
+    raise RuntimeError(
+        "EnvpackDataSource curriculum requires samples with "
+        "metadata.envpack.solver_metrics.min_solve_steps or bucket_name ending in solve_<N>"
+    )
+
+
+def _curriculum_pool_key(solve_steps: tuple[int, ...]) -> str:
+    return ",".join(str(value) for value in solve_steps)
+
+
+def _curriculum_shuffle_seed(*, base_seed: int, solve_steps: tuple[int, ...], epoch_id: int) -> int:
+    payload = f"{base_seed}|{_curriculum_pool_key(solve_steps)}|{epoch_id}"
+    return int.from_bytes(hashlib.blake2b(payload.encode("utf-8"), digest_size=8).digest(), "little")
 
 
 def _materialize_envspec_yaml(path: str, args, adapter_config) -> list[Sample]:

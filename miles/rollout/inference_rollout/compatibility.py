@@ -82,15 +82,3 @@ def _is_legacy_generate_fn(fn: Callable) -> bool:
     sig = inspect.signature(fn)
     params = list(sig.parameters.keys())
     return len(params) >= 3 and params[0] != "input"
-
-
-def call_all_samples_process_fn(fn: Callable, args, samples, data_source, /, **kwargs) -> None:
-    """Invoke the `--rollout-all-samples-process-path` hook, filtering kwargs
-    to what the function accepts. Hooks that declare `**kwargs` receive
-    everything; legacy `fn(args, samples, data_source)` impls without the
-    new kwargs (is_eval / rollout_id / eval_dataset_name / n_samples_per_group)
-    still work."""
-    sig = inspect.signature(fn)
-    has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
-    accepted = kwargs if has_var_keyword else {k: v for k, v in kwargs.items() if k in sig.parameters}
-    fn(args, samples, data_source, **accepted)

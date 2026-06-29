@@ -1,0 +1,35 @@
+# Envpack Sokoban train EnvSpec — FULL solve range [1,10] for the DAPO
+# difficulty curriculum. Identical to sokoban_train_env.yaml except the
+# min_solve_steps floor is lowered from 4 (effective) to 1 so the curriculum
+# can start on solve_1/solve_2, which a cold Qwen3-VL-8B solves often enough
+# (measured: solve_1 29% solve / 75% success-variance keep at step 0) to feed
+# DAPO dynamic sampling without deadlocking. 6x6/1-box has no solve_3 puzzles.
+#
+# Use `allocation: full` so the dataset contains every de-duplicated puzzle in
+# the requested solve range; capacity_report.json records bucket composition.
+envs:
+  - name: Sokoban
+    n_envs: 50000
+    seed: [1, 50000, 1]
+    profile: vision_free_think_local
+    pool_id: sokoban-vision
+    config:
+      render_mode: vision
+      sokoban_render_style: sprite
+      tiny_scale: 16
+      raw_plane_scale: 16
+      prompt_format: free_think
+      dim_room: [6, 6]
+      num_boxes: 1
+      max_steps: 100
+      max_actions_per_step: 3
+      min_solution_bfs_max_depth: 200
+sampling:
+  # Kept for schema compatibility; allocation: full ignores total_train.
+  total_train: 10000
+  validation_ratio: 0.05
+  preserve_validation_bucket_proportions: true
+  min_solve_steps: [1, 10]
+  allocation: full
+  sampling_policy: best_effort
+  probe_concurrency: 32

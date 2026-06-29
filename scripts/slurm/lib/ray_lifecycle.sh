@@ -33,11 +33,16 @@
 # synchronously touch the shared run dir. May leave the ray cluster running
 # on terminal exit (teardown trap in caller).
 read_train_status_sentinel() {
-    local path="$RUN_DIR/train_status.json"
+    local path="${MILES_TRAIN_STATUS_FILE:-$RUN_DIR/train_status.json}"
     [[ -f "$path" ]] || return 1
     python3 - "$path" <<'PY'
 import json
 import sys
+from datetime import datetime, timezone
+
+# A "running" heartbeat older than this is treated as NOT alive (the driver
+# stopped making progress). Generous vs the ~per-step heartbeat cadence.
+HEARTBEAT_MAX_AGE_S = 600
 
 path = sys.argv[1]
 try:
@@ -58,17 +63,46 @@ if state == "completed" and rc == 0:
 if state == "failed":
     print(f"FAILED {rc if rc != 0 else 1}")
     sys.exit(0)
+
+# Heartbeat: a "running" job whose sentinel was updated recently is alive even
+# if the Ray status API is unreadable. A stale heartbeat means the driver is no
+# longer progressing, so fall through to "unresolved".
+if state == "running":
+    updated_at = payload.get("updated_at")
+    if updated_at:
+        try:
+            ts = datetime.fromisoformat(updated_at)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            age = (datetime.now(timezone.utc) - ts).total_seconds()
+            if 0 <= age <= HEARTBEAT_MAX_AGE_S:
+                print(f"ALIVE step={payload.get('step')}")
+                sys.exit(0)
+        except Exception:
+            pass
 sys.exit(1)
 PY
 }
 
 ray_submit_and_wait() {
     RAY_ADDRESS="http://${HEAD_IP}:${RAY_DASHBOARD_PORT}"
-    echo "[submit] $(date -Is)  ray job submit --no-wait -> train.py"
+    # Entry script is overridable so recipes can opt into the async driver
+    # (train_async.py) instead of the default synchronous train.py. Set via
+    # `export MILES_TRAIN_ENTRY=train_async.py` in the recipe.
+    local TRAIN_ENTRY="${MILES_TRAIN_ENTRY:-train.py}"
+    echo "[submit] $(date -Is)  ray job submit --no-wait -> $TRAIN_ENTRY"
+    # Liveness/terminal sentinel on NODE-LOCAL disk (not the shared run dir). The
+    # training driver (Ray head) and this watchdog (controller shell) are the same
+    # node in the normal case (HEAD_NODE = GOOD_NODES[0] = batch host), so a
+    # node-local path is shared writer<->reader and is immune to shared-FS stalls.
+    # If they ever differ, the file is simply absent and the watchdog behaves as
+    # before (no fresh heartbeat -> falls through to its prior logic).
+    export MILES_TRAIN_STATUS_FILE="${TMPDIR:-/tmp}/miles-${JOBID}.train_status.json"
+    rm -f "$MILES_TRAIN_STATUS_FILE" "$MILES_TRAIN_STATUS_FILE".tmp.* 2>/dev/null || true
     rm -f "$RUN_DIR/train_status.json" "$RUN_DIR"/train_status.json.tmp.* 2>/dev/null || true
     local submit_out submit_rc
     submit_out=$(srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$HEAD_NODE" \
-         --export=ALL,RAY_ADDRESS="$RAY_ADDRESS",MILES_ARGS_STR="$(printf '%q ' "${MILES_ARGS[@]}")" \
+         --export=ALL,RAY_ADDRESS="$RAY_ADDRESS",MILES_TRAIN_ENTRY="$TRAIN_ENTRY",MILES_TRAIN_STATUS_FILE="$MILES_TRAIN_STATUS_FILE",MILES_ARGS_STR="$(printf '%q ' "${MILES_ARGS[@]}")" \
          bash -c "$NODE_PREAMBLE"'
             cd '"$MILES_REPO"'
             RUNTIME_ENV_JSON=$(python - <<EOF
@@ -82,6 +116,7 @@ print(json.dumps({"env_vars": {
     "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
     "WANDB_API_KEY": os.environ.get("WANDB_API_KEY", ""),
     "MILES_RUN_DIR": os.environ.get("RUN_DIR", ""),
+    "MILES_TRAIN_STATUS_FILE": os.environ.get("MILES_TRAIN_STATUS_FILE", ""),
 }}))
 EOF
 )
@@ -90,7 +125,7 @@ EOF
                 --no-wait \
                 --address "$RAY_ADDRESS" \
                 --runtime-env-json "$RUNTIME_ENV_JSON" \
-                -- python3 train.py "$@"
+                -- python3 "${MILES_TRAIN_ENTRY:-train.py}" "$@"
          ' 2>&1)
     submit_rc=$?
     echo "$submit_out"
@@ -190,11 +225,19 @@ EOF
                 echo "[submit] WARN: unreadable probe ${status_fail_count}/${fail_grace} (rc=$status_rc, stderr=${err_summary:-<empty>})"
                 if (( status_fail_count >= fail_grace )); then
                     if sentinel_out=$(read_train_status_sentinel); then
+                        if [[ "$sentinel_out" == ALIVE* ]]; then
+                            # Ray status API is unreadable, but the training driver's
+                            # heartbeat is fresh — the job is alive, not dead. Reset the
+                            # grace counter and keep waiting instead of false-killing.
+                            echo "[submit] Ray status unreadable ~$((fail_grace * poll_interval))s but train_status heartbeat is fresh ($sentinel_out) — job alive, resetting grace"
+                            status_fail_count=0
+                            continue
+                        fi
                         STATE=${sentinel_out%% *}
                         JOB_RC=${sentinel_out##* }
                         echo "[submit] train_status.json resolved unreadable Ray status as $STATE job_rc=$JOB_RC"
                     else
-                        echo "[submit] $fail_grace consecutive unreadable status probes (~$((fail_grace * poll_interval))s) — declaring cluster dead"
+                        echo "[submit] $fail_grace consecutive unreadable status probes (~$((fail_grace * poll_interval))s) and no fresh heartbeat — declaring cluster dead"
                         STATE=CLUSTER_DEAD
                         JOB_RC=3
                     fi
@@ -216,7 +259,7 @@ EOF
     wait "$log_tail_pid" 2>/dev/null || true
     rm -f "$poll_done_marker" "$probe_err"
 
-    echo "[submit] $(date -Is)  train.py terminal state: $STATE  job_rc=$JOB_RC"
+    echo "[submit] $(date -Is)  ${MILES_TRAIN_ENTRY:-train.py} terminal state: $STATE  job_rc=$JOB_RC"
 }
 
 # crash_debug_check

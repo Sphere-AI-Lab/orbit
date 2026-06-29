@@ -1,0 +1,31 @@
+# DIAGNOSTIC Envpack Sokoban EnvSpec — EASY floor (min_solve_steps [1,4]).
+# Purpose: cold-start keep-rate probe. The maintained sokoban_train_env.yaml
+# ranges [3..10] and in practice finds nothing below solve_4; this config opens
+# the floor to solve_1/2/3 to test whether 1-3-step puzzles are easy enough for
+# a cold Qwen3-VL-8B to solve a nonzero fraction (→ nonzero DAPO success-variance
+# keep at step 0). Smaller probe (n_envs 20000) since this is a throwaway probe.
+envs:
+  - name: Sokoban
+    n_envs: 20000
+    seed: [1, 20000, 1]
+    profile: vision_free_think_local
+    pool_id: sokoban-vision
+    config:
+      render_mode: vision
+      sokoban_render_style: sprite
+      tiny_scale: 16
+      raw_plane_scale: 16
+      prompt_format: free_think
+      dim_room: [6, 6]
+      num_boxes: 1
+      max_steps: 100
+      max_actions_per_step: 3
+      min_solution_bfs_max_depth: 200
+sampling:
+  total_train: 10000
+  validation_ratio: 0.05
+  preserve_validation_bucket_proportions: true
+  min_solve_steps: [1, 4]
+  allocation: full
+  sampling_policy: best_effort
+  probe_concurrency: 32
