@@ -28,7 +28,7 @@ class TrackingBackend(ABC):
     def init(self, args, *, primary: bool = True, **kwargs) -> bool | None: ...
 
     @abstractmethod
-    def log(self, metrics: dict[str, Any], step: int | None = None) -> None: ...
+    def log(self, metrics: dict[str, Any], step: int | None = None, **kwargs) -> None: ...
 
     @abstractmethod
     def finish(self) -> None: ...
@@ -49,7 +49,7 @@ class WandbBackend(TrackingBackend):
         else:
             return wandb_utils.init_wandb_secondary(args, **kwargs)
 
-    def log(self, metrics: dict[str, Any], step: int | None = None) -> None:
+    def log(self, metrics: dict[str, Any], step: int | None = None, **kwargs) -> None:
         import wandb
 
         # W&B has one global row step, while Miles has independent logical axes
@@ -81,11 +81,13 @@ class TensorboardBackend(TrackingBackend):
 
         self._adapter = _TensorboardAdapter(args)
 
-    def log(self, metrics: dict[str, Any], step: int | None = None) -> None:
+    def log(self, metrics: dict[str, Any], step: int | None = None, *, step_key: str | None = None, **kwargs) -> None:
         if self._adapter is not None:
-            # Strip step-key entries (e.g. "train/step", "rollout/step") —
-            # tensorboard receives step as an explicit argument instead.
-            data = {k: v for k, v in metrics.items() if not k.endswith("/step")}
+            # Strip the caller's exact step-key entry (e.g. "train/step",
+            # "rollout/step") — tensorboard receives step as an explicit
+            # argument instead. Matching by exact key rather than endswith
+            # avoids dropping user metrics that happen to end in "/step".
+            data = {k: v for k, v in metrics.items() if k != step_key}
             self._adapter.log(data=data, step=step)
 
     def finish(self) -> None:
@@ -100,7 +102,7 @@ class MlflowBackend(TrackingBackend):
 
         mlflow_utils.init_mlflow(args, primary=primary, **kwargs)
 
-    def log(self, metrics: dict[str, Any], step: int | None = None) -> None:
+    def log(self, metrics: dict[str, Any], step: int | None = None, **kwargs) -> None:
         from . import mlflow_utils
 
         mlflow_utils.log_metrics(metrics, step=step)
@@ -120,7 +122,7 @@ class PrometheusBackend(TrackingBackend):
 
         init_prometheus(args, start_server=primary)
 
-    def log(self, metrics: dict[str, Any], step: int | None = None) -> None:
+    def log(self, metrics: dict[str, Any], step: int | None = None, **kwargs) -> None:
         from .prometheus_utils import get_prometheus
 
         prom = get_prometheus()
@@ -165,14 +167,14 @@ class TrackingManager:
                     continue
                 self._backends.append(backend)
 
-    def log(self, metrics: dict[str, Any], step: int | None = None) -> None:
+    def log(self, metrics: dict[str, Any], step: int | None = None, step_key: str | None = None) -> None:
         if not self._backends:
             if self._tracking_requested and not self._warned_no_backends:
                 logger.warning("Dropping tracking metrics because no backend is initialized: %s", sorted(metrics)[:8])
                 self._warned_no_backends = True
             return
         for backend in self._backends:
-            backend.log(metrics, step=step)
+            backend.log(metrics, step=step, step_key=step_key)
 
     def finish(self) -> None:
         for backend in self._backends:

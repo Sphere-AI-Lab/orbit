@@ -32,12 +32,14 @@ class RayTrainGroup:
         num_gpus_per_actor: float = 1,
         role: str,
         with_ref: bool,
+        with_opd_teacher: bool = False,
     ) -> None:
         self.args = args
         self._num_nodes = num_nodes
         self._num_gpus_per_node = num_gpus_per_node
         self.role = role
         self.with_ref = with_ref
+        self.with_opd_teacher = with_opd_teacher
 
         # Allocate the GPUs for actors w/o instantiating them
         self._actor_handles = self._allocate_gpus_for_actor(pg, num_gpus_per_actor)
@@ -54,6 +56,8 @@ class RayTrainGroup:
             # we need also set it to 0 to prevent nccl error.
             "NCCL_CUMEM_ENABLE": os.environ.get("NCCL_CUMEM_ENABLE", "0"),
             "NVTE_FP8_BLOCK_SCALING_FP32_SCALES": "1",
+            # DeepEP/NVSHMEM's internal NCCL conflicts with our NCCL and hangs under CUDA graphs.
+            "NVSHMEM_DISABLE_NCCL": os.environ.get("NVSHMEM_DISABLE_NCCL", "1"),
             **{name: "1" for name in NOSET_VISIBLE_DEVICES_ENV_VARS_LIST},
             **self.args.train_env_vars,
         }
@@ -109,7 +113,9 @@ class RayTrainGroup:
         """
         Allocate GPU resourced and initialize model, optimizer, local ckpt, etc.
         """
-        return await self._broadcast("init", self.args, self.role, with_ref=self.with_ref)
+        return await self._broadcast(
+            "init", self.args, self.role, with_ref=self.with_ref, with_opd_teacher=self.with_opd_teacher
+        )
 
     async def train(self, rollout_id, rollout_data_ref):
         """Do one rollout training"""
