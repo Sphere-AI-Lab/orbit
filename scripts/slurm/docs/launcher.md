@@ -75,8 +75,9 @@ show `mem=<full node mem>`, not `mem=64G`.
 
 ## Healthcheck
 
-`[healthcheck]` step: two tiers per allocated node, run from the head
-node via `srun --overlap --mem=0`.
+Three **per-node** tiers (run from the head node via `srun --overlap
+--mem=0`, one srun per node) plus one **cross-node** tier, all before Ray
+bring-up so a bad node/fabric never wastes a ~12 min model load.
 
 1. **Tier 1 — `nvidia-smi --query-gpu=count`** (~2 s). Catches nodes
    where the driver is missing or `nvidia-smi` itself hangs.
@@ -87,8 +88,19 @@ node via `srun --overlap --mem=0`.
    `cudaErrorDevicesUnavailable` (slinky-35 GPU 0+1 on 2026-05-20).
    Per-node output goes to `<run-dir>/gpu_probe.<node>.log` when the
    probe fails (cleaned up on success).
+3. **Tier ib — `bash lib/ib_probe.sh`** (~1 s, pure `ibstat`, no torch).
+   Every InfiniBand-layer rail must be `Physical state: LinkUp`. Catches
+   a rail stuck in `Polling` (e.g. `mlx5_8` at Rate 10 instead of 400G
+   LinkUp on slinky-20/23, 2026-05-26): NCCL auto-enumerates all 8 IB
+   rails, so one Polling rail breaks the whole multi-node ring on the
+   *first* collective with `NET/IB ... error 12, vendor err 129 (Recv)`
+   → 120 s watchdog → SIGABRT. RoCE/Ethernet rails (`mlx5_0/1`, 100 G)
+   are ignored — NCCL doesn't auto-select them. Skips (non-blocking) if
+   `ibstat` is missing or reports no IB rails. Opt out with
+   `MILES_HEALTHCHECK_IB=0`.
 
-On bad nodes:
+Tiers 1–3 are per-node and **localizable** — a failure appends the node to
+`BAD_NODES` and rides the shared requeue machinery:
 
 - `<run-dir>/.bad_nodes` accumulates the bad-node list across requeues
   of this job (dedup'd before use).
@@ -106,7 +118,54 @@ still exits 75 with a manual `[healthcheck] HINT: SBATCH_EXTRA='--exclude=...'`
 line — the requeue may land on the same bad nodes, so the cap protects
 against an infinite loop.
 
-Implementation: `launch_miles.sbatch` healthcheck section + `lib/gpu_probe.py`.
+4. **Tier nccl — `lib/nccl_probe.py`** (cross-node, ~1 min; runs after
+   `NODE_PREAMBLE`, before HF convert / Ray bring-up; skipped when fewer
+   than 2 Ray/training nodes). Forms a real process group across the
+   Ray/training nodes (`RAY_NODES` — i.e. excluding any envpack-server
+   nodes, which run an HTTP env server over TCP and never join training
+   NCCL) and runs a `torch.distributed` all-reduce size sweep — the exact
+   transport training uses. Catches what per-node `ibstat` can't: a rail
+   that is LinkUp but errors under load, or a topology NCCL can't ring.
+   `NCCL_HEALTHCHECK_MIN_BUSBW_GB` (default 50) floors bus bandwidth — a
+   preflight pass/fail gate, not a throttle — so it also catches a *silent*
+   IB→socket fallback that completes the all-reduce at ~socket speed, which a
+   completion-only check misses. The 50 GB/s floor is ~8× below healthy IB
+   (~470 GB/s here) so it does not false-fail a good run; set 0 to disable.
+   It runs with the `NODE_PREAMBLE` (conda + the `ulimit -Sl`
+   memlock fix), so it mirrors training; `MASTER_ADDR` is injected as the
+   first Ray node (the Ray head) so rendezvous never targets an excluded
+   or envpack-only node. Being an
+   **aggregate** check it can't attribute a failure to one node, so —
+   unlike tiers 1–3 — it does **not** requeue: after 2 in-place attempts
+   it writes `MANIFEST state=FAILED failure_reason=nccl_probe` and exits
+   1, leaving a clean repro at `<run-dir>/nccl_probe.log` (`NCCL_DEBUG=INFO`)
+   for infra. Rationale: the deterministic causes (Polling rail, memlock)
+   are already auto-healed by tier-ib + the preamble, so a tier-nccl
+   failure is a genuine fabric problem worth human eyes, not blind
+   requeue-thrash. Opt out / tune with `MILES_HEALTHCHECK_NCCL=0`,
+   `NCCL_HEALTHCHECK_MAX_BYTES`, `NCCL_HEALTHCHECK_WALL`,
+   `NCCL_HEALTHCHECK_MIN_BUSBW_GB` (default 50; 0 disables the bandwidth floor).
+
+Ad-hoc fabric check outside a run (e.g. to re-test a repaired node) — grab the
+nodes and run the same `lib/nccl_probe.py` with the miles env active:
+
+    salloc -N2 --gres=gpu:8 --exclusive --nodelist=slinky-20,slinky-23
+    srun --ntasks-per-node=8 --gpus-per-task=1 --cpus-per-task=8 bash -c '
+      source /data/shared/conda/miniconda3/etc/profile.d/conda.sh && conda activate miles
+      ulimit -Sl "$(ulimit -Hl)"          # RDMA memlock, as in NODE_PREAMBLE
+      export LD_LIBRARY_PATH="$(python -c "import site;print(site.getsitepackages()[0])")/nvidia/cudnn/lib:$LD_LIBRARY_PATH"
+      python scripts/slurm/lib/nccl_probe.py'
+
+`NCCL_IB_HCA=mlx5_2 srun …` pins one rail; `NCCL_HEALTHCHECK_MAX_BYTES=8589934592`
+runs the full 8 GiB sweep.
+
+All `MILES_HEALTHCHECK_*` / `NCCL_HEALTHCHECK_*` toggles are read at launcher
+start, *before* the recipe is sourced — pass them as submit-time env vars
+(`MILES_HEALTHCHECK_NCCL=0 bash scripts/slurm/submit.sh <exp>`), not as recipe
+knobs, or they will not take effect.
+
+Implementation: `launch_miles.sbatch` healthcheck sections + `lib/gpu_probe.py`,
+`lib/ib_probe.sh`, `lib/nccl_probe.py`.
 
 ## Two-phase cleanup + D-state gate
 
@@ -141,18 +200,23 @@ The launcher now:
 3. Foreground `ray job status` also runs locally, every
    `RAY_STATUS_POLL_INTERVAL=15s`, with each probe wrapped in
    `timeout $RAY_STATUS_PROBE_TIMEOUT=10s`. Terminal states: `SUCCEEDED`
-   (rc 0), `FAILED` (rc 1), `STOPPED` (rc 2). If the dashboard returns
-   unreadable output for `RAY_STATUS_FAIL_GRACE=24` consecutive probes
-   (= 6 min by default), we first check `$RUN_DIR/train_status.json`,
-   which `train.py` writes from inside the Ray job. A completed sentinel
-   resolves the run as `SUCCEEDED`; a failed sentinel resolves it as
-   `FAILED`; no terminal sentinel falls through to `CLUSTER_DEAD` (rc 3).
-   If the SLURM wall deadline is reached without a terminal state,
-   `DEADLINE` (rc 124). Per-probe diagnostics are written to node-local
-   scratch under `${TMPDIR:-/tmp}`; `run.log` prints a one-line warning
-   and the local diagnostics path. This avoids synchronously opening files
-   in `$RUN_DIR` on every poll while still giving the launcher an
-   independent completion signal when the Ray Jobs API becomes unreadable.
+   (rc 0), `FAILED` (rc 1), `STOPPED` (rc 2). A readable `RUNNING`/`PENDING`
+   reply resets the grace counter. If the dashboard returns **unreadable**
+   output for `RAY_STATUS_FAIL_GRACE=24` consecutive probes (= 6 min by
+   default), we consult `$RUN_DIR/train_status.json`, which `train.py`
+   writes from inside the Ray job: a fresh `ALIVE` heartbeat means the
+   actors are healthy and the dashboard is merely wedged, so the grace
+   counter resets and polling continues; a completed sentinel resolves the
+   run as `SUCCEEDED`, a failed one as `FAILED`; no fresh heartbeat at all
+   falls through to `CLUSTER_DEAD` (rc 3). Terminal log-tail markers are
+   treated as hints and reconfirmed with an authoritative `ray job status`
+   before the loop trusts them. If the SLURM wall deadline is reached
+   without a terminal state, `DEADLINE` (rc 124). Per-probe diagnostics are
+   written to node-local scratch under `${TMPDIR:-/tmp}`; `run.log` prints a
+   one-line warning and the local diagnostics path. This avoids
+   synchronously opening files in `$RUN_DIR` on every poll while still
+   giving the launcher an independent completion signal when the Ray Jobs
+   API becomes unreadable.
 4. The bg log tail watches a node-local marker the fg poll touches when
    finished, so teardown is fast and the active `ray job logs` child is
    killed with the wrapper.
@@ -200,6 +264,7 @@ One per run, at `$RUN_DIR/MANIFEST.json`. Fields:
 | `recipe` | str | Path to the experiment recipe |
 | `restarts` | int | `SLURM_RESTART_COUNT` |
 | `job_rc` | int | Final exit code (terminal write only) |
+| `failure_reason` | str | Set on launcher-side fails: `healthcheck_exhausted`, `head_ip_unresolved`, `nccl_probe` (with `bad_nodes` / `probe_nodes`) |
 
 `submit.sh` reads the most recent 3 manifests for the same job name and
 warns about any non-`SUCCEEDED` state. That's a heads-up to the operator,
@@ -259,6 +324,8 @@ call just before `exit`.
 | [`launch_miles.sbatch`](../launch_miles.sbatch) | High-level orchestration: SBATCH headers, env defaults, run dir, healthcheck, cleanup, recipe sourcing, ray bring-up, teardown trap, calls into lib/. |
 | [`lib/manifest.sh`](../lib/manifest.sh) | `write_manifest` (used by launcher) + `read_recent_manifests` (used by submit.sh). |
 | [`lib/gpu_probe.py`](../lib/gpu_probe.py) | Tier-2 healthcheck — `torch.cuda.set_device(i)` probe per GPU. |
+| [`lib/ib_probe.sh`](../lib/ib_probe.sh) | Tier-ib healthcheck — every InfiniBand rail must be LinkUp (catches a Polling rail). |
+| [`lib/nccl_probe.py`](../lib/nccl_probe.py) | Tier-nccl healthcheck — cross-node all-reduce smoke test over the fabric. |
 | [`lib/ray_lifecycle.sh`](../lib/ray_lifecycle.sh) | `ray_submit_and_wait` + `crash_debug_check`. |
 | [`submit.sh`](../submit.sh) | Login-node wrapper: argv parsing, asset download (`hf download`), per-run dir creation, prior-run warning, `sbatch` call. |
 | [`check_run.sh`](../check_run.sh) | Snapshot script — concise health report (MANIFEST + sacct + last rollout/train/eval). Called by [`rl-monitor-loop` SKILL.md](../../../.claude/skills/rl-monitor-loop/SKILL.md). |

@@ -3,7 +3,8 @@
 # launch_miles.sbatch — slurm launcher for one miles RL training run.
 #
 # Boots a Ray cluster across N allocated nodes inside the `miles` conda env,
-# healthchecks each node (nvidia-smi count + torch.cuda.set_device probe),
+# healthchecks each node (nvidia-smi count + torch.cuda probe + InfiniBand
+# rail check) and the fabric (a cross-node NCCL all-reduce smoke test),
 # submits `train.py` via `ray job submit`, tears down on signal. On node
 # failure or preempt, slurm requeues and miles auto-resumes from --load via
 # `latest_checkpointed_iteration.txt`. Bad nodes detected by healthcheck
@@ -29,11 +30,16 @@
 #   RAY_DASHBOARD_PORT                             [8265]
 #   HEALTHCHECK_TIMEOUT   per-node probe timeout (s)         [60]
 #   HEALTHCHECK_MAX_RESTARTS  auto-requeue cap for bad nodes [3]
+#   MILES_HEALTHCHECK_IB      per-node IB-rail probe; 0/off/false disables  [1]
+#   MILES_HEALTHCHECK_NCCL    cross-node NCCL all-reduce; 0/off/false disables [1]
+#   NCCL_HEALTHCHECK_WALL     NCCL probe wall timeout (s)    [300]
+#   NCCL_HEALTHCHECK_MIN_BUSBW_GB  tier-nccl busbw floor (GB/s); 0=off [50]
 #   RAY_BRINGUP_TIMEOUT   cluster-ready timeout (s)          [300]
 #   RAY_STATUS_POLL_INTERVAL  ray job status poll period (s) [15]
 #   RAY_STATUS_PROBE_TIMEOUT  per-probe timeout (s)          [10]
 #   RAY_STATUS_FAIL_GRACE     unreadable-probe count -> dead [24]
-#                             (default 24 × 15s = 6 min)
+#                             (default 24 × 15s = 6 min; a fresh train_status.json
+#                             heartbeat resets it — see docs/launcher.md)
 #   ENVPACK_SERVER_NODE_COUNT  nodes reserved for one envpack server [0]
 #   ENVPACK_SERVER_ENV_NAME    conda env for envpack server [$MILES_ENV_NAME]
 #   ENVPACK_SERVER_WAIT_TIMEOUT envpack server readiness timeout (s) [60]
@@ -59,6 +65,13 @@ RAY_PORT=${RAY_PORT:-6379}
 RAY_DASHBOARD_PORT=${RAY_DASHBOARD_PORT:-8265}
 HEALTHCHECK_TIMEOUT=${HEALTHCHECK_TIMEOUT:-${PREFLIGHT_TIMEOUT:-60}}
 HEALTHCHECK_MAX_RESTARTS=${HEALTHCHECK_MAX_RESTARTS:-3}
+# Normalize boolean env to the bare 0/1 the (( )) guards below need — a
+# non-numeric value in (( )) aborts under `set -u`. Unrecognized -> 1.
+_bool() { case "${1,,}" in 0|off|false|no) echo 0 ;; *) echo 1 ;; esac; }
+HEALTHCHECK_IB=$(_bool "${MILES_HEALTHCHECK_IB:-1}")
+HEALTHCHECK_NCCL=$(_bool "${MILES_HEALTHCHECK_NCCL:-1}")
+NCCL_HEALTHCHECK_WALL=${NCCL_HEALTHCHECK_WALL:-300}
+NCCL_HEALTHCHECK_MIN_BUSBW_GB=${NCCL_HEALTHCHECK_MIN_BUSBW_GB:-50}
 RAY_BRINGUP_TIMEOUT=${RAY_BRINGUP_TIMEOUT:-300}
 ENVPACK_SERVER_NODE_COUNT=${ENVPACK_SERVER_NODE_COUNT:-0}
 ENVPACK_SERVER_ENV_NAME=${ENVPACK_SERVER_ENV_NAME:-$MILES_ENV_NAME}
@@ -106,13 +119,15 @@ source "$MILES_REPO/scripts/slurm/lib/manifest.sh"
 write_manifest RUNNING
 
 # ---------- healthcheck --------------------------------------------------
-# Two tiers per node, see docs/launcher.md "Healthcheck".
-#   tier 1: `nvidia-smi --query-gpu=count` (fast, ~2s)
-#   tier 2: `python gpu_probe.py` — torch.cuda.set_device(i) on every GPU
-#           (catches cudaErrorDevicesUnavailable that tier 1 misses)
-# Bad nodes are persisted in $RUN_DIR/.bad_nodes across requeues, and added
-# to the job's ExcNodeList so the next allocation skips them.
-# TODO(xiuyul): tier 3 — multi-node NCCL all-reduce probe (catches dead IB links / bad topology before ray bring-up).
+# Per-node probes (this loop) + one cross-node probe (after cleanup). See
+# docs/launcher.md "Healthcheck".
+#   tier 1  : `nvidia-smi --query-gpu=count` (fast, ~2s)
+#   tier 2  : `python gpu_probe.py` — torch.cuda.set_device(i) on every GPU
+#   tier ib : `bash ib_probe.sh` — every InfiniBand rail must be LinkUp
+# Per-node failures persist in $RUN_DIR/.bad_nodes across requeues and are
+# added to the job's ExcNodeList so the next allocation skips them.
+#   tier nccl: cross-node all-reduce smoke test (lib/nccl_probe.py), run
+#             below once GOOD_NODES is known — see "healthcheck tier nccl".
 
 ALL_NODES=( $(scontrol show hostnames "$SLURM_JOB_NODELIST") )
 echo "[healthcheck] nodes=${ALL_NODES[*]}"
@@ -137,6 +152,15 @@ for n in "${ALL_NODES[@]}"; do
         continue
     fi
     rm -f "$RUN_DIR/gpu_probe.$n.log"
+    if (( HEALTHCHECK_IB )) && ! timeout "$HEALTHCHECK_TIMEOUT" srun --jobid="$JOBID" --overlap --mem=0 \
+            -N1 -n1 -w "$n" --gres=gpu:8 \
+            bash "$MILES_REPO/scripts/slurm/lib/ib_probe.sh" \
+            > "$RUN_DIR/ib_probe.$n.log" 2>&1; then
+        BAD_NODES+=("$n")
+        echo "[healthcheck] BAD $n (tier-ib ib_probe; $(tail -n1 "$RUN_DIR/ib_probe.$n.log" 2>/dev/null))"
+        continue
+    fi
+    rm -f "$RUN_DIR/ib_probe.$n.log"
     GOOD_NODES+=("$n")
     echo "[healthcheck] OK  $n"
 done
@@ -189,7 +213,16 @@ RAY_NODES=( "${GOOD_NODES[@]:0:$MILES_NODE_COUNT}" )
 ENVPACK_NODES=( "${GOOD_NODES[@]:$MILES_NODE_COUNT}" )
 
 HEAD_NODE="${RAY_NODES[0]}"
-HEAD_IP=$(getent ahostsv4 "$HEAD_NODE" | awk 'NR==1{print $1}')
+# getent can exit 0 with empty output (IPv6-only / mis-resolving node) or
+# nonzero (NXDOMAIN); `|| true` coerces both to empty so the guard below fires.
+# Fail fast — an empty HEAD_IP otherwise surfaces as a ~5 min ray bring-up timeout.
+HEAD_IP="$(getent ahostsv4 "$HEAD_NODE" | awk 'NR==1{print $1}' || true)"
+if [[ -z "$HEAD_IP" ]]; then
+    echo "[topology] FATAL: could not resolve $HEAD_NODE to an IPv4 address (getent ahostsv4 empty)"
+    MANIFEST_EXTRA_JSON=$(printf '{"job_rc":78,"failure_reason":"head_ip_unresolved","head_node":"%s","ended_at":"%s"}' \
+                          "$HEAD_NODE" "$(date -Is)") write_manifest FAILED
+    exit 78
+fi
 WORKER_NODES=( "${RAY_NODES[@]:1}" )
 EXPECTED_GPUS=$(( ${#RAY_NODES[@]} * 8 ))
 
@@ -227,23 +260,34 @@ for n in "${GOOD_NODES[@]}"; do
                 sleep 1
             } >/dev/null 2>&1
             # D-state must PERSIST to count as poison. On WekaFS, normal I/O
-            # (including this gate'\''s own ps/awk/wc pipeline) flickers a
-            # chenyang-owned process into uninterruptible sleep on ~20% of
-            # single samples, so a one-shot check false-poisons clean nodes.
-            # A genuinely stuck process stays D across every sample; transient
-            # noise does not. Re-sample up to 5x and clear on the first 0.
+            # (including the ps/awk pipeline here) can flicker a process into
+            # uninterruptible sleep on ~20% of single samples, so a one-shot
+            # check false-poisons clean nodes. A genuinely stuck process stays D
+            # across every sample; transient noise does not. Re-sample up to 5x,
+            # keeping the offending lines for the detail dump, and clear on the
+            # first 0.
             DSTATE=0
+            DSTATE_LINES=""
             for _ in 1 2 3 4 5; do
-                d=$(ps -eo state,user --no-headers 2>/dev/null \
-                       | awk -v u="$USER" "\$1==\"D\" && \$2==u" | wc -l)
+                DSTATE_LINES=$(ps -eo pid,state,stat,user:32,comm,wchan:32,args --no-headers 2>/dev/null \
+                       | awk -v u="$USER" "\$2==\"D\" && \$4==u")
+                d=$(printf "%s\n" "$DSTATE_LINES" | awk "NF {n++} END {print n+0}")
                 if (( d == 0 )); then DSTATE=0; break; fi
                 DSTATE=$d
                 sleep 1
             done
-            GPUMEM=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null \
-                       | awk "{s+=\$1} END {print s+0}")
+            GPUMEM_LINES=$(nvidia-smi --query-gpu=index,memory.used --format=csv,noheader,nounits 2>/dev/null || true)
+            GPUMEM=$(printf "%s\n" "$GPUMEM_LINES" | awk -F, "{gsub(/ /, \"\", \$2); s+=\$2} END {print s+0}")
             if (( DSTATE > 0 )) || (( GPUMEM > 500 )); then
                 echo "[cleanup] POISONED  node=$NODE  dstate=$DSTATE  gpu_used_mb=$GPUMEM"
+                if (( DSTATE > 0 )); then
+                    echo "[cleanup] D-state detail node=$NODE  columns=pid,state,stat,user,comm,wchan,args"
+                    printf "%s\n" "$DSTATE_LINES" | sed "s/^/[cleanup] D-state process node=$NODE  /"
+                fi
+                if (( GPUMEM > 500 )); then
+                    echo "[cleanup] GPU memory detail node=$NODE  columns=index,used_mb"
+                    printf "%s\n" "$GPUMEM_LINES" | sed "s/^/[cleanup] GPU memory node=$NODE  /"
+                fi
                 exit 75
             fi
             exit 0
@@ -309,10 +353,19 @@ json.dump(out, sys.stdout, indent=2, sort_keys=True)
 sys.stdout.write("\n")
 PY
 
+# Validate required recipe fields up front so a misconfigured recipe fails in
+# seconds — before the multi-minute tier-nccl probe and the convert step.
+: "${HF_MODEL_DIR:?recipe must define HF_MODEL_DIR}"
+
 # ---------- shared per-node preamble -------------------------------------
 
 NODE_PREAMBLE='
     set -euo pipefail
+    # Raise soft memlock to hard cap so RDMA can register the pinned buffers
+    # NCCL needs for multi-node IB (slurm GRES seeds soft=8MB). Use $(ulimit -Hl)
+    # not literal `unlimited`: nodes with finite-int64 hard reject `-l unlimited`
+    # (soft=RLIM_INFINITY > hard -> EPERM); reading hard back works for both.
+    ulimit -Sl "$(ulimit -Hl)" 2>/dev/null || true
     source '"$CONDA_ROOT"'/etc/profile.d/conda.sh
     conda activate '"$MILES_ENV_NAME"'
     PY_SITE=$(python -c "import site; print(site.getsitepackages()[0])")
@@ -321,9 +374,60 @@ NODE_PREAMBLE='
     export HF_HOME='"$HF_HOME"'
     export CUDA_DEVICE_MAX_CONNECTIONS=1
     export NCCL_NVLS_ENABLE=1
-    export NCCL_DEBUG=WARN
+    : "${NCCL_DEBUG:=WARN}"
+    export NCCL_DEBUG
+    # Forward NCCL transport / debug overrides set by the submitter (e.g.
+    # NCCL_IB_HCA to pin one rail when default enumeration exhausts RDMA limits).
+    [[ -n "${NCCL_IB_HCA:-}" ]] && export NCCL_IB_HCA
+    [[ -n "${NCCL_DEBUG_SUBSYS:-}" ]] && export NCCL_DEBUG_SUBSYS
+    [[ -n "${NCCL_NET:-}" ]] && export NCCL_NET
+    [[ -n "${NCCL_SOCKET_IFNAME:-}" ]] && export NCCL_SOCKET_IFNAME
     export PYTHONUNBUFFERED=1
 '
+
+# ---------- healthcheck tier nccl: cross-node all-reduce -----------------
+# Cross-node all-reduce over IB (lib/nccl_probe.py) — catches a fabric/topology
+# fault per-node ibstat can't. Aggregate check: on failure FAIL LOUD with a
+# repro at $RUN_DIR/nccl_probe.log rather than requeue. Probes the Ray/training
+# nodes only (RAY_NODES, not envpack-server nodes); skipped for <2 such nodes.
+# See docs/launcher.md "Healthcheck".
+if (( HEALTHCHECK_NCCL )) && (( ${#RAY_NODES[@]} >= 2 )); then
+    RAY_CSV=$(IFS=,; echo "${RAY_NODES[*]}")
+    NCCL_PROBE_LOG="$RUN_DIR/nccl_probe.log"
+    NCCL_OK=0
+    # --cpus-per-task=8: the batch alloc exports SLURM_CPUS_PER_TASK=128, which
+    # the 8 tasks/node here would each inherit (8*128 > node CPUs -> srun
+    # "Requested node configuration is not available"); pin a small per-task value.
+    # NCCL_HEALTHCHECK_MIN_BUSBW_GB floors busbw to fail a silent IB->socket
+    # fallback — see docs/launcher.md "Healthcheck".
+    for attempt in 1 2; do
+        echo "[healthcheck] tier-nccl all-reduce probe (attempt $attempt/2) across ${#RAY_NODES[@]} nodes: $RAY_CSV"
+        if NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT,NET \
+                NCCL_HEALTHCHECK_MIN_BUSBW_GB="$NCCL_HEALTHCHECK_MIN_BUSBW_GB" \
+                timeout "$NCCL_HEALTHCHECK_WALL" \
+                srun --jobid="$JOBID" --overlap --mem=0 \
+                     -N"${#RAY_NODES[@]}" --ntasks-per-node=8 --gpus-per-task=1 --cpus-per-task=8 -w "$RAY_CSV" \
+                     --export=ALL,MASTER_ADDR="$HEAD_IP" \
+                     bash -c "$NODE_PREAMBLE"' python "'"$MILES_REPO"'/scripts/slurm/lib/nccl_probe.py" ' \
+                > "$NCCL_PROBE_LOG" 2>&1; then
+            echo "[healthcheck] tier-nccl OK: $(grep -m1 'PASS' "$NCCL_PROBE_LOG" || echo passed)"
+            NCCL_OK=1
+            break
+        fi
+        echo "[healthcheck] tier-nccl attempt $attempt FAILED (see $NCCL_PROBE_LOG)"
+        grep -m4 -E 'vendor err|NET/IB|nccl-probe. FAIL|Watchdog|timed out' "$NCCL_PROBE_LOG" \
+            | sed 's/^/[healthcheck]   /' || true
+    done
+    if (( ! NCCL_OK )); then
+        echo "[healthcheck] FATAL: cross-node NCCL probe failed on $RAY_CSV after 2 attempts"
+        echo "[healthcheck] per-node IB rails were LinkUp (tier-ib passed) — suspect fabric/link, not a Polling rail"
+        echo "[healthcheck] hand $NCCL_PROBE_LOG to infra — it is the clean NCCL_DEBUG=INFO repro (docs/launcher.md shows an ad-hoc rerun)"
+        MANIFEST_EXTRA_JSON=$(printf '{"job_rc":1,"failure_reason":"nccl_probe","probe_nodes":"%s","ended_at":"%s"}' \
+                              "$RAY_CSV" "$(date -Is)") \
+            write_manifest FAILED
+        exit 1
+    fi
+fi
 
 ENVPACK_NODE_PREAMBLE='
     set -euo pipefail
@@ -364,8 +468,6 @@ validate_envpack_server_timing() {
 # Recipes opt out by leaving HF_TORCHDIST_DIR unset/empty (e.g. VLM
 # recipes that load HF format directly via --megatron-to-hf-mode bridge,
 # bypassing Megatron's torch_dist checkpoint flow).
-
-: "${HF_MODEL_DIR:?recipe must define HF_MODEL_DIR}"
 
 if [[ -z "${HF_TORCHDIST_DIR:-}" ]]; then
     echo "[convert] HF_TORCHDIST_DIR empty — recipe opted out of torch_dist convert (loading HF directly)"

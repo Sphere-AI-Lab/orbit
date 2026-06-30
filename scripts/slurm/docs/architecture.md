@@ -18,7 +18,7 @@ operator                login node            slurm                 compute node
    │                       │                    │ exec launcher on head    │
    │                       │                    │ ───────────────────────► │
    │                       │                    │                          │ write MANIFEST.json
-   │                       │                    │                          │ healthcheck (nvidia-smi count + torch cuda set_device probe per node)
+   │                       │                    │                          │ healthcheck: per-node nvidia-smi + cuda set_device + IB rails, then cross-node NCCL all-reduce
    │                       │                    │                          │ cleanup (two-phase SIGTERM→SIGKILL + gate)
    │                       │                    │                          │ source recipe + dump args.json
    │                       │                    │                          │ auto-convert HF→torch_dist (if missing)
@@ -57,7 +57,8 @@ operator                login node            slurm                 compute node
 | Symptom | First place to check |
 |---|---|
 | Slurm rejects the submission | `submit.sh` stdout; recipe metadata (`EXPERIMENT_NODES`, etc.) |
-| `[healthcheck] BAD <node> (tier1\|tier2)` | Bad GPU — launcher auto-adds to `ExcNodeList` and requeues (cap `HEALTHCHECK_MAX_RESTARTS=3`); see `docs/launcher.md` "Healthcheck" |
+| `[healthcheck] BAD <node> (tier1\|tier2\|tier-ib)` | Bad GPU or IB rail — launcher auto-adds to `ExcNodeList` and requeues (cap `HEALTHCHECK_MAX_RESTARTS=3`); see `docs/launcher.md` "Healthcheck" |
+| `[healthcheck] FATAL: cross-node NCCL probe failed` | Fabric/link fault, not node-localizable — fails loud after 2 tries with a repro at `nccl_probe.log`; see `docs/launcher.md` "Healthcheck" |
 | `[cleanup] POISONED <node>` | Stale processes from a prior crash; slurm requeues automatically. If it loops, drain the node manually. |
 | `[crash-debug] ... oom_kill` | Memory budget — see `docs/launcher.md` "Step memory cap" |
 | `terminal state: CLUSTER_DEAD` | Ray dashboard unresponsive; usually downstream of an OOM or worker crash. Look in `ray_head.log` / `ray_worker_*.log`. |
@@ -74,6 +75,8 @@ scripts/slurm/
 ├── lib/
 │   ├── manifest.sh        # MANIFEST.json read/write
 │   ├── gpu_probe.py       # torch.cuda.set_device probe (tier-2 healthcheck)
+│   ├── ib_probe.sh        # InfiniBand rail check (tier-ib healthcheck)
+│   ├── nccl_probe.py      # cross-node NCCL all-reduce (tier-nccl healthcheck)
 │   └── ray_lifecycle.sh   # ray submit + wait + crash debug
 ├── docs/
 │   ├── architecture.md    # (this file)

@@ -19,7 +19,11 @@
 #   RAY_STATUS_POLL_INTERVAL   seconds between probes      [15]
 #   RAY_STATUS_PROBE_TIMEOUT   per-probe timeout (s)       [10]
 #   RAY_STATUS_FAIL_GRACE      unreadable probes -> dead   [24]
-#                              (default 24 × 15s = 6 min)
+#
+# After fail_grace consecutive unreadable probes the train_status.json
+# heartbeat is consulted before declaring CLUSTER_DEAD: a fresh ALIVE
+# heartbeat resets the grace counter (job is alive, dashboard just wedged);
+# a terminal sentinel resolves the run — see docs/launcher.md "ray status poll".
 #
 # Outputs (env, set by this function):
 #   STATE  — SUCCEEDED | FAILED | STOPPED | CLUSTER_DEAD | DEADLINE | UNKNOWN
@@ -153,7 +157,8 @@ EOF
     local probe_log="$probe_dir/probe.log"
     local probe_err="$probe_dir/probe.err"
     local poll_done_marker="$probe_dir/poll_done"
-    rm -f "$poll_done_marker" "$probe_err"
+    local log_terminal_marker="$probe_dir/log_terminal_state"
+    rm -f "$poll_done_marker" "$probe_err" "$log_terminal_marker"
     : > "$probe_log"
     echo "[submit] local probe diagnostics: $probe_log"
 
@@ -171,12 +176,39 @@ EOF
         trap cleanup_log_child TERM INT EXIT
 
         while [[ ! -f "$poll_done_marker" ]]; do
-            ray job logs --follow --address "$RAY_ADDRESS" "$job_id" 2>&1 &
+            (
+                ray job logs --follow --address "$RAY_ADDRESS" "$job_id" 2>&1 \
+                    | awk -v marker="$log_terminal_marker" -v job="$job_id" '
+                        {
+                            print
+                            fflush()
+                            line = tolower($0)
+                            if (index($0, job) && index(line, "succeeded")) {
+                                print "SUCCEEDED" > marker
+                                close(marker)
+                            } else if (index($0, job) && index(line, "failed")) {
+                                print "FAILED" > marker
+                                close(marker)
+                            } else if (index($0, job) && index(line, "stopped")) {
+                                print "STOPPED" > marker
+                                close(marker)
+                            }
+                        }
+                    '
+            ) &
             log_child=$!
             wait "$log_child"
             rc=$?
             log_child=""
             [[ -f "$poll_done_marker" ]] && break
+            if [[ -s "$log_terminal_marker" ]]; then
+                echo "[submit] ray job logs observed terminal state $(cat "$log_terminal_marker"); not reconnecting"
+                break
+            fi
+            if (( rc == 0 )); then
+                echo "[submit] ray job logs --follow exited rc=0 without terminal marker; not reconnecting"
+                break
+            fi
             echo "[submit] WARN: ray job logs --follow exited rc=$rc, reconnecting in 2s"
             sleep 2 &
             log_child=$!
@@ -186,17 +218,32 @@ EOF
     ) &
     local log_tail_pid=$!
 
-    # fg status poll. timeout=$probe_timeout per probe so a stuck dashboard
-    # can't hang the script. $fail_grace × $poll_interval = grace window
-    # (default 24 × 15s = 6 min) before declaring CLUSTER_DEAD.
+    # fg status poll. timeout per probe so a stuck dashboard can't hang us;
+    # unreadable probes accrue toward fail_grace — see docs/launcher.md.
     JOB_RC=1
     STATE=UNKNOWN
     local status_fail_count=0
     local deadline
     deadline=$(( ${SLURM_JOB_END_TIME:-$(( $(date +%s) + 86400 ))} - 120 ))
-    local status_out status_rc err_summary sentinel_out
+    local status_out status_rc err_summary log_state confirm_out sentinel_out
     while (( $(date +%s) < deadline )); do
         sleep "$poll_interval"
+        if [[ -s "$log_terminal_marker" ]]; then
+            # The log-tail awk match is loose (fires on any line with the job id
+            # + succeeded/failed/stopped, incl user logs), so treat it as a hint:
+            # confirm via `ray job status`, clear false positives, keep polling.
+            log_state=$(cat "$log_terminal_marker" 2>/dev/null || true)
+            if confirm_out=$(timeout "$probe_timeout" \
+                                 ray job status --address "$RAY_ADDRESS" "$job_id" 2>/dev/null); then
+                case "$confirm_out" in
+                    *SUCCEEDED*) STATE=SUCCEEDED; JOB_RC=0; break;;
+                    *FAILED*)    STATE=FAILED;    JOB_RC=1; break;;
+                    *STOPPED*)   STATE=STOPPED;   JOB_RC=2; break;;
+                    *) echo "[submit] INFO: log marker '$log_state' not confirmed by status ($confirm_out) — false positive, clearing"
+                       : > "$log_terminal_marker";;
+                esac
+            fi
+        fi
         # `if`-wrap the probe so `set -e` does NOT exit the script when the
         # inner timeout/ray job status returns non-zero — that's the failure
         # we're explicitly trying to count, not abort on.
@@ -215,6 +262,9 @@ EOF
                 status_fail_count=0
                 ;;
             *)
+                # Unreadable probe: count toward fail_grace, then consult the
+                # train_status.json heartbeat before declaring the cluster dead
+                # — see docs/launcher.md "ray status poll".
                 status_fail_count=$((status_fail_count + 1))
                 err_summary=$(tr '\n' ' ' < "$probe_err" 2>/dev/null | cut -c1-300 || true)
                 {
@@ -257,7 +307,7 @@ EOF
     touch "$poll_done_marker" 2>/dev/null || true
     kill "$log_tail_pid" 2>/dev/null || true
     wait "$log_tail_pid" 2>/dev/null || true
-    rm -f "$poll_done_marker" "$probe_err"
+    rm -f "$poll_done_marker" "$probe_err" "$log_terminal_marker"
 
     echo "[submit] $(date -Is)  ${MILES_TRAIN_ENTRY:-train.py} terminal state: $STATE  job_rc=$JOB_RC"
 }
