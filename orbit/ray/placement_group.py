@@ -6,7 +6,7 @@ from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from orbit.utils.async_utils import eager_create_task
-from orbit.utils.arguments import uses_rollout_engines
+from orbit.utils.arguments import needs_opd_teacher, uses_rollout_engines
 
 from ..utils.ray_utils import compute_ray_pin_head_options
 from .actor_group import RayTrainGroup
@@ -132,7 +132,9 @@ def _actor_needs_reference_weights(args) -> bool:
     return (args.kl_coef != 0 or args.use_kl_loss) and getattr(args, "peft_method", "none") == "none"
 
 
-def allocate_train_group(args, num_nodes, num_gpus_per_node, pg, role: str, with_ref: bool):
+def allocate_train_group(
+    args, num_nodes, num_gpus_per_node, pg, role: str, with_ref: bool, with_opd_teacher: bool = False
+):
     return RayTrainGroup(
         args=args,
         num_nodes=num_nodes,
@@ -141,6 +143,7 @@ def allocate_train_group(args, num_nodes, num_gpus_per_node, pg, role: str, with
         num_gpus_per_actor=0.4,
         role=role,
         with_ref=with_ref,
+        with_opd_teacher=with_opd_teacher,
     )
 
 
@@ -152,6 +155,7 @@ async def create_training_models(args, pgs, rollout_manager):
         pg=pgs["actor"],
         role="actor",
         with_ref=_actor_needs_reference_weights(args),
+        with_opd_teacher=needs_opd_teacher(args) and args.opd_type == "megatron",
     )
     if args.use_critic:
         critic_model = allocate_train_group(

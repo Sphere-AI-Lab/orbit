@@ -86,12 +86,13 @@ class MegatronTrainRayActor(TrainRayActor):
         args: Namespace,
         role: str,
         with_ref: bool = False,
+        with_opd_teacher: bool = False,
     ) -> int | None:
         _validate_train_offload_role(args, role)
 
         monkey_patch_torch_dist()
 
-        super().init(args, role, with_ref)
+        super().init(args, role, with_ref, with_opd_teacher)
 
         init(args)
 
@@ -195,6 +196,16 @@ class MegatronTrainRayActor(TrainRayActor):
 
         if with_ref and not is_peft_enabled(self.args):
             self.load_other_checkpoint("ref", args.ref_load)
+
+        # In-process Megatron OPD teacher: a second full model, loaded like "ref"
+        # and scored by a teacher-forcing forward pass at train time.
+        if with_opd_teacher:
+            if self.args.opd_teacher_ckpt_step is not None:
+                _saved_ckpt_step = self.args.ckpt_step
+                self.args.ckpt_step = self.args.opd_teacher_ckpt_step
+            self.load_other_checkpoint("teacher", self.args.opd_teacher_load)
+            if self.args.opd_teacher_ckpt_step is not None:
+                self.args.ckpt_step = _saved_ckpt_step
 
         if self.args.keep_old_actor:
             # Load old_actor checkpoint
