@@ -466,6 +466,26 @@ class MegatronTrainRayActor(TrainRayActor):
         self._switch_model("ref")
         return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="ref_")
 
+    def compute_teacher_log_probs(
+        self,
+        data_iterator: list[DataIterator],
+        num_microbatches: list[int],
+    ) -> dict[str, list[torch.Tensor]] | None:
+        """Compute in-process Megatron teacher log-probs for on-policy distillation.
+
+        Mirrors compute_ref_log_probs: a teacher-forcing forward pass on the
+        student's already-sampled tokens (not generation), producing
+        "teacher_log_probs" (store_prefix="teacher_" + base key "log_probs")
+        for the on_policy_distillation estimator / --use-opd blend. Returns None
+        when no teacher model is loaded this cycle.
+        """
+        if "teacher" not in self.model_state_manager.backup_tags:
+            return None
+
+        self._set_replay_stage("fallthrough")
+        self._switch_model("teacher")
+        return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="teacher_")
+
     def train(self, rollout_id: int, rollout_data_ref: Box) -> None:
         self._last_rollout_id = rollout_id
         if self.args.offload_train:
@@ -534,6 +554,9 @@ class MegatronTrainRayActor(TrainRayActor):
                 ref_data = self.compute_ref_log_probs(data_iterator, num_microbatches)
                 if ref_data is not None:
                     rollout_data.update(ref_data)
+                teacher_data = self.compute_teacher_log_probs(data_iterator, num_microbatches)
+                if teacher_data is not None:
+                    rollout_data.update(teacher_data)
                 self._switch_model("old_actor" if self.args.keep_old_actor else "actor")
                 if not self.args.use_rollout_logprobs or self.args.get_mismatch_metrics:
                     for m in all_replay_managers:
