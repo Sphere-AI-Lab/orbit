@@ -135,16 +135,35 @@ def test_validate_megatron_teacher_load_missing_path(tmp_path):
 
 
 def test_validate_sglang_rejects_teacher_load():
+    # Pure MOPD (not blend) so this exercises the teacher_load check, not the
+    # sglang+blend guard (see test_validate_rejects_sglang_blend below).
     args = _base_args(
-        use_opd=True, opd_type="sglang", opd_teacher_load="/some/ckpt", opd_teacher_url="http://host/generate"
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher_load="/some/ckpt",
+        opd_teacher_url="http://host/generate",
     )
     with pytest.raises(ValueError, match="sglang"):
         _validate_opd_args(args)
 
 
 def test_validate_sglang_requires_teacher_url():
-    args = _base_args(use_opd=True, opd_type="sglang", opd_teacher_url=None)
+    # Pure MOPD (not blend) so this exercises the teacher_url check, not the
+    # sglang+blend guard (see test_validate_rejects_sglang_blend below).
+    args = _base_args(
+        advantage_estimator="on_policy_distillation", opd_type="sglang", opd_teacher_url=None
+    )
     with pytest.raises(ValueError, match="opd-teacher-url"):
+        _validate_opd_args(args)
+
+
+def test_validate_rejects_sglang_blend():
+    # Fix 2: --use-opd (blend) + --opd-type sglang must be rejected -- the
+    # sglang teacher's reward_func occupies the single --custom-rm-path slot
+    # and always returns 0.0, so blend would degrade to a KL-only signal with
+    # ~0 base advantage. Blend requires --opd-type megatron instead.
+    args = _base_args(use_opd=True, opd_type="sglang", opd_teacher_url="http://host/generate")
+    with pytest.raises(ValueError, match="megatron"):
         _validate_opd_args(args)
 
 
@@ -165,7 +184,12 @@ def test_validate_megatron_passes_with_valid_ckpt(tmp_path):
 
 
 def test_validate_sglang_passes_without_teacher_load():
+    # Pure MOPD (not blend) -- see test_validate_rejects_sglang_blend for the
+    # blend+sglang rejection.
     args = _base_args(
-        use_opd=True, opd_type="sglang", opd_teacher_load=None, opd_teacher_url="http://host/generate"
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher_load=None,
+        opd_teacher_url="http://host/generate",
     )
     _validate_opd_args(args)

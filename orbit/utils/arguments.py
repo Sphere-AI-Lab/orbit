@@ -120,6 +120,19 @@ def _validate_opd_args(args) -> None:
             "KL onto a reward-based estimator. Pick one."
         )
 
+    # sglang-teacher OPD supports only pure MOPD: reward_func
+    # (orbit.rollout.opd_sglang.reward_func) always returns 0.0 and occupies the
+    # single --custom-rm-path slot, so blending it with a reward-based estimator
+    # would degrade to a KL-only signal with ~0 base advantage.
+    if getattr(args, "use_opd", False) and args.opd_type == "sglang":
+        raise ValueError(
+            "--use-opd (blend) is not supported with --opd-type sglang: the sglang teacher's "
+            "reward_func always returns 0.0 and occupies the single --custom-rm-path slot, so "
+            "blend would degrade to a KL-only signal with ~0 base advantage. sglang-teacher OPD "
+            "supports only pure MOPD (--advantage-estimator on_policy_distillation); use "
+            "--opd-type megatron for the blend."
+        )
+
     if not needs_opd_teacher(args):
         return
 

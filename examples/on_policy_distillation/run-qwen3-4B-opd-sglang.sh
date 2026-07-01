@@ -20,10 +20,19 @@
 #
 # Note: pure MOPD (`--advantage-estimator on_policy_distillation`) and the
 # blend (`--use-opd`) are mutually exclusive -- do not pass `--use-opd` here.
-# For the blend form instead, use `--advantage-estimator grpo --use-opd
-# --opd-kl-coef <λ>` on top of a reward estimator (see README). Note also that
-# a reward-bearing blend still needs its own `--custom-rm-path`/`--rm-type` for
-# the task reward *in addition to* the teacher-scoring hooks above -- see README.
+# The blend form is not supported at all with the sglang teacher (see README /
+# orbit/utils/arguments.py::_validate_opd_args) -- the sglang teacher already
+# occupies the single `--custom-rm-path` reward slot and always returns 0.0,
+# so blend requires `--opd-type megatron` instead.
+#
+# CAVEAT -- eval/pass-rate is not meaningful in this mode: `reward_func`
+# (orbit.rollout.opd_sglang.reward_func) always returns `0.0` -- it is shared
+# between train and eval, so any task-accuracy or pass-rate metric derived
+# from `sample.reward` (eval/<dataset>, pass@k, --log-passrate) reports 0
+# regardless of student quality. The actual training signal is
+# `teacher_log_probs`, not reward. Eval is disabled by default below
+# (DISABLE_EVAL=1); contrast with run-qwen3-4B-opd-megatron.sh, which uses a
+# real `--rm-type math` reward, so its eval-accuracy numbers are meaningful.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -47,6 +56,10 @@ RUN_LOG="${ORBIT_ROOT}/logs/${LAUNCHER_NAME}_$(date +%Y%m%d_%H%M%S).log"
 SAVE_DIR="${SAVE_DIR:-${ORBIT_ROOT}/orbit_ckpts/Qwen3-4B-Instruct-2507-BF16_opd_sglang}"
 : "${TRAIN_JSONL:?set TRAIN_JSONL to a training jsonl path}"
 TEST_JSONL=${TEST_JSONL:-}
+# reward_func always returns 0.0 (see CAVEAT above), so eval-accuracy/pass-rate
+# numbers are not meaningful here; eval is off by default. Set DISABLE_EVAL=0
+# to re-enable anyway (e.g. to inspect non-reward eval diagnostics).
+DISABLE_EVAL=${DISABLE_EVAL:-1}
 
 # === Resources ===
 GPUS_PER_NODE=4
@@ -137,6 +150,10 @@ PERF_ARGS=(
     --sequence-parallel
 )
 
+# Off by default (DISABLE_EVAL=1 above): reward_func always returns 0.0, so
+# eval-accuracy would report 0 regardless of student quality. No
+# --eval-pass-k-values here either -- pass-rate is derived from the same
+# always-zero reward.
 EVAL_ARGS=(
     --eval-interval 10
     --eval-prompt-data math "${TEST_JSONL}"
@@ -144,7 +161,6 @@ EVAL_ARGS=(
     --eval-max-response-len 1024
     --eval-top-k 1
     --skip-eval-before-train
-    --eval-pass-k-values 1 2 4 8 16
 )
 
 SGLANG_ARGS=(
@@ -168,9 +184,9 @@ MISC_ARGS=(
     --offload-rollout
 )
 
-DEBUG_ARGS=(
-    --log-passrate
-)
+# No --log-passrate here -- pass-rate is derived from reward_func's
+# always-zero reward, which would report 0 regardless of student quality.
+DEBUG_ARGS=()
 
 # The Megatron-teacher's full-fine-tuning restriction (see
 # run-qwen3-4B-opd-megatron.sh) does not apply here -- the teacher is off the

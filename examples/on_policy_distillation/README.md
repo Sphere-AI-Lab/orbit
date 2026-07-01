@@ -96,6 +96,17 @@ than `sample.reward`, because orbit computes zero-std-reward rollout metrics
 from `sample.reward` *before* the post-process hook runs, and those metrics
 assume a numeric reward.)
 
+**Eval-accuracy/pass-rate is not meaningful here.** `reward_func` always
+returns `0.0`, and orbit shares this hook between train and eval, so any
+task-accuracy or pass-rate metric derived from `sample.reward` (`eval/<dataset>`,
+`--eval-pass-k-values`, `--log-passrate`) reports 0 regardless of student
+quality -- the actual training signal is `teacher_log_probs`, not reward.
+`run-qwen3-4B-opd-sglang.sh` therefore disables eval by default
+(`DISABLE_EVAL=${DISABLE_EVAL:-1}`) and drops `--eval-pass-k-values`/
+`--log-passrate` entirely; `TEST_JSONL` is only consulted if you explicitly set
+`DISABLE_EVAL=0`. Contrast with `run-qwen3-4B-opd-megatron.sh`, which uses a
+real `--rm-type math` reward, so its eval-accuracy numbers are meaningful.
+
 Same CPU-free argv inspection and mutual-exclusion rules as the Megatron
 recipe apply here.
 
@@ -123,6 +134,16 @@ RL_ARGS=(
   backup, so account for the extra host memory.
 - `orbit.rollout.opd_sglang.reward_func` always returns `0.0` and occupies the
   single `--custom-rm-path` slot. Combining `--opd-type sglang` with the
-  **blend** form (which needs a real task reward from a base estimator) is not
-  wired up by this recipe -- it would require a `reward_func` that both scores
-  the teacher and computes the task reward.
+  **blend** form (`--use-opd`) is rejected by `_validate_opd_args` with a
+  `ValueError`: it would require a `reward_func` that both scores the teacher
+  and computes the task reward, which is not wired up by this recipe. The
+  sglang teacher supports only pure MOPD
+  (`--advantage-estimator on_policy_distillation`); use `--opd-type megatron`
+  for the blend instead.
+- In sglang-teacher mode, task-accuracy/pass-rate eval is **not meaningful**:
+  `reward_func` always returns `0.0` and is shared between train and eval, so
+  any `eval/<dataset>`, pass@k, or `--log-passrate` metric reports 0 regardless
+  of student quality -- the training signal is `teacher_log_probs`, not
+  reward. `run-qwen3-4B-opd-sglang.sh` disables eval by default accordingly.
+  The Megatron recipe uses a real `--rm-type math` reward, so its eval works
+  as expected.
