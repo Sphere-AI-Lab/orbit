@@ -26,6 +26,8 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
             sample.loss_mask = [1] * sample.response_length
         if sample.rollout_log_probs is None:
             sample.rollout_log_probs = [0.0] * sample.response_length
+        if sample.teacher_log_probs is None:
+            sample.teacher_log_probs = [0.0] * sample.response_length
 
     _fill_defaults(a)
     _fill_defaults(b)
@@ -60,6 +62,7 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
             loss_mask=a.loss_mask + [0] * obs_len + b.loss_mask,
             weight_versions=a.weight_versions + b.weight_versions,
             rollout_log_probs=a.rollout_log_probs + [0.0] * obs_len + b.rollout_log_probs,
+            teacher_log_probs=a.teacher_log_probs + [0.0] * obs_len + b.teacher_log_probs,
             rollout_routed_experts=b.rollout_routed_experts,
             remove_sample=_merge_equal_value("remove_sample"),
             status=b.status,
