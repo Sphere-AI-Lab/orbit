@@ -171,6 +171,12 @@ def _validate_opd_args(args) -> None:
         )
 
     if args.opd_type == "megatron":
+        if _is_peft_enabled(args):
+            raise ValueError(
+                "--opd-type megatron loads a full in-process teacher model (like the ref model), "
+                "which is incompatible with PEFT (--peft-method != none). Use --opd-type sglang "
+                "(external teacher server) for PEFT runs."
+            )
         if not args.opd_teacher_load:
             raise ValueError("--opd-type megatron requires --opd-teacher-load <megatron checkpoint directory>.")
         if not os.path.exists(args.opd_teacher_load):

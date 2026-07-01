@@ -201,6 +201,32 @@ def test_validate_sglang_requires_teacher_url():
         _validate_opd_args(args)
 
 
+def test_validate_rejects_peft_with_megatron_teacher(tmp_path):
+    # I2: --opd-type megatron loads a full in-process teacher model (like ref),
+    # which is incompatible with PEFT. The ref load is already guarded under PEFT;
+    # the teacher load must be guarded too or it fails cryptically at load time.
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="megatron",
+        opd_teacher_load=_make_ckpt(tmp_path),
+        peft_method="lora",
+    )
+    with pytest.raises(ValueError, match="PEFT"):
+        _validate_opd_args(args)
+
+
+def test_validate_allows_peft_with_sglang_teacher():
+    # Only the megatron teacher is rejected under PEFT; the external sglang
+    # teacher server is fine.
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher_url="http://host/generate",
+        peft_method="lora",
+    )
+    _validate_opd_args(args)
+
+
 def test_validate_rejects_sglang_blend():
     # Fix 2: --use-opd (blend) + --opd-type sglang must be rejected -- the
     # sglang teacher's reward_func occupies the single --custom-rm-path slot
