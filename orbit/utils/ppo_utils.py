@@ -404,6 +404,65 @@ def apply_opd_kl_to_advantages(
     rollout_data["opd_reverse_kl"] = reverse_kls
 
 
+def icepop_gate(ratio: torch.Tensor, clip_low: float, clip_high: float) -> torch.Tensor:
+    """ICE-POP hard gate: pass the importance ratio through inside the band, zero outside.
+
+    Shared masking core used by both the policy-gradient ICE-POP path
+    (``icepop_function`` in loss.py) and the OPD advantage gate
+    (``apply_opd_icepop_gate``). Tokens whose ``ratio`` lies in
+    ``[clip_low, clip_high]`` keep ``ratio`` (importance weight); tokens outside
+    the band are zeroed (hard-gated).
+
+    Args:
+        ratio: Per-token importance ratio ``exp(train_logp - rollout_logp)``.
+        clip_low: Lower band edge (``args.tis_clip_low``).
+        clip_high: Upper band edge (``args.tis_clip``).
+
+    Returns:
+        Per-token gate weight, same shape as ``ratio``.
+    """
+    return torch.where(
+        (ratio >= clip_low) & (ratio <= clip_high), ratio, torch.zeros_like(ratio)
+    )
+
+
+def apply_opd_icepop_gate(
+    rollout_data: dict,
+    advantages: list[torch.Tensor],
+    clip_low: float,
+    clip_high: float,
+) -> None:
+    """Hard-gate the OPD advantage by the per-token train/rollout ratio, in place.
+
+    For async / off-policy rollouts the acting (rollout) policy drifts from the
+    current student, biasing the OPD advantage. Following NeMo-RL MOPD, gate each
+    token by the ICE-POP importance ratio ``exp(train_logp - rollout_logp)``:
+    in-band tokens are reweighted by the ratio, out-of-band tokens are zeroed —
+    reusing the exact ratio and gate as orbit's policy-gradient path
+    (``icepop_function``).
+
+    Args:
+        rollout_data: Rollout batch dict; must contain per-sample ``log_probs``
+            (train-recomputed student log-probs) and ``rollout_log_probs``
+            (acting-policy log-probs), aligned to ``advantages``.
+        advantages: OPD advantages per sample; mutated in place.
+        clip_low: Lower band edge (``args.tis_clip_low``).
+        clip_high: Upper band edge (``args.tis_clip``).
+    """
+    train_log_probs = rollout_data.get("log_probs")
+    rollout_log_probs = rollout_data.get("rollout_log_probs")
+    if train_log_probs is None or rollout_log_probs is None:
+        raise ValueError(
+            "--opd-icepop needs train log_probs and rollout_log_probs to form the "
+            "train/rollout importance ratio, but one is missing from rollout_data. "
+            "Ensure --use-rollout-logprobs is off (so student log-probs are recomputed) "
+            "and rollout log-probs are collected."
+        )
+    for i in range(len(advantages)):
+        ratio = torch.exp(train_log_probs[i] - rollout_log_probs[i])
+        advantages[i] = advantages[i] * icepop_gate(ratio, clip_low, clip_high)
+
+
 def get_advantages_and_returns(
     total_len: int,
     response_len: int,

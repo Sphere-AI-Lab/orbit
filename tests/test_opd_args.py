@@ -31,6 +31,8 @@ def _base_args(**overrides):
         opd_teacher_load=None,
         opd_teacher_ckpt_step=None,
         opd_teacher_url=None,
+        opd_icepop=False,
+        use_rollout_logprobs=False,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -73,6 +75,48 @@ def test_opd_args_parse_values():
 def test_opd_teacher_url_parses_value():
     args = _parse(["--opd-type", "sglang", "--opd-teacher-url", "http://host:1234/generate"])
     assert args.opd_teacher_url == "http://host:1234/generate"
+
+
+def test_opd_icepop_defaults_false():
+    args = _parse([])
+    assert args.opd_icepop is False
+
+
+def test_opd_icepop_parses_true():
+    args = _parse(["--opd-icepop"])
+    assert args.opd_icepop is True
+
+
+# --- Phase 3 / Task 3.1: --opd-icepop validation ---
+
+
+def test_validate_opd_icepop_requires_opd_enabled():
+    args = _base_args(opd_icepop=True)  # no OPD estimator, no --use-opd
+    with pytest.raises(ValueError, match="opd-icepop"):
+        _validate_opd_args(args)
+
+
+def test_validate_opd_icepop_incompatible_with_use_rollout_logprobs():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher_url="http://host/generate",
+        opd_icepop=True,
+        use_rollout_logprobs=True,
+    )
+    with pytest.raises(ValueError, match="use-rollout-logprobs"):
+        _validate_opd_args(args)
+
+
+def test_validate_opd_icepop_passes_with_pure_mopd(tmp_path):
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="megatron",
+        opd_teacher_load=_make_ckpt(tmp_path),
+        opd_icepop=True,
+        use_rollout_logprobs=False,
+    )
+    _validate_opd_args(args)
 
 
 def test_opd_type_rejects_unknown_choice():

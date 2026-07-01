@@ -1,7 +1,12 @@
 import pytest
 import torch
 
-from orbit.utils.ppo_utils import apply_opd_kl_to_advantages, opd_mopd_advantages
+from orbit.utils.ppo_utils import (
+    apply_opd_icepop_gate,
+    apply_opd_kl_to_advantages,
+    icepop_gate,
+    opd_mopd_advantages,
+)
 from orbit.utils.types import Sample
 
 
@@ -85,3 +90,73 @@ def test_apply_opd_kl_to_advantages_zero_coef_is_noop():
     apply_opd_kl_to_advantages(0.0, rollout_data, advantages, student_log_probs)
 
     torch.testing.assert_close(advantages[0], torch.ones(3))
+
+
+# --- Phase 3 / Task 3.1: ICE-POP gate (shared with the PG icepop_function) ---
+
+
+def test_icepop_gate_in_band_passes_ratio_through():
+    ratio = torch.tensor([0.5, 1.0, 1.5, 2.0])
+    weight = icepop_gate(ratio, 0.5, 2.0)
+    torch.testing.assert_close(weight, ratio)
+
+
+def test_icepop_gate_out_of_band_zeroed():
+    ratio = torch.tensor([0.1, 1.0, 5.0])
+    weight = icepop_gate(ratio, 0.5, 2.0)
+    torch.testing.assert_close(weight, torch.tensor([0.0, 1.0, 0.0]))
+
+
+def test_icepop_gate_matches_inline_torch_where():
+    # Behavior-preservation: icepop_gate must equal the exact expression that
+    # icepop_function used inline (loss.py) so the refactor is a no-op for the PG path.
+    ratio = torch.tensor([-0.3, 0.0, 0.4999, 0.5, 1.0, 2.0, 2.0001, 7.3])
+    low, high = 0.5, 2.0
+    expected = torch.where((ratio >= low) & (ratio <= high), ratio, torch.zeros_like(ratio))
+    torch.testing.assert_close(icepop_gate(ratio, low, high), expected)
+
+
+def test_apply_opd_icepop_gate_zeros_out_of_band_keeps_in_band():
+    # Build train vs rollout log-probs so tokens 0,1 are in-band with ratio == 1
+    # (train == rollout => unchanged) and tokens 2,3 are out-of-band (=> zeroed).
+    train = torch.tensor([0.0, -0.3, 0.0, -5.0])
+    rollout = torch.tensor([0.0, -0.3, -5.0, 0.0])  # ratio = exp(0,0,+5,-5)
+    advantages = [torch.tensor([1.5, -2.0, 3.0, -4.0])]
+    rollout_data = {"log_probs": [train], "rollout_log_probs": [rollout]}
+
+    apply_opd_icepop_gate(rollout_data, advantages, 0.5, 2.0)
+
+    torch.testing.assert_close(advantages[0], torch.tensor([1.5, -2.0, 0.0, 0.0]))
+
+
+def test_apply_opd_icepop_gate_reweights_in_band_by_ratio():
+    # In-band tokens are importance-reweighted by the ratio (mirrors PG icepop:
+    # pg_loss * ice_weight), not merely masked.
+    train = torch.tensor([0.5])
+    rollout = torch.tensor([0.0])  # ratio = exp(0.5) ~= 1.6487, inside [0, 2]
+    advantages = [torch.tensor([2.0])]
+    rollout_data = {"log_probs": [train], "rollout_log_probs": [rollout]}
+
+    apply_opd_icepop_gate(rollout_data, advantages, 0.0, 2.0)
+
+    torch.testing.assert_close(advantages[0], torch.tensor([2.0]) * torch.exp(torch.tensor([0.5])))
+
+
+def test_apply_opd_icepop_gate_noop_when_ratio_one():
+    # Parity: when train == rollout (ratio == 1 everywhere), the OPD advantage is
+    # unchanged -- the same property that makes --opd-icepop off a no-op.
+    lp = [torch.tensor([0.1, -0.2, 0.3])]
+    advantages = [torch.tensor([1.0, -2.0, 3.0])]
+    rollout_data = {"log_probs": lp, "rollout_log_probs": [lp[0].clone()]}
+
+    apply_opd_icepop_gate(rollout_data, advantages, 0.0, 2.0)
+
+    torch.testing.assert_close(advantages[0], torch.tensor([1.0, -2.0, 3.0]))
+
+
+def test_apply_opd_icepop_gate_raises_without_rollout_log_probs():
+    advantages = [torch.tensor([1.0, 2.0])]
+    rollout_data = {"log_probs": [torch.tensor([0.0, 0.0])], "rollout_log_probs": None}
+
+    with pytest.raises(ValueError, match="rollout_log_probs"):
+        apply_opd_icepop_gate(rollout_data, advantages, 0.0, 2.0)

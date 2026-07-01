@@ -106,6 +106,17 @@ def add_on_policy_distillation_arguments(parser):
             "(required for --opd-type sglang)."
         ),
     )
+    parser.add_argument(
+        "--opd-icepop",
+        action="store_true",
+        default=False,
+        help=(
+            "Apply the ICE-POP async/off-policy correction to the OPD advantage: hard-gate (zero) tokens "
+            "whose train/rollout importance ratio leaves [--tis-clip-low, --tis-clip]. Reuses the same gate "
+            "as the policy-gradient path. Requires the student log-probs to be recomputed by the trainer, so "
+            "it is incompatible with --use-rollout-logprobs."
+        ),
+    )
     return parser
 
 
@@ -132,6 +143,23 @@ def _validate_opd_args(args) -> None:
             "supports only pure MOPD (--advantage-estimator on_policy_distillation); use "
             "--opd-type megatron for the blend."
         )
+
+    # --opd-icepop gates the OPD advantage by the train/rollout importance ratio,
+    # so it only applies when OPD is on and requires the trainer-recomputed student
+    # log-probs (mirrors how the PG icepop/TIS path requires --use-rollout-logprobs off).
+    if getattr(args, "opd_icepop", False):
+        if not needs_opd_teacher(args):
+            raise ValueError(
+                "--opd-icepop only applies to on-policy distillation; enable it via "
+                "--advantage-estimator on_policy_distillation (pure MOPD) or --use-opd (blend)."
+            )
+        if getattr(args, "use_rollout_logprobs", False):
+            raise ValueError(
+                "--opd-icepop is incompatible with --use-rollout-logprobs: the ICE-POP ratio needs "
+                "the trainer-recomputed student log-probs vs the rollout log-probs, but "
+                "--use-rollout-logprobs makes them identical (ratio == 1, no correction). "
+                "Drop --use-rollout-logprobs."
+            )
 
     if not needs_opd_teacher(args):
         return

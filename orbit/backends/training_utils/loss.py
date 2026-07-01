@@ -9,6 +9,7 @@ from orbit.utils.distributed_utils import distributed_masked_whiten
 from orbit.utils.misc import load_function
 from orbit.utils.ppo_utils import (
     _safe_exp_neg_ppo_kl,
+    apply_opd_icepop_gate,
     apply_opd_kl_to_advantages,
     calculate_log_probs_and_entropy,
     compute_approx_kl,
@@ -19,6 +20,7 @@ from orbit.utils.ppo_utils import (
     get_grpo_returns,
     get_reinforce_plus_plus_baseline_advantages,
     get_reinforce_plus_plus_returns,
+    icepop_gate,
     opd_mopd_advantages,
 )
 from orbit.utils.types import RolloutBatch
@@ -434,6 +436,11 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
     if getattr(args, "use_opd", False):
         apply_opd_kl_to_advantages(args.opd_kl_coef, rollout_data, advantages, log_probs)
 
+    # Optional async/off-policy ICE-POP correction for the OPD advantage (pure-MOPD
+    # or blend): hard-gate tokens whose train/rollout importance ratio leaves the band.
+    if getattr(args, "opd_icepop", False):
+        apply_opd_icepop_gate(rollout_data, advantages, args.tis_clip_low, args.tis_clip)
+
     # Follow-up: OpenRLHF always does advantages normalization but veRL doesn't seem to do it.
     if args.normalize_advantages:
         all_advs = torch.cat(advantages)
@@ -531,9 +538,7 @@ def icepop_function(
     old_log_probs = torch.cat(train_log_probs, dim=0)
     ice_ratio = torch.exp(old_log_probs - rollout_log_probs)
     ice_abs = (torch.exp(old_log_probs - rollout_log_probs) - 1).abs()
-    ice_weight = torch.where(
-        (ice_ratio >= args.tis_clip_low) & (ice_ratio <= args.tis_clip), ice_ratio, torch.zeros_like(ice_ratio)
-    )
+    ice_weight = icepop_gate(ice_ratio, args.tis_clip_low, args.tis_clip)
     ice_clipfrac = (ice_weight != ice_ratio).float()
     metrics = {
         "tis": ice_ratio.clone().detach(),
