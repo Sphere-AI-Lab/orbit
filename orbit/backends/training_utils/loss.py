@@ -8,6 +8,7 @@ from torch.utils.checkpoint import checkpoint
 from orbit.utils.distributed_utils import distributed_masked_whiten
 from orbit.utils.misc import load_function
 from orbit.utils.ppo_utils import (
+    _safe_exp_neg_ppo_kl,
     calculate_log_probs_and_entropy,
     compute_approx_kl,
     compute_gspo_kl,
@@ -670,7 +671,7 @@ def policy_loss_function(
 
         assert "rollout_log_probs" in batch, "rollout_log_probs must be provided for TIS"
 
-        ois = (-ppo_kl).exp()
+        ois = _safe_exp_neg_ppo_kl(ppo_kl)
         tis_kwargs = {
             "args": args,
             "pg_loss": pg_loss,

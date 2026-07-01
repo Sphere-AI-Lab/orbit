@@ -8,6 +8,22 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 
+_LOG_RATIO_EXP_CLAMP = 20.0
+
+
+def _safe_clamp_log_ratio(log_ratio: torch.Tensor) -> torch.Tensor:
+    log_ratio = torch.nan_to_num(
+        log_ratio.float(),
+        nan=0.0,
+        posinf=_LOG_RATIO_EXP_CLAMP,
+        neginf=-_LOG_RATIO_EXP_CLAMP,
+    )
+    return torch.clamp(log_ratio, min=-_LOG_RATIO_EXP_CLAMP, max=_LOG_RATIO_EXP_CLAMP)
+
+
+def _safe_exp_neg_ppo_kl(ppo_kl: torch.Tensor) -> torch.Tensor:
+    return _safe_clamp_log_ratio(-ppo_kl).exp()
+
 
 @torch.compile(dynamic=True)
 def compute_approx_kl(
@@ -37,6 +53,8 @@ def compute_approx_kl(
         # http://joschu.net/blog/kl-approx.html
         # Besides non negative, it is also unbiased and have lower variance.
         log_ratio = -log_ratio
+        if kl_loss_type == "low_var_kl":
+            log_ratio = _safe_clamp_log_ratio(log_ratio)
         kl = log_ratio.exp() - 1 - log_ratio
     else:
         raise ValueError(f"Unknown kl_loss_type: {kl_loss_type}")
@@ -130,8 +148,7 @@ def compute_policy_loss(
     eps_clip_high: float,
     eps_clip_c: float | None = None,
 ):
-    negative_approx_kl = (-ppo_kl).clamp(min=-20.0, max=20.0)
-    ratio = negative_approx_kl.exp()
+    ratio = _safe_exp_neg_ppo_kl(ppo_kl)
     pg_losses1 = -ratio * advantages
     pg_losses2 = -ratio.clamp(1 - eps_clip, 1 + eps_clip_high) * advantages
     clip_pg_losses1 = torch.maximum(pg_losses1, pg_losses2)
