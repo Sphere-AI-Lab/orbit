@@ -162,6 +162,36 @@ def get_rollout_data(args: Namespace, rollout_data_ref: Box) -> RolloutBatch:
                 )
             )
         ]
+    if "teacher_log_probs" in rollout_data and not isinstance(rollout_data["teacher_log_probs"][0], torch.Tensor):
+        # sglang OPD teacher: teacher_log_probs arrive as raw list[list[float]]
+        # (response-length aligned) transferred rollout->train, so they must be
+        # tensorized + CP-sliced here, mirroring the rollout_log_probs block above.
+        # The megatron OPD teacher instead populates rollout_data["teacher_log_probs"]
+        # with tensors *later* via compute_log_prob (sample.teacher_log_probs is None
+        # for megatron, so it is absent from the transferred data here); the isinstance
+        # guard keeps that already-tensorized path untouched.
+        max_seq_lens = rollout_data.get("max_seq_lens")
+        rollout_data["teacher_log_probs"] = [
+            torch.tensor(
+                slice_log_prob_with_cp(
+                    log_prob,
+                    total_length,
+                    response_length,
+                    args.qkv_format,
+                    max_seq_lens[i] if max_seq_lens is not None else None,
+                ),
+                device=torch.cuda.current_device(),
+                dtype=torch.float32,
+            )
+            for i, (log_prob, total_length, response_length) in enumerate(
+                zip(
+                    rollout_data["teacher_log_probs"],
+                    rollout_data["total_lengths"],
+                    rollout_data["response_lengths"],
+                    strict=False,
+                )
+            )
+        ]
     if "rollout_routed_experts" in rollout_data:
         rollout_data["rollout_routed_experts"] = [torch.from_numpy(r) for r in rollout_data["rollout_routed_experts"]]
     return rollout_data
