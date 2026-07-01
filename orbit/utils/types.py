@@ -44,6 +44,7 @@ class Sample:
     loss_mask: list[int] | None = None
     weight_versions: list[str] = field(default_factory=list)
     rollout_log_probs: list[float] | None = None  # Log probabilities from rollout engine
+    teacher_log_probs: list[float] | None = None  # per-response-token teacher logprobs (OPD)
     rollout_routed_experts: numpy.ndarray | None = (
         None  # Routed experts from rollout engine. shape: (num_tokens-1, num_layers, moe_router_topk), dtype=int32
     )
@@ -201,6 +202,8 @@ class Sample:
         self.response_length -= n
         if self.rollout_log_probs is not None:
             self.rollout_log_probs = self.rollout_log_probs[:-n]
+        if self.teacher_log_probs is not None:
+            self.teacher_log_probs = self.teacher_log_probs[:-n]
         if self.loss_mask is not None:
             self.loss_mask = self.loss_mask[:-n]
         self.response = tokenizer.decode(self.tokens[-self.response_length :]) if self.response_length > 0 else ""
@@ -222,6 +225,7 @@ class Sample:
         self.loss_mask = None
         self.weight_versions = []
         self.rollout_log_probs = None
+        self.teacher_log_probs = None
         self.rollout_routed_experts = None
         self.status = Sample.Status.ABORTED
         self.non_generation_time = 0.0
