@@ -97,6 +97,15 @@ def add_on_policy_distillation_arguments(parser):
         default=None,
         help="Checkpoint step (iteration) to load for the OPD teacher. If None, use the latest iteration.",
     )
+    parser.add_argument(
+        "--opd-teacher-url",
+        type=str,
+        default=None,
+        help=(
+            "URL of the external SGLang teacher server's /generate endpoint, e.g. http://host:port/generate "
+            "(required for --opd-type sglang)."
+        ),
+    )
     return parser
 
 
@@ -136,6 +145,8 @@ def _validate_opd_args(args) -> None:
                 "--opd-type sglang scores via an external SGLang teacher server; --opd-teacher-load must be "
                 "unset (configure the SGLang teacher endpoint instead of an in-process checkpoint)."
             )
+        if not args.opd_teacher_url:
+            raise ValueError("--opd-type sglang requires --opd-teacher-url <http://host:port/generate>.")
 
 
 def _is_default_rollout_function_path(path: str | None) -> bool:

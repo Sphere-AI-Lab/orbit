@@ -30,6 +30,7 @@ def _base_args(**overrides):
         opd_kl_coef=1.0,
         opd_teacher_load=None,
         opd_teacher_ckpt_step=None,
+        opd_teacher_url=None,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -45,6 +46,7 @@ def test_opd_args_defaults():
     assert args.opd_kl_coef == 1.0
     assert args.opd_teacher_load is None
     assert args.opd_teacher_ckpt_step is None
+    assert args.opd_teacher_url is None
 
 
 def test_opd_args_parse_values():
@@ -66,6 +68,11 @@ def test_opd_args_parse_values():
     assert args.opd_kl_coef == 0.5
     assert args.opd_teacher_load == "/some/ckpt"
     assert args.opd_teacher_ckpt_step == 100
+
+
+def test_opd_teacher_url_parses_value():
+    args = _parse(["--opd-type", "sglang", "--opd-teacher-url", "http://host:1234/generate"])
+    assert args.opd_teacher_url == "http://host:1234/generate"
 
 
 def test_opd_type_rejects_unknown_choice():
@@ -128,8 +135,16 @@ def test_validate_megatron_teacher_load_missing_path(tmp_path):
 
 
 def test_validate_sglang_rejects_teacher_load():
-    args = _base_args(use_opd=True, opd_type="sglang", opd_teacher_load="/some/ckpt")
+    args = _base_args(
+        use_opd=True, opd_type="sglang", opd_teacher_load="/some/ckpt", opd_teacher_url="http://host/generate"
+    )
     with pytest.raises(ValueError, match="sglang"):
+        _validate_opd_args(args)
+
+
+def test_validate_sglang_requires_teacher_url():
+    args = _base_args(use_opd=True, opd_type="sglang", opd_teacher_url=None)
+    with pytest.raises(ValueError, match="opd-teacher-url"):
         _validate_opd_args(args)
 
 
@@ -150,5 +165,7 @@ def test_validate_megatron_passes_with_valid_ckpt(tmp_path):
 
 
 def test_validate_sglang_passes_without_teacher_load():
-    args = _base_args(use_opd=True, opd_type="sglang", opd_teacher_load=None)
+    args = _base_args(
+        use_opd=True, opd_type="sglang", opd_teacher_load=None, opd_teacher_url="http://host/generate"
+    )
     _validate_opd_args(args)
