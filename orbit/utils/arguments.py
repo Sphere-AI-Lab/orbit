@@ -47,6 +47,97 @@ def uses_rollout_engines(args) -> bool:
     return bool(getattr(args, "use_rollout_engines", True))
 
 
+def needs_opd_teacher(args) -> bool:
+    """Whether a teacher log-prob producer is needed for on-policy distillation.
+
+    Both OPD objective forms consume the same ``rollout_data["teacher_log_probs"]``:
+    pure MOPD (``--advantage-estimator on_policy_distillation``) and the blend
+    (``--use-opd``). Either one requires teacher production.
+    """
+    return args.advantage_estimator == "on_policy_distillation" or getattr(args, "use_opd", False)
+
+
+def add_on_policy_distillation_arguments(parser):
+    """On-policy distillation (OPD) teacher config. Mirrors slime arguments.py:1084-1125."""
+    parser.add_argument(
+        "--use-opd",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable blend-mode on-policy distillation: subtract opd_kl_coef * (student - teacher) "
+            "from a reward-based estimator's advantage. Requires a teacher producer (--opd-type). "
+            "Mutually exclusive with --advantage-estimator on_policy_distillation (pure MOPD)."
+        ),
+    )
+    parser.add_argument(
+        "--opd-type",
+        type=str,
+        choices=["megatron", "sglang"],
+        default=None,
+        help=(
+            "Teacher log-prob producer: 'megatron' loads a second in-process Megatron model "
+            "scored by a forward pass; 'sglang' scores via an external SGLang teacher server."
+        ),
+    )
+    parser.add_argument(
+        "--opd-kl-coef",
+        type=float,
+        default=1.0,
+        help="Blend coefficient lambda for the distillation KL term applied to advantages under --use-opd.",
+    )
+    parser.add_argument(
+        "--opd-teacher-load",
+        type=str,
+        default=None,
+        help="Megatron checkpoint directory for the in-process OPD teacher (required for --opd-type megatron).",
+    )
+    parser.add_argument(
+        "--opd-teacher-ckpt-step",
+        type=int,
+        default=None,
+        help="Checkpoint step (iteration) to load for the OPD teacher. If None, use the latest iteration.",
+    )
+    return parser
+
+
+def _validate_opd_args(args) -> None:
+    """Validate on-policy distillation args. Mirrors slime arguments.py:1761-1791."""
+    # Pure MOPD (advantage estimator) and blend (--use-opd) are mutually exclusive:
+    # blend is meant to sit on top of a reward-based estimator, not on pure distillation.
+    if args.advantage_estimator == "on_policy_distillation" and getattr(args, "use_opd", False):
+        raise ValueError(
+            "--advantage-estimator on_policy_distillation (pure MOPD) and --use-opd (blend) are "
+            "mutually exclusive. Pure MOPD is reward-free distillation; --use-opd blends a distillation "
+            "KL onto a reward-based estimator. Pick one."
+        )
+
+    if not needs_opd_teacher(args):
+        return
+
+    if args.opd_type is None:
+        raise ValueError(
+            "On-policy distillation is enabled (advantage_estimator=on_policy_distillation or --use-opd), "
+            "so --opd-type {megatron,sglang} is required to select the teacher producer."
+        )
+
+    if args.opd_type == "megatron":
+        if not args.opd_teacher_load:
+            raise ValueError("--opd-type megatron requires --opd-teacher-load <megatron checkpoint directory>.")
+        if not os.path.exists(args.opd_teacher_load):
+            raise FileNotFoundError(f"--opd-teacher-load {args.opd_teacher_load} does not exist, please check the path.")
+        if not os.path.exists(os.path.join(args.opd_teacher_load, "latest_checkpointed_iteration.txt")):
+            logger.info(
+                f"--opd-teacher-load {args.opd_teacher_load} does not have latest_checkpointed_iteration.txt, "
+                "please make sure it is a valid megatron checkpoint directory."
+            )
+    elif args.opd_type == "sglang":
+        if args.opd_teacher_load:
+            raise ValueError(
+                "--opd-type sglang scores via an external SGLang teacher server; --opd-teacher-load must be "
+                "unset (configure the SGLang teacher endpoint instead of an in-process checkpoint)."
+            )
+
+
 def _is_default_rollout_function_path(path: str | None) -> bool:
     return path is None or path in DEFAULT_ROLLOUT_FUNCTION_PATHS
 
@@ -2051,6 +2142,7 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
         parser = add_data_arguments(parser)
         parser = add_eval_arguments(parser)
         parser = add_algo_arguments(parser)
+        parser = add_on_policy_distillation_arguments(parser)
         parser = add_peft_arguments(parser)
         parser = add_lora_arguments(parser)
         parser = add_wandb_arguments(parser)
@@ -2383,6 +2475,8 @@ def _common_orbit_validate_args(args):
             "The 'reinforce_plus_plus' and 'reinforce_plus_plus_baseline' advantage estimators "
             "require advantage normalization. Please add `--normalize-advantages` to your command."
         )
+
+    _validate_opd_args(args)
 
     if args.use_rollout_logprobs:
         assert not args.use_tis, "use_rollout_logprobs and use_tis cannot be set at the same time."
