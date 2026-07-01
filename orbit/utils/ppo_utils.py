@@ -332,6 +332,42 @@ def get_reinforce_plus_plus_baseline_advantages(
     return unwhitened_advantages
 
 
+def opd_mopd_advantages(
+    rollout_data: dict,
+    student_log_probs: list[torch.Tensor],
+    response_lengths: list[int],
+) -> list[torch.Tensor]:
+    """Pure on-policy distillation (MOPD) advantage: teacher_logp - student_logp.
+
+    Args:
+        rollout_data: Rollout batch dict; must contain `teacher_log_probs`
+            (list[torch.Tensor], one per sample, aligned to `response_lengths`).
+        student_log_probs: Current policy log-probs per sample.
+        response_lengths: Response length per sample.
+
+    Returns:
+        list[torch.Tensor]: `teacher_i[-L_i:] - student_i` per sample.
+    """
+    teacher_log_probs = rollout_data.get("teacher_log_probs")
+    if teacher_log_probs is None:
+        raise ValueError(
+            "advantage_estimator='on_policy_distillation' needs teacher_log_probs. "
+            "Enable a teacher producer with --use-opd --opd-type {megatron,sglang}."
+        )
+    if len(teacher_log_probs) != len(student_log_probs):
+        raise ValueError(f"OPD length mismatch: teacher={len(teacher_log_probs)} student={len(student_log_probs)}")
+    device = student_log_probs[0].device
+    out = []
+    for i, (t, s, response_length) in enumerate(
+        zip(teacher_log_probs, student_log_probs, response_lengths, strict=False)
+    ):
+        t = t.to(device=device)[-response_length:]
+        if t.shape != s.shape:
+            raise ValueError(f"OPD shape mismatch at {i}: teacher={tuple(t.shape)} student={tuple(s.shape)}")
+        out.append(t - s)
+    return out
+
+
 def get_advantages_and_returns(
     total_len: int,
     response_len: int,
