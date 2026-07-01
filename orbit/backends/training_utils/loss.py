@@ -9,6 +9,7 @@ from orbit.utils.distributed_utils import distributed_masked_whiten
 from orbit.utils.misc import load_function
 from orbit.utils.ppo_utils import (
     _safe_exp_neg_ppo_kl,
+    apply_opd_kl_to_advantages,
     calculate_log_probs_and_entropy,
     compute_approx_kl,
     compute_gspo_kl,
@@ -429,6 +430,9 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
 
     else:
         raise NotImplementedError(f"advantage_estimator {args.advantage_estimator} is not supported. ")
+
+    if getattr(args, "use_opd", False):
+        apply_opd_kl_to_advantages(args.opd_kl_coef, rollout_data, advantages, log_probs)
 
     # Follow-up: OpenRLHF always does advantages normalization but veRL doesn't seem to do it.
     if args.normalize_advantages:

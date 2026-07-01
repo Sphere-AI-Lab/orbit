@@ -368,6 +368,42 @@ def opd_mopd_advantages(
     return out
 
 
+def apply_opd_kl_to_advantages(
+    opd_kl_coef: float,
+    rollout_data: dict,
+    advantages: list[torch.Tensor],
+    student_log_probs: list[torch.Tensor],
+) -> None:
+    """Blend an on-policy-distillation reverse-KL penalty into base advantages, in place.
+
+    `adv_i -= opd_kl_coef * (student_i - teacher_i)`, i.e. the blend form of OPD
+    (slime/miles): any base estimator's advantage combined with distillation
+    toward the teacher. Also stores the per-sample reverse KL in
+    `rollout_data["opd_reverse_kl"]`.
+
+    Args:
+        opd_kl_coef: Coefficient for the reverse-KL penalty.
+        rollout_data: Rollout batch dict; must contain `teacher_log_probs`
+            (list[torch.Tensor], one per sample, aligned to `student_log_probs`).
+        advantages: Base-estimator advantages per sample; mutated in place.
+        student_log_probs: Current policy log-probs per sample.
+    """
+    teacher_log_probs = rollout_data.get("teacher_log_probs")
+    if teacher_log_probs is None:
+        raise ValueError("--use-opd requires teacher_log_probs; enable a teacher producer (--opd-type).")
+    device = student_log_probs[0].device
+    reverse_kls = []
+    for i, adv in enumerate(advantages):
+        t = teacher_log_probs[i].to(device=device)
+        s = student_log_probs[i]
+        if t.shape != s.shape:
+            raise ValueError(f"OPD shape mismatch at {i}: teacher={tuple(t.shape)} student={tuple(s.shape)}")
+        reverse_kl = s - t
+        advantages[i] = adv - opd_kl_coef * reverse_kl
+        reverse_kls.append(reverse_kl)
+    rollout_data["opd_reverse_kl"] = reverse_kls
+
+
 def get_advantages_and_returns(
     total_len: int,
     response_len: int,
