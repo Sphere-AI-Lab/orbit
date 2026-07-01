@@ -72,7 +72,11 @@ def start_router(args, *, has_pd_disaggregation: bool = False, force_new: bool =
     )
     process.daemon = True
     process.start()
-    wait_for_server_ready(router_ip, router_port, process, timeout=30)
+    # spawn (not fork) means this child cold-imports sglang_router.launch_router,
+    # which transitively loads torch+sglang (minutes on the bare-metal miles env,
+    # vs. ~instant when fork inherited the parent's modules). 30s is far too short;
+    # wait_for_server_ready still surfaces a real crash immediately via is_alive().
+    wait_for_server_ready(router_ip, router_port, process, timeout=600)
     logger.info(f"Router launched at {router_ip}:{router_port}")
     return router_ip, router_port
 
@@ -111,5 +115,5 @@ def start_session_server(args):
     process = multiprocessing.get_context("spawn").Process(target=run_session_server, args=(args, router_url))
     process.daemon = True
     process.start()
-    wait_for_server_ready(ip, port, process, timeout=30)
+    wait_for_server_ready(ip, port, process, timeout=600)  # see start_router: spawn cold-imports torch+sglang
     logger.info(f"Session server launched at {ip}:{port}")
