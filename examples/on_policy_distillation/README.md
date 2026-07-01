@@ -127,6 +127,33 @@ RL_ARGS=(
 )
 ```
 
+## Async correction (ICE-POP)
+
+With asynchronous / off-policy rollouts the acting policy drifts from the
+current student, biasing the OPD advantage. `--opd-icepop` (default off) applies
+orbit's existing ICE-POP truncated-importance-sampling gate to the OPD
+advantage: per token it computes the train/rollout importance ratio (the same
+ratio the policy-gradient `icepop`/TIS path uses), reweights in-band tokens by
+that ratio, and zeroes tokens whose ratio falls outside `[--tis-clip-low,
+--tis-clip]`. It reuses those existing thresholds (no new knobs) and applies to
+both pure MOPD and blend. This mirrors NeMo-RL's MOPD ICE-POP correction.
+
+```
+RL_ARGS=(
+    --advantage-estimator on_policy_distillation
+    --opd-type megatron
+    --opd-teacher-load "${OPD_TEACHER_LOAD}"
+    --opd-icepop
+    --tis-clip-low 0.2
+    --tis-clip 5.0
+    ...
+)
+```
+
+`--opd-icepop` needs the train-recomputed log-probs to differ from the rollout
+log-probs, so it is rejected together with `--use-rollout-logprobs` (which would
+make the ratio identically 1).
+
 ## Constraints
 
 - The Megatron teacher requires full fine-tuning (`--peft-method none`) and the
