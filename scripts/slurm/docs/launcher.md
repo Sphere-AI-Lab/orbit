@@ -75,7 +75,7 @@ show `mem=<full node mem>`, not `mem=64G`.
 
 ## Healthcheck
 
-Three **per-node** tiers (run from the head node via `srun --overlap
+Four **per-node** tiers (run from the head node via `srun --overlap
 --mem=0`, one srun per node) plus one **cross-node** tier, all before Ray
 bring-up so a bad node/fabric never wastes a ~12 min model load.
 
@@ -98,8 +98,19 @@ bring-up so a bad node/fabric never wastes a ~12 min model load.
    are ignored — NCCL doesn't auto-select them. Skips (non-blocking) if
    `ibstat` is missing or reports no IB rails. Opt out with
    `MILES_HEALTHCHECK_IB=0`.
+4. **Tier weka — `bash lib/weka_probe.sh`** (~2–10 s, pure bash + `dd`, no
+   torch). Reads ~64 MiB **O_DIRECT** from a large file on the shared FS (the
+   conda env under `/data`, WekaFS). Catches a **wedged WekaFS client**: a
+   healthy read returns in seconds, but a wedge makes `/data` reads hang in
+   uninterruptible D-state, which otherwise stalls sglang engine/weight bring-up
+   indefinitely with idle GPUs and no error (see
+   `docs/debug-notes/miles-sync-2026-06-30/wekafs-wedge-2026-07-01.md`). O_DIRECT
+   bypasses the page cache so a probe file left warm by a prior job can't mask
+   the wedge; it targets a *wedge* (reads that never return), not slowness
+   (64 MiB completes well within `HEALTHCHECK_TIMEOUT`). Skips (non-blocking) if
+   no sizable file is found. Opt out with `MILES_HEALTHCHECK_WEKA=0`.
 
-Tiers 1–3 are per-node and **localizable** — a failure appends the node to
+Tiers 1–4 are per-node and **localizable** — a failure appends the node to
 `BAD_NODES` and rides the shared requeue machinery:
 
 - `<run-dir>/.bad_nodes` accumulates the bad-node list across requeues
@@ -118,7 +129,7 @@ still exits 75 with a manual `[healthcheck] HINT: SBATCH_EXTRA='--exclude=...'`
 line — the requeue may land on the same bad nodes, so the cap protects
 against an infinite loop.
 
-4. **Tier nccl — `lib/nccl_probe.py`** (cross-node, ~1 min; runs after
+5. **Tier nccl — `lib/nccl_probe.py`** (cross-node, ~1 min; runs after
    `NODE_PREAMBLE`, before HF convert / Ray bring-up; skipped when fewer
    than 2 Ray/training nodes). Forms a real process group across the
    Ray/training nodes (`RAY_NODES` — i.e. excluding any envpack-server
@@ -136,7 +147,7 @@ against an infinite loop.
    first Ray node (the Ray head) so rendezvous never targets an excluded
    or envpack-only node. Being an
    **aggregate** check it can't attribute a failure to one node, so —
-   unlike tiers 1–3 — it does **not** requeue: after 2 in-place attempts
+   unlike tiers 1–4 — it does **not** requeue: after 2 in-place attempts
    it writes `MANIFEST state=FAILED failure_reason=nccl_probe` and exits
    1, leaving a clean repro at `<run-dir>/nccl_probe.log` (`NCCL_DEBUG=INFO`)
    for infra. Rationale: the deterministic causes (Polling rail, memlock)

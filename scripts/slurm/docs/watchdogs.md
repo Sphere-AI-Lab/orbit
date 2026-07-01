@@ -105,6 +105,12 @@ S7 training compute, "outer" = any time after submit.
   capped at 3 restarts → else FAILED ("healthcheck_exhausted").
 - **Cleanup gate POISONED**: after killing leftover procs, if a **D-state process persists**
   (5 re-samples) or **GPU mem used > 500 MB**, the node is POISONED → requeue (exit 75).
+- **Tier weka** (`lib/weka_probe.sh`): a bounded ~64 MiB **O_DIRECT** read from the shared FS
+  (`/data`, WekaFS), per-node, same requeue-excluding path as T1/T2. Catches a **wedged Weka
+  client** — reads hang in D-state and otherwise stall engine/weight bring-up with idle GPUs
+  and no error (2026-07-01, j21623). Complements the cleanup gate: that flags only *leftover*
+  D-state procs, this actively reads to catch a wedged mount on an otherwise-clean node. Opt
+  out `MILES_HEALTHCHECK_WEKA=0`.
 - **Why**: never start training on a node with dead/orphaned GPU procs (leaked vLLM/sglang
   workers) — they'd OOM or hang the run. **This is what killed 21351/21352/21353** today:
   gpu_probe BAD on slinky-11/47/29/34/51 (leftover GPU procs). Note: the in-job

@@ -31,6 +31,7 @@
 #   HEALTHCHECK_TIMEOUT   per-node probe timeout (s)         [60]
 #   HEALTHCHECK_MAX_RESTARTS  auto-requeue cap for bad nodes [3]
 #   MILES_HEALTHCHECK_IB      per-node IB-rail probe; 0/off/false disables  [1]
+#   MILES_HEALTHCHECK_WEKA    per-node shared-FS (WekaFS) read probe; 0/off/false disables [1]
 #   MILES_HEALTHCHECK_NCCL    cross-node NCCL all-reduce; 0/off/false disables [1]
 #   NCCL_HEALTHCHECK_WALL     NCCL probe wall timeout (s)    [300]
 #   NCCL_HEALTHCHECK_MIN_BUSBW_GB  tier-nccl busbw floor (GB/s); 0=off [50]
@@ -70,6 +71,7 @@ HEALTHCHECK_MAX_RESTARTS=${HEALTHCHECK_MAX_RESTARTS:-3}
 # non-numeric value in (( )) aborts under `set -u`. Unrecognized -> 1.
 _bool() { case "${1,,}" in 0|off|false|no) echo 0 ;; *) echo 1 ;; esac; }
 HEALTHCHECK_IB=$(_bool "${MILES_HEALTHCHECK_IB:-1}")
+HEALTHCHECK_WEKA=$(_bool "${MILES_HEALTHCHECK_WEKA:-1}")
 HEALTHCHECK_NCCL=$(_bool "${MILES_HEALTHCHECK_NCCL:-1}")
 NCCL_HEALTHCHECK_WALL=${NCCL_HEALTHCHECK_WALL:-300}
 NCCL_HEALTHCHECK_MIN_BUSBW_GB=${NCCL_HEALTHCHECK_MIN_BUSBW_GB:-50}
@@ -126,6 +128,8 @@ write_manifest RUNNING
 #   tier 1  : `nvidia-smi --query-gpu=count` (fast, ~2s)
 #   tier 2  : `python gpu_probe.py` — torch.cuda.set_device(i) on every GPU
 #   tier ib : `bash ib_probe.sh` — every InfiniBand rail must be LinkUp
+#   tier weka: `bash weka_probe.sh` — bounded read from the shared FS; catches a
+#             wedged WekaFS client (reads hang in D-state, stalling weight/engine load)
 # Per-node failures persist in $RUN_DIR/.bad_nodes across requeues and are
 # added to the job's ExcNodeList so the next allocation skips them.
 #   tier nccl: cross-node all-reduce smoke test (lib/nccl_probe.py), run
@@ -163,6 +167,15 @@ for n in "${ALL_NODES[@]}"; do
         continue
     fi
     rm -f "$RUN_DIR/ib_probe.$n.log"
+    if (( HEALTHCHECK_WEKA )) && ! timeout "$HEALTHCHECK_TIMEOUT" srun --jobid="$JOBID" --overlap --mem=0 \
+            -N1 -n1 -w "$n" --gres=gpu:8 \
+            bash "$MILES_REPO/scripts/slurm/lib/weka_probe.sh" \
+            > "$RUN_DIR/weka_probe.$n.log" 2>&1; then
+        BAD_NODES+=("$n")
+        echo "[healthcheck] BAD $n (tier-weka weka_probe; $(tail -n1 "$RUN_DIR/weka_probe.$n.log" 2>/dev/null))"
+        continue
+    fi
+    rm -f "$RUN_DIR/weka_probe.$n.log"
     GOOD_NODES+=("$n")
     echo "[healthcheck] OK  $n"
 done
