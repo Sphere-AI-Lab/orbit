@@ -80,6 +80,20 @@ def dump_node_env(rank: int, local_rank: int) -> None:
         "CUDA_VISIBLE_DEVICES",
     ]
     print(f"\n[env {host} rank={rank}] memlock soft={soft} hard={hard}", flush=True)
+    # memlock must be effectively unlimited for RDMA/IB registration; a small cap
+    # silently forces NCCL to fall back to TCP sockets (which the MIN_BUSBW_GB gate
+    # then catches as a bandwidth floor miss). Surface it directly as the root cause.
+    # "Unlimited" is NOT always the RLIM_INFINITY sentinel: this cluster caps memlock
+    # at a literal ~2^63 bytes (9 EiB — unlimited in practice), so a sentinel-equality
+    # check WARNs on every healthy node. Warn only below a threshold that no sane
+    # config uses but every real misconfig (the 64 KiB / 64 MiB defaults) sits under.
+    memlock_warn_below = 1 << 40  # 1 TiB
+    if soft != resource.RLIM_INFINITY and soft < memlock_warn_below:
+        print(
+            f"[env {host}] WARN: RLIMIT_MEMLOCK soft={soft} (<1 TiB) — RDMA/IB "
+            f"registration can fail or fall back to sockets (raise via `ulimit -l unlimited`)",
+            flush=True,
+        )
     for k in nccl_keys:
         print(f"[env {host}]   {k}={os.environ.get(k, '<unset>')}", flush=True)
     try:
