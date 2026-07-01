@@ -34,7 +34,8 @@
 #   MILES_HEALTHCHECK_NCCL    cross-node NCCL all-reduce; 0/off/false disables [1]
 #   NCCL_HEALTHCHECK_WALL     NCCL probe wall timeout (s)    [300]
 #   NCCL_HEALTHCHECK_MIN_BUSBW_GB  tier-nccl busbw floor (GB/s); 0=off [50]
-#   RAY_BRINGUP_TIMEOUT   cluster-ready timeout (s)          [300]
+#   RAY_BRINGUP_TIMEOUT   per-attempt cluster-ready timeout (s)  [300]
+#   RAY_BRINGUP_ATTEMPTS  ray bring-up tries before FAILED   [3]
 #   RAY_STATUS_POLL_INTERVAL  ray job status poll period (s) [15]
 #   RAY_STATUS_PROBE_TIMEOUT  per-probe timeout (s)          [10]
 #   RAY_STATUS_FAIL_GRACE     unreadable-probe count -> dead [24]
@@ -73,6 +74,7 @@ HEALTHCHECK_NCCL=$(_bool "${MILES_HEALTHCHECK_NCCL:-1}")
 NCCL_HEALTHCHECK_WALL=${NCCL_HEALTHCHECK_WALL:-300}
 NCCL_HEALTHCHECK_MIN_BUSBW_GB=${NCCL_HEALTHCHECK_MIN_BUSBW_GB:-50}
 RAY_BRINGUP_TIMEOUT=${RAY_BRINGUP_TIMEOUT:-300}
+RAY_BRINGUP_ATTEMPTS=${RAY_BRINGUP_ATTEMPTS:-3}
 ENVPACK_SERVER_NODE_COUNT=${ENVPACK_SERVER_NODE_COUNT:-0}
 ENVPACK_SERVER_ENV_NAME=${ENVPACK_SERVER_ENV_NAME:-$MILES_ENV_NAME}
 ENVPACK_SERVER_WAIT_TIMEOUT=${ENVPACK_SERVER_WAIT_TIMEOUT:-60}
@@ -606,34 +608,85 @@ start_envpack_server_watchdog() {
     echo "[envpack-server] watchdog started pid=$ENVPACK_SERVER_WATCHDOG_PID url=$health_url interval=${ENVPACK_SERVER_WATCHDOG_INTERVAL}s failures=$ENVPACK_SERVER_WATCHDOG_FAILURES"
 }
 
-# ---------- ray bring-up --------------------------------------------------
+# ---------- ray bring-up (fail-fast detection + retry) --------------------
+# Boot ray head + workers, then poll BOTH `ray status` (GPUs registered) and the
+# head/worker srun PIDs. Each `ray start … --block` blocks forever on success, so
+# a dead PID means that node's ray exited — i.e. the cluster collapsed (commonly
+# slow GCS/raylet registration tripping Ray's hardcoded 30s node-info wait, which
+# no launcher timeout can extend; see docs/launcher.md "Ray bring-up"). On that
+# signal we stop polling at once instead of idling out the whole
+# RAY_BRINGUP_TIMEOUT, snapshot the node-local Ray component logs (they vanish
+# with the node otherwise), and retry on a fresh `ray start` — these failures are
+# usually transient.
 
-echo "[ray] starting head on $HEAD_NODE"
-srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$HEAD_NODE" \
-     --export=ALL,MASTER_ADDR="$HEAD_IP",RAY_PORT="$RAY_PORT",RAY_DASHBOARD_PORT="$RAY_DASHBOARD_PORT" \
-     bash -c "$NODE_PREAMBLE"'
-        ray stop --force >/dev/null 2>&1 || true
-        ray start --head \
-            --node-ip-address "$MASTER_ADDR" \
-            --port "$RAY_PORT" \
-            --num-gpus 8 \
-            --dashboard-host 0.0.0.0 \
-            --dashboard-port "$RAY_DASHBOARD_PORT" \
-            --disable-usage-stats --block
-     ' >"$RUN_DIR/ray_head.log" 2>&1 &
-RAY_PIDS=( $! )
-
-for w in "${WORKER_NODES[@]}"; do
-    echo "[ray] starting worker on $w"
-    srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$w" \
-         --export=ALL,MASTER_ADDR="$HEAD_IP",RAY_PORT="$RAY_PORT" \
+# Launch head + workers as backgrounded srun; (re)populates the RAY_PIDS array.
+start_ray_cluster() {
+    RAY_PIDS=()
+    echo "[ray] starting head on $HEAD_NODE"
+    srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$HEAD_NODE" \
+         --export=ALL,MASTER_ADDR="$HEAD_IP",RAY_PORT="$RAY_PORT",RAY_DASHBOARD_PORT="$RAY_DASHBOARD_PORT" \
          bash -c "$NODE_PREAMBLE"'
             ray stop --force >/dev/null 2>&1 || true
-            ray start --address "${MASTER_ADDR}:${RAY_PORT}" \
-                --num-gpus 8 --disable-usage-stats --block
-         ' >"$RUN_DIR/ray_worker_${w}.log" 2>&1 &
-    RAY_PIDS+=( $! )
-done
+            ray start --head \
+                --node-ip-address "$MASTER_ADDR" \
+                --port "$RAY_PORT" \
+                --num-gpus 8 \
+                --dashboard-host 0.0.0.0 \
+                --dashboard-port "$RAY_DASHBOARD_PORT" \
+                --disable-usage-stats --block
+         ' >"$RUN_DIR/ray_head.log" 2>&1 &
+    RAY_PIDS=( $! )
+
+    for w in "${WORKER_NODES[@]}"; do
+        echo "[ray] starting worker on $w"
+        srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$w" \
+             --export=ALL,MASTER_ADDR="$HEAD_IP",RAY_PORT="$RAY_PORT" \
+             bash -c "$NODE_PREAMBLE"'
+                ray stop --force >/dev/null 2>&1 || true
+                ray start --address "${MASTER_ADDR}:${RAY_PORT}" \
+                    --num-gpus 8 --disable-usage-stats --block
+             ' >"$RUN_DIR/ray_worker_${w}.log" 2>&1 &
+        RAY_PIDS+=( $! )
+    done
+}
+
+# Snapshot a failed attempt's logs to $RUN_DIR/ray-debug-attempt<N>/: the
+# per-node top-level srun logs plus Ray's node-local component logs
+# (gcs_server / raylet / ray_client_server / *_agent), the only place the real
+# bootstrap cause is recorded and which otherwise disappear with the node.
+collect_ray_logs() {
+    local attempt="$1"
+    local dst="$RUN_DIR/ray-debug-attempt${attempt}"
+    local node role
+    mkdir -p "$dst"
+    cp "$RUN_DIR"/ray_head.log "$RUN_DIR"/ray_worker_*.log "$dst"/ 2>/dev/null || true
+    for node in "$HEAD_NODE" "${WORKER_NODES[@]}"; do
+        [[ "$node" == "$HEAD_NODE" ]] && role=head || role=worker
+        srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$node" \
+             bash -c '
+                d="$1/$2-$3"; mkdir -p "$d"; s=/tmp/ray/session_latest/logs
+                for f in gcs_server.out gcs_server.err raylet.out raylet.err \
+                         ray_client_server.out ray_client_server.err \
+                         dashboard_agent.log dashboard.log runtime_env_agent.log \
+                         ray_process_exit.log monitor.out monitor.err log_monitor.log; do
+                    [ -e "$s/$f" ] && cp "$s/$f" "$d/" 2>/dev/null
+                done
+             ' _ "$dst" "$role" "$node" >/dev/null 2>&1 || true
+    done
+    echo "[ray] failed-attempt ${attempt} logs saved to $dst"
+}
+
+# Stop ray on every allocated node + reap the bring-up srun PIDs (between retries).
+stop_all_ray() {
+    local n
+    for n in "$HEAD_NODE" "${WORKER_NODES[@]}"; do
+        srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$n" \
+             bash -c "$NODE_PREAMBLE"' ray stop --force ' >/dev/null 2>&1 || true
+    done
+    kill "${RAY_PIDS[@]}" 2>/dev/null || true
+}
+
+RAY_PIDS=()
 
 teardown() {
     echo "[teardown] $(date -Is)  stopping ray + killing srun children"
@@ -652,25 +705,62 @@ if [[ -n "${ENVPACK_SERVER_HEALTH_URL:-}" ]]; then
     start_envpack_server_watchdog "$ENVPACK_SERVER_HEALTH_URL"
 fi
 
-# ---------- wait for cluster ready ---------------------------------------
+# ---------- wait for cluster ready (fail-fast + retry) -------------------
 
-echo "[ray] waiting up to ${RAY_BRINGUP_TIMEOUT}s for $EXPECTED_GPUS GPUs"
-ELAPSED=0
-while (( ELAPSED < RAY_BRINGUP_TIMEOUT )); do
-    sleep 10
-    ELAPSED=$((ELAPSED + 10))
-    OUT=$(srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$HEAD_NODE" \
-              bash -c "$NODE_PREAMBLE"' ray status --address "'"$HEAD_IP"':'"$RAY_PORT"'" ' 2>/dev/null || true)
-    GPU_LINE=$(echo "$OUT" | grep -E "^[[:space:]]*[0-9.]+/[0-9.]+ GPU" | head -1 || true)
-    TOTAL=$(echo "$GPU_LINE" | sed -E 's|.*/([0-9]+)(\.[0-9]+)? GPU.*|\1|')
-    if [[ -n "${TOTAL:-}" && "$TOTAL" -ge "$EXPECTED_GPUS" ]]; then
-        echo "[ray] cluster ready: $GPU_LINE"
-        break
+RAY_READY=0
+for (( attempt=1; attempt <= RAY_BRINGUP_ATTEMPTS; attempt++ )); do
+    echo "[ray] bring-up attempt ${attempt}/${RAY_BRINGUP_ATTEMPTS}"
+    start_ray_cluster
+    echo "[ray] waiting up to ${RAY_BRINGUP_TIMEOUT}s for $EXPECTED_GPUS GPUs"
+    ELAPSED=0
+    ATTEMPT_FAIL=""
+    while (( ELAPSED < RAY_BRINGUP_TIMEOUT )); do
+        sleep 10
+        ELAPSED=$((ELAPSED + 10))
+
+        # fail-fast: a backgrounded `ray start … --block` PID dies only if that
+        # node's ray exited — the cluster is gone, don't wait out the timeout.
+        for pid in "${RAY_PIDS[@]}"; do
+            kill -0 "$pid" 2>/dev/null || { ATTEMPT_FAIL="ray start pid $pid exited"; break; }
+        done
+        [[ -n "$ATTEMPT_FAIL" ]] && break
+
+        OUT=$(srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$HEAD_NODE" \
+                  bash -c "$NODE_PREAMBLE"' ray status --address "'"$HEAD_IP"':'"$RAY_PORT"'" ' 2>/dev/null || true)
+        GPU_LINE=$(echo "$OUT" | grep -E "^[[:space:]]*[0-9.]+/[0-9.]+ GPU" | head -1 || true)
+        TOTAL=$(echo "$GPU_LINE" | sed -E 's|.*/([0-9]+)(\.[0-9]+)? GPU.*|\1|')
+        if [[ -n "${TOTAL:-}" && "$TOTAL" -ge "$EXPECTED_GPUS" ]]; then
+            echo "[ray] cluster ready: $GPU_LINE"
+            RAY_READY=1
+            break
+        fi
+    done
+
+    (( RAY_READY )) && break
+
+    if [[ -n "$ATTEMPT_FAIL" ]]; then
+        echo "[ray] attempt ${attempt} collapsed fast ($ATTEMPT_FAIL) — see ray_head.log / ray_worker_*.log"
+    else
+        echo "[ray] attempt ${attempt} did not assemble in ${RAY_BRINGUP_TIMEOUT}s"
+    fi
+    collect_ray_logs "$attempt"
+    stop_all_ray
+    if (( attempt < RAY_BRINGUP_ATTEMPTS )); then
+        echo "[ray] retrying bring-up after 15s…"
+        sleep 15
     fi
 done
-if (( ELAPSED >= RAY_BRINGUP_TIMEOUT )); then
-    echo "[ray] FATAL: cluster did not assemble in ${RAY_BRINGUP_TIMEOUT}s"
-    exit 75
+
+if (( ! RAY_READY )); then
+    # Terminal, not requeue: the in-place retries above already cover transient
+    # bring-up flakiness, and there is no bad-node exclusion for ray bring-up, so a
+    # blind --requeue would just reroll onto the same slow nodes (and, uncapped, loop
+    # to walltime — the old "stuck at RUNNING" failure). Record FAILED and stop.
+    echo "[ray] FATAL: cluster did not assemble after ${RAY_BRINGUP_ATTEMPTS} attempt(s); see ray-debug-attempt*/"
+    MANIFEST_EXTRA_JSON=$(printf '{"job_rc":1,"failure_reason":"ray_bringup","attempts":%d,"head_node":"%s","ended_at":"%s"}' \
+        "$RAY_BRINGUP_ATTEMPTS" "$HEAD_NODE" "$(date -Is)") \
+        write_manifest FAILED
+    exit 1
 fi
 
 # ---------- submit train.py + wait + crash debug -------------------------

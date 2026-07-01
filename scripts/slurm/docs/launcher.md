@@ -249,6 +249,40 @@ Implementation: `lib/ray_lifecycle.sh:crash_debug_check`. This is the
 minimum floor — a richer RL debug skill is planned that will layer
 NaN-loss / grad-explosion / sglang-weight-transfer signals on top.
 
+## Ray bring-up
+
+After the healthcheck passes, the launcher boots Ray — `ray start --head … --block`
+on the head plus `ray start --address … --block` on each worker (backgrounded
+`srun`s) — then polls until the cluster is ready. The poll watches **two** signals:
+
+- **`ray status`** — the GPUs registered with the head's GCS reach `EXPECTED_GPUS`
+  (= nodes × 8).
+- **the head/worker srun PIDs** — each `ray start … --block` blocks forever on
+  success, so a dead PID means that node's Ray exited and the cluster has collapsed.
+  The poll detects this and stops *immediately* rather than idling out the whole
+  `RAY_BRINGUP_TIMEOUT` (default 300s/attempt).
+
+The dominant bootstrap failure is the head's GCS/raylet being slow to register the
+node — `Failed to get node info … Deadline Exceeded` / "node timed out during
+startup", or a `ray_client_server [exit code=1]` whose own node-info wait expired,
+which then trips Ray's `--block` monitor into killing the head. The window for this
+is **Ray's hardcoded 30s `raylet_start_wait_time_s`** (`ray/_private/node.py`), which
+no launcher env var can extend — so raising `RAY_BRINGUP_TIMEOUT` does **not** help
+it. These failures are usually transient (the same nodes assemble fine moments
+later), so on a failed attempt the launcher:
+
+1. snapshots the bootstrap logs to `ray-debug-attempt<N>/` — the per-node srun logs
+   plus Ray's node-local component logs (`gcs_server.*`, `raylet.*`,
+   `ray_client_server.*`, `*_agent.log`) pulled from `/tmp/ray/session_latest/logs`,
+   which otherwise vanish with the node and are the *only* record of the real cause;
+2. `ray stop --force` on every node and retries on a fresh `ray start`.
+
+Up to `RAY_BRINGUP_ATTEMPTS` (default 3). Exhausting all attempts is terminal —
+`MANIFEST state=FAILED failure_reason=ray_bringup` (with `attempts`), exit 1. It does
+**not** requeue: there is no bad-node exclusion for bring-up, so a reroll would just
+land on the same slow nodes (and, uncapped, loop to walltime). Re-submit with
+known-good nodes instead.
+
 ## `MANIFEST.json` schema
 
 One per run, at `$RUN_DIR/MANIFEST.json`. Fields:
@@ -264,7 +298,7 @@ One per run, at `$RUN_DIR/MANIFEST.json`. Fields:
 | `recipe` | str | Path to the experiment recipe |
 | `restarts` | int | `SLURM_RESTART_COUNT` |
 | `job_rc` | int | Final exit code (terminal write only) |
-| `failure_reason` | str | Set on launcher-side fails: `healthcheck_exhausted`, `head_ip_unresolved`, `nccl_probe` (with `bad_nodes` / `probe_nodes`) |
+| `failure_reason` | str | Set on launcher-side fails: `healthcheck_exhausted`, `head_ip_unresolved`, `nccl_probe` (with `bad_nodes` / `probe_nodes`), `ray_bringup` (with `attempts`) |
 
 `submit.sh` reads the most recent 3 manifests for the same job name and
 warns about any non-`SUCCEEDED` state. That's a heads-up to the operator,
@@ -295,8 +329,11 @@ node-level failures, never for code bugs.
 runs/<job-name>/<YYMMDD_HHMMSS>/
 ├── run.log             # slurm --output, contains everything from launch_miles
 ├── args.json           # MILES_ARGS array parsed into JSON for diffing across runs
-├── ray_head.log        # stdout/stderr of `ray start --head`
+├── ray_head.log        # stdout/stderr of `ray start --head` (last attempt)
 ├── ray_worker_<N>.log  # stdout/stderr of each `ray start --address` worker
+├── ray-debug-attempt<N>/  # only on a failed bring-up attempt: that attempt's per-node
+│                          #   srun logs + Ray component logs (gcs_server/raylet/
+│                          #   ray_client_server/*_agent) pulled from the node's /tmp/ray
 └── MANIFEST.json       # state/timing/job_id audit record (see above)
 ```
 

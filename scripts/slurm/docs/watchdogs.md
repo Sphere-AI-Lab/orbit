@@ -28,7 +28,7 @@ engine health-monitor and the weight-broadcast cascade matter most here.
 | 2 | Node healthcheck T2 (gpu_probe) | S1 | `torch.cuda.set_device`+alloc fails | 60s/node | bad node → **requeue** (≤3) |
 | 3 | Cleanup gate POISONED | S1 | D-state proc OR GPU mem >500 MB | — | **requeue** (exit 75) |
 | 4 | Healthcheck restart cap | S1 | still-bad after 3 requeues | 3 | **FAILED** (no requeue) |
-| 5 | Ray assembly timeout | S2 | cluster ≠ EXPECTED_GPUS in time | 300s | **requeue** ("did not assemble") |
+| 5 | Ray bring-up (fail-fast + retry) | S2 | a `ray start` PID dies, or cluster ≠ EXPECTED_GPUS in time | 300s/attempt ×3 | retry in place; exhausted → **FAILED** (`ray_bringup`) |
 | 6 | Init asserts | S3 | bad config (see §6) | — | **FAILED** at init |
 | 7 | Rollout engine health-monitor | S5/S5a | `health_generate` timeout ×N consecutive | 300s timeout, 3 strikes, 30s interval | **kill engine → cascades to whole job** |
 | 8 | Weight-broadcast cascade | S5a | a dead/missing engine in the broadcast | (dist timeout 10min) | **FAILED/hang** |
@@ -112,9 +112,20 @@ S7 training compute, "outer" = any time after submit.
   must resubmit with `SBATCH_EXTRA=--exclude=...` yourself. **Not a training/code problem.**
 
 ### S2 — ray cluster assembly  (`launch_miles.sbatch` ~"did not assemble")
-- `ray status` must report `EXPECTED_GPUS` (= nodes×8) within `RAY_BRINGUP_TIMEOUT=300s`,
-  else requeue. **Why**: a worker that never joins (network / a slow node) would otherwise
-  hang init forever. Historical slinky-24/34 "ray wedge" lived here.
+- The poll watches both `ray status` (must report `EXPECTED_GPUS` = nodes×8 within
+  `RAY_BRINGUP_TIMEOUT=300s`) **and** the head/worker `ray start … --block` srun PIDs.
+  A dead PID = that node's Ray exited (cluster collapsed) → the poll stops at once
+  instead of idling out the timeout. **Why**: a worker that never joins (network / a
+  slow node) would otherwise hang init forever. Historical slinky-24/34 "ray wedge"
+  lived here.
+- On failure the launcher snapshots the node-local Ray component logs to
+  `ray-debug-attempt<N>/` and retries on a fresh `ray start`, up to
+  `RAY_BRINGUP_ATTEMPTS=3`. The dominant cause is the head's GCS/raylet being slow to
+  register the node, which trips **Ray's hardcoded 30s `raylet_start_wait_time_s`**
+  (`ray/_private/node.py`) — no launcher env var extends it, so the in-place retry (not
+  a longer timeout) is the lever. Exhausting all attempts is terminal:
+  `MANIFEST state=FAILED failure_reason=ray_bringup`, exit 1 (no requeue — there is no
+  bad-node exclusion for bring-up, so a reroll would just hit the same slow nodes).
 
 ### S3 — model init (placement, bridge model build, sglang init, first update_weights)
 - **§6 fatal asserts** (AssertionError → FAILED at init):
