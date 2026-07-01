@@ -10,6 +10,21 @@ def test_sample_declares_teacher_log_probs_default_none():
     assert s.teacher_log_probs is None
 
 
+def test_sample_validate_raises_on_teacher_log_probs_length_mismatch():
+    s = Sample(
+        index=0, prompt="p", tokens=[1, 2, 3], response="r", response_length=3, teacher_log_probs=[0.1, 0.2]
+    )
+    with pytest.raises(AssertionError, match="teacher_log_probs"):
+        s.validate()
+
+
+def test_sample_validate_passes_with_correct_teacher_log_probs_length():
+    s = Sample(
+        index=0, prompt="p", tokens=[1, 2, 3], response="r", response_length=3, teacher_log_probs=[0.1, 0.2, 0.3]
+    )
+    s.validate()
+
+
 def test_opd_mopd_advantages_raises_without_teacher_log_probs():
     student_log_probs = [torch.tensor([0.1, 0.2, 0.3])]
     response_lengths = [3]
