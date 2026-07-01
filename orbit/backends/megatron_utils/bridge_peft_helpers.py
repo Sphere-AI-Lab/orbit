@@ -316,7 +316,8 @@ def _setup_peft_model_via_bridge(args: Namespace) -> list:
         )
     )
 
-    ddp_config = DistributedDataParallelConfig(use_distributed_optimizer=True)
+    use_distributed_optimizer = "muon" not in (getattr(args, "optimizer", None) or "").lower()
+    ddp_config = DistributedDataParallelConfig(use_distributed_optimizer=use_distributed_optimizer)
     ddp_config.finalize()
     extra_kwargs = {}
     if getattr(provider, "experimental_attention_variant", None) == "dsv4":
