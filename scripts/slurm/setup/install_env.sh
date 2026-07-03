@@ -15,7 +15,7 @@
 #     against the patched fork's own pyproject.toml.
 #   - mbridge          — tools/convert_hf_to_torch_dist.py imports it
 #   - torch_memory_saver — miles/backends/megatron_utils/actor.py imports it
-#   - transformer_engine[pytorch] — Megatron training requires it
+#   - transformer_engine + source-built torch extension — Megatron training requires it
 #   - flash-attn 2/3   — `--attention-backend flash` and FA3-only Megatron paths
 #
 # Versions for the non-thirdparty deps (TE, flash-attn, mbridge, tms) match
@@ -36,6 +36,15 @@
 #   THIRDPARTY_DIR    submodule dir                        [$MILES_REPO/thirdparty]
 #   PULL_REMOTE       `git submodule update --remote`?     [0]  set 1 to bump to branch HEAD
 #   CUDA_HOME         override system CUDA toolkit path    [auto-detected]
+#   CUDNN_CU12_VERSION override torch-declared cuDNN pin   [derived from torch]
+#   TE_BUILD_MAX_JOBS transformer_engine_torch build jobs  [16]
+#   KERNELS_SPEC      transformers hub-kernels compat cap  [kernels>=0.12,<0.15]
+#   SGLANG_SRC        external sglang checkout/worktree    [$THIRDPARTY_DIR/sglang]
+#   MILES_ALLOW_WHEELS_SGLANG_LAG=1  allow wheels bundle sglang < source sglang
+#   SGL_WHL_INDEX_URL extra index for +cuNNN kernel wheels [unset]
+#                     (e.g. https://docs.sglang.ai/whl/cu129 for sglang-kernel/
+#                      sgl-deep-gemm +cu129 builds; PyPI defaults are cu13)
+#   SGLANG_EXTRA_CONSTRAINT  extra uv constraint file for the sglang step [unset]
 
 set -euo pipefail
 
@@ -236,7 +245,9 @@ if [[ "$PULL_REMOTE" == "1" ]]; then
 fi
 
 MEGATRON_SRC="$THIRDPARTY_DIR/Megatron-LM"
-SGLANG_SRC="$THIRDPARTY_DIR/sglang"
+# SGLANG_SRC may point at an external sglang checkout/worktree (version-bump
+# testing) without moving the production submodule tree that live envs run.
+SGLANG_SRC=${SGLANG_SRC:-$THIRDPARTY_DIR/sglang}
 MEGATRON_BRIDGE_SRC="$THIRDPARTY_DIR/Megatron-Bridge"
 
 # Fail closed on submodule ↔ ACTIVE-pins mismatch (needs the actual submodule
@@ -247,10 +258,21 @@ MEGATRON_BRIDGE_SRC="$THIRDPARTY_DIR/Megatron-Bridge"
 sub_sglang_base=$(git -C "$SGLANG_SRC" describe --tags --abbrev=0 2>/dev/null || echo "")
 if [[ -n "${MILES_WHEELS_SGLANG_VERSION:-}" && -n "$sub_sglang_base" \
       && "$sub_sglang_base" != "$MILES_WHEELS_SGLANG_VERSION" ]]; then
-    echo "FATAL: thirdparty/sglang is at $sub_sglang_base but pins.env expects $MILES_WHEELS_SGLANG_VERSION" >&2
-    echo "       (MILES_WHEELS_TAG=$MILES_WHEELS_TAG). The wheels won't match the sglang you build." >&2
-    echo "       Run sglang-sync to realign, or set MILES_WHEELS_TAG to the matching release." >&2
-    exit 1
+    if [[ "${MILES_ALLOW_WHEELS_SGLANG_LAG:-0}" == "1" ]]; then
+        # The bundle wheels (FA2/FA3/apex/router/gateway) are torch-ABI-bound, not
+        # sglang-version-bound; upstream's own Dockerfile pairs a v0.5.13 sglang
+        # image with the v0.5.12 wheels bundle. The torch guard below is the real
+        # safety; allow a lagging bundle when explicitly requested.
+        echo "[pins] WARN: sglang source is $sub_sglang_base but wheels bundle is $MILES_WHEELS_SGLANG_VERSION" >&2
+        echo "[pins]       (MILES_WHEELS_TAG=$MILES_WHEELS_TAG) — allowed by MILES_ALLOW_WHEELS_SGLANG_LAG=1." >&2
+    else
+        echo "FATAL: sglang source is at $sub_sglang_base but pins.env expects $MILES_WHEELS_SGLANG_VERSION" >&2
+        echo "       (MILES_WHEELS_TAG=$MILES_WHEELS_TAG). The wheels won't match the sglang you build." >&2
+        echo "       Run sglang-sync to realign, set MILES_WHEELS_TAG to the matching release," >&2
+        echo "       or set MILES_ALLOW_WHEELS_SGLANG_LAG=1 (bundle wheels are torch-ABI-bound," >&2
+        echo "       not sglang-version-bound; the torch pin check below still applies)." >&2
+        exit 1
+    fi
 fi
 # The submodule's own torch pin must equal TORCH_VERSION (catches a hand-set
 # TORCH_VERSION override that disagrees with what sglang was built against).
@@ -277,11 +299,70 @@ conda activate "$MILES_ENV_NAME"
 echo "[env] python: $(python --version)  prefix: $CONDA_PREFIX"
 
 UV="uv pip install --python $CONDA_PREFIX/bin/python"
+PY_SITE=$(python -c "import site; print(site.getsitepackages()[0])")
+CUDNN_LIB_DIR="$PY_SITE/nvidia/cudnn/lib"
+
+_prepend_ld_library_path_once() {
+    local dir=$1
+    [[ -n "$dir" ]] || return 0
+    case ":${LD_LIBRARY_PATH:-}:" in
+        *":$dir:"*) : ;;
+        *) export LD_LIBRARY_PATH="$dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
+    esac
+}
+
+_prepend_env_cuda_libs() {
+    # Keep env-provided CUDA/cuDNN libs ahead of host paths such as
+    # /usr/lib/x86_64-linux-gnu, which can contain an older system cuDNN.
+    _prepend_ld_library_path_once "$CONDA_PREFIX/lib"
+    _prepend_ld_library_path_once "$CUDNN_LIB_DIR"
+}
+
+_torch_declared_cudnn_cu12_version() {
+    "$CONDA_PREFIX/bin/python" - <<'PY'
+from importlib import metadata
+from packaging.requirements import Requirement
+import sys
+
+for req_text in metadata.requires("torch") or []:
+    req = Requirement(req_text)
+    if req.name != "nvidia-cudnn-cu12":
+        continue
+    versions = [spec.version for spec in req.specifier if spec.operator == "=="]
+    if len(versions) == 1:
+        print(versions[0])
+        raise SystemExit(0)
+    raise SystemExit(f"FATAL: torch requirement {req_text!r} does not contain exactly one == pin")
+
+raise SystemExit("FATAL: torch metadata does not declare nvidia-cudnn-cu12")
+PY
+}
+
+_effective_cudnn_cu12_version() {
+    if [[ -n "${CUDNN_CU12_VERSION:-}" ]]; then
+        printf '%s\n' "$CUDNN_CU12_VERSION"
+    else
+        _torch_declared_cudnn_cu12_version
+    fi
+}
+
+_install_cudnn_for_torch() {
+    local context=${1:-"torch-declared pin"}
+    local version
+    version=$(_effective_cudnn_cu12_version)
+    export CUDNN_CU12_VERSION="$version"
+    _prepend_env_cuda_libs
+    echo "[deps] nvidia-cudnn-cu12==$CUDNN_CU12_VERSION ($context)"
+    $UV "nvidia-cudnn-cu12==$CUDNN_CU12_VERSION"
+}
+
+_prepend_env_cuda_libs
 
 # ---------- torch (pinned, cu129) ----------------------------------------
 
 echo "[torch] torch==$TORCH_VERSION + torchvision from $TORCH_INDEX_URL"
 $UV --index-url "$TORCH_INDEX_URL" "torch==$TORCH_VERSION" torchvision
+_install_cudnn_for_torch "after torch install; override with CUDNN_CU12_VERSION if needed"
 
 # ---------- patched Megatron-LM + sglang (editable source installs) -------
 # (submodules were init'd + validated above, before the torch install)
@@ -296,7 +377,6 @@ $UV -e "$MEGATRON_SRC" --no-deps
 # inside the same repo, hard-imported from megatron/core/transformer/*.py).
 # Drop a .pth file so `import miles_megatron_plugins` works in any python
 # invocation without needing PYTHONPATH set.
-PY_SITE=$(python -c "import site; print(site.getsitepackages()[0])")
 echo "$MEGATRON_SRC" > "$PY_SITE/miles-megatron-source-root.pth"
 echo "[src] miles-megatron-source-root.pth -> $MEGATRON_SRC"
 
@@ -328,10 +408,57 @@ echo "[src] installing sglang editable from $SGLANG_SRC (full dep resolution)"
 # look at PyPI for torchao (dependency-confusion guard). Order of indexes
 # still controls preference (cu129/flashinfer before pypi); uv only falls
 # through when earlier indexes do not provide a compatible version.
+#
+# cu12 sglang dependency reconciliation. Two coupled problems on a cu12 host (cu129
+# prebuilt wheels + a CUDA-12.x driver that cannot run CUDA 13):
+#   1. sglang's pyproject pins `cuda-python>=13.0` (CUDA 13). The cu129 sglang docker
+#      variant (`lmsysorg/sglang:<ver>-cu129`) actually runs on the cu12.9 cuda-python
+#      line, so the floor is wrong for the build we ship. A --constraint can't satisfy
+#      `>=13` AND `<13`; an --override REPLACES the declared bound.
+#   2. sglang pins `torch==$TORCH_VERSION` (no local tag); under unsafe-first-match uv will
+#      otherwise swap the +cu$torch_cu_tag wheel for PyPI's plain torch (the CUDA-13 build
+#      at >= 2.11), leaving torch(cu130) vs torchvision(cu$torch_cu_tag) — a CUDA-major
+#      mismatch that breaks `import torchvision` (hence sglang). The +cu<tag> --constraint
+#      pins the cu-index build (unsatisfiable by PyPI's plain wheel).
+# Together: torch is held at +cu$torch_cu_tag, whose `cuda-bindings>=12.9.4,<13` requirement
+# pulls cuda-python up to the 12.9.x line (12.6.x has no cuda-bindings dep, so `<13` alone
+# under-selects) — the whole env lands CUDA-${torch_cu_tag}-consistent with the wheels.
+# Applied only on cu12; a genuine CUDA-13 bundle (cu130 tag) leaves sglang's pins alone.
+sglang_dep_args=()
+if [[ "${torch_cu_tag:0:2}" == "12" ]]; then
+    mkdir -p "$WHEELS_DIR"
+    echo "cuda-python<13" > "$WHEELS_DIR/sglang-cuda-python-override.txt"
+    echo "torch==${TORCH_VERSION}+cu${torch_cu_tag}" > "$WHEELS_DIR/torch-cu-constraint.txt"
+    sglang_dep_args=(
+        --override "$WHEELS_DIR/sglang-cuda-python-override.txt"
+        --constraint "$WHEELS_DIR/torch-cu-constraint.txt"
+    )
+fi
+# Caller-supplied extra constraints (e.g. pre-pinning resolver-backtrack-prone
+# deps like flash-attn-4/quack-kernels/cuda-tile on a version-bump test).
+if [[ -n "${SGLANG_EXTRA_CONSTRAINT:-}" ]]; then
+    sglang_dep_args+=(--constraint "$SGLANG_EXTRA_CONSTRAINT")
+fi
+# Optional extra index for +cuNNN local-version kernel wheels (sglang-kernel /
+# sgl-deep-gemm publish cu12 builds only at docs.sglang.ai/whl/cuNNN; the PyPI
+# default wheels for those are cu13-linked).
+if [[ -n "${SGL_WHL_INDEX_URL:-}" ]]; then
+    sglang_dep_args+=(--extra-index-url "$SGL_WHL_INDEX_URL")
+fi
 $UV -e "$SGLANG_SRC/python[all]" \
+    "${sglang_dep_args[@]}" \
     --extra-index-url "$FLASHINFER_INDEX_URL" \
     --extra-index-url "$TORCH_INDEX_URL" \
     --index-strategy unsafe-first-match
+
+# transformers==5.6.0 imports integrations.hub_kernels at model-import time and
+# constructs kernels.LayerRepository objects without a version/revision. kernels
+# 0.15+ made that invalid, which breaks `import megatron.bridge` / `import mbridge`
+# before any model code runs. SGLang's pyproject leaves `kernels` unpinned, so
+# cap the incompatible API line until transformers catches up.
+KERNELS_SPEC=${KERNELS_SPEC:-"kernels>=0.12,<0.15"}
+echo "[deps] $KERNELS_SPEC (transformers hub_kernels compatibility)"
+$UV "$KERNELS_SPEC"
 
 # sglang_router is installed from the miles-wheels release (NOT PyPI) in the
 # prebuilt-wheels section below, to match the upstream Dockerfile's wheel source.
@@ -343,8 +470,8 @@ $UV "git+https://github.com/ISEEKYAN/mbridge.git@$MBRIDGE_COMMIT" --no-deps
 
 echo "[deps] nvidia-modelopt — required by megatron.bridge's auto_bridge.py top-level import"
 # Dockerfile has the [torch] extra but modelopt 0.44+ dropped it (warning-only).
-# Side effect: pulls nvidia-cudnn-cu12==9.10.2.21 which clobbers the 9.16.0.29
-# pin we need for pytorch/pytorch#168167; the cudnn step below restores it.
+# Side effect: can pull an older nvidia-cudnn-cu12 and clobber torch's declared
+# cuDNN pin; reassert the effective torch-derived/overridden cuDNN before TE.
 $UV --no-build-isolation "nvidia-modelopt>=0.37.0"
 
 echo "[src] installing Megatron-Bridge editable from $MEGATRON_BRIDGE_SRC (--no-deps)"
@@ -353,8 +480,30 @@ $UV -e "$MEGATRON_BRIDGE_SRC" --no-deps --no-build-isolation
 echo "[deps] torch_memory_saver @ $TMS_COMMIT (for miles/backends/megatron_utils/actor.py)"
 $UV --no-cache-dir --force-reinstall "git+https://github.com/fzyzcjy/torch_memory_saver.git@$TMS_COMMIT"
 
-echo "[deps] transformer_engine[pytorch]==$TE_VERSION (compiles, ~10 min)"
-$UV --no-build-isolation "transformer_engine[pytorch]==$TE_VERSION"
+_install_cudnn_for_torch "before transformer_engine_torch source build"
+
+echo "[deps] transformer_engine==$TE_VERSION + transformer_engine_cu12==$TE_VERSION"
+# Do NOT install the `transformer_engine[pytorch]` extra here: pip/uv will prefer
+# PyPI's prebuilt transformer_engine_torch wheel when one exists, and that wheel is
+# torch-ABI-bound. For torch 2.11.0+cu129, TE 2.10.0's prebuilt torch extension
+# imports with an undefined c10::cuda symbol. Mirror Docker's safer CUDA-13 shape:
+# install the pure/runtime TE packages, then force the torch extension to compile
+# against the torch already installed in this env.
+$UV --no-deps "transformer_engine==$TE_VERSION" "transformer_engine_cu12==$TE_VERSION"
+
+TE_BUILD_MAX_JOBS=${TE_BUILD_MAX_JOBS:-${MAX_JOBS:-16}}
+echo "[deps] transformer_engine_torch==$TE_VERSION (source build, MAX_JOBS=$TE_BUILD_MAX_JOBS)"
+_prepend_env_cuda_libs
+MAX_JOBS="$TE_BUILD_MAX_JOBS" NVTE_FRAMEWORK=pytorch \
+    $UV --no-deps --no-build-isolation --no-cache --no-binary :all: \
+        --reinstall-package transformer_engine_torch \
+        "transformer_engine_torch==$TE_VERSION"
+
+echo "[deps] onnx>=1.21.0 + onnxscript (transformer_engine_torch runtime deps)"
+# The source-build path intentionally uses --no-deps to avoid PyPI's prebuilt
+# torch-ABI-bound transformer_engine_torch wheel, so restore the pure/runtime
+# deps declared by transformer_engine_torch metadata explicitly.
+$UV "onnx>=1.21.0" onnxscript
 
 # ---------- prebuilt wheels (flash-attn, flash-attn-3, apex) -------------
 # Source builds for these are 30-60 min each on Hopper. The Dockerfile uses
@@ -430,17 +579,61 @@ fi
 # abi3 wheel — NOT torch-ABI-bound — installed here (after the editable sglang
 # above) so it wins over any sglang_router pulled transitively from an index.
 router_wheel=$(_fetch_miles_wheel sglang_router-)
-echo "[deps] sglang_router <- $(basename "$router_wheel") (release wheel, matches Dockerfile source)"
-case "$(basename "$router_wheel")" in
+router_wheel_base=$(basename "$router_wheel")
+case "$router_wheel_base" in
     sglang_router-"$SGLANG_ROUTER_VERSION"-*) : ;;
     *)
-        echo "FATAL: release sglang_router wheel $(basename "$router_wheel") does not match pinned $SGLANG_ROUTER_VERSION." >&2
+        echo "FATAL: release sglang_router wheel $router_wheel_base does not match pinned $SGLANG_ROUTER_VERSION." >&2
         echo "       Update WHEELS_STACK in extract_pins.py for MILES_WHEELS_TAG=$MILES_WHEELS_TAG," >&2
         echo "       or use a miles-wheels release that ships sglang_router-$SGLANG_ROUTER_VERSION." >&2
         exit 1
         ;;
 esac
-$UV "$router_wheel"
+
+# GLIBC guard: the release wheel is manylinux_2_NN (built on the docker base, e.g.
+# Ubuntu 24.04 / GLIBC 2.39). On an older host uv refuses to install it AND the abi3
+# .so would fail to load at runtime. When the host GLIBC is below the wheel's floor,
+# build the patched router from source (radixark/sgl-router-for-miles — the Dockerfile's
+# SGL_ROUTER_USE_WHEELS=0 path) so the radixark patches survive on an older-GLIBC host.
+# (Same root cause as the sgl-model-gateway GLIBC skip below; the router is essential so
+# we build rather than skip.)
+wheel_glibc_minor=$(sed -n 's/.*manylinux_2_\([0-9]\{1,\}\)_.*/\1/p' <<<"$router_wheel_base")
+host_glibc_minor=$(ldd --version 2>/dev/null | awk 'NR==1{print $NF}' | cut -d. -f2)
+if [[ -n "$wheel_glibc_minor" && -n "$host_glibc_minor" && "$host_glibc_minor" -lt "$wheel_glibc_minor" ]]; then
+    echo "[deps] sglang_router: release wheel needs GLIBC 2.$wheel_glibc_minor > host 2.$host_glibc_minor — building from source"
+    SGL_ROUTER_REPO=${SGL_ROUTER_REPO:-https://github.com/radixark/sgl-router-for-miles.git}
+    SGL_ROUTER_BRANCH=${SGL_ROUTER_BRANCH:-main}
+    command -v cargo >/dev/null \
+        || { echo "FATAL: cargo not on PATH — needed to build sglang_router from source" >&2; exit 1; }
+    router_src=$(mktemp -d)
+    echo "[deps] cloning $SGL_ROUTER_REPO@$SGL_ROUTER_BRANCH"
+    git clone --branch "$SGL_ROUTER_BRANCH" --depth 1 "$SGL_ROUTER_REPO" "$router_src/src"
+    $UV maturin
+    # maturin >=1.14 refuses readme paths that resolve outside the package dir;
+    # the router's bindings/python/pyproject.toml points at ../../README.md.
+    # Copy the file in place and rewrite the reference so metadata is self-contained.
+    router_pyproject="$router_src/src/bindings/python/pyproject.toml"
+    if grep -qE '^readme = "\.\./\.\./README\.md"' "$router_pyproject"; then
+        cp "$router_src/src/README.md" "$router_src/src/bindings/python/README.md"
+        sed -i 's|^readme = "\.\./\.\./README\.md"|readme = "README.md"|' "$router_pyproject"
+        echo "[deps] sglang_router: inlined ../../README.md (maturin metadata-root restriction)"
+    fi
+    ( cd "$router_src/src/bindings/python" && ulimit -n 65536 \
+        && maturin build --release --features vendored-openssl --out "$router_src/wheels" )
+    built_router=$(compgen -G "$router_src/wheels/sglang_router-*.whl" | head -1 || true)
+    [[ -n "$built_router" ]] \
+        || { echo "FATAL: maturin produced no sglang_router wheel under $router_src/wheels" >&2; exit 1; }
+    case "$(basename "$built_router")" in
+        sglang_router-"$SGLANG_ROUTER_VERSION"-*) : ;;
+        *) echo "[deps] WARN: built $(basename "$built_router") != pinned $SGLANG_ROUTER_VERSION (source '$SGL_ROUTER_BRANCH' moved); proceeding (from-source GLIBC fallback)" >&2 ;;
+    esac
+    echo "[deps] sglang_router <- $(basename "$built_router") (built from source)"
+    $UV --force-reinstall "$built_router"
+    rm -rf "$router_src"
+else
+    echo "[deps] sglang_router <- $router_wheel_base (release wheel, matches Dockerfile source)"
+    $UV "$router_wheel"
+fi
 
 # ---------- sgl-model-gateway binary -------------------------------------
 # Standalone Rust binary that fronts multiple sglang servers (multi-replica
@@ -482,23 +675,24 @@ $UV -r "$MILES_REPO/requirements.txt"
 echo "[deps] miles editable"
 $UV -e "$MILES_REPO" --no-deps
 
-# Megatron-Core insists on numpy <2.
-$UV 'numpy<2'
-
-# pytorch/pytorch#168167 — torch 2.9.x ships an older cudnn that segfaults on
-# some cu12 setups; pin to the same cudnn the Dockerfile uses.
-CUDNN_CU12_VERSION=${CUDNN_CU12_VERSION:-9.16.0.29}
-echo "[deps] nvidia-cudnn-cu12==$CUDNN_CU12_VERSION (pytorch/pytorch#168167 workaround)"
-$UV "nvidia-cudnn-cu12==$CUDNN_CU12_VERSION"
+# numpy 1.x for megatron — mirrors upstream docker/Dockerfile's late
+# `pip install "numpy<2"`. scipy must be capped WITH it: sglang's unpinned
+# `scipy` resolves to 1.18+ whose runtime requires numpy>=2 (its _sputils
+# references np.long, absent in numpy 1.26 → AttributeError breaks
+# `import sglang`/`import megatron.bridge`). scipy 1.15.x runs on numpy 1.26.
+$UV 'numpy<2' 'scipy<1.16'
 
 echo "[deps] mooncake-transfer-engine==$MOONCAKE_VERSION (sglang docker base)"
 $UV "mooncake-transfer-engine==$MOONCAKE_VERSION"
+
+_install_cudnn_for_torch "final pre-verify reassert"
 
 # ---------- smoke test + version audit -----------------------------------
 # verify_env.py runs the import/CUDA/FA3-symbol checks the old inline heredoc
 # did, plus cross-checks installed versions against pins.env and confirms the
 # editable installs point at thirdparty/. Failures here fail the install.
 
+_prepend_env_cuda_libs
 python3 "$SCRIPT_DIR/verify_env.py"
 
 echo

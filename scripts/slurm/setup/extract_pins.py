@@ -98,12 +98,6 @@ PIN_GROUPS: list[tuple[str, list[Pin]]] = [
             Pin("MBRIDGE_COMMIT", DOCKERFILE, r"ISEEKYAN/mbridge\.git@([0-9a-f]{7,40})"),
             Pin("TMS_COMMIT", DOCKERFILE, r"fzyzcjy/torch_memory_saver\.git@([0-9a-f]{7,40})"),
             Pin(
-                "CUDNN_CU12_VERSION",
-                DOCKERFILE,
-                r"nvidia-cudnn-cu12==([0-9a-z.]+)",
-                "pytorch/pytorch#168167 workaround; modelopt later downgrades it, this re-pins.",
-            ),
-            Pin(
                 "FLASH_ATTN_INTERFACE_COMMIT",
                 DOCKERFILE,
                 r"flash-attention/([0-9a-f]{7,40})/hopper",
@@ -128,7 +122,10 @@ PIN_GROUPS: list[tuple[str, list[Pin]]] = [
 # Extracted from docker/Dockerfile — the UPSTREAM TARGET, recorded but not applied.
 UPSTREAM_PINS: list[Pin] = [
     Pin("UPSTREAM_SGLANG_IMAGE_TAG", DOCKERFILE, r"^ARG\s+SGLANG_IMAGE_TAG=(\S+)"),
-    Pin("UPSTREAM_WHEELS_TAG", DOCKERFILE, r"^ARG\s+WHEELS_TAG=(\S+)"),
+    # Upstream split WHEELS_TAG into per-arch WHEELS_TAG_X86 / WHEELS_TAG_ARM64
+    # (2026-06). We track the x86 line; the bare `WHEELS_TAG=` alternative keeps
+    # older Dockerfile layouts parsable.
+    Pin("UPSTREAM_WHEELS_TAG", DOCKERFILE, r"^ARG\s+WHEELS_TAG(?:_X86)?=(\S+)"),
 ]
 
 
