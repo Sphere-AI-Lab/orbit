@@ -389,6 +389,16 @@ if ! command -v protoc >/dev/null; then
     "$CONDA_ROOT/bin/conda" install -n "$MILES_ENV_NAME" -c conda-forge -y libprotobuf protobuf
 fi
 
+# torchcodec (sglang srt dep, torch-2.11-matched) dlopens FFmpeg shared libs at
+# import; without them every engine start dumps a (non-fatal) probe traceback and
+# video decode is unavailable. FFmpeg 7 pairs with torchcodec's core7 loader
+# (libavutil.so.59). Docker gets ffmpeg from the base image; bare-metal installs it
+# into the env, which conda activation puts on the loader path.
+if [[ ! -e "$CONDA_PREFIX/lib/libavutil.so.59" ]]; then
+    echo "[deps] installing ffmpeg 7 into $MILES_ENV_NAME (torchcodec runtime libs)"
+    "$CONDA_ROOT/bin/conda" install -n "$MILES_ENV_NAME" -c conda-forge -y 'ffmpeg=7'
+fi
+
 # SGLang's pyproject declares the full runtime tree (fastapi/uvicorn/orjson/
 # flashinfer_python/sglang-kernel/flash-attn-4/cuda-python/...). We DON'T use
 # --no-deps because we're not starting from `lmsysorg/sglang:v0.5.10` — pip
