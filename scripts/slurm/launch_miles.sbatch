@@ -28,7 +28,7 @@
 #   HF_HOME             general HF cache           [/data/shared/hf_cache]
 #   RAY_PORT                                       [6379]
 #   RAY_DASHBOARD_PORT                             [8265]
-#   HEALTHCHECK_TIMEOUT   per-node probe timeout (s)         [60]
+#   HEALTHCHECK_TIMEOUT   per-node probe timeout (s)         [300]
 #   HEALTHCHECK_MAX_RESTARTS  auto-requeue cap for bad nodes [3]
 #   MILES_HEALTHCHECK_IB      per-node IB-rail probe; 0/off/false disables  [1]
 #   MILES_HEALTHCHECK_WEKA    per-node shared-FS (WekaFS) read probe; 0/off/false disables [1]
@@ -65,7 +65,10 @@ THIRDPARTY_DIR=${THIRDPARTY_DIR:-$MILES_REPO/thirdparty}
 HF_HOME=${HF_HOME:-/data/shared/hf_cache}
 RAY_PORT=${RAY_PORT:-6379}
 RAY_DASHBOARD_PORT=${RAY_DASHBOARD_PORT:-8265}
-HEALTHCHECK_TIMEOUT=${HEALTHCHECK_TIMEOUT:-${PREFLIGHT_TIMEOUT:-60}}
+# 300s, not 60: tier2's `import torch` cold-reads ~1GB+ of .so from /data and
+# takes 85s+ on a busy FS / cold page cache — 60s false-fails healthy nodes
+# (bit jobs 21571-era and 22261).
+HEALTHCHECK_TIMEOUT=${HEALTHCHECK_TIMEOUT:-${PREFLIGHT_TIMEOUT:-300}}
 HEALTHCHECK_MAX_RESTARTS=${HEALTHCHECK_MAX_RESTARTS:-3}
 # Normalize boolean env to the bare 0/1 the (( )) guards below need — a
 # non-numeric value in (( )) aborts under `set -u`. Unrecognized -> 1.
