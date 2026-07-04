@@ -56,13 +56,28 @@ miles code and the sglang it targets should move in the same PR.
   pin the old SHA) and the archive keeps it reachable. Within a version (v0.5.12-23 →
   v0.5.12-50) it's a plain fast-forward of `sglang-miles` itself (no archive needed).
 - `impossible-inc/sglang@sglang-miles` is **NOT a pure mirror** — it carries local
-  miles patches on top of the upstream line. Currently ONE: `[sglang-miles]
-  forward_batch: gate mrope text-only path on rl_on_policy_target` (geo3k VLM fix,
-  authored locally; sgl-project's rebase does NOT carry it forward and v0.5.12 does
-  NOT subsume it). On every version bump these local patches MUST be re-applied onto
-  the rebased target (Step 3) — the new pin is `target + re-applied patch(es)`, not the
-  bare target. Step 3 surfaces the mirror-only commits and STOPs so you can tell local
-  patches from old-upstream-line commits.
+  miles patches on top of the upstream line. Currently THREE (as of the v0.5.13 sync):
+  1. `[sglang-miles] forward_batch: gate mrope text-only path on rl_on_policy_target`
+     (geo3k VLM fix, authored locally; upstream candidate).
+  2. `[sglang-miles cu129] bare-metal cu12 dep flavors` (pyproject: cuda-python <13,
+     flashinfer [cu12], plain cutlass-dsl, +cu129 local-version pins for
+     sglang-kernel/sgl-deep-gemm/torchao — the PyPI default wheels of those three are
+     cu13-linked). Mirror-only BY DESIGN — not an upstream candidate (upstream's
+     docker line wants the cu13 flavors).
+  3. `[sglang-miles] restore pause-aware flush_cache` (the v0.5.13 rebase dropped the
+     flush disjunct of #22754/#22623; without it every fully-async weight update
+     deadlocks against its own queued rollout requests. Upstream candidate).
+  On every version bump these local patches MUST be re-applied onto the rebased target
+  (Step 3) — the new pin is `target + re-applied patch(es)`, not the bare target. Step 3
+  surfaces the mirror-only commits and STOPs so you can tell local patches from
+  old-upstream-line commits.
+- **Verify re-applied patch CONTENT, not commit titles.** sgl-project's own rebase of
+  its miles patch stack can silently drop hunks: on the v0.5.13 rebase, the twin of
+  "Fix pause-aware weight update deadlocks" carried the right title but only a one-line
+  fragment — the flush_cache disjunct was lost to a conflicting upstream refactor. For
+  each `[sglang-miles]` patch expected on the new line, grep the rebased TREE for the
+  patch's key lines (e.g. `_engine_paused and self.running_batch.is_empty`,
+  `rl_on_policy_target` in forward_batch_info) before trusting it survived.
 - The torch ABI + prebuilt wheels live in `yueming-yuan/miles-wheels` under the
   tag `cu129-x86_64[-v<sglang>]`; `WHEELS_STACK` in `extract_pins.py` maps tag →
   `{sglang, torch, router}`.
@@ -133,8 +148,21 @@ gh release view "$TAG" --repo yueming-yuan/miles-wheels --json name,assets \
 ```
 
 Confirm the release name's torch (e.g. "SGLang v0.5.12 / torch 2.11.0") equals
-`$NEW_TORCH`. If the release is missing or the torch disagrees, **STOP** — the
-bundle isn't ready; fall back to recording `[sglang-sync pending]` (see "Not ready").
+`$NEW_TORCH`. If the torch disagrees, **STOP** — the bundle isn't ready; fall back to
+recording `[sglang-sync pending]` (see "Not ready").
+
+**A same-version wheels release is NOT required — the bundle may LAG the sglang source
+when torch matches.** Bundle wheels (FA2/FA3/apex/router/gateway) are torch-ABI-bound,
+not sglang-version-bound; the sglang-version-locked kernels (sglang-kernel,
+sgl-deep-gemm) come from `docs.sglang.ai/whl/cuNNN` +cuNNN builds pinned in the fork's
+pyproject (SGL_WHL_INDEX_URL), not from the bundle. Upstream's own Dockerfile pairs its
+v0.5.13 image with the v0.5.12 bundle, and the pairing is validated bare-metal
+(2026-07 sync: clean install 37/37 + 500-step 3-node async run). So when no
+`cu129-x86_64-<new base>` release exists but an existing bundle has the SAME torch,
+keep that bundle as ACTIVE and proceed — install_env.sh WARNs on the version lag and
+still fail-closes on any torch mismatch, and `[sglang-sync pending]` compares the
+version component of the wheels tags (the cu prefix is a deployment property: upstream
+docker is cu130, bare-metal is driver-bound to cu129).
 
 ### Step 3 — Advance the mirror (rebase-aware; uses the TRUE origin state)
 
@@ -237,12 +265,15 @@ printf '%s\n' "$check_out"
 grep -qF '[sglang-sync pending]' <<<"$check_out" \
     && { echo "STOP: [sglang-sync pending] remains — ACTIVE != UPSTREAM, advance incomplete" >&2; exit 1; } || true
 
-# 2. submodule base == the sglang the ACTIVE tag implies (install_env.sh fails closed on this)
-eval "$(python3 scripts/slurm/setup/extract_pins.py --resolve "$TAG")"   # sets MILES_WHEELS_{SGLANG,...}_VERSION
+# 2. submodule TORCH == the bundle torch (the real ABI safety; install_env.sh fails
+#    closed on this). The submodule's sglang BASE may legitimately be AHEAD of the
+#    bundle's (bundle-may-lag rule, Step 2) — report it, don't stop.
+eval "$(python3 scripts/slurm/setup/extract_pins.py --resolve "$TAG")"   # sets MILES_WHEELS_{SGLANG,TORCH,...}_VERSION
 sub_base=$(git -C thirdparty/sglang describe --tags --abbrev=0 HEAD)
-[[ "$sub_base" == "$MILES_WHEELS_SGLANG_VERSION" ]] \
-    && echo "✓ submodule $sub_base == $MILES_WHEELS_SGLANG_VERSION" \
-    || { echo "STOP: submodule $sub_base != $MILES_WHEELS_SGLANG_VERSION — gitlink/tag mismatch" >&2; exit 1; }
+sub_torch=$(grep -oE '"torch==[0-9][^"]*"' thirdparty/sglang/python/pyproject.toml | head -1 | tr -d '"' | cut -d= -f3)
+[[ "$sub_torch" == "$MILES_WHEELS_TORCH_VERSION" ]] \
+    && echo "✓ submodule torch $sub_torch == bundle torch $MILES_WHEELS_TORCH_VERSION (sglang: source $sub_base / bundle $MILES_WHEELS_SGLANG_VERSION)" \
+    || { echo "STOP: submodule torch $sub_torch != bundle torch $MILES_WHEELS_TORCH_VERSION — ABI mismatch" >&2; exit 1; }
 
 # 3. the release ships sglang_router-$SGLANG_ROUTER_VERSION (install_env.sh fetches it by
 #    prefix and FAILS CLOSED — exit 1 — on a version mismatch, so this must hold)
@@ -292,9 +323,16 @@ git -C "$S" push "$OURL" "refs/heads/$BR:refs/heads/$BR"   # NON-force; sglang-m
 That push alone makes the pin durable AND resolvable (`git submodule update` fetches
 `$NEWPIN` from `$BR`). **Defer here if asked ("branch out but don't PR yet").**
 
-To land it on `sglang-miles`, advance by Step 3's `$FORCE`. A review PR (`$BR ->
-sglang-miles`) is optional — once the new tip lands it auto-marks **Merged** (its head
-becomes the base tip), so it's just a review surface.
+**Open the review PR (`$BR -> sglang-miles`) BEFORE advancing `sglang-miles` — this is
+the history track, not optional** (precedent: impossible-inc/sglang PR #1 v0.5.12,
+PR #2 v0.5.13). Body per that convention: contents (base jump + each local patch with
+one-line rationale), the landing mechanics for this $FORCE case, and the consuming
+miles-imp PR. Once the new tip lands, the PR auto-marks **Merged** (its head becomes
+the base tip). Ordering matters: after the force-advance, base == head and GitHub
+refuses to create the PR — you'd have to briefly reset `sglang-miles` to the old tip
+to open it retroactively (v0.5.13 landing had to do exactly that).
+
+Then land it on `sglang-miles`, advancing by Step 3's `$FORCE`:
 
 **`$FORCE=0` (within-version bump — `sglang-miles` IS an ancestor of `$NEWPIN`):** plain
 fast-forward. Push directly (or "Rebase and merge" the review PR) — both keep it linear:
