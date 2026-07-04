@@ -40,7 +40,6 @@
 #   TE_BUILD_MAX_JOBS transformer_engine_torch build jobs  [16]
 #   KERNELS_SPEC      transformers hub-kernels compat cap  [kernels>=0.12,<0.15]
 #   SGLANG_SRC        external sglang checkout/worktree    [$THIRDPARTY_DIR/sglang]
-#   MILES_ALLOW_WHEELS_SGLANG_LAG=1  allow wheels bundle sglang < source sglang
 #   SGL_WHL_INDEX_URL extra index for +cuNNN kernel wheels [unset]
 #                     (e.g. https://docs.sglang.ai/whl/cu129 for sglang-kernel/
 #                      sgl-deep-gemm +cu129 builds; PyPI defaults are cu13)
@@ -258,21 +257,13 @@ MEGATRON_BRIDGE_SRC="$THIRDPARTY_DIR/Megatron-Bridge"
 sub_sglang_base=$(git -C "$SGLANG_SRC" describe --tags --abbrev=0 2>/dev/null || echo "")
 if [[ -n "${MILES_WHEELS_SGLANG_VERSION:-}" && -n "$sub_sglang_base" \
       && "$sub_sglang_base" != "$MILES_WHEELS_SGLANG_VERSION" ]]; then
-    if [[ "${MILES_ALLOW_WHEELS_SGLANG_LAG:-0}" == "1" ]]; then
-        # The bundle wheels (FA2/FA3/apex/router/gateway) are torch-ABI-bound, not
-        # sglang-version-bound; upstream's own Dockerfile pairs a v0.5.13 sglang
-        # image with the v0.5.12 wheels bundle. The torch guard below is the real
-        # safety; allow a lagging bundle when explicitly requested.
-        echo "[pins] WARN: sglang source is $sub_sglang_base but wheels bundle is $MILES_WHEELS_SGLANG_VERSION" >&2
-        echo "[pins]       (MILES_WHEELS_TAG=$MILES_WHEELS_TAG) — allowed by MILES_ALLOW_WHEELS_SGLANG_LAG=1." >&2
-    else
-        echo "FATAL: sglang source is at $sub_sglang_base but pins.env expects $MILES_WHEELS_SGLANG_VERSION" >&2
-        echo "       (MILES_WHEELS_TAG=$MILES_WHEELS_TAG). The wheels won't match the sglang you build." >&2
-        echo "       Run sglang-sync to realign, set MILES_WHEELS_TAG to the matching release," >&2
-        echo "       or set MILES_ALLOW_WHEELS_SGLANG_LAG=1 (bundle wheels are torch-ABI-bound," >&2
-        echo "       not sglang-version-bound; the torch pin check below still applies)." >&2
-        exit 1
-    fi
+    # A lagging bundle is VALID when torch matches: the bundle wheels
+    # (FA2/FA3/apex/router/gateway) are torch-ABI-bound, not sglang-version-bound —
+    # upstream's own Dockerfile pairs the v0.5.13 sglang image with the v0.5.12
+    # wheels bundle, and the pairing is validated bare-metal (2026-07 sync). The
+    # torch pin check below is the real safety and stays FATAL.
+    echo "[pins] WARN: sglang source is $sub_sglang_base but the wheels bundle is $MILES_WHEELS_SGLANG_VERSION" >&2
+    echo "[pins]       (MILES_WHEELS_TAG=$MILES_WHEELS_TAG). OK while their torch matches (checked next)." >&2
 fi
 # The submodule's own torch pin must equal TORCH_VERSION (catches a hand-set
 # TORCH_VERSION override that disagrees with what sglang was built against).
