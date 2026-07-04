@@ -105,6 +105,15 @@ class ServerGroup:
                     # TODO: this is hacky. Use env var SGLANG_DG_CACHE_DIR_PER_PROCESS=1
                     # to enable this isolation.
                     "SGLANG_DG_CACHE_DIR": f"/tmp/sglang_deep_gemm/{self.worker_type}_rank_{global_rank}",
+                    # Triton JIT cache: per-user + per-rank node-local dir. Without an
+                    # explicit TRITON_CACHE_DIR, engine schedulers have been observed
+                    # compiling into a shared /tmp/triton, which collides across users
+                    # on shared nodes (mid-run EACCES killed all engines on a node)
+                    # and races across same-node engines compiling the same kernel.
+                    "TRITON_CACHE_DIR": (
+                        f"/tmp/triton_{os.environ.get('USER', 'unknown')}"
+                        f"/{self.worker_type}_rank_{global_rank}"
+                    ),
                     "SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK": "false",
                     "SGLANG_MEMORY_SAVER_CUDA_GRAPH": "true",
                     "SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2": (

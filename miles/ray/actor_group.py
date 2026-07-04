@@ -58,6 +58,11 @@ class RayTrainGroup:
             "NVTE_FP8_BLOCK_SCALING_FP32_SCALES": "1",
             # DeepEP/NVSHMEM's internal NCCL conflicts with our NCCL and hangs under CUDA graphs.
             "NVSHMEM_DISABLE_NCCL": os.environ.get("NVSHMEM_DISABLE_NCCL", "1"),
+            # Triton JIT cache: per-user node-local dir — a shared /tmp/triton
+            # collides across users on shared nodes (see server_group.py).
+            "TRITON_CACHE_DIR": os.environ.get(
+                "TRITON_CACHE_DIR", f"/tmp/triton_{os.environ.get('USER', 'unknown')}/train"
+            ),
             **{name: "1" for name in NOSET_VISIBLE_DEVICES_ENV_VARS_LIST},
             **self.args.train_env_vars,
         }
