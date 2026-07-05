@@ -223,6 +223,8 @@ def test_validate_allows_peft_with_sglang_teacher():
         opd_type="sglang",
         opd_teacher_url="http://host/generate",
         peft_method="lora",
+        custom_rm_path="orbit.rollout.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.rollout.opd_sglang.post_process",
     )
     _validate_opd_args(args)
 
@@ -261,5 +263,32 @@ def test_validate_sglang_passes_without_teacher_load():
         opd_type="sglang",
         opd_teacher_load=None,
         opd_teacher_url="http://host/generate",
+        custom_rm_path="orbit.rollout.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.rollout.opd_sglang.post_process",
     )
     _validate_opd_args(args)
+
+
+def test_validate_sglang_requires_custom_reward_hooks():
+    # The sglang teacher produces teacher_log_probs ONLY through its two
+    # custom-reward hooks; forgetting them passes validation but dies after a
+    # full (expensive) rollout in opd_mopd_advantages. Catch it at startup.
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher_url="http://host/generate",
+    )
+    with pytest.raises(ValueError, match="custom-rm-path"):
+        _validate_opd_args(args)
+
+
+def test_validate_sglang_rejects_foreign_custom_rm():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher_url="http://host/generate",
+        custom_rm_path="my_pkg.my_rm",
+        custom_reward_post_process_path="orbit.rollout.opd_sglang.post_process",
+    )
+    with pytest.raises(ValueError, match="custom-rm-path"):
+        _validate_opd_args(args)

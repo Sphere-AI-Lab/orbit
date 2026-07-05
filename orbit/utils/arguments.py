@@ -194,6 +194,20 @@ def _validate_opd_args(args) -> None:
             )
         if not args.opd_teacher_url:
             raise ValueError("--opd-type sglang requires --opd-teacher-url <http://host:port/generate>.")
+        # The sglang teacher produces sample.teacher_log_probs ONLY through its
+        # two custom-reward hooks; without them the run passes validation, pays
+        # for a full rollout, and only then dies in opd_mopd_advantages.
+        expected_rm = "orbit.rollout.opd_sglang.reward_func"
+        expected_post = "orbit.rollout.opd_sglang.post_process"
+        if (
+            getattr(args, "custom_rm_path", None) != expected_rm
+            or getattr(args, "custom_reward_post_process_path", None) != expected_post
+        ):
+            raise ValueError(
+                "--opd-type sglang scores samples through its custom-reward hooks, the sole producer "
+                f"of teacher_log_probs; set --custom-rm-path {expected_rm} and "
+                f"--custom-reward-post-process-path {expected_post}."
+            )
 
 
 def _is_default_rollout_function_path(path: str | None) -> bool:
