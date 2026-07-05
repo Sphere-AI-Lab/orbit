@@ -754,7 +754,13 @@ class RolloutManager:
         if any(sample.weight_versions for sample in samples):
             train_data["weight_versions"] = [sample.weight_versions for sample in samples]
 
-        if samples[0].teacher_log_probs is not None:
+        if any(sample.teacher_log_probs is not None for sample in samples):
+            missing = sum(1 for sample in samples if sample.teacher_log_probs is None)
+            if missing:
+                raise ValueError(
+                    f"teacher_log_probs is set on some samples but missing on {missing}/{len(samples)}; "
+                    "the teacher producer must score every sample in the batch."
+                )
             train_data["teacher_log_probs"] = [sample.teacher_log_probs for sample in samples]
 
         # Pass dynamic global_batch_size to training side

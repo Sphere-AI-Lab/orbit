@@ -51,11 +51,21 @@ def test_merge_samples_concatenates_teacher_log_probs():
     merged.validate()
 
 
-def test_merge_samples_teacher_log_probs_none_does_not_raise():
-    # Non-OPD path: teacher_log_probs None on both halves. _fill_defaults fills a
-    # neutral [0.0]*response_length (mirroring rollout_log_probs) so the merge does
-    # not raise the field-mismatch AssertionError.
+def test_merge_samples_teacher_log_probs_none_stays_none():
+    # Non-OPD path: teacher_log_probs None on both halves must stay None (miles
+    # 74198b45 semantics). Zero-filling here poisons non-OPD agentic batches: a
+    # merged sample gets a fake non-None value while unmerged single-turn samples
+    # keep None, and the mixed batch crashes train-side CP slicing.
     a, b = _make_pair(None, None)
     merged = merge_samples([a, b], _FakeTokenizer())
-    assert merged.teacher_log_probs == [0.0, 0.0, 0.0, 0.0, 0.0]
+    assert merged.teacher_log_probs is None
+    merged.validate()
+
+
+def test_merge_samples_teacher_log_probs_one_sided_fills_missing_half_with_zeros():
+    # OPD edge: only one half carries teacher log-probs -> missing half and the
+    # observation span are zero-filled, matching rollout_log_probs shape.
+    a, b = _make_pair([0.11, 0.22], None)
+    merged = merge_samples([a, b], _FakeTokenizer())
+    assert merged.teacher_log_probs == [0.11, 0.22, 0.0, 0.0, 0.0]
     merged.validate()
