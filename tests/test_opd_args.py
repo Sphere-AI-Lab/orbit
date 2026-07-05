@@ -292,3 +292,39 @@ def test_validate_sglang_rejects_foreign_custom_rm():
     )
     with pytest.raises(ValueError, match="custom-rm-path"):
         _validate_opd_args(args)
+
+
+def test_validate_topk_requires_sglang_teacher(tmp_path):
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="megatron",
+        opd_teacher_load=_make_ckpt(tmp_path),
+        opd_log_prob_top_k=8,
+    )
+    with pytest.raises(ValueError, match="opd-log-prob-top-k"):
+        _validate_opd_args(args)
+
+
+def test_validate_topk_rejects_negative():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher_url="http://host/generate",
+        custom_rm_path="orbit.rollout.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.rollout.opd_sglang.post_process",
+        opd_log_prob_top_k=-1,
+    )
+    with pytest.raises(ValueError, match="non-negative"):
+        _validate_opd_args(args)
+
+
+def test_validate_topk_passes_with_sglang(tmp_path):
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher_url="http://host/generate",
+        custom_rm_path="orbit.rollout.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.rollout.opd_sglang.post_process",
+        opd_log_prob_top_k=8,
+    )
+    _validate_opd_args(args)

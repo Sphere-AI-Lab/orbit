@@ -348,6 +348,29 @@ def opd_mopd_advantages(
     Returns:
         list[torch.Tensor]: `teacher_i[-L_i:] - student_i` per sample.
     """
+    precomputed_reverse_kls = rollout_data.get("opd_reverse_kl")
+    if precomputed_reverse_kls is not None:
+        # Top-k OPD: rollout-side scoring already computed the per-token
+        # weighted reverse KL; the MOPD advantage is simply its negation.
+        if len(precomputed_reverse_kls) != len(student_log_probs):
+            raise ValueError(
+                f"OPD length mismatch: opd_reverse_kl={len(precomputed_reverse_kls)} "
+                f"student={len(student_log_probs)}"
+            )
+        device = student_log_probs[0].device
+        out = []
+        for i, reverse_kl in enumerate(precomputed_reverse_kls):
+            if not torch.is_tensor(reverse_kl):
+                reverse_kl = torch.tensor(reverse_kl, dtype=torch.float32)
+            reverse_kl = reverse_kl.to(device=device)
+            if reverse_kl.shape != student_log_probs[i].shape:
+                raise ValueError(
+                    f"OPD shape mismatch at {i}: opd_reverse_kl={tuple(reverse_kl.shape)} "
+                    f"student={tuple(student_log_probs[i].shape)}"
+                )
+            out.append(-reverse_kl)
+        return out
+
     teacher_log_probs = rollout_data.get("teacher_log_probs")
     if teacher_log_probs is None:
         raise ValueError(
@@ -391,6 +414,31 @@ def apply_opd_kl_to_advantages(
     """
     if student_log_probs is None:
         return
+
+    precomputed_reverse_kls = rollout_data.get("opd_reverse_kl")
+    if precomputed_reverse_kls is not None:
+        # Top-k OPD: consume the rollout-side precomputed per-token reverse KL.
+        if len(advantages) != len(precomputed_reverse_kls):
+            raise ValueError(
+                f"OPD length mismatch: advantages={len(advantages)}, "
+                f"opd_reverse_kl={len(precomputed_reverse_kls)}."
+            )
+        reverse_kls = []
+        for i, adv in enumerate(advantages):
+            reverse_kl = precomputed_reverse_kls[i]
+            if not torch.is_tensor(reverse_kl):
+                reverse_kl = torch.tensor(reverse_kl, dtype=torch.float32)
+            reverse_kl = reverse_kl.to(device=adv.device)
+            if adv.shape != reverse_kl.shape:
+                raise ValueError(
+                    f"OPD shape mismatch at sample {i}: advantages={tuple(adv.shape)}, "
+                    f"opd_reverse_kl={tuple(reverse_kl.shape)}."
+                )
+            advantages[i] = adv - opd_kl_coef * reverse_kl
+            reverse_kls.append(reverse_kl)
+        rollout_data["opd_reverse_kl"] = reverse_kls
+        return
+
     teacher_log_probs = rollout_data.get("teacher_log_probs")
     if teacher_log_probs is None:
         raise ValueError("--use-opd requires teacher_log_probs; enable a teacher producer (--opd-type).")

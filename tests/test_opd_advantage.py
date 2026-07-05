@@ -186,3 +186,25 @@ def test_apply_opd_kl_raises_on_length_mismatch():
 
     with pytest.raises(ValueError, match="length mismatch"):
         apply_opd_kl_to_advantages(0.5, rollout_data, advantages, student_log_probs)
+
+
+def test_apply_opd_kl_uses_precomputed_reverse_kl():
+    # Top-k OPD: rollout-side scoring stores per-token reverse KL; the blend
+    # must consume it directly (no teacher_log_probs required).
+    advantages = [torch.tensor([1.0, 1.0])]
+    rollout_data = {"opd_reverse_kl": [torch.tensor([0.2, 0.4])]}
+    student_log_probs = [torch.tensor([-0.1, -0.2])]
+
+    apply_opd_kl_to_advantages(0.5, rollout_data, advantages, student_log_probs)
+
+    torch.testing.assert_close(advantages[0], torch.tensor([1.0 - 0.5 * 0.2, 1.0 - 0.5 * 0.4]))
+
+
+def test_opd_mopd_advantages_uses_precomputed_reverse_kl():
+    # Pure MOPD with top-k scoring: advantage = -reverse_kl per token.
+    student_log_probs = [torch.tensor([-0.1, -0.2])]
+    rollout_data = {"opd_reverse_kl": [torch.tensor([0.2, 0.4])]}
+
+    out = opd_mopd_advantages(rollout_data, student_log_probs, [2])
+
+    torch.testing.assert_close(out[0], torch.tensor([-0.2, -0.4]))

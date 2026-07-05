@@ -763,6 +763,15 @@ class RolloutManager:
                 )
             train_data["teacher_log_probs"] = [sample.teacher_log_probs for sample in samples]
 
+        if any(sample.opd_reverse_kl is not None for sample in samples):
+            missing = sum(1 for sample in samples if sample.opd_reverse_kl is None)
+            if missing:
+                raise ValueError(
+                    f"opd_reverse_kl is set on some samples but missing on {missing}/{len(samples)}; "
+                    "the top-k OPD scorer must score every sample in the batch."
+                )
+            train_data["opd_reverse_kl"] = [sample.opd_reverse_kl for sample in samples]
+
         # Pass dynamic global_batch_size to training side
         assert self.args.use_dynamic_global_batch_size == hasattr(self, "_dynamic_global_batch_size")
         if hasattr(self, "_dynamic_global_batch_size"):
@@ -807,6 +816,7 @@ class RolloutManager:
                 "rollout_routed_experts",
                 "prompt",
                 "teacher_log_probs",
+                "opd_reverse_kl",
                 "weight_versions",
             ]:
                 if key not in data:

@@ -145,6 +145,7 @@ def get_rollout_data(args: Namespace, rollout_data_ref: Box) -> RolloutBatch:
     # — and the already-tensor guard keeps that path untouched either way).
     _tensorize_cp_sliced_log_probs(args, rollout_data, "rollout_log_probs")
     _tensorize_cp_sliced_log_probs(args, rollout_data, "teacher_log_probs")
+    _tensorize_cp_sliced_log_probs(args, rollout_data, "opd_reverse_kl")
     if "rollout_routed_experts" in rollout_data:
         rollout_data["rollout_routed_experts"] = [torch.from_numpy(r) for r in rollout_data["rollout_routed_experts"]]
     return rollout_data

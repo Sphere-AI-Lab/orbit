@@ -117,11 +117,40 @@ def add_on_policy_distillation_arguments(parser):
             "it is incompatible with --use-rollout-logprobs."
         ),
     )
+    parser.add_argument(
+        "--opd-log-prob-top-k",
+        type=int,
+        default=0,
+        help=(
+            "Number of top-k tokens to use for the re-think OPD token-level reward. "
+            "Set to 0 to use sampled-token OPD."
+        ),
+    )
+    parser.add_argument(
+        "--opd-top-k-strategy",
+        type=str,
+        choices=["only-student", "only-teacher", "intersection", "union", "xor"],
+        default="only-student",
+        help="Token set strategy for top-k OPD.",
+    )
+    parser.add_argument(
+        "--opd-reward-weight-mode",
+        type=str,
+        choices=["student_p", "teacher_p", "none"],
+        default="student_p",
+        help="Weighting scheme for top-k OPD token rewards.",
+    )
     return parser
 
 
 def _validate_opd_args(args) -> None:
     """Validate on-policy distillation args. Mirrors slime arguments.py:1761-1791."""
+    opd_top_k = getattr(args, "opd_log_prob_top_k", 0) or 0
+    if opd_top_k < 0:
+        raise ValueError("--opd-log-prob-top-k must be non-negative.")
+    if opd_top_k > 0 and getattr(args, "opd_type", None) != "sglang":
+        raise ValueError("--opd-log-prob-top-k is currently supported only with --opd-type=sglang.")
+
     # Pure MOPD (advantage estimator) and blend (--use-opd) are mutually exclusive:
     # blend is meant to sit on top of a reward-based estimator, not on pure distillation.
     if args.advantage_estimator == "on_policy_distillation" and getattr(args, "use_opd", False):

@@ -398,6 +398,19 @@ async def generate(
         "return_logprob": should_request_rollout_logprobs(args, evaluation),
     }
 
+    # Top-k OPD (sglang teacher): collect the student's own top-k logprobs during
+    # generation; post_process cross-scores them against the teacher's top-k.
+    _opd_top_k = getattr(args, "opd_log_prob_top_k", 0) or 0
+    _opd_wants_student_top = (
+        not evaluation
+        and _opd_top_k > 0
+        and getattr(args, "opd_type", None) == "sglang"
+        and getattr(args, "opd_top_k_strategy", "only-student") != "only-teacher"
+    )
+    if _opd_wants_student_top:
+        payload["top_logprobs_num"] = _opd_top_k
+        payload["return_logprob"] = True  # sglang returns output_top_logprobs only with logprobs on
+
     attach_peft_request_payload(args, payload)
 
     if args.use_rollout_routing_replay:
@@ -422,6 +435,11 @@ async def generate(
 
     _t_http0 = time.perf_counter()
     output = await post(url, payload, headers=headers)
+    if _opd_wants_student_top:
+        _output_top_logprobs = output.get("meta_info", {}).get("output_top_logprobs")
+        if _output_top_logprobs is not None:
+            sample.metadata.setdefault("opd_student_top_logprobs", [])
+            sample.metadata["opd_student_top_logprobs"].extend(_output_top_logprobs)
     if os.environ.get("ORBIT_DSV4_RESPONSE_DEBUG", "0") == "1":
         dump_dir = os.environ.get("ORBIT_DSV4_RESPONSE_DEBUG_DIR", "/tmp")
         os.makedirs(dump_dir, exist_ok=True)
