@@ -334,7 +334,7 @@ def get_values(
     return res
 
 
-def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) -> None:
+def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch, role: str = "actor") -> None:
     """Compute advantages and returns in-place based on `args.advantage_estimator`.
 
     This function extracts rewards, log-probs, values, and masks from
@@ -354,6 +354,10 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
             "rewards", "values", "response_lengths", "loss_masks",
             "total_lengths"). Modified in-place to add "advantages" and
             "returns" keys, each mapping to lists of tensors per sample.
+        role: "actor" or "critic". The critic never receives teacher_log_probs
+            (sync_actor_critic_data does not broadcast them) and its value loss
+            consumes `returns`, which the OPD blend does not touch — so OPD
+            advantage adjustments are skipped for role="critic".
     """
     parallel_state = get_parallel_state()
     log_probs: list[torch.Tensor] = rollout_data.get("rollout_log_probs" if args.use_rollout_logprobs else "log_probs")
@@ -433,12 +437,12 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
     else:
         raise NotImplementedError(f"advantage_estimator {args.advantage_estimator} is not supported. ")
 
-    if getattr(args, "use_opd", False):
+    if role == "actor" and getattr(args, "use_opd", False):
         apply_opd_kl_to_advantages(args.opd_kl_coef, rollout_data, advantages, log_probs)
 
     # Optional async/off-policy ICE-POP correction for the OPD advantage (pure-MOPD
     # or blend): hard-gate tokens whose train/rollout importance ratio leaves the band.
-    if getattr(args, "opd_icepop", False):
+    if role == "actor" and getattr(args, "opd_icepop", False):
         apply_opd_icepop_gate(rollout_data, advantages, args.tis_clip_low, args.tis_clip)
 
     # Follow-up: OpenRLHF always does advantages normalization but veRL doesn't seem to do it.

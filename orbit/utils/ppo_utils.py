@@ -352,7 +352,7 @@ def opd_mopd_advantages(
     if teacher_log_probs is None:
         raise ValueError(
             "advantage_estimator='on_policy_distillation' needs teacher_log_probs. "
-            "Enable a teacher producer with --use-opd --opd-type {megatron,sglang}."
+            "Enable a teacher producer with --opd-type {megatron,sglang}."
         )
     if len(teacher_log_probs) != len(student_log_probs):
         raise ValueError(f"OPD length mismatch: teacher={len(teacher_log_probs)} student={len(student_log_probs)}")
@@ -386,11 +386,19 @@ def apply_opd_kl_to_advantages(
         rollout_data: Rollout batch dict; must contain `teacher_log_probs`
             (list[torch.Tensor], one per sample, aligned to `student_log_probs`).
         advantages: Base-estimator advantages per sample; mutated in place.
-        student_log_probs: Current policy log-probs per sample.
+        student_log_probs: Current policy log-probs per sample, or None (e.g. on
+            the critic with KL off) — the blend is then a silent no-op.
     """
+    if student_log_probs is None:
+        return
     teacher_log_probs = rollout_data.get("teacher_log_probs")
     if teacher_log_probs is None:
         raise ValueError("--use-opd requires teacher_log_probs; enable a teacher producer (--opd-type).")
+    if not (len(advantages) == len(student_log_probs) == len(teacher_log_probs)):
+        raise ValueError(
+            f"OPD length mismatch: advantages={len(advantages)}, "
+            f"student_log_probs={len(student_log_probs)}, teacher_log_probs={len(teacher_log_probs)}."
+        )
     device = student_log_probs[0].device
     reverse_kls = []
     for i, adv in enumerate(advantages):

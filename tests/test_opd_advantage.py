@@ -34,8 +34,12 @@ def test_opd_mopd_advantages_raises_without_teacher_log_probs():
     student_log_probs = [torch.tensor([0.1, 0.2, 0.3])]
     response_lengths = [3]
 
-    with pytest.raises(ValueError, match="--use-opd"):
+    with pytest.raises(ValueError, match="--opd-type") as excinfo:
         opd_mopd_advantages({"teacher_log_probs": None}, student_log_probs, response_lengths)
+    # The advice must NOT mention --use-opd: pure MOPD + --use-opd is rejected
+    # as mutually exclusive by _validate_opd_args, so following that advice
+    # would trade one error for another.
+    assert "--use-opd" not in str(excinfo.value)
 
 
 def test_opd_mopd_advantages_matches_teacher_minus_student():
@@ -160,3 +164,25 @@ def test_apply_opd_icepop_gate_raises_without_rollout_log_probs():
 
     with pytest.raises(ValueError, match="rollout_log_probs"):
         apply_opd_icepop_gate(rollout_data, advantages, 0.0, 2.0)
+
+
+def test_apply_opd_kl_is_noop_when_student_log_probs_none():
+    # Critic path: teacher_log_probs never reaches the critic and, with KL off,
+    # neither do student log-probs. The blend must be a silent no-op (miles
+    # semantics), not a crash.
+    advantages = [torch.tensor([1.0, 2.0])]
+    rollout_data = {"teacher_log_probs": [torch.tensor([0.5, 0.5])]}
+
+    apply_opd_kl_to_advantages(0.5, rollout_data, advantages, None)
+
+    torch.testing.assert_close(advantages[0], torch.tensor([1.0, 2.0]))
+    assert "opd_reverse_kl" not in rollout_data
+
+
+def test_apply_opd_kl_raises_on_length_mismatch():
+    advantages = [torch.tensor([1.0]), torch.tensor([2.0])]
+    student_log_probs = [torch.tensor([0.1]), torch.tensor([0.2])]
+    rollout_data = {"teacher_log_probs": [torch.tensor([0.3])]}
+
+    with pytest.raises(ValueError, match="length mismatch"):
+        apply_opd_kl_to_advantages(0.5, rollout_data, advantages, student_log_probs)
