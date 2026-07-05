@@ -89,3 +89,22 @@ async def test_reward_func_returns_zero_and_stashes_teacher_response(monkeypatch
 
     assert reward == 0.0
     assert sample.metadata[opd_sglang.TEACHER_RESPONSE_METADATA_KEY] is fake_response
+
+
+def test_post_process_tolerates_unscored_sample():
+    # A sample can reach post_process without the stashed teacher response
+    # (aborted-then-recovered partial rollout, reward produced by another
+    # path). One such sample must not KeyError the whole batch conversion;
+    # it keeps teacher_log_probs=None while scored samples are extracted.
+    args = argparse.Namespace()
+    scored = _make_sample(2)
+    scored.metadata[opd_sglang.TEACHER_RESPONSE_METADATA_KEY] = _fake_response(
+        [None, 0.1, 0.2], [10, 11, 12]
+    )
+    unscored = _make_sample(2)
+
+    raw_rewards, rewards = opd_sglang.post_process(args, [scored, unscored])
+
+    assert scored.teacher_log_probs == [0.1, 0.2]
+    assert unscored.teacher_log_probs is None
+    assert raw_rewards == [0.0, 0.0] and rewards == [0.0, 0.0]

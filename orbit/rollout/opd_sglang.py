@@ -28,9 +28,13 @@ teacher response in ``sample.metadata`` instead, for ``post_process`` to read
 back and discard.
 """
 
+import logging
+
 import aiohttp
 
 from orbit.utils.types import Sample
+
+logger = logging.getLogger(__name__)
 
 TEACHER_RESPONSE_METADATA_KEY = "opd_teacher_response"
 
@@ -92,9 +96,20 @@ def post_process(args, samples: list[Sample], **kwargs):
     ``(raw_rewards, rewards)`` shape expected by
     ``RolloutManager._convert_samples_to_train_data``.
     """
+    unscored = 0
     for sample in samples:
-        response = sample.metadata.pop(TEACHER_RESPONSE_METADATA_KEY)
+        response = sample.metadata.pop(TEACHER_RESPONSE_METADATA_KEY, None)
+        if response is None:
+            # e.g. aborted-then-recovered partial rollout whose reward was not
+            # produced by reward_func. Keep teacher_log_probs=None (honest
+            # "not scored" state) instead of KeyError-ing the whole batch;
+            # if such a sample reaches training, _convert_samples_to_train_data
+            # rejects the mixed batch with an actionable error.
+            unscored += 1
+            continue
         sample.teacher_log_probs = _extract_teacher_log_probs(response, sample.response_length)
+    if unscored:
+        logger.warning("OPD sglang post_process: %d/%d samples had no stashed teacher response.", unscored, len(samples))
 
     scalar_rewards = [0.0] * len(samples)
     return scalar_rewards, scalar_rewards

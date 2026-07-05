@@ -34,6 +34,14 @@ def _fake_parallel_state():
 
 @pytest.fixture
 def patched(monkeypatch):
+    # get_rollout_data hardcodes device=torch.cuda.current_device(). A working
+    # CUDA *context* is required — torch.cuda.is_available() is not enough (on
+    # login shells it reports True while context creation fails with "device
+    # busy or unavailable"), so probe with a real allocation.
+    try:
+        torch.zeros(1, device="cuda")
+    except Exception as e:
+        pytest.skip(f"CUDA context unavailable: {e}")
     fake = _fake_parallel_state()
     # slice_log_prob_with_cp (cp_utils) and get_rollout_data (data) each import
     # get_parallel_state from .parallel, so both references must be patched.
@@ -93,3 +101,38 @@ def test_get_rollout_data_leaves_already_tensor_teacher_untouched(patched):
     out = data.get_rollout_data(args, rollout_data)
 
     assert out["teacher_log_probs"][0] is existing
+
+
+# --- _tensorize_cp_sliced_log_probs: CPU-only paths (no CUDA context needed) ---
+
+
+def test_tensorize_helper_noop_on_empty_list():
+    # A DP rank can receive zero samples (rollout batch not divisible by the
+    # training DP size); indexing [0] to sniff the element type IndexErrors.
+    args = Namespace(qkv_format="thd")
+    rollout_data = {"teacher_log_probs": [], "total_lengths": [], "response_lengths": []}
+
+    data._tensorize_cp_sliced_log_probs(args, rollout_data, "teacher_log_probs")
+
+    assert rollout_data["teacher_log_probs"] == []
+
+
+def test_tensorize_helper_noop_on_absent_key():
+    args = Namespace(qkv_format="thd")
+    rollout_data = {"total_lengths": [3], "response_lengths": [3]}
+
+    data._tensorize_cp_sliced_log_probs(args, rollout_data, "teacher_log_probs")
+
+    assert "teacher_log_probs" not in rollout_data
+
+
+def test_tensorize_helper_noop_on_already_tensor_entries():
+    # Megatron OPD teacher populates tensors later via compute_log_prob; the
+    # helper must leave already-tensorized entries untouched.
+    args = Namespace(qkv_format="thd")
+    t = torch.tensor([-1.0, -2.0])
+    rollout_data = {"teacher_log_probs": [t], "total_lengths": [3], "response_lengths": [2]}
+
+    data._tensorize_cp_sliced_log_probs(args, rollout_data, "teacher_log_probs")
+
+    assert rollout_data["teacher_log_probs"][0] is t
