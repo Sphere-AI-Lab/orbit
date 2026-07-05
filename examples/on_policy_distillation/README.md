@@ -110,6 +110,88 @@ real `--rm-type math` reward, so its eval-accuracy numbers are meaningful.
 Same CPU-free argv inspection and mutual-exclusion rules as the Megatron
 recipe apply here.
 
+## Top-k distributional scoring (Rethinking OPD)
+
+`--opd-log-prob-top-k 0` (the default) scores only the *sampled* token — a
+high-variance single-point estimate of the reverse KL. Setting it above zero
+switches the sglang teacher to the top-k recipe from
+[Rethinking On-Policy Distillation](https://arxiv.org/abs/2604.13016): the
+student's own top-k logprobs are harvested during rollout generation, the
+teacher is scored at the same sequence, and a weighted reverse-KL estimate is
+aggregated over a selected token set per response position. The result ships
+as one scalar per token in `sample.opd_reverse_kl`, which the trainer consumes
+directly (both pure MOPD and the blend) — training-side cost is unchanged.
+
+The token set is controlled by `--opd-top-k-strategy`:
+
+| Strategy | Token set |
+|----------|-----------|
+| `only-student` | Student top-k tokens, with teacher logprobs queried for those IDs. |
+| `only-teacher` | Teacher top-k tokens, with student logprobs queried for those IDs. |
+| `intersection` | Tokens appearing in both top-k sets. |
+| `union` | Tokens appearing in either top-k set, with duplicates removed. |
+| `xor` | Tokens appearing in exactly one top-k set. |
+
+`--opd-reward-weight-mode` weights each selected token by student probability
+(`student_p`, default), teacher probability (`teacher_p`), or uniformly
+(`none`). Weights are softmax-normalized over the set except for `xor`.
+
+```
+RL_ARGS=(
+    --advantage-estimator on_policy_distillation
+    --opd-type sglang
+    --opd-log-prob-top-k 16
+    --opd-top-k-strategy only-student
+    ...
+)
+```
+
+### Tail-mass bucket (exact truncated KL)
+
+The default weighting renormalizes over the selected token set, so the
+estimate cannot see probability mass the student moves *outside* the top-k.
+`--opd-topk-tail-bucket` instead treats the position as k+1 buckets that sum
+to 1 — the selected ids at their exact full-softmax probabilities, plus one
+aggregated tail bucket — and computes the exact reverse KL over that
+partition. The tail term penalizes the student for pushing mass off the
+support. Requires `--opd-reward-weight-mode student_p` and
+`--opd-top-k-strategy only-student` or `intersection`: the bucket partition
+is only exact when all student logprobs at the selected ids come from a
+single softmax (the rollout harvest). (This is the same idea as NeMo-RL's
+`zero_outside_topk` distillation-loss correction, computed rollout-side.)
+
+## Multi-teacher routing and ensembles
+
+`--opd-teacher-urls NAME=URL[@W][,URL[@W]...]` (sglang mode only) routes each
+sample to a named teacher group instead of the single `--opd-teacher-url`:
+
+- **Routing**: each sample is sent to the group named by
+  `sample.metadata[--opd-teacher-key]` (default key: `opd_teacher`, populated
+  from the dataset's metadata column). The reserved name `default` is the
+  fallback for samples with a missing or unknown name; without a `default`,
+  such samples fail loudly — silently distilling from the wrong teacher is
+  worse than failing the rollout.
+- **Ensembles**: a name mapping to several comma-separated URLs scores the
+  sample against every member in parallel (wall clock = max latency, not the
+  sum) and combines the teachers as a weighted mixture in probability space
+  (logsumexp of weighted logprobs — the logprob of the mixture teacher, not a
+  geometric mean). Per-URL weights default to 1.0. With
+  `--opd-log-prob-top-k > 0`, ensembles require
+  `--opd-top-k-strategy only-student` so every member is scored at the same
+  student token ids.
+
+```bash
+--opd-teacher-urls \
+    math=http://h1:30001/generate \
+    code=http://h2:30002/generate@2,http://h3:30003/generate \
+    default=http://h1:30001/generate
+```
+
+Scoring robustness: `--opd-scoring-timeout-secs` bounds each teacher/student
+scoring request (teachers are often much larger and slower than the student);
+transient failures (timeout, connection error, HTTP 5xx) get one automatic
+jittered retry, 4xx responses never retry.
+
 ## Blend variant
 
 To blend distillation onto a reward-based estimator, drop
