@@ -42,6 +42,7 @@ from .ci_utils import (
     compute_model_hashes_by_layer,
     save_model_hashes,
 )
+from .fp32_param_utils import enforce_marked_param_dtypes
 from .initialize import is_megatron_main_rank
 from .low_precision_bootstrap import should_preload_low_precision_model_before_optimizer
 from .model_provider import get_model_provider_func
@@ -188,6 +189,9 @@ def setup_model_and_optimizer(
     assert args.load is not None or args.pretrained_checkpoint is not None
 
     model = _build_model(args, role)
+    # Apply parameter-level dtype overrides declared in model definitions
+    # (e.g. Qwen3.5 A_log pinned to fp32) before the optimizer maps params.
+    enforce_marked_param_dtypes(model)
     optimizer, opt_param_scheduler = _build_optimizer_and_scheduler(args, model)
     return model, optimizer, opt_param_scheduler
 
