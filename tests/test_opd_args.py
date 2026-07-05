@@ -328,3 +328,39 @@ def test_validate_topk_passes_with_sglang(tmp_path):
         opd_log_prob_top_k=8,
     )
     _validate_opd_args(args)
+
+
+def test_validate_teacher_urls_requires_sglang(tmp_path):
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="megatron",
+        opd_teacher_load=_make_ckpt(tmp_path),
+        opd_teacher_urls=["math=http://h1/generate"],
+    )
+    with pytest.raises(ValueError, match="opd-teacher-urls"):
+        _validate_opd_args(args)
+
+
+def test_validate_teacher_urls_fail_fast_on_malformed():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher_url=None,
+        opd_teacher_urls=["malformed-entry"],
+        custom_rm_path="orbit.rollout.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.rollout.opd_sglang.post_process",
+    )
+    with pytest.raises(ValueError, match="expected NAME=URL"):
+        _validate_opd_args(args)
+
+
+def test_validate_sglang_passes_with_teacher_urls_instead_of_url():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher_url=None,
+        opd_teacher_urls=["default=http://h1/generate", "math=http://h2/generate"],
+        custom_rm_path="orbit.rollout.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.rollout.opd_sglang.post_process",
+    )
+    _validate_opd_args(args)

@@ -107,6 +107,58 @@ def add_on_policy_distillation_arguments(parser):
         ),
     )
     parser.add_argument(
+        "--opd-teacher-urls",
+        type=str,
+        nargs="+",
+        default=None,
+        metavar="NAME=URL[@W][,URL[@W]...]",
+        help=(
+            "Multi-teacher routing/ensemble map for --opd-type=sglang, e.g. "
+            "--opd-teacher-urls math=http://h1:30001/generate code=http://h2:30002/generate. "
+            "Each sample is routed to the teacher group named by "
+            "sample.metadata[--opd-teacher-key]; the reserved name 'default' is the "
+            "fallback for samples with a missing or unknown name. A name mapping to "
+            "several comma-separated URLs is an ensemble: every member scores the "
+            "sample in parallel and the targets are combined as a weighted mixture "
+            "in probability space (logsumexp of weighted logprobs); per-URL weights "
+            "default to 1.0 (uniform). With --opd-log-prob-top-k > 0, ensembles "
+            "require --opd-top-k-strategy only-student. When unset, all samples are "
+            "scored by the single teacher at --opd-teacher-url (original behavior)."
+        ),
+    )
+    parser.add_argument(
+        "--opd-topk-tail-bucket",
+        action="store_true",
+        default=False,
+        help=(
+            "Compute the top-k OPD reward as the exact reverse KL over the selected "
+            "token ids plus one tail bucket (k+1 buckets summing to 1), instead of "
+            "the softmax-renormalized truncated estimate. Keeps the estimate "
+            "sensitive to probability mass the student moves outside the top-k. "
+            "Requires --opd-log-prob-top-k > 0 and --opd-reward-weight-mode "
+            "student_p (the bucket weights are the raw student probabilities)."
+        ),
+    )
+    parser.add_argument(
+        "--opd-scoring-timeout-secs",
+        type=float,
+        default=None,
+        help=(
+            "Per-request timeout for OPD teacher/student scoring calls. Set this to "
+            "give (typically larger, slower) teacher servers a different bound than "
+            "generation requests."
+        ),
+    )
+    parser.add_argument(
+        "--opd-teacher-key",
+        type=str,
+        default="opd_teacher",
+        help=(
+            "Sample metadata key holding the teacher name used for --opd-teacher-urls "
+            "routing. Populated from the dataset's metadata column."
+        ),
+    )
+    parser.add_argument(
         "--opd-icepop",
         action="store_true",
         default=False,
@@ -150,6 +202,33 @@ def _validate_opd_args(args) -> None:
         raise ValueError("--opd-log-prob-top-k must be non-negative.")
     if opd_top_k > 0 and getattr(args, "opd_type", None) != "sglang":
         raise ValueError("--opd-log-prob-top-k is currently supported only with --opd-type=sglang.")
+    if getattr(args, "opd_teacher_urls", None):
+        if getattr(args, "opd_type", None) != "sglang":
+            raise ValueError("--opd-teacher-urls is only supported with --opd-type=sglang.")
+        # Local import to keep orbit.utils free of rollout imports at module load.
+        from orbit.rollout.opd_sglang import parse_teacher_urls
+
+        url_map = parse_teacher_urls(args.opd_teacher_urls)  # fail fast on malformed/duplicate entries
+        has_ensemble_group = any(len(targets) > 1 for targets in url_map.values())
+        if has_ensemble_group and opd_top_k > 0 and getattr(args, "opd_top_k_strategy", "only-student") != "only-student":
+            raise ValueError(
+                "Teacher ensembles (--opd-teacher-urls groups with multiple URLs) require "
+                "--opd-top-k-strategy only-student: every group member must be scored at the "
+                f"same student top-k token ids, got {args.opd_top_k_strategy!r}."
+            )
+    if getattr(args, "opd_topk_tail_bucket", False):
+        if opd_top_k <= 0:
+            raise ValueError("--opd-topk-tail-bucket requires --opd-log-prob-top-k > 0.")
+        if getattr(args, "opd_reward_weight_mode", "student_p") != "student_p":
+            raise ValueError(
+                "--opd-topk-tail-bucket uses raw student probabilities as bucket weights and is "
+                f"incompatible with --opd-reward-weight-mode {args.opd_reward_weight_mode!r}; use student_p."
+            )
+        if getattr(args, "opd_top_k_strategy", "only-student") not in ("only-student", "intersection"):
+            raise ValueError(
+                "--opd-topk-tail-bucket requires --opd-top-k-strategy only-student or intersection "
+                f"(single-softmax student logprobs), got {args.opd_top_k_strategy!r}."
+            )
 
     # Pure MOPD (advantage estimator) and blend (--use-opd) are mutually exclusive:
     # blend is meant to sit on top of a reward-based estimator, not on pure distillation.
@@ -221,8 +300,11 @@ def _validate_opd_args(args) -> None:
                 "--opd-type sglang scores via an external SGLang teacher server; --opd-teacher-load must be "
                 "unset (configure the SGLang teacher endpoint instead of an in-process checkpoint)."
             )
-        if not args.opd_teacher_url:
-            raise ValueError("--opd-type sglang requires --opd-teacher-url <http://host:port/generate>.")
+        if not args.opd_teacher_url and not getattr(args, "opd_teacher_urls", None):
+            raise ValueError(
+                "--opd-type sglang requires --opd-teacher-url <http://host:port/generate> "
+                "(or a multi-teacher routing map via --opd-teacher-urls NAME=URL ...)."
+            )
         # The sglang teacher produces sample.teacher_log_probs ONLY through its
         # two custom-reward hooks; without them the run passes validation, pays
         # for a full rollout, and only then dies in opd_mopd_advantages.

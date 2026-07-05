@@ -77,7 +77,7 @@ def test_post_process_handles_multiple_samples_independently():
 async def test_reward_func_returns_zero_and_stashes_teacher_response(monkeypatch):
     fake_response = _fake_response([None, 0.1], [1, 2])
 
-    async def fake_score(args, sample):
+    async def fake_score(args, sample, targets=None):
         return fake_response
 
     monkeypatch.setattr(opd_sglang, "_score_with_teacher", fake_score)
