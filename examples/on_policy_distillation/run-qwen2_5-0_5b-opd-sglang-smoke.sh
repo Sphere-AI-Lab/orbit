@@ -56,7 +56,7 @@ CKPT_ARGS=(
     --hf-checkpoint "${HF_CKPT}"
     --load "${MEGATRON_LOAD}"
     --save "${SAVE_DIR}/actor"
-    --save-interval 200
+    --save-interval "${SAVE_INTERVAL:-200}"
     --no-save-optim
     --no-save-rng
     --megatron-to-hf-mode bridge
