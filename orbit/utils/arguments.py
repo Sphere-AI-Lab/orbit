@@ -214,7 +214,60 @@ def add_on_policy_distillation_arguments(parser):
             "(NeMo-RL's mixed_kl_weight; 0.5 matches their default recipe)."
         ),
     )
+    parser.add_argument(
+        "--judge-base-url",
+        type=str,
+        default=None,
+        help=(
+            "Base URL of an OpenAI-compatible judge server (e.g. an sglang server: "
+            "http://host:port) used by orbit.rollout.llm_judge.reward_func. "
+            "Required when --custom-rm-path points at the LLM-judge hook."
+        ),
+    )
+    parser.add_argument(
+        "--judge-mode",
+        type=str,
+        choices=["equivalence", "score"],
+        default="equivalence",
+        help=(
+            "LLM-judge grading mode: 'equivalence' compares the response's final "
+            "answer to sample.label (reward 1/0); 'score' is a pointwise 0-10 "
+            "quality grade normalized to [0, 1]."
+        ),
+    )
+    parser.add_argument(
+        "--judge-model",
+        type=str,
+        default="default",
+        help="Model name passed to the judge's chat-completions endpoint.",
+    )
+    parser.add_argument(
+        "--judge-max-tokens",
+        type=int,
+        default=1024,
+        help="Max tokens for the judge's reply (reasoning + final verdict line).",
+    )
+    parser.add_argument(
+        "--judge-timeout-secs",
+        type=float,
+        default=None,
+        help="Per-request timeout for judge calls (one automatic retry on transient failures).",
+    )
     return parser
+
+
+def _validate_judge_args(args) -> None:
+    """Validate LLM-judge reward args when the judge hook is wired."""
+    custom_rm = getattr(args, "custom_rm_path", None) or ""
+    if not custom_rm.endswith("llm_judge.reward_func"):
+        return
+    if not getattr(args, "judge_base_url", None):
+        raise ValueError(
+            "--custom-rm-path orbit.rollout.llm_judge.reward_func requires --judge-base-url "
+            "<http://judge-host:port> (an OpenAI-compatible chat-completions server)."
+        )
+    if getattr(args, "judge_mode", "equivalence") not in ("equivalence", "score"):
+        raise ValueError(f"Unknown --judge-mode: {args.judge_mode!r}.")
 
 
 def _validate_opd_args(args) -> None:
@@ -2692,6 +2745,7 @@ def _common_orbit_validate_args(args):
         )
 
     _validate_opd_args(args)
+    _validate_judge_args(args)
 
     if args.use_rollout_logprobs:
         assert not args.use_tis, "use_rollout_logprobs and use_tis cannot be set at the same time."

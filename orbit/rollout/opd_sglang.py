@@ -39,14 +39,13 @@ back and discard.
 import asyncio
 import logging
 import math
-import random
 from argparse import Namespace
 from collections.abc import Iterable
 from typing import Any
 
-import aiohttp
 import torch
 
+from orbit.rollout.scoring_client import post_json
 from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)
@@ -63,9 +62,7 @@ TeacherTarget = tuple[str, float]
 # logprobs arrive as JSON doubles, so 1 - sum(p) only goes non-positive through genuine
 # float64 rounding; the floor (log ~= -27.6) is a last-resort guard, not a working range.
 TAIL_PROB_FLOOR = 1e-12
-# Bounded retry for teacher/student scoring requests: one retry on transient failures
-# (timeout, connection error, HTTP 5xx) with jitter. 4xx responses never retry.
-SCORING_MAX_RETRIES = 1
+
 
 TOP_K_STRATEGIES = {"only-student", "only-teacher", "intersection", "union", "xor"}
 REWARD_WEIGHT_MODES = {"student_p", "teacher_p", "none"}
@@ -247,29 +244,10 @@ def _scoring_timeout(args: Namespace) -> int | float | None:
     return getattr(args, "sglang_router_request_timeout_secs", None)
 
 
-def _is_retryable_scoring_error(exc: BaseException) -> bool:
-    if isinstance(exc, aiohttp.ClientResponseError):
-        return exc.status >= 500
-    return isinstance(exc, (aiohttp.ClientError, asyncio.TimeoutError))
-
-
-async def _post_json_once(url: str, payload: dict[str, Any], timeout: aiohttp.ClientTimeout) -> dict[str, Any]:
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(url, json=payload) as resp:
-            resp.raise_for_status()
-            return await resp.json()
-
-
 async def _post_json(url: str, payload: dict[str, Any], timeout_secs: int | float | None = None) -> dict[str, Any]:
-    timeout = aiohttp.ClientTimeout(total=timeout_secs)
-    for attempt in range(SCORING_MAX_RETRIES + 1):
-        try:
-            return await _post_json_once(url, payload, timeout)
-        except BaseException as exc:
-            if attempt >= SCORING_MAX_RETRIES or not _is_retryable_scoring_error(exc):
-                raise
-            await asyncio.sleep(min(2**attempt, 4) * (0.5 + 0.5 * random.random()))
-    raise AssertionError("unreachable")
+    # Thin module-level wrapper around the shared scoring client so tests can
+    # monkeypatch opd_sglang._post_json.
+    return await post_json(url, payload, timeout_secs=timeout_secs)
 
 
 def _mixture_log_probs(per_teacher: list[torch.Tensor], weights: list[float]) -> torch.Tensor:
