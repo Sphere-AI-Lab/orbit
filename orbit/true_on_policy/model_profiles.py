@@ -49,11 +49,10 @@ QWEN3_DENSE_PROFILE = TrueOnPolicyModelProfile(
         "Qwen3-4B-Base",
         "Qwen3-4B-Instruct-2507",
     ),
-    # miles certifies ("dp", "tp", "pp", "ulysses_cp") for training; orbit's
-    # current true-on-policy log-prob kernel breaks under train TP>1 (design
-    # §3.1) and the CP loss-scaling correction is unported, so "tp"/"cp" join
-    # after Phase 4.
-    supported_train_layouts=("dp", "pp"),
+    # miles certifies ("dp", "tp", "pp", "ulysses_cp") for training; "tp"
+    # joined in Phase 4 with the TP-correct full-vocab gather. "cp" stays out
+    # until the CP loss-scaling correction is ported.
+    supported_train_layouts=("dp", "tp", "pp"),
     supported_rollout_layouts=("dp", "tp"),
     contract=QWEN3_DENSE_TRUE_ON_POLICY_V1,
 )

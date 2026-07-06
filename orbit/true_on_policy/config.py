@@ -279,10 +279,11 @@ def apply_true_on_policy_parse_defaults(args: Any) -> None:
 
     Orbit analog of miles' ``apply_true_on_policy_script_defaults``: miles
     expands at launch-script level into CLI strings; orbit parses args
-    in-process, so the expansion mutates parsed dests directly. Applies only
-    the rollout-side dests, the mode flags, and env vars — the Megatron
-    training-side flags the plan declares (batch-invariant mode, fusion bans)
-    are Phase-4 scope. Off-mode is a byte-for-byte no-op.
+    in-process, so the expansion mutates parsed dests directly. Applies the
+    rollout-side dests, the mode flags, the Megatron training-side determinism
+    flags (batch-invariant kernels, fusion bans — they reach TransformerConfig
+    via core_transformer_config_from_args field-name matching), and env vars.
+    Off-mode is a byte-for-byte no-op.
     """
     plan = build_true_on_policy_launch_plan(args)
     if not plan.enabled:
@@ -302,7 +303,17 @@ def apply_true_on_policy_parse_defaults(args: Any) -> None:
     args.recompute_logprobs_via_prefill = True
     args.deterministic_mode = True
 
+    kernel_policy = plan.kernel_policy
+    args.batch_invariant_mode = kernel_policy.batch_invariant_mode
+    if kernel_policy.disable_rope_fusion:
+        args.apply_rope_fusion = False
+    if kernel_policy.disable_bias_swiglu_fusion:
+        args.bias_swiglu_fusion = False
+
     env_vars = dict(getattr(args, "train_env_vars", None) or {})
     for key, value in plan.env_vars.items():
         env_vars.setdefault(key, value)
+        # Megatron's deterministic-mode validation asserts NCCL_ALGO in the
+        # *driver* process env (validate_args); actors get --train-env-vars.
+        os.environ.setdefault(key, value)
     args.train_env_vars = env_vars

@@ -98,6 +98,16 @@ def init(args):
         torch.backends.cudnn.benchmark = False
         torch.use_deterministic_algorithms(True, warn_only=False)
 
+    # Mirror of megatron.training.initialize (orbit does not call it): the
+    # TransformerConfig field alone only affects config validation; the kernel
+    # overrides are installed by this global switch.
+    if getattr(args, "batch_invariant_mode", False):
+        from megatron.core.transformer.custom_layers.batch_invariant_kernels import enable_batch_invariant_mode
+
+        if args.rank == 0:
+            logger.info("> enabling batch-invariant kernels globally")
+        enable_batch_invariant_mode()
+
     if args.tp_comm_overlap:
         from megatron.training.initialize import _initialize_tp_communicators
 

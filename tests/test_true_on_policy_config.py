@@ -63,9 +63,10 @@ def test_qwen3_dense_profile_resolves_model_names():
     assert profile.contract is contract
     assert contract.schema.name == "qwen3_dense_true_on_policy_v1"
     assert contract.schema.model_family == "qwen3_dense"
-    # orbit deviation from miles: no train "tp"/"ulysses_cp" until Phase 4
-    # ports the TP-correct full-vocab gather (design §3.1).
-    assert profile.supported_train_layouts == ("dp", "pp")
+    # orbit deviation from miles: no "ulysses_cp" (orbit's CP loss-scaling
+    # correction is unported); "tp" joined in Phase 4 with the TP-correct
+    # full-vocab gather.
+    assert profile.supported_train_layouts == ("dp", "tp", "pp")
     assert profile.supported_rollout_layouts == ("dp", "tp")
     assert profile.required_kernel_contracts == ("qwen3_dense_sglang_math",)
     assert profile.logprob_contract == "sglang_prefill"
@@ -134,14 +135,16 @@ def test_switch_expands_rollout_and_mode_dests():
     assert "NCCL_ALGO" in args.train_env_vars
 
 
-def test_expansion_does_not_apply_phase4_megatron_flags():
+def test_expansion_applies_training_side_determinism_flags():
     args = _args()
 
     apply_true_on_policy_parse_defaults(args)
 
-    # Declared in the launch plan, but applying them is Phase-4 scope.
-    assert not hasattr(args, "batch_invariant_mode")
-    assert not hasattr(args, "apply_rope_fusion")
+    # Phase 4: batch-invariant kernels + fusion bans flow into TransformerConfig
+    # via core_transformer_config_from_args (field-name matching).
+    assert args.batch_invariant_mode is True
+    assert args.apply_rope_fusion is False
+    assert args.bias_swiglu_fusion is False
 
 
 def test_conflicting_explicit_sglang_backend_is_rejected():
@@ -160,6 +163,18 @@ def test_user_train_env_vars_win_over_contract_defaults():
     args = _args(train_env_vars={"CUBLAS_WORKSPACE_CONFIG": ":16:8"})
     apply_true_on_policy_parse_defaults(args)
     assert args.train_env_vars["CUBLAS_WORKSPACE_CONFIG"] == ":16:8"
+
+
+def test_expansion_exports_driver_process_env(monkeypatch):
+    # Megatron's deterministic-mode validate_args asserts NCCL_ALGO in the
+    # driver env, not just the actor env.
+    import os
+
+    monkeypatch.delenv("NCCL_ALGO", raising=False)
+    monkeypatch.delenv("NVTE_ALLOW_NONDETERMINISTIC_ALGO", raising=False)
+    apply_true_on_policy_parse_defaults(_args())
+    assert os.environ["NCCL_ALGO"] == "Ring"
+    assert os.environ["NVTE_ALLOW_NONDETERMINISTIC_ALGO"] == "0"
 
 
 def test_nccl_algo_respects_ambient_environment(monkeypatch):
@@ -185,10 +200,12 @@ def test_sequence_parallel_is_rejected():
         build_true_on_policy_launch_plan(args)
 
 
-def test_train_tp_is_rejected_until_phase4():
+def test_train_tp_is_allowed_and_drives_tp_invariant_policy():
     args = _args(tensor_model_parallel_size=2)
-    with pytest.raises(ValueError, match="does not support 'tp'"):
-        build_true_on_policy_launch_plan(args)
+    plan = build_true_on_policy_launch_plan(args)
+    assert plan.parallel_layout.uses_train_tp
+    assert plan.kernel_policy.tp_invariant_row_linear
+    assert plan.kernel_policy.deterministic_tp_allreduce
 
 
 def test_context_parallel_is_rejected():

@@ -1,7 +1,6 @@
 # Adapt from https://github.com/OpenRLHF/OpenRLHF/blob/10c733694ed9fbb78a0a2ff6a05efc7401584d46/openrlhf/models/utils.py
 # and https://github.com/OpenRLHF/OpenRLHF/blob/10c733694ed9fbb78a0a2ff6a05efc7401584d46/openrlhf/trainer/ppo_utils/experience_maker.py
 
-import contextlib
 from argparse import Namespace
 
 import torch
@@ -858,11 +857,23 @@ def chunked_gae(
 
 
 def calculate_log_probs_and_entropy(
-    logits, tokens, tp_group, with_entropy: bool = False, entropy_no_grad: bool = False, chunk_size: int = -1, true_on_policy: bool = False
+    logits,
+    tokens,
+    tp_group,
+    with_entropy: bool = False,
+    entropy_no_grad: bool = False,
+    chunk_size: int = -1,
+    true_on_policy: bool = False,
+    vocab_size: int | None = None,
 ):
     if true_on_policy:
         return _calculate_log_probs_and_entropy_true_on_policy(
-            logits, tokens, with_entropy=with_entropy, entropy_no_grad=entropy_no_grad
+            logits,
+            tokens,
+            tp_group,
+            with_entropy=with_entropy,
+            entropy_no_grad=entropy_no_grad,
+            vocab_size=vocab_size,
         )
 
     logits = logits.contiguous()
@@ -905,19 +916,117 @@ def calculate_log_probs_and_entropy(
     return log_prob, entropy
 
 
+def _prepare_true_on_policy_full_logits(
+    logits_or_shards: torch.Tensor | list[torch.Tensor] | tuple[torch.Tensor, ...],
+    *,
+    vocab_size: int | None = None,
+) -> torch.Tensor:
+    if isinstance(logits_or_shards, (list, tuple)):
+        full_logits = torch.cat([shard.contiguous() for shard in logits_or_shards], dim=-1)
+    else:
+        full_logits = logits_or_shards.contiguous()
+
+    # Truncate Megatron's padded vocab back to the real tokenizer vocab before
+    # log_softmax, matching what SGLang normalizes over.
+    if vocab_size is not None and full_logits.size(-1) > vocab_size:
+        full_logits = full_logits[..., :vocab_size]
+
+    return full_logits
+
+
+def _split_replicated_loss_gather_grad(
+    grad_output: torch.Tensor,
+    *,
+    rank: int,
+    world_size: int,
+    local_last_dim: int,
+) -> torch.Tensor:
+    if world_size <= 1:
+        return grad_output.contiguous()
+
+    expected_last_dim = local_last_dim * world_size
+    if grad_output.size(-1) != expected_last_dim:
+        raise RuntimeError(
+            "True-on-policy replicated-loss gather backward expected the full padded "
+            f"vocab dimension to be {expected_last_dim}, got {grad_output.size(-1)}."
+        )
+    start = rank * local_last_dim
+    return grad_output[..., start : start + local_last_dim].contiguous()
+
+
+class _ReplicatedLossAllGatherLastDim(torch.autograd.Function):
+    """All-gather vocab shards for a loss replicated on every TP rank.
+
+    Megatron's standard all-gather autograd uses reduce-scatter in backward,
+    which is correct when each rank contributes a distinct output gradient. In
+    the true-on-policy logprob path every TP rank computes the same scalar loss
+    from the gathered full vocabulary, so reduce-scatter would sum identical
+    gradients and scale the local logits gradient by TP size.
+    """
+
+    @staticmethod
+    def forward(ctx, input_: torch.Tensor, group: dist.ProcessGroup) -> torch.Tensor:
+        world_size = group.size()
+        ctx.group = group
+        ctx.local_last_dim = input_.shape[-1]
+        ctx.world_size = world_size
+
+        if world_size == 1:
+            return input_.contiguous()
+
+        from megatron.core.tensor_parallel.mappings import dist_all_gather_func
+
+        gather_shape = list(input_.shape)
+        gather_shape[0] *= world_size
+        gathered = torch.empty(gather_shape, dtype=input_.dtype, device=input_.device)
+        dist_all_gather_func(gathered, input_.contiguous(), group=group)
+        return torch.cat(gathered.chunk(world_size, dim=0), dim=-1).contiguous()
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        return (
+            _split_replicated_loss_gather_grad(
+                grad_output,
+                rank=ctx.group.rank(),
+                world_size=ctx.world_size,
+                local_last_dim=ctx.local_last_dim,
+            ),
+            None,
+        )
+
+
+def _gather_true_on_policy_full_logits(
+    logits: torch.Tensor,
+    process_group: dist.ProcessGroup | None,
+    *,
+    vocab_size: int | None = None,
+) -> torch.Tensor:
+    if process_group is None or process_group.size() <= 1:
+        return _prepare_true_on_policy_full_logits(logits, vocab_size=vocab_size)
+
+    full_logits = _ReplicatedLossAllGatherLastDim.apply(logits.contiguous(), process_group)
+    return _prepare_true_on_policy_full_logits(full_logits, vocab_size=vocab_size)
+
+
 def _calculate_log_probs_and_entropy_true_on_policy(
     logits: torch.Tensor,
     tokens: torch.Tensor,
+    tp_group: dist.ProcessGroup | None,
     with_entropy: bool = False,
     entropy_no_grad: bool = False,
+    vocab_size: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
-    """Simple log-prob and entropy computation matching SGLang's inference path.
+    """Log-prob and entropy computation matching SGLang's scoring contract.
 
     Args:
-        logits: Aligned logits of shape ``[R, V]`` (already response-sliced
-            and temperature-scaled by ``get_responses``).
+        logits: Aligned local logits of shape ``[R, V_local]`` (already
+            response-sliced and temperature-scaled by ``get_responses``;
+            a vocab shard under TP>1).
         tokens: Target tokens of shape ``[R]``.
+        tp_group: Tensor-parallel process group for the full-vocab gather.
         with_entropy: If True, also compute entropy.
+        vocab_size: Real tokenizer vocab size. If provided, padded logits are
+            truncated after the full-vocab gather and before ``log_softmax``.
 
     Returns:
         Tuple of ``(log_probs, entropy)`` where *log_probs* has shape ``[R]``
@@ -928,18 +1037,14 @@ def _calculate_log_probs_and_entropy_true_on_policy(
         entropy = logits.new_zeros((0,)) if with_entropy else None
         return log_prob, entropy
 
-    log_probs_full = torch.log_softmax(logits, dim=-1)
+    full_logits = _gather_true_on_policy_full_logits(logits, tp_group, vocab_size=vocab_size)
+    log_probs_full = torch.log_softmax(full_logits, dim=-1)
     log_prob = torch.gather(log_probs_full, dim=-1, index=tokens.unsqueeze(-1)).squeeze(-1)
 
     entropy = None
     if with_entropy:
-        entropy_ctx = torch.no_grad() if entropy_no_grad else contextlib.nullcontext()
-        with entropy_ctx:
-            entropy_logits = logits.detach() if entropy_no_grad else logits
-            probs = torch.softmax(entropy_logits, dim=-1)
-            entropy_log_probs = (
-                log_probs_full.detach() if entropy_no_grad else log_probs_full
-            )
-            entropy = -(probs * entropy_log_probs).sum(dim=-1)
+        entropy_log_probs = log_probs_full.detach() if entropy_no_grad else log_probs_full
+        probs = entropy_log_probs.exp()
+        entropy = -(probs * entropy_log_probs).sum(dim=-1)
 
     return log_prob, entropy

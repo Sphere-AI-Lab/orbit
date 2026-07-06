@@ -112,7 +112,8 @@ def get_responses(
     parallel_state = get_parallel_state()
     qkv_format = args.qkv_format
 
-    assert logits.dtype == torch.float32, f"{logits.dtype}"
+    if not args.true_on_policy_mode:
+        assert logits.dtype == torch.float32, f"{logits.dtype}"
     assert len(logits.shape) == 3, f"{logits.shape}"
 
     if qkv_format == "thd":
@@ -129,6 +130,13 @@ def get_responses(
     # CUDA allocator near OOM on the GRPO loss path.
     if rollout_temperature != 1.0:
         logits = logits.div(rollout_temperature)
+    if args.true_on_policy_mode:
+        # Parity contract: SGLang computes log_softmax over bf16 logits, so the
+        # training side must feed the same dtype (design doc §2.2 invariant 6).
+        if getattr(args, "bf16", False):
+            logits = logits.to(torch.bfloat16)
+        elif getattr(args, "fp16", False):
+            logits = logits.to(torch.float16)
 
     cp_size = parallel_state.cp.size
     end = 0
@@ -250,6 +258,7 @@ def get_log_probs_and_entropy(
             entropy_no_grad=entropy_no_grad,
             chunk_size=args.log_probs_chunk_size,
             true_on_policy=args.true_on_policy_mode,
+            vocab_size=getattr(args, "vocab_size", None),
         )
 
         log_probs_list.append(log_prob.squeeze(-1))
