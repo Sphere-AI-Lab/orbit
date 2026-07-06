@@ -778,10 +778,31 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
                 help="The qkv layout.",
             )
             parser.add_argument(
+                "--true-on-policy",
+                action="store_true",
+                default=False,
+                help=(
+                    "Enable bit-exact train/rollout parity via a named contract "
+                    "(orbit/true_on_policy/). Expands at parse time into the deterministic "
+                    "rollout flags, --true-on-policy-mode, --recompute-logprobs-via-prefill, "
+                    "--deterministic-mode and determinism env vars; validates the run "
+                    "(model family, topology, precision, adapter) against the contract."
+                ),
+            )
+            parser.add_argument(
+                "--true-on-policy-contract",
+                type=str,
+                default=None,
+                help="Override the contract selected by the model profile (e.g. qwen3_dense_true_on_policy_v1).",
+            )
+            parser.add_argument(
                 "--true-on-policy-mode",
                 action="store_true",
                 default=False,
-                help="Whether to enable true-on-policy mode.",
+                help=(
+                    "Internal true-on-policy mode flag (training-side log-prob kernel + CI "
+                    "bitwise gate). Set automatically by --true-on-policy."
+                ),
             )
             parser.add_argument(
                 "--recompute-logprobs-via-prefill",
@@ -2747,6 +2768,13 @@ def _common_orbit_validate_args(args):
 
     _normalize_and_validate_peft_args(args)
     _validate_dsv4_cp_args(args)
+
+    # Expand --true-on-policy into its derived flags/env vars (no-op when off).
+    # After PEFT normalization (the contract validates the adapter) and before
+    # megatron/sglang validation (it mutates their dests).
+    from orbit.true_on_policy import apply_true_on_policy_parse_defaults
+
+    apply_true_on_policy_parse_defaults(args)
 
     assert not (args.kl_coef != 0 and args.kl_loss_coef != 0), "Only one of kl_coef and kl_loss_coef can be set"
 
