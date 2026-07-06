@@ -107,6 +107,9 @@ RL_ARGS=(
     --num-critic-only-steps "${NUM_CRITIC_ONLY_STEPS}"
     --normalize-advantages
 )
+if [ "${PREFILL_RECOMPUTE:-0}" = "1" ]; then
+    RL_ARGS+=(--recompute-logprobs-via-prefill)
+fi
 
 LOSS_ARGS=(
     --calculate-per-token-loss

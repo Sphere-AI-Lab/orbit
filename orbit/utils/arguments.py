@@ -784,6 +784,18 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
                 help="Whether to enable true-on-policy mode.",
             )
             parser.add_argument(
+                "--recompute-logprobs-via-prefill",
+                action="store_true",
+                default=False,
+                help=(
+                    "Recompute rollout logprobs via one clean SGLang prefill pass (flush_cache + "
+                    "max_new_tokens=0 scoring) instead of trusting decode-time logprobs, removing "
+                    "KV-cache/chunked-prefill/batch-composition variance. Usable standalone "
+                    "(improves the rollout_log_probs consumed by TIS/ICE-POP/OPD); required by "
+                    "true-on-policy contracts."
+                ),
+            )
+            parser.add_argument(
                 "--train-env-vars",
                 type=json.loads,
                 default="{}",
