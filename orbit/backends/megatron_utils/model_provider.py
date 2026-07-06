@@ -109,6 +109,11 @@ def get_model_provider_func(
             pg_collection=None,
         ) -> GPTModel:
             assert config is None, "orbit builds the config from args, so it expects config to be None"
+            # PP>1 paths in megatron.bridge providers (e.g. mamba_provider) read
+            # self._pg_collection.pp during provide(); without forwarding the
+            # caller's pg_collection here, those code paths hit AttributeError.
+            if pg_collection is not None:
+                provider._pg_collection = pg_collection
             model = provider.provide(pre_process=pre_process, post_process=post_process, vp_stage=vp_stage)
             # Gemma-4 forward returns (logits, loss_mask); keep logits only.
             _bridge_forward = model.forward
