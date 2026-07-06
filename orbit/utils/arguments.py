@@ -270,6 +270,23 @@ def _validate_judge_args(args) -> None:
         raise ValueError(f"Unknown --judge-mode: {args.judge_mode!r}.")
 
 
+def _validate_genrm_args(args) -> None:
+    """Validate group-wise GenRM args when the genrm hook is wired."""
+    custom_rm = getattr(args, "custom_rm_path", None) or ""
+    if not custom_rm.endswith("genrm_judge.reward_func"):
+        return
+    if not getattr(args, "group_rm", False):
+        raise ValueError(
+            "--custom-rm-path orbit.rollout.genrm_judge.reward_func is a batch-mode hook: "
+            "it must be combined with --group-rm (otherwise it would receive single samples)."
+        )
+    if not getattr(args, "judge_base_url", None):
+        raise ValueError(
+            "--custom-rm-path orbit.rollout.genrm_judge.reward_func requires --judge-base-url "
+            "<http://judge-host:port> (an OpenAI-compatible chat-completions server)."
+        )
+
+
 def _validate_opd_args(args) -> None:
     """Validate on-policy distillation args. Mirrors slime arguments.py:1761-1791."""
     opd_top_k = getattr(args, "opd_log_prob_top_k", 0) or 0
@@ -2786,6 +2803,7 @@ def _common_orbit_validate_args(args):
 
     _validate_opd_args(args)
     _validate_judge_args(args)
+    _validate_genrm_args(args)
 
     if args.use_rollout_logprobs:
         assert not args.use_tis, "use_rollout_logprobs and use_tis cannot be set at the same time."
