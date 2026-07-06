@@ -341,3 +341,78 @@ async def test_post_teacher_group_ensemble_returns_responses_and_weights(monkeyp
     out = await _post_teacher_group([("http://h1/g", 2.0), ("http://h2/g", 1.0)], {"p": 1}, None)
     assert out["teachers"] == [{"meta_info": {"url": "http://h1/g"}}, {"meta_info": {"url": "http://h2/g"}}]
     assert out["teacher_weights"] == [2.0, 1.0]
+
+
+# ---------------------------------------------------------------------------
+# KL direction (--opd-kl-type): reverse (default) / forward / mixed
+# (NeMo-RL DistillationLossFn parity, adapted to rollout-side scoring)
+# ---------------------------------------------------------------------------
+
+from orbit.rollout.opd_sglang import _tail_bucket_forward_kl  # noqa: E402
+
+
+def _kl_args(kl_type, mixed_weight=0.5, strategy="only-student"):
+    args = _args(strategy)
+    args.opd_kl_type = kl_type
+    args.opd_mixed_kl_weight = mixed_weight
+    return args
+
+
+def _expected_reverse():
+    e0 = 0.6 * math.log(0.6 / 0.3) + 0.4 * math.log(0.4 / 0.7)
+    e1 = 0.7 * math.log(0.7 / 0.4) + 0.3 * math.log(0.3 / 0.6)
+    return e0, e1
+
+
+def _expected_forward():
+    # Forward KL over the renormalized set: teacher-probability weights.
+    e0 = 0.3 * math.log(0.3 / 0.6) + 0.7 * math.log(0.7 / 0.4)
+    e1 = 0.4 * math.log(0.4 / 0.7) + 0.6 * math.log(0.6 / 0.3)
+    return e0, e1
+
+
+def test_topk_kl_type_forward_uses_teacher_weights_and_direction():
+    reverse_kl = _compute_topk_reverse_kl(_kl_args("forward"), _sample(), _teacher_payload())
+    assert reverse_kl.tolist() == pytest.approx(list(_expected_forward()))
+
+
+def test_topk_kl_type_mixed_combines_both_directions():
+    r0, r1 = _expected_reverse()
+    f0, f1 = _expected_forward()
+    mixed = _compute_topk_reverse_kl(_kl_args("mixed", mixed_weight=0.25), _sample(), _teacher_payload())
+    assert mixed.tolist() == pytest.approx([0.25 * f0 + 0.75 * r0, 0.25 * f1 + 0.75 * r1])
+
+
+def test_topk_kl_type_default_is_reverse():
+    r0, r1 = _expected_reverse()
+    out = _compute_topk_reverse_kl(_args("only-student"), _sample(), _teacher_payload())
+    assert out.tolist() == pytest.approx([r0, r1])
+
+
+def test_tail_bucket_forward_kl_adds_exact_tail_term():
+    student = [math.log(0.6), math.log(0.3)]
+    teacher = [math.log(0.5), math.log(0.2)]
+    expected = (
+        0.5 * math.log(0.5 / 0.6)
+        + 0.2 * math.log(0.2 / 0.3)
+        + 0.3 * (math.log(0.3) - math.log(0.1))
+    )
+    assert _tail_bucket_forward_kl(student, teacher) == pytest.approx(expected, rel=1e-9)
+
+
+def test_tail_bucket_forward_kl_full_teacher_mass_has_no_tail_term():
+    student = [math.log(0.6), math.log(0.3)]
+    teacher = [math.log(0.4), math.log(0.6)]
+    expected = 0.4 * math.log(0.4 / 0.6) + 0.6 * math.log(0.6 / 0.3)
+    assert _tail_bucket_forward_kl(student, teacher) == pytest.approx(expected, rel=1e-9)
+
+
+def test_topk_tail_bucket_mixed_combines_both_tails():
+    args = _kl_args("mixed", mixed_weight=0.5)
+    args.opd_topk_tail_bucket = True
+    out = _compute_topk_reverse_kl(args, _sample(), _teacher_payload())
+    # Position 0: student probs (.6,.4) mass 1.0 -> reverse tail 0; teacher
+    # (on student ids) probs (.3,.7) mass 1.0 -> forward tail 0.
+    rev0 = 0.6 * math.log(0.6 / 0.3) + 0.4 * math.log(0.4 / 0.7)
+    fwd0 = 0.3 * math.log(0.3 / 0.6) + 0.7 * math.log(0.7 / 0.4)
+    assert out.tolist()[0] == pytest.approx(0.5 * fwd0 + 0.5 * rev0, rel=1e-6)

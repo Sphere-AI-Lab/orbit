@@ -136,6 +136,17 @@ The token set is controlled by `--opd-top-k-strategy`:
 (`student_p`, default), teacher probability (`teacher_p`), or uniformly
 (`none`). Weights are softmax-normalized over the set except for `xor`.
 
+`--opd-kl-type` selects the KL direction (mirroring NeMo-RL's distillation
+`kl_type`): `reverse` (default) weights by the student distribution and is
+mode-seeking; `forward` weights by the teacher distribution and is
+mass-covering; `mixed` is the convex combination with
+`--opd-mixed-kl-weight` on the forward term (0.5 matches NeMo-RL's default
+recipe). `--opd-reward-weight-mode` applies to the reverse term only — the
+forward term is always teacher-weighted (its natural measure). Forward and
+mixed require `--opd-log-prob-top-k > 0`; the sampled-token path is
+reverse-only. Both directions compose with `--opd-topk-tail-bucket` (the
+forward tail term penalizes teacher mass the student's support misses).
+
 ```
 RL_ARGS=(
     --advantage-estimator on_policy_distillation

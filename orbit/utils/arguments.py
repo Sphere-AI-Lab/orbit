@@ -190,7 +190,29 @@ def add_on_policy_distillation_arguments(parser):
         type=str,
         choices=["student_p", "teacher_p", "none"],
         default="student_p",
-        help="Weighting scheme for top-k OPD token rewards.",
+        help="Weighting scheme for top-k OPD token rewards (applies to the reverse-KL term only).",
+    )
+    parser.add_argument(
+        "--opd-kl-type",
+        type=str,
+        choices=["reverse", "forward", "mixed"],
+        default="reverse",
+        help=(
+            "KL direction for the top-k OPD estimate (mirrors NeMo-RL's distillation "
+            "kl_type): 'reverse' (default) weights by the student distribution, "
+            "'forward' by the teacher distribution, 'mixed' is the convex combination "
+            "with --opd-mixed-kl-weight on the forward term. Requires "
+            "--opd-log-prob-top-k > 0 (the sampled-token path is reverse-only)."
+        ),
+    )
+    parser.add_argument(
+        "--opd-mixed-kl-weight",
+        type=float,
+        default=0.5,
+        help=(
+            "Weight on the forward-KL term for --opd-kl-type mixed, in [0, 1] "
+            "(NeMo-RL's mixed_kl_weight; 0.5 matches their default recipe)."
+        ),
     )
     return parser
 
@@ -202,6 +224,16 @@ def _validate_opd_args(args) -> None:
         raise ValueError("--opd-log-prob-top-k must be non-negative.")
     if opd_top_k > 0 and getattr(args, "opd_type", None) != "sglang":
         raise ValueError("--opd-log-prob-top-k is currently supported only with --opd-type=sglang.")
+    opd_kl_type = getattr(args, "opd_kl_type", "reverse") or "reverse"
+    if opd_kl_type != "reverse" and opd_top_k <= 0:
+        raise ValueError(
+            f"--opd-kl-type {opd_kl_type!r} requires --opd-log-prob-top-k > 0: the sampled-token "
+            "path stores teacher_log_probs and computes reverse KL in the trainer; forward/mixed "
+            "need per-position top-k distributions from rollout-side scoring."
+        )
+    opd_mixed_kl_weight = getattr(args, "opd_mixed_kl_weight", 0.5)
+    if not (0.0 <= opd_mixed_kl_weight <= 1.0):
+        raise ValueError(f"--opd-mixed-kl-weight must be in [0, 1], got {opd_mixed_kl_weight}.")
     if getattr(args, "opd_teacher_urls", None):
         if getattr(args, "opd_type", None) != "sglang":
             raise ValueError("--opd-teacher-urls is only supported with --opd-type=sglang.")

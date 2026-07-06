@@ -364,3 +364,46 @@ def test_validate_sglang_passes_with_teacher_urls_instead_of_url():
         custom_reward_post_process_path="orbit.rollout.opd_sglang.post_process",
     )
     _validate_opd_args(args)
+
+
+def test_validate_kl_type_forward_requires_topk():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher_url="http://host/generate",
+        custom_rm_path="orbit.rollout.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.rollout.opd_sglang.post_process",
+        opd_kl_type="forward",
+        opd_log_prob_top_k=0,
+    )
+    with pytest.raises(ValueError, match="opd-kl-type"):
+        _validate_opd_args(args)
+
+
+def test_validate_mixed_kl_weight_range():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher_url="http://host/generate",
+        custom_rm_path="orbit.rollout.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.rollout.opd_sglang.post_process",
+        opd_log_prob_top_k=16,
+        opd_kl_type="mixed",
+        opd_mixed_kl_weight=1.5,
+    )
+    with pytest.raises(ValueError, match="mixed-kl-weight"):
+        _validate_opd_args(args)
+
+
+def test_validate_kl_type_mixed_passes_with_topk():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher_url="http://host/generate",
+        custom_rm_path="orbit.rollout.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.rollout.opd_sglang.post_process",
+        opd_log_prob_top_k=16,
+        opd_kl_type="mixed",
+        opd_mixed_kl_weight=0.5,
+    )
+    _validate_opd_args(args)

@@ -69,6 +69,7 @@ SCORING_MAX_RETRIES = 1
 
 TOP_K_STRATEGIES = {"only-student", "only-teacher", "intersection", "union", "xor"}
 REWARD_WEIGHT_MODES = {"student_p", "teacher_p", "none"}
+KL_TYPES = {"reverse", "forward", "mixed"}
 
 STUDENT_TOP_STRATEGIES = TOP_K_STRATEGIES - {"only-teacher"}
 TEACHER_TOP_STRATEGIES = TOP_K_STRATEGIES - {"only-student"}
@@ -191,6 +192,23 @@ def _get_reward_weight_mode(args: Namespace) -> str:
     if mode not in REWARD_WEIGHT_MODES:
         raise ValueError(f"Unknown OPD reward weight mode: {mode}")
     return mode
+
+
+def _get_kl_type(args: Namespace) -> tuple[str, float]:
+    """Resolve the KL direction and the forward weight for ``mixed``.
+
+    Mirrors NeMo-RL's DistillationLossFn ``kl_type``/``mixed_kl_weight``:
+    ``reverse`` (default) keeps the original student-weighted estimate,
+    ``forward`` weights by the teacher distribution, ``mixed`` is the convex
+    combination with ``--opd-mixed-kl-weight`` on the forward term.
+    """
+    kl_type = getattr(args, "opd_kl_type", "reverse") or "reverse"
+    if kl_type not in KL_TYPES:
+        raise ValueError(f"Unknown OPD KL type: {kl_type}")
+    mixed_weight = float(getattr(args, "opd_mixed_kl_weight", 0.5))
+    if not (0.0 <= mixed_weight <= 1.0):
+        raise ValueError(f"--opd-mixed-kl-weight must be in [0, 1], got {mixed_weight}.")
+    return kl_type, mixed_weight
 
 
 def _score_payload(input_ids: list[int], top_k: int = 0, token_ids: list[int] | None = None) -> dict[str, Any]:
@@ -452,6 +470,26 @@ def _tail_bucket_reverse_kl(student_logps: list[float], teacher_logps: list[floa
     return kl + (1.0 - student_mass) * (log_tail_s - log_tail_t)
 
 
+def _tail_bucket_forward_kl(student_logps: list[float], teacher_logps: list[float]) -> float:
+    """Exact forward KL over the (k+1)-bucket partition — the mirror of
+    :func:`_tail_bucket_reverse_kl` with teacher and student roles swapped:
+    KL(p_T || p_s) = sum_v p_T(v)(t_v - s_v) + tail_T * (log tail_T - log tail_s).
+    A teacher tail rounded to <= 0 contributes 0 (the x*log(x) -> 0 limit);
+    the student tail is floored to keep log finite.
+    """
+    teacher_probs = [math.exp(logp) for logp in teacher_logps]
+    kl = sum(
+        p * (t_logp - s_logp) for p, t_logp, s_logp in zip(teacher_probs, teacher_logps, student_logps, strict=True)
+    )
+    teacher_mass = sum(teacher_probs)
+    if teacher_mass >= 1.0:
+        return kl
+    student_mass = sum(math.exp(logp) for logp in student_logps)
+    log_tail_t = math.log1p(-teacher_mass)
+    log_tail_s = math.log1p(-min(student_mass, 1.0 - TAIL_PROB_FLOOR))
+    return kl + (1.0 - teacher_mass) * (log_tail_t - log_tail_s)
+
+
 def _compute_topk_reverse_kl(
     args: Namespace,
     sample: Sample,
@@ -463,6 +501,7 @@ def _compute_topk_reverse_kl(
 
     strategy = _get_top_k_strategy(args)
     weight_mode = _get_reward_weight_mode(args)
+    kl_type, mixed_weight = _get_kl_type(args)
     tail_bucket = bool(getattr(args, "opd_topk_tail_bucket", False))
     if tail_bucket and strategy not in ("only-student", "intersection"):
         # The k+1 partition is only exact when all student logprobs come from one
@@ -540,14 +579,31 @@ def _compute_topk_reverse_kl(
                 )
             )
 
-        if tail_bucket:
-            reverse_kl = _tail_bucket_reverse_kl(student_logps, teacher_logps)
-        else:
+        def _reverse_term():
+            if tail_bucket:
+                return _tail_bucket_reverse_kl(student_logps, teacher_logps)
             weights = _reward_weights(student_logps, teacher_logps, weight_mode, normalize=normalize_weights)
-            reverse_kl = sum(
+            return sum(
                 w * (s_logp - t_logp) for w, s_logp, t_logp in zip(weights, student_logps, teacher_logps, strict=True)
             )
-        reverse_kls.append(reverse_kl)
+
+        def _forward_term():
+            # Forward KL weights by the teacher distribution (its natural
+            # measure); --opd-reward-weight-mode applies to the reverse term only.
+            if tail_bucket:
+                return _tail_bucket_forward_kl(student_logps, teacher_logps)
+            weights = _reward_weights(student_logps, teacher_logps, "teacher_p", normalize=normalize_weights)
+            return sum(
+                w * (t_logp - s_logp) for w, s_logp, t_logp in zip(weights, student_logps, teacher_logps, strict=True)
+            )
+
+        if kl_type == "reverse":
+            value = _reverse_term()
+        elif kl_type == "forward":
+            value = _forward_term()
+        else:
+            value = mixed_weight * _forward_term() + (1.0 - mixed_weight) * _reverse_term()
+        reverse_kls.append(value)
 
     return torch.tensor(reverse_kls, dtype=torch.float32)
 

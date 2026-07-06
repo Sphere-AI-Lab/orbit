@@ -26,6 +26,7 @@ RUN_LOG="${ORBIT_ROOT}/logs/${LAUNCHER_NAME}_$(date +%Y%m%d_%H%M%S).log"
 : "${OPD_TEACHER_URL:?set OPD_TEACHER_URL to the teacher sglang /generate endpoint}"
 OPD_TOPK="${OPD_TOPK:-0}"
 OPD_TAIL_BUCKET="${OPD_TAIL_BUCKET:-0}"
+OPD_KL_TYPE="${OPD_KL_TYPE:-reverse}"
 SAVE_DIR="${ORBIT_ROOT}/orbit_ckpts/Qwen2.5-0.5B-Instruct_opd_sglang_smoke"
 : "${TRAIN_JSONL:?set TRAIN_JSONL to a training jsonl path}"
 TEST_JSONL=${TEST_JSONL:-}
@@ -102,6 +103,7 @@ RL_ARGS=(
 )
 if [ "${OPD_TOPK}" -gt 0 ]; then
     RL_ARGS+=(--opd-log-prob-top-k "${OPD_TOPK}" --opd-top-k-strategy only-student)
+    RL_ARGS+=(--opd-kl-type "${OPD_KL_TYPE}")
 fi
 if [ "${OPD_TAIL_BUCKET}" = "1" ]; then
     RL_ARGS+=(--opd-topk-tail-bucket)
