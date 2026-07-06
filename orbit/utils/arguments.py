@@ -253,6 +253,24 @@ def add_on_policy_distillation_arguments(parser):
         default=None,
         help="Per-request timeout for judge calls (one automatic retry on transient failures).",
     )
+    parser.add_argument(
+        "--code-rm-timeout-secs",
+        type=float,
+        default=6.0,
+        help="Sandbox code-execution reward: wall-clock timeout per unit test.",
+    )
+    parser.add_argument(
+        "--code-rm-memory-mb",
+        type=int,
+        default=512,
+        help="Sandbox code-execution reward: address-space limit per test process.",
+    )
+    parser.add_argument(
+        "--code-rm-max-tests",
+        type=int,
+        default=0,
+        help="Sandbox code-execution reward: cap on unit tests executed per sample (0 = all).",
+    )
     return parser
 
 
