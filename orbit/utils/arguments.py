@@ -287,6 +287,18 @@ def add_on_policy_distillation_arguments(parser):
         help="SWE patch reward: wall-clock timeout per verification (copy + patch + tests).",
     )
     parser.add_argument(
+        "--swe-agent-max-turns",
+        type=int,
+        default=12,
+        help="Agentic SWE episodes: maximum model turns per episode.",
+    )
+    parser.add_argument(
+        "--swe-agent-cmd-timeout-secs",
+        type=float,
+        default=30.0,
+        help="Agentic SWE episodes: wall-clock timeout per shell command in the container session.",
+    )
+    parser.add_argument(
         "--reward-router-unmapped",
         type=str,
         choices=["zero", "error"],
