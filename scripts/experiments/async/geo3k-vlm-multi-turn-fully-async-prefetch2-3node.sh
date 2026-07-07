@@ -205,7 +205,9 @@ SGLANG_ARGS=(
 WANDB_ARGS=(
    --use-wandb
    --wandb-team    M3TRL
-   --wandb-project async_envpack
+   # Override the destination project per-run via WANDB_PROJECT (e.g.
+   # WANDB_PROJECT=baseline for runs that belong with the team baselines).
+   --wandb-project "${WANDB_PROJECT:-async_envpack}"
    --wandb-group   "$RUN_NAME"
    --disable-wandb-random-suffix
    # WANDB_API_KEY comes from the env (exported by submit.sh / launch_miles.sbatch);

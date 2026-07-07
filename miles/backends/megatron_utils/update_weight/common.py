@@ -3,7 +3,7 @@ import inspect
 import logging
 import re
 from argparse import Namespace
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 
 import ray
 import torch
@@ -16,6 +16,43 @@ from miles.backends.training_utils.parallel import get_parallel_state
 from miles.utils.types import ParamInfo
 
 logger = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class AtomicUpdateGroup:
+    key: str
+    suffixes: tuple[str, ...]
+
+
+def get_atomic_update_groups(args, model_name) -> list[AtomicUpdateGroup]:
+    model_groups = _get_model_atomic_update_groups(model_name)
+    if model_groups:
+        return model_groups
+    return _get_q_lora_atomic_update_groups(args)
+
+
+def _get_q_lora_atomic_update_groups(args) -> list[AtomicUpdateGroup]:
+    if args.q_lora_rank is None:
+        return []
+
+    return [
+        AtomicUpdateGroup(
+            key="q_lora_a_proj",
+            suffixes=(
+                ".self_attention.linear_q_down_proj.weight",
+                ".self_attention.linear_kv_down_proj.weight",
+            ),
+        )
+    ]
+
+
+def _get_model_atomic_update_groups(model_name) -> list[AtomicUpdateGroup]:
+    model_name = model_name.lower()
+    if "deepseekv4" in model_name:
+        from ..megatron_to_hf.deepseekv4 import get_deepseek_v4_atomic_update_groups
+
+        return get_deepseek_v4_atomic_update_groups()
+    return []
 
 
 @dataclasses.dataclass(frozen=True)
@@ -346,25 +383,35 @@ def collect_named_tensors_for_weight_transfer(
             yield name, tensor
 
 
-def post_process_weights(
-    rollout_engines: Sequence[ActorHandle],
-    restore_weights_before_load: bool = False,
-    post_process_quantization: bool = False,
-    post_load_weights: bool = False,
-):
+def begin_weight_update(rollout_engines: Sequence[ActorHandle]):
+    """Open a weight-update session on all rollout engines (restore packed weights)."""
+    ray.get([engine.begin_weight_update.remote() for engine in rollout_engines])
+
+
+def end_weight_update(rollout_engines: Sequence[ActorHandle]):
+    """Close the weight-update session (post-load + quant post-process on the full model)."""
+    ray.get([engine.end_weight_update.remote() for engine in rollout_engines])
+
+
+def _check_weight_sync_results(results: list, *, is_lora: bool) -> None:
+    """Validate return values from rollout engine weight-sync RPCs.
+
+    Raises RuntimeError if any engine reports failure, preventing silent
+    failures when SGLang versions are incompatible.
     """
-    Trigger post-process on all rollout engines,
-    including:
-        - int4/fp4 quantization
-        - post_load_weights (should be enabled when using p2p weights updating)
-    """
-    ray.get(
-        [
-            engine.post_process_weights.remote(
-                restore_weights_before_load=restore_weights_before_load,
-                post_process_quantization=post_process_quantization,
-                post_load_weights=post_load_weights,
+    sync_type = "LoRA" if is_lora else "Base model"
+    for result in results:
+        if isinstance(result, Mapping):
+            success = result.get("success")
+            error_msg = result.get("error_message") or result.get("error") or "unknown error"
+        elif hasattr(result, "success"):
+            success = result.success
+            error_msg = getattr(result, "error_message", "unknown error")
+        else:
+            continue
+
+        if success is False:
+            raise RuntimeError(
+                f"{sync_type} weight sync failed on rollout engine: {error_msg}. "
+                f"Check SGLang version compatibility."
             )
-            for engine in rollout_engines
-        ]
-    )

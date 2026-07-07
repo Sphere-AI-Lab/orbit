@@ -140,6 +140,24 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 help="The qkv layout.",
             )
             parser.add_argument(
+                "--linear-attention-backend",
+                type=str,
+                choices=["fla", "flashqla"],
+                default="fla",
+                help=(
+                    "Backend for Qwen GDN linear-attention layers. "
+                    "'fla' (flash-linear-attention) is portable and runs on any supported GPU. "
+                    "'flashqla' (FlashQLA) requires NVIDIA SM90 (Hopper) or newer, CUDA 12.8+, and PyTorch 2.8+."
+                ),
+            )
+            parser.add_argument(
+                "--miles-dsa-topk-backend",
+                type=str,
+                choices=["torch", "flashinfer"],
+                default="torch",
+                help="Top-k backend for Miles DSA indexer.",
+            )
+            parser.add_argument(
                 "--true-on-policy-mode",
                 action="store_true",
                 default=False,
@@ -990,9 +1008,12 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                     "reinforce_plus_plus",
                     "reinforce_plus_plus_baseline",
                     "ppo",
-                    "on_policy_distillation",
                 ],
                 default="grpo",
+                help=(
+                    "Advantage estimator to use. Note: on-policy distillation (OPD) is now orthogonal "
+                    "to the advantage estimator. Use --opd-kl-coef > 0 to enable OPD on top of any estimator."
+                ),
             )
             parser.add_argument(
                 "--disable-compute-advantages-and-returns",
@@ -1144,6 +1165,72 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
             )
             return parser
 
+        def add_on_policy_distillation_arguments(parser):
+            """Add on-policy distillation (OPD) related arguments.
+
+            OPD is orthogonal to advantage estimators and can be applied on top of
+            any estimator (GRPO, PPO, etc.) by adding a KL penalty to advantages.
+            """
+            parser.add_argument(
+                "--use-opd",
+                action="store_true",
+                default=False,
+                help="Enable on-policy distillation (OPD). Must specify --opd-type when enabled.",
+            )
+            parser.add_argument(
+                "--opd-type",
+                type=str,
+                choices=["sglang", "megatron"],
+                default=None,
+                help=(
+                    "Type of on-policy distillation. "
+                    "'sglang': Teacher log-probs are obtained from external SGLang server during rollout. "
+                    "'megatron': Teacher model is loaded via --opd-teacher-load and forwarded during training."
+                ),
+            )
+            parser.add_argument(
+                "--opd-kl-coef",
+                type=float,
+                default=1.0,
+                help="On-policy distillation KL penalty coefficient. Default is 1.0.",
+            )
+            parser.add_argument(
+                "--opd-log-prob-top-k",
+                type=int,
+                default=0,
+                help=(
+                    "Number of top-k tokens to use for the re-think OPD token-level reward. "
+                    "Set to 0 to use sampled-token OPD."
+                ),
+            )
+            parser.add_argument(
+                "--opd-top-k-strategy",
+                type=str,
+                choices=["only-student", "only-teacher", "intersection", "union", "xor"],
+                default="only-student",
+                help="Token set strategy for top-k OPD.",
+            )
+            parser.add_argument(
+                "--opd-reward-weight-mode",
+                type=str,
+                choices=["student_p", "teacher_p", "none"],
+                default="student_p",
+                help="Weighting scheme for top-k OPD token rewards.",
+            )
+            parser.add_argument(
+                "--opd-teacher-load",
+                type=str,
+                default=None,
+                help=(
+                    "The checkpoint for OPD teacher model. Required when --opd-type=megatron. "
+                    "The teacher model should have the same architecture as policy/ref model."
+                ),
+            )
+            parser.add_argument(
+                "--opd-teacher-ckpt-step", type=int, default=None, help="The checkpoint step for OPD teacher model."
+            )
+            return parser
+
         def add_lora_arguments(parser):
             """Add LoRA-related arguments for Megatron backend."""
             parser.add_argument(
@@ -1222,12 +1309,6 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 action="store_true",
                 default=False,
                 help="Whether to use MilesRouter for text-based routing instead of SGLang token-based routing",
-            )
-            parser.add_argument(
-                "--miles-router-middleware-paths",
-                type=str,
-                nargs="+",
-                default="",
             )
             parser.add_argument(
                 "--miles-router-timeout",
@@ -1310,7 +1391,7 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 default=None,
                 help=(
                     "Log statistics of the category of reward, such as why the reward function considers it as failed. "
-                    "Specify the key in the reward dict using this argument.",
+                    "Specify the key in the reward dict using this argument."
                 ),
             )
             parser.add_argument(
@@ -1512,6 +1593,12 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 default="torch",
             )
             parser.add_argument("--check-weight-update-equal", action="store_true")
+            parser.add_argument(
+                "--check-weight-update-allow-quant-error",
+                action="store_true",
+                help="When comparing weights after update, allow quantized tensors to differ "
+                "by up to 1 ULP of the quantized dtype per side (compared in dequantized space).",
+            )
             parser.add_argument(
                 "--env-report",
                 type=str,
@@ -1842,6 +1929,7 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
         parser = add_data_arguments(parser)
         parser = add_eval_arguments(parser)
         parser = add_algo_arguments(parser)
+        parser = add_on_policy_distillation_arguments(parser)
         parser = add_lora_arguments(parser)
         parser = add_wandb_arguments(parser)
         parser = add_mlflow_arguments(parser)
@@ -1889,8 +1977,10 @@ def parse_args(add_custom_arguments=None):
         from miles.backends.megatron_utils.arguments import validate_args as megatron_validate_args
 
         args = megatron_parse_args(extra_args_provider=add_miles_arguments)
+        args.compress_ratios = None
         if args.hf_checkpoint:
             hf_config = load_hf_config(args.hf_checkpoint)
+            args.compress_ratios = getattr(hf_config, "compress_ratios", None)
             hf_validate_args(args, hf_config)
 
             if is_dsa(hf_config):
@@ -2091,9 +2181,51 @@ def miles_validate_args(args):
                 "please make sure it is a valid megatron checkpoint directory."
             )
 
+    # Validate on-policy distillation (OPD) arguments
+    if args.use_opd:
+        if args.opd_type is None:
+            raise ValueError("--opd-type must be specified when --use-opd is enabled. Choose 'sglang' or 'megatron'.")
+        if args.opd_log_prob_top_k < 0:
+            raise ValueError("--opd-log-prob-top-k must be non-negative.")
+        if args.opd_log_prob_top_k > 0 and args.opd_type != "sglang":
+            raise ValueError("--opd-log-prob-top-k is currently supported only with --opd-type=sglang.")
+
+        if args.opd_type == "megatron":
+            if args.opd_teacher_load is None:
+                raise ValueError(
+                    "--opd-teacher-load is required when --opd-type=megatron. "
+                    "Please provide the path to the teacher model checkpoint."
+                )
+            if not os.path.exists(args.opd_teacher_load):
+                raise FileNotFoundError(
+                    f"opd_teacher_load {args.opd_teacher_load} does not exist, please check the path."
+                )
+            if not os.path.exists(os.path.join(args.opd_teacher_load, "latest_checkpointed_iteration.txt")):
+                logger.info(
+                    f"opd_teacher_load {args.opd_teacher_load} does not have latest_checkpointed_iteration.txt, "
+                    "please make sure it is a valid megatron checkpoint directory."
+                )
+
+        elif args.opd_type == "sglang":
+            if args.opd_teacher_load is not None:
+                raise ValueError(
+                    "--opd-teacher-load should not be set when --opd-type=sglang. "
+                    "In sglang mode, teacher log-probs are obtained from external server during rollout."
+                )
+    else:
+        if args.opd_teacher_load is not None:
+            raise ValueError("--opd-teacher-load is set but --use-opd is not enabled. Please add --use-opd flag.")
+
     # TODO: During loading, we need to set the start_rollout_id here.
     if args.megatron_to_hf_mode == "bridge":
-        if args.load is None:
+        # Fresh runs pass a not-yet-created `--load` dir; fall back to the reference
+        # weights (loaded via the HF bridge) instead of asserting in load_checkpoint.
+        # Mirrors the non-bridge branch below.
+        if (
+            args.load is None
+            or not os.path.exists(args.load)
+            or not os.path.exists(os.path.join(args.load, "latest_checkpointed_iteration.txt"))
+        ):
             args.load = args.ref_load or args.hf_checkpoint
         args.start_rollout_id = 0
     else:
@@ -2219,6 +2351,9 @@ def miles_validate_args(args):
         "debug_rollout_only and debug_train_only cannot be set at the same time, " "please set only one of them."
     )
 
+    if args.ci_test and not args.debug_rollout_only and not args.debug_train_only:
+        args.check_weight_update_equal = True
+
     # always true on offload for colocate at the moment.
     if args.update_weight_transfer_mode == "p2p":
         assert not args.colocate, (
@@ -2228,6 +2363,7 @@ def miles_validate_args(args):
         assert (
             getattr(args, "prefill_num_servers", None) is None
         ), "P2P weight transfer mode has not been tested when PD is enabled."
+        assert args.lora_rank <= 0, "LoRA weight sync is not supported for p2p (RDMA) weight transfer."
 
     if args.colocate:
         if args.offload_train is None:
@@ -2394,12 +2530,23 @@ def hf_validate_args(args, hf_config):
     if hasattr(hf_config, "rope_parameters") and isinstance(hf_config.rope_parameters, dict):
         if "rope_theta" in hf_config.rope_parameters:
             hf_config.rope_theta = hf_config.rope_parameters["rope_theta"]
+        else:
+            # Gemma-4 nests rope_theta per attention type; take the first.
+            for _entry in hf_config.rope_parameters.values():
+                if isinstance(_entry, dict) and "rope_theta" in _entry:
+                    hf_config.rope_theta = _entry["rope_theta"]
+                    break
+
+    model_name = (args.model_name or "").lower().replace("-", "").replace("_", "")
+    if (hf_config.model_type == "deepseek_v4" or "deepseekv4" in model_name) and args.context_parallel_size > 1:
+        assert args.allgather_cp, "zigzag CP is not supported for DeepSeek V4."
 
     for hf_config_name, megatron_config_name, compare_fn in [
         ("hidden_size", "hidden_size", equal),
         ("num_attention_heads", "num_attention_heads", equal),
         ("num_hidden_layers", "num_layers", equal),
         ("intermediate_size", "ffn_hidden_size", equal),
+        ("moe_intermediate_size", "moe_ffn_hidden_size", equal),
         ("tie_word_embeddings", "untie_embeddings_and_output_weights", lambda x, y: not x == y),
         (
             "rms_norm_eps",
@@ -2410,6 +2557,8 @@ def hf_validate_args(args, hf_config):
     ]:
         # FIXME: Qwen3.5 transfomers has bug.
         if getattr(hf_config, "model_type", "") == "qwen3_5_moe_text" and hf_config_name == "intermediate_size":
+            continue
+        if getattr(hf_config, "model_type", "") == "deepseek_v4" and hf_config_name == "intermediate_size":
             continue
         if hasattr(hf_config, hf_config_name):
             if not compare_fn(getattr(hf_config, hf_config_name), getattr(args, megatron_config_name)):

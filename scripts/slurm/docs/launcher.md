@@ -75,7 +75,7 @@ show `mem=<full node mem>`, not `mem=64G`.
 
 ## Healthcheck
 
-Three **per-node** tiers (run from the head node via `srun --overlap
+Four **per-node** tiers (run from the head node via `srun --overlap
 --mem=0`, one srun per node) plus one **cross-node** tier, all before Ray
 bring-up so a bad node/fabric never wastes a ~12 min model load.
 
@@ -98,8 +98,19 @@ bring-up so a bad node/fabric never wastes a ~12 min model load.
    are ignored — NCCL doesn't auto-select them. Skips (non-blocking) if
    `ibstat` is missing or reports no IB rails. Opt out with
    `MILES_HEALTHCHECK_IB=0`.
+4. **Tier weka — `bash lib/weka_probe.sh`** (~2–10 s, pure bash + `dd`, no
+   torch). Reads ~64 MiB **O_DIRECT** from a large file on the shared FS (the
+   conda env under `/data`, WekaFS). Catches a **wedged WekaFS client**: a
+   healthy read returns in seconds, but a wedge makes `/data` reads hang in
+   uninterruptible D-state, which otherwise stalls sglang engine/weight bring-up
+   indefinitely with idle GPUs and no error (see
+   `docs/debug-notes/miles-sync-2026-06-30/wekafs-wedge-2026-07-01.md`). O_DIRECT
+   bypasses the page cache so a probe file left warm by a prior job can't mask
+   the wedge; it targets a *wedge* (reads that never return), not slowness
+   (64 MiB completes well within `HEALTHCHECK_TIMEOUT`). Skips (non-blocking) if
+   no sizable file is found. Opt out with `MILES_HEALTHCHECK_WEKA=0`.
 
-Tiers 1–3 are per-node and **localizable** — a failure appends the node to
+Tiers 1–4 are per-node and **localizable** — a failure appends the node to
 `BAD_NODES` and rides the shared requeue machinery:
 
 - `<run-dir>/.bad_nodes` accumulates the bad-node list across requeues
@@ -118,7 +129,7 @@ still exits 75 with a manual `[healthcheck] HINT: SBATCH_EXTRA='--exclude=...'`
 line — the requeue may land on the same bad nodes, so the cap protects
 against an infinite loop.
 
-4. **Tier nccl — `lib/nccl_probe.py`** (cross-node, ~1 min; runs after
+5. **Tier nccl — `lib/nccl_probe.py`** (cross-node, ~1 min; runs after
    `NODE_PREAMBLE`, before HF convert / Ray bring-up; skipped when fewer
    than 2 Ray/training nodes). Forms a real process group across the
    Ray/training nodes (`RAY_NODES` — i.e. excluding any envpack-server
@@ -136,7 +147,7 @@ against an infinite loop.
    first Ray node (the Ray head) so rendezvous never targets an excluded
    or envpack-only node. Being an
    **aggregate** check it can't attribute a failure to one node, so —
-   unlike tiers 1–3 — it does **not** requeue: after 2 in-place attempts
+   unlike tiers 1–4 — it does **not** requeue: after 2 in-place attempts
    it writes `MANIFEST state=FAILED failure_reason=nccl_probe` and exits
    1, leaving a clean repro at `<run-dir>/nccl_probe.log` (`NCCL_DEBUG=INFO`)
    for infra. Rationale: the deterministic causes (Polling rail, memlock)
@@ -249,6 +260,40 @@ Implementation: `lib/ray_lifecycle.sh:crash_debug_check`. This is the
 minimum floor — a richer RL debug skill is planned that will layer
 NaN-loss / grad-explosion / sglang-weight-transfer signals on top.
 
+## Ray bring-up
+
+After the healthcheck passes, the launcher boots Ray — `ray start --head … --block`
+on the head plus `ray start --address … --block` on each worker (backgrounded
+`srun`s) — then polls until the cluster is ready. The poll watches **two** signals:
+
+- **`ray status`** — the GPUs registered with the head's GCS reach `EXPECTED_GPUS`
+  (= nodes × 8).
+- **the head/worker srun PIDs** — each `ray start … --block` blocks forever on
+  success, so a dead PID means that node's Ray exited and the cluster has collapsed.
+  The poll detects this and stops *immediately* rather than idling out the whole
+  `RAY_BRINGUP_TIMEOUT` (default 300s/attempt).
+
+The dominant bootstrap failure is the head's GCS/raylet being slow to register the
+node — `Failed to get node info … Deadline Exceeded` / "node timed out during
+startup", or a `ray_client_server [exit code=1]` whose own node-info wait expired,
+which then trips Ray's `--block` monitor into killing the head. The window for this
+is **Ray's hardcoded 30s `raylet_start_wait_time_s`** (`ray/_private/node.py`), which
+no launcher env var can extend — so raising `RAY_BRINGUP_TIMEOUT` does **not** help
+it. These failures are usually transient (the same nodes assemble fine moments
+later), so on a failed attempt the launcher:
+
+1. snapshots the bootstrap logs to `ray-debug-attempt<N>/` — the per-node srun logs
+   plus Ray's node-local component logs (`gcs_server.*`, `raylet.*`,
+   `ray_client_server.*`, `*_agent.log`) pulled from `/tmp/ray/session_latest/logs`,
+   which otherwise vanish with the node and are the *only* record of the real cause;
+2. `ray stop --force` on every node and retries on a fresh `ray start`.
+
+Up to `RAY_BRINGUP_ATTEMPTS` (default 3). Exhausting all attempts is terminal —
+`MANIFEST state=FAILED failure_reason=ray_bringup` (with `attempts`), exit 1. It does
+**not** requeue: there is no bad-node exclusion for bring-up, so a reroll would just
+land on the same slow nodes (and, uncapped, loop to walltime). Re-submit with
+known-good nodes instead.
+
 ## `MANIFEST.json` schema
 
 One per run, at `$RUN_DIR/MANIFEST.json`. Fields:
@@ -264,7 +309,7 @@ One per run, at `$RUN_DIR/MANIFEST.json`. Fields:
 | `recipe` | str | Path to the experiment recipe |
 | `restarts` | int | `SLURM_RESTART_COUNT` |
 | `job_rc` | int | Final exit code (terminal write only) |
-| `failure_reason` | str | Set on launcher-side fails: `healthcheck_exhausted`, `head_ip_unresolved`, `nccl_probe` (with `bad_nodes` / `probe_nodes`) |
+| `failure_reason` | str | Set on launcher-side fails: `healthcheck_exhausted`, `head_ip_unresolved`, `nccl_probe` (with `bad_nodes` / `probe_nodes`), `ray_bringup` (with `attempts`) |
 
 `submit.sh` reads the most recent 3 manifests for the same job name and
 warns about any non-`SUCCEEDED` state. That's a heads-up to the operator,
@@ -295,8 +340,11 @@ node-level failures, never for code bugs.
 runs/<job-name>/<YYMMDD_HHMMSS>/
 ├── run.log             # slurm --output, contains everything from launch_miles
 ├── args.json           # MILES_ARGS array parsed into JSON for diffing across runs
-├── ray_head.log        # stdout/stderr of `ray start --head`
+├── ray_head.log        # stdout/stderr of `ray start --head` (last attempt)
 ├── ray_worker_<N>.log  # stdout/stderr of each `ray start --address` worker
+├── ray-debug-attempt<N>/  # only on a failed bring-up attempt: that attempt's per-node
+│                          #   srun logs + Ray component logs (gcs_server/raylet/
+│                          #   ray_client_server/*_agent) pulled from the node's /tmp/ray
 └── MANIFEST.json       # state/timing/job_id audit record (see above)
 ```
 

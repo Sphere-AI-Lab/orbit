@@ -98,12 +98,6 @@ PIN_GROUPS: list[tuple[str, list[Pin]]] = [
             Pin("MBRIDGE_COMMIT", DOCKERFILE, r"ISEEKYAN/mbridge\.git@([0-9a-f]{7,40})"),
             Pin("TMS_COMMIT", DOCKERFILE, r"fzyzcjy/torch_memory_saver\.git@([0-9a-f]{7,40})"),
             Pin(
-                "CUDNN_CU12_VERSION",
-                DOCKERFILE,
-                r"nvidia-cudnn-cu12==([0-9a-z.]+)",
-                "pytorch/pytorch#168167 workaround; modelopt later downgrades it, this re-pins.",
-            ),
-            Pin(
                 "FLASH_ATTN_INTERFACE_COMMIT",
                 DOCKERFILE,
                 r"flash-attention/([0-9a-f]{7,40})/hopper",
@@ -128,7 +122,10 @@ PIN_GROUPS: list[tuple[str, list[Pin]]] = [
 # Extracted from docker/Dockerfile — the UPSTREAM TARGET, recorded but not applied.
 UPSTREAM_PINS: list[Pin] = [
     Pin("UPSTREAM_SGLANG_IMAGE_TAG", DOCKERFILE, r"^ARG\s+SGLANG_IMAGE_TAG=(\S+)"),
-    Pin("UPSTREAM_WHEELS_TAG", DOCKERFILE, r"^ARG\s+WHEELS_TAG=(\S+)"),
+    # Upstream split WHEELS_TAG into per-arch WHEELS_TAG_X86 / WHEELS_TAG_ARM64
+    # (2026-06). We track the x86 line; the bare `WHEELS_TAG=` alternative keeps
+    # older Dockerfile layouts parsable.
+    Pin("UPSTREAM_WHEELS_TAG", DOCKERFILE, r"^ARG\s+WHEELS_TAG(?:_X86)?=(\S+)"),
 ]
 
 
@@ -159,7 +156,9 @@ def read_active_wheels_tag(default: str) -> str:
 
 
 def derive_index_urls(wheels_tag: str) -> dict[str, str]:
-    """Derive torch + flashinfer wheel-index URLs from the ACTIVE wheels-tag cu prefix."""
+    """Derive wheel-index URLs from the ACTIVE wheels-tag cu prefix. SGL_WHL_INDEX_URL
+    carries sgl-project's +cuNNN local-version builds of sglang-kernel/sgl-deep-gemm —
+    the PyPI default wheels of those are cu13-linked, unloadable on a CUDA-12 driver."""
     match = re.search(r"cu(\d{3})", wheels_tag)
     if not match:
         raise SystemExit(f"FATAL: cannot derive cu tag from MILES_WHEELS_TAG={wheels_tag!r}")
@@ -167,6 +166,7 @@ def derive_index_urls(wheels_tag: str) -> dict[str, str]:
     return {
         "TORCH_INDEX_URL": f"https://download.pytorch.org/whl/{cu}",
         "FLASHINFER_INDEX_URL": f"https://flashinfer.ai/whl/{cu}",
+        "SGL_WHL_INDEX_URL": f"https://docs.sglang.ai/whl/{cu}",
     }
 
 
@@ -249,6 +249,7 @@ def render(values: dict[str, str]) -> str:
     out.append("# Derived from MILES_WHEELS_TAG cu prefix")
     out.append(f"TORCH_INDEX_URL=${{TORCH_INDEX_URL:-{values['TORCH_INDEX_URL']}}}")
     out.append(f"FLASHINFER_INDEX_URL=${{FLASHINFER_INDEX_URL:-{values['FLASHINFER_INDEX_URL']}}}")
+    out.append(f"SGL_WHL_INDEX_URL=${{SGL_WHL_INDEX_URL:-{values['SGL_WHL_INDEX_URL']}}}")
     out.append("")
     return "\n".join(out)
 
@@ -268,9 +269,21 @@ def abi_errors(values: dict[str, str]) -> list[str]:
     return errs
 
 
+def _tag_sglang_version(tag: str) -> str:
+    """The sglang-version component of a wheels tag ('cu129-x86_64-v0.5.12' ->
+    'v0.5.12'; legacy suffix-less tags -> '')."""
+    m = re.search(r"-(v[0-9][^-]*)$", tag)
+    return m.group(1) if m else ""
+
+
 def pending_notice(values: dict[str, str]) -> str | None:
-    """ACTIVE behind UPSTREAM target → a deferrable sglang-sync is due."""
-    if values["MILES_WHEELS_TAG"] != values["UPSTREAM_WHEELS_TAG"]:
+    """ACTIVE behind UPSTREAM target → a deferrable sglang-sync is due.
+
+    Compared on the sglang-VERSION component of the tags, not the whole tag: the
+    cu prefix is a deployment property, not a version lag — upstream's Dockerfile
+    moved to cu130 wheels while bare-metal is driver-bound to the cu129 line
+    (CUDA-12.8 driver), so a cu129-vs-cu130 difference alone is not 'pending'."""
+    if _tag_sglang_version(values["MILES_WHEELS_TAG"]) != _tag_sglang_version(values["UPSTREAM_WHEELS_TAG"]):
         return (
             f"[sglang-sync pending] ACTIVE MILES_WHEELS_TAG={values['MILES_WHEELS_TAG']} "
             f"(sglang {values['MILES_WHEELS_SGLANG_VERSION']} / torch {values['MILES_WHEELS_TORCH_VERSION']}) "

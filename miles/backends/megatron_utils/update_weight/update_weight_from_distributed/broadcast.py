@@ -14,6 +14,8 @@ from miles.backends.training_utils.parallel import get_parallel_state
 from miles.utils.distributed_utils import get_gloo_group, init_process_group
 from miles.utils.timer import timer
 
+from ...lora_utils import LORA_ADAPTER_NAME
+from ..common import _check_weight_sync_results
 from ..hf_weight_iterator_base import HfWeightIteratorBase
 from .mixin import DistBucketedWeightUpdateMixin
 
@@ -58,6 +60,13 @@ class UpdateWeightFromDistributed(DistBucketedWeightUpdateMixin):
                 quantization_config=quantization_config,
                 is_lora=is_lora,
             )
+        self._init_lora(
+            args=args,
+            model=model,
+            model_name=model_name,
+            quantization_config=quantization_config,
+            is_lora=is_lora,
+        )
 
     def connect_rollout_engines(
         self,
@@ -104,6 +113,13 @@ class UpdateWeightFromDistributed(DistBucketedWeightUpdateMixin):
         if self._bridge_mode:
             is_source = is_source and pstate.pp.rank == 0
         return is_source
+
+    @property
+    def _is_lora_source(self) -> bool:
+        """The single rank holding the full adapter (DP=TP=PP=0). At PP=1 (enforced
+        for LoRA) this coincides with ``_is_source``."""
+        ps = get_parallel_state()
+        return ps.pp.rank == 0 and ps.tp.rank == 0 and ps.intra_dp_cp.rank == 0
 
     def _update_weight_implementation(
         self, converted_named_tensors: list[tuple[str, torch.Tensor]], pbar: tqdm | None = None
@@ -164,6 +180,38 @@ class UpdateWeightFromDistributed(DistBucketedWeightUpdateMixin):
         with timer("finalize_and_resume_engines"):
             self._finalize_and_resume_engines()
             dist.barrier(group=get_gloo_group())
+
+    def _update_lora_weight_implementation(self, named_tensors: list[tuple[str, torch.Tensor]]) -> None:
+        """Send adapter metadata over Ray, then broadcast the tensors (src=0).
+
+        Reuses the base broadcast group (``self._model_update_groups`` /
+        ``self._group_name``); base and adapter syncs are strictly sequential, so
+        sharing the NCCL communicator is safe. No CUDA IPC, so it works across
+        nodes: the engine allocates buffers from the metadata and broadcast-receives
+        in order.
+        """
+        names = [name for name, _ in named_tensors]
+        dtypes = [param.dtype for _, param in named_tensors]
+        shapes = [list(param.shape) for _, param in named_tensors]
+
+        refs = [
+            engine.load_lora_adapter_from_distributed.remote(
+                lora_name=LORA_ADAPTER_NAME,
+                config_dict=self._lora_config,
+                names=names,
+                dtypes=dtypes,
+                shapes=shapes,
+                group_name=self._group_name,
+            )
+            for engine in self.rollout_engines
+        ]
+        handles = [
+            dist.broadcast(param.data, 0, group=self._model_update_groups, async_op=True) for _, param in named_tensors
+        ]
+        for handle in handles:
+            handle.wait()
+
+        _check_weight_sync_results(ray.get(refs), is_lora=True)
 
 
 def connect_rollout_engines_from_distributed(

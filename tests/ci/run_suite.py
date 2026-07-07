@@ -10,6 +10,7 @@ from tests.ci.ci_utils import run_unittest_files
 HW_MAPPING = {
     "cpu": HWBackend.CPU,
     "cuda": HWBackend.CUDA,
+    "rocm": HWBackend.ROCM,
 }
 
 # PR-side label prefix the workflow attaches to every domain label and passes
@@ -35,6 +36,11 @@ PER_COMMIT_SUITES = {
         "stage-c-8-gpu-h100",
         "stage-c-4-gpu-h200",
         "stage-c-2-gpu-h200",
+    ],
+    HWBackend.ROCM: [
+        "stage-c-8-gpu-mi350",
+        "stage-c-4-gpu-mi350",
+        "stage-c-2-gpu-mi350",
     ],
 }
 
@@ -174,6 +180,20 @@ def pretty_print_tests(args, ci_tests: list[CIRegistry], skipped_tests: list[CIR
     print(msg, flush=True)
 
 
+def build_cpu_pytest_cmd(filenames: list[str], continue_on_error: bool) -> list[str]:
+    """Build the single pytest invocation for a CPU suite.
+
+    `-x` (stop at first failure) is the default per-commit behavior. With
+    continue_on_error -- e.g. a PR carrying the `bypass-fastfail` label -- drop
+    `-x` so every file runs; pytest still exits non-zero if any failed, so the
+    stage stays red.
+    """
+    cmd = ["pytest", *filenames, "-v"]
+    if not continue_on_error:
+        cmd.append("-x")
+    return cmd
+
+
 def run_a_suite(args):
     hw = HW_MAPPING[args.hw]
     suite = args.suite
@@ -207,7 +227,7 @@ def run_a_suite(args):
 
     # CPU tests (fast/) use pytest; CUDA tests use python3 per-file
     if hw == HWBackend.CPU:
-        cmd = ["pytest"] + [t.filename for t in ci_tests] + ["-x", "-v"]
+        cmd = build_cpu_pytest_cmd([t.filename for t in ci_tests], args.continue_on_error)
         print(f"Running: {' '.join(cmd)}", flush=True)
         return subprocess.call(cmd)
 

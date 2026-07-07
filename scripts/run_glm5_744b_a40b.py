@@ -5,8 +5,7 @@ GLM-5 744B-A40B Training Script
 
 Tested on H200, B200, GB300
 
-For H200, B200, please use `radixark/miles:glm5` docker
-For GB300, please use `radixark/miles:glm5-gb300` docker
+Please use the `radixark/miles:dev` docker image.
 
 =====================
 
@@ -345,6 +344,7 @@ def _execute_train(args: ScriptArgs):
         # use flashmla backend for better precision
         "--sglang-nsa-decode-backend flashmla_sparse "
         "--sglang-nsa-prefill-backend flashmla_sparse "
+        "--sglang-kv-cache-dtype bf16 "
         "--sglang-attention-backend nsa "
         "--sglang-page-size 64 "
         f"--sglang-cuda-graph-max-bs {sglang_decode_max_bs} "
@@ -353,6 +353,12 @@ def _execute_train(args: ScriptArgs):
         f"--sglang-chunked-prefill-size {2048 * sglang_world_size} "
         "--sglang-watchdog-timeout 3600 "
     )
+    if args.hardware in ("B200", "GB300") and not (args.fp8_rollout and args.use_deepep):
+        # TODO: fix bf16 trtllm weight update
+        if args.fp8_rollout:
+            sglang_args += "--sglang-moe-runner-backend flashinfer_trtllm_routed "
+        else:
+            sglang_args += "--sglang-moe-runner-backend triton "
     sglang_extra_env_vars = {
         "SGLANG_DEEPEP_NUM_MAX_DISPATCH_TOKENS_PER_RANK": f"{32 if args.enable_pd else 256}",
         "SGLANG_NSA_FORCE_MLA": "1",
