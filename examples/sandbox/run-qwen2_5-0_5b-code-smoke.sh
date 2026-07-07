@@ -57,7 +57,7 @@ CKPT_ARGS=(
     --save-interval 200
     --no-save-optim
     --no-save-rng
-    --megatron-to-hf-mode bridge
+    --megatron-to-hf-mode "${MEGATRON_TO_HF_MODE:-bridge}"
 )
 
 ROLLOUT_ARGS=(

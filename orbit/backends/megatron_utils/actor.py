@@ -50,6 +50,7 @@ from .peft_utils import create_peft_instance, get_peft_method, is_peft_enabled
 from .replay_utils import get_register_replay_list_func
 from .state_mode import should_backup_actor_after_train, uses_adapter_state
 from .update_weight.common import named_adapter_params, named_params_and_buffers
+from .update_weight.update_weight_from_distributed.bridge import UpdateWeightFromDistributedBridge
 from .update_weight.update_weight_from_distributed.broadcast import UpdateWeightFromDistributed
 try:
     from .update_weight.update_weight_from_distributed.p2p import UpdateWeightP2P
@@ -69,6 +70,22 @@ def _get_weight_updater_kwargs(args: Namespace, update_weight_cls: type) -> dict
     if update_weight_cls is UpdateWeightFromTensor:
         return {"peft_method": get_peft_method(args)}
     return {"is_lora": is_lora_enabled(args)}
+
+
+def _select_update_weight_cls(args: Namespace) -> type:
+    """Pick the weight updater for this run's (colocate, PEFT, transfer, to-hf) combo."""
+    if args.colocate or get_peft_method(args) != "none":
+        # PEFT (LoRA/OFT) routes through UpdateWeightFromTensor regardless
+        # of colocate, so the unified PeftWeightTransport (IPC for colocate,
+        # NCCL for async) is the only adapter sync path.
+        return UpdateWeightFromTensor
+    if args.update_weight_transfer_mode == "broadcast":
+        # Bridge-loaded models (Nemotron-H, Gemma-4) have no megatron_to_hf
+        # name mapping; their disaggregated sync streams the bridge export.
+        if args.megatron_to_hf_mode == "bridge":
+            return UpdateWeightFromDistributedBridge
+        return UpdateWeightFromDistributed
+    return UpdateWeightP2P
 
 
 def _validate_train_offload_role(args: Namespace, role: str) -> None:
@@ -217,16 +234,7 @@ class MegatronTrainRayActor(TrainRayActor):
         if self.args.vocab_size is None:
             self.args.vocab_size = self.tokenizer.vocab_size
 
-        if self.args.colocate or get_peft_method(self.args) != "none":
-            # PEFT (LoRA/OFT) routes through UpdateWeightFromTensor regardless
-            # of colocate, so the unified PeftWeightTransport (IPC for colocate,
-            # NCCL for async) is the only adapter sync path.
-            update_weight_cls = UpdateWeightFromTensor
-        else:
-            if self.args.update_weight_transfer_mode == "broadcast":
-                update_weight_cls = UpdateWeightFromDistributed
-            else:
-                update_weight_cls = UpdateWeightP2P
+        update_weight_cls = _select_update_weight_cls(self.args)
         self.weight_updater = update_weight_cls(
             self.args,
             self.model,

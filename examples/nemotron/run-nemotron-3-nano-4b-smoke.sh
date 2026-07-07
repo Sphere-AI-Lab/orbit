@@ -47,7 +47,14 @@ TRAIN_ROWS=${TRAIN_ROWS:-$(wc -l < "${TRAIN_JSONL}")}
 NUM_ROLLOUT=${NUM_ROLLOUT:-$(( (TRAIN_ROWS * TOTAL_EPOCHS + ROLLOUT_BATCH_SIZE - 1) / ROLLOUT_BATCH_SIZE ))}
 
 # === ARGS arrays ===
-COLOCATE_ARGS=( --colocate )
+# COLOCATE=0 runs disaggregated: bridge models sync via
+# UpdateWeightFromDistributedBridge (megatron-bridge export streamed over
+# NCCL) instead of requiring colocated UpdateWeightFromTensor.
+if [ "${COLOCATE:-1}" = "1" ]; then
+    COLOCATE_ARGS=( --colocate )
+else
+    COLOCATE_ARGS=()
+fi
 
 CKPT_ARGS=(
     --hf-checkpoint "${HF_CKPT}"
@@ -134,7 +141,8 @@ SGLANG_ARGS=(
     --rollout-num-gpus "${ROLLOUT_NUM_GPUS}"
     --sglang-mem-fraction-static "${SGLANG_MEM_FRACTION_STATIC:-0.60}"
     --sglang-max-running-requests "${SGLANG_MAX_RUNNING_REQUESTS:-1024}"
-    --sglang-attention-backend "${SGLANG_ATTENTION_BACKEND:-triton}"
+    # NemotronH rejects triton (first layer is Mamba, not attention)
+    --sglang-attention-backend "${SGLANG_ATTENTION_BACKEND:-flashinfer}"
     --sglang-sampling-backend pytorch
     --router-disable-circuit-breaker
 )
