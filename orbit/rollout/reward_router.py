@@ -36,6 +36,7 @@ from argparse import Namespace
 from orbit.rollout.genrm_judge import reward_func as _genrm_reward
 from orbit.rollout.llm_judge import reward_func as _judge_reward
 from orbit.rollout.sandbox.code_rm import reward_func as _code_reward
+from orbit.rollout.sandbox.swe_rm import reward_func as _swe_reward
 from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ _AGENT_ROUTES: dict[str, str] = {
     "genrm_simple_agent": "genrm",
     "genrm_simple_agent_reasoning_off": "genrm",
     "code_gen_simple_agent": "code",
+    "swe_agents_train": "swe",
 }
 
 
@@ -88,6 +90,8 @@ async def reward_func(args: Namespace, samples: list[Sample], **kwargs) -> list[
                 rewards.append(float(await _judge_reward(args, sample, **kwargs)))
             elif route == "code":
                 rewards.append(float(await _code_reward(args, sample, **kwargs)))
+            elif route == "swe":
+                rewards.append(float(await _swe_reward(args, sample, **kwargs)))
             else:  # pragma: no cover — routes and handlers are defined together
                 raise AssertionError(f"unhandled route {route!r}")
         return rewards

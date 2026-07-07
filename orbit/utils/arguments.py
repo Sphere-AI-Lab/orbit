@@ -272,6 +272,21 @@ def add_on_policy_distillation_arguments(parser):
         help="Sandbox code-execution reward: cap on unit tests executed per sample (0 = all).",
     )
     parser.add_argument(
+        "--swe-rm-sif-cache",
+        type=str,
+        default=None,
+        help=(
+            "SWE patch reward: directory of pre-pulled Apptainer SIFs keyed by sanitized "
+            "image name (build with tools/prepare_swe_subset.py)."
+        ),
+    )
+    parser.add_argument(
+        "--swe-rm-timeout-secs",
+        type=float,
+        default=300.0,
+        help="SWE patch reward: wall-clock timeout per verification (copy + patch + tests).",
+    )
+    parser.add_argument(
         "--reward-router-unmapped",
         type=str,
         choices=["zero", "error"],
