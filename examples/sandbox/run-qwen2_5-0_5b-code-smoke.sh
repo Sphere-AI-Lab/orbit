@@ -124,7 +124,19 @@ PERF_ARGS=(
     --sequence-parallel
 )
 
-EVAL_ARGS=()
+# Optional executor-graded eval: pass-rate on held-out code rows (per-sample
+# custom RM — no group machinery involved in eval here).
+if [ -n "${CODE_VAL:-}" ]; then
+    EVAL_ARGS=(
+        --eval-interval "${EVAL_INTERVAL:-10}"
+        --eval-prompt-data code "${CODE_VAL}"
+        --n-samples-per-eval-prompt 1
+        --eval-max-response-len 1024
+        --eval-top-k 1
+    )
+else
+    EVAL_ARGS=()
+fi
 
 SGLANG_ARGS=(
     --rollout-num-gpus-per-engine 1
