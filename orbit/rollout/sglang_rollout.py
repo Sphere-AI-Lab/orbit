@@ -783,7 +783,8 @@ EVAL_PROMPT_DATASET = {}
 
 
 async def eval_rollout(args: Namespace, rollout_id: int) -> tuple[dict[str, dict[str, list[Any]]], list[list[Sample]]]:
-    assert not args.group_rm, "Group RM is not supported for eval rollout"
+    # --group-rm eval is supported via singleton-group grading in
+    # _generate_and_rm_eval (each eval sample becomes its own group).
 
     coros = []
     for dataset_cfg in getattr(args, "eval_datasets", []) or []:
@@ -805,7 +806,8 @@ async def eval_rollout_single_dataset(
         rollout_id: int, the id of the rollout, used for deterministic data generation
         dataset_cfg: configuration of the dataset
     """
-    assert not args.group_rm, "Group RM is not supported for eval rollout"
+    # --group-rm eval is supported via singleton-group grading in
+    # _generate_and_rm_eval (each eval sample becomes its own group).
 
     global EVAL_PROMPT_DATASET
 
@@ -868,22 +870,27 @@ async def eval_rollout_single_dataset(
         else None
     )
 
+    async def _generate_and_rm_eval(sample, sampling_params):
+        sample = await generate_and_rm(
+            args,
+            sample,
+            sampling_params=sampling_params,
+            evaluation=True,
+        )
+        # With --group-rm, generate_and_rm defers rewards to the group hook;
+        # eval samples have no training group, so grade each as a singleton
+        # group (batch hooks handle len-1 groups: router/code/judge stay
+        # meaningful, genrm degenerates to a documented neutral 0.5).
+        if args.group_rm and sample.reward is None and sample.status != Sample.Status.ABORTED:
+            sample.reward = (await batched_async_rm(args, [sample]))[0]
+        return sample
+
     async def generate_eval_sample(sample, sampling_params):
         if eval_generate_semaphore is None:
-            return await generate_and_rm(
-                args,
-                sample,
-                sampling_params=sampling_params,
-                evaluation=True,
-            )
+            return await _generate_and_rm_eval(sample, sampling_params)
 
         async with eval_generate_semaphore:
-            return await generate_and_rm(
-                args,
-                sample,
-                sampling_params=sampling_params,
-                evaluation=True,
-            )
+            return await _generate_and_rm_eval(sample, sampling_params)
 
     _setup_t0 = time.perf_counter()
     tasks = []

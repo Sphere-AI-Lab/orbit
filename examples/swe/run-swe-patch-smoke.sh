@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# NVIDIA Nemotron-3-Nano-4B (dense nemotron_h = hybrid Mamba + Attention) BF16
-# GRPO smoke on math. Loads the HF checkpoint directly through megatron.bridge
-# (--load points at the HF directory; orbit's load_checkpoint falls through to
-# _load_checkpoint_hf), exercising OrbitNemotronHBridge + the lazy hybrid-layer
-# shims + sglang's nemotron_h serving end to end.
+# One-shot SWE patch RL smoke (rung 2a): the model emits a unified diff for
+# a real GitHub issue; orbit.rollout.sandbox.swe_rm applies it + the row's
+# test_patch inside the instance's Apptainer image and runs the SWE-bench
+# FAIL_TO_PASS/PASS_TO_PASS suites (binary reward). Data + SIF cache from
+# tools/prepare_swe_subset.py. Golden-patch oracle: tools/swe_rm_oracle.py.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,7 +12,7 @@ source "${ORBIT_ROOT}/scripts/lib/tool_env.sh"
 source "${ORBIT_ROOT}/scripts/lib/common.sh"
 
 # === Recipe identity ===
-LAUNCHER_NAME=smoke_nemotron3_nano4b_grpo
+LAUNCHER_NAME=smoke_swe_patch
 WANDB_PROJECT=${WANDB_PROJECT:-orbit-release}
 WANDB_GROUP=${WANDB_GROUP:-${LAUNCHER_NAME}}
 PRECISION_PROFILE=bf16
@@ -20,22 +20,20 @@ ORBIT_ENTRYPOINT="${ORBIT_ENTRYPOINT:-${ORBIT_ROOT}/train.py}"
 RUN_LOG="${ORBIT_ROOT}/logs/${LAUNCHER_NAME}_$(date +%Y%m%d_%H%M%S).log"
 
 # === Paths ===
-: "${HF_CKPT:?set HF_CKPT to the Nemotron-3-Nano-4B HF checkpoint path}"
-# The bridge path loads Megatron weights straight from the HF directory;
-# scripts/lib/launcher.sh requires MEGATRON_LOAD, so point it there too.
-MEGATRON_LOAD="${MEGATRON_LOAD:-${HF_CKPT}}"
-SAVE_DIR="${ORBIT_ROOT}/orbit_ckpts/Nemotron-3-Nano-4B_grpo_smoke"
+: "${HF_CKPT:?set HF_CKPT to a Hugging Face checkpoint path}"
+: "${MEGATRON_LOAD:?set MEGATRON_LOAD to a Megatron torch_dist checkpoint path}"
+SAVE_DIR="${ORBIT_ROOT}/orbit_ckpts/SWE_patch_smoke"
 : "${TRAIN_JSONL:?set TRAIN_JSONL to a training jsonl path}"
 TEST_JSONL=${TEST_JSONL:-}
 
 # === Resources ===
-# Dense 4B: actor TP=2 on 2 GPUs, rollout 2 GPUs.
+# actor=2 GPUs, rollout=2 GPUs.
 GPUS_PER_NODE="${GPUS_PER_NODE:-2}"
 ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-2}"
 RAY_NUM_CPUS="${RAY_NUM_CPUS:-32}"
 
 # === Model args ===
-source "${ORBIT_ROOT}/orbit_plugins/model_args/nemotron-3-nano-4b.sh"   # provides MODEL_ARGS=(...)
+source "${ORBIT_ROOT}/orbit_plugins/model_args/${MODEL_ARGS_FILE:-qwen2.5-0.5B}.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
@@ -47,23 +45,16 @@ TRAIN_ROWS=${TRAIN_ROWS:-$(wc -l < "${TRAIN_JSONL}")}
 NUM_ROLLOUT=${NUM_ROLLOUT:-$(( (TRAIN_ROWS * TOTAL_EPOCHS + ROLLOUT_BATCH_SIZE - 1) / ROLLOUT_BATCH_SIZE ))}
 
 # === ARGS arrays ===
-# COLOCATE=0 runs disaggregated: bridge models sync via
-# UpdateWeightFromDistributedBridge (megatron-bridge export streamed over
-# NCCL) instead of requiring colocated UpdateWeightFromTensor.
-if [ "${COLOCATE:-1}" = "1" ]; then
-    COLOCATE_ARGS=( --colocate )
-else
-    COLOCATE_ARGS=()
-fi
+COLOCATE_ARGS=()
 
 CKPT_ARGS=(
     --hf-checkpoint "${HF_CKPT}"
-    --load "${HF_CKPT}"
+    --load "${MEGATRON_LOAD}"
     --save "${SAVE_DIR}/actor"
     --save-interval 200
     --no-save-optim
     --no-save-rng
-    --megatron-to-hf-mode bridge
+    --megatron-to-hf-mode "${MEGATRON_TO_HF_MODE:-bridge}"
 )
 
 ROLLOUT_ARGS=(
@@ -79,6 +70,9 @@ ROLLOUT_ARGS=(
     --rollout-max-response-len "${ROLLOUT_MAX_RESPONSE_LEN}"
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
+    --custom-rm-path orbit.rollout.sandbox.swe_rm.reward_func
+    --swe-rm-sif-cache "${SWE_SIF_CACHE:?set SWE_SIF_CACHE to the pre-pulled SIF dir}"
+    --swe-rm-timeout-secs "${SWE_RM_TIMEOUT_SECS:-300}"
 )
 
 OPTIMIZER_ARGS=(
@@ -101,7 +95,6 @@ RL_ARGS=(
     --gamma 1.0
     --lambd 1.0
 )
-
 LOSS_ARGS=(
     --calculate-per-token-loss
 )
@@ -114,7 +107,7 @@ WANDB_ARGS=(
 )
 
 PERF_ARGS=(
-    --tensor-model-parallel-size 2
+    --tensor-model-parallel-size 1
     --pipeline-model-parallel-size 1
     --context-parallel-size 1
     --expert-model-parallel-size 1
@@ -127,22 +120,27 @@ PERF_ARGS=(
     --sequence-parallel
 )
 
-EVAL_ARGS=(
-    --eval-interval 10
-    --eval-prompt-data math "${TEST_JSONL}"
-    --n-samples-per-eval-prompt 1
-    --eval-max-response-len 1024
-    --eval-top-k 1
-    --eval-pass-k-values 1 2 4 8 16
-)
+# Optional executor-graded eval: pass-rate on held-out code rows (per-sample
+# custom RM — no group machinery involved in eval here).
+if [ -n "${CODE_VAL:-}" ]; then
+    EVAL_ARGS=(
+        --eval-interval "${EVAL_INTERVAL:-10}"
+        --eval-prompt-data code "${CODE_VAL}"
+        --n-samples-per-eval-prompt 1
+        --eval-max-response-len 1024
+        --eval-top-k 1
+    )
+else
+    EVAL_ARGS=()
+fi
 
 SGLANG_ARGS=(
     --rollout-num-gpus-per-engine 1
     --rollout-num-gpus "${ROLLOUT_NUM_GPUS}"
     --sglang-mem-fraction-static "${SGLANG_MEM_FRACTION_STATIC:-0.60}"
     --sglang-max-running-requests "${SGLANG_MAX_RUNNING_REQUESTS:-1024}"
-    # NemotronH rejects triton (first layer is Mamba, not attention)
-    --sglang-attention-backend "${SGLANG_ATTENTION_BACKEND:-flashinfer}"
+    --sglang-force-native-ops
+    --sglang-attention-backend triton
     --sglang-sampling-backend pytorch
     --router-disable-circuit-breaker
 )
@@ -150,13 +148,13 @@ SGLANG_ARGS=(
 MISC_ARGS=(
     --attention-dropout 0.0
     --hidden-dropout 0.0
-    --attention-backend auto
+    --attention-backend flash
     --accumulate-allreduce-grads-in-fp32
     --attention-softmax-in-fp32
     --no-gradient-accumulation-fusion
     --no-offload-train
     --no-offload-train-async
-    --offload-rollout
+    --no-offload-rollout
     --cuda-graph-impl local
     --cuda-graph-scope full_iteration
     --te-rng-tracker
