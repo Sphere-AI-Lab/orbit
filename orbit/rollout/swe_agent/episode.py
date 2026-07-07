@@ -42,27 +42,44 @@ _EPISODE_TIMEOUT_SECS = 900.0
 
 _SYSTEM_PROMPT = """You are an expert software engineer fixing a GitHub issue inside the repository's own environment.
 
-You interact through tool calls. Available tools:
+Work in steps: explore the code (grep, cat, sed), reproduce the problem if
+useful, EDIT files (e.g. with sed -i, or cat > file << 'EOF' ... EOF),
+verify, then call submit. Reply with EXACTLY ONE tool call per turn. Do not
+modify the test suite. Keep commands short; output is truncated."""
 
-1. run_shell — run one shell command in the repository root and see its output.
-2. submit — declare the fix complete (your edits to the working tree will be tested).
+# Rendered natively by the chat template (tools=...) so the model sees the
+# tool-call format it was trained on.
+_TOOLS_SCHEMA = [
+    {
+        "type": "function",
+        "function": {
+            "name": "run_shell",
+            "description": "Run one shell command in the repository root and return its output.",
+            "parameters": {
+                "type": "object",
+                "properties": {"command": {"type": "string", "description": "shell command"}},
+                "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "submit",
+            "description": "Declare the fix complete; the working tree will be tested.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+]
 
-Reply with EXACTLY ONE tool call per turn, formatted as:
-<tool_call>
-{"name": "run_shell", "arguments": {"command": "<shell command>"}}
-</tool_call>
-or
-<tool_call>
-{"name": "submit", "arguments": {}}
-</tool_call>
-
-Explore the code (grep, cat, sed), reproduce the problem if useful, EDIT files
-(e.g. with sed -i, or cat > file << 'EOF' ... EOF), verify, then submit.
-Do not modify the test suite. Keep commands short; output is truncated."""
+_BARE_JSON_RE = re.compile(r"\{[^{}]*\"name\"[^{}]*\"arguments\"\s*:\s*\{[^{}]*\}[^{}]*\}")
 
 
 def _parse_action(text: str) -> dict | None:
     matches = _TOOL_CALL_RE.findall(text or "")
+    if not matches:
+        # models sometimes emit the call as bare JSON without the tags
+        matches = _BARE_JSON_RE.findall(text or "")
     if not matches:
         return None
     try:
@@ -73,8 +90,9 @@ def _parse_action(text: str) -> dict | None:
 
 
 def _template_ids(tokenizer, messages: list[dict], add_generation_prompt: bool) -> list[int]:
+    # tools must appear in EVERY render or the append-only prefix property breaks
     text = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=add_generation_prompt
+        messages, tools=_TOOLS_SCHEMA, tokenize=False, add_generation_prompt=add_generation_prompt
     )
     return tokenizer(text, add_special_tokens=False)["input_ids"]
 
@@ -108,11 +126,15 @@ async def _run_episode(args: Namespace, sample: Sample, sampling_params: dict) -
     response_budget = int(args.rollout_max_response_len)
 
     # Conversation both as messages (for template deltas) and as one token stream.
-    if isinstance(sample.prompt, list):
-        user_messages = [m for m in sample.prompt if m.get("role") == "user"]
-        issue_text = user_messages[-1]["content"] if user_messages else str(sample.prompt)
-    else:
-        issue_text = str(sample.prompt)
+    # NOTE: with --apply-chat-template the dataset pre-renders sample.prompt
+    # into a templated STRING — never embed that; prefer the raw issue text.
+    issue_text = swe.get("problem_statement")
+    if not issue_text:
+        if isinstance(sample.prompt, list):
+            user_messages = [m for m in sample.prompt if m.get("role") == "user"]
+            issue_text = user_messages[-1]["content"] if user_messages else str(sample.prompt)
+        else:
+            issue_text = str(sample.prompt)
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": issue_text},

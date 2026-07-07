@@ -22,7 +22,7 @@ from orbit.utils.types import Sample
 class FakeTokenizer:
     """Character-code tokenizer with an append-only 'template'."""
 
-    def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=False):
+    def apply_chat_template(self, messages, tools=None, tokenize=False, add_generation_prompt=False):
         text = "".join(f"[{m['role']}]{m['content']}[/]" for m in messages)
         if add_generation_prompt:
             text += "[assistant]"
@@ -135,6 +135,12 @@ def test_parse_action_variants():
     assert gen_mod._parse_action("thinking...\n" + _tool_call("submit"))["name"] == "submit"
     assert gen_mod._parse_action("no call") is None
     assert gen_mod._parse_action("<tool_call>{bad json}</tool_call>") is None
+
+
+def test_parse_action_bare_json_fallback():
+    bare = '{"name": "run_shell", "arguments": {"command": "pip show click"}}'
+    assert gen_mod._parse_action(bare)["name"] == "run_shell"
+    assert gen_mod._parse_action("prefix text\n" + bare)["arguments"]["command"] == "pip show click"
 
 
 # ---------------------------------------------------------------------------
