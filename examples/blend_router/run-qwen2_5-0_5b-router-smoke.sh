@@ -22,7 +22,9 @@ RUN_LOG="${ORBIT_ROOT}/logs/${LAUNCHER_NAME}_$(date +%Y%m%d_%H%M%S).log"
 # === Paths ===
 : "${HF_CKPT:?set HF_CKPT to a Hugging Face checkpoint path}"
 : "${MEGATRON_LOAD:?set MEGATRON_LOAD to a Megatron torch_dist checkpoint path}"
-: "${JUDGE_BASE_URL:?set JUDGE_BASE_URL to the judge server base URL}"
+# Judge server is only needed for judge/genrm-routed rows; rule-based-only
+# blends (tool_call/mcqa/structured/ifbench/code) can run without one.
+JUDGE_BASE_URL="${JUDGE_BASE_URL:-}"
 SAVE_DIR="${ORBIT_ROOT}/orbit_ckpts/Qwen2.5-0.5B-Instruct_router_smoke"
 : "${TRAIN_JSONL:?set TRAIN_JSONL to a training jsonl path}"
 TEST_JSONL=${TEST_JSONL:-}
@@ -73,10 +75,15 @@ ROLLOUT_ARGS=(
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
     --custom-rm-path orbit.rollout.reward_router.reward_func
     --group-rm
-    --judge-base-url "${JUDGE_BASE_URL}"
     --code-rm-timeout-secs "${CODE_RM_TIMEOUT_SECS:-6}"
     --code-rm-max-tests "${CODE_RM_MAX_TESTS:-8}"
 )
+if [ -n "${JUDGE_BASE_URL}" ]; then
+    ROLLOUT_ARGS+=( --judge-base-url "${JUDGE_BASE_URL}" )
+fi
+if [ -n "${TOOL_KEY:-}" ]; then
+    ROLLOUT_ARGS+=( --tool-key "${TOOL_KEY}" )
+fi
 
 OPTIMIZER_ARGS=(
     --optimizer adam
@@ -123,7 +130,20 @@ PERF_ARGS=(
     --sequence-parallel
 )
 
-EVAL_ARGS=()
+# Per-domain eval: judge-equivalence accuracy on reasoning val + executor
+# pass-rate on held-out code rows, both scored through the router (eval
+# groups are singletons: judge/code routes stay meaningful, genrm would not).
+if [ -n "${REASONING_VAL:-}" ] && [ -n "${CODE_VAL:-}" ]; then
+    EVAL_ARGS=(
+        --eval-interval "${EVAL_INTERVAL:-10}"
+        --eval-prompt-data reasoning "${REASONING_VAL}" code "${CODE_VAL}"
+        --n-samples-per-eval-prompt 1
+        --eval-max-response-len 1024
+        --eval-top-k 1
+    )
+else
+    EVAL_ARGS=()
+fi
 
 SGLANG_ARGS=(
     --rollout-num-gpus-per-engine 1

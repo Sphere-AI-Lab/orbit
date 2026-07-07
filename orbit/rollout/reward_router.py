@@ -48,6 +48,13 @@ _AGENT_ROUTES: dict[str, str] = {
     "genrm_simple_agent_reasoning_off": "genrm",
     "code_gen_simple_agent": "code",
     "swe_agents_train": "swe",
+    # single-turn rule-based Ultra agents (rm_hub/ultra_agents.py)
+    "single_step_tool_use_with_argument_comparison_agent": "tool_call",
+    "swe_pivot_single_step_tool_use_with_argument_comparison_agent": "tool_call",
+    "toolcall_schema_single_step_tool_use_with_argument_comparison_agent": "tool_call",
+    "mcqa_simple_agent": "mcqa",
+    "structured_outputs_simple_agent": "structured",
+    "instruction_following_simple_agent": "if",
 }
 
 
@@ -86,12 +93,41 @@ async def reward_func(args: Namespace, samples: list[Sample], **kwargs) -> list[
             return await _genrm_reward(args, samples, **kwargs)
         rewards = []
         for sample in samples:
+            metadata = sample.metadata if isinstance(sample.metadata, dict) else {}
             if route == "judge":
                 rewards.append(float(await _judge_reward(args, sample, **kwargs)))
             elif route == "code":
                 rewards.append(float(await _code_reward(args, sample, **kwargs)))
             elif route == "swe":
                 rewards.append(float(await _swe_reward(args, sample, **kwargs)))
+            elif route == "tool_call":
+                from orbit.rollout.rm_hub.ultra_agents import grade_tool_call
+
+                rewards.append(grade_tool_call(sample.response, metadata.get("expected_action")))
+            elif route == "mcqa":
+                from orbit.rollout.rm_hub.ultra_agents import grade_mcqa
+
+                rewards.append(
+                    grade_mcqa(sample.response, sample.label or metadata.get("expected_answer"), metadata.get("output_regex"))
+                )
+            elif route == "structured":
+                from orbit.rollout.rm_hub.ultra_agents import grade_structured_output
+
+                rewards.append(
+                    grade_structured_output(sample.response, metadata.get("schema_str") or "", metadata.get("schema_type"))
+                )
+            elif route == "if":
+                # lazy: first use may clone allenai/open-instruct (IFEvalG registry)
+                from orbit.rollout.rm_hub.ultra_agents import grade_instruction_following
+
+                rewards.append(
+                    grade_instruction_following(
+                        sample.response,
+                        metadata.get("instruction_id_list") or [],
+                        metadata.get("kwargs"),
+                        prompt_text=metadata.get("prompt_text") or "",
+                    )
+                )
             else:  # pragma: no cover — routes and handlers are defined together
                 raise AssertionError(f"unhandled route {route!r}")
         return rewards

@@ -82,7 +82,7 @@ def test_default_agent_map(agent, target):
 
 
 def test_unmapped_agent_zero_rewards_loudly(monkeypatch, caplog):
-    group = _group("single_step_tool_use_with_argument_comparison_agent")
+    group = _group("definitely_not_a_real_agent")
     with caplog.at_level("WARNING"):
         rewards = _run(router.reward_func(_args(), group))
     assert rewards == [0.0, 0.0]
@@ -90,7 +90,7 @@ def test_unmapped_agent_zero_rewards_loudly(monkeypatch, caplog):
 
 
 def test_unmapped_agent_can_error_instead():
-    group = _group("single_step_tool_use_with_argument_comparison_agent")
+    group = _group("definitely_not_a_real_agent")
     with pytest.raises(ValueError, match="unmapped"):
         _run(router.reward_func(_args(reward_router_unmapped="error"), group))
 
