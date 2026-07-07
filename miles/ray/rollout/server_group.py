@@ -111,8 +111,7 @@ class ServerGroup:
                     # on shared nodes (mid-run EACCES killed all engines on a node)
                     # and races across same-node engines compiling the same kernel.
                     "TRITON_CACHE_DIR": (
-                        f"/tmp/triton_{os.environ.get('USER', 'unknown')}"
-                        f"/{self.worker_type}_rank_{global_rank}"
+                        f"/tmp/triton_{os.environ.get('USER', 'unknown')}/{self.worker_type}_rank_{global_rank}"
                     ),
                     "SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK": "false",
                     "SGLANG_MEMORY_SAVER_CUDA_GRAPH": "true",
