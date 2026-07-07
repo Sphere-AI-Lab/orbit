@@ -139,32 +139,63 @@ def get_rollout_data(args: Namespace, rollout_data_ref: Box) -> RolloutBatch:
                 parallel_state=parallel_state,
             )
 
-    if "rollout_log_probs" in rollout_data:
-        max_seq_lens = rollout_data.get("max_seq_lens")
-        rollout_data["rollout_log_probs"] = [
-            torch.tensor(
-                slice_log_prob_with_cp(
-                    log_prob,
-                    total_length,
-                    response_length,
-                    args.qkv_format,
-                    max_seq_lens[i] if max_seq_lens is not None else None,
-                ),
-                device=torch.cuda.current_device(),
-                dtype=torch.float32,
-            )
-            for i, (log_prob, total_length, response_length) in enumerate(
-                zip(
-                    rollout_data["rollout_log_probs"],
-                    rollout_data["total_lengths"],
-                    rollout_data["response_lengths"],
-                    strict=False,
-                )
-            )
-        ]
+    # rollout_log_probs always arrive as raw list[list[float]]; teacher_log_probs
+    # arrive raw only from the sglang OPD teacher (the megatron OPD teacher
+    # populates tensors *later* via compute_log_prob, so the key is absent here
+    # — and the already-tensor guard keeps that path untouched either way).
+    _tensorize_cp_sliced_log_probs(args, rollout_data, "rollout_log_probs", dtype=_rollout_logprob_dtype(args))
+    _tensorize_cp_sliced_log_probs(args, rollout_data, "teacher_log_probs")
+    _tensorize_cp_sliced_log_probs(args, rollout_data, "opd_reverse_kl")
     if "rollout_routed_experts" in rollout_data:
         rollout_data["rollout_routed_experts"] = [torch.from_numpy(r) for r in rollout_data["rollout_routed_experts"]]
     return rollout_data
+
+
+def _rollout_logprob_dtype(args: Namespace) -> torch.dtype:
+    # Parity contract: under true-on-policy the stored rollout log-probs must
+    # be exactly what SGLang computed (bf16/fp16), not an fp32 widening.
+    if getattr(args, "true_on_policy_mode", False):
+        if getattr(args, "bf16", False):
+            return torch.bfloat16
+        if getattr(args, "fp16", False):
+            return torch.float16
+    return torch.float32
+
+
+def _tensorize_cp_sliced_log_probs(
+    args: Namespace, rollout_data: RolloutBatch, key: str, dtype: torch.dtype = torch.float32
+) -> None:
+    """Tensorize + CP-slice a per-sample ``list[list[float]]`` of response-aligned
+    log-probs transferred rollout->train, in place.
+
+    No-op when the key is absent, the list is empty (a DP rank can receive zero
+    samples), or entries are already tensors.
+    """
+    values = rollout_data.get(key)
+    if not values or isinstance(values[0], torch.Tensor):
+        return
+    max_seq_lens = rollout_data.get("max_seq_lens")
+    rollout_data[key] = [
+        torch.tensor(
+            slice_log_prob_with_cp(
+                log_prob,
+                total_length,
+                response_length,
+                args.qkv_format,
+                max_seq_lens[i] if max_seq_lens is not None else None,
+            ),
+            device=torch.cuda.current_device(),
+            dtype=dtype,
+        )
+        for i, (log_prob, total_length, response_length) in enumerate(
+            zip(
+                values,
+                rollout_data["total_lengths"],
+                rollout_data["response_lengths"],
+                strict=False,
+            )
+        )
+    ]
 
 
 def get_batch(

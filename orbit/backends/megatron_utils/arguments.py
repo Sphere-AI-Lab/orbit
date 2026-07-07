@@ -28,9 +28,14 @@ __all__ = ["validate_args", "parse_args", "set_default_megatron_args"]
 logger = logging.getLogger(__name__)
 
 
+def _is_muon_optimizer(optimizer: str | None) -> bool:
+    return optimizer is not None and "muon" in optimizer.lower()
+
+
 def set_default_megatron_args(args):
-    # always use zero optimizer
-    args.use_distributed_optimizer = True
+    # Muon owns its own sharding path and is incompatible with Megatron's
+    # distributed optimizer; Adam/SGD keep the historical ZeRO default.
+    args.use_distributed_optimizer = not _is_muon_optimizer(getattr(args, "optimizer", None))
     # Follow-up: maybe change this after megatron has good fp8 support
     args.bf16 = not args.fp16
     # placeholders

@@ -8,6 +8,9 @@ from torch.utils.checkpoint import checkpoint
 from orbit.utils.distributed_utils import distributed_masked_whiten
 from orbit.utils.misc import load_function
 from orbit.utils.ppo_utils import (
+    _safe_exp_neg_ppo_kl,
+    apply_opd_icepop_gate,
+    apply_opd_kl_to_advantages,
     calculate_log_probs_and_entropy,
     compute_approx_kl,
     compute_gspo_kl,
@@ -17,6 +20,8 @@ from orbit.utils.ppo_utils import (
     get_grpo_returns,
     get_reinforce_plus_plus_baseline_advantages,
     get_reinforce_plus_plus_returns,
+    icepop_gate,
+    opd_mopd_advantages,
 )
 from orbit.utils.types import RolloutBatch
 
@@ -107,7 +112,8 @@ def get_responses(
     parallel_state = get_parallel_state()
     qkv_format = args.qkv_format
 
-    assert logits.dtype == torch.float32, f"{logits.dtype}"
+    if not args.true_on_policy_mode:
+        assert logits.dtype == torch.float32, f"{logits.dtype}"
     assert len(logits.shape) == 3, f"{logits.shape}"
 
     if qkv_format == "thd":
@@ -124,6 +130,13 @@ def get_responses(
     # CUDA allocator near OOM on the GRPO loss path.
     if rollout_temperature != 1.0:
         logits = logits.div(rollout_temperature)
+    if args.true_on_policy_mode:
+        # Parity contract: SGLang computes log_softmax over bf16 logits, so the
+        # training side must feed the same dtype (design doc §2.2 invariant 6).
+        if getattr(args, "bf16", False):
+            logits = logits.to(torch.bfloat16)
+        elif getattr(args, "fp16", False):
+            logits = logits.to(torch.float16)
 
     cp_size = parallel_state.cp.size
     end = 0
@@ -245,6 +258,7 @@ def get_log_probs_and_entropy(
             entropy_no_grad=entropy_no_grad,
             chunk_size=args.log_probs_chunk_size,
             true_on_policy=args.true_on_policy_mode,
+            vocab_size=getattr(args, "vocab_size", None),
         )
 
         log_probs_list.append(log_prob.squeeze(-1))
@@ -329,7 +343,7 @@ def get_values(
     return res
 
 
-def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) -> None:
+def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch, role: str = "actor") -> None:
     """Compute advantages and returns in-place based on `args.advantage_estimator`.
 
     This function extracts rewards, log-probs, values, and masks from
@@ -349,6 +363,10 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
             "rewards", "values", "response_lengths", "loss_masks",
             "total_lengths"). Modified in-place to add "advantages" and
             "returns" keys, each mapping to lists of tensors per sample.
+        role: "actor" or "critic". The critic never receives teacher_log_probs
+            (sync_actor_critic_data does not broadcast them) and its value loss
+            consumes `returns`, which the OPD blend does not touch — so OPD
+            advantage adjustments are skipped for role="critic".
     """
     parallel_state = get_parallel_state()
     log_probs: list[torch.Tensor] = rollout_data.get("rollout_log_probs" if args.use_rollout_logprobs else "log_probs")
@@ -422,23 +440,19 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch) 
         returns = advantages
 
     elif args.advantage_estimator == "on_policy_distillation":
-        student_log_probs = log_probs
-        teacher_log_probs = rollout_data.get("teacher_log_probs")
-        response_lengths = rollout_data.get("response_lengths")
-        device = student_log_probs[0].device
-        teacher_log_probs = [t_log_prob.to(device=device) for t_log_prob in teacher_log_probs]
-        teacher_log_probs = [
-            t_log_prob[-response_length:]
-            for t_log_prob, response_length in zip(teacher_log_probs, response_lengths, strict=False)
-        ]
-        advantages = [
-            teacher_log_prob - student_log_prob
-            for teacher_log_prob, student_log_prob in zip(teacher_log_probs, student_log_probs, strict=False)
-        ]
+        advantages = opd_mopd_advantages(rollout_data, log_probs, rollout_data.get("response_lengths"))
         returns = advantages
 
     else:
         raise NotImplementedError(f"advantage_estimator {args.advantage_estimator} is not supported. ")
+
+    if role == "actor" and getattr(args, "use_opd", False):
+        apply_opd_kl_to_advantages(args.opd_kl_coef, rollout_data, advantages, log_probs)
+
+    # Optional async/off-policy ICE-POP correction for the OPD advantage (pure-MOPD
+    # or blend): hard-gate tokens whose train/rollout importance ratio leaves the band.
+    if role == "actor" and getattr(args, "opd_icepop", False):
+        apply_opd_icepop_gate(rollout_data, advantages, args.tis_clip_low, args.tis_clip)
 
     # Follow-up: OpenRLHF always does advantages normalization but veRL doesn't seem to do it.
     if args.normalize_advantages:
@@ -537,9 +551,7 @@ def icepop_function(
     old_log_probs = torch.cat(train_log_probs, dim=0)
     ice_ratio = torch.exp(old_log_probs - rollout_log_probs)
     ice_abs = (torch.exp(old_log_probs - rollout_log_probs) - 1).abs()
-    ice_weight = torch.where(
-        (ice_ratio >= args.tis_clip_low) & (ice_ratio <= args.tis_clip), ice_ratio, torch.zeros_like(ice_ratio)
-    )
+    ice_weight = icepop_gate(ice_ratio, args.tis_clip_low, args.tis_clip)
     ice_clipfrac = (ice_weight != ice_ratio).float()
     metrics = {
         "tis": ice_ratio.clone().detach(),
@@ -670,7 +682,7 @@ def policy_loss_function(
 
         assert "rollout_log_probs" in batch, "rollout_log_probs must be provided for TIS"
 
-        ois = (-ppo_kl).exp()
+        ois = _safe_exp_neg_ppo_kl(ppo_kl)
         tis_kwargs = {
             "args": args,
             "pg_loss": pg_loss,

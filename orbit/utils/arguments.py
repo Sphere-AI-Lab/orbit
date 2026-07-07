@@ -47,6 +47,400 @@ def uses_rollout_engines(args) -> bool:
     return bool(getattr(args, "use_rollout_engines", True))
 
 
+def needs_opd_teacher(args) -> bool:
+    """Whether a teacher log-prob producer is needed for on-policy distillation.
+
+    Both OPD objective forms consume the same ``rollout_data["teacher_log_probs"]``:
+    pure MOPD (``--advantage-estimator on_policy_distillation``) and the blend
+    (``--use-opd``). Either one requires teacher production.
+    """
+    return args.advantage_estimator == "on_policy_distillation" or getattr(args, "use_opd", False)
+
+
+def add_on_policy_distillation_arguments(parser):
+    """On-policy distillation (OPD) teacher config. Mirrors slime arguments.py:1084-1125."""
+    parser.add_argument(
+        "--use-opd",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable blend-mode on-policy distillation: subtract opd_kl_coef * (student - teacher) "
+            "from a reward-based estimator's advantage. Requires a teacher producer (--opd-type). "
+            "Mutually exclusive with --advantage-estimator on_policy_distillation (pure MOPD)."
+        ),
+    )
+    parser.add_argument(
+        "--opd-type",
+        type=str,
+        choices=["megatron", "sglang"],
+        default=None,
+        help=(
+            "Teacher log-prob producer: 'megatron' loads a second in-process Megatron model "
+            "scored by a forward pass; 'sglang' scores via an external SGLang teacher server."
+        ),
+    )
+    parser.add_argument(
+        "--opd-kl-coef",
+        type=float,
+        default=1.0,
+        help="Blend coefficient lambda for the distillation KL term applied to advantages under --use-opd.",
+    )
+    parser.add_argument(
+        "--opd-teacher-load",
+        type=str,
+        default=None,
+        help="Megatron checkpoint directory for the in-process OPD teacher (required for --opd-type megatron).",
+    )
+    parser.add_argument(
+        "--opd-teacher-ckpt-step",
+        type=int,
+        default=None,
+        help="Checkpoint step (iteration) to load for the OPD teacher. If None, use the latest iteration.",
+    )
+    parser.add_argument(
+        "--opd-teacher-url",
+        type=str,
+        default=None,
+        help=(
+            "URL of the external SGLang teacher server's /generate endpoint, e.g. http://host:port/generate "
+            "(required for --opd-type sglang)."
+        ),
+    )
+    parser.add_argument(
+        "--opd-teacher-urls",
+        type=str,
+        nargs="+",
+        default=None,
+        metavar="NAME=URL[@W][,URL[@W]...]",
+        help=(
+            "Multi-teacher routing/ensemble map for --opd-type=sglang, e.g. "
+            "--opd-teacher-urls math=http://h1:30001/generate code=http://h2:30002/generate. "
+            "Each sample is routed to the teacher group named by "
+            "sample.metadata[--opd-teacher-key]; the reserved name 'default' is the "
+            "fallback for samples with a missing or unknown name. A name mapping to "
+            "several comma-separated URLs is an ensemble: every member scores the "
+            "sample in parallel and the targets are combined as a weighted mixture "
+            "in probability space (logsumexp of weighted logprobs); per-URL weights "
+            "default to 1.0 (uniform). With --opd-log-prob-top-k > 0, ensembles "
+            "require --opd-top-k-strategy only-student. When unset, all samples are "
+            "scored by the single teacher at --opd-teacher-url (original behavior)."
+        ),
+    )
+    parser.add_argument(
+        "--opd-topk-tail-bucket",
+        action="store_true",
+        default=False,
+        help=(
+            "Compute the top-k OPD reward as the exact reverse KL over the selected "
+            "token ids plus one tail bucket (k+1 buckets summing to 1), instead of "
+            "the softmax-renormalized truncated estimate. Keeps the estimate "
+            "sensitive to probability mass the student moves outside the top-k. "
+            "Requires --opd-log-prob-top-k > 0 and --opd-reward-weight-mode "
+            "student_p (the bucket weights are the raw student probabilities)."
+        ),
+    )
+    parser.add_argument(
+        "--opd-scoring-timeout-secs",
+        type=float,
+        default=None,
+        help=(
+            "Per-request timeout for OPD teacher/student scoring calls. Set this to "
+            "give (typically larger, slower) teacher servers a different bound than "
+            "generation requests."
+        ),
+    )
+    parser.add_argument(
+        "--opd-teacher-key",
+        type=str,
+        default="opd_teacher",
+        help=(
+            "Sample metadata key holding the teacher name used for --opd-teacher-urls "
+            "routing. Populated from the dataset's metadata column."
+        ),
+    )
+    parser.add_argument(
+        "--opd-icepop",
+        action="store_true",
+        default=False,
+        help=(
+            "Apply the ICE-POP async/off-policy correction to the OPD advantage: hard-gate (zero) tokens "
+            "whose train/rollout importance ratio leaves [--tis-clip-low, --tis-clip]. Reuses the same gate "
+            "as the policy-gradient path. Requires the student log-probs to be recomputed by the trainer, so "
+            "it is incompatible with --use-rollout-logprobs."
+        ),
+    )
+    parser.add_argument(
+        "--opd-log-prob-top-k",
+        type=int,
+        default=0,
+        help=(
+            "Number of top-k tokens to use for the re-think OPD token-level reward. "
+            "Set to 0 to use sampled-token OPD."
+        ),
+    )
+    parser.add_argument(
+        "--opd-top-k-strategy",
+        type=str,
+        choices=["only-student", "only-teacher", "intersection", "union", "xor"],
+        default="only-student",
+        help="Token set strategy for top-k OPD.",
+    )
+    parser.add_argument(
+        "--opd-reward-weight-mode",
+        type=str,
+        choices=["student_p", "teacher_p", "none"],
+        default="student_p",
+        help="Weighting scheme for top-k OPD token rewards (applies to the reverse-KL term only).",
+    )
+    parser.add_argument(
+        "--opd-kl-type",
+        type=str,
+        choices=["reverse", "forward", "mixed"],
+        default="reverse",
+        help=(
+            "KL direction for the top-k OPD estimate (mirrors NeMo-RL's distillation "
+            "kl_type): 'reverse' (default) weights by the student distribution, "
+            "'forward' by the teacher distribution, 'mixed' is the convex combination "
+            "with --opd-mixed-kl-weight on the forward term. Requires "
+            "--opd-log-prob-top-k > 0 (the sampled-token path is reverse-only)."
+        ),
+    )
+    parser.add_argument(
+        "--opd-mixed-kl-weight",
+        type=float,
+        default=0.5,
+        help=(
+            "Weight on the forward-KL term for --opd-kl-type mixed, in [0, 1] "
+            "(NeMo-RL's mixed_kl_weight; 0.5 matches their default recipe)."
+        ),
+    )
+    parser.add_argument(
+        "--judge-base-url",
+        type=str,
+        default=None,
+        help=(
+            "Base URL of an OpenAI-compatible judge server (e.g. an sglang server: "
+            "http://host:port) used by orbit.rollout.llm_judge.reward_func. "
+            "Required when --custom-rm-path points at the LLM-judge hook."
+        ),
+    )
+    parser.add_argument(
+        "--judge-mode",
+        type=str,
+        choices=["equivalence", "score"],
+        default="equivalence",
+        help=(
+            "LLM-judge grading mode: 'equivalence' compares the response's final "
+            "answer to sample.label (reward 1/0); 'score' is a pointwise 0-10 "
+            "quality grade normalized to [0, 1]."
+        ),
+    )
+    parser.add_argument(
+        "--judge-model",
+        type=str,
+        default="default",
+        help="Model name passed to the judge's chat-completions endpoint.",
+    )
+    parser.add_argument(
+        "--judge-max-tokens",
+        type=int,
+        default=1024,
+        help="Max tokens for the judge's reply (reasoning + final verdict line).",
+    )
+    parser.add_argument(
+        "--judge-timeout-secs",
+        type=float,
+        default=None,
+        help="Per-request timeout for judge calls (one automatic retry on transient failures).",
+    )
+    parser.add_argument(
+        "--code-rm-timeout-secs",
+        type=float,
+        default=6.0,
+        help="Sandbox code-execution reward: wall-clock timeout per unit test.",
+    )
+    parser.add_argument(
+        "--code-rm-memory-mb",
+        type=int,
+        default=512,
+        help="Sandbox code-execution reward: address-space limit per test process.",
+    )
+    parser.add_argument(
+        "--code-rm-max-tests",
+        type=int,
+        default=0,
+        help="Sandbox code-execution reward: cap on unit tests executed per sample (0 = all).",
+    )
+    return parser
+
+
+def _validate_judge_args(args) -> None:
+    """Validate LLM-judge reward args when the judge hook is wired."""
+    custom_rm = getattr(args, "custom_rm_path", None) or ""
+    if not custom_rm.endswith("llm_judge.reward_func"):
+        return
+    if not getattr(args, "judge_base_url", None):
+        raise ValueError(
+            "--custom-rm-path orbit.rollout.llm_judge.reward_func requires --judge-base-url "
+            "<http://judge-host:port> (an OpenAI-compatible chat-completions server)."
+        )
+    if getattr(args, "judge_mode", "equivalence") not in ("equivalence", "score"):
+        raise ValueError(f"Unknown --judge-mode: {args.judge_mode!r}.")
+
+
+def _validate_genrm_args(args) -> None:
+    """Validate group-wise GenRM args when the genrm hook is wired."""
+    custom_rm = getattr(args, "custom_rm_path", None) or ""
+    if not custom_rm.endswith("genrm_judge.reward_func"):
+        return
+    if not getattr(args, "group_rm", False):
+        raise ValueError(
+            "--custom-rm-path orbit.rollout.genrm_judge.reward_func is a batch-mode hook: "
+            "it must be combined with --group-rm (otherwise it would receive single samples)."
+        )
+    if not getattr(args, "judge_base_url", None):
+        raise ValueError(
+            "--custom-rm-path orbit.rollout.genrm_judge.reward_func requires --judge-base-url "
+            "<http://judge-host:port> (an OpenAI-compatible chat-completions server)."
+        )
+
+
+def _validate_opd_args(args) -> None:
+    """Validate on-policy distillation args. Mirrors slime arguments.py:1761-1791."""
+    opd_top_k = getattr(args, "opd_log_prob_top_k", 0) or 0
+    if opd_top_k < 0:
+        raise ValueError("--opd-log-prob-top-k must be non-negative.")
+    if opd_top_k > 0 and getattr(args, "opd_type", None) != "sglang":
+        raise ValueError("--opd-log-prob-top-k is currently supported only with --opd-type=sglang.")
+    opd_kl_type = getattr(args, "opd_kl_type", "reverse") or "reverse"
+    if opd_kl_type != "reverse" and opd_top_k <= 0:
+        raise ValueError(
+            f"--opd-kl-type {opd_kl_type!r} requires --opd-log-prob-top-k > 0: the sampled-token "
+            "path stores teacher_log_probs and computes reverse KL in the trainer; forward/mixed "
+            "need per-position top-k distributions from rollout-side scoring."
+        )
+    opd_mixed_kl_weight = getattr(args, "opd_mixed_kl_weight", 0.5)
+    if not (0.0 <= opd_mixed_kl_weight <= 1.0):
+        raise ValueError(f"--opd-mixed-kl-weight must be in [0, 1], got {opd_mixed_kl_weight}.")
+    if getattr(args, "opd_teacher_urls", None):
+        if getattr(args, "opd_type", None) != "sglang":
+            raise ValueError("--opd-teacher-urls is only supported with --opd-type=sglang.")
+        # Local import to keep orbit.utils free of rollout imports at module load.
+        from orbit.rollout.opd_sglang import parse_teacher_urls
+
+        url_map = parse_teacher_urls(args.opd_teacher_urls)  # fail fast on malformed/duplicate entries
+        has_ensemble_group = any(len(targets) > 1 for targets in url_map.values())
+        if has_ensemble_group and opd_top_k > 0 and getattr(args, "opd_top_k_strategy", "only-student") != "only-student":
+            raise ValueError(
+                "Teacher ensembles (--opd-teacher-urls groups with multiple URLs) require "
+                "--opd-top-k-strategy only-student: every group member must be scored at the "
+                f"same student top-k token ids, got {args.opd_top_k_strategy!r}."
+            )
+    if getattr(args, "opd_topk_tail_bucket", False):
+        if opd_top_k <= 0:
+            raise ValueError("--opd-topk-tail-bucket requires --opd-log-prob-top-k > 0.")
+        if getattr(args, "opd_reward_weight_mode", "student_p") != "student_p":
+            raise ValueError(
+                "--opd-topk-tail-bucket uses raw student probabilities as bucket weights and is "
+                f"incompatible with --opd-reward-weight-mode {args.opd_reward_weight_mode!r}; use student_p."
+            )
+        if getattr(args, "opd_top_k_strategy", "only-student") not in ("only-student", "intersection"):
+            raise ValueError(
+                "--opd-topk-tail-bucket requires --opd-top-k-strategy only-student or intersection "
+                f"(single-softmax student logprobs), got {args.opd_top_k_strategy!r}."
+            )
+
+    # Pure MOPD (advantage estimator) and blend (--use-opd) are mutually exclusive:
+    # blend is meant to sit on top of a reward-based estimator, not on pure distillation.
+    if args.advantage_estimator == "on_policy_distillation" and getattr(args, "use_opd", False):
+        raise ValueError(
+            "--advantage-estimator on_policy_distillation (pure MOPD) and --use-opd (blend) are "
+            "mutually exclusive. Pure MOPD is reward-free distillation; --use-opd blends a distillation "
+            "KL onto a reward-based estimator. Pick one."
+        )
+
+    # sglang-teacher OPD supports only pure MOPD: reward_func
+    # (orbit.rollout.opd_sglang.reward_func) always returns 0.0 and occupies the
+    # single --custom-rm-path slot, so blending it with a reward-based estimator
+    # would degrade to a KL-only signal with ~0 base advantage.
+    if getattr(args, "use_opd", False) and args.opd_type == "sglang":
+        raise ValueError(
+            "--use-opd (blend) is not supported with --opd-type sglang: the sglang teacher's "
+            "reward_func always returns 0.0 and occupies the single --custom-rm-path slot, so "
+            "blend would degrade to a KL-only signal with ~0 base advantage. sglang-teacher OPD "
+            "supports only pure MOPD (--advantage-estimator on_policy_distillation); use "
+            "--opd-type megatron for the blend."
+        )
+
+    # --opd-icepop gates the OPD advantage by the train/rollout importance ratio,
+    # so it only applies when OPD is on and requires the trainer-recomputed student
+    # log-probs (mirrors how the PG icepop/TIS path requires --use-rollout-logprobs off).
+    if getattr(args, "opd_icepop", False):
+        if not needs_opd_teacher(args):
+            raise ValueError(
+                "--opd-icepop only applies to on-policy distillation; enable it via "
+                "--advantage-estimator on_policy_distillation (pure MOPD) or --use-opd (blend)."
+            )
+        if getattr(args, "use_rollout_logprobs", False):
+            raise ValueError(
+                "--opd-icepop is incompatible with --use-rollout-logprobs: the ICE-POP ratio needs "
+                "the trainer-recomputed student log-probs vs the rollout log-probs, but "
+                "--use-rollout-logprobs makes them identical (ratio == 1, no correction). "
+                "Drop --use-rollout-logprobs."
+            )
+
+    if not needs_opd_teacher(args):
+        return
+
+    if args.opd_type is None:
+        raise ValueError(
+            "On-policy distillation is enabled (advantage_estimator=on_policy_distillation or --use-opd), "
+            "so --opd-type {megatron,sglang} is required to select the teacher producer."
+        )
+
+    if args.opd_type == "megatron":
+        if _is_peft_enabled(args):
+            raise ValueError(
+                "--opd-type megatron loads a full in-process teacher model (like the ref model), "
+                "which is incompatible with PEFT (--peft-method != none). Use --opd-type sglang "
+                "(external teacher server) for PEFT runs."
+            )
+        if not args.opd_teacher_load:
+            raise ValueError("--opd-type megatron requires --opd-teacher-load <megatron checkpoint directory>.")
+        if not os.path.exists(args.opd_teacher_load):
+            raise FileNotFoundError(f"--opd-teacher-load {args.opd_teacher_load} does not exist, please check the path.")
+        if not os.path.exists(os.path.join(args.opd_teacher_load, "latest_checkpointed_iteration.txt")):
+            logger.info(
+                f"--opd-teacher-load {args.opd_teacher_load} does not have latest_checkpointed_iteration.txt, "
+                "please make sure it is a valid megatron checkpoint directory."
+            )
+    elif args.opd_type == "sglang":
+        if args.opd_teacher_load:
+            raise ValueError(
+                "--opd-type sglang scores via an external SGLang teacher server; --opd-teacher-load must be "
+                "unset (configure the SGLang teacher endpoint instead of an in-process checkpoint)."
+            )
+        if not args.opd_teacher_url and not getattr(args, "opd_teacher_urls", None):
+            raise ValueError(
+                "--opd-type sglang requires --opd-teacher-url <http://host:port/generate> "
+                "(or a multi-teacher routing map via --opd-teacher-urls NAME=URL ...)."
+            )
+        # The sglang teacher produces sample.teacher_log_probs ONLY through its
+        # two custom-reward hooks; without them the run passes validation, pays
+        # for a full rollout, and only then dies in opd_mopd_advantages.
+        expected_rm = "orbit.rollout.opd_sglang.reward_func"
+        expected_post = "orbit.rollout.opd_sglang.post_process"
+        if (
+            getattr(args, "custom_rm_path", None) != expected_rm
+            or getattr(args, "custom_reward_post_process_path", None) != expected_post
+        ):
+            raise ValueError(
+                "--opd-type sglang scores samples through its custom-reward hooks, the sole producer "
+                f"of teacher_log_probs; set --custom-rm-path {expected_rm} and "
+                f"--custom-reward-post-process-path {expected_post}."
+            )
+
+
 def _is_default_rollout_function_path(path: str | None) -> bool:
     return path is None or path in DEFAULT_ROLLOUT_FUNCTION_PATHS
 
@@ -419,10 +813,43 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
                 help="The qkv layout.",
             )
             parser.add_argument(
+                "--true-on-policy",
+                action="store_true",
+                default=False,
+                help=(
+                    "Enable bit-exact train/rollout parity via a named contract "
+                    "(orbit/true_on_policy/). Expands at parse time into the deterministic "
+                    "rollout flags, --true-on-policy-mode, --recompute-logprobs-via-prefill, "
+                    "--deterministic-mode and determinism env vars; validates the run "
+                    "(model family, topology, precision, adapter) against the contract."
+                ),
+            )
+            parser.add_argument(
+                "--true-on-policy-contract",
+                type=str,
+                default=None,
+                help="Override the contract selected by the model profile (e.g. qwen3_dense_true_on_policy_v1).",
+            )
+            parser.add_argument(
                 "--true-on-policy-mode",
                 action="store_true",
                 default=False,
-                help="Whether to enable true-on-policy mode.",
+                help=(
+                    "Internal true-on-policy mode flag (training-side log-prob kernel + CI "
+                    "bitwise gate). Set automatically by --true-on-policy."
+                ),
+            )
+            parser.add_argument(
+                "--recompute-logprobs-via-prefill",
+                action="store_true",
+                default=False,
+                help=(
+                    "Recompute rollout logprobs via one clean SGLang prefill pass (flush_cache + "
+                    "max_new_tokens=0 scoring) instead of trusting decode-time logprobs, removing "
+                    "KV-cache/chunked-prefill/batch-composition variance. Usable standalone "
+                    "(improves the rollout_log_probs consumed by TIS/ICE-POP/OPD); required by "
+                    "true-on-policy contracts."
+                ),
             )
             parser.add_argument(
                 "--train-env-vars",
@@ -2051,6 +2478,7 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
         parser = add_data_arguments(parser)
         parser = add_eval_arguments(parser)
         parser = add_algo_arguments(parser)
+        parser = add_on_policy_distillation_arguments(parser)
         parser = add_peft_arguments(parser)
         parser = add_lora_arguments(parser)
         parser = add_wandb_arguments(parser)
@@ -2376,6 +2804,13 @@ def _common_orbit_validate_args(args):
     _normalize_and_validate_peft_args(args)
     _validate_dsv4_cp_args(args)
 
+    # Expand --true-on-policy into its derived flags/env vars (no-op when off).
+    # After PEFT normalization (the contract validates the adapter) and before
+    # megatron/sglang validation (it mutates their dests).
+    from orbit.true_on_policy import apply_true_on_policy_parse_defaults
+
+    apply_true_on_policy_parse_defaults(args)
+
     assert not (args.kl_coef != 0 and args.kl_loss_coef != 0), "Only one of kl_coef and kl_loss_coef can be set"
 
     if args.advantage_estimator in ["reinforce_plus_plus", "reinforce_plus_plus_baseline"]:
@@ -2383,6 +2818,10 @@ def _common_orbit_validate_args(args):
             "The 'reinforce_plus_plus' and 'reinforce_plus_plus_baseline' advantage estimators "
             "require advantage normalization. Please add `--normalize-advantages` to your command."
         )
+
+    _validate_opd_args(args)
+    _validate_judge_args(args)
+    _validate_genrm_args(args)
 
     if args.use_rollout_logprobs:
         assert not args.use_tis, "use_rollout_logprobs and use_tis cannot be set at the same time."
@@ -2594,6 +3033,12 @@ def hf_validate_args(args, hf_config):
     if hasattr(hf_config, "rope_parameters") and isinstance(hf_config.rope_parameters, dict):
         if "rope_theta" in hf_config.rope_parameters:
             hf_config.rope_theta = hf_config.rope_parameters["rope_theta"]
+        else:
+            # Gemma-4 nests rope_theta per attention type; take the first.
+            for _entry in hf_config.rope_parameters.values():
+                if isinstance(_entry, dict) and "rope_theta" in _entry:
+                    hf_config.rope_theta = _entry["rope_theta"]
+                    break
 
     for hf_config_name, megatron_config_name, compare_fn in [
         ("hidden_size", "hidden_size", equal),
