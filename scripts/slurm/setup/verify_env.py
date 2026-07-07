@@ -167,10 +167,12 @@ def check_runtime() -> list[tuple[str, bool]]:
     # torchcodec dlopens FFmpeg at first use (its import only WARNS when the libs are
     # missing, so an import check is toothless). Assert the install step's contract:
     # env-local ffmpeg 7 (libavutil.so.59 = torchcodec's core7 loader).
-    out.append((
-        "env ffmpeg for torchcodec (lib/libavutil.so.59)",
-        (Path(sys.prefix) / "lib" / "libavutil.so.59").exists(),
-    ))
+    out.append(
+        (
+            "env ffmpeg for torchcodec (lib/libavutil.so.59)",
+            (Path(sys.prefix) / "lib" / "libavutil.so.59").exists(),
+        )
+    )
     if os.environ.get("INSTALL_FLASH_ATTN_3", "1") == "1":
         try:
             fa3 = importlib.import_module("flash_attn_3.flash_attn_interface")
