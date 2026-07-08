@@ -71,8 +71,7 @@ _AGENT_ROUTES: dict[str, str] = {
     "jailbreak_hard_refusal_with_helplines": "policy_judge",
     "jailbreak_engagement_with_disclaimer": "policy_judge",
     "jailbreak_hard_refusal_no_redirection": "policy_judge",
-    # math_formal_lean_refinement_agent: DEFERRED (needs Lean 4 + Mathlib
-    # toolchain; ~0.9% of rlvr rows) — stays unmapped/zero-rewarded.
+    "math_formal_lean_refinement_agent": "lean",  # needs --lean-server-url
 }
 
 
@@ -156,6 +155,16 @@ async def reward_func(args: Namespace, samples: list[Sample], **kwargs) -> list[
                 from orbit.rollout.rm_hub.ultra_longtail import grade_calendar
 
                 rewards.append(grade_calendar(sample.response, metadata.get("exp_cal_state")))
+            elif route == "lean":
+                from orbit.rollout.rm_hub.lean_rm import grade_lean_proof
+
+                rewards.append(
+                    float(
+                        await grade_lean_proof(
+                            args, sample.response, metadata.get("header") or "", metadata.get("formal_statement") or ""
+                        )
+                    )
+                )
             elif route == "rubric_judge":
                 from orbit.rollout.rm_hub.ultra_longtail import grade_rubric_judge
 
