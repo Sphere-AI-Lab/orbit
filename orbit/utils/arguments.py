@@ -299,6 +299,18 @@ def add_on_policy_distillation_arguments(parser):
         help="Agentic SWE episodes: wall-clock timeout per shell command in the container session.",
     )
     parser.add_argument(
+        "--lean-server-url",
+        type=str,
+        default=None,
+        help="Base URL of a kimina-lean-server for math_formal_lean verification.",
+    )
+    parser.add_argument(
+        "--lean-timeout-secs",
+        type=float,
+        default=180.0,
+        help="Per-proof Lean verification timeout.",
+    )
+    parser.add_argument(
         "--reward-router-unmapped",
         type=str,
         choices=["zero", "error"],
