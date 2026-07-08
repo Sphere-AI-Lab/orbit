@@ -86,7 +86,7 @@ if [ -n "${TOOL_KEY:-}" ]; then
 fi
 
 OPTIMIZER_ARGS=(
-    --optimizer adam
+    --optimizer "${OPTIMIZER:-adam}"
     --lr 1e-6
     --lr-decay-style constant
     --weight-decay 0.01
