@@ -54,7 +54,25 @@ _AGENT_ROUTES: dict[str, str] = {
     "toolcall_schema_single_step_tool_use_with_argument_comparison_agent": "tool_call",
     "mcqa_simple_agent": "mcqa",
     "structured_outputs_simple_agent": "structured",
+    "structured_outputs_v3_simple_agent": "structured",
     "instruction_following_simple_agent": "if",
+    # long-tail agents (rm_hub/ultra_longtail.py)
+    "ns_tools_simple_agent": "judge",  # verifier_type math_with_judge in-row
+    "abstention_simple_agent": "judge",
+    "rdkit_chemistry_agent": "boxed",
+    "reasoning_gym_simple_agent": "boxed",
+    "nvarc_transductive_simple_agent": "nvarc_t",
+    "nvarc_inductive_simple_agent": "nvarc_i",
+    "citation_format_simple_agent": "verifier_spec",
+    "freeform_formatting_simple_agent": "verifier_spec",
+    "calendar_simple_agent": "calendar",
+    "multichallenge_simple_agent": "rubric_judge",
+    "jailbreak_refusal_with_explanation": "policy_judge",
+    "jailbreak_hard_refusal_with_helplines": "policy_judge",
+    "jailbreak_engagement_with_disclaimer": "policy_judge",
+    "jailbreak_hard_refusal_no_redirection": "policy_judge",
+    # math_formal_lean_refinement_agent: DEFERRED (needs Lean 4 + Mathlib
+    # toolchain; ~0.9% of rlvr rows) — stays unmapped/zero-rewarded.
 }
 
 
@@ -115,6 +133,44 @@ async def reward_func(args: Namespace, samples: list[Sample], **kwargs) -> list[
 
                 rewards.append(
                     grade_structured_output(sample.response, metadata.get("schema_str") or "", metadata.get("schema_type"))
+                )
+            elif route == "boxed":
+                from orbit.rollout.rm_hub.ultra_longtail import grade_boxed_answer
+
+                rewards.append(grade_boxed_answer(sample.response, sample.label or metadata.get("expected_answer")))
+            elif route == "nvarc_t":
+                from orbit.rollout.rm_hub.ultra_longtail import grade_nvarc_transductive
+
+                rewards.append(grade_nvarc_transductive(sample.response, metadata.get("expected_output")))
+            elif route == "nvarc_i":
+                from orbit.rollout.rm_hub.ultra_longtail import grade_nvarc_inductive
+
+                rewards.append(
+                    float(await grade_nvarc_inductive(sample.response, metadata.get("test_input"), metadata.get("expected_output")))
+                )
+            elif route == "verifier_spec":
+                from orbit.rollout.rm_hub.ultra_longtail import grade_verifier_spec
+
+                rewards.append(grade_verifier_spec(sample.response, metadata.get("verifier")))
+            elif route == "calendar":
+                from orbit.rollout.rm_hub.ultra_longtail import grade_calendar
+
+                rewards.append(grade_calendar(sample.response, metadata.get("exp_cal_state")))
+            elif route == "rubric_judge":
+                from orbit.rollout.rm_hub.ultra_longtail import grade_rubric_judge
+
+                rewards.append(
+                    float(await grade_rubric_judge(args, metadata.get("context") or "", sample.response, metadata.get("rubric") or []))
+                )
+            elif route == "policy_judge":
+                from orbit.rollout.rm_hub.ultra_longtail import grade_policy_judge
+
+                rewards.append(
+                    float(
+                        await grade_policy_judge(
+                            args, metadata.get("adversarial_prompt") or "", sample.response, metadata.get("response_policy") or ""
+                        )
+                    )
                 )
             elif route == "if":
                 # lazy: first use may clone allenai/open-instruct (IFEvalG registry)

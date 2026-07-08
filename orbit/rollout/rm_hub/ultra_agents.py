@@ -126,17 +126,33 @@ def _extract_json_candidate(text: str) -> str | None:
 
 
 def grade_structured_output(response: str, schema_str: str, schema_type: str | None) -> float:
-    if (schema_type or "json") != "json":
+    schema_type = schema_type or "json"
+    if schema_type not in ("json", "yaml"):
         logger.warning("ultra_agents: unsupported schema_type %r; reward 0.", schema_type)
         return 0.0
-    candidate = _extract_json_candidate(response)
-    if candidate is None:
-        return 0.0
     try:
-        payload = json.loads(candidate)
         schema = json.loads(schema_str)
     except json.JSONDecodeError:
         return 0.0
+    if schema_type == "yaml":
+        import yaml
+
+        fences = re.findall(r"```(?:yaml|yml)?\s*\n(.*?)```", response or "", re.DOTALL)
+        candidate = fences[-1].strip() if fences else (response or "").strip()
+        try:
+            payload = yaml.safe_load(candidate)
+        except yaml.YAMLError:
+            return 0.0
+        if payload is None:
+            return 0.0
+    else:
+        candidate = _extract_json_candidate(response)
+        if candidate is None:
+            return 0.0
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            return 0.0
 
     import jsonschema
 
