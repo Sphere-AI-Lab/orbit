@@ -406,6 +406,8 @@ def _validate_genrm_args(args) -> None:
 
 def _validate_opd_args(args) -> None:
     """Validate on-policy distillation args. Mirrors slime arguments.py:1761-1791."""
+    from orbit.utils.opd_teacher_spec import is_same_base, is_self_teacher, parse_teacher_spec
+
     opd_top_k = getattr(args, "opd_log_prob_top_k", 0) or 0
     if opd_top_k < 0:
         raise ValueError("--opd-log-prob-top-k must be non-negative.")
@@ -458,18 +460,22 @@ def _validate_opd_args(args) -> None:
             "KL onto a reward-based estimator. Pick one."
         )
 
-    # sglang-teacher OPD supports only pure MOPD: reward_func
-    # (orbit.rollout.opd_sglang.reward_func) always returns 0.0 and occupies the
-    # single --custom-rm-path slot, so blending it with a reward-based estimator
-    # would degrade to a KL-only signal with ~0 base advantage.
+    # sglang-teacher OPD blend is only safe when the teacher scores through the
+    # local rollout-engine adapter slot (same-base): the external-URL teacher's
+    # reward_func always returns 0.0 and occupies the single --custom-rm-path
+    # slot, so blending it with a reward-based estimator would degrade to a
+    # KL-only signal with ~0 base advantage.
     if getattr(args, "use_opd", False) and args.opd_type == "sglang":
-        raise ValueError(
-            "--use-opd (blend) is not supported with --opd-type sglang: the sglang teacher's "
-            "reward_func always returns 0.0 and occupies the single --custom-rm-path slot, so "
-            "blend would degrade to a KL-only signal with ~0 base advantage. sglang-teacher OPD "
-            "supports only pure MOPD (--advantage-estimator on_policy_distillation); use "
-            "--opd-type megatron for the blend."
-        )
+        spec_for_blend = parse_teacher_spec(getattr(args, "opd_teacher", None), args.opd_teacher_load)
+        external = getattr(args, "opd_teacher_url", None) or getattr(args, "opd_teacher_urls", None)
+        if external or not is_same_base(spec_for_blend):
+            raise ValueError(
+                "--use-opd (blend) with --opd-type sglang requires a same-base teacher scored by "
+                "the local engine (--opd-teacher base/adapter:<path>/self:*): the external-URL "
+                "teacher's reward_func occupies the single --custom-rm-path slot and always "
+                "returns 0.0, so blend would degrade to a KL-only signal. Use --opd-type megatron "
+                "or a same-base local teacher for the blend."
+            )
 
     # --opd-icepop gates the OPD advantage by the train/rollout importance ratio,
     # so it only applies when OPD is on and requires the trainer-recomputed student
@@ -490,8 +496,6 @@ def _validate_opd_args(args) -> None:
 
     if not needs_opd_teacher(args):
         return
-
-    from orbit.utils.opd_teacher_spec import is_self_teacher, parse_teacher_spec
 
     spec = parse_teacher_spec(getattr(args, "opd_teacher", None), args.opd_teacher_load)
     args.opd_teacher_spec = spec
@@ -551,28 +555,43 @@ def _validate_opd_args(args) -> None:
     elif args.opd_type == "sglang":
         if spec is not None and spec.source == "load":
             raise ValueError(
-                "--opd-type sglang scores via an external SGLang teacher server; --opd-teacher-load must be "
-                "unset (configure the SGLang teacher endpoint instead of an in-process checkpoint)."
+                "--opd-type sglang scores via the rollout engine or an external SGLang server; "
+                "--opd-teacher load:<ckpt> (in-process second model) requires --opd-type megatron."
             )
-        if not args.opd_teacher_url and not getattr(args, "opd_teacher_urls", None):
-            raise ValueError(
-                "--opd-type sglang requires --opd-teacher-url <http://host:port/generate> "
-                "(or a multi-teacher routing map via --opd-teacher-urls NAME=URL ...)."
-            )
-        # The sglang teacher produces sample.teacher_log_probs ONLY through its
-        # two custom-reward hooks; without them the run passes validation, pays
-        # for a full rollout, and only then dies in opd_mopd_advantages.
-        expected_rm = "orbit.rollout.opd_sglang.reward_func"
-        expected_post = "orbit.rollout.opd_sglang.post_process"
-        if (
-            getattr(args, "custom_rm_path", None) != expected_rm
-            or getattr(args, "custom_reward_post_process_path", None) != expected_post
-        ):
-            raise ValueError(
-                "--opd-type sglang scores samples through its custom-reward hooks, the sole producer "
-                f"of teacher_log_probs; set --custom-rm-path {expected_rm} and "
-                f"--custom-reward-post-process-path {expected_post}."
-            )
+        external = args.opd_teacher_url or getattr(args, "opd_teacher_urls", None)
+        if external:
+            # Legacy external-teacher path: unchanged hook requirements.
+            expected_rm = "orbit.rollout.opd_sglang.reward_func"
+            expected_post = "orbit.rollout.opd_sglang.post_process"
+            if (
+                getattr(args, "custom_rm_path", None) != expected_rm
+                or getattr(args, "custom_reward_post_process_path", None) != expected_post
+            ):
+                raise ValueError(
+                    "--opd-type sglang with an external teacher URL scores samples through its "
+                    f"custom-reward hooks; set --custom-rm-path {expected_rm} and "
+                    f"--custom-reward-post-process-path {expected_post}."
+                )
+        else:
+            # Local mode: the rollout engine scores its own teacher slot.
+            if not is_same_base(spec):
+                raise ValueError(
+                    "--opd-type sglang without --opd-teacher-url needs a same-base local teacher: "
+                    "--opd-teacher {base,adapter:<path>,self:ema,self:lag} (the rollout engine "
+                    "scores it via the orbit_teacher adapter slot), or provide an external "
+                    "--opd-teacher-url."
+                )
+            if not _is_peft_enabled(args):
+                raise ValueError(
+                    "--opd-type sglang local-teacher mode needs PEFT enabled (--peft-method != "
+                    "none): the teacher is an adapter over the student's base."
+                )
+            if getattr(args, "custom_rm_path", None) == "orbit.rollout.opd_sglang.reward_func":
+                raise ValueError(
+                    "Local-teacher mode scores through the built-in rollout stage; do not set "
+                    "--custom-rm-path orbit.rollout.opd_sglang.reward_func (it would double-score). "
+                    "Leave --custom-rm-path free or point it at a real reward model."
+                )
 
 
 def _is_default_rollout_function_path(path: str | None) -> bool:

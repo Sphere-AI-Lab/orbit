@@ -520,3 +520,56 @@ def test_megatron_without_any_teacher_rejected():
     args = _base_args(advantage_estimator="on_policy_distillation", opd_type="megatron")
     with pytest.raises(ValueError, match="--opd-teacher"):
         _validate_opd_args(args)
+
+
+# --- Task 8: local-mode sglang + blend unlock ---
+
+
+def test_sglang_local_mode_accepted_without_url_or_hooks():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation", opd_type="sglang",
+        opd_teacher="base", peft_method="lora",
+    )
+    _validate_opd_args(args)
+
+
+def test_sglang_local_mode_blend_allowed():
+    args = _base_args(
+        advantage_estimator="grpo", use_opd=True, opd_type="sglang",
+        opd_teacher="self:ema", peft_method="lora", opd_promote_interval=1,
+    )
+    _validate_opd_args(args)  # custom-rm slot is free: real rewards compose
+
+
+def test_sglang_external_url_blend_still_rejected():
+    args = _base_args(
+        advantage_estimator="grpo", use_opd=True, opd_type="sglang",
+        opd_teacher_url="http://h:1/generate",
+        custom_rm_path="orbit.rollout.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.rollout.opd_sglang.post_process",
+    )
+    with pytest.raises(ValueError, match="blend"):
+        _validate_opd_args(args)
+
+
+def test_sglang_no_teacher_at_all_still_rejected():
+    args = _base_args(advantage_estimator="on_policy_distillation", opd_type="sglang")
+    with pytest.raises(ValueError, match="opd-teacher"):
+        _validate_opd_args(args)
+
+
+def test_sglang_load_spec_still_rejected():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation", opd_type="sglang",
+        opd_teacher="load:/ckpt",
+    )
+    with pytest.raises(ValueError, match="load"):
+        _validate_opd_args(args)
+
+
+def test_sglang_local_mode_without_peft_rejected():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation", opd_type="sglang", opd_teacher="base",
+    )
+    with pytest.raises(ValueError, match="PEFT|adapter structure"):
+        _validate_opd_args(args)
