@@ -214,8 +214,9 @@ The launcher now:
    (rc 0), `FAILED` (rc 1), `STOPPED` (rc 2). A readable `RUNNING`/`PENDING`
    reply resets the grace counter. If the dashboard returns **unreadable**
    output for `RAY_STATUS_FAIL_GRACE=24` consecutive probes (= 6 min by
-   default), we consult `$RUN_DIR/train_status.json`, which `train.py`
-   writes from inside the Ray job: a fresh `ALIVE` heartbeat means the
+   default), we consult the node-local `$MILES_TRAIN_STATUS_FILE` (set to
+   `${TMPDIR:-/tmp}/miles-$JOBID.train_status.json`), which `train.py` writes
+   from inside the Ray job: a fresh `ALIVE` heartbeat means the
    actors are healthy and the dashboard is merely wedged, so the grace
    counter resets and polling continues; a completed sentinel resolves the
    run as `SUCCEEDED`, a failed one as `FAILED`; no fresh heartbeat at all
@@ -224,7 +225,9 @@ The launcher now:
    before the loop trusts them. If the SLURM wall deadline is reached
    without a terminal state, `DEADLINE` (rc 124). Per-probe diagnostics are
    written to node-local scratch under `${TMPDIR:-/tmp}`; `run.log` prints a
-   one-line warning and the local diagnostics path. This avoids
+   one-line warning and the local diagnostics path. On terminal exit, a
+   nonempty probe log is copied to `$RUN_DIR/probe.log`, and the final driver
+   sentinel is copied to `$RUN_DIR/train_status.final.json`. This avoids
    synchronously opening files in `$RUN_DIR` on every poll while still
    giving the launcher an independent completion signal when the Ray Jobs
    API becomes unreadable.
@@ -267,7 +270,8 @@ on the head plus `ray start --address … --block` on each worker (backgrounded
 `srun`s) — then polls until the cluster is ready. The poll watches **two** signals:
 
 - **`ray status`** — the GPUs registered with the head's GCS reach `EXPECTED_GPUS`
-  (= nodes × 8).
+  (= workers × 8 + `MILES_RAY_HEAD_NUM_GPUS`, default 8 — recipes hosting a
+  whole-node GPU sidecar on the head, e.g. an OPD teacher, export 0).
 - **the head/worker srun PIDs** — each `ray start … --block` blocks forever on
   success, so a dead PID means that node's Ray exited and the cluster has collapsed.
   The poll detects this and stops *immediately* rather than idling out the whole

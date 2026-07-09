@@ -65,7 +65,14 @@ if state == "completed" and rc == 0:
     print("SUCCEEDED 0")
     sys.exit(0)
 if state == "failed":
+    # First line is the machine-readable verdict; subsequent lines carry the
+    # driver's recorded exception so the launcher can surface it in run.log
+    # (the 23771 post-mortem needed a follow-up job just to read these fields).
     print(f"FAILED {rc if rc != 0 else 1}")
+    if payload.get("error_type"):
+        print(f"error_type: {payload['error_type']}")
+    for line in str(payload.get("error") or "").splitlines():
+        print(f"error: {line}")
     sys.exit(0)
 
 # Heartbeat: a "running" job whose sentinel was updated recently is alive even
@@ -86,6 +93,35 @@ if state == "running":
             pass
 sys.exit(1)
 PY
+}
+
+# ray_job_state_token JOB_ID OUTPUT
+#
+# Normalize `ray job status` CLI output to one token: RUNNING, PENDING,
+# SUCCEEDED, FAILED, STOPPED, or UNREADABLE. Ray's CLI prints non-terminal
+# states as "Status for job 'X': RUNNING" but terminal states only as a
+# lowercase banner ("Job 'X' failed") — matching uppercase enums alone turns
+# every terminal state into a full fail_grace of "unreadable" probes (that
+# masked the 23771/23779 crashes for ~8 minutes each). Only the definitive
+# line for the exact job id is consulted, so enum words inside the user-log
+# excerpt that terminal status output embeds cannot spoof the verdict; when
+# no such line exists (other CLI formats / connection errors), fall back to
+# scanning the raw output.
+ray_job_state_token() {
+    local job_id=$1 out=$2 line
+    line=$(printf '%s\n' "$out" \
+        | grep -aiE "Job '${job_id}' (succeeded|failed|stopped)|Status for job '${job_id}'" \
+        | head -1)
+    [[ -z "$line" ]] && line=$out
+    line=${line,,}
+    case "$line" in
+        *succeeded*) echo SUCCEEDED ;;
+        *failed*)    echo FAILED ;;
+        *stopped*)   echo STOPPED ;;
+        *running*)   echo RUNNING ;;
+        *pending*)   echo PENDING ;;
+        *)           echo UNREADABLE ;;
+    esac
 }
 
 ray_submit_and_wait() {
@@ -206,10 +242,20 @@ EOF
                 break
             fi
             if (( rc == 0 )); then
-                echo "[submit] ray job logs --follow exited rc=0 without terminal marker; not reconnecting"
-                break
+                # Ray closes the log websocket mid-run (normal close 1000) on
+                # dashboard hiccups, so rc=0 does NOT mean the job ended — that
+                # assumption blinded run.log for the whole 23771 crash window.
+                # Only stop when the job is confirmed terminal.
+                follow_state=$(ray_job_state_token "$job_id" \
+                    "$(timeout 10 ray job status --address "$RAY_ADDRESS" "$job_id" 2>/dev/null || true)")
+                if [[ "$follow_state" == SUCCEEDED || "$follow_state" == FAILED || "$follow_state" == STOPPED ]]; then
+                    echo "[submit] ray job logs --follow exited rc=0 and job is $follow_state; not reconnecting"
+                    break
+                fi
+                echo "[submit] WARN: ray job logs --follow exited rc=0 but job is $follow_state — reconnecting in 2s"
+            else
+                echo "[submit] WARN: ray job logs --follow exited rc=$rc, reconnecting in 2s"
             fi
-            echo "[submit] WARN: ray job logs --follow exited rc=$rc, reconnecting in 2s"
             sleep 2 &
             log_child=$!
             wait "$log_child" || true
@@ -225,7 +271,7 @@ EOF
     local status_fail_count=0
     local deadline
     deadline=$(( ${SLURM_JOB_END_TIME:-$(( $(date +%s) + 86400 ))} - 120 ))
-    local status_out status_rc err_summary log_state confirm_out sentinel_out
+    local status_out status_rc err_summary log_state confirm_out sentinel_out sentinel_head
     while (( $(date +%s) < deadline )); do
         sleep "$poll_interval"
         if [[ -s "$log_terminal_marker" ]]; then
@@ -235,11 +281,11 @@ EOF
             log_state=$(cat "$log_terminal_marker" 2>/dev/null || true)
             if confirm_out=$(timeout "$probe_timeout" \
                                  ray job status --address "$RAY_ADDRESS" "$job_id" 2>/dev/null); then
-                case "$confirm_out" in
-                    *SUCCEEDED*) STATE=SUCCEEDED; JOB_RC=0; break;;
-                    *FAILED*)    STATE=FAILED;    JOB_RC=1; break;;
-                    *STOPPED*)   STATE=STOPPED;   JOB_RC=2; break;;
-                    *) echo "[submit] INFO: log marker '$log_state' not confirmed by status ($confirm_out) — false positive, clearing"
+                case "$(ray_job_state_token "$job_id" "$confirm_out")" in
+                    SUCCEEDED) STATE=SUCCEEDED; JOB_RC=0; break;;
+                    FAILED)    STATE=FAILED;    JOB_RC=1; break;;
+                    STOPPED)   STATE=STOPPED;   JOB_RC=2; break;;
+                    *) echo "[submit] INFO: log marker '$log_state' not confirmed by status — false positive, clearing"
                        : > "$log_terminal_marker";;
                 esac
             fi
@@ -254,11 +300,11 @@ EOF
         else
             status_rc=$?
         fi
-        case "$status_out" in
-            *SUCCEEDED*) STATE=SUCCEEDED; JOB_RC=0; break;;
-            *FAILED*)    STATE=FAILED;    JOB_RC=1; break;;
-            *STOPPED*)   STATE=STOPPED;   JOB_RC=2; break;;
-            *RUNNING*|*PENDING*)
+        case "$(ray_job_state_token "$job_id" "$status_out")" in
+            SUCCEEDED) STATE=SUCCEEDED; JOB_RC=0; break;;
+            FAILED)    STATE=FAILED;    JOB_RC=1; break;;
+            STOPPED)   STATE=STOPPED;   JOB_RC=2; break;;
+            RUNNING|PENDING)
                 status_fail_count=0
                 ;;
             *)
@@ -275,17 +321,23 @@ EOF
                 echo "[submit] WARN: unreadable probe ${status_fail_count}/${fail_grace} (rc=$status_rc, stderr=${err_summary:-<empty>})"
                 if (( status_fail_count >= fail_grace )); then
                     if sentinel_out=$(read_train_status_sentinel); then
-                        if [[ "$sentinel_out" == ALIVE* ]]; then
+                        # First line is "STATE RC"; any further lines carry the
+                        # driver's recorded exception (surfaced below).
+                        sentinel_head=${sentinel_out%%$'\n'*}
+                        if [[ "$sentinel_head" == ALIVE* ]]; then
                             # Ray status API is unreadable, but the training driver's
                             # heartbeat is fresh — the job is alive, not dead. Reset the
                             # grace counter and keep waiting instead of false-killing.
-                            echo "[submit] Ray status unreadable ~$((fail_grace * poll_interval))s but train_status heartbeat is fresh ($sentinel_out) — job alive, resetting grace"
+                            echo "[submit] Ray status unreadable ~$((fail_grace * poll_interval))s but train_status heartbeat is fresh ($sentinel_head) — job alive, resetting grace"
                             status_fail_count=0
                             continue
                         fi
-                        STATE=${sentinel_out%% *}
-                        JOB_RC=${sentinel_out##* }
+                        STATE=${sentinel_head%% *}
+                        JOB_RC=${sentinel_head##* }
                         echo "[submit] train_status.json resolved unreadable Ray status as $STATE job_rc=$JOB_RC"
+                        if [[ "$sentinel_out" == *$'\n'* ]]; then
+                            printf '%s\n' "${sentinel_out#*$'\n'}" | sed 's/^/[submit] train_status /'
+                        fi
                     else
                         echo "[submit] $fail_grace consecutive unreadable status probes (~$((fail_grace * poll_interval))s) and no fresh heartbeat — declaring cluster dead"
                         STATE=CLUSTER_DEAD
@@ -308,6 +360,16 @@ EOF
     kill "$log_tail_pid" 2>/dev/null || true
     wait "$log_tail_pid" 2>/dev/null || true
     rm -f "$poll_done_marker" "$probe_err" "$log_terminal_marker"
+
+    # Persist post-mortem evidence into the shared run dir: probe diagnostics
+    # and the driver's final status sentinel live on node-local scratch and
+    # vanish with the allocation (reading 23771's took a dedicated slurm job).
+    if [[ -s "$probe_log" ]]; then
+        cp -f "$probe_log" "$RUN_DIR/probe.log" 2>/dev/null || true
+    fi
+    if [[ -f "$MILES_TRAIN_STATUS_FILE" ]]; then
+        cp -f "$MILES_TRAIN_STATUS_FILE" "$RUN_DIR/train_status.final.json" 2>/dev/null || true
+    fi
 
     echo "[submit] $(date -Is)  ${MILES_TRAIN_ENTRY:-train.py} terminal state: $STATE  job_rc=$JOB_RC"
 }

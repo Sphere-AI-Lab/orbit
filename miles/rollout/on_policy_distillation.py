@@ -1,12 +1,18 @@
+import asyncio
+import logging
 import math
+import time
 from argparse import Namespace
 from collections.abc import Iterable
+from contextlib import nullcontext
 from typing import Any
 
 import aiohttp
 import torch
 
 from miles.utils.types import Sample
+
+logger = logging.getLogger(__name__)
 
 TopLogprobs = list[list[Any]]
 LogprobMaps = list[dict[int, float]]
@@ -60,11 +66,84 @@ def _student_score_url(args: Namespace) -> str:
     return f"http://{args.sglang_router_ip}:{args.sglang_router_port}/generate"
 
 
-async def _post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
-    async with aiohttp.ClientSession() as session:
+def _get_scoring_timeout(args: Namespace) -> float:
+    return float(getattr(args, "opd_scoring_timeout", 600.0) or 600.0)
+
+
+def _get_scoring_max_inflight(args: Namespace) -> int:
+    value = getattr(args, "opd_scoring_max_inflight", 8)
+    return int(8 if value is None else value)  # <= 0 disables the cap
+
+
+def _get_scoring_retries(args: Namespace) -> int:
+    value = getattr(args, "opd_scoring_retries", 1)
+    return max(0, int(1 if value is None else value))
+
+
+# One per process: reward_func runs on the RolloutManager's single event loop.
+_SCORING_SEMAPHORE: asyncio.Semaphore | None = None
+
+
+def _scoring_semaphore(args: Namespace) -> asyncio.Semaphore | None:
+    """Return the shared in-flight semaphore, or None when the cap is disabled."""
+    global _SCORING_SEMAPHORE
+    max_inflight = _get_scoring_max_inflight(args)
+    if max_inflight <= 0:
+        return None
+    if _SCORING_SEMAPHORE is None:
+        _SCORING_SEMAPHORE = asyncio.Semaphore(max_inflight)
+    return _SCORING_SEMAPHORE
+
+
+async def _post_json(url: str, payload: dict[str, Any], timeout_s: float) -> dict[str, Any]:
+    timeout = aiohttp.ClientTimeout(total=timeout_s)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(url, json=payload) as resp:
             resp.raise_for_status()
             return await resp.json()
+
+
+async def _scoring_post(args: Namespace, url: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """One scoring RPC: bounded in-flight, explicit timeout, retries, contextual errors.
+
+    A whole rollout batch finishes together, so without the semaphore every
+    sample's request dogpiles the teacher at once and queue time burns each
+    request's timeout; without an explicit timeout aiohttp's implicit 300s
+    total applies and surfaces as a bare TimeoutError. Retries default to 1;
+    --opd-scoring-retries 0 fails fast on the first error.
+    """
+    timeout_s = _get_scoring_timeout(args)
+    semaphore = _scoring_semaphore(args)
+    guard = nullcontext() if semaphore is None else semaphore
+    attempts = _get_scoring_retries(args) + 1
+    n_tokens = len(payload.get("input_ids") or [])
+    n_ids = len(payload.get("token_ids_logprob") or [])
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        start = time.monotonic()
+        try:
+            async with guard:
+                return await _post_json(url, payload, timeout_s)
+        except (TimeoutError, asyncio.TimeoutError, aiohttp.ClientError) as exc:
+            last_exc = exc
+            logger.warning(
+                "OPD scoring POST %s attempt %d/%d failed after %.0fs "
+                "(timeout %.0fs, %d input tokens, %d requested token ids): %r",
+                url,
+                attempt,
+                attempts,
+                time.monotonic() - start,
+                timeout_s,
+                n_tokens,
+                n_ids,
+                exc,
+            )
+            if attempt < attempts:
+                await asyncio.sleep(2.0)
+    raise RuntimeError(
+        f"OPD scoring request to {url} failed {attempts} time(s) (timeout {timeout_s:.0f}s/attempt, "
+        f"{n_tokens} input tokens, {n_ids} requested token ids); last error: {last_exc!r}"
+    ) from last_exc
 
 
 def _top_entry_token_id(entry: list[Any]) -> int:
@@ -272,7 +351,7 @@ def _compute_topk_reverse_kl(
 async def reward_func(args: Namespace, sample: Sample, **kwargs: Any) -> dict[str, Any]:
     top_k = _get_opd_top_k(args)
     if top_k == 0:
-        return await _post_json(args.rm_url, _score_payload(sample.tokens))
+        return await _scoring_post(args, args.rm_url, _score_payload(sample.tokens))
 
     strategy = _get_top_k_strategy(args)
 
@@ -286,13 +365,14 @@ async def reward_func(args: Namespace, sample: Sample, **kwargs: Any) -> dict[st
         top_k=top_k if strategy in TEACHER_TOP_STRATEGIES else 0,
         token_ids=teacher_token_ids,
     )
-    teacher_response = await _post_json(args.rm_url, teacher_payload)
+    teacher_response = await _scoring_post(args, args.rm_url, teacher_payload)
 
     reward_payload = {"teacher": teacher_response}
     if strategy in STUDENT_ON_TEACHER_STRATEGIES:
         teacher_top = _trim_input_field(teacher_response["meta_info"], "input_top_logprobs", sample.response_length)
         student_token_ids = _unique_ids(teacher_top)
-        reward_payload["student_on_teacher"] = await _post_json(
+        reward_payload["student_on_teacher"] = await _scoring_post(
+            args,
             _student_score_url(args),
             _score_payload(sample.tokens, token_ids=student_token_ids),
         )

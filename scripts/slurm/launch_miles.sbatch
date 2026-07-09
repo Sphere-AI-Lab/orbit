@@ -42,6 +42,10 @@
 #   RAY_STATUS_FAIL_GRACE     unreadable-probe count -> dead [24]
 #                             (default 24 × 15s = 6 min; a fresh train_status.json
 #                             heartbeat resets it — see docs/launcher.md)
+#   MILES_RAY_HEAD_NUM_GPUS   GPUs Ray registers on the head node [8]
+#                             (recipes hosting a GPU sidecar on the head — e.g.
+#                             a whole-node OPD teacher — export 0; honored both
+#                             from the submit env and from the recipe itself)
 #   ENVPACK_SERVER_NODE_COUNT  nodes reserved for one envpack server [0]
 #   ENVPACK_SERVER_ENV_NAME    conda env for envpack server [$MILES_ENV_NAME]
 #   ENVPACK_SERVER_WAIT_TIMEOUT envpack server readiness timeout (s) [60]
@@ -80,6 +84,21 @@ NCCL_HEALTHCHECK_WALL=${NCCL_HEALTHCHECK_WALL:-300}
 NCCL_HEALTHCHECK_MIN_BUSBW_GB=${NCCL_HEALTHCHECK_MIN_BUSBW_GB:-50}
 RAY_BRINGUP_TIMEOUT=${RAY_BRINGUP_TIMEOUT:-300}
 RAY_BRINGUP_ATTEMPTS=${RAY_BRINGUP_ATTEMPTS:-3}
+# GPUs Ray registers on the head node; whole-node head-sidecar recipes export
+# 0. Validated wherever it can change (submit env here, recipe re-source
+# below): under `set -uo pipefail` without -e, garbage in the EXPECTED_GPUS
+# arithmetic would fail the assignment and silently leave a stale value.
+MILES_RAY_HEAD_NUM_GPUS=${MILES_RAY_HEAD_NUM_GPUS:-8}
+_validate_head_num_gpus() {
+    if ! [[ "$MILES_RAY_HEAD_NUM_GPUS" =~ ^[0-8]$ ]]; then
+        echo "FATAL: MILES_RAY_HEAD_NUM_GPUS must be 0-8, got '$MILES_RAY_HEAD_NUM_GPUS'" >&2
+        # First call predates manifest.sh sourcing; skip the manifest then
+        # (nothing was written yet), finalize it on the post-recipe call.
+        declare -F write_manifest >/dev/null && write_manifest FAILED
+        exit 78
+    fi
+}
+_validate_head_num_gpus
 ENVPACK_SERVER_NODE_COUNT=${ENVPACK_SERVER_NODE_COUNT:-0}
 ENVPACK_SERVER_ENV_NAME=${ENVPACK_SERVER_ENV_NAME:-$MILES_ENV_NAME}
 ENVPACK_SERVER_WAIT_TIMEOUT=${ENVPACK_SERVER_WAIT_TIMEOUT:-60}
@@ -242,7 +261,10 @@ if [[ -z "$HEAD_IP" ]]; then
     exit 78
 fi
 WORKER_NODES=( "${RAY_NODES[@]:1}" )
-EXPECTED_GPUS=$(( ${#RAY_NODES[@]} * 8 ))
+# The head contributes MILES_RAY_HEAD_NUM_GPUS (default 8) to Ray; recipes
+# hosting a whole-node GPU sidecar on the head export 0. Recomputed after the
+# recipe is sourced below in case the export comes from the recipe itself.
+EXPECTED_GPUS=$(( (${#RAY_NODES[@]} - 1) * 8 + ${MILES_RAY_HEAD_NUM_GPUS:-8} ))
 
 if (( ENVPACK_SERVER_NODE_COUNT > 0 )); then
     ENVPACK_SERVER_NODE="${ENVPACK_NODES[0]}"
@@ -331,6 +353,22 @@ source "$RECIPE"
 if [[ -z "${MILES_ARGS+x}" ]]; then
     echo "[recipe] FATAL: $RECIPE did not define MILES_ARGS"
     exit 78   # EX_CONFIG
+fi
+# Recipes may export MILES_RAY_HEAD_NUM_GPUS (whole-node head sidecar) —
+# recompute the bring-up expectation now that the recipe has run.
+_validate_head_num_gpus
+EXPECTED_GPUS=$(( (${#RAY_NODES[@]} - 1) * 8 + ${MILES_RAY_HEAD_NUM_GPUS:-8} ))
+if (( EXPECTED_GPUS == 0 )); then
+    echo "[recipe] FATAL: MILES_RAY_HEAD_NUM_GPUS=0 with no worker nodes leaves Ray no GPUs" >&2
+    write_manifest FAILED
+    exit 78
+fi
+if (( MILES_RAY_HEAD_NUM_GPUS != 8 )); then
+    # Surface the reduced head in run.log: if a recipe that DOES need all
+    # nodes' GPUs inherits this from a stale shell export, bring-up would pass
+    # at the smaller total and the job would then pend forever on placement —
+    # this line is the tell.
+    echo "[recipe] MILES_RAY_HEAD_NUM_GPUS=$MILES_RAY_HEAD_NUM_GPUS — head contributes $MILES_RAY_HEAD_NUM_GPUS GPU(s) to Ray, expected total $EXPECTED_GPUS"
 fi
 WANDB_RUN_ID_FILE="$RUN_DIR/wandb_run_id"
 if [[ -f "$WANDB_RUN_ID_FILE" ]]; then
@@ -643,10 +681,14 @@ start_ray_cluster() {
          --export=ALL,MASTER_ADDR="$HEAD_IP",RAY_PORT="$RAY_PORT",RAY_DASHBOARD_PORT="$RAY_DASHBOARD_PORT" \
          bash -c "$NODE_PREAMBLE"'
             ray stop --force >/dev/null 2>&1 || true
+            # MILES_RAY_HEAD_NUM_GPUS: recipes that host a GPU sidecar on the
+            # head node (e.g. a whole-node OPD teacher via the local-server
+            # hook) export 0 so Ray never schedules actor/rollout bundles
+            # onto the GPUs the sidecar owns.
             ray start --head \
                 --node-ip-address "$MASTER_ADDR" \
                 --port "$RAY_PORT" \
-                --num-gpus 8 \
+                --num-gpus "${MILES_RAY_HEAD_NUM_GPUS:-8}" \
                 --dashboard-host 0.0.0.0 \
                 --dashboard-port "$RAY_DASHBOARD_PORT" \
                 --disable-usage-stats --block

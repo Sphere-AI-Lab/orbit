@@ -1218,6 +1218,32 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 help="Weighting scheme for top-k OPD token rewards.",
             )
             parser.add_argument(
+                "--opd-scoring-timeout",
+                type=float,
+                default=600.0,
+                help=(
+                    "Total timeout in seconds for each OPD teacher/student scoring HTTP request. "
+                    "Without it aiohttp's implicit 300s default applies and long-sequence scoring "
+                    "aborts with a bare TimeoutError."
+                ),
+            )
+            parser.add_argument(
+                "--opd-scoring-max-inflight",
+                type=int,
+                default=8,
+                help=(
+                    "Maximum concurrent OPD scoring requests. Bounds the dogpile on the teacher "
+                    "server when a whole rollout batch finishes generating at once. 0 disables "
+                    "the cap entirely (dedicated-teacher layouts)."
+                ),
+            )
+            parser.add_argument(
+                "--opd-scoring-retries",
+                type=int,
+                default=1,
+                help="Retries per OPD scoring request after the first failure. 0 fails fast.",
+            )
+            parser.add_argument(
                 "--opd-teacher-load",
                 type=str,
                 default=None,
@@ -2189,6 +2215,12 @@ def miles_validate_args(args):
             raise ValueError("--opd-log-prob-top-k must be non-negative.")
         if args.opd_log_prob_top_k > 0 and args.opd_type != "sglang":
             raise ValueError("--opd-log-prob-top-k is currently supported only with --opd-type=sglang.")
+        if args.opd_scoring_timeout <= 0:
+            raise ValueError("--opd-scoring-timeout must be positive.")
+        if args.opd_scoring_max_inflight < 0:
+            raise ValueError("--opd-scoring-max-inflight must be >= 0 (0 disables the cap).")
+        if args.opd_scoring_retries < 0:
+            raise ValueError("--opd-scoring-retries must be >= 0.")
 
         if args.opd_type == "megatron":
             if args.opd_teacher_load is None:

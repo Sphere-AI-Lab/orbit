@@ -62,11 +62,13 @@ S7 training compute, "outer" = any time after submit.
   on actual training liveness.
 - **FIX (committed)**: a **heartbeat sentinel**. The driver writes
   `train_status.json` (`running` at start + every step, terminal at exit) to **node-local**
-  disk (`MILES_TRAIN_STATUS_FILE`, default `$MILES_RUN_DIR`). When the Ray API is unreadable
+  disk (`MILES_TRAIN_STATUS_FILE`, set by the launcher under `${TMPDIR:-/tmp}`). When the Ray API is unreadable
   but the heartbeat's `updated_at` is < `HEARTBEAT_MAX_AGE_S=600s` old, the watchdog prints
   `ALIVE`, **resets the grace counter, and keeps waiting** instead of killing. A stale
   heartbeat (driver not progressing) still falls through to CLUSTER_DEAD. Before the fix,
   `train_async.py` wrote **no sentinel at all** → async jobs had no fallback liveness signal.
+  At terminal exit the launcher copies the sentinel to `$RUN_DIR/train_status.final.json`
+  and any nonempty unreadable-probe diagnostics to `$RUN_DIR/probe.log` for postmortem use.
 - **Known gap (confirmed on j21354)**: the per-step heartbeat only refreshes once the training
   loop starts; during the long S3/S4 warmup (bridge model-load + cuda-graph capture, ~20–40 min)
   the sentinel goes stale, so the veto is **inert during warmup** — a Ray-API outage *while
@@ -118,7 +120,8 @@ S7 training compute, "outer" = any time after submit.
   must resubmit with `SBATCH_EXTRA=--exclude=...` yourself. **Not a training/code problem.**
 
 ### S2 — ray cluster assembly  (`launch_miles.sbatch` ~"did not assemble")
-- The poll watches both `ray status` (must report `EXPECTED_GPUS` = nodes×8 within
+- The poll watches both `ray status` (must report `EXPECTED_GPUS` = workers×8 +
+  `MILES_RAY_HEAD_NUM_GPUS` (default 8; head-sidecar recipes export 0) within
   `RAY_BRINGUP_TIMEOUT=300s`) **and** the head/worker `ray start … --block` srun PIDs.
   A dead PID = that node's Ray exited (cluster collapsed) → the poll stops at once
   instead of idling out the timeout. **Why**: a worker that never joins (network / a

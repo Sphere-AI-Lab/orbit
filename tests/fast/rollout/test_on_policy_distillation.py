@@ -1,9 +1,11 @@
+import asyncio
 import math
 from argparse import Namespace
 
 import pytest
 from tests.ci.ci_register import register_cpu_ci
 
+from miles.rollout import on_policy_distillation as opd
 from miles.rollout.on_policy_distillation import _compute_topk_reverse_kl
 from miles.utils.types import Sample
 
@@ -32,6 +34,34 @@ def _sample():
             ]
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_scoring_post_retries_asyncio_timeout(monkeypatch):
+    calls = 0
+
+    async def fake_post_json(url, payload, timeout_s):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise asyncio.TimeoutError
+        return {"ok": True}
+
+    async def no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(opd, "_post_json", fake_post_json)
+    monkeypatch.setattr(opd.asyncio, "sleep", no_sleep)
+    args = Namespace(
+        opd_scoring_timeout=1,
+        opd_scoring_max_inflight=0,
+        opd_scoring_retries=1,
+    )
+
+    result = await opd._scoring_post(args, "http://teacher/generate", {"input_ids": [1]})
+
+    assert result == {"ok": True}
+    assert calls == 2
 
 
 def _teacher_payload():

@@ -104,7 +104,14 @@ class ServerGroup:
                     "SGLANG_JIT_DEEPGEMM_PRECOMPILE": "false",
                     # TODO: this is hacky. Use env var SGLANG_DG_CACHE_DIR_PER_PROCESS=1
                     # to enable this isolation.
-                    "SGLANG_DG_CACHE_DIR": f"/tmp/sglang_deep_gemm/{self.worker_type}_rank_{global_rank}",
+                    # Per-user parent for the same reason as TRITON_CACHE_DIR below: a
+                    # fixed /tmp/sglang_deep_gemm/ is owned by whichever user touched
+                    # the node first, and everyone else dies at engine init with
+                    # EACCES (job 23818 on slinky-27).
+                    "SGLANG_DG_CACHE_DIR": (
+                        f"/tmp/sglang_deep_gemm_{os.environ.get('USER', 'unknown')}"
+                        f"/{self.worker_type}_rank_{global_rank}"
+                    ),
                     # Triton JIT cache: per-user + per-rank node-local dir. Without an
                     # explicit TRITON_CACHE_DIR, engine schedulers have been observed
                     # compiling into a shared /tmp/triton, which collides across users
