@@ -32,10 +32,15 @@ def _is_muon_optimizer(optimizer: str | None) -> bool:
     return optimizer is not None and "muon" in optimizer.lower()
 
 
+def _is_pion_optimizer(optimizer: str | None) -> bool:
+    return optimizer is not None and "pion" in optimizer.lower()
+
+
 def set_default_megatron_args(args):
-    # Muon owns its own sharding path and is incompatible with Megatron's
+    # Muon and Pion each own their own sharding path and raise on Megatron's
     # distributed optimizer; Adam/SGD keep the historical ZeRO default.
-    args.use_distributed_optimizer = not _is_muon_optimizer(getattr(args, "optimizer", None))
+    _opt = getattr(args, "optimizer", None)
+    args.use_distributed_optimizer = not (_is_muon_optimizer(_opt) or _is_pion_optimizer(_opt))
     # Follow-up: maybe change this after megatron has good fp8 support
     args.bf16 = not args.fp16
     # placeholders
