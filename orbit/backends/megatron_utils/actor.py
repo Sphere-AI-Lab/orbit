@@ -12,10 +12,12 @@ from transformers import AutoConfig
 
 from orbit.ray.train_actor import TrainRayActor
 from orbit.utils import train_dump_utils
+from orbit.utils.adapter_swap import swap_adapter_tensors
 from orbit.utils.arguments import uses_rollout_engines
 from orbit.utils.context_utils import with_defer
 from orbit.utils.distributed_utils import get_gloo_group, init_process_group
 from orbit.utils.memory_utils import clear_memory, print_memory
+from orbit.utils.opd_teacher_spec import teacher_forward_plan
 from orbit.utils.processing_utils import load_tokenizer
 from orbit.utils.ray_utils import Box
 from orbit.utils.reloadable_process_group import destroy_process_groups, monkey_patch_torch_dist, reload_process_groups
@@ -46,7 +48,13 @@ from .peft_offload import (
     offload_megatron_grad_buffers,
     offload_megatron_optimizer,
 )
-from .peft_utils import create_peft_instance, get_peft_method, is_peft_enabled
+from .peft_utils import (
+    create_peft_instance,
+    get_peft_method,
+    is_adapter_param_name,
+    is_peft_enabled,
+    load_adapter_tensors_for_teacher,
+)
 from .replay_utils import get_register_replay_list_func
 from .state_mode import should_backup_actor_after_train, uses_adapter_state
 from .update_weight.common import named_adapter_params, named_params_and_buffers
@@ -214,15 +222,29 @@ class MegatronTrainRayActor(TrainRayActor):
         if with_ref and not is_peft_enabled(self.args):
             self.load_other_checkpoint("ref", args.ref_load)
 
-        # In-process Megatron OPD teacher: a second full model, loaded like "ref"
-        # and scored by a teacher-forcing forward pass at train time.
+        # In-process OPD teacher. Same-base specs (base/adapter:/self:*) need no
+        # second model: the teacher is the resident base with adapters toggled.
+        # Only the legacy load:<ckpt> spec loads a full second model like "ref".
+        self._opd_teacher_spec = getattr(self.args, "opd_teacher_spec", None)
+        self._opd_teacher_tensors: dict[str, torch.Tensor] | None = None
+        self._self_teacher = None  # created in Task 5 for self:* specs
         if with_opd_teacher:
-            if self.args.opd_teacher_ckpt_step is not None:
-                _saved_ckpt_step = self.args.ckpt_step
-                self.args.ckpt_step = self.args.opd_teacher_ckpt_step
-            self.load_other_checkpoint("teacher", self.args.opd_teacher_load)
-            if self.args.opd_teacher_ckpt_step is not None:
-                self.args.ckpt_step = _saved_ckpt_step
+            if self._opd_teacher_spec is None:
+                from orbit.utils.opd_teacher_spec import parse_teacher_spec
+
+                self._opd_teacher_spec = parse_teacher_spec(
+                    getattr(self.args, "opd_teacher", None), self.args.opd_teacher_load
+                )
+            spec = self._opd_teacher_spec
+            if spec.source == "load":
+                if self.args.opd_teacher_ckpt_step is not None:
+                    _saved_ckpt_step = self.args.ckpt_step
+                    self.args.ckpt_step = self.args.opd_teacher_ckpt_step
+                self.load_other_checkpoint("teacher", spec.path)
+                if self.args.opd_teacher_ckpt_step is not None:
+                    self.args.ckpt_step = _saved_ckpt_step
+            elif spec.source == "adapter":
+                self._opd_teacher_tensors = load_adapter_tensors_for_teacher(self.model, spec.path)
 
         if self.args.keep_old_actor:
             # Load old_actor checkpoint
@@ -478,18 +500,42 @@ class MegatronTrainRayActor(TrainRayActor):
         self,
         data_iterator: list[DataIterator],
         num_microbatches: list[int],
+        ref_data: dict[str, list[torch.Tensor]] | None = None,
     ) -> dict[str, list[torch.Tensor]] | None:
-        """Compute in-process Megatron teacher log-probs for on-policy distillation.
+        """Compute in-process teacher log-probs for on-policy distillation.
 
-        Mirrors compute_ref_log_probs: a teacher-forcing forward pass on the
-        student's already-sampled tokens (not generation), producing
-        "teacher_log_probs" (store_prefix="teacher_" + base key "log_probs")
-        for the on_policy_distillation estimator / --use-opd blend. Returns None
-        when no teacher model is loaded this cycle.
+        Teacher-forcing forward on the student's sampled tokens, producing
+        "teacher_log_probs". Routing follows teacher_forward_plan: same-base
+        specs toggle adapters on the resident model (no second model); base
+        aliases the already-computed ref forward when available; load: keeps
+        the legacy full second model.
         """
+        plan = teacher_forward_plan(
+            self._opd_teacher_spec, is_peft_enabled(self.args), ref_data is not None
+        )
+        if plan == "none":
+            return None
+        if plan == "alias_ref":
+            return {"teacher_log_probs": ref_data["ref_log_probs"]}
+        if plan == "adapter_off":
+            peft = create_peft_instance(self.args)
+            if peft is None:
+                raise RuntimeError("OPD base teacher requested but no PEFT instance could be created.")
+            self._set_replay_stage("fallthrough")
+            with peft.disable_adapter(self.model):
+                return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="teacher_")
+        if plan == "adapter_swap":
+            tensors = self._opd_teacher_tensors
+            if tensors is None and self._self_teacher is not None:
+                tensors = self._self_teacher.tensors
+            if tensors is None:
+                raise RuntimeError(f"OPD teacher {self._opd_teacher_spec.source} has no tensors loaded.")
+            self._set_replay_stage("fallthrough")
+            with swap_adapter_tensors(self.model, tensors, is_adapter_param_name):
+                return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="teacher_")
+        # switch_model (legacy load:)
         if "teacher" not in self.model_state_manager.backup_tags:
             return None
-
         self._set_replay_stage("fallthrough")
         self._switch_model("teacher")
         return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="teacher_")
@@ -562,7 +608,7 @@ class MegatronTrainRayActor(TrainRayActor):
                 ref_data = self.compute_ref_log_probs(data_iterator, num_microbatches)
                 if ref_data is not None:
                     rollout_data.update(ref_data)
-                teacher_data = self.compute_teacher_log_probs(data_iterator, num_microbatches)
+                teacher_data = self.compute_teacher_log_probs(data_iterator, num_microbatches, ref_data=ref_data)
                 if teacher_data is not None:
                     rollout_data.update(teacher_data)
                 self._switch_model("old_actor" if self.args.keep_old_actor else "actor")

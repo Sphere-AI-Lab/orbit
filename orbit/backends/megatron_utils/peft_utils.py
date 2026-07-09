@@ -780,3 +780,40 @@ def load_peft_adapter_checkpoint(
 
     logger.warning(f"No adapter checkpoint found at {adapter_dir}")
     return False, None
+
+
+def load_adapter_tensors_for_teacher(
+    model: Sequence[torch.nn.Module],
+    adapter_path: str,
+) -> dict[str, torch.Tensor]:
+    """Load a frozen teacher adapter as a name->tensor dict (never into params).
+
+    Requires Megatron-native shards (adapter_megatron_tp{tp}_pp{pp}.pt) as
+    written by save_peft_checkpoint; HF-only artifacts are rejected — the
+    engine side consumes those, the trainer side needs native names/shapes.
+    """
+    adapter_dir = Path(adapter_path)
+    tp_rank = mpu.get_tensor_model_parallel_rank()
+    pp_rank = mpu.get_pipeline_model_parallel_rank()
+    native_path = adapter_dir / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt"
+    if not native_path.exists():
+        raise FileNotFoundError(
+            f"OPD teacher adapter needs Megatron-native shards, missing {native_path}. "
+            "Save the teacher with orbit's save_peft_checkpoint (HF-only artifacts are not "
+            "loadable trainer-side)."
+        )
+    state_dict = torch.load(native_path, map_location="cpu", weights_only=True)
+    tensors: dict[str, torch.Tensor] = {}
+    for chunk in model:
+        for name, param in chunk.named_parameters():
+            if not is_adapter_param_name(name):
+                continue
+            source = state_dict.get(name)
+            if source is None:
+                legacy_key = _maybe_legacy_canonical_oft_key(name)
+                if legacy_key is not None:
+                    source = state_dict.get(legacy_key)
+            if source is None:
+                raise KeyError(f"Teacher adapter shard {native_path} is missing tensor {name!r}.")
+            tensors[name] = source.to(device=param.device, dtype=param.dtype)
+    return tensors

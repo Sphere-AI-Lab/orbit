@@ -69,3 +69,24 @@ def needs_engine_teacher_slot(spec: TeacherSpec | None) -> bool:
     lora_path), so it needs no slot.
     """
     return spec is not None and spec.source in ("adapter", "self_ema", "self_lag")
+
+
+def teacher_forward_plan(spec: TeacherSpec | None, peft_enabled: bool, ref_available: bool) -> str:
+    """Decide how the trainer produces teacher_log_probs this cycle.
+
+    Returns "none" (no teacher), "alias_ref" (teacher==base and the ref
+    forward already ran: reuse it), "adapter_off" (base teacher, run one
+    forward with the adapter disabled), "adapter_swap" (swap frozen/self
+    teacher adapter tensors in for the forward), or "switch_model" (legacy
+    full second model).
+    """
+    if spec is None:
+        return "none"
+    if spec.source == "load":
+        return "switch_model"
+    if not peft_enabled:
+        # Validated at arg-parse time; defensive for direct callers.
+        raise ValueError(f"--opd-teacher {spec.source} requires PEFT to toggle adapters.")
+    if spec.source == "base":
+        return "alias_ref" if ref_available else "adapter_off"
+    return "adapter_swap"

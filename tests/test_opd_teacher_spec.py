@@ -7,6 +7,7 @@ from orbit.utils.opd_teacher_spec import (
     is_self_teacher,
     needs_engine_teacher_slot,
     parse_teacher_spec,
+    teacher_forward_plan,
 )
 
 
@@ -79,3 +80,29 @@ def test_engine_slot_predicate():
 
 def test_adapter_name_constant():
     assert OPD_TEACHER_ADAPTER_NAME == "orbit_teacher"
+
+
+def test_plan_none_without_spec():
+    assert teacher_forward_plan(None, peft_enabled=True, ref_available=True) == "none"
+
+
+def test_plan_load_is_switch_model():
+    assert teacher_forward_plan(TeacherSpec("load", "/x"), peft_enabled=False, ref_available=False) == "switch_model"
+
+
+def test_plan_base_aliases_ref_when_available():
+    assert teacher_forward_plan(TeacherSpec("base", None), peft_enabled=True, ref_available=True) == "alias_ref"
+
+
+def test_plan_base_disables_adapter_without_ref():
+    assert teacher_forward_plan(TeacherSpec("base", None), peft_enabled=True, ref_available=False) == "adapter_off"
+
+
+def test_plan_adapter_and_self_swap():
+    for source in ("adapter", "self_ema", "self_lag"):
+        assert teacher_forward_plan(TeacherSpec(source, "/x"), peft_enabled=True, ref_available=True) == "adapter_swap"
+
+
+def test_plan_same_base_without_peft_raises():
+    with pytest.raises(ValueError, match="PEFT"):
+        teacher_forward_plan(TeacherSpec("base", None), peft_enabled=False, ref_available=False)
