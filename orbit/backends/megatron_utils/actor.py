@@ -22,6 +22,7 @@ from orbit.utils.processing_utils import load_tokenizer
 from orbit.utils.ray_utils import Box
 from orbit.utils.reloadable_process_group import destroy_process_groups, monkey_patch_torch_dist, reload_process_groups
 from orbit.utils.replay_base import all_replay_managers
+from orbit.utils.self_teacher import SelfTeacherBuffer
 from orbit.utils.timer import Timer, inverse_timer, timer
 from orbit.utils.tracking_utils import init_tracking
 from orbit.utils.types import RolloutBatch
@@ -227,7 +228,7 @@ class MegatronTrainRayActor(TrainRayActor):
         # Only the legacy load:<ckpt> spec loads a full second model like "ref".
         self._opd_teacher_spec = getattr(self.args, "opd_teacher_spec", None)
         self._opd_teacher_tensors: dict[str, torch.Tensor] | None = None
-        self._self_teacher = None  # created in Task 5 for self:* specs
+        self._self_teacher = None
         if with_opd_teacher:
             if self._opd_teacher_spec is None:
                 from orbit.utils.opd_teacher_spec import parse_teacher_spec
@@ -245,6 +246,13 @@ class MegatronTrainRayActor(TrainRayActor):
                     self.args.ckpt_step = _saved_ckpt_step
             elif spec.source == "adapter":
                 self._opd_teacher_tensors = load_adapter_tensors_for_teacher(self.model, spec.path)
+            elif spec.source in ("self_ema", "self_lag"):
+                self._self_teacher = SelfTeacherBuffer(
+                    self._adapter_named_params(),
+                    mode="ema" if spec.source == "self_ema" else "lag",
+                    decay=self.args.opd_ema_decay,
+                    interval=self.args.opd_self_teacher_interval,
+                )
 
         if self.args.keep_old_actor:
             # Load old_actor checkpoint
@@ -496,6 +504,14 @@ class MegatronTrainRayActor(TrainRayActor):
         self._switch_model("ref")
         return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="ref_")
 
+    def _adapter_named_params(self) -> dict[str, torch.Tensor]:
+        params: dict[str, torch.Tensor] = {}
+        for chunk in self.model:
+            for name, param in chunk.named_parameters():
+                if is_adapter_param_name(name):
+                    params[name] = param
+        return params
+
     def compute_teacher_log_probs(
         self,
         data_iterator: list[DataIterator],
@@ -659,6 +675,8 @@ class MegatronTrainRayActor(TrainRayActor):
                     data_iterator,
                     num_microbatches,
                 )
+                if self._self_teacher is not None:
+                    self._self_teacher.update(self._adapter_named_params())
 
             self.prof.step(rollout_id=rollout_id)
 
