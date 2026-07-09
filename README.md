@@ -58,6 +58,19 @@ The first build compiles everything from source, budget **around 1–2 hours on 
 
 > Alternatively, [CUDA-13-install.md](CUDA-13-install.md) installs the layer from prebuilt wheels.
 
+### Optional: Muon / Pion optimizers
+
+`uv sync` does **not** install the Muon algorithm. It lives in NVIDIA's standalone `emerging-optimizers` package (Megatron's `get_megatron_optimizer` dispatches `--optimizer muon` / `dist_muon` / `pion_msign` into it), so a run that selects one of those raises `ImportError: emerging-optimizers package is required` without it. Install from the NVIDIA-NeMo source:
+
+```bash
+git clone https://github.com/NVIDIA-NeMo/Emerging-Optimizers.git
+uv pip install --python .venv/bin/python --no-deps ./Emerging-Optimizers
+```
+
+> **Do not `pip install emerging-optimizers` from PyPI** — that name is a dependency-confusion stub (resolves to a bogus `999.9.9` and fails to build). It must come from the GitHub source above.
+
+`--optimizer adam` (default), `sgd`, and `pion` need nothing extra; only `muon`, `dist_muon`, and `pion_msign` require this package.
+
 > **Release maintainers:** verify a public clean-room install with `scripts/release/clean_room_gate.sh` after setting `PUBLIC_ORBIT_URL`. This gate targets the future public Git-ref release; it is not expected to pass against the interim local-path backend sources.
 
 ## Quickstart
