@@ -211,11 +211,30 @@ def _build_optimizer_and_scheduler(
             kwargs[f.name] = getattr(args, f.name)
     config = OptimizerConfig(**kwargs)
     config.timers = None
-    optimizer = get_megatron_optimizer(
-        config=config,
-        model_chunks=model,
-        use_gloo_process_groups=args.use_gloo_process_groups,
-    )
+    # Pion has its own getters (own sharding; ZeRO already disabled upstream by
+    # the arguments shim). Muon/Adam/SGD are dispatched inside
+    # get_megatron_optimizer, so they fall through here. Mirrors the Sphere-AI
+    # pion fork's training.py dispatch.
+    optimizer_type = (config.optimizer or "").lower()
+    if "pion" in optimizer_type:
+        if optimizer_type == "pion_msign":
+            from megatron.core.optimizer.pion_msign import get_megatron_pion_ortho_exp_optimizer
+
+            optimizer = get_megatron_pion_ortho_exp_optimizer(
+                config, model, use_gloo_process_groups=args.use_gloo_process_groups
+            )
+        else:
+            from megatron.core.optimizer.pion import get_megatron_pion_optimizer
+
+            optimizer = get_megatron_pion_optimizer(
+                config, model, use_gloo_process_groups=args.use_gloo_process_groups
+            )
+    else:
+        optimizer = get_megatron_optimizer(
+            config=config,
+            model_chunks=model,
+            use_gloo_process_groups=args.use_gloo_process_groups,
+        )
     opt_param_scheduler = get_optimizer_param_scheduler(args, optimizer)
     return optimizer, opt_param_scheduler
 
