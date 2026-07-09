@@ -93,6 +93,11 @@ OPTIMIZER_ARGS=(
     --adam-beta1 0.9
     --adam-beta2 0.999
 )
+# Inject extra optimizer flags (e.g. the muon-kimi preset in
+# examples/optimizers/muon-kimi.env) without editing this launcher.
+if [ -n "${EXTRA_OPTIMIZER_ARGS:-}" ]; then
+    OPTIMIZER_ARGS+=( ${EXTRA_OPTIMIZER_ARGS} )
+fi
 
 RL_ARGS=(
     --advantage-estimator grpo
