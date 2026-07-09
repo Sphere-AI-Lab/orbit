@@ -13,6 +13,21 @@ Exits 0 iff all four verdicts are correct.
 Usage:
     python tools/lean_rm_oracle.py --lean-server-url http://127.0.0.1:8000 \\
         [--swe-jsonl .../splits/rlvr1... ] # optional real-row check
+
+Booting the kimina-lean-server SIF under Apptainer needs this exact env
+(the image assumes its Docker runtime; --contain/--cleanenv strip what it
+needs, so pass it back explicitly). See logs/lean_oracle_run.sh:
+    apptainer exec --contain --cleanenv --writable-tmpfs \\
+      --env ELAN_HOME=/root/.elan \\        # find pre-installed v4.15.0 toolchain
+      --env HOME=/root \\                    # (elan/lake write scratch here)
+      --env LEAN_PATH=<abs mathlib4 + 8 deps + toolchain/lib/lean> \\
+      --env LEAN_SERVER_PROJECT_DIR=/mathlib4 \\
+      --env LEAN_SERVER_REPL_PATH=/repl/.lake/build/bin/repl \\
+      --pwd /root/kimina-lean-server SIF python -m server
+Without ELAN_HOME, elan resolves the host $HOME (quota-full) and re-downloads
+Lean -> "No space". Without LEAN_PATH, the server execs the REPL directly
+(not via `lake env`) so import Mathlib fails -> "Failed to run header on REPL".
+The full absolute LEAN_PATH is spelled out in logs/lean_oracle_run.sh.
 """
 
 from __future__ import annotations

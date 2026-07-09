@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 import re
 
-from orbit.utils.http_utils import post
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +79,15 @@ async def grade_lean_proof(args, response: str, header: str, formal_statement: s
 
     timeout = float(getattr(args, "lean_timeout_secs", 180) or 180)
     payload = {"codes": [{"custom_id": "orbit", "proof": code}], "timeout": timeout}
+    # Self-contained httpx call: the grader must not depend on orbit's global
+    # rollout http client being initialized (so it also runs from the oracle).
+    # The first import-Mathlib verify loads Mathlib into a REPL and is slow, so
+    # allow generous connect/read time beyond the per-proof timeout.
     try:
-        out = await post(f"{base_url.rstrip('/')}/verify", payload, max_retries=2)
+        async with httpx.AsyncClient(timeout=timeout + 120) as client:
+            resp = await client.post(f"{base_url.rstrip('/')}/verify", json=payload)
+        resp.raise_for_status()
+        out = resp.json()
     except Exception:
         logger.exception("lean_rm: verify call failed; reward 0.")
         return 0.0

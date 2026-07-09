@@ -21,13 +21,44 @@ class _Args:
     lean_timeout_secs = 60
 
 
-def _mock_server(monkeypatch, result):
-    async def fake_post(url, payload, max_retries=2):
-        fake_post.last_payload = payload
-        return {"results": [result]}
+class _FakeResp:
+    def __init__(self, payload, raise_exc=None):
+        self._payload = payload
+        self._raise_exc = raise_exc
 
-    monkeypatch.setattr(lr, "post", fake_post)
-    return fake_post
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+class _FakeClient:
+    """Stand-in for httpx.AsyncClient used as an async context manager."""
+
+    def __init__(self, tracker, result, raise_exc):
+        self._tracker = tracker
+        self._result = result
+        self._raise_exc = raise_exc
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def post(self, url, json=None):
+        self._tracker["called"] = True
+        self._tracker["payload"] = json
+        if self._raise_exc is not None:
+            raise self._raise_exc
+        return _FakeResp({"results": [self._result]})
+
+
+def _mock_server(monkeypatch, result, raise_exc=None):
+    tracker = {"called": False, "payload": None}
+    monkeypatch.setattr(lr.httpx, "AsyncClient", lambda *a, **k: _FakeClient(tracker, result, raise_exc))
+    return tracker
 
 
 # ---------------------------------------------------------------------------
@@ -89,17 +120,14 @@ def test_sorry_warning_and_sorries_field_fail(monkeypatch):
 
 
 def test_sorry_in_code_rejected_before_server(monkeypatch):
-    fake = _mock_server(monkeypatch, {"error": None, "response": {"messages": []}})
+    tracker = _mock_server(monkeypatch, {"error": None, "response": {"messages": []}})
     resp = "```lean4\nimport Mathlib\ntheorem two : 1 + 1 = 2 := by sorry\n```"
     assert asyncio.run(lr.grade_lean_proof(_Args(), resp, HEADER, STATEMENT)) == 0.0
-    assert not hasattr(fake, "last_payload")  # server never called
+    assert tracker["called"] is False  # server never called
 
 
 def test_transport_error_and_no_url_fail_soft(monkeypatch):
-    async def boom(url, payload, max_retries=2):
-        raise RuntimeError("down")
-
-    monkeypatch.setattr(lr, "post", boom)
+    _mock_server(monkeypatch, {}, raise_exc=RuntimeError("down"))
     assert asyncio.run(lr.grade_lean_proof(_Args(), FULL_CODE, HEADER, STATEMENT)) == 0.0
 
     class NoUrl:
