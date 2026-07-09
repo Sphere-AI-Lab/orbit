@@ -71,6 +71,8 @@ uv pip install --python .venv/bin/python --no-deps ./Emerging-Optimizers
 
 `--optimizer adam` (default), `sgd`, and `pion` need nothing extra; only `muon`, `dist_muon`, and `pion_msign` require this package.
 
+**Muon-Kimi preset.** Moonshot's Kimi-Muon ("Muon is Scalable for LLM Training", arXiv:2502.16982) is not a separate optimizer — it is orbit's Muon with a specific config, all flags in [`examples/optimizers/muon-kimi.env`](examples/optimizers/muon-kimi.env): `--muon-scale-mode spectral --muon-extra-scale-factor 0.2 --muon-nesterov --muon-coefficient-type simple --muon-num-ns-steps 5 --muon-scalar-optimizer adam`. The one non-obvious flag is `--muon-coefficient-type simple` (Keller-Jordan's original Newton-Schulz coefficients — Kimi's actual set), **not** the default `quintic` (a newer, tighter-converging set). `tools/muon_kimi_equivalence.py` verifies this reproduces the vendored Kimi-Muon to bf16 precision (per-step update cos > 0.999, 5-step weight trajectory within 0.01%) — and unlike single-GPU reference implementations, it runs at full tensor-parallel / distributed scale.
+
 > **Release maintainers:** verify a public clean-room install with `scripts/release/clean_room_gate.sh` after setting `PUBLIC_ORBIT_URL`. This gate targets the future public Git-ref release; it is not expected to pass against the interim local-path backend sources.
 
 ## Quickstart
