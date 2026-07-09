@@ -76,7 +76,9 @@ def add_on_policy_distillation_arguments(parser):
         default=None,
         help=(
             "Teacher log-prob producer: 'megatron' loads a second in-process Megatron model "
-            "scored by a forward pass; 'sglang' scores via an external SGLang teacher server."
+            "scored by a forward pass; 'sglang' scores on the rollout engine, either against "
+            "an external SGLang teacher server (--opd-teacher-url) or a local same-base teacher "
+            "in the reserved orbit_teacher adapter slot."
         ),
     )
     parser.add_argument(
@@ -89,7 +91,7 @@ def add_on_policy_distillation_arguments(parser):
         "--opd-teacher-load",
         type=str,
         default=None,
-        help="Megatron checkpoint directory for the in-process OPD teacher (required for --opd-type megatron).",
+        help="Megatron checkpoint directory for the in-process OPD teacher; legacy sugar for --opd-teacher load:<ckpt>.",
     )
     parser.add_argument(
         "--opd-teacher",
@@ -136,7 +138,7 @@ def add_on_policy_distillation_arguments(parser):
         default=None,
         help=(
             "URL of the external SGLang teacher server's /generate endpoint, e.g. http://host:port/generate "
-            "(required for --opd-type sglang)."
+            "(required only for external-teacher sglang mode, not for a local same-base teacher)."
         ),
     )
     parser.add_argument(

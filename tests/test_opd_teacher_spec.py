@@ -83,26 +83,97 @@ def test_adapter_name_constant():
 
 
 def test_plan_none_without_spec():
-    assert teacher_forward_plan(None, peft_enabled=True, ref_available=True) == "none"
+    assert teacher_forward_plan(None, peft_enabled=True, ref_available=True, opd_type="megatron") == "none"
 
 
 def test_plan_load_is_switch_model():
-    assert teacher_forward_plan(TeacherSpec("load", "/x"), peft_enabled=False, ref_available=False) == "switch_model"
+    assert (
+        teacher_forward_plan(TeacherSpec("load", "/x"), peft_enabled=False, ref_available=False, opd_type="megatron")
+        == "switch_model"
+    )
 
 
 def test_plan_base_aliases_ref_when_available():
-    assert teacher_forward_plan(TeacherSpec("base", None), peft_enabled=True, ref_available=True) == "alias_ref"
+    assert (
+        teacher_forward_plan(TeacherSpec("base", None), peft_enabled=True, ref_available=True, opd_type="megatron")
+        == "alias_ref"
+    )
 
 
 def test_plan_base_disables_adapter_without_ref():
-    assert teacher_forward_plan(TeacherSpec("base", None), peft_enabled=True, ref_available=False) == "adapter_off"
+    assert (
+        teacher_forward_plan(TeacherSpec("base", None), peft_enabled=True, ref_available=False, opd_type="megatron")
+        == "adapter_off"
+    )
 
 
 def test_plan_adapter_and_self_swap():
     for source in ("adapter", "self_ema", "self_lag"):
-        assert teacher_forward_plan(TeacherSpec(source, "/x"), peft_enabled=True, ref_available=True) == "adapter_swap"
+        assert (
+            teacher_forward_plan(TeacherSpec(source, "/x"), peft_enabled=True, ref_available=True, opd_type="megatron")
+            == "adapter_swap"
+        )
 
 
 def test_plan_same_base_without_peft_raises():
     with pytest.raises(ValueError, match="PEFT"):
-        teacher_forward_plan(TeacherSpec("base", None), peft_enabled=False, ref_available=False)
+        teacher_forward_plan(TeacherSpec("base", None), peft_enabled=False, ref_available=False, opd_type="megatron")
+
+
+_ALL_SOURCES = (
+    None,
+    TeacherSpec("base", None),
+    TeacherSpec("adapter", "/x"),
+    TeacherSpec("self_ema", None),
+    TeacherSpec("self_lag", None),
+    TeacherSpec("load", "/x"),
+)
+
+
+def test_plan_sglang_is_none_for_every_source():
+    # sglang teachers are scored on the rollout engine; the trainer produces
+    # nothing (engine-scored teacher_log_probs are authoritative).
+    for spec in _ALL_SOURCES:
+        for ref_available in (True, False):
+            assert (
+                teacher_forward_plan(spec, peft_enabled=True, ref_available=ref_available, opd_type="sglang")
+                == "none"
+            )
+
+
+def test_plan_sglang_adapter_is_none_regression():
+    # Regression for the crashed config: sglang + adapter:<path> used to reach
+    # the trainer's adapter_swap branch and RuntimeError "has no tensors loaded"
+    # because with_opd_teacher is megatron-only. Engine scoring is authoritative.
+    for ref_available in (True, False):
+        assert (
+            teacher_forward_plan(
+                TeacherSpec("adapter", "/x"),
+                peft_enabled=True,
+                ref_available=ref_available,
+                opd_type="sglang",
+            )
+            == "none"
+        )
+
+
+def test_plan_megatron_routing_unchanged():
+    # opd_type == "megatron" preserves the original per-source routing.
+    assert teacher_forward_plan(None, peft_enabled=True, ref_available=True, opd_type="megatron") == "none"
+    assert (
+        teacher_forward_plan(TeacherSpec("load", "/x"), peft_enabled=False, ref_available=False, opd_type="megatron")
+        == "switch_model"
+    )
+    assert (
+        teacher_forward_plan(TeacherSpec("base", None), peft_enabled=True, ref_available=True, opd_type="megatron")
+        == "alias_ref"
+    )
+    assert (
+        teacher_forward_plan(TeacherSpec("base", None), peft_enabled=True, ref_available=False, opd_type="megatron")
+        == "adapter_off"
+    )
+    for source in ("adapter", "self_ema", "self_lag"):
+        assert (
+            teacher_forward_plan(TeacherSpec(source, "/x"), peft_enabled=True, ref_available=True, opd_type="megatron")
+            == "adapter_swap"
+        )

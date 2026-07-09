@@ -82,7 +82,9 @@ def should_promote_teacher(spec_source: str, promote_interval: int | None, rollo
     return rollout_id % promote_interval == 0
 
 
-def teacher_forward_plan(spec: TeacherSpec | None, peft_enabled: bool, ref_available: bool) -> str:
+def teacher_forward_plan(
+    spec: TeacherSpec | None, peft_enabled: bool, ref_available: bool, *, opd_type: str | None
+) -> str:
     """Decide how the trainer produces teacher_log_probs this cycle.
 
     Returns "none" (no teacher), "alias_ref" (teacher==base and the ref
@@ -90,7 +92,13 @@ def teacher_forward_plan(spec: TeacherSpec | None, peft_enabled: bool, ref_avail
     forward with the adapter disabled), "adapter_swap" (swap frozen/self
     teacher adapter tensors in for the forward), or "switch_model" (legacy
     full second model).
+
+    opd_type is the teacher producer ("megatron", "sglang", or None). Under
+    "sglang" the teacher is scored on the rollout engine and its log-probs are
+    authoritative, so the trainer produces nothing ("none") for every source.
     """
+    if opd_type == "sglang":
+        return "none"
     if spec is None:
         return "none"
     if spec.source == "load":

@@ -548,10 +548,14 @@ class MegatronTrainRayActor(TrainRayActor):
         "teacher_log_probs". Routing follows teacher_forward_plan: same-base
         specs toggle adapters on the resident model (no second model); base
         aliases the already-computed ref forward when available; load: keeps
-        the legacy full second model.
+        the legacy full second model. Under --opd-type sglang the teacher is
+        scored on the rollout engine, so this returns None (plan "none").
         """
         plan = teacher_forward_plan(
-            self._opd_teacher_spec, is_peft_enabled(self.args), ref_data is not None
+            self._opd_teacher_spec,
+            is_peft_enabled(self.args),
+            ref_data is not None,
+            opd_type=getattr(self.args, "opd_type", None),
         )
         if plan == "none":
             return None
