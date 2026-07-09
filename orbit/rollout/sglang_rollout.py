@@ -38,6 +38,7 @@ from orbit.utils.processing_utils import (
 )
 from orbit.utils.types import Sample
 
+from .opd_scoring import local_scoring_enabled, opd_score_sample
 from .rm_hub import async_rm, batched_async_rm
 
 __all__ = ["generate_rollout", "get_model_url"]
@@ -554,6 +555,15 @@ async def generate_and_rm(
                     sample = await custom_generate_func(args, sample, sampling_params)
             else:
                 sample = await generate(args, sample, sampling_params, evaluation=evaluation)
+
+    # score against the local same-engine teacher (adapter-slot or base), once
+    # per generated sample, before any reward computation below; dormant
+    # unless local_scoring_enabled(args) (same-base --opd-teacher, no external
+    # --opd-teacher-url/-urls).
+    if local_scoring_enabled(args):
+        for scored_sample in sample if isinstance(sample, list) else [sample]:
+            if scored_sample.status != Sample.Status.ABORTED:
+                await opd_score_sample(args, scored_sample)
 
     # for the rm that need the whole group, we will not do the rm here
     if args.group_rm:
