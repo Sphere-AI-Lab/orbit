@@ -17,7 +17,7 @@ from orbit.utils.arguments import uses_rollout_engines
 from orbit.utils.context_utils import with_defer
 from orbit.utils.distributed_utils import get_gloo_group, init_process_group
 from orbit.utils.memory_utils import clear_memory, print_memory
-from orbit.utils.opd_teacher_spec import teacher_forward_plan
+from orbit.utils.opd_teacher_spec import should_promote_teacher, teacher_forward_plan
 from orbit.utils.processing_utils import load_tokenizer
 from orbit.utils.ray_utils import Box
 from orbit.utils.reloadable_process_group import destroy_process_groups, monkey_patch_torch_dist, reload_process_groups
@@ -253,6 +253,30 @@ class MegatronTrainRayActor(TrainRayActor):
                     decay=self.args.opd_ema_decay,
                     interval=self.args.opd_self_teacher_interval,
                 )
+
+        # sglang self:* teachers score on the rollout engine, so with_opd_teacher
+        # is False (no in-process teacher model/tensors are allocated). The actor
+        # still shadows the student adapter here so _promote_self_teacher can push
+        # the EMA/lag buffer into the engine's orbit_teacher slot. Kept separate
+        # from the with_opd_teacher block above to leave the megatron path
+        # byte-identical. Actor-only: the critic shares args.opd_teacher_spec but
+        # never produces or promotes teachers.
+        if (
+            role == "actor"
+            and self._self_teacher is None
+            and self._opd_teacher_spec is not None
+            and self._opd_teacher_spec.source in ("self_ema", "self_lag")
+            and getattr(self.args, "opd_type", None) == "sglang"
+        ):
+            self._self_teacher = SelfTeacherBuffer(
+                self._adapter_named_params(),
+                mode="ema" if self._opd_teacher_spec.source == "self_ema" else "lag",
+                decay=self.args.opd_ema_decay,
+                interval=self.args.opd_self_teacher_interval,
+            )
+        # Set True after the engine's orbit_teacher slot has been filled once
+        # (startup promotion in update_weights); scoring an empty slot 404s.
+        self._teacher_slot_startup_promoted = False
 
         if self.args.keep_old_actor:
             # Load old_actor checkpoint
@@ -556,6 +580,21 @@ class MegatronTrainRayActor(TrainRayActor):
         self._switch_model("teacher")
         return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="teacher_")
 
+    def _promote_self_teacher(self) -> None:
+        """Push the EMA/lag buffer to the engine's orbit_teacher slot.
+
+        Swap buffer tensors into the live adapter params so the existing
+        megatron->HF conversion + transport applies unchanged, sync to the
+        teacher slot name, restore. Failure keeps the previous teacher slot
+        (never silently distill from a half-loaded adapter).
+        """
+        with swap_adapter_tensors(self.model, self._self_teacher.tensors, is_adapter_param_name):
+            try:
+                self.weight_updater.push_teacher_adapter()
+            except Exception:
+                logger.exception("OPD self-teacher promotion FAILED; engine keeps the previous teacher slot.")
+                raise
+
     def train(self, rollout_id: int, rollout_data_ref: Box) -> None:
         self._last_rollout_id = rollout_id
         if self.args.offload_train:
@@ -677,6 +716,10 @@ class MegatronTrainRayActor(TrainRayActor):
                 )
                 if self._self_teacher is not None:
                     self._self_teacher.update(self._adapter_named_params())
+                    if should_promote_teacher(
+                        self._opd_teacher_spec.source, self.args.opd_promote_interval, rollout_id
+                    ):
+                        self._promote_self_teacher()
 
             self.prof.step(rollout_id=rollout_id)
 
@@ -761,6 +804,27 @@ class MegatronTrainRayActor(TrainRayActor):
         print_memory("before update_weights")
         self.weight_updater.update_weights()
         print_memory("after update_weights")
+
+        # Startup fill of the engine's orbit_teacher slot for sglang self:*
+        # teachers (Task 6 reserves it EMPTY; the local scoring stage fires
+        # unconditionally during the FIRST generate, and scoring an empty slot
+        # 404s). Both drivers call actor update_weights once before the first
+        # generate — on fresh start AND resume — so promoting here guarantees
+        # the slot is filled before any scoring. Re-promote whenever new or
+        # restarted engines connect: their slot starts empty too. Must run
+        # before offload_train_adapter (the export reads live GPU params). A
+        # failure raises out of the launch — never start training with an
+        # empty teacher slot.
+        if (
+            self._self_teacher is not None
+            and should_promote_teacher(
+                self._opd_teacher_spec.source, getattr(self.args, "opd_promote_interval", None), 0
+            )
+            and (not self._teacher_slot_startup_promoted or num_new_engines > 0)
+        ):
+            self._promote_self_teacher()
+            self._teacher_slot_startup_promoted = True
+
         if self.args.offload_train_adapter:
             offload_megatron_adapter_to_cpu(self.model)
             print_memory("after update_weights adapter_offload")

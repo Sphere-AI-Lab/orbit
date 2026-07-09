@@ -71,6 +71,17 @@ def needs_engine_teacher_slot(spec: TeacherSpec | None) -> bool:
     return spec is not None and spec.source in ("adapter", "self_ema", "self_lag")
 
 
+def should_promote_teacher(spec_source: str, promote_interval: int | None, rollout_id: int) -> bool:
+    """Promotion cadence for self:* teachers scored by the rollout engine.
+
+    rollout_id 0 always promotes (the engine slot starts empty; scoring an
+    unfilled slot would 404), then every promote_interval rollouts.
+    """
+    if spec_source not in ("self_ema", "self_lag") or not promote_interval:
+        return False
+    return rollout_id % promote_interval == 0
+
+
 def teacher_forward_plan(spec: TeacherSpec | None, peft_enabled: bool, ref_available: bool) -> str:
     """Decide how the trainer produces teacher_log_probs this cycle.
 
