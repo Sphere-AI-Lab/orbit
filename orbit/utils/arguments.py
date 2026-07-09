@@ -92,6 +92,39 @@ def add_on_policy_distillation_arguments(parser):
         help="Megatron checkpoint directory for the in-process OPD teacher (required for --opd-type megatron).",
     )
     parser.add_argument(
+        "--opd-teacher",
+        type=str,
+        default=None,
+        help=(
+            "What the OPD teacher IS: base (frozen base, adapter off), adapter:<path> "
+            "(base + frozen adapter checkpoint), self:ema / self:lag (EMA or lagged "
+            "snapshot of the student adapter), or load:<megatron-ckpt> (full second "
+            "model; same as legacy --opd-teacher-load). Same-base specs require PEFT."
+        ),
+    )
+    parser.add_argument(
+        "--opd-ema-decay",
+        type=float,
+        default=0.999,
+        help="EMA decay beta for --opd-teacher self:ema (per training step).",
+    )
+    parser.add_argument(
+        "--opd-self-teacher-interval",
+        type=int,
+        default=1,
+        help="Snapshot refresh cadence (training steps) for --opd-teacher self:lag.",
+    )
+    parser.add_argument(
+        "--opd-promote-interval",
+        type=int,
+        default=None,
+        help=(
+            "Promote the self-teacher (EMA/lag) adapter to the rollout engine's "
+            "orbit_teacher slot every N training steps. Required for self:* teachers "
+            "with --opd-type sglang."
+        ),
+    )
+    parser.add_argument(
         "--opd-teacher-ckpt-step",
         type=int,
         default=None,
@@ -458,6 +491,25 @@ def _validate_opd_args(args) -> None:
     if not needs_opd_teacher(args):
         return
 
+    from orbit.utils.opd_teacher_spec import is_self_teacher, parse_teacher_spec
+
+    spec = parse_teacher_spec(getattr(args, "opd_teacher", None), args.opd_teacher_load)
+    args.opd_teacher_spec = spec
+
+    ema_decay = getattr(args, "opd_ema_decay", 0.999)
+    if not (0.0 < ema_decay < 1.0):
+        raise ValueError(f"--opd-ema-decay must be in (0, 1), got {ema_decay}.")
+    if getattr(args, "opd_self_teacher_interval", 1) < 1:
+        raise ValueError("--opd-self-teacher-interval must be >= 1.")
+    promote = getattr(args, "opd_promote_interval", None)
+    if promote is not None and promote < 1:
+        raise ValueError("--opd-promote-interval must be >= 1.")
+    if is_self_teacher(spec) and args.opd_type == "sglang" and promote is None:
+        raise ValueError(
+            "--opd-teacher self:* with --opd-type sglang requires --opd-promote-interval N: "
+            "without promotion the engine's orbit_teacher slot would stay frozen at init."
+        )
+
     if args.opd_type is None:
         raise ValueError(
             "On-policy distillation is enabled (advantage_estimator=on_policy_distillation or --use-opd), "
@@ -465,23 +517,39 @@ def _validate_opd_args(args) -> None:
         )
 
     if args.opd_type == "megatron":
-        if _is_peft_enabled(args):
+        if spec is None:
             raise ValueError(
-                "--opd-type megatron loads a full in-process teacher model (like the ref model), "
-                "which is incompatible with PEFT (--peft-method != none). Use --opd-type sglang "
-                "(external teacher server) for PEFT runs."
+                "--opd-type megatron requires a teacher: --opd-teacher "
+                "{base,adapter:<path>,self:ema,self:lag,load:<ckpt>} (or legacy --opd-teacher-load)."
             )
-        if not args.opd_teacher_load:
-            raise ValueError("--opd-type megatron requires --opd-teacher-load <megatron checkpoint directory>.")
-        if not os.path.exists(args.opd_teacher_load):
-            raise FileNotFoundError(f"--opd-teacher-load {args.opd_teacher_load} does not exist, please check the path.")
-        if not os.path.exists(os.path.join(args.opd_teacher_load, "latest_checkpointed_iteration.txt")):
-            logger.info(
-                f"--opd-teacher-load {args.opd_teacher_load} does not have latest_checkpointed_iteration.txt, "
-                "please make sure it is a valid megatron checkpoint directory."
-            )
+        if spec.source == "load":
+            if _is_peft_enabled(args):
+                raise ValueError(
+                    "--opd-teacher load:<ckpt> loads a full in-process teacher model (like the ref "
+                    "model), which is incompatible with PEFT (--peft-method != none). For PEFT runs "
+                    "use a same-base teacher (--opd-teacher base/adapter:<path>/self:ema/self:lag) "
+                    "or --opd-type sglang."
+                )
+            if not os.path.exists(spec.path):
+                raise FileNotFoundError(f"--opd-teacher load: {spec.path} does not exist, please check the path.")
+            if not os.path.exists(os.path.join(spec.path, "latest_checkpointed_iteration.txt")):
+                logger.info(
+                    f"--opd-teacher load: {spec.path} does not have latest_checkpointed_iteration.txt, "
+                    "please make sure it is a valid megatron checkpoint directory."
+                )
+        else:
+            if not _is_peft_enabled(args):
+                raise ValueError(
+                    f"--opd-teacher {args.opd_teacher!r} shares the student's base weights and needs "
+                    "an adapter structure to swap the teacher onto (--peft-method != none); with full "
+                    "fine-tuning use --opd-teacher load:<ckpt>."
+                )
+            if spec.source == "adapter":
+                if not os.path.isdir(spec.path):
+                    raise FileNotFoundError(f"--opd-teacher adapter: {spec.path} does not exist.")
+                _validate_teacher_adapter_config(spec.path, args.peft_method)
     elif args.opd_type == "sglang":
-        if args.opd_teacher_load:
+        if spec is not None and spec.source == "load":
             raise ValueError(
                 "--opd-type sglang scores via an external SGLang teacher server; --opd-teacher-load must be "
                 "unset (configure the SGLang teacher endpoint instead of an in-process checkpoint)."
@@ -563,6 +631,21 @@ def _is_peft_enabled(args) -> bool:
     GPU-only deps just to validate args).
     """
     return getattr(args, "peft_method", "none") != "none"
+
+
+def _validate_teacher_adapter_config(adapter_dir: str, peft_method: str) -> None:
+    """CPU-safe mirror of peft_utils.validate_peft_checkpoint_type (that module
+    imports megatron.bridge at import time, unavailable at arg-parse time)."""
+    config_path = os.path.join(adapter_dir, "adapter_config.json")
+    if not os.path.exists(config_path):
+        return
+    with open(config_path) as f:
+        actual_type = json.load(f).get("peft_type")
+    if actual_type is not None and actual_type.upper() != peft_method.upper():
+        raise ValueError(
+            f"--opd-teacher adapter: checkpoint at {adapter_dir} has peft_type={actual_type}, "
+            f"expected {peft_method.upper()} (the active --peft-method)."
+        )
 
 
 _MEGATRON_FULL_MODEL_OFFLOAD_ERROR = (
