@@ -208,7 +208,9 @@ def _get_kl_type(args: Namespace) -> tuple[str, float]:
     return kl_type, mixed_weight
 
 
-def _score_payload(input_ids: list[int], top_k: int = 0, token_ids: list[int] | None = None) -> dict[str, Any]:
+def _score_payload(
+    input_ids: list[int], top_k: int = 0, token_ids: list[int] | None = None, lora_path: str | None = None
+) -> dict[str, Any]:
     payload = {
         "input_ids": input_ids,
         "sampling_params": {
@@ -223,6 +225,8 @@ def _score_payload(input_ids: list[int], top_k: int = 0, token_ids: list[int] | 
         payload["top_logprobs_num"] = top_k
     if token_ids:
         payload["token_ids_logprob"] = token_ids
+    if lora_path is not None:
+        payload["lora_path"] = lora_path
     return payload
 
 
@@ -631,16 +635,22 @@ def _sampled_teacher_log_probs(payload: dict[str, Any], response_length: int) ->
     return _extract_teacher_log_probs(payload, response_length)
 
 
-async def _score_with_teacher(args, sample: Sample, targets: list[TeacherTarget] | None = None) -> dict:
+async def _score_with_teacher(
+    args, sample: Sample, targets: list[TeacherTarget] | None = None, lora_path: str | None = None
+) -> dict:
     """POST the sample's full token sequence to the SGLang teacher group for
     prefill-only scoring (sampled-token path). Kept separate from
     ``reward_func`` so tests can monkeypatch it and never hit the network.
     """
     targets = targets or [(args.opd_teacher_url, 1.0)]
-    return await _post_teacher_group(targets, _score_payload(sample.tokens), _scoring_timeout(args))
+    return await _post_teacher_group(
+        targets, _score_payload(sample.tokens, lora_path=lora_path), _scoring_timeout(args)
+    )
 
 
-async def _score_top_k(args, sample: Sample, targets: list[TeacherTarget] | None = None) -> dict[str, Any]:
+async def _score_top_k(
+    args, sample: Sample, targets: list[TeacherTarget] | None = None, lora_path: str | None = None
+) -> dict[str, Any]:
     """Orchestrate top-k cross-scoring: the teacher group scored with its own
     top-k and/or on the student's top-k token ids; optionally the student
     re-scored on the teacher's top-k ids (via the rollout router). Returns the
@@ -660,6 +670,7 @@ async def _score_top_k(args, sample: Sample, targets: list[TeacherTarget] | None
         sample.tokens,
         top_k=top_k if strategy in TEACHER_TOP_STRATEGIES else 0,
         token_ids=teacher_token_ids,
+        lora_path=lora_path,
     )
     group_response = await _post_teacher_group(targets, teacher_payload, request_timeout)
 

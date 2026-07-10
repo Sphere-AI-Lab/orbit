@@ -18,14 +18,20 @@ pure distillation.
 The teacher's `teacher_log_probs` come from a teacher-forcing forward pass (the
 teacher does **not** generate). The producer is chosen with `--opd-type`:
 
-- `--opd-type megatron`: a second full Megatron model loaded on the training
-  GPUs, scored like the `ref` model. Requires `--opd-teacher-load <megatron
-  checkpoint>` (optionally `--opd-teacher-ckpt-step <iter>`).
-- `--opd-type sglang`: scoring via an external SGLang teacher server (no
-  in-process checkpoint). Requires `--opd-teacher-url <http://host:port/generate>`,
-  plus `--custom-rm-path orbit.rollout.opd_sglang.reward_func
+- `--opd-type megatron`: trainer-side scoring. `--opd-teacher load:<ckpt>`
+  (legacy `--opd-teacher-load <megatron checkpoint>`, optionally
+  `--opd-teacher-ckpt-step <iter>`) loads a second full Megatron model on the
+  training GPUs, scored like the `ref` model; same-base specs
+  (`--opd-teacher base/adapter:<path>/self:*`, see "Teacher-as-Adapter-Slot"
+  below) score without a second model.
+- `--opd-type sglang`: rollout-side scoring (no in-process second
+  checkpoint). With `--opd-teacher-url <http://host:port/generate>` an
+  external SGLang teacher server scores the samples; that mode requires
+  `--custom-rm-path orbit.rollout.opd_sglang.reward_func
   --custom-reward-post-process-path orbit.rollout.opd_sglang.post_process` to
-  wire the scoring call into orbit's reward pipeline (see below).
+  wire the scoring call into orbit's reward pipeline (see below). Without a
+  URL (local mode), the rollout engine scores a same-base teacher itself and
+  those hooks must be left unset (see "Teacher-as-Adapter-Slot" below).
 
 ## Megatron teacher recipe
 
@@ -96,8 +102,9 @@ than `sample.reward`, because orbit computes zero-std-reward rollout metrics
 from `sample.reward` *before* the post-process hook runs, and those metrics
 assume a numeric reward.)
 
-**Eval-accuracy/pass-rate is not meaningful here.** `reward_func` always
-returns `0.0`, and orbit shares this hook between train and eval, so any
+**Eval-accuracy/pass-rate is not meaningful in this external-URL hook mode.**
+`reward_func` always returns `0.0`, and orbit shares this hook between train
+and eval, so any
 task-accuracy or pass-rate metric derived from `sample.reward` (`eval/<dataset>`,
 `--eval-pass-k-values`, `--log-passrate`) reports 0 regardless of student
 quality -- the actual training signal is `teacher_log_probs`, not reward.
@@ -106,6 +113,9 @@ quality -- the actual training signal is `teacher_log_probs`, not reward.
 `--log-passrate` entirely; `TEST_JSONL` is only consulted if you explicitly set
 `DISABLE_EVAL=0`. Contrast with `run-qwen3-4B-opd-megatron.sh`, which uses a
 real `--rm-type math` reward, so its eval-accuracy numbers are meaningful.
+(In sglang local-teacher mode — no `--opd-teacher-url`, see
+"Teacher-as-Adapter-Slot" below — scoring is a built-in rollout stage, the
+reward hook stays real, and eval metrics are meaningful again.)
 
 Same CPU-free argv inspection and mutual-exclusion rules as the Megatron
 recipe apply here.
@@ -249,21 +259,52 @@ make the ratio identically 1).
 
 ## Constraints
 
-- The Megatron teacher requires full fine-tuning (`--peft-method none`) and the
-  CPU weights backuper (enabled by default). It adds a second full-model CPU
-  backup, so account for the extra host memory.
-- `orbit.rollout.opd_sglang.reward_func` always returns `0.0` and occupies the
-  single `--custom-rm-path` slot. Combining `--opd-type sglang` with the
-  **blend** form (`--use-opd`) is rejected by `_validate_opd_args` with a
-  `ValueError`: it would require a `reward_func` that both scores the teacher
-  and computes the task reward, which is not wired up by this recipe. The
-  sglang teacher supports only pure MOPD
-  (`--advantage-estimator on_policy_distillation`); use `--opd-type megatron`
-  for the blend instead.
-- In sglang-teacher mode, task-accuracy/pass-rate eval is **not meaningful**:
-  `reward_func` always returns `0.0` and is shared between train and eval, so
-  any `eval/<dataset>`, pass@k, or `--log-passrate` metric reports 0 regardless
-  of student quality -- the training signal is `teacher_log_probs`, not
-  reward. `run-qwen3-4B-opd-sglang.sh` disables eval by default accordingly.
-  The Megatron recipe uses a real `--rm-type math` reward, so its eval works
-  as expected.
+- The Megatron teacher requires full fine-tuning (`--peft-method none`) only
+  for `--opd-teacher load:<ckpt>` (the second-full-model path, same as legacy
+  `--opd-teacher-load`); that path also requires the CPU weights backuper
+  (enabled by default) and adds a second full-model CPU backup, so account
+  for the extra host memory. Same-base specs
+  (`--opd-teacher base/adapter:<path>/self:*`) require PEFT instead and load
+  no second model.
+- With an external `--opd-teacher-url`, `orbit.rollout.opd_sglang.reward_func`
+  always returns `0.0` and occupies the single `--custom-rm-path` slot.
+  Combining that external-teacher mode with the **blend** form (`--use-opd`)
+  is rejected by `_validate_opd_args` with a `ValueError`: it would require a
+  `reward_func` that both scores the teacher and computes the task reward,
+  which is not wired up by this recipe. The external-URL sglang teacher
+  supports only pure MOPD (`--advantage-estimator on_policy_distillation`);
+  for the blend use `--opd-type megatron` or a same-base local teacher (no
+  `--opd-teacher-url`), where scoring is a built-in rollout stage and the
+  `--custom-rm-path` slot stays free for a real task reward.
+- In external-URL sglang-teacher mode, task-accuracy/pass-rate eval is **not
+  meaningful**: `reward_func` always returns `0.0` and is shared between train
+  and eval, so any `eval/<dataset>`, pass@k, or `--log-passrate` metric reports
+  0 regardless of student quality -- the training signal is
+  `teacher_log_probs`, not reward. `run-qwen3-4B-opd-sglang.sh` disables eval
+  by default accordingly. The Megatron recipe and sglang local-teacher mode
+  use a real reward (`--rm-type math` here), so their eval works as expected.
+
+## Teacher-as-Adapter-Slot (same-base teachers)
+
+When the teacher shares the student's frozen base, no second model and no
+teacher server are needed — the teacher is a named adapter:
+
+- `--opd-teacher base`: the frozen base itself (with `--kl-coef`/KL on, the
+  ref forward is reused: the teacher is literally free).
+- `--opd-teacher adapter:<path>`: base + a frozen adapter checkpoint (SFT /
+  expert / RL-trained). Trainer-side scoring swaps the adapter tensors in for
+  the teacher forward; sglang-side scoring targets the engine's reserved
+  `orbit_teacher` slot via per-request `lora_path`.
+- `--opd-teacher self:ema` / `self:lag`: an EMA (`--opd-ema-decay`) or lagged
+  (`--opd-self-teacher-interval`) snapshot of the student adapter. With
+  `--opd-type sglang`, add `--opd-promote-interval N` to push the buffer to
+  the engine slot every N steps (the EMA updates once per rollout training
+  step). This enables mean-teacher MOPD and iterated self-distillation at
+  adapter cost.
+
+Same-base specs require PEFT (`--peft-method != none`); with full fine-tuning
+use `--opd-teacher load:<ckpt>` (the legacy second-model path,
+`--opd-teacher-load` is equivalent). In sglang local mode (no
+`--opd-teacher-url`), scoring is a built-in rollout stage: `--custom-rm-path`
+stays free, so real task rewards compose with distillation (`--use-opd`
+blend now works with sglang teachers) and eval accuracy is meaningful again.

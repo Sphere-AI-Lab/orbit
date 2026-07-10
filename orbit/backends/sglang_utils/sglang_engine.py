@@ -959,6 +959,20 @@ def _compute_server_args(
     if engine_info_bootstrap_port is not None:
         kwargs["engine_info_bootstrap_port"] = engine_info_bootstrap_port
 
+    from orbit.utils.opd_teacher_spec import (
+        OPD_TEACHER_ADAPTER_NAME,
+        needs_engine_teacher_slot,
+        parse_teacher_spec,
+    )
+
+    def _opd_teacher_spec_from_args(a):
+        if getattr(a, "opd_type", None) != "sglang":
+            return None
+        return parse_teacher_spec(getattr(a, "opd_teacher", None), getattr(a, "opd_teacher_load", None))
+
+    opd_teacher_spec = _opd_teacher_spec_from_args(args)
+    opd_teacher_slot = needs_engine_teacher_slot(opd_teacher_spec)
+
     peft_method = get_peft_method(args)
     if "enable_weights_cpu_backup" not in kwargs:
         kwargs["enable_weights_cpu_backup"] = args.offload_rollout
@@ -992,6 +1006,9 @@ def _compute_server_args(
         kwargs["max_loras_per_batch"] = 1
         if getattr(args, "adapter_double_buffer", False):
             kwargs["max_loras_per_batch"] = max(kwargs["max_loras_per_batch"], 2)
+        # reserved orbit_teacher slot for OPD same-base teacher scoring
+        if opd_teacher_slot:
+            kwargs["max_loras_per_batch"] += 1
         kwargs["max_lora_rank"] = max(getattr(args, "lora_rank", 0), 1)
         kwargs["lora_target_modules"] = convert_target_modules_to_hf(args.target_modules)
 
@@ -1000,6 +1017,10 @@ def _compute_server_args(
             kwargs["lora_paths"] = {LORA_ADAPTER_NAME: lora_adapter_path}
         else:
             logger.info("No pre-trained LoRA adapter_path provided, will use random initial weights")
+        # Preload the teacher AFTER the student lora_paths assignment above so
+        # the student's dict reassignment cannot clobber the teacher entry.
+        if opd_teacher_slot and opd_teacher_spec.source == "adapter":
+            kwargs.setdefault("lora_paths", {})[OPD_TEACHER_ADAPTER_NAME] = opd_teacher_spec.path
     elif peft_method == "oft":
         # Same BP-7 decline as above; mirror args.offload_rollout until the
         # merge gate is verified for the OFT recovery / offload path too.
@@ -1017,12 +1038,19 @@ def _compute_server_args(
         kwargs["max_ofts_per_batch"] = 2
         if getattr(args, "adapter_double_buffer", False):
             kwargs["max_ofts_per_batch"] = max(kwargs["max_ofts_per_batch"], 3)
+        # reserved orbit_teacher slot for OPD same-base teacher scoring
+        if opd_teacher_slot:
+            kwargs["max_ofts_per_batch"] += 1
         kwargs["oft_backend"] = getattr(args, "sglang_oft_backend", "triton")
         oft_adapter_path = getattr(args, "oft_adapter_path", None)
         if oft_adapter_path is not None:
             kwargs["oft_paths"] = {OFT_ADAPTER_NAME: oft_adapter_path}
         else:
             logger.info("No pre-trained OFT adapter_path provided, will use random initial weights")
+        # Preload the teacher AFTER the student oft_paths assignment above so
+        # the student's dict reassignment cannot clobber the teacher entry.
+        if opd_teacher_slot and opd_teacher_spec.source == "adapter":
+            kwargs.setdefault("oft_paths", {})[OPD_TEACHER_ADAPTER_NAME] = opd_teacher_spec.path
 
     server_arg_fields = {field.name for field in dataclasses.fields(ServerArgs)}
     for attr in dataclasses.fields(ServerArgs):

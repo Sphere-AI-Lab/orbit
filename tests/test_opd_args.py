@@ -33,6 +33,14 @@ def _base_args(**overrides):
         opd_teacher_url=None,
         opd_icepop=False,
         use_rollout_logprobs=False,
+        peft_method="none",
+        opd_teacher=None,
+        opd_teacher_urls=None,
+        opd_ema_decay=0.999,
+        opd_self_teacher_interval=1,
+        opd_promote_interval=None,
+        custom_rm_path=None,
+        custom_reward_post_process_path=None,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -407,3 +415,161 @@ def test_validate_kl_type_mixed_passes_with_topk():
         opd_mixed_kl_weight=0.5,
     )
     _validate_opd_args(args)
+
+
+# --- Teacher-as-Adapter-Slot: TeacherSpec validation matrix ---
+
+
+def _make_adapter_dir(tmp_path, peft_type="LORA"):
+    d = tmp_path / "teacher_adapter"
+    d.mkdir()
+    (d / "adapter_config.json").write_text(f'{{"peft_type": "{peft_type}"}}')
+    return str(d)
+
+
+def test_opd_teacher_arg_parses():
+    args = _parse(["--opd-teacher", "adapter:/x/y"])
+    assert args.opd_teacher == "adapter:/x/y"
+    assert args.opd_ema_decay == 0.999
+    assert args.opd_self_teacher_interval == 1
+    assert args.opd_promote_interval is None
+
+
+def test_legacy_load_still_validates(tmp_path):
+    ckpt = _make_ckpt(tmp_path)
+    args = _base_args(advantage_estimator="on_policy_distillation", opd_type="megatron", opd_teacher_load=ckpt)
+    _validate_opd_args(args)
+    assert args.opd_teacher_spec.source == "load"
+    assert args.opd_teacher_spec.path == ckpt
+
+
+def test_load_spec_with_peft_rejected(tmp_path):
+    ckpt = _make_ckpt(tmp_path)
+    args = _base_args(
+        advantage_estimator="on_policy_distillation", opd_type="megatron",
+        opd_teacher=f"load:{ckpt}", peft_method="lora",
+    )
+    with pytest.raises(ValueError, match="incompatible with PEFT"):
+        _validate_opd_args(args)
+
+
+def test_same_base_spec_without_peft_rejected():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation", opd_type="megatron", opd_teacher="base",
+    )
+    with pytest.raises(ValueError, match="adapter structure"):
+        _validate_opd_args(args)
+
+
+def test_base_spec_with_peft_accepted():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation", opd_type="megatron",
+        opd_teacher="base", peft_method="lora",
+    )
+    _validate_opd_args(args)
+    assert args.opd_teacher_spec.source == "base"
+
+
+def test_adapter_spec_missing_dir_rejected():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation", opd_type="megatron",
+        opd_teacher="adapter:/nonexistent/dir", peft_method="lora",
+    )
+    with pytest.raises(FileNotFoundError):
+        _validate_opd_args(args)
+
+
+def test_adapter_spec_method_mismatch_rejected(tmp_path):
+    adapter = _make_adapter_dir(tmp_path, peft_type="OFT")
+    args = _base_args(
+        advantage_estimator="on_policy_distillation", opd_type="megatron",
+        opd_teacher=f"adapter:{adapter}", peft_method="lora",
+    )
+    with pytest.raises(ValueError, match="peft_type"):
+        _validate_opd_args(args)
+
+
+def test_adapter_spec_method_match_accepted(tmp_path):
+    adapter = _make_adapter_dir(tmp_path, peft_type="LORA")
+    args = _base_args(
+        advantage_estimator="on_policy_distillation", opd_type="megatron",
+        opd_teacher=f"adapter:{adapter}", peft_method="lora",
+    )
+    _validate_opd_args(args)
+    assert args.opd_teacher_spec.source == "adapter"
+
+
+def test_self_ema_megatron_accepted_without_promote_interval():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation", opd_type="megatron",
+        opd_teacher="self:ema", peft_method="lora",
+    )
+    _validate_opd_args(args)
+
+
+def test_bad_ema_decay_rejected():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation", opd_type="megatron",
+        opd_teacher="self:ema", peft_method="lora", opd_ema_decay=1.5,
+    )
+    with pytest.raises(ValueError, match="opd-ema-decay"):
+        _validate_opd_args(args)
+
+
+def test_megatron_without_any_teacher_rejected():
+    args = _base_args(advantage_estimator="on_policy_distillation", opd_type="megatron")
+    with pytest.raises(ValueError, match="--opd-teacher"):
+        _validate_opd_args(args)
+
+
+# --- Task 8: local-mode sglang + blend unlock ---
+
+
+def test_sglang_local_mode_accepted_without_url_or_hooks():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation", opd_type="sglang",
+        opd_teacher="base", peft_method="lora",
+    )
+    _validate_opd_args(args)
+
+
+def test_sglang_local_mode_blend_allowed():
+    args = _base_args(
+        advantage_estimator="grpo", use_opd=True, opd_type="sglang",
+        opd_teacher="self:ema", peft_method="lora", opd_promote_interval=1,
+    )
+    _validate_opd_args(args)  # custom-rm slot is free: real rewards compose
+
+
+def test_sglang_external_url_blend_still_rejected():
+    args = _base_args(
+        advantage_estimator="grpo", use_opd=True, opd_type="sglang",
+        opd_teacher_url="http://h:1/generate",
+        custom_rm_path="orbit.rollout.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.rollout.opd_sglang.post_process",
+    )
+    with pytest.raises(ValueError, match="blend"):
+        _validate_opd_args(args)
+
+
+def test_sglang_no_teacher_at_all_still_rejected():
+    args = _base_args(advantage_estimator="on_policy_distillation", opd_type="sglang")
+    with pytest.raises(ValueError, match="opd-teacher"):
+        _validate_opd_args(args)
+
+
+def test_sglang_load_spec_still_rejected():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation", opd_type="sglang",
+        opd_teacher="load:/ckpt",
+    )
+    with pytest.raises(ValueError, match="load"):
+        _validate_opd_args(args)
+
+
+def test_sglang_local_mode_without_peft_rejected():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation", opd_type="sglang", opd_teacher="base",
+    )
+    with pytest.raises(ValueError, match="PEFT|adapter structure"):
+        _validate_opd_args(args)

@@ -12,14 +12,17 @@ from transformers import AutoConfig
 
 from orbit.ray.train_actor import TrainRayActor
 from orbit.utils import train_dump_utils
+from orbit.utils.adapter_swap import swap_adapter_tensors
 from orbit.utils.arguments import uses_rollout_engines
 from orbit.utils.context_utils import with_defer
 from orbit.utils.distributed_utils import get_gloo_group, init_process_group
 from orbit.utils.memory_utils import clear_memory, print_memory
+from orbit.utils.opd_teacher_spec import should_promote_teacher, teacher_forward_plan
 from orbit.utils.processing_utils import load_tokenizer
 from orbit.utils.ray_utils import Box
 from orbit.utils.reloadable_process_group import destroy_process_groups, monkey_patch_torch_dist, reload_process_groups
 from orbit.utils.replay_base import all_replay_managers
+from orbit.utils.self_teacher import SelfTeacherBuffer
 from orbit.utils.timer import Timer, inverse_timer, timer
 from orbit.utils.tracking_utils import init_tracking
 from orbit.utils.types import RolloutBatch
@@ -46,7 +49,13 @@ from .peft_offload import (
     offload_megatron_grad_buffers,
     offload_megatron_optimizer,
 )
-from .peft_utils import create_peft_instance, get_peft_method, is_peft_enabled
+from .peft_utils import (
+    create_peft_instance,
+    get_peft_method,
+    is_adapter_param_name,
+    is_peft_enabled,
+    load_adapter_tensors_for_teacher,
+)
 from .replay_utils import get_register_replay_list_func
 from .state_mode import should_backup_actor_after_train, uses_adapter_state
 from .update_weight.common import named_adapter_params, named_params_and_buffers
@@ -214,15 +223,60 @@ class MegatronTrainRayActor(TrainRayActor):
         if with_ref and not is_peft_enabled(self.args):
             self.load_other_checkpoint("ref", args.ref_load)
 
-        # In-process Megatron OPD teacher: a second full model, loaded like "ref"
-        # and scored by a teacher-forcing forward pass at train time.
+        # In-process OPD teacher. Same-base specs (base/adapter:/self:*) need no
+        # second model: the teacher is the resident base with adapters toggled.
+        # Only the legacy load:<ckpt> spec loads a full second model like "ref".
+        self._opd_teacher_spec = getattr(self.args, "opd_teacher_spec", None)
+        self._opd_teacher_tensors: dict[str, torch.Tensor] | None = None
+        self._self_teacher = None
         if with_opd_teacher:
-            if self.args.opd_teacher_ckpt_step is not None:
-                _saved_ckpt_step = self.args.ckpt_step
-                self.args.ckpt_step = self.args.opd_teacher_ckpt_step
-            self.load_other_checkpoint("teacher", self.args.opd_teacher_load)
-            if self.args.opd_teacher_ckpt_step is not None:
-                self.args.ckpt_step = _saved_ckpt_step
+            if self._opd_teacher_spec is None:
+                from orbit.utils.opd_teacher_spec import parse_teacher_spec
+
+                self._opd_teacher_spec = parse_teacher_spec(
+                    getattr(self.args, "opd_teacher", None), self.args.opd_teacher_load
+                )
+            spec = self._opd_teacher_spec
+            if spec.source == "load":
+                if self.args.opd_teacher_ckpt_step is not None:
+                    _saved_ckpt_step = self.args.ckpt_step
+                    self.args.ckpt_step = self.args.opd_teacher_ckpt_step
+                self.load_other_checkpoint("teacher", spec.path)
+                if self.args.opd_teacher_ckpt_step is not None:
+                    self.args.ckpt_step = _saved_ckpt_step
+            elif spec.source == "adapter":
+                self._opd_teacher_tensors = load_adapter_tensors_for_teacher(self.model, spec.path)
+            elif spec.source in ("self_ema", "self_lag"):
+                self._self_teacher = SelfTeacherBuffer(
+                    self._adapter_named_params(),
+                    mode="ema" if spec.source == "self_ema" else "lag",
+                    decay=self.args.opd_ema_decay,
+                    interval=self.args.opd_self_teacher_interval,
+                )
+
+        # sglang self:* teachers score on the rollout engine, so with_opd_teacher
+        # is False (no in-process teacher model/tensors are allocated). The actor
+        # still shadows the student adapter here so _promote_self_teacher can push
+        # the EMA/lag buffer into the engine's orbit_teacher slot. Kept separate
+        # from the with_opd_teacher block above to leave the megatron path
+        # byte-identical. Actor-only: the critic shares args.opd_teacher_spec but
+        # never produces or promotes teachers.
+        if (
+            role == "actor"
+            and self._self_teacher is None
+            and self._opd_teacher_spec is not None
+            and self._opd_teacher_spec.source in ("self_ema", "self_lag")
+            and getattr(self.args, "opd_type", None) == "sglang"
+        ):
+            self._self_teacher = SelfTeacherBuffer(
+                self._adapter_named_params(),
+                mode="ema" if self._opd_teacher_spec.source == "self_ema" else "lag",
+                decay=self.args.opd_ema_decay,
+                interval=self.args.opd_self_teacher_interval,
+            )
+        # Set True after the engine's orbit_teacher slot has been filled once
+        # (startup promotion in update_weights); scoring an empty slot 404s.
+        self._teacher_slot_startup_promoted = False
 
         if self.args.keep_old_actor:
             # Load old_actor checkpoint
@@ -474,25 +528,76 @@ class MegatronTrainRayActor(TrainRayActor):
         self._switch_model("ref")
         return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="ref_")
 
+    def _adapter_named_params(self) -> dict[str, torch.Tensor]:
+        params: dict[str, torch.Tensor] = {}
+        for chunk in self.model:
+            for name, param in chunk.named_parameters():
+                if is_adapter_param_name(name):
+                    params[name] = param
+        return params
+
     def compute_teacher_log_probs(
         self,
         data_iterator: list[DataIterator],
         num_microbatches: list[int],
+        ref_data: dict[str, list[torch.Tensor]] | None = None,
     ) -> dict[str, list[torch.Tensor]] | None:
-        """Compute in-process Megatron teacher log-probs for on-policy distillation.
+        """Compute in-process teacher log-probs for on-policy distillation.
 
-        Mirrors compute_ref_log_probs: a teacher-forcing forward pass on the
-        student's already-sampled tokens (not generation), producing
-        "teacher_log_probs" (store_prefix="teacher_" + base key "log_probs")
-        for the on_policy_distillation estimator / --use-opd blend. Returns None
-        when no teacher model is loaded this cycle.
+        Teacher-forcing forward on the student's sampled tokens, producing
+        "teacher_log_probs". Routing follows teacher_forward_plan: same-base
+        specs toggle adapters on the resident model (no second model); base
+        aliases the already-computed ref forward when available; load: keeps
+        the legacy full second model. Under --opd-type sglang the teacher is
+        scored on the rollout engine, so this returns None (plan "none").
         """
+        plan = teacher_forward_plan(
+            self._opd_teacher_spec,
+            is_peft_enabled(self.args),
+            ref_data is not None,
+            opd_type=getattr(self.args, "opd_type", None),
+        )
+        if plan == "none":
+            return None
+        if plan == "alias_ref":
+            return {"teacher_log_probs": ref_data["ref_log_probs"]}
+        if plan == "adapter_off":
+            peft = create_peft_instance(self.args)
+            if peft is None:
+                raise RuntimeError("OPD base teacher requested but no PEFT instance could be created.")
+            self._set_replay_stage("fallthrough")
+            with peft.disable_adapter(self.model):
+                return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="teacher_")
+        if plan == "adapter_swap":
+            tensors = self._opd_teacher_tensors
+            if tensors is None and self._self_teacher is not None:
+                tensors = self._self_teacher.tensors
+            if tensors is None:
+                raise RuntimeError(f"OPD teacher {self._opd_teacher_spec.source} has no tensors loaded.")
+            self._set_replay_stage("fallthrough")
+            with swap_adapter_tensors(self.model, tensors, is_adapter_param_name):
+                return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="teacher_")
+        # switch_model (legacy load:)
         if "teacher" not in self.model_state_manager.backup_tags:
             return None
-
         self._set_replay_stage("fallthrough")
         self._switch_model("teacher")
         return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="teacher_")
+
+    def _promote_self_teacher(self) -> None:
+        """Push the EMA/lag buffer to the engine's orbit_teacher slot.
+
+        Swap buffer tensors into the live adapter params so the existing
+        megatron->HF conversion + transport applies unchanged, sync to the
+        teacher slot name, restore. Failure keeps the previous teacher slot
+        (never silently distill from a half-loaded adapter).
+        """
+        with swap_adapter_tensors(self.model, self._self_teacher.tensors, is_adapter_param_name):
+            try:
+                self.weight_updater.push_teacher_adapter()
+            except Exception:
+                logger.exception("OPD self-teacher promotion FAILED; engine keeps the previous teacher slot.")
+                raise
 
     def train(self, rollout_id: int, rollout_data_ref: Box) -> None:
         self._last_rollout_id = rollout_id
@@ -562,7 +667,7 @@ class MegatronTrainRayActor(TrainRayActor):
                 ref_data = self.compute_ref_log_probs(data_iterator, num_microbatches)
                 if ref_data is not None:
                     rollout_data.update(ref_data)
-                teacher_data = self.compute_teacher_log_probs(data_iterator, num_microbatches)
+                teacher_data = self.compute_teacher_log_probs(data_iterator, num_microbatches, ref_data=ref_data)
                 if teacher_data is not None:
                     rollout_data.update(teacher_data)
                 self._switch_model("old_actor" if self.args.keep_old_actor else "actor")
@@ -613,6 +718,12 @@ class MegatronTrainRayActor(TrainRayActor):
                     data_iterator,
                     num_microbatches,
                 )
+                if self._self_teacher is not None:
+                    self._self_teacher.update(self._adapter_named_params())
+                    if should_promote_teacher(
+                        self._opd_teacher_spec.source, self.args.opd_promote_interval, rollout_id
+                    ):
+                        self._promote_self_teacher()
 
             self.prof.step(rollout_id=rollout_id)
 
@@ -697,6 +808,27 @@ class MegatronTrainRayActor(TrainRayActor):
         print_memory("before update_weights")
         self.weight_updater.update_weights()
         print_memory("after update_weights")
+
+        # Startup fill of the engine's orbit_teacher slot for sglang self:*
+        # teachers (Task 6 reserves it EMPTY; the local scoring stage fires
+        # unconditionally during the FIRST generate, and scoring an empty slot
+        # 404s). Both drivers call actor update_weights once before the first
+        # generate — on fresh start AND resume — so promoting here guarantees
+        # the slot is filled before any scoring. Re-promote whenever new or
+        # restarted engines connect: their slot starts empty too. Must run
+        # before offload_train_adapter (the export reads live GPU params). A
+        # failure raises out of the launch — never start training with an
+        # empty teacher slot.
+        if (
+            self._self_teacher is not None
+            and should_promote_teacher(
+                self._opd_teacher_spec.source, getattr(self.args, "opd_promote_interval", None), 0
+            )
+            and (not self._teacher_slot_startup_promoted or num_new_engines > 0)
+        ):
+            self._promote_self_teacher()
+            self._teacher_slot_startup_promoted = True
+
         if self.args.offload_train_adapter:
             offload_megatron_adapter_to_cpu(self.model)
             print_memory("after update_weights adapter_offload")
