@@ -16,7 +16,7 @@
 # The teacher URL uses the head node's routable IP (NOT 127.0.0.1): the
 # RolloutManager that runs the OPD reward fn lives on a worker node here.
 #
-# Scoring policy (vs the sglang_teacher_baseline recipe):
+# Scoring policy (vs the archived sglang_teacher_baseline recipe):
 #   - timeout kept explicit (600s; the implicit aiohttp 300s killed 23787)
 #   - retries 0 — fail fast; with a whole-node teacher a failure means
 #     something real, not queue pressure
@@ -26,7 +26,7 @@
 #     timeouts ever reappear.
 #
 # QUICK-CHECK config otherwise: same data/optimizer/GRPO hyperparameters as
-# sglang_teacher_baseline, no --save (nothing checkpointed).
+# the archived sglang_teacher_baseline, no --save (nothing checkpointed).
 #
 # The teacher model is owner-managed (not auto-downloaded by submit.sh):
 #   hf download Qwen/Qwen3-32B --local-dir /data/shared/models/Qwen3-32B
@@ -112,7 +112,10 @@ export ENVPACK_SERVER_WAIT_TIMEOUT=${ENVPACK_SERVER_WAIT_TIMEOUT:-1800}
 # shellcheck disable=SC1090
 source "$MILES_REPO/scripts/models/qwen3-8B.sh"
 
-RUN_NAME=${WANDB_RUN_NAME:-math-opd-qwen3-8B-sglang-t32B-3nodes}
+# Sampled-token OPD by default (see GRPO_ARGS); the run name carries the
+# top-k so curves from different settings never share a wandb group.
+OPD_TOP_K=${OPD_TOP_K:-0}
+RUN_NAME=${WANDB_RUN_NAME:-math-opd-qwen3-8B-sglang-t32B-3nodes-topk${OPD_TOP_K}}
 
 CKPT_ARGS=(
    --hf-checkpoint  "$HF_MODEL_DIR"
@@ -124,7 +127,8 @@ ROLLOUT_ARGS=(
    --input-key     prompt
    --apply-chat-template
    --rollout-shuffle
-   --num-rollout   300
+   # OPD_NUM_ROLLOUT: short cluster smokes (e.g. 5) without editing the recipe.
+   --num-rollout   "${OPD_NUM_ROLLOUT:-300}"
    --rollout-batch-size      16
    --n-samples-per-prompt    4
    --rollout-max-response-len 16384
@@ -161,22 +165,25 @@ GRPO_ARGS=(
    --use-opd
    --opd-type sglang
    --opd-kl-coef 1.0
-   # Rethinking-OPD top-k reward (0 = sampled-token OPD). 2 is the validated
-   # setting; 16 (the paper default) blows up the scoring payload at 16k
-   # response length — see sglang_teacher_baseline for the full story.
-   --opd-log-prob-top-k "${OPD_TOP_K:-2}"
-   --opd-top-k-strategy only-student
-   --opd-reward-weight-mode student_p
+   # 0 = sampled-token OPD: rollout decodes at full speed (top-k>0 costs ~3x
+   # decode on per-token top-logprob extraction) and teacher scoring is a
+   # compact prefill-only request. top-k>0 (Rethinking-OPD) grows the scoring
+   # payload O(len x union of per-position ids): top-k 16 dies at step 0
+   # (jobs 23771/23779); top-k 2 survived 99 steps, then one 16.5k-token
+   # sample's 1827-id union blew the 600s scoring timeout (job 23851).
+   --opd-log-prob-top-k "$OPD_TOP_K"
    # Scoring policy for the dedicated-teacher layout (see header): explicit
    # timeout, fail-fast, no in-flight cap (0 = disabled).
    --opd-scoring-timeout "${OPD_SCORING_TIMEOUT:-600}"
    --opd-scoring-max-inflight "${OPD_SCORING_MAX_INFLIGHT:-0}"
    --opd-scoring-retries "${OPD_SCORING_RETRIES:-0}"
 
-   --use-kl-loss
-   --kl-loss-coef 0.00
-   --kl-loss-type low_var_kl
-   --entropy-coef 0.00
+   # Pure distillation objective: the learning signal is the OPD reverse-KL
+   # penalty alone — no reward KL, no loss KL (skips the ref forward), no
+   # entropy bonus, and no --normalize-advantages.
+   --kl-coef 0
+   --kl-loss-coef 0
+   --entropy-coef 0
 )
 
 OPTIMIZER_ARGS=(

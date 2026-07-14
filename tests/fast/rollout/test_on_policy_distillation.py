@@ -36,6 +36,34 @@ def _sample():
     )
 
 
+def test_score_payload_materializes_only_the_response_window():
+    input_ids = [10, 11, 12, 13, 14]
+
+    payload = opd._score_payload(input_ids, response_length=2, top_k=4, token_ids=[21, 22])
+
+    assert payload["input_ids"] is input_ids
+    assert payload["logprob_start_len"] == 2
+    assert payload["top_logprobs_num"] == 4
+    assert payload["token_ids_logprob"] == [21, 22]
+
+
+def test_score_payload_with_empty_response_starts_at_last_prompt_token():
+    payload = opd._score_payload([10, 11, 12], response_length=0)
+
+    assert payload["logprob_start_len"] == 2
+
+
+@pytest.mark.parametrize("response_length", [-1, 4])
+def test_score_payload_rejects_response_length_outside_input(response_length):
+    with pytest.raises(ValueError, match="response_length must be between 0 and len"):
+        opd._score_payload([10, 11, 12], response_length=response_length)
+
+
+def test_score_payload_requires_at_least_one_prompt_token():
+    with pytest.raises(ValueError, match="requires at least one prompt token"):
+        opd._score_payload([10, 11, 12], response_length=3)
+
+
 @pytest.mark.asyncio
 async def test_scoring_post_retries_asyncio_timeout(monkeypatch):
     calls = 0
@@ -45,7 +73,13 @@ async def test_scoring_post_retries_asyncio_timeout(monkeypatch):
         calls += 1
         if calls == 1:
             raise asyncio.TimeoutError
-        return {"ok": True}
+        return opd._PostJsonResult(
+            response={"meta_info": {"input_token_logprobs": [None, [-0.5, 1]]}},
+            request_body_bytes=128,
+            response_body_bytes=256,
+            body_read_s=0.01,
+            json_decode_s=0.02,
+        )
 
     async def no_sleep(_delay):
         return None
@@ -58,10 +92,137 @@ async def test_scoring_post_retries_asyncio_timeout(monkeypatch):
         opd_scoring_retries=1,
     )
 
-    result = await opd._scoring_post(args, "http://teacher/generate", {"input_ids": [1]})
+    result = await opd._scoring_post(
+        args,
+        "http://teacher/generate",
+        {"input_ids": [1]},
+        target="teacher",
+        response_length=1,
+    )
 
-    assert result == {"ok": True}
+    assert result.response == {"meta_info": {"input_token_logprobs": [None, [-0.5, 1]]}}
+    assert result.telemetry["attempts"] == 2
+    assert result.telemetry["input_tokens"] == 1
+    assert result.telemetry["response_tokens"] == 1
+    assert result.telemetry["request_body_bytes"] == 128
+    assert result.telemetry["response_body_bytes"] == 256
+    assert result.telemetry["returned_positions"] == 2
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_reward_func_records_scoring_telemetry(monkeypatch):
+    response = {"meta_info": {"input_token_logprobs": [None, [-0.5, 11], [-0.25, 12]]}}
+    telemetry = {
+        "target": "teacher",
+        "attempts": 1,
+        "input_tokens": 3,
+        "response_tokens": 2,
+    }
+
+    async def fake_scoring_post(*args, **kwargs):
+        return opd._ScoringPostResult(response=response, telemetry=telemetry)
+
+    monkeypatch.setattr(opd, "_scoring_post", fake_scoring_post)
+    sample = Sample(tokens=[10, 11, 12], response_length=2, metadata={"dataset": "math"})
+    args = Namespace(opd_log_prob_top_k=0, rm_url="http://teacher/generate")
+
+    result = await opd.reward_func(args, sample)
+
+    assert result is response
+    assert sample.metadata["dataset"] == "math"
+    assert sample.metadata[opd.OPD_SCORING_TELEMETRY_KEY] == [telemetry]
+
+
+@pytest.mark.asyncio
+async def test_teacher_topk_reward_func_uses_response_window_for_both_scoring_calls(monkeypatch):
+    calls = []
+
+    async def fake_scoring_post(args, url, payload, *, target, response_length):
+        calls.append((target, response_length, payload))
+        if target == "teacher":
+            response = {
+                "meta_info": {
+                    "input_token_logprobs": [None, [-0.3, 11], [-0.4, 12]],
+                    "input_top_logprobs": [None, [[-0.1, 21]], [[-0.2, 22]]],
+                }
+            }
+        else:
+            response = {
+                "meta_info": {
+                    "input_token_logprobs": [None, [-0.3, 11], [-0.4, 12]],
+                    "input_token_ids_logprobs": [None, [[-0.5, 21]], [[-0.6, 22]]],
+                }
+            }
+        return opd._ScoringPostResult(response=response, telemetry={"target": target})
+
+    monkeypatch.setattr(opd, "_scoring_post", fake_scoring_post)
+    sample = Sample(tokens=[7, 8, 9, 11, 12], response_length=2)
+    args = Namespace(
+        opd_log_prob_top_k=2,
+        opd_top_k_strategy="only-teacher",
+        rm_url="http://teacher/generate",
+        sglang_router_ip="student",
+        sglang_router_port=30000,
+    )
+
+    reward = await opd.reward_func(args, sample)
+
+    assert set(reward) == {"teacher", "student_on_teacher"}
+    assert [target for target, _, _ in calls] == ["teacher", "student"]
+    assert all(response_length == 2 for _, response_length, _ in calls)
+    assert all(payload["input_ids"] is sample.tokens for _, _, payload in calls)
+    assert all(payload["logprob_start_len"] == 2 for _, _, payload in calls)
+    assert calls[0][2]["top_logprobs_num"] == 2
+    assert calls[1][2]["token_ids_logprob"] == [21, 22]
+
+
+def _sampled_scoring_response(token_ids: list[int]) -> dict:
+    return {
+        "meta_info": {
+            "input_token_logprobs": [None, *[[-0.1 * (i + 1), token_id] for i, token_id in enumerate(token_ids)]]
+        }
+    }
+
+
+def _sampled_opd_args() -> Namespace:
+    return Namespace(opd_log_prob_top_k=0, reward_key=None)
+
+
+def test_sampled_token_post_process_extracts_same_values_from_full_and_response_windows():
+    full_window_sample = Sample(tokens=[10, 11, 12], response_length=2)
+    full_window_sample.reward = {"meta_info": {"input_token_logprobs": [None, [-0.1, 10], [-0.2, 11], [-0.3, 12]]}}
+    response_window_sample = Sample(tokens=[10, 11, 12], response_length=2)
+    response_window_sample.reward = {"meta_info": {"input_token_logprobs": [None, [-0.2, 11], [-0.3, 12]]}}
+
+    raw_rewards, rewards = opd.post_process_rewards(
+        _sampled_opd_args(),
+        [full_window_sample, response_window_sample],
+    )
+
+    assert raw_rewards == [0.0, 0.0]
+    assert rewards == [0.0, 0.0]
+    assert full_window_sample.teacher_log_probs.tolist() == pytest.approx([-0.2, -0.3])
+    assert response_window_sample.teacher_log_probs.tolist() == pytest.approx([-0.2, -0.3])
+
+
+def test_sampled_token_post_process_rejects_token_alignment_mismatch():
+    sample = Sample(tokens=[10, 11, 12], response_length=2, index=7, group_index=3)
+    sample.reward = _sampled_scoring_response([10, 99, 12])
+
+    with pytest.raises(
+        ValueError,
+        match=r"teacher scoring token alignment mismatch at response position 0.*got token id 99, expected 11",
+    ):
+        opd.post_process_rewards(_sampled_opd_args(), [sample])
+
+
+def test_sampled_token_post_process_rejects_short_scoring_response():
+    sample = Sample(tokens=[10, 11, 12], response_length=2)
+    sample.reward = _sampled_scoring_response([12])
+
+    with pytest.raises(ValueError, match=r"teacher scoring token count mismatch: got 1.*expected 2"):
+        opd.post_process_rewards(_sampled_opd_args(), [sample])
 
 
 def _teacher_payload():

@@ -1,6 +1,7 @@
 #!/bin/bash
 #
-# OPD/sglang_teacher_baseline/qwen3-8B — on-policy distillation, SGLang-served teacher.
+# OPD/archive/sglang_teacher_baseline/qwen3-8B — archived on-policy
+# distillation recipe with an SGLang-served teacher.
 # Port of examples/on_policy_distillation/run-qwen3-8B-opd.sh to the submit.sh
 # recipe contract: student Qwen3-8B distills from a Qwen3-32B teacher whose
 # token log-probs are fetched during rollout by the OPD custom reward fn.
@@ -26,12 +27,12 @@
 #
 # Submit (HF_CACHE_DIR=/data/shared on slinky — the default /data/shared/hf_cache
 # is read-only there):
-#   HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh OPD/sglang_teacher_baseline/qwen3-8B
+#   HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh OPD/archive/sglang_teacher_baseline/qwen3-8B
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}
+MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}
 RECIPE_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
 
 # ---------------------------------------------------------------------------
@@ -147,23 +148,24 @@ GRPO_ARGS=(
    --use-opd
    --opd-type sglang
    --opd-kl-coef 1.0
-   # Rethinking-OPD top-k reward (0 = sampled-token OPD). Default 2, NOT the
-   # paper's 16: the teacher scoring payload grows O(len x union of per-position
-   # top-k ids), and at 16k response length top-k 16 reliably wedges a TP=1 32B
-   # teacher (jobs 23771/23779 both died to the resulting scoring timeout).
-   # OPD_TOP_K env-overridable for experiments.
-   --opd-log-prob-top-k "${OPD_TOP_K:-2}"
+   # 0 = sampled-token OPD (full-speed decode, compact prefill-only teacher
+   # scoring). top-k>0 (Rethinking-OPD) is env-overridable via OPD_TOP_K but
+   # costs ~3x rollout decode AND grows the scoring payload O(len x union of
+   # per-position ids): top-k 16 wedges a TP=1 32B teacher at step 0 (jobs
+   # 23771/23779); top-k 2 ran 99 steps before one long sample blew the 600s
+   # scoring timeout (job 23851).
+   --opd-log-prob-top-k "${OPD_TOP_K:-0}"
    # Scoring robustness: per-request timeout + in-flight cap so a whole rollout
    # batch finishing at once can't dogpile the teacher into timeout death.
    --opd-scoring-timeout "${OPD_SCORING_TIMEOUT:-600}"
    --opd-scoring-max-inflight "${OPD_SCORING_MAX_INFLIGHT:-8}"
-   --opd-top-k-strategy only-student
-   --opd-reward-weight-mode student_p
 
-   --use-kl-loss
-   --kl-loss-coef 0.00
-   --kl-loss-type low_var_kl
-   --entropy-coef 0.00
+   # Pure distillation objective: the learning signal is the OPD reverse-KL
+   # penalty alone — no reward KL, no loss KL (skips the ref forward), no
+   # entropy bonus, and no --normalize-advantages.
+   --kl-coef 0
+   --kl-loss-coef 0
+   --entropy-coef 0
 )
 
 OPTIMIZER_ARGS=(

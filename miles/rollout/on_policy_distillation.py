@@ -4,7 +4,7 @@ import math
 import time
 from argparse import Namespace
 from collections.abc import Iterable
-from contextlib import nullcontext
+from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
@@ -25,6 +25,23 @@ TEACHER_TOP_STRATEGIES = TOP_K_STRATEGIES - {"only-student"}
 TEACHER_ON_STUDENT_STRATEGIES = {"only-student", "union", "xor"}
 STUDENT_ON_TEACHER_STRATEGIES = {"only-teacher", "union", "xor"}
 
+OPD_SCORING_TELEMETRY_KEY = "opd_scoring_telemetry"
+
+
+@dataclass(frozen=True)
+class _PostJsonResult:
+    response: dict[str, Any]
+    request_body_bytes: int | None
+    response_body_bytes: int
+    body_read_s: float
+    json_decode_s: float
+
+
+@dataclass(frozen=True)
+class _ScoringPostResult:
+    response: dict[str, Any]
+    telemetry: dict[str, Any]
+
 
 def _get_opd_top_k(args: Namespace) -> int:
     return max(0, int(getattr(args, "opd_log_prob_top_k", 0) or 0))
@@ -44,7 +61,25 @@ def _get_reward_weight_mode(args: Namespace) -> str:
     return mode
 
 
-def _score_payload(input_ids: list[int], top_k: int = 0, token_ids: list[int] | None = None) -> dict[str, Any]:
+def _score_payload(
+    input_ids: list[int],
+    response_length: int,
+    top_k: int = 0,
+    token_ids: list[int] | None = None,
+) -> dict[str, Any]:
+    if response_length < 0 or response_length > len(input_ids):
+        raise ValueError(
+            f"OPD scoring response_length must be between 0 and len(input_ids): "
+            f"response_length={response_length}, len(input_ids)={len(input_ids)}."
+        )
+
+    prompt_length = len(input_ids) - response_length
+    if prompt_length <= 0:
+        raise ValueError(
+            "OPD scoring requires at least one prompt token before the response: "
+            f"response_length={response_length}, len(input_ids)={len(input_ids)}."
+        )
+
     payload = {
         "input_ids": input_ids,
         "sampling_params": {
@@ -53,7 +88,9 @@ def _score_payload(input_ids: list[int], top_k: int = 0, token_ids: list[int] | 
             "skip_special_tokens": False,
         },
         "return_logprob": True,
-        "logprob_start_len": 0,
+        # Keep the complete prefix in input_ids, but only materialize logprobs
+        # from one token before the response so every response token is scored.
+        "logprob_start_len": prompt_length - 1,
     }
     if top_k > 0:
         payload["top_logprobs_num"] = top_k
@@ -95,15 +132,51 @@ def _scoring_semaphore(args: Namespace) -> asyncio.Semaphore | None:
     return _SCORING_SEMAPHORE
 
 
-async def _post_json(url: str, payload: dict[str, Any], timeout_s: float) -> dict[str, Any]:
+async def _post_json(url: str, payload: dict[str, Any], timeout_s: float) -> _PostJsonResult:
     timeout = aiohttp.ClientTimeout(total=timeout_s)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(url, json=payload) as resp:
             resp.raise_for_status()
-            return await resp.json()
+            body_read_start = time.monotonic()
+            body = await resp.read()
+            body_read_s = time.monotonic() - body_read_start
+
+            json_decode_start = time.monotonic()
+            response = await resp.json()
+            json_decode_s = time.monotonic() - json_decode_start
+
+            request_body_bytes_header = resp.request_info.headers.get("Content-Length")
+            request_body_bytes = int(request_body_bytes_header) if request_body_bytes_header is not None else None
+            return _PostJsonResult(
+                response=response,
+                request_body_bytes=request_body_bytes,
+                response_body_bytes=len(body),
+                body_read_s=body_read_s,
+                json_decode_s=json_decode_s,
+            )
 
 
-async def _scoring_post(args: Namespace, url: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _payload_input_token_count(payload: dict[str, Any]) -> int:
+    input_ids = payload.get("input_ids") or []
+    if input_ids and isinstance(input_ids[0], list):
+        return sum(len(ids) for ids in input_ids)
+    return len(input_ids)
+
+
+def _returned_position_count(response: dict[str, Any]) -> int:
+    meta_info = response.get("meta_info") or {}
+    fields = ("input_token_logprobs", "input_top_logprobs", "input_token_ids_logprobs")
+    return max((len(meta_info.get(field) or []) for field in fields), default=0)
+
+
+async def _scoring_post(
+    args: Namespace,
+    url: str,
+    payload: dict[str, Any],
+    *,
+    target: str,
+    response_length: int,
+) -> _ScoringPostResult:
     """One scoring RPC: bounded in-flight, explicit timeout, retries, contextual errors.
 
     A whole rollout batch finishes together, so without the semaphore every
@@ -114,16 +187,55 @@ async def _scoring_post(args: Namespace, url: str, payload: dict[str, Any]) -> d
     """
     timeout_s = _get_scoring_timeout(args)
     semaphore = _scoring_semaphore(args)
-    guard = nullcontext() if semaphore is None else semaphore
     attempts = _get_scoring_retries(args) + 1
-    n_tokens = len(payload.get("input_ids") or [])
+    n_tokens = _payload_input_token_count(payload)
     n_ids = len(payload.get("token_ids_logprob") or [])
+    telemetry: dict[str, Any] = {
+        "target": target,
+        "attempts": 0,
+        "input_tokens": n_tokens,
+        "response_tokens": response_length,
+        "requested_token_ids": n_ids,
+        "top_k": int(payload.get("top_logprobs_num", 0) or 0),
+        "semaphore_wait_s": 0.0,
+        "http_s": 0.0,
+    }
+    overall_start = time.monotonic()
     last_exc: Exception | None = None
+
+    async def post_once() -> _PostJsonResult:
+        if semaphore is None:
+            http_start = time.monotonic()
+            try:
+                return await _post_json(url, payload, timeout_s)
+            finally:
+                telemetry["http_s"] += time.monotonic() - http_start
+
+        wait_start = time.monotonic()
+        async with semaphore:
+            telemetry["semaphore_wait_s"] += time.monotonic() - wait_start
+            http_start = time.monotonic()
+            try:
+                return await _post_json(url, payload, timeout_s)
+            finally:
+                telemetry["http_s"] += time.monotonic() - http_start
+
     for attempt in range(1, attempts + 1):
         start = time.monotonic()
+        telemetry["attempts"] = attempt
         try:
-            async with guard:
-                return await _post_json(url, payload, timeout_s)
+            result = await post_once()
+            telemetry.update(
+                {
+                    "e2e_latency_s": time.monotonic() - overall_start,
+                    "request_body_bytes": result.request_body_bytes,
+                    "response_body_bytes": result.response_body_bytes,
+                    "body_read_s": result.body_read_s,
+                    "json_decode_s": result.json_decode_s,
+                    "returned_positions": _returned_position_count(result.response),
+                }
+            )
+            return _ScoringPostResult(response=result.response, telemetry=telemetry)
         except (TimeoutError, asyncio.TimeoutError, aiohttp.ClientError) as exc:
             last_exc = exc
             logger.warning(
@@ -168,14 +280,62 @@ def _trim_input_field(meta_info: dict[str, Any], field: str, response_length: in
     return values[1:][-response_length:] if response_length > 0 else []
 
 
+def _validate_scoring_token_alignment(response: dict[str, Any], sample: Sample, *, source: str) -> list[Any]:
+    response_length = sample.response_length
+    if response_length == 0:
+        return []
+
+    if len(sample.tokens) < response_length:
+        raise ValueError(
+            f"OPD {source} scoring cannot align {response_length} response tokens against "
+            f"only {len(sample.tokens)} total sample tokens."
+        )
+
+    meta_info = response.get("meta_info")
+    if not isinstance(meta_info, dict):
+        raise ValueError(f"OPD {source} scoring response is missing a valid meta_info object.")
+
+    entries = _trim_input_field(meta_info, "input_token_logprobs", response_length)
+    if len(entries) != response_length:
+        raise ValueError(
+            f"OPD {source} scoring token count mismatch: got {len(entries)} response logprob entries, "
+            f"expected {response_length} (sample index={sample.index}, group_index={sample.group_index})."
+        )
+
+    returned_token_ids = []
+    for position, entry in enumerate(entries):
+        if not isinstance(entry, (list, tuple)) or len(entry) < 2 or entry[1] is None:
+            raise ValueError(
+                f"OPD {source} scoring returned a malformed input_token_logprobs entry at response "
+                f"position {position}: {entry!r}."
+            )
+        returned_token_ids.append(int(entry[1]))
+
+    expected_token_ids = sample.tokens[-response_length:]
+    if returned_token_ids != expected_token_ids:
+        mismatch_position = next(
+            i
+            for i, (returned, expected) in enumerate(zip(returned_token_ids, expected_token_ids, strict=True))
+            if returned != expected
+        )
+        raise ValueError(
+            f"OPD {source} scoring token alignment mismatch at response position {mismatch_position}: "
+            f"got token id {returned_token_ids[mismatch_position]}, expected "
+            f"{expected_token_ids[mismatch_position]} (sample index={sample.index}, "
+            f"group_index={sample.group_index}, response_length={response_length})."
+        )
+
+    return entries
+
+
 def _input_logprob_maps(response: dict[str, Any], field: str, response_length: int) -> LogprobMaps:
     return [
         _top_entries_to_map(entries) for entries in _trim_input_field(response["meta_info"], field, response_length)
     ]
 
 
-def _teacher_sampled_log_probs(response: dict[str, Any], response_length: int) -> torch.Tensor:
-    input_token_logprobs = _trim_input_field(response["meta_info"], "input_token_logprobs", response_length)
+def _teacher_sampled_log_probs(response: dict[str, Any], sample: Sample) -> torch.Tensor:
+    input_token_logprobs = _validate_scoring_token_alignment(response, sample, source="teacher")
     return torch.tensor([item[0] for item in input_token_logprobs], dtype=torch.float32)
 
 
@@ -351,7 +511,15 @@ def _compute_topk_reverse_kl(
 async def reward_func(args: Namespace, sample: Sample, **kwargs: Any) -> dict[str, Any]:
     top_k = _get_opd_top_k(args)
     if top_k == 0:
-        return await _scoring_post(args, args.rm_url, _score_payload(sample.tokens))
+        result = await _scoring_post(
+            args,
+            args.rm_url,
+            _score_payload(sample.tokens, response_length=sample.response_length),
+            target="teacher",
+            response_length=sample.response_length,
+        )
+        _record_scoring_telemetry(sample, result.telemetry)
+        return result.response
 
     strategy = _get_top_k_strategy(args)
 
@@ -362,22 +530,48 @@ async def reward_func(args: Namespace, sample: Sample, **kwargs: Any) -> dict[st
 
     teacher_payload = _score_payload(
         sample.tokens,
+        response_length=sample.response_length,
         top_k=top_k if strategy in TEACHER_TOP_STRATEGIES else 0,
         token_ids=teacher_token_ids,
     )
-    teacher_response = await _scoring_post(args, args.rm_url, teacher_payload)
+    teacher_result = await _scoring_post(
+        args,
+        args.rm_url,
+        teacher_payload,
+        target="teacher",
+        response_length=sample.response_length,
+    )
+    _record_scoring_telemetry(sample, teacher_result.telemetry)
+    teacher_response = teacher_result.response
 
     reward_payload = {"teacher": teacher_response}
     if strategy in STUDENT_ON_TEACHER_STRATEGIES:
         teacher_top = _trim_input_field(teacher_response["meta_info"], "input_top_logprobs", sample.response_length)
         student_token_ids = _unique_ids(teacher_top)
-        reward_payload["student_on_teacher"] = await _scoring_post(
+        student_result = await _scoring_post(
             args,
             _student_score_url(args),
-            _score_payload(sample.tokens, token_ids=student_token_ids),
+            _score_payload(
+                sample.tokens,
+                response_length=sample.response_length,
+                token_ids=student_token_ids,
+            ),
+            target="student",
+            response_length=sample.response_length,
         )
+        _record_scoring_telemetry(sample, student_result.telemetry)
+        reward_payload["student_on_teacher"] = student_result.response
 
     return reward_payload
+
+
+def _record_scoring_telemetry(sample: Sample, telemetry: dict[str, Any]) -> None:
+    metadata = dict(sample.metadata or {})
+    entries = metadata.get(OPD_SCORING_TELEMETRY_KEY, [])
+    if not isinstance(entries, list):
+        raise ValueError(f"sample.metadata[{OPD_SCORING_TELEMETRY_KEY!r}] must be a list.")
+    metadata[OPD_SCORING_TELEMETRY_KEY] = [*entries, telemetry]
+    sample.metadata = metadata
 
 
 def post_process_rewards(args: Namespace, samples: list[Sample], **kwargs: Any) -> tuple[list[float], list[float]]:
@@ -391,17 +585,23 @@ def post_process_rewards(args: Namespace, samples: list[Sample], **kwargs: Any) 
     response position and storing a precomputed weighted reverse-KL estimate.
     """
     raw_rewards = [sample.get_reward_value(args) for sample in samples]
-    response_lengths = [sample.response_length for sample in samples]
 
     if _get_opd_top_k(args) > 0:
+        strategy = _get_top_k_strategy(args)
         for sample, reward in zip(samples, raw_rewards, strict=True):
+            _validate_scoring_token_alignment(reward["teacher"], sample, source="teacher")
+            if strategy in STUDENT_ON_TEACHER_STRATEGIES:
+                _validate_scoring_token_alignment(
+                    reward["student_on_teacher"],
+                    sample,
+                    source="student",
+                )
             sample.opd_reverse_kl = _compute_topk_reverse_kl(args, sample, reward)
         scalar_rewards = [0.0] * len(samples)
         return scalar_rewards, scalar_rewards
 
     teacher_log_probs = [
-        _teacher_sampled_log_probs(reward, response_length)
-        for reward, response_length in zip(raw_rewards, response_lengths, strict=True)
+        _teacher_sampled_log_probs(reward, sample) for reward, sample in zip(raw_rewards, samples, strict=True)
     ]
 
     for sample, t_log_probs in zip(samples, teacher_log_probs, strict=True):

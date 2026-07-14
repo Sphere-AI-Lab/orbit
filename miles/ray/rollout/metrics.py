@@ -65,6 +65,7 @@ def log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_t
     log_dict = {**(rollout_extra_metrics or {})}
     log_dict |= dict_add_prefix(_compute_metrics_from_samples(args, samples), "rollout/")
     log_dict |= dict_add_prefix(_compute_perf_metrics_from_samples(args, samples, rollout_time), "perf/")
+    log_dict |= _compute_opd_scoring_metrics(samples)
     logger.info(f"perf {rollout_id}: {log_dict}")
     step = compute_rollout_step(args, rollout_id)
     log_dict["rollout/step"] = step
@@ -109,6 +110,79 @@ def _compute_metrics_from_samples(args, samples):
             # from the pretokenized prefix and may differ from canonical tokenization.
 
     return log_dict
+
+
+def _compute_opd_scoring_metrics(all_samples: list[Sample]) -> dict[str, float | int]:
+    calls = []
+    sample_count = 0
+    for sample in all_samples:
+        entries = sample.metadata.get("opd_scoring_telemetry") if sample.metadata else None
+        if not isinstance(entries, list):
+            continue
+        valid_entries = [entry for entry in entries if isinstance(entry, dict)]
+        if valid_entries:
+            sample_count += 1
+            calls.extend(valid_entries)
+
+    if not calls:
+        return {}
+
+    metrics: dict[str, float | int] = {
+        "opd_scoring/sample_count": sample_count,
+        "opd_scoring/request_count": len(calls),
+        "opd_scoring/retry_count": sum(max(0, int(call.get("attempts", 1)) - 1) for call in calls),
+    }
+
+    for target in sorted({str(call.get("target")) for call in calls if call.get("target")}):
+        metrics[f"opd_scoring/{target}_request_count"] = sum(call.get("target") == target for call in calls)
+
+    total_fields = (
+        "input_tokens",
+        "response_tokens",
+        "requested_token_ids",
+        "request_body_bytes",
+        "response_body_bytes",
+        "returned_positions",
+    )
+    for field in total_fields:
+        values = [call[field] for call in calls if isinstance(call.get(field), (int, float))]
+        if values:
+            metrics[f"opd_scoring/{field}_total"] = sum(values)
+        if field == "request_body_bytes":
+            metrics["opd_scoring/request_body_bytes_coverage"] = len(values) / len(calls)
+
+    response_bytes = metrics.get("opd_scoring/response_body_bytes_total", 0)
+    returned_positions = metrics.get("opd_scoring/returned_positions_total", 0)
+    if returned_positions:
+        metrics["opd_scoring/response_bytes_per_returned_position"] = response_bytes / returned_positions
+
+    response_tokens = metrics.get("opd_scoring/response_tokens_total", 0)
+    if response_tokens:
+        metrics["opd_scoring/response_bytes_per_response_token"] = response_bytes / response_tokens
+        metrics["opd_scoring/returned_positions_per_response_token"] = returned_positions / response_tokens
+
+    distribution_fields = (
+        "e2e_latency_s",
+        "http_s",
+        "semaphore_wait_s",
+        "body_read_s",
+        "json_decode_s",
+        "response_body_bytes",
+        "input_tokens",
+        "returned_positions",
+    )
+    for field in distribution_fields:
+        values = [float(call[field]) for call in calls if isinstance(call.get(field), (int, float))]
+        if not values:
+            continue
+        array = np.asarray(values, dtype=np.float64)
+        prefix = f"opd_scoring/{field}"
+        metrics[f"{prefix}/mean"] = np.mean(array).item()
+        metrics[f"{prefix}/p50"] = np.percentile(array, 50).item()
+        metrics[f"{prefix}/p95"] = np.percentile(array, 95).item()
+        metrics[f"{prefix}/max"] = np.max(array).item()
+
+    return metrics
 
 
 def _compute_perf_metrics_from_samples(args, samples, rollout_time):

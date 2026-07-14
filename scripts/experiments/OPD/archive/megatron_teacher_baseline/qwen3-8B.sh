@@ -1,6 +1,7 @@
 #!/bin/bash
 #
-# OPD/megatron_teacher_baseline/qwen3-8B — on-policy distillation, Megatron-side
+# OPD/archive/megatron_teacher_baseline/qwen3-8B — archived on-policy
+# distillation recipe with a Megatron-side
 # teacher. Port of examples/on_policy_distillation/run-qwen3-8B-opd-megatron.sh
 # to the submit.sh recipe contract (pure config: no `ray start`, no `sbatch`,
 # no downloads — the orchestrator does the I/O).
@@ -16,19 +17,19 @@
 # auto-converts it if missing). Point OPD_TEACHER_LOAD at a stronger
 # converted model for a real run, e.g.:
 #   OPD_TEACHER_LOAD=/data/shared/models/<teacher>_torch_dist \
-#   bash scripts/slurm/submit.sh OPD/megatron_teacher_baseline/qwen3-8B
+#   bash scripts/slurm/submit.sh OPD/archive/megatron_teacher_baseline/qwen3-8B
 #
 # QUICK-CHECK config: no --save/--save-interval (nothing is checkpointed;
 # weights come from --ref-load via the --load fallback).
 #
 # Submit (HF_CACHE_DIR=/data/shared on slinky — the default /data/shared/hf_cache
 # is read-only there):
-#   HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh OPD/megatron_teacher_baseline/qwen3-8B
+#   HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh OPD/archive/megatron_teacher_baseline/qwen3-8B
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}
+MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}
 RECIPE_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
 
 # ---------------------------------------------------------------------------
@@ -108,10 +109,12 @@ GRPO_ARGS=(
    --opd-kl-coef 1.0
    --opd-teacher-load "$OPD_TEACHER_LOAD"
 
-   --use-kl-loss
-   --kl-loss-coef 0.00
-   --kl-loss-type low_var_kl
-   --entropy-coef 0.00
+   # This archived recipe keeps --rm-type math, so GRPO task advantage and OPD
+   # are both active. Reward KL, loss KL, entropy, and advantage normalization
+   # remain disabled.
+   --kl-coef 0
+   --kl-loss-coef 0
+   --entropy-coef 0
 )
 
 OPTIMIZER_ARGS=(

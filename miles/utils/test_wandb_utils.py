@@ -54,3 +54,17 @@ def test_secondary_wandb_init_uses_extended_init_timeout(monkeypatch):
     assert settings.x_primary is False
     assert settings.x_update_finish_state is False
     assert settings.init_timeout == 300.0
+
+
+def test_wandb_registers_opd_scoring_metrics_on_rollout_step(monkeypatch):
+    define_calls = []
+
+    monkeypatch.setattr(
+        wandb_utils.wandb,
+        "define_metric",
+        lambda *args, **kwargs: define_calls.append((args, kwargs)),
+    )
+
+    wandb_utils._init_wandb_common()
+
+    assert (("opd_scoring/*",), {"step_metric": "rollout/step"}) in define_calls

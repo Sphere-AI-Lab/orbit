@@ -3,7 +3,104 @@ from __future__ import annotations
 import pytest
 from tests.fast.ray.rollout.conftest import make_args, make_samples_grouped
 
-from miles.ray.rollout.metrics import _compute_metrics_from_samples, _compute_zero_std_metrics
+from miles.ray.rollout import metrics as rollout_metrics
+from miles.ray.rollout.metrics import (
+    _compute_metrics_from_samples,
+    _compute_opd_scoring_metrics,
+    _compute_zero_std_metrics,
+)
+from miles.utils.types import Sample
+
+
+class TestOpdScoringMetrics:
+    def test_no_telemetry_emits_no_metrics(self):
+        assert _compute_opd_scoring_metrics([Sample()]) == {}
+
+    def test_aggregates_counts_bytes_and_latency_percentiles(self):
+        samples = [
+            Sample(
+                metadata={
+                    "opd_scoring_telemetry": [
+                        {
+                            "target": "teacher",
+                            "attempts": 1,
+                            "input_tokens": 100,
+                            "response_tokens": 40,
+                            "requested_token_ids": 0,
+                            "request_body_bytes": 500,
+                            "response_body_bytes": 1_000,
+                            "returned_positions": 100,
+                            "e2e_latency_s": 1.0,
+                            "http_s": 0.8,
+                            "semaphore_wait_s": 0.1,
+                            "body_read_s": 0.2,
+                            "json_decode_s": 0.05,
+                        }
+                    ]
+                }
+            ),
+            Sample(
+                metadata={
+                    "opd_scoring_telemetry": [
+                        {
+                            "target": "student",
+                            "attempts": 2,
+                            "input_tokens": 200,
+                            "response_tokens": 80,
+                            "requested_token_ids": 3,
+                            "request_body_bytes": None,
+                            "response_body_bytes": 3_000,
+                            "returned_positions": 200,
+                            "e2e_latency_s": 3.0,
+                            "http_s": 2.0,
+                            "semaphore_wait_s": 0.5,
+                            "body_read_s": 0.6,
+                            "json_decode_s": 0.15,
+                        }
+                    ]
+                }
+            ),
+        ]
+
+        metrics = _compute_opd_scoring_metrics(samples)
+
+        assert metrics["opd_scoring/sample_count"] == 2
+        assert metrics["opd_scoring/request_count"] == 2
+        assert metrics["opd_scoring/retry_count"] == 1
+        assert metrics["opd_scoring/teacher_request_count"] == 1
+        assert metrics["opd_scoring/student_request_count"] == 1
+        assert metrics["opd_scoring/input_tokens_total"] == 300
+        assert metrics["opd_scoring/response_tokens_total"] == 120
+        assert metrics["opd_scoring/requested_token_ids_total"] == 3
+        assert metrics["opd_scoring/request_body_bytes_total"] == 500
+        assert metrics["opd_scoring/request_body_bytes_coverage"] == 0.5
+        assert metrics["opd_scoring/response_body_bytes_total"] == 4_000
+        assert metrics["opd_scoring/returned_positions_total"] == 300
+        assert metrics["opd_scoring/response_bytes_per_returned_position"] == pytest.approx(4_000 / 300)
+        assert metrics["opd_scoring/response_bytes_per_response_token"] == pytest.approx(4_000 / 120)
+        assert metrics["opd_scoring/returned_positions_per_response_token"] == pytest.approx(300 / 120)
+        assert metrics["opd_scoring/e2e_latency_s/mean"] == 2.0
+        assert metrics["opd_scoring/e2e_latency_s/p50"] == 2.0
+        assert metrics["opd_scoring/e2e_latency_s/p95"] == pytest.approx(2.9)
+        assert metrics["opd_scoring/e2e_latency_s/max"] == 3.0
+
+    def test_wandb_keys_use_a_separate_top_level_section(self, monkeypatch):
+        sample = make_samples_grouped(1, 1)[0]
+        sample.metadata["opd_scoring_telemetry"] = [{"target": "teacher", "attempts": 1}]
+        logged = {}
+
+        def capture_log(args, metrics, step_key):
+            logged.update(metrics)
+
+        monkeypatch.setattr(rollout_metrics.tracking_utils, "log", capture_log)
+        args = make_args(wandb_always_use_train_step=False)
+
+        rollout_metrics.log_rollout_data(0, args, [sample], rollout_extra_metrics=None, rollout_time=1.0)
+
+        assert logged["opd_scoring/request_count"] == 1
+        assert not any(key.startswith("rollout/opd_scoring/") for key in logged)
+        assert "rollout/response_len/mean" in logged
+        assert "perf/rollout_time" in logged
 
 
 class TestComputeZeroStdMetrics:

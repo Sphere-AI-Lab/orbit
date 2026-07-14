@@ -180,6 +180,7 @@ def _init_wandb_common():
     wandb.define_metric("envpack_rollout_bucket/*", step_metric="rollout/step")
     wandb.define_metric("envpack_rollout_pre_filter_bucket/*", step_metric="rollout/step")
     wandb.define_metric("envpack_prompt_groups/*", step_metric="rollout/step")
+    wandb.define_metric("opd_scoring/*", step_metric="rollout/step")
     wandb.define_metric("eval/step")
     wandb.define_metric("eval/*", step_metric="eval/step")
     wandb.define_metric("envpack_eval_bucket/*", step_metric="eval/step")
