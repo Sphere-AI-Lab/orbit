@@ -183,6 +183,7 @@ def _opd_dagger_args(**overrides) -> SimpleNamespace:
     values = {
         "use_opd": True,
         "opd_type": "sglang",
+        "opd_kl_coef": 1.0,
         "opd_log_prob_top_k": 0,
         "opd_dagger_top_k": 2,
         "opd_dagger_coef": 1.0,
@@ -200,6 +201,20 @@ def test_opd_dagger_accepts_explicit_teacher_sparse_target_contract():
 
 def test_opd_dagger_accepts_complete_topk_rest_cross_entropy():
     _validate_opd_dagger_args(_opd_dagger_args(opd_dagger_loss="cross_entropy"))
+
+
+def test_opd_dagger_accepts_sampled_rkld_hybrid_configuration():
+    args = _opd_dagger_args(
+        opd_kl_coef=1.0,
+        opd_dagger_coef=1.0,
+        opd_dagger_loss="cross_entropy",
+    )
+
+    _validate_opd_dagger_args(args)
+
+    assert args.opd_log_prob_top_k == 0
+    assert args.opd_kl_coef > 0
+    assert args.opd_dagger_coef > 0
 
 
 def test_opd_dagger_top_k_can_collect_targets_with_zero_loss_coefficient():

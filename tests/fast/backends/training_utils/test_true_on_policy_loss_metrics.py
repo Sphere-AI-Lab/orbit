@@ -5,6 +5,9 @@ import pytest
 import torch
 
 from miles.backends.training_utils.loss_hub import losses as loss_utils
+from miles.backends.training_utils.loss_hub.opd import apply_opd_kl_to_advantages
+
+from .loss.loss_test_utils import make_parallel_state
 
 
 def _make_args(*, use_rollout_logprobs: bool) -> Namespace:
@@ -268,6 +271,109 @@ def test_policy_loss_dispatches_complete_topk_rest_dagger_term(monkeypatch):
     torch.testing.assert_close(metrics["opd_dagger/teacher_entropy"], torch.tensor(0.5))
     torch.testing.assert_close(metrics["opd_dagger/coarse_kl"], torch.tensor(0.3))
     torch.testing.assert_close(metrics["opd_dagger/loss"], torch.tensor(1.2))
+
+
+def test_sampled_rkld_pg_and_topk_rest_dagger_compose_in_value_gradient_and_metrics(monkeypatch):
+    """Milestone 03: the two independently validated branches share one forward."""
+    make_parallel_state()
+    _patch_single_rank_loss_helpers(monkeypatch)
+
+    args = _make_args(use_rollout_logprobs=False)
+    # Keep this fast composition test independent of the optional Megatron
+    # fused-CE import. The DAgger branch still exercises the production
+    # Stable-TP operator; only the sampled-token log-prob lookup uses the
+    # single-rank full-vocabulary reference path.
+    args.true_on_policy_mode = True
+    args.vocab_size = 4
+    args.opd_dagger_top_k = 2
+    args.opd_dagger_loss = "cross_entropy"
+    args.opd_dagger_coef = 0.7
+
+    base_logits = torch.tensor(
+        [[[1.2, -0.4, 0.8, -1.0], [-0.3, 1.1, 0.2, 0.7], [9.0, 9.0, 9.0, 9.0]]],
+        dtype=torch.float32,
+    )
+    sampled_tokens = torch.tensor([3, 2], dtype=torch.long)
+    with torch.no_grad():
+        old_student_log_probs = (
+            torch.log_softmax(base_logits[0, :2], dim=-1)
+            .gather(
+                dim=-1,
+                index=sampled_tokens.unsqueeze(-1),
+            )
+            .squeeze(-1)
+        )
+
+    # Build the RKLD-PG coefficient exactly as the training pre-pass does. Both
+    # q_old and p_T intentionally carry autograd history here so this test also
+    # proves the stop-gradient boundary is enforced rather than assumed.
+    expected_reverse_kl = torch.tensor([0.25, -0.15], dtype=torch.float32)
+    old_student_leaf = old_student_log_probs.clone().requires_grad_()
+    teacher_sampled_leaf = (old_student_log_probs - expected_reverse_kl).clone().requires_grad_()
+    rkld_advantages = [torch.zeros(2, dtype=torch.float32)]
+    rollout_data = {"teacher_log_probs": [teacher_sampled_leaf]}
+    apply_opd_kl_to_advantages(
+        Namespace(opd_type="sglang", opd_kl_coef=0.4),
+        rollout_data,
+        rkld_advantages,
+        [old_student_leaf],
+    )
+    torch.testing.assert_close(rkld_advantages[0], -0.4 * expected_reverse_kl)
+    assert rkld_advantages[0].requires_grad is False
+    assert rollout_data["opd_reverse_kl"][0].requires_grad is False
+
+    teacher_topk_probs = torch.tensor([[0.6, 0.3], [0.5, 0.2]], dtype=torch.float32)
+    teacher_topk_log_probs = teacher_topk_probs.log().requires_grad_()
+    common_batch = {
+        "log_probs": [old_student_log_probs.detach()],
+        "rollout_log_probs": [old_student_log_probs.detach().clone()],
+        "unconcat_tokens": [torch.tensor([0, 3, 2], dtype=torch.long)],
+        "response_lengths": [2],
+        "total_lengths": [3],
+        "loss_masks": [torch.ones(2, dtype=torch.float32)],
+        "opd_reverse_kl": [rollout_data["opd_reverse_kl"][0]],
+        "teacher_topk_token_ids": [torch.tensor([[1, 2], [0, 1]], dtype=torch.long)],
+        "teacher_topk_log_probs": [teacher_topk_log_probs],
+        "teacher_topk_valid_mask": [torch.ones((2, 2), dtype=torch.bool)],
+    }
+
+    def run_branch(*, advantages: torch.Tensor, dagger_coef: float):
+        branch_args = Namespace(**vars(args))
+        branch_args.opd_dagger_coef = dagger_coef
+        branch_logits = base_logits.clone().requires_grad_()
+        batch = {**common_batch, "advantages": [advantages.clone()]}
+        loss, metrics = loss_utils.policy_loss_function(
+            branch_args,
+            batch,
+            branch_logits,
+            sum_of_sample_mean=lambda tensor: tensor.float().mean(),
+        )
+        loss.backward()
+        return loss.detach(), metrics, branch_logits.grad.detach().clone()
+
+    hybrid_loss, hybrid_metrics, hybrid_grad = run_branch(
+        advantages=rkld_advantages[0],
+        dagger_coef=args.opd_dagger_coef,
+    )
+    rkld_loss, _, rkld_grad = run_branch(advantages=rkld_advantages[0], dagger_coef=0.0)
+    dagger_loss, _, dagger_grad = run_branch(
+        advantages=torch.zeros_like(rkld_advantages[0]),
+        dagger_coef=args.opd_dagger_coef,
+    )
+
+    torch.testing.assert_close(hybrid_loss, rkld_loss + dagger_loss, atol=1e-6, rtol=1e-6)
+    torch.testing.assert_close(hybrid_grad, rkld_grad + dagger_grad, atol=1e-6, rtol=1e-6)
+    assert torch.linalg.vector_norm(rkld_grad) > 0
+    assert torch.linalg.vector_norm(dagger_grad) > 0
+
+    torch.testing.assert_close(hybrid_metrics["loss"], hybrid_loss)
+    torch.testing.assert_close(hybrid_metrics["pg_loss"], rkld_loss)
+    torch.testing.assert_close(hybrid_metrics["opd_dagger/loss"], dagger_loss)
+    torch.testing.assert_close(hybrid_metrics["opd_reverse_kl"], expected_reverse_kl.mean())
+    assert "opd_dagger/cross_entropy" in hybrid_metrics
+    assert old_student_leaf.grad is None
+    assert teacher_sampled_leaf.grad is None
+    assert teacher_topk_log_probs.grad is None
 
 
 def test_zero_weighted_kl_nan_does_not_poison_policy_loss(monkeypatch):

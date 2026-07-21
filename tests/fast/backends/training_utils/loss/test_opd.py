@@ -24,8 +24,8 @@ def _args(opd_kl_coef: float = 1.0) -> Namespace:
 
 def test_subtracts_weighted_reverse_kl_and_stores_metric():
     args = _args(opd_kl_coef=0.5)
-    student = [torch.tensor([0.0, 1.0])]
-    teacher = [torch.tensor([0.0, 0.0])]
+    student = [torch.tensor([0.0, 1.0], requires_grad=True)]
+    teacher = [torch.tensor([0.0, 0.0], requires_grad=True)]
     advantages = [torch.tensor([2.0, 2.0])]
     rollout_data = {"teacher_log_probs": teacher}
 
@@ -34,6 +34,24 @@ def test_subtracts_weighted_reverse_kl_and_stores_metric():
     # reverse_kl = student - teacher = [0, 1]; adv - 0.5 * reverse_kl = [2.0, 1.5]
     assert torch.allclose(advantages[0], torch.tensor([2.0, 1.5]))
     assert torch.allclose(rollout_data["opd_reverse_kl"][0], torch.tensor([0.0, 1.0]))
+    assert advantages[0].requires_grad is False
+    assert rollout_data["opd_reverse_kl"][0].requires_grad is False
+    assert student[0].grad is None
+    assert teacher[0].grad is None
+
+
+def test_precomputed_reverse_kl_is_detached_before_weighting_advantages():
+    args = _args(opd_kl_coef=0.25)
+    precomputed = torch.tensor([0.4, -0.2], requires_grad=True)
+    advantages = [torch.tensor([0.0, 0.0])]
+    rollout_data = {"opd_reverse_kl": [precomputed]}
+
+    apply_opd_kl_to_advantages(args, rollout_data, advantages, student_log_probs=[torch.zeros(2)])
+
+    torch.testing.assert_close(advantages[0], torch.tensor([-0.1, 0.05]))
+    assert advantages[0].requires_grad is False
+    assert rollout_data["opd_reverse_kl"][0].requires_grad is False
+    assert precomputed.grad is None
 
 
 def test_noop_when_student_log_probs_none():

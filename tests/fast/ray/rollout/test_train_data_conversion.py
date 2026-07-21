@@ -114,9 +114,10 @@ class TestConvertSamplesToTrainData:
         )
         assert out["rollout_log_probs"][0] == [-0.1, -0.2, -0.3, -0.4]
 
-    def test_teacher_topk_targets_passed_through_as_sparse_tensors(self):
+    def test_sampled_and_topk_teacher_targets_pass_through_together(self):
         args = make_args(rewards_normalization=False)
         sample = make_sample(response_length=2)
+        sample.teacher_log_probs = torch.tensor([-0.5, -0.6], dtype=torch.float32)
         sample.teacher_topk_token_ids = torch.tensor([[10, 11], [12, 13]], dtype=torch.long)
         sample.teacher_topk_log_probs = torch.tensor([[-0.1, -0.2], [-0.3, -0.4]], dtype=torch.float32)
         sample.teacher_topk_valid_mask = torch.ones((2, 2), dtype=torch.bool)
@@ -129,6 +130,7 @@ class TestConvertSamplesToTrainData:
             custom_reward_post_process_func=None,
         )
 
+        torch.testing.assert_close(out["teacher_log_probs"][0], sample.teacher_log_probs)
         torch.testing.assert_close(out["teacher_topk_token_ids"][0], sample.teacher_topk_token_ids)
         torch.testing.assert_close(out["teacher_topk_log_probs"][0], sample.teacher_topk_log_probs)
         torch.testing.assert_close(out["teacher_topk_valid_mask"][0], sample.teacher_topk_valid_mask)
@@ -467,6 +469,7 @@ class TestSplitTrainDataByDp:
             "loss_masks": [[1], [1]],
             "sample_indices": [0, 1],
             "rollout_log_probs": [[-0.1], [-0.2]],
+            "teacher_log_probs": [[-0.3], [-0.4]],
             "round_number": [1, 2],
             "teacher_topk_token_ids": [
                 torch.tensor([[10, 11]], dtype=torch.long),
@@ -484,6 +487,7 @@ class TestSplitTrainDataByDp:
         refs = split_train_data_by_dp(args, data, dp_size=2)
         parts = [ray.get(r.inner) for r in refs]
         assert "rollout_log_probs" in parts[0]
+        assert "teacher_log_probs" in parts[0]
         assert "round_number" in parts[0]
         assert "teacher_topk_token_ids" in parts[0]
         assert "teacher_topk_log_probs" in parts[0]

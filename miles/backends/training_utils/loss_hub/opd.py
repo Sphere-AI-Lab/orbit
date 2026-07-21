@@ -42,7 +42,10 @@ def apply_opd_kl_to_advantages(
             reverse_kl = precomputed_reverse_kls[i]
             if not torch.is_tensor(reverse_kl):
                 reverse_kl = torch.tensor(reverse_kl, dtype=torch.float32)
-            reverse_kl = reverse_kl.to(device=adv.device)
+            # RKLD-PG treats the rollout-side score as a stop-gradient
+            # coefficient. Keep that contract explicit even if a custom data
+            # path accidentally supplies a tensor with autograd history.
+            reverse_kl = reverse_kl.to(device=adv.device).detach()
             if adv.shape != reverse_kl.shape:
                 raise ValueError(
                     f"OPD shape mismatch at sample {i}: advantages={tuple(adv.shape)}, "
@@ -65,7 +68,7 @@ def apply_opd_kl_to_advantages(
         )
 
     device = student_log_probs[0].device
-    teacher_log_probs = [t.to(device=device) for t in teacher_log_probs]
+    teacher_log_probs = [t.to(device=device).detach() for t in teacher_log_probs]
 
     reverse_kls = []
     for i, adv in enumerate(advantages):
@@ -80,7 +83,8 @@ def apply_opd_kl_to_advantages(
                 f"student_log_probs={tuple(student_log_probs[i].shape)}. "
                 "OPD expects per-token advantages; broadcast scalar advantages must be expanded before this call."
             )
-        reverse_kl = student_log_probs[i] - teacher_log_probs[i]
+        old_student_log_prob = student_log_probs[i].detach()
+        reverse_kl = old_student_log_prob - teacher_log_probs[i]
         advantages[i] = adv - args.opd_kl_coef * reverse_kl
         reverse_kls.append(reverse_kl)
 

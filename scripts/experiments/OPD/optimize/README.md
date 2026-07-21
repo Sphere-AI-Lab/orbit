@@ -13,7 +13,10 @@ instead of shipping placeholder launchers.
 | 02b | `02b-topk-rest-tp4-smoke.sh` | Verify the Stable TP operator generalizes to TP=4, PP=1, DP=2 | Passed (25080): 5/5; displayed step-0/4 CE stays within the 0.0028 three-layout spread |
 | 02c | `02c-topk-rest-pp2-smoke.sh` | Verify last-pipeline-stage target ownership with TP=2, PP=2, DP=2 | Passed (25085; first attempt 25081 was an IB preflight refusal, not code): 5/5; no PP ownership failure |
 | 02d | `02d-topk-rest-tp2-gate.sh` | Canonical 50-step objective/stability gate after all 5-step smokes pass | Passed (25137): 50/50, CE 0.487→0.407, coarse KL -58.5%, 3,200/0 requests, 149.7 s/step (+1.6% descriptive versus sampled baseline) |
-| 03 | `03-rkld-topk-dagger.sh` | Add the existing sampled RKLD-PG branch to Top-K + Rest DAgger | Planned after pure DAgger is stable |
+| 03a | `03a-rkld-topk-rest-smoke.sh` | Five-step TP2 composition smoke: sampled RKLD-PG + Stable-TP Top-K + Rest | Passed (25267): 5/5, both branches active and finite |
+| 03b | `03b-sampled-rkld-control.sh` | Fresh 50-step sampled-RKLD control from the same commit as the hybrid | Done (25279): 50/50, `I_rkld=0.01584`, median step 143.4 s |
+| 03c | `03c-topk-rest-control.sh` | Fresh 50-step pure Top-K + Rest control from the same commit as the hybrid | Done (25280): 50/50; rerun floors calibrated against job 25137 |
+| 03d | `03d-rkld-topk-rest-gate.sh` | Matched 50-step hybrid decision gate | Inconclusive (25281): guards 1/3/4 passed, RKLD preservation missed by 4.7x its floor, and coarse KL missed by 1.3x; G5 held for a coefficient sweep |
 
 The 01 treatment will isolate the candidate-level term with:
 
@@ -189,16 +192,32 @@ HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
   OPD/optimize/02d-topk-rest-tp2-gate
 ```
 
-The three smokes must finish 5/5 before allocating the 50-step gate. All runs
-must retain 64 teacher and zero student scoring requests per step, finite loss
-and gradient series, zero protocol/alignment failures, and stable
+The three smokes finished 5/5 before the 50-step gate was allocated. All runs
+retained 64 teacher and zero student scoring requests per step, finite loss and
+gradient series, zero protocol/alignment failures, and stable
 `opd_dagger/{explicit_ce,rest_ce,cross_entropy,teacher_entropy,coarse_kl,teacher_rest_mass,student_rest_mass,rest_mass_abs_error}`.
 Use `coarse_kl = cross_entropy - teacher_entropy`, not raw CE magnitude, when
 judging distribution mismatch.
-TP2/TP4 runs additionally check for `xTP` loss/gradient scaling; PP2 checks that
-the final pipeline stage receives all three sparse target tensors. CP and FSDP
-are intentionally outside the 02 cluster gate and must not be advertised as
-validated by these scripts.
+The displayed step-0 and step-4 CE values have maximum cross-layout spreads of
+0.00027 and 0.00280 respectively. Together with the independent Oracle tests,
+that is evidence against an obvious `xTP` scale or PP last-stage ownership bug;
+it is not a claim that independent runs are bitwise identical.
+
+Job 25137 completed 50/50, but the embedded W&B export contains 49 trainer-loss
+records at steps 0-48. On those records, first-10 to last-10 means are
+0.4397→0.4231 for total CE, 0.3374→0.3398 for explicit CE, and 0.1022→0.0833
+for Rest CE. The observed window improvement is therefore Rest-driven; the
+explicit component is flat/noisy. Sampled reverse-KL, which has coefficient zero
+in 02, moves 0.1131→0.1145 across the same first/last ten-point diagnostic
+windows and does not support a "comparable decline" claim. This does not reject
+the coarse forward-KL objective; it makes the matched 03 composition experiment
+necessary.
+
+Median end-to-end step time was 149.7 s versus 147.4 s for the sampled-token
+control (+1.6 %). Dedicated Stable-TP operator timing and peak-memory counters
+were not exported, so the cross-run delta must not be presented as the causal
+cost of the two vocabulary scans. CP and FSDP are intentionally outside the 02
+cluster gate and must not be advertised as validated by these scripts.
 
 ### PDF parity boundary
 
@@ -210,21 +229,106 @@ acceptance checklist:
 | Teacher-selected raw `[T,K]` targets plus sampled teacher log-prob from one request | Implemented and validated by rollout/Sample/Ray tests and job 24890; no Student SGLang rescore. |
 | Current trainer logits provide candidate and Rest gradients | Implemented by the Stable TP loss; teacher tensors detach at the loss boundary. |
 | No Top-K renormalization; stable `p_R`, `logZ`, and `logZ_R` | Implemented with the numerical protocol above and dense FP64 Oracle parity. |
-| TP=1/2/4 and independent process groups | TP1 gradcheck plus real Gloo TP2/DP2 and TP4 parity passed; NCCL TP2/TP4 smokes remain. |
-| PP=2 | Batch fields are wired and `02c` is prepared; runtime validation remains. |
+| TP=1/2/4 and independent process groups | TP1 gradcheck plus real Gloo TP2/DP2 and TP4 parity passed; NCCL TP2 and TP4 smokes passed as jobs 25079 and 25080. |
+| PP=2 | Runtime validation passed in job 25085 after an unrelated node-IB preflight refusal in job 25081. VPP remains untested. |
 | Zigzag CP=2 / allgather CP | Candidate-axis slicing has a unit test, but no distributed loss/gradient gate; allgather CP is explicitly rejected. |
 | Multimodal/agentic alignment | Multi-turn observation rows are masked. Prompt-only media expansion preserves response targets; response-side media expansion is not hardened and will fail the response-length guard. |
 | Shared tokenizer/vocabulary | The loss enforces IDs inside the student vocabulary. Semantic tokenizer equality is a recipe/deployment contract, not yet verified from the remote teacher endpoint; the Qwen3-32B/8B recipe assumes the shared Qwen3 vocabulary. |
 | FSDP | Not supported: its micro-batch key path is not wired. |
-| `RKLD-PG + lambda * DAgger` hybrid | Data and loss branches are composable, but the matched hybrid experiment is milestone 03. The 02 scripts intentionally isolate pure DAgger with sampled RKLD coefficient zero. |
+| `RKLD-PG + lambda * DAgger` hybrid | Composition regression and 03a-03d recipes are implemented; server fast tests, the five-step smoke, and matched 50-step arms remain unrun. The 02 scripts intentionally isolate pure DAgger with sampled RKLD coefficient zero. |
 
 One systems caveat is separate from mathematical correctness: the current loss
 invokes the Stable TP primitive once per response sample. That is five TP
 reductions per sample (full MAX/SUM, Rest MAX/SUM, selected SUM), with total
 payload `Theta(T)` but latency proportional to the number of samples in the
 micro-batch. The duplicate CPU/GPU protocol checks also synchronize per sample.
-02a-02d must therefore measure loss time and peak memory before considering a
-packed row-index interface; this is not a reason to change the objective.
+The completed 02a-02d build did not export dedicated loss time or peak memory,
+so those metrics remain prerequisites before considering a packed row-index
+interface; this is not a reason to change the objective.
+
+## 03 implementation and validation sequence
+
+Milestone 03 composes the two already-isolated objectives without adding a new
+teacher request, student forward, trainer operator, or distributed topology:
+
+```text
+A_RKLD,t = beta * (log p_T(a_t | h_t) - log q_old(a_t | h_t))
+
+L_03 = L_policy(log q_theta(a_t | h_t), stop_gradient(A_RKLD,t))
+       + lambda * L_TopK+Rest(current trainer logits, teacher [T,K] targets)
+```
+
+The same teacher prefill returns the sampled-action log-probability required by
+RKLD-PG and the native `[T,K]` IDs/raw log-probabilities/valid mask required by
+DAgger. `Sample`, multi-turn merge, train-data conversion, and DP splitting now
+have regression coverage that retains both contracts together. The trainer's
+single current-policy forward supplies both the sampled-action log-probability
+and the vocabulary-sharded logits consumed by Stable TP.
+
+`apply_opd_kl_to_advantages` explicitly detaches `q_old`, sampled teacher
+log-probabilities, and any precomputed reverse-KL tensor at the RKLD boundary.
+This makes the PDF's `stop_gradient` contract independent of how a custom data
+source constructed those tensors. It does not detach current trainer logits or
+change the numerical value produced by the normal HTTP/Ray path.
+Milestone 03 introduces no extra importance ratio: RKLD-PG continues through
+Miles' existing sampled policy-loss machinery, while Top-K + Rest continues to
+bypass advantages, PPO clipping, TIS, and sampled-action reduction.
+
+Run the server fast-test gate first:
+
+```bash
+python -m pytest -q \
+  tests/fast/backends/training_utils/loss/test_opd.py \
+  tests/fast/backends/training_utils/loss/test_rkld_dagger.py \
+  tests/fast/backends/training_utils/test_true_on_policy_loss_metrics.py \
+  tests/fast/rollout/test_on_policy_distillation.py \
+  tests/fast/ray/rollout/test_train_data_conversion.py \
+  tests/fast/utils/test_arguments.py
+```
+
+The dedicated 03 fixture checks a stronger invariant than finite execution. It
+runs hybrid, RKLD-only, and DAgger-only branches from identical logits and
+requires both `L_hybrid = L_RKLD + L_DAgger` and
+`grad(L_hybrid) = grad(L_RKLD) + grad(L_DAgger)`. It also requires nonzero
+branch gradients, independent `pg_loss`, `opd_reverse_kl`, and
+`opd_dagger/*` metrics, and no gradients on `q_old` or teacher targets. The
+sampled-token lookup uses the single-rank reference implementation so the fast
+fixture is not coupled to Megatron's optional fused-CE import; the DAgger term
+still executes the production Stable-TP operator. The cluster smoke is the
+real Megatron/NCCL gate.
+
+After the fast tests pass, run the five-step composition smoke:
+
+```bash
+HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
+  OPD/optimize/03a-rkld-topk-rest-smoke
+```
+
+03a must show 64 teacher and zero student-rescore requests per step; finite,
+nonzero `train/pg_loss`, `train/opd_reverse_kl`, and `opd_dagger/loss`; finite
+total loss and gradient norm; and no protocol, alignment, retry, or timeout
+failure. It uses `opd_kl_coef=1`, `opd_dagger_top_k=2`, and
+`opd_dagger_coef=1` unless explicitly overridden, with distinct coefficients
+encoded in the W&B run name.
+
+Only after 03a passes, launch the same-commit 50-step arms:
+
+```bash
+HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
+  OPD/optimize/03b-sampled-rkld-control
+
+HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
+  OPD/optimize/03c-topk-rest-control
+
+HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
+  OPD/optimize/03d-rkld-topk-rest-gate
+```
+
+Use first-10 versus last-10 windows for sampled reverse KL, coarse KL, explicit
+CE, Rest CE, total loss, gradient norm, request counts, retries, and end-to-end
+step time. Jobs 24374 and 25137 remain historical controls; they are not
+substitutes for these current-commit arms. Fully async and staleness remain out
+of G5 until the synchronous composition is stable.
 
 ## 00 characterization outcome
 
