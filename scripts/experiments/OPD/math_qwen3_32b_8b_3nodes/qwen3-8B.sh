@@ -20,6 +20,8 @@
 #   - timeout kept explicit (600s; the implicit aiohttp 300s killed 23787)
 #   - retries 0 — fail fast; with a whole-node teacher a failure means
 #     something real, not queue pressure
+#   - persistent HTTP session enabled by default; set
+#     OPD_SCORING_PERSISTENT_SESSION=0 for the one-session-per-request A/B arm
 #   - NO in-flight cap (0 = disabled): a TP=8 whole-node teacher absorbs the
 #     full 64-request burst and sglang's continuous batching does the
 #     queueing. Set OPD_SCORING_MAX_INFLIGHT (e.g. 8) if scoring-tail
@@ -112,10 +114,15 @@ export ENVPACK_SERVER_WAIT_TIMEOUT=${ENVPACK_SERVER_WAIT_TIMEOUT:-1800}
 # shellcheck disable=SC1090
 source "$MILES_REPO/scripts/models/qwen3-8B.sh"
 
-# Sampled-token OPD by default (see GRPO_ARGS); the run name carries the
-# top-k so curves from different settings never share a wandb group.
+# Sampled-token OPD by default (see GRPO_ARGS); the run name carries top-k and
+# transport mode so curves from the A/B arms never share a wandb group.
 OPD_TOP_K=${OPD_TOP_K:-0}
-RUN_NAME=${WANDB_RUN_NAME:-math-opd-qwen3-8B-sglang-t32B-3nodes-topk${OPD_TOP_K}}
+case "${OPD_SCORING_PERSISTENT_SESSION:-1}" in
+   1|true) OPD_SCORING_PERSISTENT_SESSION=1 ;;
+   0|false) OPD_SCORING_PERSISTENT_SESSION=0 ;;
+   *) echo "OPD_SCORING_PERSISTENT_SESSION must be 0/1 or false/true" >&2; exit 2 ;;
+esac
+RUN_NAME=${WANDB_RUN_NAME:-math-opd-qwen3-8B-sglang-t32B-3nodes-topk${OPD_TOP_K}-persistent${OPD_SCORING_PERSISTENT_SESSION}}
 
 CKPT_ARGS=(
    --hf-checkpoint  "$HF_MODEL_DIR"
@@ -185,6 +192,12 @@ GRPO_ARGS=(
    --kl-loss-coef 0
    --entropy-coef 0
 )
+
+if [[ "$OPD_SCORING_PERSISTENT_SESSION" == "0" ]]; then
+   GRPO_ARGS+=(--no-opd-scoring-persistent-session)
+else
+   GRPO_ARGS+=(--opd-scoring-persistent-session)
+fi
 
 OPTIMIZER_ARGS=(
    --optimizer adam

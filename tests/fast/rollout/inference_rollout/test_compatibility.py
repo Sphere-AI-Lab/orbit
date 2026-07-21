@@ -16,6 +16,7 @@ from miles.rollout.inference_rollout.compatibility import (
     LegacyGenerateFnAdapter,
     LegacyRolloutFnAdapter,
     call_rollout_function,
+    dispose_rollout_function,
     load_generate_function,
     load_rollout_function,
 )
@@ -133,6 +134,39 @@ class TestSupportedRolloutFormats:
             assert isinstance(fn, AsyncRolloutFn)
             expected_type = RolloutFnEvalOutput if evaluation else RolloutFnTrainOutput
             assert isinstance(result, expected_type)
+
+
+class TestRolloutDispose:
+    def test_legacy_adapter_preserves_dispose_hook(self, constructor_input):
+        disposed = []
+
+        def legacy_rollout_fn(args, rollout_id, data_source, evaluation=False):
+            return []
+
+        legacy_rollout_fn.dispose = lambda: disposed.append("legacy")
+
+        with function_registry.temporary("test:legacy_dispose", legacy_rollout_fn):
+            fn = load_rollout_function(constructor_input, "test:legacy_dispose")
+            dispose_rollout_function(fn)
+
+        assert disposed == ["legacy"]
+
+    def test_async_class_dispose_hook_is_awaited(self, constructor_input):
+        disposed = []
+
+        class AsyncRolloutFn:
+            def __init__(self, input: RolloutFnConstructorInput):
+                pass
+
+            async def dispose(self):
+                await asyncio.sleep(0)
+                disposed.append("async")
+
+        with function_registry.temporary("test:async_dispose", AsyncRolloutFn):
+            fn = load_rollout_function(constructor_input, "test:async_dispose")
+            dispose_rollout_function(fn)
+
+        assert disposed == ["async"]
 
 
 class TestSupportedGenerateFormats:

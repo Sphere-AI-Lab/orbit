@@ -1,6 +1,10 @@
 import asyncio
+import itertools
 import math
+import queue
+import threading
 from argparse import Namespace
+from types import SimpleNamespace
 
 import pytest
 from tests.ci.ci_register import register_cpu_ci
@@ -10,6 +14,56 @@ from miles.rollout.on_policy_distillation import _compute_topk_reverse_kl
 from miles.utils.types import Sample
 
 register_cpu_ci(est_time=60, suite="stage-a-cpu")
+
+
+class _FakeResponse:
+    request_info = SimpleNamespace(headers={"Content-Length": "128"})
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        return False
+
+    def raise_for_status(self):
+        return None
+
+    async def read(self):
+        return b'{"meta_info": {}}'
+
+    async def json(self):
+        return {"meta_info": {}}
+
+
+class _FakeClientSession:
+    def __init__(self, sessions, **kwargs):
+        self.closed = False
+        self.post_calls = []
+        self.post_exceptions = []
+        self.connection_reuse_events = []
+        sessions.append(self)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback):
+        self.closed = True
+        return False
+
+    def post(self, url, **kwargs):
+        self.post_calls.append((url, kwargs))
+        if self.connection_reuse_events:
+            kwargs["trace_request_ctx"].connection_reused = self.connection_reuse_events.pop(0)
+        if self.post_exceptions:
+            raise self.post_exceptions.pop(0)
+        return _FakeResponse()
+
+
+def _install_fake_http(monkeypatch):
+    sessions = []
+    monkeypatch.setattr(opd.aiohttp, "TCPConnector", lambda **kwargs: object())
+    monkeypatch.setattr(opd.aiohttp, "ClientSession", lambda **kwargs: _FakeClientSession(sessions, **kwargs))
+    return sessions
 
 
 def _entry(prob: float, token_id: int):
@@ -68,7 +122,7 @@ def test_score_payload_requires_at_least_one_prompt_token():
 async def test_scoring_post_retries_asyncio_timeout(monkeypatch):
     calls = 0
 
-    async def fake_post_json(url, payload, timeout_s):
+    async def fake_post_json(url, payload, timeout_s, *, persistent):
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -79,6 +133,10 @@ async def test_scoring_post_retries_asyncio_timeout(monkeypatch):
             response_body_bytes=256,
             body_read_s=0.01,
             json_decode_s=0.02,
+            client_session_reused=True,
+            connection_reused=True,
+            transport_attempts=1,
+            stale_connection_retry_count=0,
         )
 
     async def no_sleep(_delay):
@@ -107,7 +165,238 @@ async def test_scoring_post_retries_asyncio_timeout(monkeypatch):
     assert result.telemetry["request_body_bytes"] == 128
     assert result.telemetry["response_body_bytes"] == 256
     assert result.telemetry["returned_positions"] == 2
+    assert result.telemetry["persistent_session"] is True
+    assert result.telemetry["client_session_reused"] is True
+    assert result.telemetry["connection_reused"] is True
+    assert result.telemetry["transport_attempts"] == 2
+    assert result.telemetry["stale_connection_retry_count"] == 0
     assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_post_json_reuses_session_and_rebuilds_after_close(monkeypatch):
+    sessions = _install_fake_http(monkeypatch)
+
+    first = await opd._post_json("http://teacher/generate", {"input_ids": [1]}, 10, persistent=True)
+    second = await opd._post_json("http://teacher/generate", {"input_ids": [2]}, 10, persistent=True)
+
+    assert len(sessions) == 1
+    assert first.client_session_reused is False
+    assert second.client_session_reused is True
+    assert first.connection_reused is False
+    assert second.connection_reused is False
+    assert sessions[0].closed is False
+
+    await opd.close_scoring_transport()
+    assert sessions[0].closed is True
+
+    third = await opd._post_json("http://teacher/generate", {"input_ids": [3]}, 10, persistent=True)
+    assert len(sessions) == 2
+    assert third.client_session_reused is False
+
+    await opd.close_scoring_transport()
+    assert sessions[1].closed is True
+
+
+@pytest.mark.asyncio
+async def test_post_json_retries_stale_persistent_connection(monkeypatch):
+    sessions = _install_fake_http(monkeypatch)
+
+    first = await opd._post_json("http://teacher/generate", {"input_ids": [1]}, 10, persistent=True)
+    assert first.client_session_reused is False
+
+    # aiohttp confirms the failed request checked out a pooled connection; the
+    # idempotent scoring request may then retry on a new connection.
+    sessions[0].connection_reuse_events = [True, False]
+    sessions[0].post_exceptions = [opd.aiohttp.ServerDisconnectedError("Server disconnected")]
+    second = await opd._post_json("http://teacher/generate", {"input_ids": [2]}, 10, persistent=True)
+
+    assert second.response == {"meta_info": {}}
+    assert second.client_session_reused is True
+    assert second.connection_reused is False
+    assert second.transport_attempts == 2
+    assert second.stale_connection_retry_count == 1
+    assert len(sessions) == 1
+    assert len(sessions[0].post_calls) == 3
+
+    await opd.close_scoring_transport()
+
+
+@pytest.mark.asyncio
+async def test_post_json_stale_retries_share_one_timeout_budget(monkeypatch):
+    sessions = _install_fake_http(monkeypatch)
+    await opd._persistent_scoring_session()
+    sessions[0].connection_reuse_events = [True, False]
+    sessions[0].post_exceptions = [opd.aiohttp.ServerDisconnectedError("Server disconnected")]
+    # opd.time IS the global time module, and the asyncio event loop reads
+    # time.monotonic() for its own scheduling — an exact-length iterator gets
+    # exhausted by those loop-internal calls. The scripted values cover the
+    # seven in-band reads (they happen in one non-suspending await chain, in
+    # order); everything after sees a frozen clock.
+    clock = itertools.chain(iter([100.0, 101.0, 104.0, 105.0, 105.1, 105.2, 105.3]), itertools.repeat(105.3))
+    monkeypatch.setattr(opd.time, "monotonic", lambda: next(clock))
+
+    result = await opd._post_json("http://teacher/generate", {"input_ids": [1]}, 10, persistent=True)
+
+    first_timeout = sessions[0].post_calls[0][1]["timeout"].total
+    second_timeout = sessions[0].post_calls[1][1]["timeout"].total
+    assert first_timeout == 9
+    assert second_timeout == 6
+    assert result.transport_attempts == 2
+
+    await opd.close_scoring_transport()
+
+
+@pytest.mark.asyncio
+async def test_post_json_does_not_retry_disconnect_on_fresh_session(monkeypatch):
+    sessions = _install_fake_http(monkeypatch)
+
+    def session_factory(**kwargs):
+        session = _FakeClientSession(sessions, **kwargs)
+        session.post_exceptions = [opd.aiohttp.ServerDisconnectedError("Server disconnected")]
+        return session
+
+    monkeypatch.setattr(opd.aiohttp, "ClientSession", session_factory)
+
+    with pytest.raises(opd.aiohttp.ServerDisconnectedError):
+        await opd._post_json("http://teacher/generate", {"input_ids": [1]}, 10, persistent=True)
+
+    assert len(sessions[0].post_calls) == 1
+
+    await opd.close_scoring_transport()
+
+
+@pytest.mark.asyncio
+async def test_post_json_does_not_retry_fresh_connection_in_reused_session(monkeypatch):
+    sessions = _install_fake_http(monkeypatch)
+
+    await opd._post_json("http://teacher/generate", {"input_ids": [1]}, 10, persistent=True)
+    sessions[0].connection_reuse_events = [False]
+    sessions[0].post_exceptions = [opd.aiohttp.ServerDisconnectedError("Server disconnected")]
+
+    with pytest.raises(opd.aiohttp.ServerDisconnectedError) as exc_info:
+        await opd._post_json("http://teacher/generate", {"input_ids": [2]}, 10, persistent=True)
+
+    assert len(sessions[0].post_calls) == 2
+    assert exc_info.value.opd_transport_attempts == 1
+    assert exc_info.value.opd_stale_connection_retry_count == 0
+
+    await opd.close_scoring_transport()
+
+
+@pytest.mark.asyncio
+async def test_post_json_gives_up_after_exhausting_stale_connections(monkeypatch):
+    sessions = _install_fake_http(monkeypatch)
+
+    await opd._post_json("http://teacher/generate", {"input_ids": [1]}, 10, persistent=True)
+    sessions[0].connection_reuse_events = [True] * opd._STALE_CONNECTION_ATTEMPTS
+    sessions[0].post_exceptions = [
+        opd.aiohttp.ServerDisconnectedError("Server disconnected") for _ in range(opd._STALE_CONNECTION_ATTEMPTS)
+    ]
+
+    with pytest.raises(opd.aiohttp.ServerDisconnectedError) as exc_info:
+        await opd._post_json("http://teacher/generate", {"input_ids": [2]}, 10, persistent=True)
+
+    assert len(sessions[0].post_calls) == 1 + opd._STALE_CONNECTION_ATTEMPTS
+    assert exc_info.value.opd_transport_attempts == opd._STALE_CONNECTION_ATTEMPTS
+    assert exc_info.value.opd_stale_connection_retry_count == opd._STALE_CONNECTION_ATTEMPTS - 1
+
+    await opd.close_scoring_transport()
+
+
+@pytest.mark.asyncio
+async def test_persistent_connector_expires_before_sglang_keepalive(monkeypatch):
+    captured = {}
+
+    def fake_connector(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(opd.aiohttp, "TCPConnector", fake_connector)
+    monkeypatch.setattr(opd.aiohttp, "ClientSession", lambda **kwargs: _FakeClientSession([], **kwargs))
+
+    await opd._post_json("http://teacher/generate", {"input_ids": [1]}, 10, persistent=True)
+
+    # sglang's uvicorn reaps idle connections at SGLANG_TIMEOUT_KEEP_ALIVE=5s;
+    # the client pool must expire strictly earlier.
+    assert captured["keepalive_timeout"] < 5
+
+    await opd.close_scoring_transport()
+
+
+@pytest.mark.asyncio
+async def test_post_json_can_disable_persistent_session(monkeypatch):
+    sessions = _install_fake_http(monkeypatch)
+
+    first = await opd._post_json("http://teacher/generate", {"input_ids": [1]}, 10, persistent=False)
+    second = await opd._post_json("http://teacher/generate", {"input_ids": [2]}, 10, persistent=False)
+
+    assert len(sessions) == 2
+    assert all(session.closed for session in sessions)
+    assert first.client_session_reused is False
+    assert second.client_session_reused is False
+
+
+def test_persistent_session_is_isolated_and_closed_per_event_loop(monkeypatch):
+    sessions = _install_fake_http(monkeypatch)
+
+    async def post_once():
+        return await opd._post_json("http://teacher/generate", {"input_ids": [1]}, 10, persistent=True)
+
+    first = asyncio.run(post_once())
+    second = asyncio.run(post_once())
+
+    assert len(sessions) == 2
+    assert all(session.closed for session in sessions)
+    assert first.client_session_reused is False
+    assert second.client_session_reused is False
+    assert not opd._SCORING_LOOP_STATES
+
+
+def test_fully_async_worker_closes_transport_on_its_owner_loop(monkeypatch):
+    from examples.fully_async import fully_async_rollout
+
+    worker = object.__new__(fully_async_rollout.AsyncRolloutWorker)
+    worker.args = Namespace(rollout_batch_size=1, use_opd=True)
+    worker.data_buffer = SimpleNamespace(get_samples=lambda _count: [[object()]])
+    worker.output_queue = queue.Queue()
+    worker.state = SimpleNamespace(sampling_params={})
+    worker.running = True
+    worker.max_concurrent_tasks = 1
+    worker.prefetch_batches = 1
+    worker.max_completed_queue_groups = 1
+    worker.worker_thread = None
+    worker._loop = None
+    worker._active_tasks = set()
+    started = threading.Event()
+    cancelled = threading.Event()
+    closed_on = []
+
+    async def fake_generate(*args, **kwargs):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    async def fake_close(_args):
+        assert worker._loop is asyncio.get_running_loop()
+        closed_on.append(asyncio.get_running_loop())
+
+    monkeypatch.setattr(fully_async_rollout, "generate_and_rm_group", fake_generate)
+    monkeypatch.setattr(fully_async_rollout, "_close_opd_scoring_transport", fake_close)
+
+    worker.start()
+    try:
+        assert started.wait(timeout=2)
+    finally:
+        worker.stop()
+
+    assert len(closed_on) == 1
+    assert cancelled.is_set()
+    assert worker._loop is None
+    assert not worker.worker_thread.is_alive()
+    assert fully_async_rollout.generate_rollout_fully_async.dispose is fully_async_rollout.stop_global_worker
 
 
 @pytest.mark.asyncio

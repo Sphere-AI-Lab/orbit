@@ -74,6 +74,15 @@ def stop_global_worker():
             _global_worker = None
 
 
+async def _close_opd_scoring_transport(args):
+    if not getattr(args, "use_opd", False):
+        return
+
+    from miles.rollout.on_policy_distillation import close_scoring_transport
+
+    await close_scoring_transport()
+
+
 class AsyncRolloutWorker:
     """
     Simplified asynchronous rollout worker, using threads instead of processes
@@ -93,6 +102,8 @@ class AsyncRolloutWorker:
         # max_completed_queue_groups is enforced as a soft launch cap below.
         self.output_queue = queue.Queue()
         self.worker_thread = None
+        self._loop = None
+        self._active_tasks = set()
         self.state = GenerateState(args)
 
         self._warn_if_prefetch_is_likely_wasteful()
@@ -135,6 +146,7 @@ class AsyncRolloutWorker:
         print("Continuous async rollout worker started")
 
         active_tasks = set()
+        self._active_tasks = active_tasks
         max_concurrent_tasks = self.max_concurrent_tasks
         group_id_counter = 0
         print(
@@ -183,7 +195,10 @@ class AsyncRolloutWorker:
                         # Add completion callback
                         def make_callback(gid):
                             def task_done_callback(done_task):
-                                result = done_task.result()
+                                try:
+                                    result = done_task.result()
+                                except asyncio.CancelledError:
+                                    return
                                 self.output_queue.put((gid, result))
 
                             return task_done_callback
@@ -200,14 +215,30 @@ class AsyncRolloutWorker:
                 await asyncio.sleep(1)
 
         if active_tasks:
-            print(f"Waiting for {len(active_tasks)} continuous tasks to complete...")
+            print(f"Waiting for {len(active_tasks)} continuous tasks to stop...")
             await asyncio.wait(active_tasks)
 
         print("Continuous async rollout worker stopped")
 
+    def _cancel_active_tasks(self):
+        for task in tuple(self._active_tasks):
+            task.cancel()
+
     def worker_thread_func(self):
         """Worker function running in independent thread"""
-        asyncio.run(self.continuous_worker_loop())
+
+        async def run_worker():
+            self._loop = asyncio.get_running_loop()
+            try:
+                await self.continuous_worker_loop()
+            finally:
+                try:
+                    await _close_opd_scoring_transport(self.args)
+                finally:
+                    self._active_tasks = set()
+                    self._loop = None
+
+        asyncio.run(run_worker())
 
     def start(self):
         """Start continuous work mode"""
@@ -219,8 +250,12 @@ class AsyncRolloutWorker:
     def stop(self):
         """Stop worker thread"""
         self.running = False
+        if self._loop is not None and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._cancel_active_tasks)
         if self.worker_thread and self.worker_thread.is_alive():
             self.worker_thread.join(timeout=5)
+            if self.worker_thread.is_alive():
+                logger.warning("Fully async rollout worker did not stop within 5 seconds")
         print("Stopped async worker thread")
 
     def get_completed_groups(self, max_items: int | None = None) -> list[tuple]:
@@ -407,6 +442,8 @@ def generate_rollout_fully_async(args, rollout_id, data_buffer: DataSource, eval
     return completed_samples
 
 
-# Register exit cleanup function
+# RolloutManager calls this hook before closing the default background loop.
+generate_rollout_fully_async.dispose = stop_global_worker
 
+# Register exit cleanup function
 atexit.register(stop_global_worker)

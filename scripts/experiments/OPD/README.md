@@ -9,7 +9,8 @@ and rollout workers. It runs pure sampled-token distillation by default:
 ```text
 math_qwen3_32b_8b_3nodes/   Active 3-node baseline. Whole-node TP=8 teacher
                             on the head node, 8-GPU Megatron actor, and 8-GPU
-                            SGLang rollout worker.
+                            SGLang rollout worker. Also contains the persistent
+                            HTTP treatment described below.
 archive/                    Historical 1-node smoke recipes; not active
                             baselines or current validation targets.
 ```
@@ -31,6 +32,24 @@ Launch (on the slinky cluster, use `HF_CACHE_DIR=/data/shared`; the default
 ```bash
 HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh OPD/math_qwen3_32b_8b_3nodes/qwen3-8B
 ```
+
+## Persistent HTTP transport experiment
+
+The control run `origin-topk0-response-http` has already completed. The new
+recipe preserves its `top_k=0` setup and the response-window/T+1 scoring change
+from `b88d7cf`; it only changes the aiohttp `ClientSession` lifecycle.
+
+```bash
+HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
+  OPD/math_qwen3_32b_8b_3nodes/persistent-topk0-response-http
+```
+
+The new W&B run name is `persistent-topk0-response-http2`; compare it with the
+existing `origin-topk0-response-http` run. First verify that the treatment
+reports a high `opd_scoring/client_session_reuse_rate`; then compare
+`opd_scoring/http_s`, `opd_scoring/e2e_latency_s`, overall rollout time, and
+timeout/retry behavior. Session reuse enables connection pooling but does not
+by itself prove that a TCP connection was reused.
 
 The teacher model must already exist on disk:
 

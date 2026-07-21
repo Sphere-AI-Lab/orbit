@@ -1244,6 +1244,15 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 help="Retries per OPD scoring request after the first failure. 0 fails fast.",
             )
             parser.add_argument(
+                "--opd-scoring-persistent-session",
+                action=argparse.BooleanOptionalAction,
+                default=True,
+                help=(
+                    "Reuse an event-loop-local aiohttp ClientSession for OPD scoring requests. "
+                    "Disable with --no-opd-scoring-persistent-session for transport A/B tests."
+                ),
+            )
+            parser.add_argument(
                 "--opd-teacher-load",
                 type=str,
                 default=None,

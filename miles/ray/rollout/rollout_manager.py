@@ -21,7 +21,11 @@ from miles.rollout.base_types import (
     RolloutFnTrainInput,
     call_rollout_fn,
 )
-from miles.rollout.inference_rollout.compatibility import call_rollout_function, load_rollout_function
+from miles.rollout.inference_rollout.compatibility import (
+    call_rollout_function,
+    dispose_rollout_function,
+    load_rollout_function,
+)
 from miles.utils.environ import enable_experimental_rollout_refactor
 from miles.utils.health_monitor import RolloutHealthMonitor
 from miles.utils.http_utils import init_http_client
@@ -98,6 +102,17 @@ class RolloutManager:
             self._metric_checker.dispose()
         for monitor in self._health_monitors:
             monitor.stop()
+        try:
+            dispose_rollout_function(self.generate_rollout)
+        finally:
+            if getattr(self.args, "use_opd", False):
+                # The default rollout path owns its scoring transport on the
+                # shared background loop. Custom rollout workers close their
+                # owner-loop resources through the dispose hook above.
+                from miles.rollout.on_policy_distillation import close_scoring_transport
+                from miles.utils.async_utils import run
+
+                run(close_scoring_transport())
 
     # -------------------------- data generation -----------------------------
 

@@ -39,6 +39,23 @@ def load_rollout_function(input: RolloutFnConstructorInput, path: str):
         return LegacyRolloutFnAdapter(input, fn)
 
 
+def dispose_rollout_function(fn) -> None:
+    """Run an optional rollout-owned ``dispose`` hook.
+
+    Awaitable hooks use the same shared loop as async rollout callables.
+    """
+    if isinstance(fn, LegacyRolloutFnAdapter):
+        fn = fn.fn
+
+    dispose = getattr(fn, "dispose", None)
+    if dispose is None:
+        return
+
+    output = dispose()
+    if inspect.isawaitable(output):
+        run(output)
+
+
 def call_rollout_function(fn, input: RolloutFnInput) -> RolloutFnOutput:
     output = fn(input)
 

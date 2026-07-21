@@ -131,10 +131,24 @@ def _compute_opd_scoring_metrics(all_samples: list[Sample]) -> dict[str, float |
         "opd_scoring/sample_count": sample_count,
         "opd_scoring/request_count": len(calls),
         "opd_scoring/retry_count": sum(max(0, int(call.get("attempts", 1)) - 1) for call in calls),
+        "opd_scoring/transport_retry_count": sum(max(0, int(call.get("transport_attempts", 1)) - 1) for call in calls),
+        "opd_scoring/stale_connection_retry_count": sum(
+            max(0, int(call.get("stale_connection_retry_count", 0))) for call in calls
+        ),
     }
 
     for target in sorted({str(call.get("target")) for call in calls if call.get("target")}):
         metrics[f"opd_scoring/{target}_request_count"] = sum(call.get("target") == target for call in calls)
+
+    session_reuse = [
+        call["client_session_reused"] for call in calls if isinstance(call.get("client_session_reused"), bool)
+    ]
+    if session_reuse:
+        metrics["opd_scoring/client_session_reuse_rate"] = sum(session_reuse) / len(session_reuse)
+
+    connection_reuse = [call["connection_reused"] for call in calls if isinstance(call.get("connection_reused"), bool)]
+    if connection_reuse:
+        metrics["opd_scoring/connection_reuse_rate"] = sum(connection_reuse) / len(connection_reuse)
 
     total_fields = (
         "input_tokens",
@@ -143,6 +157,7 @@ def _compute_opd_scoring_metrics(all_samples: list[Sample]) -> dict[str, float |
         "request_body_bytes",
         "response_body_bytes",
         "returned_positions",
+        "transport_attempts",
     )
     for field in total_fields:
         values = [call[field] for call in calls if isinstance(call.get(field), (int, float))]

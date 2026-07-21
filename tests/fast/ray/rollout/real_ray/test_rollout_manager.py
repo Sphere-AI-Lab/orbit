@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import textwrap
 import time
+from types import SimpleNamespace
 
 import pytest
 import ray
@@ -157,6 +158,24 @@ class TestRolloutManagerInit:
         for h in eal.rollout_engines:
             assert isinstance(h, ray.actor.ActorHandle)
             assert ray.get(h.health_generate.remote(timeout=1.0)) is True
+
+
+class TestRolloutManagerDispose:
+    def test_dispose_calls_rollout_owned_cleanup(self, monkeypatch):
+        import miles.ray.rollout.rollout_manager as rmgr
+
+        manager = object.__new__(RolloutManager.__ray_actor_class__)
+        manager.args = SimpleNamespace(use_opd=False)
+        manager.generate_rollout = object()
+        manager._metric_checker = None
+        manager._health_monitors = []
+        disposed = []
+
+        monkeypatch.setattr(rmgr, "dispose_rollout_function", lambda fn: disposed.append(fn))
+
+        manager.dispose()
+
+        assert disposed == [manager.generate_rollout]
 
 
 @pytest.mark.asyncio

@@ -3,7 +3,7 @@ import logging
 import math
 import time
 from argparse import Namespace
-from collections.abc import Iterable
+from collections.abc import AsyncGenerator, Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,12 +35,30 @@ class _PostJsonResult:
     response_body_bytes: int
     body_read_s: float
     json_decode_s: float
+    client_session_reused: bool
+    connection_reused: bool
+    transport_attempts: int
+    stale_connection_retry_count: int
+
+
+@dataclass
+class _ScoringRequestTrace:
+    connection_reused: bool = False
 
 
 @dataclass(frozen=True)
 class _ScoringPostResult:
     response: dict[str, Any]
     telemetry: dict[str, Any]
+
+
+@dataclass
+class _ScoringLoopState:
+    semaphore: asyncio.Semaphore | None = None
+    semaphore_limit: int | None = None
+    session: aiohttp.ClientSession | None = None
+    session_scope: AsyncGenerator[aiohttp.ClientSession, None] | None = None
+    session_token: object | None = None
 
 
 def _get_opd_top_k(args: Namespace) -> int:
@@ -117,25 +135,148 @@ def _get_scoring_retries(args: Namespace) -> int:
     return max(0, int(1 if value is None else value))
 
 
-# One per process: reward_func runs on the RolloutManager's single event loop.
-_SCORING_SEMAPHORE: asyncio.Semaphore | None = None
+def _use_persistent_scoring_session(args: Namespace) -> bool:
+    return bool(getattr(args, "opd_scoring_persistent_session", True))
+
+
+_SCORING_LOOP_STATES: dict[asyncio.AbstractEventLoop, _ScoringLoopState] = {}
+
+
+def _scoring_loop_state() -> tuple[asyncio.AbstractEventLoop, _ScoringLoopState]:
+    loop = asyncio.get_running_loop()
+    state = _SCORING_LOOP_STATES.get(loop)
+    if state is None:
+        state = _ScoringLoopState()
+        _SCORING_LOOP_STATES[loop] = state
+    return loop, state
+
+
+# sglang's HTTP server closes idle keep-alive connections after
+# SGLANG_TIMEOUT_KEEP_ALIVE (default 5s). Pooled client connections must
+# expire strictly earlier, or a checkout can race the server-side close and
+# die with ServerDisconnectedError (job 24681 lost a 3-node run to a single
+# such race under retries=0).
+_SCORING_KEEPALIVE_TIMEOUT_S = 4.0
+# The race can't be eliminated, only narrowed. Retrying is limited to requests
+# that aiohttp confirms used a pooled connection; the scoring POST is a
+# read-only, max_new_tokens=0 operation, so replaying it is idempotent.
+_STALE_CONNECTION_ATTEMPTS = 3
+
+
+async def _mark_connection_reused(
+    _session: aiohttp.ClientSession,
+    trace_config_ctx: Any,
+    _params: Any,
+) -> None:
+    request_trace = getattr(trace_config_ctx, "trace_request_ctx", None)
+    if request_trace is not None:
+        request_trace.connection_reused = True
+
+
+def _scoring_trace_config() -> aiohttp.TraceConfig:
+    trace_config = aiohttp.TraceConfig()
+    trace_config.on_connection_reuseconn.append(_mark_connection_reused)
+    return trace_config
+
+
+def _annotate_transport_error(
+    exc: Exception,
+    *,
+    transport_attempts: int,
+    stale_connection_retry_count: int,
+) -> None:
+    exc.opd_transport_attempts = transport_attempts
+    exc.opd_stale_connection_retry_count = stale_connection_retry_count
+
+
+async def _scoring_session_scope(
+    loop: asyncio.AbstractEventLoop,
+    token: object,
+) -> AsyncGenerator[aiohttp.ClientSession, None]:
+    # Do not add a connector-level concurrency cap: the existing OPD semaphore
+    # remains the single source of request backpressure, and 0 still disables it.
+    connector = aiohttp.TCPConnector(limit=0, keepalive_timeout=_SCORING_KEEPALIVE_TIMEOUT_S)
+    async with aiohttp.ClientSession(
+        connector=connector,
+        trace_configs=[_scoring_trace_config()],
+    ) as session:
+        try:
+            yield session
+        finally:
+            state = _SCORING_LOOP_STATES.get(loop)
+            if state is not None and state.session_token is token:
+                _SCORING_LOOP_STATES.pop(loop, None)
+
+
+async def _persistent_scoring_session() -> tuple[aiohttp.ClientSession, bool]:
+    loop, state = _scoring_loop_state()
+    if state.session is not None and not state.session.closed:
+        return state.session, True
+
+    if state.session_scope is not None:
+        await state.session_scope.aclose()
+        _, state = _scoring_loop_state()
+
+    token = object()
+    scope = _scoring_session_scope(loop, token)
+    session = await anext(scope)
+    state.session = session
+    state.session_scope = scope
+    state.session_token = token
+    return session, False
+
+
+async def close_scoring_transport() -> None:
+    """Close OPD transport resources owned by the current event loop."""
+    loop = asyncio.get_running_loop()
+    state = _SCORING_LOOP_STATES.get(loop)
+    if state is None:
+        return
+    if state.session_scope is None:
+        _SCORING_LOOP_STATES.pop(loop, None)
+        return
+    await state.session_scope.aclose()
 
 
 def _scoring_semaphore(args: Namespace) -> asyncio.Semaphore | None:
-    """Return the shared in-flight semaphore, or None when the cap is disabled."""
-    global _SCORING_SEMAPHORE
+    """Return this event loop's in-flight semaphore, or None when disabled."""
     max_inflight = _get_scoring_max_inflight(args)
     if max_inflight <= 0:
         return None
-    if _SCORING_SEMAPHORE is None:
-        _SCORING_SEMAPHORE = asyncio.Semaphore(max_inflight)
-    return _SCORING_SEMAPHORE
+    _, state = _scoring_loop_state()
+    if state.semaphore is None or state.semaphore_limit != max_inflight:
+        state.semaphore = asyncio.Semaphore(max_inflight)
+        state.semaphore_limit = max_inflight
+    return state.semaphore
 
 
-async def _post_json(url: str, payload: dict[str, Any], timeout_s: float) -> _PostJsonResult:
-    timeout = aiohttp.ClientTimeout(total=timeout_s)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(url, json=payload) as resp:
+async def _post_json(
+    url: str,
+    payload: dict[str, Any],
+    timeout_s: float,
+    *,
+    persistent: bool,
+) -> _PostJsonResult:
+    deadline = time.monotonic() + timeout_s
+
+    async def request(
+        session: aiohttp.ClientSession,
+        *,
+        session_reused: bool,
+        request_trace: _ScoringRequestTrace,
+        transport_attempts: int,
+        stale_connection_retry_count: int,
+    ) -> _PostJsonResult:
+        remaining_s = deadline - time.monotonic()
+        if remaining_s <= 0:
+            raise asyncio.TimeoutError(f"OPD scoring POST to {url} exhausted its {timeout_s:.0f}s timeout")
+        timeout = aiohttp.ClientTimeout(total=remaining_s)
+        async with session.post(
+            url,
+            json=payload,
+            timeout=timeout,
+            trace_request_ctx=request_trace,
+        ) as resp:
             resp.raise_for_status()
             body_read_start = time.monotonic()
             body = await resp.read()
@@ -153,7 +294,80 @@ async def _post_json(url: str, payload: dict[str, Any], timeout_s: float) -> _Po
                 response_body_bytes=len(body),
                 body_read_s=body_read_s,
                 json_decode_s=json_decode_s,
+                client_session_reused=session_reused,
+                connection_reused=request_trace.connection_reused,
+                transport_attempts=transport_attempts,
+                stale_connection_retry_count=stale_connection_retry_count,
             )
+
+    if persistent:
+        stale_connection_retry_count = 0
+        last_disconnect: aiohttp.ServerDisconnectedError | None = None
+        for transport_attempt in range(1, _STALE_CONNECTION_ATTEMPTS + 1):
+            session, session_reused = await _persistent_scoring_session()
+            request_trace = _ScoringRequestTrace()
+            try:
+                return await request(
+                    session,
+                    session_reused=session_reused,
+                    request_trace=request_trace,
+                    transport_attempts=transport_attempt,
+                    stale_connection_retry_count=stale_connection_retry_count,
+                )
+            except aiohttp.ServerDisconnectedError as exc:
+                last_disconnect = exc
+                if not request_trace.connection_reused:
+                    _annotate_transport_error(
+                        exc,
+                        transport_attempts=transport_attempt,
+                        stale_connection_retry_count=stale_connection_retry_count,
+                    )
+                    raise
+                if transport_attempt == _STALE_CONNECTION_ATTEMPTS:
+                    break
+                stale_connection_retry_count += 1
+                logger.warning(
+                    "OPD scoring POST %s disconnected on an aiohttp-confirmed reused "
+                    "connection; retrying the idempotent scoring request (%d/%d)",
+                    url,
+                    transport_attempt,
+                    _STALE_CONNECTION_ATTEMPTS,
+                )
+            except Exception as exc:
+                _annotate_transport_error(
+                    exc,
+                    transport_attempts=transport_attempt,
+                    stale_connection_retry_count=stale_connection_retry_count,
+                )
+                raise
+        exc = aiohttp.ServerDisconnectedError(
+            f"OPD scoring POST to {url} repeatedly disconnected on reused pooled connections "
+            f"({_STALE_CONNECTION_ATTEMPTS} attempts)"
+        )
+        _annotate_transport_error(
+            exc,
+            transport_attempts=_STALE_CONNECTION_ATTEMPTS,
+            stale_connection_retry_count=stale_connection_retry_count,
+        )
+        raise exc from last_disconnect
+
+    async with aiohttp.ClientSession() as session:
+        request_trace = _ScoringRequestTrace()
+        try:
+            return await request(
+                session,
+                session_reused=False,
+                request_trace=request_trace,
+                transport_attempts=1,
+                stale_connection_retry_count=0,
+            )
+        except Exception as exc:
+            _annotate_transport_error(
+                exc,
+                transport_attempts=1,
+                stale_connection_retry_count=0,
+            )
+            raise
 
 
 def _payload_input_token_count(payload: dict[str, Any]) -> int:
@@ -188,6 +402,7 @@ async def _scoring_post(
     timeout_s = _get_scoring_timeout(args)
     semaphore = _scoring_semaphore(args)
     attempts = _get_scoring_retries(args) + 1
+    persistent_session = _use_persistent_scoring_session(args)
     n_tokens = _payload_input_token_count(payload)
     n_ids = len(payload.get("token_ids_logprob") or [])
     telemetry: dict[str, Any] = {
@@ -197,6 +412,9 @@ async def _scoring_post(
         "response_tokens": response_length,
         "requested_token_ids": n_ids,
         "top_k": int(payload.get("top_logprobs_num", 0) or 0),
+        "persistent_session": persistent_session,
+        "transport_attempts": 0,
+        "stale_connection_retry_count": 0,
         "semaphore_wait_s": 0.0,
         "http_s": 0.0,
     }
@@ -207,7 +425,7 @@ async def _scoring_post(
         if semaphore is None:
             http_start = time.monotonic()
             try:
-                return await _post_json(url, payload, timeout_s)
+                return await _post_json(url, payload, timeout_s, persistent=persistent_session)
             finally:
                 telemetry["http_s"] += time.monotonic() - http_start
 
@@ -216,7 +434,7 @@ async def _scoring_post(
             telemetry["semaphore_wait_s"] += time.monotonic() - wait_start
             http_start = time.monotonic()
             try:
-                return await _post_json(url, payload, timeout_s)
+                return await _post_json(url, payload, timeout_s, persistent=persistent_session)
             finally:
                 telemetry["http_s"] += time.monotonic() - http_start
 
@@ -232,12 +450,19 @@ async def _scoring_post(
                     "response_body_bytes": result.response_body_bytes,
                     "body_read_s": result.body_read_s,
                     "json_decode_s": result.json_decode_s,
+                    "client_session_reused": result.client_session_reused,
+                    "connection_reused": result.connection_reused,
+                    "transport_attempts": telemetry["transport_attempts"] + result.transport_attempts,
+                    "stale_connection_retry_count": telemetry["stale_connection_retry_count"]
+                    + result.stale_connection_retry_count,
                     "returned_positions": _returned_position_count(result.response),
                 }
             )
             return _ScoringPostResult(response=result.response, telemetry=telemetry)
         except (TimeoutError, asyncio.TimeoutError, aiohttp.ClientError) as exc:
             last_exc = exc
+            telemetry["transport_attempts"] += int(getattr(exc, "opd_transport_attempts", 1))
+            telemetry["stale_connection_retry_count"] += int(getattr(exc, "opd_stale_connection_retry_count", 0))
             logger.warning(
                 "OPD scoring POST %s attempt %d/%d failed after %.0fs "
                 "(timeout %.0fs, %d input tokens, %d requested token ids): %r",

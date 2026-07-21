@@ -35,6 +35,10 @@ class TestOpdScoringMetrics:
                             "semaphore_wait_s": 0.1,
                             "body_read_s": 0.2,
                             "json_decode_s": 0.05,
+                            "client_session_reused": False,
+                            "connection_reused": False,
+                            "transport_attempts": 1,
+                            "stale_connection_retry_count": 0,
                         }
                     ]
                 }
@@ -56,6 +60,10 @@ class TestOpdScoringMetrics:
                             "semaphore_wait_s": 0.5,
                             "body_read_s": 0.6,
                             "json_decode_s": 0.15,
+                            "client_session_reused": True,
+                            "connection_reused": True,
+                            "transport_attempts": 3,
+                            "stale_connection_retry_count": 1,
                         }
                     ]
                 }
@@ -67,6 +75,8 @@ class TestOpdScoringMetrics:
         assert metrics["opd_scoring/sample_count"] == 2
         assert metrics["opd_scoring/request_count"] == 2
         assert metrics["opd_scoring/retry_count"] == 1
+        assert metrics["opd_scoring/transport_retry_count"] == 2
+        assert metrics["opd_scoring/stale_connection_retry_count"] == 1
         assert metrics["opd_scoring/teacher_request_count"] == 1
         assert metrics["opd_scoring/student_request_count"] == 1
         assert metrics["opd_scoring/input_tokens_total"] == 300
@@ -79,6 +89,9 @@ class TestOpdScoringMetrics:
         assert metrics["opd_scoring/response_bytes_per_returned_position"] == pytest.approx(4_000 / 300)
         assert metrics["opd_scoring/response_bytes_per_response_token"] == pytest.approx(4_000 / 120)
         assert metrics["opd_scoring/returned_positions_per_response_token"] == pytest.approx(300 / 120)
+        assert metrics["opd_scoring/client_session_reuse_rate"] == 0.5
+        assert metrics["opd_scoring/connection_reuse_rate"] == 0.5
+        assert metrics["opd_scoring/transport_attempts_total"] == 4
         assert metrics["opd_scoring/e2e_latency_s/mean"] == 2.0
         assert metrics["opd_scoring/e2e_latency_s/p50"] == 2.0
         assert metrics["opd_scoring/e2e_latency_s/p95"] == pytest.approx(2.9)
