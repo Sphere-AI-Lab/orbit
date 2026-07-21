@@ -13,7 +13,10 @@ Use this workflow when an agent is helping with non-trivial changes.
 - Put subsystem-specific implementation plans next to that subsystem's docs, for example
   `scripts/slurm/docs/plan-notes/<topic>.md`.
 - Keep `debug-notes/` for incident reports and investigation notes; keep
-  `plan-notes/` for decision-complete implementation plans.
+  `plan-notes/` for decision-complete implementation plans. Both are gitignored
+  scratch space. Upstream-sync records are the exception: they live in the
+  git-tracked `scripts/slurm/docs/sync-records/` (see its README) so every sync's
+  context ships in its PR.
 - Use a personal skill only when the workflow should apply across many repos, not for a
   single-repo engineering convention.
 

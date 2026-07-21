@@ -1,0 +1,1021 @@
+diff --git a/scripts/slurm/setup/extract_pins.py b/scripts/slurm/setup/extract_pins.py
+index 69dde6f25..e7a93458f 100755
+--- a/scripts/slurm/setup/extract_pins.py
++++ b/scripts/slurm/setup/extract_pins.py
+@@ -10,14 +10,30 @@ Sources of truth (the things you actually bump when upgrading):
+ defaults — the bare-metal install therefore stays in lockstep with the
+ container build without us re-typing the pins in two places.
+ 
++The sglang stack is special. The prebuilt wheels (flash-attn / flash-attn-3 /
++apex) are torch-ABI-bound, so (sglang version, torch version, wheels) move as
++one atomic bundle. There are TWO views of that bundle:
++
++  ACTIVE          — what install_env.sh actually installs. Tracks the
++                    thirdparty/sglang submodule. Only sglang-sync advances it.
++                    Held in MILES_WHEELS_TAG; torch/sglang/router are DERIVED
++                    from it via the WHEELS_STACK mapping below.
++  UPSTREAM_TARGET — where upstream docker/Dockerfile points (SGLANG_IMAGE_TAG /
++                    WHEELS_TAG). The destination a future sglang-sync advances
++                    ACTIVE to. Extracted, recorded, never auto-applied.
++
++`MILES_WHEELS_TAG` is therefore NOT extracted from the Dockerfile — it is
++PRESERVED from the existing pins.env. miles-sync must never auto-bump it; doing
++so without also bumping the submodule + torch is exactly the ABI-mismatch trap.
++
+ Usage:
+   # Print pins.env content to stdout (preview before writing):
+   python scripts/slurm/setup/extract_pins.py
+ 
+-  # Regenerate pins.env in place (run this after bumping the Dockerfile):
++  # Regenerate pins.env in place (re-derives ACTIVE fields, refreshes UPSTREAM):
+   python scripts/slurm/setup/extract_pins.py --write
+ 
+-  # CI / install-time drift check (exits 1 if pins.env is stale vs sources):
++  # CI / install-time check (see exit-code contract in main()):
+   python scripts/slurm/setup/extract_pins.py --check
+ """
+ 
+@@ -37,6 +53,20 @@ SGLANG_DOCKER = REPO_ROOT / "thirdparty" / "sglang" / "docker" / "Dockerfile"
+ SGLANG_PYPROJ = REPO_ROOT / "thirdparty" / "sglang" / "python" / "pyproject.toml"
+ PINS_FILE = REPO_ROOT / "scripts" / "slurm" / "setup" / "pins.env"
+ 
++# ---------------------------------------------------------------------------
++# WHEELS_STACK — the single source of truth for "what an sglang wheels tag
++# means". Maps a miles-wheels release tag to the (sglang base tag, torch ABI,
++# sglang_router version) it was built against. The torch/sglang fields are read
++# off the release's own name on GitHub (e.g. cu129-x86_64-v0.5.12 is published
++# as "SGLang v0.5.12 / torch 2.11.0"); the old cu129-x86_64 line is the v0.5.10
++# / torch 2.9.1 bundle. ADD A ROW HERE as part of sglang-sync whenever you point
++# MILES_WHEELS_TAG at a new release.
++# ---------------------------------------------------------------------------
++WHEELS_STACK: dict[str, dict[str, str]] = {
++    "cu129-x86_64": {"sglang": "v0.5.10", "torch": "2.9.1", "router": "0.3.2"},
++    "cu129-x86_64-v0.5.12": {"sglang": "v0.5.12", "torch": "2.11.0", "router": "0.3.2"},
++}
++
+ 
+ @dataclass
+ class Pin:
+@@ -46,7 +76,9 @@ class Pin:
+     note: str = ""
+ 
+ 
+-# Group → ordered list of pins. Group titles double as section headers in pins.env.
++# Purely-extracted scalars (overwritten verbatim on --write). The sglang-stack
++# ACTIVE block (MILES_WHEELS_TAG + derived fields) is handled separately below —
++# it is NOT in here because it is preserved, not extracted.
+ PIN_GROUPS: list[tuple[str, list[Pin]]] = [
+     (
+         "From thirdparty/sglang/python/pyproject.toml (patched sglang fork)",
+@@ -55,7 +87,7 @@ PIN_GROUPS: list[tuple[str, list[Pin]]] = [
+                 "TORCH_VERSION",
+                 SGLANG_PYPROJ,
+                 r'"torch==([^"]+)"',
+-                "sglang's pyproject pins the entire runtime tree against this torch.",
++                "torch the sglang SUBMODULE is built against — this defines ACTIVE torch.",
+             ),
+         ],
+     ),
+@@ -65,12 +97,6 @@ PIN_GROUPS: list[tuple[str, list[Pin]]] = [
+             Pin("TE_VERSION", DOCKERFILE, r'transformer_engine\[pytorch\]==([^"\s]+)"'),
+             Pin("MBRIDGE_COMMIT", DOCKERFILE, r"ISEEKYAN/mbridge\.git@([0-9a-f]{7,40})"),
+             Pin("TMS_COMMIT", DOCKERFILE, r"fzyzcjy/torch_memory_saver\.git@([0-9a-f]{7,40})"),
+-            Pin(
+-                "CUDNN_CU12_VERSION",
+-                DOCKERFILE,
+-                r"nvidia-cudnn-cu12==([0-9a-z.]+)",
+-                "pytorch/pytorch#168167 workaround; modelopt later downgrades it, this re-pins.",
+-            ),
+             Pin(
+                 "FLASH_ATTN_INTERFACE_COMMIT",
+                 DOCKERFILE,
+@@ -78,7 +104,6 @@ PIN_GROUPS: list[tuple[str, list[Pin]]] = [
+                 "FA3 ships .so but not the python interface; we drop it in by hand.",
+             ),
+             Pin("MILES_WHEELS_REPO", DOCKERFILE, r"^ARG\s+WHEELS_REPO=(\S+)"),
+-            Pin("MILES_WHEELS_TAG", DOCKERFILE, r"^ARG\s+WHEELS_TAG=(\S+)"),
+         ],
+     ),
+     (
+@@ -94,6 +119,12 @@ PIN_GROUPS: list[tuple[str, list[Pin]]] = [
+     ),
+ ]
+ 
++# Extracted from docker/Dockerfile — the UPSTREAM TARGET, recorded but not applied.
++UPSTREAM_PINS: list[Pin] = [
++    Pin("UPSTREAM_SGLANG_IMAGE_TAG", DOCKERFILE, r"^ARG\s+SGLANG_IMAGE_TAG=(\S+)"),
++    Pin("UPSTREAM_WHEELS_TAG", DOCKERFILE, r"^ARG\s+WHEELS_TAG=(\S+)"),
++]
++
+ 
+ def search(pin: Pin) -> str:
+     if not pin.source.exists():
+@@ -109,8 +140,20 @@ def search(pin: Pin) -> str:
+     return match.group(1)
+ 
+ 
++def read_active_wheels_tag(default: str) -> str:
++    """ACTIVE MILES_WHEELS_TAG is PRESERVED from the committed pins.env, not
++    extracted. Falls back to `default` (the upstream tag) only when pins.env is
++    absent / has no pin — i.e. first-time bootstrap, where tracking upstream is
++    the sane initial state."""
++    if PINS_FILE.exists():
++        m = re.search(r"^MILES_WHEELS_TAG=\$\{MILES_WHEELS_TAG:-(\S+)\}", PINS_FILE.read_text(), re.MULTILINE)
++        if m:
++            return m.group(1)
++    return default
++
++
+ def derive_index_urls(wheels_tag: str) -> dict[str, str]:
+-    """Derive torch + flashinfer wheel-index URLs from the MILES_WHEELS_TAG cu prefix."""
++    """Derive torch + flashinfer wheel-index URLs from the ACTIVE wheels-tag cu prefix."""
+     match = re.search(r"cu(\d{3})", wheels_tag)
+     if not match:
+         raise SystemExit(f"FATAL: cannot derive cu tag from MILES_WHEELS_TAG={wheels_tag!r}")
+@@ -121,35 +164,61 @@ def derive_index_urls(wheels_tag: str) -> dict[str, str]:
+     }
+ 
+ 
+-def extract() -> tuple[dict[str, str], dict[str, Pin]]:
+-    """Return ({key: value}, {key: Pin}) — pin metadata preserved for header notes."""
++def extract() -> dict[str, str]:
+     values: dict[str, str] = {}
+-    meta: dict[str, Pin] = {}
+     for _, pins in PIN_GROUPS:
+         for pin in pins:
+             values[pin.key] = search(pin)
+-            meta[pin.key] = pin
+-    values.update(derive_index_urls(values["MILES_WHEELS_TAG"]))
+-    return values, meta
++    for pin in UPSTREAM_PINS:
++        values[pin.key] = search(pin)
++
++    # ACTIVE sglang stack: preserve MILES_WHEELS_TAG, derive the rest from the map.
++    active = read_active_wheels_tag(default=values["UPSTREAM_WHEELS_TAG"])
++    if active not in WHEELS_STACK:
++        raise SystemExit(
++            f"FATAL: MILES_WHEELS_TAG={active!r} is not in WHEELS_STACK.\n"
++            f"       Add a row for it in {Path(__file__).name} (this is part of sglang-sync)."
++        )
++    stack = WHEELS_STACK[active]
++    values["MILES_WHEELS_TAG"] = active
++    values["MILES_WHEELS_TORCH_VERSION"] = stack["torch"]
++    values["MILES_WHEELS_SGLANG_VERSION"] = stack["sglang"]
++    values["SGLANG_ROUTER_VERSION"] = stack["router"]
++
++    values.update(derive_index_urls(active))
++    return values
+ 
+ 
+ HEADER = """\
+ # scripts/slurm/setup/pins.env — pinned versions/commits for install_env.sh.
+ #
+-# AUTO-GENERATED — do not edit by hand. Sources of truth:
++# AUTO-GENERATED — do not hand-edit, EXCEPT MILES_WHEELS_TAG (the ACTIVE sglang
++# bundle), which only sglang-sync changes. Regenerate the rest with:
++#   python scripts/slurm/setup/extract_pins.py --write
++#
++# Sources of truth:
+ #   - docker/Dockerfile                          (radixark/miles)
+ #   - thirdparty/sglang/docker/Dockerfile        (sglang base image)
+ #   - thirdparty/sglang/python/pyproject.toml    (patched sglang fork)
+ #
+-# Regenerate after bumping any of the above:
+-#   python scripts/slurm/setup/extract_pins.py --write
+-#
+ # Each value is overridable: set the env var before invoking install_env.sh
+ # (e.g. `TE_VERSION=2.11.0 bash scripts/slurm/setup/install_env.sh`).
+ """
+ 
++SGLANG_STACK_COMMENT = """\
++# --- sglang stack (atomic bundle: sglang version + torch ABI + prebuilt wheels) ---
++# ACTIVE = what install_env.sh installs; tracks thirdparty/sglang. UPSTREAM_* =
++# where docker/Dockerfile points. When they differ, `extract_pins.py --check`
++# prints `[sglang-sync pending]` (exit 0 — deferrable, NOT a sync blocker), and
++# install_env.sh hard-fails on any torch-ABI inconsistency.
++#
++# MILES_WHEELS_TAG is the ONE hand/sglang-sync-owned pin. The three fields under
++# it are DERIVED from it via WHEELS_STACK in extract_pins.py — do not hand-edit;
++# run `extract_pins.py --write`. To upgrade sglang: add a WHEELS_STACK row, set
++# MILES_WHEELS_TAG, bump the submodule, then --write."""
++
+ 
+-def render(values: dict[str, str], meta: dict[str, Pin]) -> str:
++def render(values: dict[str, str]) -> str:
+     out: list[str] = [HEADER]
+     for title, pins in PIN_GROUPS:
+         out.append(f"\n# {title}")
+@@ -157,6 +226,19 @@ def render(values: dict[str, str], meta: dict[str, Pin]) -> str:
+             if pin.note:
+                 out.append(f"# {pin.note}")
+             out.append(f"{pin.key}=${{{pin.key}:-{values[pin.key]}}}")
++
++    out.append("")
++    out.append(SGLANG_STACK_COMMENT)
++    out.append(f"MILES_WHEELS_TAG=${{MILES_WHEELS_TAG:-{values['MILES_WHEELS_TAG']}}}")
++    out.append(f"MILES_WHEELS_TORCH_VERSION=${{MILES_WHEELS_TORCH_VERSION:-{values['MILES_WHEELS_TORCH_VERSION']}}}")
++    out.append(
++        f"MILES_WHEELS_SGLANG_VERSION=${{MILES_WHEELS_SGLANG_VERSION:-{values['MILES_WHEELS_SGLANG_VERSION']}}}"
++    )
++    out.append(f"SGLANG_ROUTER_VERSION=${{SGLANG_ROUTER_VERSION:-{values['SGLANG_ROUTER_VERSION']}}}")
++    out.append("# UPSTREAM TARGET (from docker/Dockerfile) — advance ACTIVE to this via sglang-sync:")
++    out.append(f"UPSTREAM_SGLANG_IMAGE_TAG=${{UPSTREAM_SGLANG_IMAGE_TAG:-{values['UPSTREAM_SGLANG_IMAGE_TAG']}}}")
++    out.append(f"UPSTREAM_WHEELS_TAG=${{UPSTREAM_WHEELS_TAG:-{values['UPSTREAM_WHEELS_TAG']}}}")
++
+     out.append("")
+     out.append("# Derived from MILES_WHEELS_TAG cu prefix")
+     out.append(f"TORCH_INDEX_URL=${{TORCH_INDEX_URL:-{values['TORCH_INDEX_URL']}}}")
+@@ -165,46 +247,149 @@ def render(values: dict[str, str], meta: dict[str, Pin]) -> str:
+     return "\n".join(out)
+ 
+ 
++def abi_errors(values: dict[str, str]) -> list[str]:
++    """Cross-field torch-ABI consistency of the ACTIVE bundle. Non-empty = danger
++    (a fresh install_env.sh would install torch-X wheels into a torch-Y env)."""
++    errs: list[str] = []
++    active = values["MILES_WHEELS_TAG"]
++    stack = WHEELS_STACK[active]
++    if stack["torch"] != values["TORCH_VERSION"]:
++        errs.append(
++            f"ABI MISMATCH: MILES_WHEELS_TAG={active} ships torch-{stack['torch']} wheels, "
++            f"but the sglang submodule pins torch=={values['TORCH_VERSION']}. "
++            f"flash-attn/apex are torch-ABI-bound — run sglang-sync to align."
++        )
++    return errs
++
++
++def pending_notice(values: dict[str, str]) -> str | None:
++    """ACTIVE behind UPSTREAM target → a deferrable sglang-sync is due."""
++    if values["MILES_WHEELS_TAG"] != values["UPSTREAM_WHEELS_TAG"]:
++        return (
++            f"[sglang-sync pending] ACTIVE MILES_WHEELS_TAG={values['MILES_WHEELS_TAG']} "
++            f"(sglang {values['MILES_WHEELS_SGLANG_VERSION']} / torch {values['MILES_WHEELS_TORCH_VERSION']}) "
++            f"is behind UPSTREAM_WHEELS_TAG={values['UPSTREAM_WHEELS_TAG']} "
++            f"(image {values['UPSTREAM_SGLANG_IMAGE_TAG']}). Run sglang-sync when ready to upgrade."
++        )
++    return None
++
++
++def resolve_tag(tag: str) -> int:
++    """Print the derived MILES_WHEELS_* fields for a wheels tag (pure WHEELS_STACK
++    lookup, no file reads). install_env.sh evals this to re-derive the sglang-stack
++    fields from the EFFECTIVE (possibly runtime-overridden) MILES_WHEELS_TAG, so an
++    override of the tag can't desync from its torch/sglang/router. Exit 2 = unknown
++    tag (same code as ABI danger: 'this bundle is not safe / not known')."""
++    stack = WHEELS_STACK.get(tag)
++    if stack is None:
++        print(
++            f"FATAL: MILES_WHEELS_TAG={tag!r} is not in WHEELS_STACK "
++            f"(add a row in {Path(__file__).name} — this is part of sglang-sync).",
++            file=sys.stderr,
++        )
++        return 2
++    print(f"MILES_WHEELS_TORCH_VERSION={stack['torch']}")
++    print(f"MILES_WHEELS_SGLANG_VERSION={stack['sglang']}")
++    print(f"SGLANG_ROUTER_VERSION={stack['router']}")
++    return 0
++
++
++def tag_for_sglang(base: str) -> int:
++    """Reverse-lookup: print the wheels tag whose WHEELS_STACK row has sglang==base.
++    sglang-sync's no-arg path uses this instead of string-concatenating
++    `cu129-x86_64-<base>` — the legacy v0.5.10 tag is suffix-less (`cu129-x86_64`),
++    so the convention only holds for newer bases. Exit 2 on no/ambiguous match."""
++    matches = [t for t, s in WHEELS_STACK.items() if s["sglang"] == base]
++    if len(matches) == 1:
++        print(matches[0])
++        return 0
++    if not matches:
++        print(
++            f"FATAL: no WHEELS_STACK tag maps to sglang {base!r}. Add a row in {Path(__file__).name} "
++            f"(new miles-wheels releases are named cu129-x86_64-{base}).",
++            file=sys.stderr,
++        )
++        return 2
++    print(f"FATAL: ambiguous — multiple WHEELS_STACK tags map to sglang {base!r}: {matches}", file=sys.stderr)
++    return 2
++
++
+ def main() -> int:
+-    parser = argparse.ArgumentParser(
+-        description=__doc__,
+-        formatter_class=argparse.RawDescriptionHelpFormatter,
+-    )
++    # Exit-code contract (shared by --check and --write):
++    #   0 = consistent, OR only `[sglang-sync pending]` (ACTIVE behind UPSTREAM —
++    #       deferrable, must NOT block CI / install / miles-sync).
++    #   1 = pins.env missing, OR drift (committed != freshly extracted; run --write).
++    #   2 = torch-ABI inconsistency / unknown wheels tag (DANGER — do NOT --write;
++    #       bump the submodule / fix the tag first). Distinct from 1 so callers can
++    #       stop on danger instead of blindly regenerating.
++    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
++    parser.add_argument("--write", action="store_true", help=f"write to {PINS_FILE.relative_to(REPO_ROOT)}")
++    parser.add_argument("--check", action="store_true", help="verify pins.env (exit 0/1/2; see contract in source)")
+     parser.add_argument(
+-        "--write", action="store_true", help=f"write to {PINS_FILE.relative_to(REPO_ROOT)} instead of stdout"
++        "--resolve", metavar="TAG", help="print derived MILES_WHEELS_* for a wheels TAG (for install_env.sh) and exit"
+     )
+     parser.add_argument(
+-        "--check", action="store_true", help="exit 1 if committed pins.env diverges from extracted pins"
++        "--tag-for-sglang",
++        metavar="BASE",
++        help="print the wheels tag whose WHEELS_STACK row matches sglang BASE, and exit",
+     )
+     args = parser.parse_args()
+ 
+-    values, meta = extract()
+-    rendered = render(values, meta)
++    if args.resolve is not None:
++        return resolve_tag(args.resolve)
++    if args.tag_for_sglang is not None:
++        return tag_for_sglang(args.tag_for_sglang)
++
++    values = extract()
++    rendered = render(values)
++    errs = abi_errors(values)
+ 
+     if args.check:
+         if not PINS_FILE.exists():
+             print(f"FATAL: {PINS_FILE.relative_to(REPO_ROOT)} does not exist", file=sys.stderr)
+             return 1
++        if errs:
++            for e in errs:
++                print(f"FATAL: {e}", file=sys.stderr)
++            return 2
++
+         committed = PINS_FILE.read_text()
+-        if committed.strip() == rendered.strip():
+-            print(f"[pins] OK — {PINS_FILE.relative_to(REPO_ROOT)} matches upstream sources", file=sys.stderr)
+-            return 0
+-        print(f"FATAL: {PINS_FILE.relative_to(REPO_ROOT)} is stale vs upstream sources.", file=sys.stderr)
+-        print("       Regenerate with: python scripts/slurm/setup/extract_pins.py --write\n", file=sys.stderr)
+-        sys.stderr.writelines(
+-            difflib.unified_diff(
+-                committed.splitlines(keepends=True),
+-                rendered.splitlines(keepends=True),
+-                fromfile=str(PINS_FILE.relative_to(REPO_ROOT)) + " (committed)",
+-                tofile="(extracted now)",
+-                n=1,
++        if committed.strip() != rendered.strip():
++            print(f"FATAL: {PINS_FILE.relative_to(REPO_ROOT)} is stale vs sources.", file=sys.stderr)
++            print("       Regenerate with: python scripts/slurm/setup/extract_pins.py --write\n", file=sys.stderr)
++            sys.stderr.writelines(
++                difflib.unified_diff(
++                    committed.splitlines(keepends=True),
++                    rendered.splitlines(keepends=True),
++                    fromfile=str(PINS_FILE.relative_to(REPO_ROOT)) + " (committed)",
++                    tofile="(extracted now)",
++                    n=1,
++                )
+             )
+-        )
+-        return 1
++            return 1
++
++        pending = pending_notice(values)
++        if pending:
++            print(pending, file=sys.stderr)
++        else:
++            print(f"[pins] OK — {PINS_FILE.relative_to(REPO_ROOT)} matches sources", file=sys.stderr)
++        return 0
+ 
+     if args.write:
++        if errs:
++            for e in errs:
++                print(f"FATAL: {e}", file=sys.stderr)
++            print(
++                "       Refusing to write an ABI-inconsistent bundle. Bump thirdparty/sglang to the\n"
++                "       matching line FIRST (so its pyproject torch matches the tag), then --write.",
++                file=sys.stderr,
++            )
++            return 2
+         PINS_FILE.write_text(rendered)
+         print(f"[pins] wrote {PINS_FILE.relative_to(REPO_ROOT)}", file=sys.stderr)
++        pending = pending_notice(values)
++        if pending:
++            print(pending, file=sys.stderr)
+         return 0
+ 
+     sys.stdout.write(rendered)
+diff --git a/scripts/slurm/setup/install_env.sh b/scripts/slurm/setup/install_env.sh
+index 974f6988c..38a8d60b3 100755
+--- a/scripts/slurm/setup/install_env.sh
++++ b/scripts/slurm/setup/install_env.sh
+@@ -15,7 +15,7 @@
+ #     against the patched fork's own pyproject.toml.
+ #   - mbridge          — tools/convert_hf_to_torch_dist.py imports it
+ #   - torch_memory_saver — miles/backends/megatron_utils/actor.py imports it
+-#   - transformer_engine[pytorch] — Megatron training requires it
++#   - transformer_engine + source-built torch extension — Megatron training requires it
+ #   - flash-attn 2/3   — `--attention-backend flash` and FA3-only Megatron paths
+ #
+ # Versions for the non-thirdparty deps (TE, flash-attn, mbridge, tms) match
+@@ -36,6 +36,9 @@
+ #   THIRDPARTY_DIR    submodule dir                        [$MILES_REPO/thirdparty]
+ #   PULL_REMOTE       `git submodule update --remote`?     [0]  set 1 to bump to branch HEAD
+ #   CUDA_HOME         override system CUDA toolkit path    [auto-detected]
++#   CUDNN_CU12_VERSION override torch-declared cuDNN pin   [derived from torch]
++#   TE_BUILD_MAX_JOBS transformer_engine_torch build jobs  [16]
++#   KERNELS_SPEC      transformers hub-kernels compat cap  [kernels>=0.12,<0.15]
+ 
+ set -euo pipefail
+ 
+@@ -66,6 +69,35 @@ export INSTALL_FLASH_ATTN INSTALL_FLASH_ATTN_3 INSTALL_APEX
+ # shellcheck disable=SC1091
+ source "$SCRIPT_DIR/pins.env"
+ 
++# Re-derive the sglang-stack fields from the EFFECTIVE MILES_WHEELS_TAG. pins.env
++# bakes MILES_WHEELS_TORCH_VERSION / MILES_WHEELS_SGLANG_VERSION / SGLANG_ROUTER_VERSION
++# as a static snapshot, but MILES_WHEELS_TAG is independently overridable at runtime
++# (`MILES_WHEELS_TAG=... bash install_env.sh`). Without re-deriving, an override of the
++# tag would leave the torch/sglang fields stale and the ABI guard below would pass while
++# _fetch_miles_wheel pulls a mismatched-ABI wheel set. WHEELS_STACK in extract_pins.py is
++# the single source of truth; resolve against it so the tag is always authoritative.
++_resolved=$(python3 "$SCRIPT_DIR/extract_pins.py" --resolve "$MILES_WHEELS_TAG") || {
++    echo "FATAL: could not resolve MILES_WHEELS_TAG=$MILES_WHEELS_TAG via extract_pins.py --resolve" >&2
++    echo "       (unknown wheels tag, or python3 unavailable). Add a WHEELS_STACK row, or use a known tag." >&2
++    exit 1
++}
++eval "$_resolved"
++unset _resolved
++
++# sglang-stack torch-ABI guard (fail closed). The prebuilt flash-attn /
++# flash-attn-3 / apex wheels in $MILES_WHEELS_TAG are compiled against a specific
++# torch C++ ABI; MILES_WHEELS_TORCH_VERSION (derived from the tag) MUST equal the
++# torch we install (TORCH_VERSION, from the sglang submodule's pyproject). Mismatch
++# = torch-X wheels into a torch-Y env = ImportError/segfault. Placed before the GPU
++# preflight so a pins/override check fails on the real cause, not a missing GPU.
++if [[ -n "${MILES_WHEELS_TORCH_VERSION:-}" && "$MILES_WHEELS_TORCH_VERSION" != "$TORCH_VERSION" ]]; then
++    echo "FATAL: MILES_WHEELS_TAG=$MILES_WHEELS_TAG ships torch-$MILES_WHEELS_TORCH_VERSION wheels," >&2
++    echo "       but TORCH_VERSION=$TORCH_VERSION. flash-attn/apex are torch-ABI-bound — this would" >&2
++    echo "       build an ImportError/segfault env. Run sglang-sync to realign pins + submodule," >&2
++    echo "       or set MILES_WHEELS_TAG to the release built for torch $TORCH_VERSION." >&2
++    exit 1
++fi
++
+ # Non-fatal drift check — warn if pins.env hasn't been regenerated since the
+ # Dockerfile bumped. CI / `--check` makes it hard. Skipped if sources missing
+ # (e.g. fresh clone without submodules — install_env.sh inits them later).
+@@ -190,6 +222,49 @@ echo "[preflight] CUDA_HOME=$CUDA_HOME"
+ 
+ mkdir -p "$THIRDPARTY_DIR"
+ 
++# ---------- submodules: init + fail-closed validation BEFORE env mutation -
++# Init the source tree and validate the sglang/torch line HERE — before the
++# torch install below mutates a (possibly reused) conda env. A wrong submodule
++# vs MILES_WHEELS_TAG, or a TORCH_VERSION override that disagrees with the
++# submodule's pyproject, must abort before we touch torch. Needs only git +
++# pins.env values; no conda/torch dependency, so it is safe this early.
++echo "[src] initialising submodules under $THIRDPARTY_DIR"
++git -C "$MILES_REPO" submodule update --init --recursive \
++    thirdparty/Megatron-LM thirdparty/sglang thirdparty/Megatron-Bridge
++
++if [[ "$PULL_REMOTE" == "1" ]]; then
++    echo "[src] PULL_REMOTE=1 — bumping submodules to branch HEAD"
++    git -C "$MILES_REPO" submodule update --remote --recursive \
++        thirdparty/Megatron-LM thirdparty/sglang thirdparty/Megatron-Bridge
++fi
++
++MEGATRON_SRC="$THIRDPARTY_DIR/Megatron-LM"
++SGLANG_SRC="$THIRDPARTY_DIR/sglang"
++MEGATRON_BRIDGE_SRC="$THIRDPARTY_DIR/Megatron-Bridge"
++
++# Fail closed on submodule ↔ ACTIVE-pins mismatch (needs the actual submodule
++# HEAD, which only git can see — complements the file-derivable preflight ABI
++# guard up top). The sglang line just checked out must match the wheels bundle
++# the ACTIVE pins describe, else we'd build sglang vX but install vY's torch-ABI
++# wheels. Skipped if `git describe` finds no tag (shallow/odd clone).
++sub_sglang_base=$(git -C "$SGLANG_SRC" describe --tags --abbrev=0 2>/dev/null || echo "")
++if [[ -n "${MILES_WHEELS_SGLANG_VERSION:-}" && -n "$sub_sglang_base" \
++      && "$sub_sglang_base" != "$MILES_WHEELS_SGLANG_VERSION" ]]; then
++    echo "FATAL: thirdparty/sglang is at $sub_sglang_base but pins.env expects $MILES_WHEELS_SGLANG_VERSION" >&2
++    echo "       (MILES_WHEELS_TAG=$MILES_WHEELS_TAG). The wheels won't match the sglang you build." >&2
++    echo "       Run sglang-sync to realign, or set MILES_WHEELS_TAG to the matching release." >&2
++    exit 1
++fi
++# The submodule's own torch pin must equal TORCH_VERSION (catches a hand-set
++# TORCH_VERSION override that disagrees with what sglang was built against).
++sub_torch=$(grep -oE '"torch==[0-9][^"]*"' "$SGLANG_SRC/python/pyproject.toml" 2>/dev/null \
++            | head -1 | tr -d '"' | cut -d= -f3)
++if [[ -n "$sub_torch" && "$sub_torch" != "$TORCH_VERSION" ]]; then
++    echo "FATAL: thirdparty/sglang pyproject pins torch==$sub_torch but TORCH_VERSION=$TORCH_VERSION." >&2
++    echo "       Regenerate pins: python scripts/slurm/setup/extract_pins.py --write" >&2
++    exit 1
++fi
++
+ # shellcheck disable=SC1091
+ source "$CONDA_ROOT/etc/profile.d/conda.sh"
+ 
+@@ -205,27 +280,73 @@ conda activate "$MILES_ENV_NAME"
+ echo "[env] python: $(python --version)  prefix: $CONDA_PREFIX"
+ 
+ UV="uv pip install --python $CONDA_PREFIX/bin/python"
++PY_SITE=$(python -c "import site; print(site.getsitepackages()[0])")
++CUDNN_LIB_DIR="$PY_SITE/nvidia/cudnn/lib"
++
++_prepend_ld_library_path_once() {
++    local dir=$1
++    [[ -n "$dir" ]] || return 0
++    case ":${LD_LIBRARY_PATH:-}:" in
++        *":$dir:"*) : ;;
++        *) export LD_LIBRARY_PATH="$dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ;;
++    esac
++}
+ 
+-# ---------- torch (pinned, cu129) ----------------------------------------
++_prepend_env_cuda_libs() {
++    # Keep env-provided CUDA/cuDNN libs ahead of host paths such as
++    # /usr/lib/x86_64-linux-gnu, which can contain an older system cuDNN.
++    _prepend_ld_library_path_once "$CONDA_PREFIX/lib"
++    _prepend_ld_library_path_once "$CUDNN_LIB_DIR"
++}
+ 
+-echo "[torch] torch==$TORCH_VERSION + torchvision from $TORCH_INDEX_URL"
+-$UV --index-url "$TORCH_INDEX_URL" "torch==$TORCH_VERSION" torchvision
++_torch_declared_cudnn_cu12_version() {
++    "$CONDA_PREFIX/bin/python" - <<'PY'
++from importlib import metadata
++from packaging.requirements import Requirement
++import sys
++
++for req_text in metadata.requires("torch") or []:
++    req = Requirement(req_text)
++    if req.name != "nvidia-cudnn-cu12":
++        continue
++    versions = [spec.version for spec in req.specifier if spec.operator == "=="]
++    if len(versions) == 1:
++        print(versions[0])
++        raise SystemExit(0)
++    raise SystemExit(f"FATAL: torch requirement {req_text!r} does not contain exactly one == pin")
++
++raise SystemExit("FATAL: torch metadata does not declare nvidia-cudnn-cu12")
++PY
++}
++
++_effective_cudnn_cu12_version() {
++    if [[ -n "${CUDNN_CU12_VERSION:-}" ]]; then
++        printf '%s\n' "$CUDNN_CU12_VERSION"
++    else
++        _torch_declared_cudnn_cu12_version
++    fi
++}
+ 
+-# ---------- patched Megatron-LM + sglang (git submodules, source install) -
++_install_cudnn_for_torch() {
++    local context=${1:-"torch-declared pin"}
++    local version
++    version=$(_effective_cudnn_cu12_version)
++    export CUDNN_CU12_VERSION="$version"
++    _prepend_env_cuda_libs
++    echo "[deps] nvidia-cudnn-cu12==$CUDNN_CU12_VERSION ($context)"
++    $UV "nvidia-cudnn-cu12==$CUDNN_CU12_VERSION"
++}
+ 
+-echo "[src] initialising submodules under $THIRDPARTY_DIR"
+-git -C "$MILES_REPO" submodule update --init --recursive \
+-    thirdparty/Megatron-LM thirdparty/sglang thirdparty/Megatron-Bridge
++_prepend_env_cuda_libs
+ 
+-if [[ "$PULL_REMOTE" == "1" ]]; then
+-    echo "[src] PULL_REMOTE=1 — bumping submodules to branch HEAD"
+-    git -C "$MILES_REPO" submodule update --remote --recursive \
+-        thirdparty/Megatron-LM thirdparty/sglang thirdparty/Megatron-Bridge
+-fi
++# ---------- torch (pinned, cu129) ----------------------------------------
+ 
+-MEGATRON_SRC="$THIRDPARTY_DIR/Megatron-LM"
+-SGLANG_SRC="$THIRDPARTY_DIR/sglang"
+-MEGATRON_BRIDGE_SRC="$THIRDPARTY_DIR/Megatron-Bridge"
++echo "[torch] torch==$TORCH_VERSION + torchvision from $TORCH_INDEX_URL"
++$UV --index-url "$TORCH_INDEX_URL" "torch==$TORCH_VERSION" torchvision
++_install_cudnn_for_torch "after torch install; override with CUDNN_CU12_VERSION if needed"
++
++# ---------- patched Megatron-LM + sglang (editable source installs) -------
++# (submodules were init'd + validated above, before the torch install)
+ 
+ # Megatron-Core's pyproject deps are just `torch>=2.6.0, numpy, packaging`,
+ # all already satisfied. --no-deps avoids any chance of pip re-resolving torch.
+@@ -237,10 +358,27 @@ $UV -e "$MEGATRON_SRC" --no-deps
+ # inside the same repo, hard-imported from megatron/core/transformer/*.py).
+ # Drop a .pth file so `import miles_megatron_plugins` works in any python
+ # invocation without needing PYTHONPATH set.
+-PY_SITE=$(python -c "import site; print(site.getsitepackages()[0])")
+ echo "$MEGATRON_SRC" > "$PY_SITE/miles-megatron-source-root.pth"
+ echo "[src] miles-megatron-source-root.pth -> $MEGATRON_SRC"
+ 
++# sglang's pyproject (post-2026-05) declares a setuptools-rust extension that
++# builds `thirdparty/sglang/rust/sglang-grpc` via cargo + protoc. The
++# `lmsysorg/sglang` docker image installs both via apt; we don't have root, so
++# put rustup in $HOME/.cargo and protoc in the conda env's bin/.
++# Idempotent: rustup -y is a no-op if already installed; conda install ditto.
++if ! command -v cargo &>/dev/null && [[ ! -x "$HOME/.cargo/bin/cargo" ]]; then
++    echo "[deps] installing rustup (sglang setuptools-rust ext build dep)"
++    curl --proto '=https' --tlsv1.2 --retry 3 --retry-delay 2 -sSf https://sh.rustup.rs | sh -s -- -y
++fi
++export PATH="$HOME/.cargo/bin:$PATH"
++command -v cargo >/dev/null \
++    || { echo "FATAL: cargo still not on PATH after rustup install" >&2; exit 1; }
++
++if ! command -v protoc >/dev/null; then
++    echo "[deps] installing libprotobuf + protobuf into $MILES_ENV_NAME (sglang-grpc build dep)"
++    "$CONDA_ROOT/bin/conda" install -n "$MILES_ENV_NAME" -c conda-forge -y libprotobuf protobuf
++fi
++
+ # SGLang's pyproject declares the full runtime tree (fastapi/uvicorn/orjson/
+ # flashinfer_python/sglang-kernel/flash-attn-4/cuda-python/...). We DON'T use
+ # --no-deps because we're not starting from `lmsysorg/sglang:v0.5.10` — pip
+@@ -251,11 +389,50 @@ echo "[src] installing sglang editable from $SGLANG_SRC (full dep resolution)"
+ # look at PyPI for torchao (dependency-confusion guard). Order of indexes
+ # still controls preference (cu129/flashinfer before pypi); uv only falls
+ # through when earlier indexes do not provide a compatible version.
++#
++# cu12 sglang dependency reconciliation. Two coupled problems on a cu12 host (cu129
++# prebuilt wheels + a CUDA-12.x driver that cannot run CUDA 13):
++#   1. sglang's pyproject pins `cuda-python>=13.0` (CUDA 13). The cu129 sglang docker
++#      variant (`lmsysorg/sglang:<ver>-cu129`) actually runs on the cu12.9 cuda-python
++#      line, so the floor is wrong for the build we ship. A --constraint can't satisfy
++#      `>=13` AND `<13`; an --override REPLACES the declared bound.
++#   2. sglang pins `torch==$TORCH_VERSION` (no local tag); under unsafe-first-match uv will
++#      otherwise swap the +cu$torch_cu_tag wheel for PyPI's plain torch (the CUDA-13 build
++#      at >= 2.11), leaving torch(cu130) vs torchvision(cu$torch_cu_tag) — a CUDA-major
++#      mismatch that breaks `import torchvision` (hence sglang). The +cu<tag> --constraint
++#      pins the cu-index build (unsatisfiable by PyPI's plain wheel).
++# Together: torch is held at +cu$torch_cu_tag, whose `cuda-bindings>=12.9.4,<13` requirement
++# pulls cuda-python up to the 12.9.x line (12.6.x has no cuda-bindings dep, so `<13` alone
++# under-selects) — the whole env lands CUDA-${torch_cu_tag}-consistent with the wheels.
++# Applied only on cu12; a genuine CUDA-13 bundle (cu130 tag) leaves sglang's pins alone.
++sglang_dep_args=()
++if [[ "${torch_cu_tag:0:2}" == "12" ]]; then
++    mkdir -p "$WHEELS_DIR"
++    echo "cuda-python<13" > "$WHEELS_DIR/sglang-cuda-python-override.txt"
++    echo "torch==${TORCH_VERSION}+cu${torch_cu_tag}" > "$WHEELS_DIR/torch-cu-constraint.txt"
++    sglang_dep_args=(
++        --override "$WHEELS_DIR/sglang-cuda-python-override.txt"
++        --constraint "$WHEELS_DIR/torch-cu-constraint.txt"
++    )
++fi
+ $UV -e "$SGLANG_SRC/python[all]" \
++    "${sglang_dep_args[@]}" \
+     --extra-index-url "$FLASHINFER_INDEX_URL" \
+     --extra-index-url "$TORCH_INDEX_URL" \
+     --index-strategy unsafe-first-match
+ 
++# transformers==5.6.0 imports integrations.hub_kernels at model-import time and
++# constructs kernels.LayerRepository objects without a version/revision. kernels
++# 0.15+ made that invalid, which breaks `import megatron.bridge` / `import mbridge`
++# before any model code runs. SGLang's pyproject leaves `kernels` unpinned, so
++# cap the incompatible API line until transformers catches up.
++KERNELS_SPEC=${KERNELS_SPEC:-"kernels>=0.12,<0.15"}
++echo "[deps] $KERNELS_SPEC (transformers hub_kernels compatibility)"
++$UV "$KERNELS_SPEC"
++
++# sglang_router is installed from the miles-wheels release (NOT PyPI) in the
++# prebuilt-wheels section below, to match the upstream Dockerfile's wheel source.
++
+ # ---------- recipe-required runtime deps (not in requirements.txt) -------
+ 
+ echo "[deps] mbridge @ $MBRIDGE_COMMIT (for tools/convert_hf_to_torch_dist.py)"
+@@ -263,8 +440,8 @@ $UV "git+https://github.com/ISEEKYAN/mbridge.git@$MBRIDGE_COMMIT" --no-deps
+ 
+ echo "[deps] nvidia-modelopt — required by megatron.bridge's auto_bridge.py top-level import"
+ # Dockerfile has the [torch] extra but modelopt 0.44+ dropped it (warning-only).
+-# Side effect: pulls nvidia-cudnn-cu12==9.10.2.21 which clobbers the 9.16.0.29
+-# pin we need for pytorch/pytorch#168167; the cudnn step below restores it.
++# Side effect: can pull an older nvidia-cudnn-cu12 and clobber torch's declared
++# cuDNN pin; reassert the effective torch-derived/overridden cuDNN before TE.
+ $UV --no-build-isolation "nvidia-modelopt>=0.37.0"
+ 
+ echo "[src] installing Megatron-Bridge editable from $MEGATRON_BRIDGE_SRC (--no-deps)"
+@@ -273,8 +450,30 @@ $UV -e "$MEGATRON_BRIDGE_SRC" --no-deps --no-build-isolation
+ echo "[deps] torch_memory_saver @ $TMS_COMMIT (for miles/backends/megatron_utils/actor.py)"
+ $UV --no-cache-dir --force-reinstall "git+https://github.com/fzyzcjy/torch_memory_saver.git@$TMS_COMMIT"
+ 
+-echo "[deps] transformer_engine[pytorch]==$TE_VERSION (compiles, ~10 min)"
+-$UV --no-build-isolation "transformer_engine[pytorch]==$TE_VERSION"
++_install_cudnn_for_torch "before transformer_engine_torch source build"
++
++echo "[deps] transformer_engine==$TE_VERSION + transformer_engine_cu12==$TE_VERSION"
++# Do NOT install the `transformer_engine[pytorch]` extra here: pip/uv will prefer
++# PyPI's prebuilt transformer_engine_torch wheel when one exists, and that wheel is
++# torch-ABI-bound. For torch 2.11.0+cu129, TE 2.10.0's prebuilt torch extension
++# imports with an undefined c10::cuda symbol. Mirror Docker's safer CUDA-13 shape:
++# install the pure/runtime TE packages, then force the torch extension to compile
++# against the torch already installed in this env.
++$UV --no-deps "transformer_engine==$TE_VERSION" "transformer_engine_cu12==$TE_VERSION"
++
++TE_BUILD_MAX_JOBS=${TE_BUILD_MAX_JOBS:-${MAX_JOBS:-16}}
++echo "[deps] transformer_engine_torch==$TE_VERSION (source build, MAX_JOBS=$TE_BUILD_MAX_JOBS)"
++_prepend_env_cuda_libs
++MAX_JOBS="$TE_BUILD_MAX_JOBS" NVTE_FRAMEWORK=pytorch \
++    $UV --no-deps --no-build-isolation --no-cache --no-binary :all: \
++        --reinstall-package transformer_engine_torch \
++        "transformer_engine_torch==$TE_VERSION"
++
++echo "[deps] onnx>=1.21.0 + onnxscript (transformer_engine_torch runtime deps)"
++# The source-build path intentionally uses --no-deps to avoid PyPI's prebuilt
++# torch-ABI-bound transformer_engine_torch wheel, so restore the pure/runtime
++# deps declared by transformer_engine_torch metadata explicitly.
++$UV "onnx>=1.21.0" onnxscript
+ 
+ # ---------- prebuilt wheels (flash-attn, flash-attn-3, apex) -------------
+ # Source builds for these are 30-60 min each on Hopper. The Dockerfile uses
+@@ -342,6 +541,61 @@ if [[ "$INSTALL_APEX" == "1" ]]; then
+     $UV "$apex_wheel"
+ fi
+ 
++# sglang_router from the SAME miles-wheels release as FA/apex — NOT from PyPI.
++# The release wheel may be a radixark/patched build; a PyPI `sglang-router==X`
++# can share the version number yet diverge from what the upstream Dockerfile
++# installs (it COPYs /tmp/wheels/sglang_router-*.whl from this release). miles
++# code version-gates on sglang_router.__version__, so provenance matters. Rust/
++# abi3 wheel — NOT torch-ABI-bound — installed here (after the editable sglang
++# above) so it wins over any sglang_router pulled transitively from an index.
++router_wheel=$(_fetch_miles_wheel sglang_router-)
++router_wheel_base=$(basename "$router_wheel")
++case "$router_wheel_base" in
++    sglang_router-"$SGLANG_ROUTER_VERSION"-*) : ;;
++    *)
++        echo "FATAL: release sglang_router wheel $router_wheel_base does not match pinned $SGLANG_ROUTER_VERSION." >&2
++        echo "       Update WHEELS_STACK in extract_pins.py for MILES_WHEELS_TAG=$MILES_WHEELS_TAG," >&2
++        echo "       or use a miles-wheels release that ships sglang_router-$SGLANG_ROUTER_VERSION." >&2
++        exit 1
++        ;;
++esac
++
++# GLIBC guard: the release wheel is manylinux_2_NN (built on the docker base, e.g.
++# Ubuntu 24.04 / GLIBC 2.39). On an older host uv refuses to install it AND the abi3
++# .so would fail to load at runtime. When the host GLIBC is below the wheel's floor,
++# build the patched router from source (radixark/sgl-router-for-miles — the Dockerfile's
++# SGL_ROUTER_USE_WHEELS=0 path) so the radixark patches survive on an older-GLIBC host.
++# (Same root cause as the sgl-model-gateway GLIBC skip below; the router is essential so
++# we build rather than skip.)
++wheel_glibc_minor=$(sed -n 's/.*manylinux_2_\([0-9]\{1,\}\)_.*/\1/p' <<<"$router_wheel_base")
++host_glibc_minor=$(ldd --version 2>/dev/null | awk 'NR==1{print $NF}' | cut -d. -f2)
++if [[ -n "$wheel_glibc_minor" && -n "$host_glibc_minor" && "$host_glibc_minor" -lt "$wheel_glibc_minor" ]]; then
++    echo "[deps] sglang_router: release wheel needs GLIBC 2.$wheel_glibc_minor > host 2.$host_glibc_minor — building from source"
++    SGL_ROUTER_REPO=${SGL_ROUTER_REPO:-https://github.com/radixark/sgl-router-for-miles.git}
++    SGL_ROUTER_BRANCH=${SGL_ROUTER_BRANCH:-main}
++    command -v cargo >/dev/null \
++        || { echo "FATAL: cargo not on PATH — needed to build sglang_router from source" >&2; exit 1; }
++    router_src=$(mktemp -d)
++    echo "[deps] cloning $SGL_ROUTER_REPO@$SGL_ROUTER_BRANCH"
++    git clone --branch "$SGL_ROUTER_BRANCH" --depth 1 "$SGL_ROUTER_REPO" "$router_src/src"
++    $UV maturin
++    ( cd "$router_src/src/bindings/python" && ulimit -n 65536 \
++        && maturin build --release --features vendored-openssl --out "$router_src/wheels" )
++    built_router=$(compgen -G "$router_src/wheels/sglang_router-*.whl" | head -1 || true)
++    [[ -n "$built_router" ]] \
++        || { echo "FATAL: maturin produced no sglang_router wheel under $router_src/wheels" >&2; exit 1; }
++    case "$(basename "$built_router")" in
++        sglang_router-"$SGLANG_ROUTER_VERSION"-*) : ;;
++        *) echo "[deps] WARN: built $(basename "$built_router") != pinned $SGLANG_ROUTER_VERSION (source '$SGL_ROUTER_BRANCH' moved); proceeding (from-source GLIBC fallback)" >&2 ;;
++    esac
++    echo "[deps] sglang_router <- $(basename "$built_router") (built from source)"
++    $UV --force-reinstall "$built_router"
++    rm -rf "$router_src"
++else
++    echo "[deps] sglang_router <- $router_wheel_base (release wheel, matches Dockerfile source)"
++    $UV "$router_wheel"
++fi
++
+ # ---------- sgl-model-gateway binary -------------------------------------
+ # Standalone Rust binary that fronts multiple sglang servers (multi-replica
+ # disagg rollout routing). Docker drops it into /usr/local/bin/; bare-metal we
+@@ -365,8 +619,12 @@ if [[ "$INSTALL_SGL_GATEWAY" == "1" ]]; then
+         tar xzf "$gateway_tarball" -C "$CONDA_PREFIX/bin/"
+         chmod +x "$CONDA_PREFIX/bin/sgl-model-gateway"
+     else
++        # EXPLICIT HOST EXCEPTION (not an sglang-stack pin issue): the gateway is a
++        # standalone Rust binary, NOT torch-ABI-bound, so it's exempt from the ABI
++        # guards above. It's skipped purely because this host's GLIBC predates the
++        # prebuilt's 2.38 floor. Only needed for multi-server sglang routing.
+         echo "[deps] sgl-model-gateway: skipping — host GLIBC $GLIBC_VER < 2.38 (prebuilt needs 2.38+)"
+-        echo "[deps] sgl-model-gateway: only needed for multi-server sglang routing; build from source if you need it"
++        echo "[deps] sgl-model-gateway: build from source (SGL_ROUTER_USE_WHEELS=0 path) if you need routing"
+     fi
+ fi
+ 
+@@ -381,20 +639,17 @@ $UV -e "$MILES_REPO" --no-deps
+ # Megatron-Core insists on numpy <2.
+ $UV 'numpy<2'
+ 
+-# pytorch/pytorch#168167 — torch 2.9.x ships an older cudnn that segfaults on
+-# some cu12 setups; pin to the same cudnn the Dockerfile uses.
+-CUDNN_CU12_VERSION=${CUDNN_CU12_VERSION:-9.16.0.29}
+-echo "[deps] nvidia-cudnn-cu12==$CUDNN_CU12_VERSION (pytorch/pytorch#168167 workaround)"
+-$UV "nvidia-cudnn-cu12==$CUDNN_CU12_VERSION"
+-
+ echo "[deps] mooncake-transfer-engine==$MOONCAKE_VERSION (sglang docker base)"
+ $UV "mooncake-transfer-engine==$MOONCAKE_VERSION"
+ 
++_install_cudnn_for_torch "final pre-verify reassert"
++
+ # ---------- smoke test + version audit -----------------------------------
+ # verify_env.py runs the import/CUDA/FA3-symbol checks the old inline heredoc
+ # did, plus cross-checks installed versions against pins.env and confirms the
+ # editable installs point at thirdparty/. Failures here fail the install.
+ 
++_prepend_env_cuda_libs
+ python3 "$SCRIPT_DIR/verify_env.py"
+ 
+ echo
+diff --git a/scripts/slurm/setup/pins.env b/scripts/slurm/setup/pins.env
+index 7e6c01c87..d16190c16 100644
+--- a/scripts/slurm/setup/pins.env
++++ b/scripts/slurm/setup/pins.env
+@@ -1,35 +1,51 @@
+ # scripts/slurm/setup/pins.env — pinned versions/commits for install_env.sh.
+ #
+-# AUTO-GENERATED — do not edit by hand. Sources of truth:
++# AUTO-GENERATED — do not hand-edit, EXCEPT MILES_WHEELS_TAG (the ACTIVE sglang
++# bundle), which only sglang-sync changes. Regenerate the rest with:
++#   python scripts/slurm/setup/extract_pins.py --write
++#
++# Sources of truth:
+ #   - docker/Dockerfile                          (radixark/miles)
+ #   - thirdparty/sglang/docker/Dockerfile        (sglang base image)
+ #   - thirdparty/sglang/python/pyproject.toml    (patched sglang fork)
+ #
+-# Regenerate after bumping any of the above:
+-#   python scripts/slurm/setup/extract_pins.py --write
+-#
+ # Each value is overridable: set the env var before invoking install_env.sh
+ # (e.g. `TE_VERSION=2.11.0 bash scripts/slurm/setup/install_env.sh`).
+ 
+ 
+ # From thirdparty/sglang/python/pyproject.toml (patched sglang fork)
+-# sglang's pyproject pins the entire runtime tree against this torch.
+-TORCH_VERSION=${TORCH_VERSION:-2.9.1}
++# torch the sglang SUBMODULE is built against — this defines ACTIVE torch.
++TORCH_VERSION=${TORCH_VERSION:-2.11.0}
+ 
+ # From docker/Dockerfile (radixark/miles)
+ TE_VERSION=${TE_VERSION:-2.10.0}
+ MBRIDGE_COMMIT=${MBRIDGE_COMMIT:-89eb10887887bc74853f89a4de258c0702932a1c}
+ TMS_COMMIT=${TMS_COMMIT:-d64a639}
+-# pytorch/pytorch#168167 workaround; modelopt later downgrades it, this re-pins.
+-CUDNN_CU12_VERSION=${CUDNN_CU12_VERSION:-9.16.0.29}
+ # FA3 ships .so but not the python interface; we drop it in by hand.
+ FLASH_ATTN_INTERFACE_COMMIT=${FLASH_ATTN_INTERFACE_COMMIT:-fbf24f67cf7f6442c5cfb2c1057f4bfc57e72d89}
+ MILES_WHEELS_REPO=${MILES_WHEELS_REPO:-yueming-yuan/miles-wheels}
+-MILES_WHEELS_TAG=${MILES_WHEELS_TAG:-cu129-x86_64}
+ 
+ # From thirdparty/sglang/docker/Dockerfile (sglang base image)
+ # miles imports mooncake.engine.TransferEngine at top level — required.
+-MOONCAKE_VERSION=${MOONCAKE_VERSION:-0.3.9}
++MOONCAKE_VERSION=${MOONCAKE_VERSION:-0.3.10.post2}
++
++# --- sglang stack (atomic bundle: sglang version + torch ABI + prebuilt wheels) ---
++# ACTIVE = what install_env.sh installs; tracks thirdparty/sglang. UPSTREAM_* =
++# where docker/Dockerfile points. When they differ, `extract_pins.py --check`
++# prints `[sglang-sync pending]` (exit 0 — deferrable, NOT a sync blocker), and
++# install_env.sh hard-fails on any torch-ABI inconsistency.
++#
++# MILES_WHEELS_TAG is the ONE hand/sglang-sync-owned pin. The three fields under
++# it are DERIVED from it via WHEELS_STACK in extract_pins.py — do not hand-edit;
++# run `extract_pins.py --write`. To upgrade sglang: add a WHEELS_STACK row, set
++# MILES_WHEELS_TAG, bump the submodule, then --write.
++MILES_WHEELS_TAG=${MILES_WHEELS_TAG:-cu129-x86_64-v0.5.12}
++MILES_WHEELS_TORCH_VERSION=${MILES_WHEELS_TORCH_VERSION:-2.11.0}
++MILES_WHEELS_SGLANG_VERSION=${MILES_WHEELS_SGLANG_VERSION:-v0.5.12}
++SGLANG_ROUTER_VERSION=${SGLANG_ROUTER_VERSION:-0.3.2}
++# UPSTREAM TARGET (from docker/Dockerfile) — advance ACTIVE to this via sglang-sync:
++UPSTREAM_SGLANG_IMAGE_TAG=${UPSTREAM_SGLANG_IMAGE_TAG:-v0.5.12-cu129}
++UPSTREAM_WHEELS_TAG=${UPSTREAM_WHEELS_TAG:-cu129-x86_64-v0.5.12}
+ 
+ # Derived from MILES_WHEELS_TAG cu prefix
+ TORCH_INDEX_URL=${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu129}
+diff --git a/scripts/slurm/setup/verify_env.py b/scripts/slurm/setup/verify_env.py
+index 6303fcc22..50ff57d7a 100644
+--- a/scripts/slurm/setup/verify_env.py
++++ b/scripts/slurm/setup/verify_env.py
+@@ -29,6 +29,9 @@ import sys
+ import urllib.request
+ from pathlib import Path
+ 
++from packaging.requirements import Requirement
++from packaging.version import Version
++
+ REPO_ROOT = Path(__file__).resolve().parents[3]
+ SITE_DIR = Path(site.getsitepackages()[0])
+ PINS_FILE = REPO_ROOT / "scripts/slurm/setup/pins.env"
+@@ -52,6 +55,36 @@ def ver(pkg: str) -> str | None:
+         return None
+ 
+ 
++def torch_declared_cudnn_cu12_version() -> str:
++    """Return torch's exact nvidia-cudnn-cu12 requirement from installed metadata."""
++    for req_text in md.requires("torch") or []:
++        req = Requirement(req_text)
++        if req.name != "nvidia-cudnn-cu12":
++            continue
++        versions = [spec.version for spec in req.specifier if spec.operator == "=="]
++        if len(versions) == 1:
++            return versions[0]
++        raise RuntimeError(f"torch requirement {req_text!r} does not contain exactly one == pin")
++    raise RuntimeError("torch metadata does not declare nvidia-cudnn-cu12")
++
++
++def effective_cudnn_cu12_version() -> str:
++    """Expected cuDNN package version: env override, else torch's declared pin."""
++    return os.environ.get("CUDNN_CU12_VERSION") or torch_declared_cudnn_cu12_version()
++
++
++def cudnn_int_to_triplet(v: int) -> tuple[int, int, int]:
++    """torch.backends.cudnn.version() encodes 9.17.1 as 91701."""
++    return (v // 10000, (v // 100) % 100, v % 100)
++
++
++def version_triplet(v: str) -> tuple[int, int, int]:
++    parts = v.split(".")
++    if len(parts) < 3:
++        raise RuntimeError(f"expected at least major.minor.patch in version {v!r}")
++    return tuple(int(x) for x in parts[:3])  # type: ignore[return-value]
++
++
+ def direct_url(pkg: str) -> dict | None:
+     try:
+         dist = md.distribution(pkg)
+@@ -95,6 +128,8 @@ def check_imports() -> list[tuple[str, bool]]:
+         "torch_memory_saver",
+         "mooncake.engine",
+         "miles_megatron_plugins",
++        "onnx",
++        "onnxscript",
+     ]
+     if os.environ.get("INSTALL_FLASH_ATTN", "1") == "1":
+         mods.append("flash_attn")
+@@ -116,6 +151,17 @@ def check_imports() -> list[tuple[str, bool]]:
+ def check_runtime() -> list[tuple[str, bool]]:
+     """Importable != linkable. Probe FA3 symbols, apex C extensions, CUDA visibility."""
+     out: list[tuple[str, bool]] = []
++    try:
++        from sgl_kernel import sgl_per_token_quant_fp8  # noqa: F401
++
++        out.append(("sgl_kernel symbol: sgl_per_token_quant_fp8", True))
++    except Exception as e:
++        out.append((f"sgl_kernel symbol: sgl_per_token_quant_fp8 ({type(e).__name__}: {e})", False))
++    try:
++        importlib.import_module("sglang.srt.layers.quantization.fp8_kernel")
++        out.append(("sglang engine import: srt.layers.quantization.fp8_kernel", True))
++    except Exception as e:
++        out.append((f"sglang engine import: fp8_kernel ({type(e).__name__}: {e})", False))
+     if os.environ.get("INSTALL_FLASH_ATTN_3", "1") == "1":
+         try:
+             fa3 = importlib.import_module("flash_attn_3.flash_attn_interface")
+@@ -144,6 +190,15 @@ def check_runtime() -> list[tuple[str, bool]]:
+         out.append((f"torch.cuda.is_available()  (cuda={torch.version.cuda})", torch.cuda.is_available()))
+     except Exception as e:
+         out.append((f"torch.cuda ({type(e).__name__})", False))
++    try:
++        import torch
++
++        expected = effective_cudnn_cu12_version()
++        got = torch.backends.cudnn.version()
++        ok = got is not None and cudnn_int_to_triplet(got) == version_triplet(expected)
++        out.append((f"torch runtime cuDNN == {'.'.join(expected.split('.')[:3])} (got {got})", ok))
++    except Exception as e:
++        out.append((f"torch runtime cuDNN ({type(e).__name__}: {e})", False))
+     return out
+ 
+ 
+@@ -152,13 +207,38 @@ def check_pins(pins: dict[str, str]) -> list[tuple[str, bool]]:
+ 
+     t = ver("torch")
+     out.append((f"torch == {pins['TORCH_VERSION']}", bool(t and t.split("+")[0] == pins["TORCH_VERSION"])))
++
++    # torch's CUDA build (+cuNNN local tag) must match the wheels-tag cu build. Catches
++    # PyPI swapping the +cu129 wheel for its default CUDA-13 build during the sglang dep
++    # resolution — a silent CUDA-major mismatch that breaks torchvision/sglang import.
++    m_tag = re.search(r"cu(\d+)", pins.get("MILES_WHEELS_TAG", "") or pins.get("TORCH_INDEX_URL", ""))
++    if m_tag:
++        cu_want = m_tag.group(1)
++        m_got = re.search(r"\+cu(\d+)", t or "")
++        cu_got = m_got.group(1) if m_got else "<none>"
++        out.append((f"torch CUDA build == cu{cu_want} (got cu{cu_got})", cu_got == cu_want))
+     for key, pkg in [
+         ("TE_VERSION", "transformer_engine"),
+-        ("CUDNN_CU12_VERSION", "nvidia-cudnn-cu12"),
+         ("MOONCAKE_VERSION", "mooncake-transfer-engine"),
+     ]:
+         out.append((f"{pkg} == {pins[key]}", ver(pkg) == pins[key]))
+ 
++    try:
++        expected_cudnn = effective_cudnn_cu12_version()
++        got_cudnn = ver("nvidia-cudnn-cu12")
++        out.append((f"nvidia-cudnn-cu12 == {expected_cudnn}", got_cudnn == expected_cudnn))
++    except Exception as e:
++        out.append((f"nvidia-cudnn-cu12 expected version ({type(e).__name__}: {e})", False))
++
++    kernels_spec = os.environ.get("KERNELS_SPEC", "kernels>=0.12,<0.15")
++    try:
++        kernels_req = Requirement(kernels_spec)
++        got_kernels = ver("kernels")
++        ok = bool(got_kernels and Version(got_kernels) in kernels_req.specifier)
++        out.append((f"kernels satisfies {kernels_req.specifier} (got {got_kernels})", ok))
++    except Exception as e:
++        out.append((f"kernels spec check ({type(e).__name__}: {e})", False))
++
+     mb = (direct_url("mbridge") or {}).get("vcs_info", {}).get("commit_id")
+     out.append((f"mbridge @ {pins['MBRIDGE_COMMIT'][:8]}…", mb == pins["MBRIDGE_COMMIT"]))
+ 

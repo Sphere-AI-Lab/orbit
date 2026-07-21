@@ -55,7 +55,7 @@ Caveats:
   prebuilt `miles` env. (These guards are dev tooling, not CI-gated, so they do
   not fail the PR.) A clean-room installer for "torch-2.9.1 binaries + v0.5.12
   source" needs the parked torch-constraint work
-  (`docs/debug-notes/miles-sync-2026-06-02/setup-scripts-vs-main.patch`) and is
+  (`docs/sync-records/miles-sync-2026-06-02/setup-scripts-vs-main.patch`) and is
   follow-up.
 
 ## Step memory cap (`--mem=0` on every srun)
@@ -104,7 +104,7 @@ bring-up so a bad node/fabric never wastes a ~12 min model load.
    healthy read returns in seconds, but a wedge makes `/data` reads hang in
    uninterruptible D-state, which otherwise stalls sglang engine/weight bring-up
    indefinitely with idle GPUs and no error (see
-   `docs/debug-notes/miles-sync-2026-06-30/wekafs-wedge-2026-07-01.md`). O_DIRECT
+   `docs/sync-records/miles-sync-2026-06-30/wekafs-wedge-2026-07-01.md`). O_DIRECT
    bypasses the page cache so a probe file left warm by a prior job can't mask
    the wedge; it targets a *wedge* (reads that never return), not slowness
    (64 MiB completes well within `HEALTHCHECK_TIMEOUT`). Skips (non-blocking) if
@@ -396,8 +396,10 @@ a new module — we keep the launcher boundary thin on purpose.
   to actually launch a run (filesystem layout, recipe pattern, dispatch flow).
 - [`rl-monitor-loop` SKILL.md](../../../.claude/skills/rl-monitor-loop/SKILL.md)
   — adaptive-cadence Claude-driven monitor that wraps `check_run.sh`.
-- [`sync/`](sync/) — upstream-sync trail (`prs.md`, `pr-body.md`,
-  `divergence.patch` / `.stat`) for the v0.5.10 → v0.5.12 sglang sync.
+- [`sync-records/`](sync-records/) — the tracked upstream-sync history (`prs.md`,
+  `pr-body.md`, `divergence.patch` / `.stat` per event; see its README). The
+  v0.5.10 → v0.5.12 trail lives in
+  [`sync-records/miles-sync-2026-06-02/`](sync-records/miles-sync-2026-06-02/).
 - Upstream miles docs: [`docs/getting-started/installation.md`](../../../docs/getting-started/installation.md)
   + [`docker/Dockerfile`](../../../docker/Dockerfile) — the canonical install
   reference that `setup/install_env.sh` mirrors.

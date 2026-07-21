@@ -206,6 +206,10 @@ _examples_synced/
 /scripts/slurm/docs/debug-notes/
 /scripts/slurm/docs/plan-notes/
 
+# upstream-sync records ARE tracked history (incl. raw install logs) — un-ignore
+# them from global patterns like *.log so a sync's full context survives in git
+!/scripts/slurm/docs/sync-records/**
+
 # Claude Code runtime lock for /loop and scheduled tasks
 .claude/scheduled_tasks.lock
 

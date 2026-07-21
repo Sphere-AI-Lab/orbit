@@ -29,7 +29,9 @@ miles code and the sglang it targets should move in the same PR.
    explicit "push it".
 3. **One bundle, one commit.** The sglang gitlink bump + `pins.env` + the
    `WHEELS_STACK` row in `extract_pins.py` go in a single commit (folded into the
-   miles-sync "our changes" commit when run together).
+   miles-sync "our changes" commit when run together). (The sync-record folder is
+   the one exception: standalone runs commit it as its own `[docs] sglang-sync
+   record` commit — Step 7; combined runs leave it to miles-sync Step 9.)
 4. **`extract_pins.py --check` must end at exit 0 with no `[sglang-sync pending]`**
    — that is the definition of done: ACTIVE == UPSTREAM and torch-ABI consistent.
 
@@ -303,6 +305,17 @@ When invoked by `/miles-sync`: do NOT commit separately — these staged changes
 folded into miles-sync's single "our changes" commit (Step 6 there), so the PR has
 the miles merge + one combined bundle commit.
 
+**Record the event** (git-tracked history — see
+`scripts/slurm/docs/sync-records/README.md`; before a standalone run, read ONLY the
+newest record there — older ones describe superseded pin states and pollute context):
+combined runs write their notes into the
+cycle's `sync-records/miles-sync-YYYY-MM-DD/` folder; a **standalone** sglang bump gets
+its own `sync-records/sglang-sync-YYYY-MM-DD/` folder. Save anything the next operator
+needs: the mirror-only commit classification from Step 3, patch re-apply notes, the
+publish script/commands actually run (Step 8), and debug notes for anything that broke.
+Commit the folder as `[docs] sglang-sync YYYY-MM-DD record` alongside the push
+(combined runs: miles-sync Step 9 commits it).
+
 ### Step 8 — Publish: sync branch now, archive + force-advance sglang-miles later (ONLY after explicit approval)
 
 ⛔ No outward push without an explicit "push it". The gitlink points at `$NEWPIN`
@@ -384,4 +397,5 @@ ABI guard backstops.
 
 - [`/miles-sync`](../miles-sync/SKILL.md) — invokes this at its Step 5d pending gate (sync-together).
 - [`scripts/slurm/setup/extract_pins.py`](../../../scripts/slurm/setup/extract_pins.py) — `WHEELS_STACK`, `--resolve`, `--check`.
-- [`scripts/slurm/docs/debug-notes/upstream-sync-design.md`](../../../scripts/slurm/docs/debug-notes/upstream-sync-design.md) — ACTIVE/UPSTREAM model + sglang topology.
+- [`scripts/slurm/docs/sync-records/upstream-sync-design.md`](../../../scripts/slurm/docs/sync-records/upstream-sync-design.md) — ACTIVE/UPSTREAM model + sglang topology.
+- [`scripts/slurm/docs/sync-records/README.md`](../../../scripts/slurm/docs/sync-records/README.md) — the tracked sync-history layout + index of past syncs.

@@ -1,0 +1,19 @@
+pyxis: importing docker image: lmsysorg/sglang:v0.5.12-cu129
+[2026-06-04T01:11:08] error: *** STEP 13745.0 ON slinky-13 CANCELLED AT 2026-06-04T01:11:08 DUE to SIGNAL Terminated ***
+[2026-06-04T01:11:08] error: pyxis: could not wait for child 16832: Interrupted system call
+[2026-06-04T01:11:08] error: pyxis: failed to import docker image
+[2026-06-04T01:11:08] error: pyxis: printing enroot log file:
+[2026-06-04T01:11:08] error: pyxis:     [INFO] Querying registry for permission grant
+[2026-06-04T01:11:08] error: pyxis:     [INFO] Authenticating with user: <anonymous>
+[2026-06-04T01:11:08] error: pyxis:     [INFO] Authentication succeeded
+[2026-06-04T01:11:08] error: pyxis:     [INFO] Fetching image manifest list
+[2026-06-04T01:11:08] error: pyxis:     [INFO] Fetching image manifest
+[2026-06-04T01:11:08] error: pyxis:     [INFO] Found all layers in cache
+[2026-06-04T01:11:08] error: pyxis:     [INFO] Extracting image layers...
+[2026-06-04T01:11:08] error: pyxis:     [INFO] Converting whiteouts...
+[2026-06-04T01:11:08] error: pyxis:     [INFO] Creating squashfs filesystem...
+[2026-06-04T01:11:08] error: pyxis: couldn't start container
+[2026-06-04T01:11:08] error: spank: required plugin spank_pyxis.so: task_init() failed with rc=-1
+[2026-06-04T01:11:08] error: Failed to invoke spank plugin stack
+[2026-06-04T01:11:08] error: pyxis: child 17263 failed with error code: 1
+srun: error: slinky-13: task 0: Exited with exit code 1

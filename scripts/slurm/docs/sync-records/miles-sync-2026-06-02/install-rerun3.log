@@ -1,0 +1,1779 @@
+[preflight] WARNING: driver CUDA 12.8 < wheel CUDA 12.9 — relying on CUDA 12.x minor-version forward compatibility.
+[preflight] If smoke-test imports fail with CUDA symbol errors, install a driver supporting CUDA >= 12.9 or switch to cu128 wheels.
+[preflight] FA3 target GPU: NVIDIA H200 (compute capability 9.0)
+[preflight] nvcc: Build cuda_12.8.r12.8/compiler.35404655_0
+[preflight] CUDA_HOME=/usr/local/cuda-12.8
+[src] initialising submodules under /data/home/xiuyul/workspace/miles-imp/thirdparty
+[env] creating conda env 'miles_v0512_test' (python=3.12)
+2 channel Terms of Service accepted
+Channels:
+ - defaults
+Platform: linux-64
+Collecting package metadata (repodata.json): - \ | / - \ | / - \ | / - \ | / - \ | done
+Solving environment: - done
+
+## Package Plan ##
+
+  environment location: /data/shared/conda/miniconda3/envs/miles_v0512_test
+
+  added / updated specs:
+    - python=3.12
+
+
+The following NEW packages will be INSTALLED:
+
+  _libgcc_mutex      pkgs/main/linux-64::_libgcc_mutex-0.1-main 
+  _openmp_mutex      pkgs/main/linux-64::_openmp_mutex-5.1-52_gnu 
+  bzip2              pkgs/main/linux-64::bzip2-1.0.8-h5eee18b_6 
+  ca-certificates    pkgs/main/linux-64::ca-certificates-2026.5.14-h06a4308_0 
+  ld_impl_linux-64   pkgs/main/linux-64::ld_impl_linux-64-2.44-h9e0c5a2_3 
+  libexpat           pkgs/main/linux-64::libexpat-2.8.1-h7354ed3_0 
+  libffi             pkgs/main/linux-64::libffi-3.4.8-hc5d346e_2 
+  libgcc             pkgs/main/linux-64::libgcc-15.2.0-h69a1729_8 
+  libgcc-ng          pkgs/main/linux-64::libgcc-ng-15.2.0-h166f726_8 
+  libstdcxx          pkgs/main/linux-64::libstdcxx-15.2.0-h39759b7_8 
+  libuuid            pkgs/main/linux-64::libuuid-1.41.5-h5eee18b_0 
+  libxcb             pkgs/main/linux-64::libxcb-1.17.0-h9b100fa_0 
+  libzlib            pkgs/main/linux-64::libzlib-1.3.1-h47b2149_1 
+  ncurses            pkgs/main/linux-64::ncurses-6.5-h7934f7d_0 
+  openssl            pkgs/main/linux-64::openssl-3.5.6-h1b28b03_0 
+  packaging          pkgs/main/linux-64::packaging-26.0-py312h06a4308_0 
+  pip                pkgs/main/noarch::pip-26.1.1-pyhc872135_1 
+  pthread-stubs      pkgs/main/linux-64::pthread-stubs-0.3-h0ce48e5_1 
+  python             pkgs/main/linux-64::python-3.12.13-h4d16e0c_1 
+  readline           pkgs/main/linux-64::readline-8.3-hc2a1206_0 
+  setuptools         pkgs/main/linux-64::setuptools-82.0.1-py312h06a4308_0 
+  sqlite             pkgs/main/linux-64::sqlite-3.51.2-h3e8d24a_0 
+  tk                 pkgs/main/linux-64::tk-8.6.15-h54e0aa7_0 
+  tzdata             pkgs/main/noarch::tzdata-2026b-he532380_0 
+  wheel              pkgs/main/linux-64::wheel-0.46.3-py312h06a4308_0 
+  xorg-libx11        pkgs/main/linux-64::xorg-libx11-1.8.12-h9b100fa_1 
+  xorg-libxau        pkgs/main/linux-64::xorg-libxau-1.0.12-h9b100fa_0 
+  xorg-libxdmcp      pkgs/main/linux-64::xorg-libxdmcp-1.1.5-h9b100fa_0 
+  xorg-xorgproto     pkgs/main/linux-64::xorg-xorgproto-2024.1-h5eee18b_1 
+  xz                 pkgs/main/linux-64::xz-5.8.2-h448239c_0 
+  zlib               pkgs/main/linux-64::zlib-1.3.1-h47b2149_1 
+
+
+
+Downloading and Extracting Packages: ...working... done
+Preparing transaction: | / - \ | done
+Verifying transaction: - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / done
+Executing transaction: \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ done
+#
+# To activate this environment, use
+#
+#     $ conda activate miles_v0512_test
+#
+# To deactivate an active environment, use
+#
+#     $ conda deactivate
+
+[env] python: Python 3.12.13  prefix: /data/shared/conda/miniconda3/envs/miles_v0512_test
+[torch] torch==2.11.0 + torchvision from https://download.pytorch.org/whl/cu129
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 32 packages in 1.32s
+Uninstalled 1 package in 1.62s
+Installed 32 packages in 29.85s
+ + cuda-bindings==12.9.4
+ + cuda-pathfinder==1.2.2
+ + cuda-toolkit==12.9.1
+ + filelock==3.29.0
+ + fsspec==2026.4.0
+ + jinja2==3.1.6
+ + markupsafe==3.0.3
+ + mpmath==1.3.0
+ + networkx==3.6.1
+ + numpy==2.4.4
+ + nvidia-cublas-cu12==12.9.1.4
+ + nvidia-cuda-cupti-cu12==12.9.79
+ + nvidia-cuda-nvrtc-cu12==12.9.86
+ + nvidia-cuda-runtime-cu12==12.9.79
+ + nvidia-cudnn-cu12==9.17.1.4
+ + nvidia-cufft-cu12==11.4.1.4
+ + nvidia-cufile-cu12==1.14.1.1
+ + nvidia-curand-cu12==10.3.10.19
+ + nvidia-cusolver-cu12==11.7.5.82
+ + nvidia-cusparse-cu12==12.5.10.65
+ + nvidia-cusparselt-cu12==0.7.1
+ + nvidia-nccl-cu12==2.28.9
+ + nvidia-nvjitlink-cu12==12.9.86
+ + nvidia-nvshmem-cu12==3.4.5
+ + nvidia-nvtx-cu12==12.9.79
+ + pillow==12.2.0
+ - setuptools==82.0.1
+ + setuptools==70.2.0
+ + sympy==1.14.0
+ + torch==2.11.0+cu129
+ + torchvision==0.26.0+cu129
+ + triton==3.6.0
+ + typing-extensions==4.15.0
+[src] installing Megatron-LM editable (--no-deps)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 1 package in 7.39s
+   Building megatron-core @ file:///data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-LM
+      Built megatron-core @ file:///data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-LM
+Prepared 1 package in 10.02s
+Installed 1 package in 72ms
+ + megatron-core==0.16.0rc0 (from file:///data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-LM)
+[src] miles-megatron-source-root.pth -> /data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-LM
+[deps] installing libprotobuf + protobuf into miles_v0512_test (sglang-grpc build dep)
+2 channel Terms of Service accepted
+Channels:
+ - conda-forge
+ - defaults
+Platform: linux-64
+Collecting package metadata (repodata.json): - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - done
+Solving environment: | done
+
+
+==> WARNING: A newer version of conda exists. <==
+    current version: 26.1.1
+    latest version: 26.5.2
+
+Please update conda by running
+
+    $ conda update -n base -c conda-forge conda
+
+
+
+## Package Plan ##
+
+  environment location: /data/shared/conda/miniconda3/envs/miles_v0512_test
+
+  added / updated specs:
+    - libprotobuf
+    - protobuf
+
+
+The following NEW packages will be INSTALLED:
+
+  libabseil          conda-forge/linux-64::libabseil-20260107.1-cxx17_h7b12aa8_0 
+  libprotobuf        conda-forge/linux-64::libprotobuf-6.33.5-h2b00c02_0 
+  protobuf           conda-forge/linux-64::protobuf-6.33.5-py312ha7b3241_2 
+  python_abi         pkgs/main/linux-64::python_abi-3.12-3_cp312 
+
+The following packages will be UPDATED:
+
+  ca-certificates    pkgs/main/linux-64::ca-certificates-2~ --> conda-forge/noarch::ca-certificates-2026.5.20-hbd8a1cb_0 
+  openssl               pkgs/main::openssl-3.5.6-h1b28b03_0 --> conda-forge::openssl-3.6.2-h35e630c_0 
+
+
+
+Downloading and Extracting Packages: ...working... done
+Preparing transaction: - done
+Verifying transaction: | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - done
+Executing transaction: | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - \ | / - done
+[src] installing sglang editable from /data/home/xiuyul/workspace/miles-imp/thirdparty/sglang (full dep resolution)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 221 packages in 17.89s
+   Building sglang @ file:///data/home/xiuyul/workspace/miles-imp/thirdparty/sglang/python
+      Built sglang @ file:///data/home/xiuyul/workspace/miles-imp/thirdparty/sglang/python
+Prepared 1 package in 24.74s
+Uninstalled 4 packages in 4.34s
+Installed 191 packages in 31.90s
+ + addict==2.4.0
+ + aiohappyeyeballs==2.6.2
+ + aiohttp==3.14.0
+ + aiosignal==1.4.0
+ + airportsdata==20260315
+ + annotated-doc==0.0.4
+ + annotated-types==0.7.0
+ + anthropic==0.105.2
+ + antlr4-python3-runtime==4.9.3
+ + anyio==4.13.0
+ + apache-tvm-ffi==0.1.9
+ + asttokens==3.0.1
+ + attrs==26.1.0
+ + av==16.1.0
+ + blobfile==3.0.0
+ + build==1.5.0
+ + cache-dit==1.3.0
+ + certifi==2026.5.20
+ + cffi==2.0.0
+ + charset-normalizer==2.1.1
+ + click==8.4.1
+ + cloudpickle==3.1.2
+ + compressed-tensors==0.16.0
+ + cuda-python==12.9.0
+ + cuda-tile==1.4.0
+ + datasets==4.8.5
+ + decorator==5.3.1
+ + diffusers==0.37.0
+ + dill==0.4.1
+ + diskcache==5.6.3
+ + distro==1.9.0
+ + docstring-parser==0.18.0
+ + easydict==1.13
+ + einops==0.8.2
+ + executing==2.2.1
+ + fastapi==0.136.3
+ + flash-attn-4==4.0.0b15
+ + flashinfer-cubin==0.6.11.post1
+ + flashinfer-python==0.6.11.post1
+ + frozenlist==1.8.0
+ - fsspec==2026.4.0
+ + fsspec==2026.2.0
+ + gguf==0.19.0
+ + googleapis-common-protos==1.75.0
+ + granian==2.7.5
+ + grpcio==1.81.0
+ + grpcio-health-checking==1.81.0
+ + grpcio-reflection==1.81.0
+ + h11==0.16.0
+ + hf-xet==1.5.0
+ + httpcore==1.0.9
+ + httpx==0.28.1
+ + huggingface-hub==1.17.0
+ + humanize==4.15.0
+ + idna==3.4
+ + imageio==2.36.0
+ + imageio-ffmpeg==0.5.1
+ + importlib-metadata==7.1.0
+ + interegular==0.3.3
+ + ipython==9.14.0
+ + ipython-pygments-lexers==1.1.1
+ + jedi==0.20.0
+ + jiter==0.15.0
+ + jsonschema==4.26.0
+ + jsonschema-specifications==2025.9.1
+ + kernels==0.15.1
+ + kernels-data==0.15.1
+ + lark==1.3.1
+ + lazy-loader==0.5
+ + llguidance==0.7.30
+ + loguru==0.7.3
+ + lxml==6.1.1
+ + markdown-it-py==4.2.0
+ + matplotlib-inline==0.2.2
+ + mdurl==0.1.2
+ + mistral-common==1.11.2
+ + ml-dtypes==0.5.4
+ + modelscope==1.37.1
+ + moviepy==2.2.1
+ + msgspec==0.21.1
+ + multidict==6.7.1
+ + multiprocess==0.70.19
+ + nest-asyncio==1.6.0
+ + ninja==1.13.0
+ - numpy==2.4.4
+ + numpy==2.3.5
+ + nvidia-cudnn-frontend==1.24.0
+ + nvidia-cutlass-dsl==4.5.0
+ + nvidia-cutlass-dsl-libs-base==4.5.0
+ + nvidia-ml-py==13.610.43
+ + nvidia-modelopt==0.44.0
+ + omegaconf==2.3.0
+ + openai==2.6.1
+ + openai-harmony==0.0.4
+ + opencv-python-headless==4.10.0.84
+ + opentelemetry-api==1.42.1
+ + opentelemetry-exporter-otlp==1.42.1
+ + opentelemetry-exporter-otlp-proto-common==1.42.1
+ + opentelemetry-exporter-otlp-proto-grpc==1.42.1
+ + opentelemetry-exporter-otlp-proto-http==1.42.1
+ + opentelemetry-proto==1.42.1
+ + opentelemetry-sdk==1.42.1
+ + opentelemetry-semantic-conventions==0.63b1
+ + orjson==3.11.9
+ + outlines==0.1.11
+ + outlines-core==0.1.26
+ + pandas==3.0.3
+ + parso==0.8.7
+ + partial-json-parser==0.2.1.1.post7
+ + pexpect==4.9.0
+ - pillow==12.2.0
+ + pillow==11.3.0
+ + proglog==0.1.12
+ + prometheus-client==0.25.0
+ + prompt-toolkit==3.0.52
+ + propcache==0.5.2
+ + psutil==7.2.2
+ + ptyprocess==0.7.0
+ + pulp==3.3.2
+ + pure-eval==0.2.3
+ + py-spy==0.4.2
+ + pyarrow==24.0.0
+ + pybase64==1.4.3
+ + pycountry==26.2.16
+ + pycparser==3.0
+ + pycryptodomex==3.23.0
+ + pydantic==2.13.4
+ + pydantic-core==2.46.4
+ + pydantic-extra-types==2.11.1
+ + pygments==2.20.0
+ + pyproject-hooks==1.2.0
+ + python-dateutil==2.9.0.post0
+ + python-dotenv==1.2.2
+ + python-multipart==0.0.30
+ + pyyaml==6.0.1
+ + pyzmq==27.1.0
+ + quack-kernels==0.4.1
+ + referencing==0.37.0
+ + regex==2026.5.9
+ + remote-pdb==2.1.0
+ + requests==2.34.2
+ + rich==15.0.0
+ + rpds-py==2026.5.1
+ + runai-model-streamer==0.16.0
+ + safetensors==0.7.0
+ + scikit-image==0.25.2
+ + scipy==1.17.1
+ + sentencepiece==0.2.1
+ + setproctitle==1.3.7
+ - setuptools==70.2.0
+ + setuptools==81.0.0
+ + sgl-deep-gemm==0.1.0
+ + sglang==0.5.12.post2.dev24+gc74db48da (from file:///data/home/xiuyul/workspace/miles-imp/thirdparty/sglang/python)
+ + sglang-kernel==0.4.2.post2
+ + shellingham==1.5.4
+ + six==1.17.0
+ + smg-grpc-proto==0.4.8
+ + smg-grpc-servicer==0.5.3
+ + sniffio==1.3.1
+ + soundfile==0.13.1
+ + st-attn==0.0.7
+ + stack-data==0.6.3
+ + starlette==1.2.1
+ + tabulate==0.10.0
+ + tifffile==2026.6.1
+ + tiktoken==0.13.0
+ + tilelang==0.1.8
+ + timm==1.0.16
+ + tokenizers==0.22.2
+ + tokenspeed-mla==0.1.1
+ + tokenspeed-triton==3.7.10.post20260531
+ + tomlkit==0.15.0
+ + torch-c-dlpack-ext==0.1.5
+ + torch-memory-saver==0.0.9.post1
+ + torchao==0.17.0+cu129
+ + torchaudio==2.11.0+cu129
+ + torchcodec==0.11.1+cu129
+ + tqdm==4.66.5
+ + traitlets==5.15.0
+ + transformers==5.6.0
+ + trimesh==4.12.2
+ + typer==0.25.1
+ + typing-inspection==0.4.2
+ + urllib3==1.26.13
+ + uvicorn==0.48.0
+ + uvloop==0.22.1
+ + vsa==0.0.4
+ + watchfiles==1.2.0
+ + wcwidth==0.7.0
+ + xatlas==0.0.11
+ + xgrammar==0.2.0
+ + xxhash==3.7.0
+ + yarl==1.24.2
+ + z3-solver==4.15.4.0
+ + zipp==3.19.2
+[deps] mbridge @ 89eb10887887bc74853f89a4de258c0702932a1c (for tools/convert_hf_to_torch_dist.py)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 1 package in 78ms
+Installed 1 package in 259ms
+ + mbridge==0.15.1 (from git+https://github.com/ISEEKYAN/mbridge.git@89eb10887887bc74853f89a4de258c0702932a1c)
+[deps] nvidia-modelopt — required by megatron.bridge's auto_bridge.py top-level import
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Checked 1 package in 274ms
+[src] installing Megatron-Bridge editable from /data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-Bridge (--no-deps)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 1 package in 7.66s
+   Building megatron-bridge @ file:///data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-Bridge
+      Built megatron-bridge @ file:///data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-Bridge
+Prepared 1 package in 5.16s
+Installed 1 package in 84ms
+ + megatron-bridge==0.5.0+6fde1c85 (from file:///data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-Bridge)
+[deps] torch_memory_saver @ d64a639 (for miles/backends/megatron_utils/actor.py)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+   Updating https://github.com/fzyzcjy/torch_memory_saver.git (d64a639)
+    Updated https://github.com/fzyzcjy/torch_memory_saver.git (d64a6394d1e09c613fab90260054cecc2684586d)
+Resolved 1 package in 2.16s
+   Building torch-memory-saver @ git+https://github.com/fzyzcjy/torch_memory_saver.git@d64a6394d1e09c613fab90260054cecc2684586d
+      Built torch-memory-saver @ git+https://github.com/fzyzcjy/torch_memory_saver.git@d64a6394d1e09c613fab90260054cecc2684586d
+Prepared 1 package in 4.71s
+Uninstalled 1 package in 66ms
+warning: Failed to hardlink files; falling back to full copy. This may lead to degraded performance.
+         If the cache and target directories are on different filesystems, hardlinking may not be supported.
+         If this is intentional, set `export UV_LINK_MODE=copy` or use `--link-mode=copy` to suppress this warning.
+Installed 1 package in 298ms
+ - torch-memory-saver==0.0.9.post1
+ + torch-memory-saver==0.0.9 (from git+https://github.com/fzyzcjy/torch_memory_saver.git@d64a6394d1e09c613fab90260054cecc2684586d)
+[deps] transformer_engine[pytorch]==2.10.0 (compiles, ~10 min)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 46 packages in 280ms
+Installed 6 packages in 44.98s
+ + onnx==1.21.0
+ + onnx-ir==0.2.1
+ + onnxscript==0.7.0
+ + transformer-engine==2.10.0
+ + transformer-engine-cu12==2.10.0
+ + transformer-engine-torch==2.10.0
+[deps] flash-attn (FA2) — Megatron --attention-backend flash
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 31 packages in 28ms
+Installed 1 package in 272ms
+ + flash-attn==2.7.4.post1 (from file:///data/home/xiuyul/workspace/miles-imp/thirdparty/wheels/cu129-x86_64-v0.5.12/flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl)
+[deps] flash-attn-3 (FA3, Hopper) — Megatron attention.py auto-detects HAVE_FA3
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 33 packages in 29ms
+Installed 1 package in 85ms
+ + flash-attn-3==3.0.0b1 (from file:///data/home/xiuyul/workspace/miles-imp/thirdparty/wheels/cu129-x86_64-v0.5.12/flash_attn_3-3.0.0b1-cp39-abi3-linux_x86_64.whl)
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100 30032  100 30032    0     0  87123      0 --:--:-- --:--:-- --:--:-- 87049
+[deps] apex — Megatron FusedAdam / FastLayerNorm / multi_tensor_applier
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 2 packages in 4ms
+Installed 1 package in 911ms
+ + apex==0.1 (from file:///data/home/xiuyul/workspace/miles-imp/thirdparty/wheels/cu129-x86_64-v0.5.12/apex-0.1-cp312-cp312-linux_x86_64.whl)
+[deps] sglang_router: release wheel needs GLIBC 2.39 > host 2.35 — building from source
+[deps] cloning https://github.com/radixark/sgl-router-for-miles.git@main
+Cloning into '/tmp/claude-243003778/tmp.OJeEza3YtM/src'...
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 1 package in 150ms
+Installed 1 package in 124ms
+ + maturin==1.13.3
+    Updating crates.io index
+    Updating git repository `https://github.com/openai/harmony`
+     Locking 776 packages to latest compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding matchit v0.8.4 (available: v0.8.6)
+      Adding pyo3 v0.27.2 (available: v0.28.3)
+ Downloading crates ...
+  Downloaded anstyle-wincon v3.0.11
+  Downloaded anstyle v1.0.14
+  Downloaded debugid v0.8.0
+  Downloaded ittapi v0.4.0
+  Downloaded is_terminal_polyfill v1.70.2
+  Downloaded jobserver v0.1.34
+  Downloaded proc-macro-error-attr2 v2.0.0
+  Downloaded potential_utf v0.1.5
+  Downloaded lru-slab v0.1.2
+  Downloaded malachite-q v0.4.22
+  Downloaded rustls-native-certs v0.8.4
+  Downloaded unsafe-libyaml v0.2.11
+  Downloaded wasmtime-internal-cache v38.0.4
+  Downloaded rmcp v0.8.5
+  Downloaded tinyvec v1.11.0
+  Downloaded tiny-keccak v2.0.2
+  Downloaded rustls v0.23.40
+  Downloaded wasmtime-internal-winch v38.0.4
+  Downloaded zeroize v1.8.2
+  Downloaded windows-core v0.61.2
+  Downloaded wiggle-generate v38.0.4
+  Downloaded toml_edit v0.22.27
+  Downloaded wasmtime-internal-slab v38.0.4
+  Downloaded zerovec v0.11.6
+  Downloaded ndarray v0.16.1
+  Downloaded quinn-proto v0.11.14
+  Downloaded webpki-roots v0.26.11
+  Downloaded web-time v1.1.0
+  Downloaded wat v1.251.0
+  Downloaded zerovec-derive v0.11.3
+  Downloaded zstd v0.13.3
+  Downloaded nom v8.0.0
+  Downloaded moxcms v0.8.1
+  Downloaded mio v1.2.1
+  Downloaded rav1e v0.8.1
+  Downloaded rand v0.10.1
+  Downloaded pest v2.8.6
+  Downloaded minijinja v2.20.0
+  Downloaded raw-cpuid v11.6.0
+  Downloaded oracle v0.6.3
+  Downloaded wasmtime-wasi-io v38.0.4
+  Downloaded wasmtime-internal-wit-bindgen v38.0.4
+  Downloaded wasmtime-internal-jit-debug v38.0.4
+  Downloaded nix v0.30.1
+  Downloaded security-framework v2.11.1
+  Downloaded redis v0.27.6
+  Downloaded wasmtime-internal-fiber v38.0.4
+  Downloaded quinn v0.11.9
+  Downloaded linux-raw-sys v0.4.15
+  Downloaded wasmtime-internal-math v38.0.4
+  Downloaded wasmtime-internal-jit-icache-coherence v38.0.4
+  Downloaded wasmtime-internal-component-util v38.0.4
+  Downloaded tokenizers v0.22.2
+  Downloaded tokio-postgres v0.7.17
+  Downloaded wiggle v38.0.4
+  Downloaded weezl v0.1.12
+  Downloaded libm v0.2.16
+  Downloaded k8s-openapi v0.25.0
+  Downloaded winapi-util v0.1.11
+  Downloaded whoami v2.1.2
+  Downloaded v_frame v0.3.9
+  Downloaded uuid v1.23.2
+  Downloaded utf8parse v0.2.2
+  Downloaded utf8_iter v1.0.4
+  Downloaded untrusted v0.9.0
+  Downloaded serde_with v3.20.0
+  Downloaded security-framework v3.7.0
+  Downloaded ring v0.17.14
+  Downloaded wasmtime-internal-versioned-export-macros v38.0.4
+  Downloaded wasmtime-internal-unwinder v38.0.4
+  Downloaded regalloc2 v0.13.5
+  Downloaded libfuzzer-sys v0.4.12
+  Downloaded kube-core v1.1.0
+  Downloaded kube-client v1.1.0
+  Downloaded tinystr v0.8.3
+  Downloaded time-macros v0.2.27
+  Downloaded secrecy v0.10.3
+  Downloaded schemars_derive v1.2.1
+  Downloaded schemars_derive v0.8.22
+  Downloaded schemars v0.8.22
+  Downloaded schannel v0.1.29
+  Downloaded rustpython-parser-vendored v0.4.0
+  Downloaded rustpython-parser-core v0.4.0
+  Downloaded rustpython-ast v0.4.0
+  Downloaded rustls-pki-types v1.14.1
+  Downloaded zstd-sys v2.0.16+zstd.1.5.7
+  Downloaded rustls-pemfile v2.2.0
+  Downloaded reqwest v0.12.28
+  Downloaded ravif v0.13.0
+  Downloaded rapidhash v4.4.1
+  Downloaded quinn-udp v0.5.14
+  Downloaded quick-error v2.0.1
+  Downloaded windows-sys v0.59.0
+  Downloaded quanta v0.12.6
+  Downloaded pyo3-build-config v0.27.2
+  Downloaded pulldown-cmark-to-cmark v22.0.0
+  Downloaded prost-derive v0.14.3
+  Downloaded prost-build v0.14.3
+  Downloaded proc-macro-error2 v2.0.1
+  Downloaded pem v3.0.6
+  Downloaded objc2-system-configuration v0.3.2
+  Downloaded num_cpus v1.17.0
+  Downloaded num-traits v0.2.19
+  Downloaded num-rational v0.4.2
+  Downloaded num-conv v0.2.2
+  Downloaded noop_proc_macro v0.3.0
+  Downloaded native-tls v0.2.18
+  Downloaded windows-sys v0.60.2
+  Downloaded winapi-i686-pc-windows-gnu v0.4.0
+  Downloaded mime_guess v2.0.5
+  Downloaded zerotrie v0.2.4
+  Downloaded rand_core v0.10.1
+  Downloaded quickcheck v1.1.0
+  Downloaded prost-types v0.14.3
+  Downloaded profiling-procmacros v1.0.18
+  Downloaded profiling v1.0.18
+  Downloaded parking v2.2.1
+  Downloaded ordered-float v2.10.1
+  Downloaded oracle_procmacro v0.1.2
+  Downloaded openssl-probe v0.2.1
+  Downloaded openssl-probe v0.1.6
+  Downloaded once_cell_polyfill v1.70.2
+  Downloaded num-iter v0.1.45
+  Downloaded num-derive v0.4.2
+  Downloaded num-complex v0.4.6
+  Downloaded no_std_io2 v0.9.4
+  Downloaded aws-lc-sys v0.41.0
+  Downloaded wasmprinter v0.239.0
+  Downloaded wasm-streams v0.4.2
+  Downloaded wasm-bindgen-futures v0.4.72
+  Downloaded wasite v1.0.2
+  Downloaded wasi v0.14.7+wasi-0.2.4
+  Downloaded validator_derive v0.20.0
+  Downloaded validator v0.20.0
+  Downloaded unit-prefix v0.5.2
+  Downloaded unicode-properties v0.1.4
+  Downloaded unicode-bidi v0.3.18
+  Downloaded unicase v2.9.0
+  Downloaded unic-ucd-version v0.9.0
+  Downloaded unic-emoji-char v0.9.0
+  Downloaded unic-char-range v0.9.0
+  Downloaded ulid v1.2.1
+  Downloaded tracing-serde v0.2.0
+  Downloaded tonic-prost v0.14.6
+  Downloaded tonic-build v0.14.6
+  Downloaded toml_write v0.1.2
+  Downloaded toml_parser v1.1.2+spec-1.1.0
+  Downloaded toml v0.9.12+spec-1.1.0
+  Downloaded toml v0.8.23
+  Downloaded tokio-tungstenite v0.29.0
+  Downloaded tokio-rustls v0.26.4
+  Downloaded tokio-native-tls v0.3.1
+  Downloaded tinyvec_macros v0.1.1
+  Downloaded strum_macros v0.26.4
+  Downloaded socket2 v0.6.4
+  Downloaded serde_with_macros v3.20.0
+  Downloaded unicode_names2_generator v1.3.0
+  Downloaded unic-ucd-ident v0.9.0
+  Downloaded unic-common v0.9.0
+  Downloaded unic-char-property v0.9.0
+  Downloaded tracing-appender v0.2.5
+  Downloaded tonic-prost-build v0.14.6
+  Downloaded time-core v0.1.8
+  Downloaded thiserror-impl v1.0.69
+  Downloaded thiserror v1.0.69
+  Downloaded termcolor v1.4.1
+  Downloaded target-lexicon v0.13.5
+  Downloaded system-interface v0.27.3
+  Downloaded system-configuration-sys v0.6.0
+  Downloaded system-configuration v0.7.0
+  Downloaded synstructure v0.13.2
+  Downloaded symlink v0.1.0
+  Downloaded subtle v2.6.1
+  Downloaded strum v0.26.3
+  Downloaded strsim v0.10.0
+  Downloaded stable_deref_trait v1.2.1
+  Downloaded sse-stream v0.2.3
+  Downloaded socks v0.3.4
+  Downloaded sketches-ddsketch v0.3.1
+  Downloaded siphasher v1.0.3
+  Downloaded simple_asn1 v0.6.4
+  Downloaded simd_helpers v0.1.0
+  Downloaded shlex v2.0.1
+  Downloaded sha2 v0.11.0
+  Downloaded sha2 v0.10.9
+  Downloaded sha1_smol v1.0.1
+  Downloaded sha1 v0.10.6
+  Downloaded serde_yaml v0.9.34+deprecated
+  Downloaded serde_urlencoded v0.7.1
+  Downloaded serde_spanned v1.1.1
+  Downloaded serde_spanned v0.6.9
+  Downloaded serde_path_to_error v0.1.20
+  Downloaded serde_derive_internals v0.29.1
+  Downloaded serde_bytes v0.11.19
+  Downloaded serde-value v0.7.0
+  Downloaded security-framework-sys v2.17.0
+  Downloaded rawpointer v0.2.1
+  Downloaded rand_xoshiro v0.7.0
+  Downloaded pyo3-macros v0.27.2
+  Downloaded pulley-macros v38.0.4
+  Downloaded prost v0.14.3
+  Downloaded petgraph v0.8.3
+  Downloaded pest_meta v2.8.6
+  Downloaded option-ext v0.2.0
+  Downloaded openssl-macros v0.1.1
+  Downloaded openmetrics-parser v0.4.4
+  Downloaded number_prefix v0.4.0
+  Downloaded num-integer v0.1.46
+  Downloaded new_debug_unreachable v1.0.6
+  Downloaded metrics-util v0.20.4
+  Downloaded metrics v0.24.6
+  Downloaded malachite-nz v0.4.22
+  Downloaded jsonpath-rust v0.7.5
+  Downloaded rustls-native-certs v0.7.3
+  Downloaded rustix-linux-procfs v0.1.1
+  Downloaded rustc_version v0.4.1
+  Downloaded rustc-hash v2.1.2
+  Downloaded rustc-hash v1.1.0
+  Downloaded rustc-demangle v0.1.27
+  Downloaded rmcp-macros v0.8.5
+  Downloaded rgb v0.8.53
+  Downloaded ref-cast-impl v1.0.25
+  Downloaded ref-cast v1.0.25
+  Downloaded redox_users v0.5.2
+  Downloaded redox_users v0.4.6
+  Downloaded pastey v0.1.1
+  Downloaded opentelemetry-otlp v0.27.0
+  Downloaded minijinja-contrib v2.20.0
+  Downloaded jsonwebtoken v9.3.1
+  Downloaded json-patch v4.2.0
+  Downloaded malachite-base v0.4.22
+  Downloaded mach2 v0.4.3
+  Downloaded loop9 v0.1.5
+  Downloaded log v0.4.31
+  Downloaded litemap v0.8.2
+  Downloaded kube v1.1.0
+  Downloaded jsonptr v0.7.1
+  Downloaded encoding_rs v0.8.35
+  Downloaded lru v0.16.4
+  Downloaded libredox v0.1.17
+  Downloaded lebe v0.5.3
+  Downloaded lalrpop-util v0.20.2
+  Downloaded image v0.25.10
+  Downloaded idna v1.1.0
+  Downloaded icu_properties_data v2.2.0
+  Downloaded hyper v1.10.1
+  Downloaded hdrhistogram v7.5.4
+  Downloaded hashbrown v0.16.1
+  Downloaded gimli v0.32.3
+  Downloaded exr v1.74.0
+  Downloaded postgres-types v0.2.13
+  Downloaded postgres-protocol v0.6.11
+  Downloaded postcard v1.1.3
+  Downloaded portable-atomic-util v0.2.7
+  Downloaded phf_shared v0.13.1
+  Downloaded phf_shared v0.11.3
+  Downloaded phf_generator v0.11.3
+  Downloaded phf_codegen v0.11.3
+  Downloaded phf v0.11.3
+  Downloaded pest_generator v2.8.6
+  Downloaded pest_derive v2.8.6
+  Downloaded matrixmultiply v0.3.10
+  Downloaded matchit v0.8.4
+  Downloaded indicatif v0.18.4
+  Downloaded indicatif v0.17.11
+  Downloaded image-webp v0.2.4
+  Downloaded icu_normalizer_data v2.2.0
+  Downloaded icu_normalizer v2.2.0
+  Downloaded icu_locale_core v2.2.0
+  Downloaded icu_collections v2.2.0
+  Downloaded headers v0.4.1
+  Downloaded hashbrown v0.14.5
+  Downloaded fancy-regex v0.13.0
+  Downloaded encode_unicode v1.0.0
+  Downloaded derive_more-impl v2.1.1
+  Downloaded derive_more-impl v1.0.0
+  Downloaded derive_more v2.1.1
+  Downloaded darling_core v0.23.0
+  Downloaded cranelift-codegen v0.125.4
+  Downloaded bstr v1.12.1
+  Downloaded aws-lc-rs v1.17.0
+  Downloaded av-scenechange v0.14.1
+  Downloaded powerfmt v0.2.0
+  Downloaded memo-map v0.3.3
+  Downloaded memfd v0.6.5
+  Downloaded md-5 v0.11.0
+  Downloaded maybe-rayon v0.1.1
+  Downloaded maybe-owned v0.3.4
+  Downloaded malachite-bigint v0.2.3
+  Downloaded malachite v0.4.22
+  Downloaded ittapi-sys v0.4.0
+  Downloaded itertools v0.13.0
+  Downloaded itertools v0.11.0
+  Downloaded io-lifetimes v2.0.4
+  Downloaded io-extras v0.18.4
+  Downloaded icu_provider v2.2.0
+  Downloaded icu_properties v2.2.0
+  Downloaded iana-time-zone v0.1.65
+  Downloaded hybrid-array v0.4.12
+  Downloaded hmac v0.13.0
+  Downloaded hf-hub v0.4.3
+  Downloaded hermit-abi v0.5.2
+  Downloaded half v2.7.1
+  Downloaded glob v0.3.3
+  Downloaded gif v0.14.2
+  Downloaded fxprof-processed-profile v0.8.1
+  Downloaded futures v0.3.32
+  Downloaded fs_extra v1.3.0
+  Downloaded foldhash v0.2.0
+  Downloaded fax v0.2.7
+  Downloaded fallible-iterator v0.2.0
+  Downloaded event-listener-strategy v0.5.4
+  Downloaded event-listener v5.4.1
+  Downloaded env_logger v0.11.10
+  Downloaded enum-ordinalize-derive v4.3.2
+  Downloaded embedded-io v0.4.0
+  Downloaded educe v0.6.0
+  Downloaded displaydoc v0.2.6
+  Downloaded digest v0.11.3
+  Downloaded digest v0.10.7
+  Downloaded derive_more v1.0.0
+  Downloaded deranged v0.5.8
+  Downloaded deadpool v0.12.3
+  Downloaded darling_core v0.21.3
+  Downloaded cranelift-isle v0.125.4
+  Downloaded combine v4.6.7
+  Downloaded chrono v0.4.44
+  Downloaded cc v1.2.63
+  Downloaded cap-primitives v3.4.5
+  Downloaded blake3 v1.8.5
+  Downloaded axum v0.8.9
+  Downloaded ipnet v2.12.0
+  Downloaded imgref v1.12.1
+  Downloaded hyper-rustls v0.27.9
+  Downloaded hyper-http-proxy v1.1.0
+  Downloaded getopts v0.2.24
+  Downloaded futures-macro v0.3.32
+  Downloaded futures-executor v0.3.32
+  Downloaded fs-err v3.3.0
+  Downloaded fdeflate v0.3.7
+  Downloaded fd-lock v4.0.4
+  Downloaded fallible-iterator v0.3.0
+  Downloaded dunce v1.0.5
+  Downloaded dirs-sys-next v0.1.2
+  Downloaded dirs-sys v0.5.0
+  Downloaded dirs v6.0.0
+  Downloaded deadpool-postgres v0.14.1
+  Downloaded data-encoding v2.11.0
+  Downloaded darling_core v0.13.4
+  Downloaded darling v0.21.3
+  Downloaded crdts v7.3.2
+  Downloaded cranelift-frontend v0.125.4
+  Downloaded cranelift-codegen-meta v0.125.4
+  Downloaded cranelift-assembler-x64-meta v0.125.4
+  Downloaded cpp_demangle v0.4.5
+  Downloaded core-foundation v0.9.4
+  Downloaded const-oid v0.10.2
+  Downloaded console v0.16.3
+  Downloaded console v0.15.11
+  Downloaded clap_builder v4.6.0
+  Downloaded clap v4.6.1
+  Downloaded chacha20 v0.10.0
+  Downloaded cap-std v3.4.5
+  Downloaded bytemuck v1.25.0
+  Downloaded built v0.8.1
+  Downloaded bs58 v0.5.1
+  Downloaded bitstream-io v4.10.0
+  Downloaded bitflags v2.12.1
+  Downloaded backon v1.6.0
+  Downloaded axum-server v0.8.0
+  Downloaded axum-macros v0.5.1
+  Downloaded av1-grain v0.2.5
+  Downloaded async-compression v0.4.42
+  Downloaded arc-swap v1.9.1
+  Downloaded is-macro v0.3.7
+  Downloaded instant v0.1.13
+  Downloaded idna_adapter v1.2.2
+  Downloaded iana-time-zone-haiku v0.1.2
+  Downloaded hostname v0.4.2
+  Downloaded home v0.5.12
+  Downloaded hex v0.4.3
+  Downloaded headers-core v0.3.0
+  Downloaded gloo-timers v0.3.0
+  Downloaded generic-array v0.14.7
+  Downloaded fs-set-times v0.20.3
+  Downloaded foreign-types v0.3.2
+  Downloaded equator v0.4.2
+  Downloaded dyn-clone v1.0.20
+  Downloaded directories-next v2.0.0
+  Downloaded deadpool-redis v0.18.0
+  Downloaded darling v0.13.4
+  Downloaded cranelift-entity v0.125.4
+  Downloaded cranelift-bforest v0.125.4
+  Downloaded cranelift-assembler-x64 v0.125.4
+  Downloaded core-foundation-sys v0.8.7
+  Downloaded core-foundation v0.10.1
+  Downloaded constant_time_eq v0.4.2
+  Downloaded concurrent-queue v2.5.0
+  Downloaded compression-codecs v0.4.38
+  Downloaded cmov v0.5.4
+  Downloaded cmake v0.1.58
+  Downloaded clap_derive v4.6.1
+  Downloaded cfg_aliases v0.2.1
+  Downloaded cap-rand v3.4.5
+  Downloaded cap-net-ext v3.4.5
+  Downloaded cap-fs-ext v3.4.5
+  Downloaded byteorder-lite v0.1.0
+  Downloaded byteorder v1.5.0
+  Downloaded bytemuck_derive v1.10.2
+  Downloaded block-buffer v0.12.0
+  Downloaded block-buffer v0.10.4
+  Downloaded bit_field v0.10.3
+  Downloaded bit-vec v0.6.3
+  Downloaded backoff v0.4.0
+  Downloaded axum-core v0.5.6
+  Downloaded avif-serialize v0.8.9
+  Downloaded auto_ops v0.3.0
+  Downloaded async-channel v2.5.0
+  Downloaded async-broadcast v0.7.2
+  Downloaded as-slice v0.2.1
+  Downloaded arrayvec v0.7.6
+  Downloaded arrayref v0.3.9
+  Downloaded array-init v2.1.0
+  Downloaded arg_enum_proc_macro v0.3.4
+  Downloaded arbitrary v1.4.2
+  Downloaded anstream v1.0.0
+  Downloaded addr2line v0.25.1
+  Downloaded futures-io v0.3.32
+  Downloaded form_urlencoded v1.2.2
+  Downloaded foreign-types-shared v0.1.1
+  Downloaded equator-macro v0.4.2
+  Downloaded env_filter v1.0.1
+  Downloaded enum-ordinalize v4.3.2
+  Downloaded embedded-io v0.6.1
+  Downloaded deadpool-runtime v0.1.4
+  Downloaded dashmap v6.2.1
+  Downloaded darling_macro v0.21.3
+  Downloaded darling_macro v0.13.4
+  Downloaded darling v0.23.0
+  Downloaded ctutils v0.4.2
+  Downloaded crypto-common v0.2.2
+  Downloaded crypto-common v0.1.7
+  Downloaded cranelift-srcgen v0.125.4
+  Downloaded cranelift-native v0.125.4
+  Downloaded cranelift-control v0.125.4
+  Downloaded cranelift-codegen-shared v0.125.4
+  Downloaded cranelift-bitset v0.125.4
+  Downloaded cpufeatures v0.3.0
+  Downloaded compression-core v0.4.32
+  Downloaded colorchoice v1.0.5
+  Downloaded color_quant v1.1.0
+  Downloaded cobs v0.3.0
+  Downloaded clap_lex v1.1.0
+  Downloaded cap-time-ext v3.4.5
+  Downloaded bit-set v0.5.3
+  Downloaded anstyle-parse v1.0.0
+  Downloaded aligned-vec v0.6.4
+  Downloaded aligned v0.4.3
+  Downloaded crunchy v0.2.4
+  Downloaded cpufeatures v0.2.17
+  Downloaded anstyle-query v1.1.5
+  Downloaded ambient-authority v0.0.2
+  Downloaded allocator-api2 v0.2.21
+  Downloaded windows v0.61.3
+🍹 Building a mixed python/rust project
+🐍 Found CPython 3.12 at /data/shared/conda/miniconda3/envs/miles_v0512_test/bin/python3
+🔗 Found pyo3 bindings with abi3 support
+warning: file `/tmp/claude-243003778/tmp.OJeEza3YtM/src/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `amg`
+  * `bin` target `sgl-model-gateway`
+  * `bin` target `smg`
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling serde_core v1.0.228
+   Compiling serde v1.0.228
+   Compiling cfg-if v1.0.4
+   Compiling libc v0.2.186
+   Compiling memchr v2.8.1
+   Compiling autocfg v1.5.1
+   Compiling find-msvc-tools v0.1.9
+   Compiling shlex v2.0.1
+   Compiling equivalent v1.0.2
+   Compiling once_cell v1.21.4
+   Compiling log v0.4.31
+   Compiling hashbrown v0.17.1
+   Compiling itoa v1.0.18
+   Compiling pin-project-lite v0.2.17
+   Compiling bytes v1.11.1
+   Compiling futures-core v0.3.32
+   Compiling parking_lot_core v0.9.12
+   Compiling zmij v1.0.21
+   Compiling scopeguard v1.2.0
+   Compiling anyhow v1.0.102
+   Compiling bitflags v2.12.1
+   Compiling futures-sink v0.3.32
+   Compiling zerocopy v0.8.50
+   Compiling slab v0.4.12
+   Compiling serde_json v1.0.150
+   Compiling futures-io v0.3.32
+   Compiling futures-task v0.3.32
+   Compiling base64 v0.22.1
+   Compiling version_check v0.9.5
+   Compiling percent-encoding v2.3.2
+   Compiling thiserror v2.0.18
+   Compiling stable_deref_trait v1.2.1
+   Compiling crossbeam-utils v0.8.21
+   Compiling heck v0.5.0
+   Compiling pkg-config v0.3.33
+   Compiling either v1.16.0
+   Compiling typenum v1.20.1
+   Compiling getrandom v0.3.4
+   Compiling crc32fast v1.5.0
+   Compiling target-lexicon v0.13.5
+   Compiling ipnet v2.12.0
+   Compiling ident_case v1.0.1
+   Compiling tower-service v0.3.3
+   Compiling rand_core v0.10.1
+   Compiling getrandom v0.4.2
+   Compiling httparse v1.10.1
+   Compiling byteorder v1.5.0
+   Compiling ryu v1.0.23
+   Compiling allocator-api2 v0.2.21
+   Compiling try-lock v0.2.5
+   Compiling atomic-waker v1.1.2
+   Compiling strsim v0.11.1
+   Compiling zeroize v1.8.2
+   Compiling simd-adler32 v0.3.9
+   Compiling fnv v1.0.7
+   Compiling fs_extra v1.3.0
+   Compiling litemap v0.8.2
+   Compiling writeable v0.6.3
+   Compiling dunce v1.0.5
+   Compiling httpdate v1.0.3
+   Compiling icu_normalizer_data v2.2.0
+   Compiling libm v0.2.16
+   Compiling icu_properties_data v2.2.0
+   Compiling regex-syntax v0.8.10
+   Compiling adler2 v2.0.1
+   Compiling tower-layer v0.3.3
+   Compiling utf8_iter v1.0.4
+   Compiling rustversion v1.0.22
+   Compiling mime v0.3.17
+   Compiling aws-lc-rs v1.17.0
+   Compiling rustix v1.1.4
+   Compiling iana-time-zone v0.1.65
+   Compiling linux-raw-sys v0.12.1
+   Compiling untrusted v0.9.0
+   Compiling cranelift-srcgen v0.125.4
+   Compiling foldhash v0.1.5
+   Compiling thiserror v1.0.69
+   Compiling rayon-core v1.13.0
+   Compiling openssl-probe v0.2.1
+   Compiling rustls v0.23.40
+   Compiling vcpkg v0.2.15
+   Compiling cpufeatures v0.2.17
+   Compiling subtle v2.6.1
+   Compiling unicase v2.9.0
+   Compiling cranelift-bitset v0.125.4
+   Compiling paste v1.0.15
+   Compiling cranelift-isle v0.125.4
+   Compiling cranelift-codegen-shared v0.125.4
+   Compiling unicode-width v0.2.2
+   Compiling unicode-xid v0.2.6
+   Compiling io-lifetimes v2.0.4
+   Compiling foreign-types-shared v0.1.1
+   Compiling openssl v0.10.80
+   Compiling compression-core v0.4.32
+   Compiling rustc-hash v2.1.2
+   Compiling native-tls v0.2.18
+   Compiling arbitrary v1.4.2
+   Compiling cpufeatures v0.3.0
+   Compiling object v0.37.3
+   Compiling leb128fmt v0.1.0
+   Compiling siphasher v1.0.3
+   Compiling crunchy v0.2.4
+   Compiling wasmparser v0.239.0
+   Compiling ucd-trie v0.1.7
+   Compiling cmov v0.5.4
+   Compiling io-extras v0.18.4
+   Compiling const-oid v0.10.2
+   Compiling wasm-encoder v0.239.0
+   Compiling cap-primitives v3.4.5
+   Compiling arrayvec v0.7.6
+   Compiling semver v1.0.28
+   Compiling zstd-safe v7.2.4
+   Compiling ambient-authority v0.0.2
+   Compiling lazy_static v1.5.0
+   Compiling tiny-keccak v2.0.2
+   Compiling cpp_demangle v0.4.5
+   Compiling maybe-owned v0.3.4
+   Compiling toml_write v0.1.2
+   Compiling id-arena v2.3.0
+   Compiling dyn-clone v1.0.20
+   Compiling syn v1.0.109
+   Compiling termcolor v1.4.1
+   Compiling wasmtime-internal-unwinder v38.0.4
+   Compiling malachite-nz v0.4.22
+   Compiling tinyvec_macros v0.1.1
+   Compiling k8s-openapi v0.25.0
+   Compiling winnow v0.7.15
+   Compiling pulldown-cmark v0.13.4
+   Compiling prettyplease v0.2.37
+   Compiling parking v2.2.1
+   Compiling encoding_rs v0.8.35
+   Compiling wasmtime-internal-component-macro v38.0.4
+   Compiling sync_wrapper v1.0.2
+   Compiling tinyvec v1.11.0
+   Compiling av-scenechange v0.14.1
+   Compiling tracing-core v0.1.36
+   Compiling wasmtime-internal-component-util v38.0.4
+   Compiling leb128 v0.2.6
+   Compiling as-slice v0.2.1
+   Compiling schemars v0.8.22
+   Compiling rustc-demangle v0.1.27
+   Compiling futures-channel v0.3.32
+   Compiling built v0.8.1
+   Compiling portable-atomic v1.13.1
+   Compiling cap-std v3.4.5
+   Compiling num-traits v0.2.19
+   Compiling indexmap v1.9.3
+   Compiling wasmtime-internal-cache v38.0.4
+   Compiling aho-corasick v1.1.4
+   Compiling nom v8.0.0
+   Compiling no_std_io2 v0.9.4
+   Compiling hashbrown v0.15.5
+   Compiling utf8parse v0.2.2
+   Compiling form_urlencoded v1.2.2
+   Compiling phf_shared v0.11.3
+   Compiling hashbrown v0.12.3
+   Compiling num-conv v0.2.2
+   Compiling cfg_aliases v0.2.1
+   Compiling fixedbitset v0.5.7
+   Compiling http v1.4.1
+   Compiling y4m v0.8.0
+   Compiling unicode-properties v0.1.4
+   Compiling powerfmt v0.2.0
+   Compiling strsim v0.10.0
+   Compiling generic-array v0.14.7
+   Compiling rustls-pki-types v1.14.1
+   Compiling ahash v0.8.12
+   Compiling ctutils v0.4.2
+   Compiling chacha20 v0.10.0
+   Compiling pastey v0.1.1
+   Compiling fastrand v2.4.1
+   Compiling data-encoding v2.11.0
+   Compiling unicode-bidi v0.3.18
+   Compiling foreign-types v0.3.2
+   Compiling wasm-encoder v0.251.0
+   Compiling quick-error v2.0.1
+   Compiling time-core v0.1.8
+   Compiling anstyle-parse v1.0.0
+   Compiling unic-char-range v0.9.0
+   Compiling zune-core v0.5.1
+   Compiling static_assertions v1.1.0
+   Compiling multimap v0.10.1
+   Compiling unsafe-libyaml v0.2.11
+   Compiling matchit v0.7.3
+   Compiling wiggle-macro v38.0.4
+   Compiling winnow v1.0.3
+   Compiling unic-common v0.9.0
+   Compiling want v0.3.1
+   Compiling cranelift-assembler-x64-meta v0.125.4
+   Compiling pem v3.0.6
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling noop_proc_macro v0.3.0
+   Compiling imgref v1.12.1
+   Compiling glob v0.3.3
+   Compiling anstyle v1.0.14
+   Compiling weezl v0.1.12
+   Compiling bit-vec v0.6.3
+   Compiling lock_api v0.4.14
+   Compiling miniz_oxide v0.8.9
+   Compiling itertools v0.14.0
+   Compiling mime_guess v2.0.5
+   Compiling itertools v0.11.0
+   Compiling wast v35.0.2
+   Compiling aligned v0.4.3
+   Compiling wasmtime-internal-slab v38.0.4
+   Compiling anstyle-query v1.1.5
+   Compiling foldhash v0.2.0
+   Compiling ref-cast v1.0.25
+   Compiling rustix v0.38.44
+   Compiling fallible-iterator v0.2.0
+   Compiling colorchoice v1.0.5
+   Compiling bumpalo v3.20.3
+   Compiling hybrid-array v0.4.12
+   Compiling cranelift-control v0.125.4
+   Compiling pest v2.8.6
+   Compiling getopts v0.2.24
+   Compiling bitstream-io v4.10.0
+   Compiling new_debug_unreachable v1.0.6
+   Compiling tracing-log v0.2.0
+   Compiling raw-cpuid v11.6.0
+   Compiling zune-inflate v0.2.54
+   Compiling fdeflate v0.3.7
+   Compiling sharded-slab v0.1.7
+   Compiling secrecy v0.10.3
+   Compiling phf_shared v0.13.1
+   Compiling avif-serialize v0.8.9
+   Compiling rustpython-parser-vendored v0.4.0
+   Compiling fs-err v3.3.0
+   Compiling matrixmultiply v0.3.10
+   Compiling unicode-normalization v0.1.25
+   Compiling rav1e v0.8.1
+   Compiling nix v0.30.1
+   Compiling deranged v0.5.8
+   Compiling thread_local v1.1.9
+   Compiling home v0.5.12
+   Compiling array-init v2.1.0
+   Compiling pxfm v0.1.29
+   Compiling fax v0.2.7
+   Compiling clap_lex v1.1.0
+   Compiling nu-ansi-term v0.50.3
+   Compiling color_quant v1.1.0
+   Compiling minimal-lexical v0.2.1
+   Compiling linux-raw-sys v0.4.15
+   Compiling cap-fs-ext v3.4.5
+   Compiling webpki-roots v1.0.7
+   Compiling rustls-native-certs v0.8.4
+   Compiling time-macros v0.2.27
+   Compiling unic-char-property v0.9.0
+   Compiling anstream v1.0.0
+   Compiling hashbrown v0.16.1
+   Compiling unic-ucd-version v0.9.0
+   Compiling zune-jpeg v0.5.15
+   Compiling loop9 v0.1.5
+   Compiling toml_parser v1.1.2+spec-1.1.0
+   Compiling bit-set v0.5.3
+   Compiling bit_field v0.10.3
+   Compiling byteorder-lite v0.1.0
+   Compiling matchit v0.8.4
+   Compiling lebe v0.5.3
+   Compiling rustc-hash v1.1.0
+   Compiling system-interface v0.27.3
+   Compiling toml_writer v1.1.1+spec-1.1.0
+   Compiling option-ext v0.2.0
+   Compiling rgb v0.8.53
+   Compiling itertools v0.13.0
+   Compiling memoffset v0.9.1
+   Compiling number_prefix v0.4.0
+   Compiling macro_rules_attribute-proc_macro v0.2.2
+   Compiling memo-map v0.3.3
+   Compiling sha1_smol v1.0.1
+   Compiling base64 v0.13.1
+   Compiling http-body v1.0.1
+   Compiling flate2 v1.1.9
+   Compiling phf v0.13.1
+   Compiling phf v0.11.3
+   Compiling rawpointer v0.2.1
+   Compiling unit-prefix v0.5.2
+   Compiling unicode-segmentation v1.13.3
+   Compiling sketches-ddsketch v0.3.1
+   Compiling instant v0.1.13
+   Compiling constant_time_eq v0.4.2
+   Compiling lalrpop-util v0.20.2
+   Compiling arrayref v0.3.9
+   Compiling auto_ops v0.3.0
+   Compiling unicode_categories v0.1.1
+   Compiling symlink v0.1.0
+   Compiling rustls-pemfile v2.2.0
+   Compiling indoc v2.0.7
+   Compiling xxhash-rust v0.8.15
+   Compiling unindent v0.2.4
+   Compiling http-body-util v0.1.3
+   Compiling regex-automata v0.4.14
+   Compiling pyo3-build-config v0.27.2
+   Compiling wast v251.0.0
+   Compiling stringprep v0.1.5
+   Compiling image-webp v0.2.4
+   Compiling gif v0.14.2
+   Compiling nom v7.1.3
+   Compiling clap_builder v4.6.0
+   Compiling webpki-roots v0.26.11
+   Compiling unic-emoji-char v0.9.0
+   Compiling unic-ucd-ident v0.9.0
+   Compiling block-buffer v0.12.0
+   Compiling crypto-common v0.2.2
+   Compiling jobserver v0.1.34
+   Compiling getrandom v0.2.17
+   Compiling pulldown-cmark-to-cmark v22.0.0
+   Compiling macro_rules_attribute v0.2.2
+   Compiling syn v2.0.117
+   Compiling compression-codecs v0.4.38
+   Compiling png v0.18.1
+   Compiling lru v0.16.4
+   Compiling simd_helpers v0.1.0
+   Compiling proc-macro-error-attr2 v2.0.0
+   Compiling crossbeam-epoch v0.9.18
+   Compiling concurrent-queue v2.5.0
+   Compiling crossbeam-channel v0.5.15
+   Compiling num-integer v0.1.46
+   Compiling hdrhistogram v7.5.4
+   Compiling wasmtime-internal-math v38.0.4
+   Compiling ordered-float v2.10.1
+   Compiling rand_core v0.6.4
+   Compiling rapidhash v4.4.1
+   Compiling arc-swap v1.9.1
+   Compiling castaway v0.2.4
+   Compiling cc v1.2.63
+   Compiling event-listener v5.4.1
+   Compiling time v0.3.47
+   Compiling cranelift-assembler-x64 v0.125.4
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling crossbeam-deque v0.8.6
+   Compiling num-iter v0.1.45
+   Compiling digest v0.10.7
+   Compiling chrono v0.4.44
+   Compiling errno v0.3.14
+   Compiling mio v1.2.1
+   Compiling socket2 v0.6.4
+   Compiling dirs-sys-next v0.1.2
+   Compiling socket2 v0.5.10
+   Compiling wasmtime-internal-jit-icache-coherence v38.0.4
+   Compiling num_cpus v1.17.0
+   Compiling console v0.16.3
+   Compiling hostname v0.4.2
+   Compiling socks v0.3.4
+   Compiling pest_meta v2.8.6
+   Compiling event-listener-strategy v0.5.4
+   Compiling metrics v0.24.6
+   Compiling console v0.15.11
+   Compiling whoami v2.1.2
+   Compiling dirs-sys v0.5.0
+   Compiling signal-hook-registry v1.4.8
+   Compiling sha2 v0.10.9
+   Compiling digest v0.11.3
+   Compiling sha1 v0.10.6
+   Compiling rand_core v0.9.5
+   Compiling rand v0.10.1
+   Compiling directories-next v2.0.0
+   Compiling async-broadcast v0.7.2
+   Compiling async-channel v2.5.0
+   Compiling quanta v0.12.6
+   Compiling dirs v6.0.0
+   Compiling md-5 v0.11.0
+   Compiling sha2 v0.11.0
+   Compiling hmac v0.13.0
+   Compiling rand_xoshiro v0.7.0
+   Compiling indicatif v0.18.4
+   Compiling cmake v0.1.58
+   Compiling openssl-src v300.6.0+3.6.2
+   Compiling indicatif v0.17.11
+   Compiling ring v0.17.14
+   Compiling zstd-sys v2.0.16+zstd.1.5.7
+   Compiling ittapi-sys v0.4.0
+   Compiling onig_sys v69.9.3
+   Compiling odpic-sys v0.1.1
+   Compiling esaxx-rs v0.1.10
+   Compiling blake3 v1.8.5
+   Compiling openssl-sys v0.9.116
+   Compiling indexmap v2.14.0
+   Compiling toml_datetime v0.7.5+spec-1.1.0
+   Compiling serde_spanned v1.1.1
+   Compiling rayon v1.12.0
+   Compiling aws-lc-sys v0.41.0
+   Compiling pyo3-ffi v0.27.2
+   Compiling pyo3-macros-backend v0.27.2
+   Compiling pyo3 v0.27.2
+   Compiling tempfile v3.27.0
+   Compiling toml v0.9.12+spec-1.1.0
+   Compiling uuid v1.23.2
+   Compiling serde_path_to_error v0.1.20
+   Compiling serde_bytes v0.11.19
+   Compiling regex v1.12.3
+   Compiling postgres-protocol v0.6.11
+   Compiling debugid v0.8.0
+   Compiling petgraph v0.8.3
+   Compiling moxcms v0.8.1
+   Compiling ppv-lite86 v0.2.21
+   Compiling gimli v0.32.3
+   Compiling rand_chacha v0.3.1
+   Compiling rand v0.8.6
+   Compiling darling_core v0.13.4
+   Compiling matchers v0.2.0
+   Compiling bstr v1.12.1
+   Compiling fancy-regex v0.13.0
+   Compiling ittapi v0.4.0
+   Compiling synstructure v0.13.2
+   Compiling darling_core v0.20.11
+   Compiling serde_derive_internals v0.29.1
+   Compiling pest_generator v2.8.6
+   Compiling darling_core v0.23.0
+   Compiling darling_core v0.21.3
+   Compiling proc-macro-error2 v2.0.1
+   Compiling phf_generator v0.11.3
+   Compiling phf_codegen v0.11.3
+   Compiling env_filter v1.0.1
+   Compiling unicode_names2_generator v1.3.0
+   Compiling rustpython-parser v0.4.0
+   Compiling tiktoken-rs v0.7.0
+   Compiling env_logger v0.11.10
+   Compiling serde_derive v1.0.228
+   Compiling tokio-macros v2.7.0
+   Compiling zerocopy-derive v0.8.50
+   Compiling futures-macro v0.3.32
+   Compiling tracing-attributes v0.1.31
+   Compiling thiserror-impl v2.0.18
+   Compiling zerofrom-derive v0.1.7
+   Compiling yoke-derive v0.8.2
+   Compiling zerovec-derive v0.11.3
+   Compiling displaydoc v0.2.6
+   Compiling async-trait v0.1.89
+   Compiling thiserror-impl v1.0.69
+   Compiling pulley-macros v38.0.4
+   Compiling wasmtime-internal-versioned-export-macros v38.0.4
+   Compiling openssl-macros v0.1.1
+   Compiling pin-project-internal v1.1.13
+   Compiling equator-macro v0.4.2
+   Compiling prost-derive v0.14.3
+   Compiling async-stream-impl v0.3.6
+   Compiling derive_more-impl v2.1.1
+   Compiling profiling-procmacros v1.0.18
+   Compiling arg_enum_proc_macro v0.3.4
+   Compiling bytemuck_derive v1.10.2
+   Compiling derive_more-impl v1.0.0
+   Compiling enum-ordinalize-derive v4.3.2
+   Compiling prost-derive v0.13.5
+   Compiling num-derive v0.4.2
+   Compiling axum-macros v0.5.1
+   Compiling ref-cast-impl v1.0.25
+   Compiling is-macro v0.3.7
+   Compiling clap_derive v4.6.1
+   Compiling monostate-impl v0.1.18
+   Compiling strum_macros v0.26.4
+   Compiling maybe-rayon v0.1.1
+   Compiling rayon-cond v0.4.0
+   Compiling pest_derive v2.8.6
+   Compiling quickcheck v1.1.0
+   Compiling schemars_derive v0.8.22
+   Compiling schemars_derive v1.2.1
+   Compiling unicode_names2 v1.3.0
+   Compiling tonic-build v0.14.6
+   Compiling pulley-interpreter v38.0.4
+   Compiling wasmtime-internal-jit-debug v38.0.4
+   Compiling wasmtime-internal-fiber v38.0.4
+   Compiling wasmtime v38.0.4
+   Compiling onig v6.5.3
+   Compiling profiling v1.0.18
+   Compiling openmetrics-parser v0.4.4
+   Compiling async-stream v0.3.6
+   Compiling monostate v0.1.18
+   Compiling enum-ordinalize v4.3.2
+   Compiling rustpython-parser-core v0.4.0
+   Compiling futures-util v0.3.32
+   Compiling educe v0.6.0
+   Compiling equator v0.4.2
+   Compiling darling_macro v0.13.4
+   Compiling pin-project v1.1.13
+   Compiling zerofrom v0.1.8
+   Compiling aligned-vec v0.6.4
+   Compiling derive_more v2.1.1
+   Compiling yoke v0.8.2
+   Compiling tracing v0.1.44
+   Compiling bytemuck v1.25.0
+   Compiling witx v0.9.1
+   Compiling cobs v0.3.0
+   Compiling jsonpath-rust v0.7.5
+   Compiling v_frame v0.3.9
+   Compiling darling v0.13.4
+   Compiling zerovec v0.11.6
+   Compiling zerotrie v0.2.4
+   Compiling prost v0.14.3
+   Compiling oracle_procmacro v0.1.2
+   Compiling opentelemetry v0.27.1
+   Compiling axum-core v0.5.6
+   Compiling qoi v0.4.1
+   Compiling prost v0.13.5
+   Compiling strum v0.26.3
+   Compiling darling_macro v0.23.0
+   Compiling prost-types v0.14.3
+   Compiling clap v4.6.1
+   Compiling darling_macro v0.20.11
+   Compiling darling_macro v0.21.3
+   Compiling darling v0.23.0
+   Compiling derive_more v1.0.0
+   Compiling rustix-linux-procfs v0.1.1
+   Compiling fs-set-times v0.20.3
+   Compiling memfd v0.6.5
+   Compiling tinystr v0.8.3
+   Compiling potential_utf v0.1.5
+   Compiling serde_with_macros v3.20.0
+   Compiling cranelift-codegen-meta v0.125.4
+   Compiling icu_collections v2.2.0
+   Compiling darling v0.20.11
+   Compiling darling v0.21.3
+   Compiling icu_locale_core v2.2.0
+   Compiling derive_builder_core v0.20.2
+   Compiling validator_derive v0.20.0
+   Compiling rmcp-macros v0.8.5
+   Compiling addr2line v0.25.1
+   Compiling wiggle-generate v38.0.4
+   Compiling prost-build v0.14.3
+   Compiling serde_with v3.20.0
+   Compiling cap-time-ext v3.4.5
+   Compiling pyo3-macros v0.27.2
+   Compiling derive_builder_macro v0.20.2
+   Compiling wat v1.251.0
+   Compiling wit-parser v0.239.0
+   Compiling smallvec v1.15.1
+   Compiling num-bigint v0.4.6
+   Compiling serde_urlencoded v0.7.1
+   Compiling postcard v1.1.3
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling jsonptr v0.7.1
+   Compiling serde-value v0.7.0
+   Compiling fxprof-processed-profile v0.8.1
+   Compiling tracing-serde v0.2.0
+   Compiling serde_yaml v0.9.34+deprecated
+   Compiling num-complex v0.4.6
+   Compiling compact_str v0.9.1
+   Compiling spm_precompiled v0.1.4
+   Compiling minijinja v2.20.0
+   Compiling icu_provider v2.2.0
+   Compiling tonic-prost-build v0.14.6
+   Compiling derive_builder v0.20.2
+   Compiling kube-derive v1.1.0
+   Compiling dary_heap v0.3.9
+   Compiling cranelift-entity v0.125.4
+   Compiling regalloc2 v0.13.5
+   Compiling toml_edit v0.22.27
+   Compiling cap-net-ext v3.4.5
+   Compiling unicode-normalization-alignments v0.1.12
+   Compiling sgl-model-gateway v0.3.2 (/tmp/claude-243003778/tmp.OJeEza3YtM/src)
+   Compiling parking_lot v0.12.5
+   Compiling icu_normalizer v2.2.0
+   Compiling icu_properties v2.2.0
+   Compiling json-patch v4.2.0
+   Compiling cranelift-bforest v0.125.4
+   Compiling ndarray v0.16.1
+   Compiling tokio v1.52.3
+   Compiling futures-executor v0.3.32
+   Compiling axum-core v0.4.5
+   Compiling sse-stream v0.2.3
+   Compiling cranelift-codegen v0.125.4
+   Compiling futures v0.3.32
+   Compiling num-rational v0.4.2
+   Compiling simple_asn1 v0.6.4
+   Compiling postgres-types v0.2.13
+   Compiling tracing-subscriber v0.3.23
+   Compiling schemars v1.2.1
+   Compiling oracle v0.6.3
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling jsonwebtoken v9.3.1
+   Compiling half v2.7.1
+   Compiling av1-grain v0.2.5
+   Compiling num v0.4.3
+   Compiling crdts v7.3.2
+   Compiling hashbrown v0.14.5
+   Compiling url v2.5.8
+   Compiling tiff v0.11.3
+   Compiling exr v1.74.0
+   Compiling rand_chacha v0.9.0
+   Compiling toml v0.8.23
+   Compiling rand v0.9.4
+   Compiling validator v0.20.0
+   Compiling malachite-base v0.4.22
+   Compiling dashmap v6.2.1
+   Compiling wasmtime-internal-wit-bindgen v38.0.4
+   Compiling tungstenite v0.29.0
+   Compiling cap-rand v3.4.5
+   Compiling metrics-util v0.20.4
+   Compiling tokenizers v0.22.2
+   Compiling ulid v1.2.1
+   Compiling tracing-appender v0.2.5
+   Compiling zstd v0.13.3
+   Compiling minijinja-contrib v2.20.0
+   Compiling tokio-util v0.7.18
+   Compiling async-compression v0.4.42
+   Compiling backon v1.6.0
+   Compiling deadpool-runtime v0.1.4
+   Compiling tokio-tungstenite v0.29.0
+   Compiling process-wrap v8.2.1
+   Compiling backoff v0.4.0
+   Compiling deadpool v0.12.3
+   Compiling ravif v0.13.0
+   Compiling wasmprinter v0.239.0
+   Compiling h2 v0.4.14
+   Compiling tower v0.5.3
+   Compiling tokio-stream v0.1.18
+   Compiling tower v0.4.13
+   Compiling combine v4.6.7
+   Compiling tokio-postgres v0.7.17
+   Compiling image v0.25.10
+   Compiling opentelemetry_sdk v0.27.1
+   Compiling tower-http v0.6.11
+   Compiling axum v0.7.9
+   Compiling wasmtime-environ v38.0.4
+   Compiling deadpool-postgres v0.14.1
+   Compiling tracing-opentelemetry v0.28.0
+   Compiling redis v0.27.6
+   Compiling hyper v1.10.1
+   Compiling malachite-q v0.4.22
+   Compiling hyper-util v0.1.20
+   Compiling kube-core v1.1.0
+   Compiling malachite v0.4.22
+   Compiling malachite-bigint v0.2.3
+   Compiling hyper-timeout v0.5.2
+   Compiling axum v0.8.9
+   Compiling tonic v0.12.3
+   Compiling rustpython-ast v0.4.0
+   Compiling rustls-webpki v0.103.13
+   Compiling opentelemetry-proto v0.27.0
+   Compiling opentelemetry-otlp v0.27.0
+   Compiling deadpool-redis v0.18.0
+   Compiling tonic v0.14.6
+   Compiling tonic-prost v0.14.6
+   Compiling tokio-rustls v0.26.4
+   Compiling hyper-rustls v0.27.9
+   Compiling axum-server v0.8.0
+   Compiling kube-client v1.1.0
+   Compiling metrics-exporter-prometheus v0.17.2
+   Compiling kube-runtime v1.1.0
+   Compiling kube v1.1.0
+   Compiling cranelift-frontend v0.125.4
+   Compiling cranelift-native v0.125.4
+   Compiling wasmtime-internal-cranelift v38.0.4
+   Compiling tokio-native-tls v0.3.1
+   Compiling ureq v2.12.1
+   Compiling hyper-tls v0.6.0
+   Compiling reqwest v0.12.28
+   Compiling oauth2 v5.0.0
+   Compiling hf-hub v0.4.3
+   Compiling rmcp v0.8.5
+   Compiling openai-harmony v0.0.4 (https://github.com/openai/harmony?tag=v0.0.4#72079ca4)
+   Compiling wasmtime-wasi-io v38.0.4
+   Compiling wiggle v38.0.4
+   Compiling wasmtime-wasi v38.0.4
+warning: unnecessary qualification
+   --> /tmp/claude-243003778/tmp.OJeEza3YtM/src/src/grpc_client/sglang_scheduler.rs:132:26
+    |
+132 |         _trace_injector: std::sync::Arc<dyn super::TraceInjector>,
+    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: requested on the command line with `-W unused-qualifications`
+help: remove the unnecessary path segments
+    |
+132 -         _trace_injector: std::sync::Arc<dyn super::TraceInjector>,
+132 +         _trace_injector: Arc<dyn super::TraceInjector>,
+    |
+
+warning: unnecessary qualification
+   --> /tmp/claude-243003778/tmp.OJeEza3YtM/src/src/grpc_client/vllm_engine.rs:131:26
+    |
+131 |         _trace_injector: std::sync::Arc<dyn super::TraceInjector>,
+    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+help: remove the unnecessary path segments
+    |
+131 -         _trace_injector: std::sync::Arc<dyn super::TraceInjector>,
+131 +         _trace_injector: Arc<dyn super::TraceInjector>,
+    |
+
+warning: unused import: `self`
+  --> /tmp/claude-243003778/tmp.OJeEza3YtM/src/src/routers/grpc/regular/responses/common.rs:12:29
+   |
+12 | use crate::data_connector::{self, ConversationId, ResponseId};
+   |                             ^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `sgl-model-gateway` (lib) generated 3 warnings (run `cargo fix --lib -p sgl-model-gateway` to apply 3 suggestions)
+   Compiling sgl-model-gateway-python v0.3.2 (/tmp/claude-243003778/tmp.OJeEza3YtM/src/bindings/python)
+    Finished `release` profile [optimized] target(s) in 4m 32s
+📦 Built wheel for abi3 Python ≥ 3.8 to /tmp/claude-243003778/tmp.OJeEza3YtM/wheels/sglang_router-0.3.2-cp38-abi3-manylinux_2_34_x86_64.whl
+[deps] sglang_router <- sglang_router-0.3.2-cp38-abi3-manylinux_2_34_x86_64.whl (built from source)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 24 packages in 534ms
+Prepared 24 packages in 348ms
+Uninstalled 23 packages in 2.14s
+Installed 24 packages in 329ms
+ ~ aiohappyeyeballs==2.6.2
+ ~ aiohttp==3.14.0
+ ~ aiosignal==1.4.0
+ ~ annotated-doc==0.0.4
+ ~ annotated-types==0.7.0
+ ~ anyio==4.13.0
+ ~ attrs==26.1.0
+ ~ click==8.4.1
+ ~ fastapi==0.136.3
+ ~ frozenlist==1.8.0
+ ~ h11==0.16.0
+ - idna==3.4
+ + idna==3.18
+ ~ multidict==6.7.1
+ ~ orjson==3.11.9
+ ~ propcache==0.5.2
+ ~ pydantic==2.13.4
+ ~ pydantic-core==2.46.4
+ ~ setproctitle==1.3.7
+ + sglang-router==0.3.2 (from file:///tmp/claude-243003778/tmp.OJeEza3YtM/wheels/sglang_router-0.3.2-cp38-abi3-manylinux_2_34_x86_64.whl)
+ ~ starlette==1.2.1
+ ~ typing-extensions==4.15.0
+ ~ typing-inspection==0.4.2
+ ~ uvicorn==0.48.0
+ ~ yarl==1.24.2
+[deps] sgl-model-gateway: skipping — host GLIBC 2.35 < 2.38 (prebuilt needs 2.38+)
+[deps] sgl-model-gateway: build from source (SGL_ROUTER_USE_WHEELS=0 path) if you need routing
+[deps] requirements.txt
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 165 packages in 1.59s
+Downloading polars-runtime-32 (53.8MiB)
+Downloading virtualenv (7.2MiB)
+ Downloaded polars-runtime-32
+ Downloaded virtualenv
+Prepared 14 packages in 2.37s
+Installed 55 packages in 9.23s
+ + absl-py==2.4.0
+ + accelerate==1.13.0
+ + aiohttp-cors==0.8.1
+ + colorful==0.5.8
+ + cryptography==48.0.0
+ + distlib==0.4.1
+ + gitdb==4.0.12
+ + gitpython==3.1.50
+ + google-api-core==2.30.3
+ + google-auth==2.53.0
+ + h2==4.3.0
+ + hpack==4.1.0
+ + httpx-sse==0.4.3
+ + hyperframe==6.1.0
+ + hypothesis==6.155.1
+ + iniconfig==2.3.0
+ + linkify-it-py==2.1.0
+ + markdown==3.10.2
+ + mcp==1.27.2
+ + mdit-py-plugins==0.6.1
+ + memray==1.19.3
+ + msgpack==1.1.2
+ + opencensus==0.11.4
+ + opencensus-context==0.1.3
+ + opentelemetry-exporter-prometheus==0.63b1
+ + platformdirs==4.10.0
+ + pluggy==1.6.0
+ + polars==1.41.2
+ + polars-runtime-32==1.41.2
+ + proto-plus==1.28.0
+ + pyasn1==0.6.3
+ + pyasn1-modules==0.4.2
+ + pydantic-settings==2.14.1
+ + pyjwt==2.13.0
+ + pylatexenc==2.10
+ + pytest==9.0.3
+ + pytest-asyncio==1.4.0
+ + python-discovery==1.4.0
+ + qwen-vl-utils==0.0.14
+ + ray==2.55.1
+ + ring-flash-attn==0.1.8
+ + sentry-sdk==2.61.1
+ + smart-open==7.6.1
+ + smmap==5.0.3
+ + sortedcontainers==2.4.0
+ + sse-starlette==3.4.4
+ + tensorboard==2.20.0
+ + tensorboard-data-server==0.7.2
+ + textual==8.2.7
+ + torchft-nightly==2026.4.3
+ + uc-micro-py==2.0.0
+ + virtualenv==21.4.2
+ + wandb==0.27.0
+ + werkzeug==3.1.8
+ + wrapt==2.2.1
+[deps] miles editable
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 1 package in 5.07s
+   Building miles @ file:///data/home/xiuyul/workspace/miles-imp
+      Built miles @ file:///data/home/xiuyul/workspace/miles-imp
+Prepared 1 package in 1.61s
+Installed 1 package in 67ms
+ + miles==0.2.1 (from file:///data/home/xiuyul/workspace/miles-imp)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 1 package in 32ms
+Uninstalled 1 package in 2.42s
+Installed 1 package in 2.42s
+ - numpy==2.3.5
+ + numpy==1.26.4
+[deps] nvidia-cudnn-cu12==9.16.0.29 (pytorch/pytorch#168167 workaround)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 2 packages in 15ms
+Uninstalled 1 package in 81ms
+Installed 1 package in 174ms
+ - nvidia-cudnn-cu12==9.17.1.4
+ + nvidia-cudnn-cu12==9.16.0.29
+[deps] mooncake-transfer-engine==0.3.10.post2 (sglang docker base)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 15 packages in 414ms
+Downloading mooncake-transfer-engine (42.6MiB)
+ Downloaded mooncake-transfer-engine
+Prepared 1 package in 2.81s
+Installed 1 package in 222ms
+ + mooncake-transfer-engine==0.3.10.post2
+[verify] imports
+/data/shared/conda/miniconda3/envs/miles_v0512_test/lib/python3.12/site-packages/apex/transformer/tensor_parallel/cross_entropy.py:89: SyntaxWarning: invalid escape sequence '\s'
+  = (1 - alpha) * y_gt + (alpha / (K - 1)) * \sum_{i != gt} y_i
+/data/shared/conda/miniconda3/envs/miles_v0512_test/lib/python3.12/site-packages/apex/transformer/pipeline_parallel/schedules/fwd_bwd_pipelining_with_interleaving.py:80: SyntaxWarning: invalid escape sequence '\_'
+  to :math:`original\_sequence\_length / tensor\_model\_parallel\_world\_size`.
+/data/shared/conda/miniconda3/envs/miles_v0512_test/lib/python3.12/site-packages/apex/transformer/pipeline_parallel/schedules/fwd_bwd_pipelining_without_interleaving.py:288: SyntaxWarning: invalid escape sequence '\_'
+  to :math:`original\_sequence\_length / tensor\_model\_parallel\_world\_size`.
+[verify] runtime symbols / CUDA
+[verify] pinned versions / commits / editables
+
+=== 26/31 pass, 5 fail ===
+  [OK  ] import torch                                v=2.11.0+cu129
+  [FAIL] import sglang                               ValueError: Either a revision or a version must be specified.
+  [FAIL] import megatron.core                        OSError: /data/shared/conda/miniconda3/envs/miles_v0512_test/lib/python3.12/site-packages/nvidia/cudnn/lib/libcudnn_engines_precompiled.so.9: undefined symbol: _ZTVN5cudnn7backend27ContractBandMatrixOperationE, version libcudnn_graph.so.9
+  [FAIL] import megatron.bridge                      OSError: /data/shared/conda/miniconda3/envs/miles_v0512_test/lib/python3.12/site-packages/nvidia/cudnn/lib/libcudnn_engines_precompiled.so.9: undefined symbol: _ZTVN5cudnn7backend27ContractBandMatrixOperationE, version libcudnn_graph.so.9
+  [FAIL] import transformer_engine                   OSError: /data/shared/conda/miniconda3/envs/miles_v0512_test/lib/python3.12/site-packages/nvidia/cudnn/lib/libcudnn_engines_precompiled.so.9: undefined symbol: _ZTVN5cudnn7backend27ContractBandMatrixOperationE, version libcudnn_graph.so.9
+  [OK  ] import ray                                  v=2.55.1
+  [OK  ] import miles                                v=?
+  [FAIL] import mbridge                              OSError: /data/shared/conda/miniconda3/envs/miles_v0512_test/lib/python3.12/site-packages/nvidia/cudnn/lib/libcudnn_engines_precompiled.so.9: undefined symbol: _ZTVN5cudnn7backend27ContractBandMatrixOperationE, version libcudnn_graph.so.9
+  [OK  ] import torch_memory_saver                   v=?
+  [OK  ] import mooncake.engine                      v=?
+  [OK  ] import miles_megatron_plugins               v=?
+  [OK  ] import flash_attn                           v=2.7.4.post1
+  [OK  ] import flash_attn_3.flash_attn_interface    v=?
+  [OK  ] import apex                                 v=?
+  [OK  ] FA3 symbols: _flash_attn_forward,flash_attn_with_kvcache,flash_attn_varlen_func
+  [OK  ] apex C ext: amp_C
+  [OK  ] apex C ext: fused_layer_norm_cuda
+  [OK  ] apex FusedAdam + FusedLayerNorm
+  [OK  ] torch.cuda.is_available()  (cuda=12.9)
+  [OK  ] torch == 2.11.0
+  [OK  ] torch CUDA build == cu129 (got cu129)
+  [OK  ] transformer_engine == 2.10.0
+  [OK  ] nvidia-cudnn-cu12 == 9.16.0.29
+  [OK  ] mooncake-transfer-engine == 0.3.10.post2
+  [OK  ] mbridge @ 89eb1088…
+  [OK  ] torch_memory_saver @ d64a639…
+  [OK  ] megatron-core editable @ thirdparty/Megatron-LM/
+  [OK  ] sglang editable @ thirdparty/sglang/python/
+  [OK  ] miles editable @ ./
+  [OK  ] megatron-bridge editable @ thirdparty/Megatron-Bridge/
+  [OK  ] miles-megatron-source-root.pth -> thirdparty/Megatron-LM/
+EXIT=1

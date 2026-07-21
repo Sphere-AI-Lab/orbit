@@ -1,0 +1,212 @@
+[preflight] WARNING: driver CUDA 12.8 < wheel CUDA 12.9 — relying on CUDA 12.x minor-version forward compatibility.
+[preflight] If smoke-test imports fail with CUDA symbol errors, install a driver supporting CUDA >= 12.9 or switch to cu128 wheels.
+[preflight] FA3 target GPU: NVIDIA H200 (compute capability 9.0)
+[preflight] nvcc: Build cuda_12.8.r12.8/compiler.35404655_0
+[preflight] CUDA_HOME=/usr/local/cuda-12.8
+[src] initialising submodules under /data/home/xiuyul/workspace/miles-imp/thirdparty
+[env] reusing existing conda env 'miles_v0512_test'
+[env] python: Python 3.12.13  prefix: /data/shared/conda/miniconda3/envs/miles_v0512_test
+[torch] torch==2.11.0 + torchvision from https://download.pytorch.org/whl/cu129
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Checked 2 packages in 255ms
+[src] installing Megatron-LM editable (--no-deps)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 1 package in 7.66s
+   Building megatron-core @ file:///data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-LM
+      Built megatron-core @ file:///data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-LM
+Prepared 1 package in 9.86s
+Uninstalled 1 package in 41ms
+Installed 1 package in 66ms
+ ~ megatron-core==0.16.0rc0 (from file:///data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-LM)
+[src] miles-megatron-source-root.pth -> /data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-LM
+[src] installing sglang editable from /data/home/xiuyul/workspace/miles-imp/thirdparty/sglang (full dep resolution)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 221 packages in 24.73s
+   Building sglang @ file:///data/home/xiuyul/workspace/miles-imp/thirdparty/sglang/python
+Downloading cuda-python (23.6MiB)
+ Downloaded cuda-python
+      Built sglang @ file:///data/home/xiuyul/workspace/miles-imp/thirdparty/sglang/python
+Prepared 2 packages in 29.92s
+Uninstalled 3 packages in 127ms
+Installed 3 packages in 1.14s
+ - cuda-python==13.0.3
+ + cuda-python==12.6.2.post1
+ ~ sglang==0.5.12.post2.dev24+gc74db48da (from file:///data/home/xiuyul/workspace/miles-imp/thirdparty/sglang/python)
+ - torch-memory-saver==0.0.9 (from git+https://github.com/fzyzcjy/torch_memory_saver.git@d64a6394d1e09c613fab90260054cecc2684586d)
+ + torch-memory-saver==0.0.9.post1
+[deps] mbridge @ 89eb10887887bc74853f89a4de258c0702932a1c (for tools/convert_hf_to_torch_dist.py)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 1 package in 91ms
+Checked 1 package in 1ms
+[deps] nvidia-modelopt — required by megatron.bridge's auto_bridge.py top-level import
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Checked 1 package in 266ms
+[src] installing Megatron-Bridge editable from /data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-Bridge (--no-deps)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 1 package in 3.10s
+   Building megatron-bridge @ file:///data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-Bridge
+      Built megatron-bridge @ file:///data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-Bridge
+Prepared 1 package in 4.94s
+Uninstalled 1 package in 33ms
+Installed 1 package in 76ms
+ ~ megatron-bridge==0.5.0+6fde1c85 (from file:///data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-Bridge)
+[deps] torch_memory_saver @ d64a639 (for miles/backends/megatron_utils/actor.py)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+   Updating https://github.com/fzyzcjy/torch_memory_saver.git (d64a639)
+    Updated https://github.com/fzyzcjy/torch_memory_saver.git (d64a6394d1e09c613fab90260054cecc2684586d)
+Resolved 1 package in 2.37s
+   Building torch-memory-saver @ git+https://github.com/fzyzcjy/torch_memory_saver.git@d64a6394d1e09c613fab90260054cecc2684586d
+      Built torch-memory-saver @ git+https://github.com/fzyzcjy/torch_memory_saver.git@d64a6394d1e09c613fab90260054cecc2684586d
+Prepared 1 package in 4.35s
+Uninstalled 1 package in 46ms
+warning: Failed to hardlink files; falling back to full copy. This may lead to degraded performance.
+         If the cache and target directories are on different filesystems, hardlinking may not be supported.
+         If this is intentional, set `export UV_LINK_MODE=copy` or use `--link-mode=copy` to suppress this warning.
+Installed 1 package in 329ms
+ - torch-memory-saver==0.0.9.post1
+ + torch-memory-saver==0.0.9 (from git+https://github.com/fzyzcjy/torch_memory_saver.git@d64a6394d1e09c613fab90260054cecc2684586d)
+[deps] transformer_engine[pytorch]==2.10.0 (compiles, ~10 min)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 46 packages in 257ms
+Uninstalled 1 package in 593ms
+Installed 1 package in 666ms
+ ~ transformer-engine-cu12==2.10.0
+[deps] flash-attn (FA2) — Megatron --attention-backend flash
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Checked 1 package in 224ms
+[deps] flash-attn-3 (FA3, Hopper) — Megatron attention.py auto-detects HAVE_FA3
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Checked 1 package in 250ms
+[deps] apex — Megatron FusedAdam / FastLayerNorm / multi_tensor_applier
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Checked 1 package in 203ms
+[deps] sglang_router: release wheel needs GLIBC 2.39 > host 2.35 — building from source
+[deps] cloning https://github.com/radixark/sgl-router-for-miles.git@main
+Cloning into '/tmp/claude-243003778/tmp.3Bn5cn6V1M/src'...
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 1 package in 273ms
+Downloading maturin (10.2MiB)
+ Downloaded maturin
+Prepared 1 package in 281ms
+Installed 1 package in 124ms
+ + maturin==1.13.3
+    Updating crates.io index
+    Updating git repository `https://github.com/openai/harmony`
+     Locking 776 packages to latest compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding matchit v0.8.4 (available: v0.8.6)
+      Adding pyo3 v0.27.2 (available: v0.28.3)
+ Downloading crates ...
+  Downloaded android_system_properties v0.1.5
+  Downloaded darling_macro v0.23.0
+  Downloaded hyper-tls v0.6.0
+  Downloaded interpolate_name v0.2.4
+  Downloaded leb128 v0.2.6
+  Downloaded kube-derive v1.1.0
+  Downloaded num v0.4.3
+  Downloaded metrics-exporter-prometheus v0.17.2
+  Downloaded kube-runtime v1.1.0
+  Downloaded phf v0.13.1
+  Downloaded stringprep v0.1.5
+  Downloaded toml_datetime v0.6.11
+  Downloaded toml_writer v1.1.1+spec-1.1.0
+  Downloaded rustix v0.38.44
+  Downloaded ucd-trie v0.1.7
+  Downloaded wiggle-macro v38.0.4
+  Downloaded windows-collections v0.2.0
+  Downloaded zstd-safe v7.2.4
+  Downloaded ureq v2.12.1
+  Downloaded wasm-encoder v0.251.0
+  Downloaded wasm-encoder v0.239.0
+  Downloaded webpki-roots v1.0.7
+  Downloaded wast v35.0.2
+  Downloaded wasmtime-internal-component-macro v38.0.4
+  Downloaded wast v251.0.0
+  Downloaded wasmparser v0.239.0
+  Downloaded zerofrom-derive v0.1.7
+  Downloaded xxhash-rust v0.8.15
+  Downloaded yoke v0.8.2
+  Downloaded zune-inflate v0.2.54
+  Downloaded web-sys v0.3.99
+  Downloaded zune-core v0.5.1
+  Downloaded wasmtime v38.0.4
+  Downloaded tiff v0.11.3
+  Downloaded winapi v0.3.9
+  Downloaded time v0.3.47
+  Downloaded syn v1.0.109
+  Downloaded rustpython-parser v0.4.0
+  Downloaded wasmtime-internal-cranelift v38.0.4
+  Downloaded winch-codegen v38.0.4
+  Downloaded wasmtime-environ v38.0.4
+  Downloaded wasmtime-wasi v38.0.4
+  Downloaded schemars v1.2.1
+  Downloaded schemars v0.9.0
+  Downloaded rustls-webpki v0.103.13
+  Downloaded tiktoken-rs v0.7.0
+  Downloaded zerocopy-derive v0.8.50
+  Downloaded pyo3 v0.27.2
+  Downloaded wit-parser v0.239.0
+  Downloaded pxfm v0.1.29
+  Downloaded winnow v1.0.3
+  Downloaded winnow v0.7.15
+  Downloaded pulldown-cmark v0.13.4
+  Downloaded process-wrap v8.2.1
+  Downloaded witx v0.9.1
+  Downloaded zerocopy v0.8.50
+  Downloaded png v0.18.1
+  Downloaded writeable v0.6.3
+  Downloaded winx v0.36.4
+  Downloaded windows-threading v0.1.0
+  Downloaded windows-targets v0.53.5
+  Downloaded windows-strings v0.4.2
+  Downloaded windows-registry v0.6.1
+  Downloaded windows-numerics v0.2.0
+  Downloaded windows-link v0.1.3
+  Downloaded windows-interface v0.59.3
+  Downloaded windows-implement v0.60.2
+  Downloaded windows-future v0.2.1
+  Downloaded windows-core v0.62.2
+  Downloaded zerofrom v0.1.8
+  Downloaded yoke-derive v0.8.2
+  Downloaded y4m v0.8.0
+  Downloaded windows-strings v0.5.1
+  Downloaded windows-result v0.4.1
+  Downloaded windows-result v0.3.4
+  Downloaded qoi v0.4.1
+  Downloaded windows_aarch64_gnullvm v0.53.1
+  Downloaded pyo3-macros-backend v0.27.2
+  Downloaded windows_x86_64_gnullvm v0.53.1
+  Downloaded pyo3-ffi v0.27.2
+  Downloaded pulley-interpreter v38.0.4
+  Downloaded windows_x86_64_msvc v0.53.1
+  Downloaded windows_i686_msvc v0.53.1
+  Downloaded windows_i686_gnu v0.53.1
+  Downloaded windows_x86_64_gnu v0.53.1
+  Downloaded windows_i686_gnullvm v0.53.1
+  Downloaded windows_aarch64_msvc v0.53.1
+  Downloaded openssl-src v300.6.0+3.6.2
+  Downloaded wasmparser v0.251.0
+  Downloaded unicode-segmentation v1.13.3
+  Downloaded unicode-normalization v0.1.25
+  Downloaded vcpkg v0.2.15
+  Downloaded url v2.5.8
+  Downloaded unicode_names2 v1.3.0
+  Downloaded unicode-width v0.2.2
+  Downloaded openssl v0.10.80
+  Downloaded odpic-sys v0.1.1
+  Downloaded opentelemetry v0.27.1
+  Downloaded openssl-sys v0.9.116
+  Downloaded object v0.37.3
+  Downloaded objc2-core-foundation v0.3.2
+  Downloaded num-bigint v0.4.6
+  Downloaded typenum v1.20.1
+  Downloaded tungstenite v0.29.0
+  Downloaded tracing-opentelemetry v0.28.0
+  Downloaded tower-http v0.6.11
+  Downloaded tonic v0.14.6
+  Downloaded toml_datetime v0.7.5+spec-1.1.0
+  Downloaded zune-jpeg v0.5.15
+  Downloaded opentelemetry_sdk v0.27.1
+  Downloaded opentelemetry-proto v0.27.0
+  Downloaded oauth2 v5.0.0
+  Downloaded winapi-x86_64-pc-windows-gnu v0.4.0

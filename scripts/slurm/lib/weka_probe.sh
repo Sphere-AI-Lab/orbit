@@ -4,7 +4,7 @@
 # filesystem under /data (WekaFS); a wedged Weka client makes those reads hang in
 # uninterruptible D-state, which stalls engine/weight bring-up with no useful error
 # (GPUs sit idle, "Load weight" never completes). See
-# docs/debug-notes/miles-sync-2026-06-30/wekafs-wedge-2026-07-01.md.
+# docs/sync-records/miles-sync-2026-06-30/wekafs-wedge-2026-07-01.md.
 #
 # Reads real bytes (O_DIRECT, bypassing the page cache) from a large file on the shared
 # FS. On a healthy mount this returns in ~1-2s; on a wedged one the read hangs and the

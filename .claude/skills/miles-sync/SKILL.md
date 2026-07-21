@@ -12,7 +12,7 @@ Sync `impossible-inc/miles-imp` with `radixark/miles`. Built on top of `/miles-u
 1. **STOP at any merge conflict.** Do NOT auto-resolve anything — not even `thirdparty/*` gitlink conflicts that look "obviously ours." Surface the conflict list to the user, suggest the typical fix (see Step 4), and wait for instructions. The user always looks first.
 2. **No `git push` until the user says push.** "Looks good" / silence / acknowledgment ≠ approval. Wait for an explicit instruction like "push it", "submit the PR", "ok send it."
 3. **Merge mode MUST be "Create a merge commit"** when the PR is eventually merged on GitHub. NOT squash, NOT rebase. Upstream SHAs must survive — future `merge-base` detection depends on it.
-4. **One commit for our changes** on top of the merge commit. No multiple commits for local adjustments — bundle pins.env regen + install_env.sh tweaks + conflict fixes into a single commit.
+4. **One commit for our changes** on top of the merge commit. No multiple commits for local adjustments — bundle pins.env regen + install_env.sh tweaks + conflict fixes into a single commit. (The sync-record folder is the one exception: it goes in its own `[docs] sync record` commit at Step 9, so the code commit stays clean.)
 5. **Stage conflicts by name**, never `git add .` — the user often has unrelated untracked files (e.g. `examples/vagen/docs/plan-notes/`).
 
 ## Topology
@@ -47,20 +47,28 @@ If there are uncommitted/untracked changes that aren't pre-existing junk (e.g. `
 
 ### Step 2 — Pre-analysis
 
-Invoke `/miles-upstream-prs merge-base`. This:
+**First, read the history — but ONLY the latest record**: skim
+`scripts/slurm/docs/sync-records/README.md` (the index) and the single newest
+`miles-sync-*/` folder (at minimum its `pr-body.md` and any `*-findings.md` /
+`*-env-test.md`). That's where the still-live context is: recurring conflict spots,
+install regressions, deferred items. Do NOT read older event folders up front —
+they describe superseded states (old pins, fixed bugs, dead workarounds) and
+pollute the sync context. Dig into an older record only when the newest one or the
+README index explicitly points there for a problem you're actually hitting.
+
+Then invoke `/miles-upstream-prs merge-base`. This:
 - Computes `MB=$(git merge-base HEAD upstream/main)`.
-- Writes the report to `scripts/slurm/docs/debug-notes/miles-sync-YYYY-MM-DD/prs.md`.
+- Writes the report to `scripts/slurm/docs/sync-records/miles-sync-YYYY-MM-DD/prs.md`.
 - Highlights watchlist hits (pin-source files) and PRs touching files we've modified.
 
-All artifacts for this sync event live under one folder: `scripts/slurm/docs/debug-notes/miles-sync-${DATE}/` containing `prs.md`, `divergence.{patch,stat}` (Step 7), and `pr-body.md` (Step 8).
+All artifacts for this sync event live under one folder: `scripts/slurm/docs/sync-records/miles-sync-YYYY-MM-DD/` containing `prs.md`, `divergence.{patch,stat}` (Step 7), and `pr-body.md` (Step 8) — plus freeform notes for anything debugged along the way. The folder is **git-tracked** and ships in this sync's PR (Step 9), so the record survives for the next operator.
 
 Show the user the report summary (total PRs, flagged PRs, watchlist hits) and **ask if they want to proceed**. Stop here if they don't.
 
 ### Step 3 — Create sync branch
 
 ```bash
-DATE=$(date +%Y%m%d)
-BRANCH_NAME="sync-upstream-${DATE}"
+BRANCH_NAME="sync-upstream-$(date +%Y%m%d)"
 # If branch exists, add a numeric suffix: sync-upstream-YYYYMMDD-2, -3, ...
 git checkout -b $BRANCH_NAME
 ```
@@ -184,7 +192,7 @@ hasn't rebased to the version miles wants yet):
    > held at `<MILES_WHEELS_TAG>` (torch `<current>`); run `/sglang-sync` once
    > upstream publishes. install_env.sh fails closed on any ABI mismatch meanwhile.
 
-See `scripts/slurm/docs/debug-notes/upstream-sync-design.md` for the ACTIVE vs
+See `scripts/slurm/docs/sync-records/upstream-sync-design.md` for the ACTIVE vs
 UPSTREAM_TARGET model and the `sglang-sync` contract ("advance ACTIVE to
 UPSTREAM_TARGET").
 
@@ -202,6 +210,7 @@ git commit -m "[chore] refresh pins.env + install_env.sh for upstream sync"
 Do NOT use `git add .` and do NOT create multiple commits. The PR should look like:
 
 ```
+[docs] miles-sync <date> record               ← Step 9 (the sanctioned exception in HARD RULE 4)
 <our single commit>                           ← all local adjustments
 Merge upstream/main                           ← merge commit (preserves SHAs)
 <upstream commit N>                           ← original SHA preserved
@@ -215,18 +224,21 @@ If Step 5 didn't produce any pins/install changes and no conflicts needed fixing
 ### Step 7 — Generate divergence diff
 
 ```bash
-DATE=$(date +%Y-%m-%d)
-EVENT_DIR=scripts/slurm/docs/debug-notes/miles-sync-${DATE}
+SYNC_DATE=$(date +%Y-%m-%d)   # dashed event date — distinct from Step 3's compact branch date
+EVENT_DIR=scripts/slurm/docs/sync-records/miles-sync-${SYNC_DATE}
 mkdir -p "$EVENT_DIR"
-git diff upstream/main -- ./ > "$EVENT_DIR/divergence.patch"
-git diff --stat upstream/main -- ./ > "$EVENT_DIR/divergence.stat"
+# Exclude sync-records itself: records describe drift, they aren't drift.
+git diff upstream/main -- ./ ':(exclude)scripts/slurm/docs/sync-records' > "$EVENT_DIR/divergence.patch"
+git diff --stat upstream/main -- ./ ':(exclude)scripts/slurm/docs/sync-records' > "$EVENT_DIR/divergence.stat"
+# The repo's check-added-large-files hook caps files at 1000 KB — gzip if over:
+[[ $(stat -c%s "$EVENT_DIR/divergence.patch") -gt 1024000 ]] && gzip -9 "$EVENT_DIR/divergence.patch"
 ```
 
 Show the `--stat` to the user — this is our "drift surface" against upstream after the sync. Note: `$EVENT_DIR` should already exist from Step 2 (where `/miles-upstream-prs` wrote `prs.md` to the same folder); `mkdir -p` is defensive.
 
 ### Step 8 — Draft PR body (do NOT push yet)
 
-Write the PR body to `$EVENT_DIR/pr-body.md` (i.e. `scripts/slurm/docs/debug-notes/miles-sync-${DATE}/pr-body.md`). Pull content from:
+Write the PR body to `$EVENT_DIR/pr-body.md` (i.e. `scripts/slurm/docs/sync-records/miles-sync-${SYNC_DATE}/pr-body.md`). Pull content from:
 - The `/miles-upstream-prs` report at `$EVENT_DIR/prs.md` (Step 2) for the upstream PR list.
 - The `--stat` at `$EVENT_DIR/divergence.stat` (Step 7) for the divergence section.
 - Any noteworthy pins/install changes from Step 5.
@@ -273,7 +285,19 @@ Sync with upstream `radixark/miles` — N upstream commits merged.
 
 ⛔ **DO NOT proceed past this line without an explicit user instruction to push.** Acknowledgments, "looks good," or silence do NOT count.
 
-When approved:
+When approved, first commit the sync record so it ships in the PR (its own commit —
+the code commit from Step 6 stays clean). Re-derive the event folder from disk: a
+delayed approval can land in a fresh shell without Step 7's variables, and "today"
+may no longer be the event date.
+
+```bash
+EVENT_DIR=$(ls -d scripts/slurm/docs/sync-records/miles-sync-* | sort | tail -1)
+SYNC_DATE=${EVENT_DIR##*miles-sync-}
+git add "$EVENT_DIR"
+git commit -m "[docs] miles-sync ${SYNC_DATE} record"
+```
+
+Then push and open the PR:
 
 ```bash
 git push -u origin $BRANCH_NAME
@@ -322,4 +346,5 @@ Show this to the user — they share it manually. The skill does not post.
 - [`/miles-upstream-prs`](../miles-upstream-prs/SKILL.md) — Step 2's pre-analysis.
 - [`scripts/slurm/setup/extract_pins.py`](../../../scripts/slurm/setup/extract_pins.py) — pin regen.
 - [`scripts/slurm/setup/install_env.sh`](../../../scripts/slurm/setup/install_env.sh) — mirrors upstream Dockerfile RUN lines.
-- [`scripts/slurm/docs/debug-notes/upstream-sync-design.md`](../../../scripts/slurm/docs/debug-notes/upstream-sync-design.md) — design rationale, sglang-sync forward plan.
+- [`scripts/slurm/docs/sync-records/upstream-sync-design.md`](../../../scripts/slurm/docs/sync-records/upstream-sync-design.md) — design rationale, sglang-sync forward plan.
+- [`scripts/slurm/docs/sync-records/README.md`](../../../scripts/slurm/docs/sync-records/README.md) — the tracked sync-history layout + index of past syncs.

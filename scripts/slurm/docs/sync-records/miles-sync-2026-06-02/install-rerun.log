@@ -1,0 +1,81 @@
+[preflight] WARNING: driver CUDA 12.8 < wheel CUDA 12.9 — relying on CUDA 12.x minor-version forward compatibility.
+[preflight] If smoke-test imports fail with CUDA symbol errors, install a driver supporting CUDA >= 12.9 or switch to cu128 wheels.
+[preflight] FA3 target GPU: NVIDIA H200 (compute capability 9.0)
+[preflight] nvcc: Build cuda_12.8.r12.8/compiler.35404655_0
+[preflight] CUDA_HOME=/usr/local/cuda-12.8
+[src] initialising submodules under /data/home/xiuyul/workspace/miles-imp/thirdparty
+[env] reusing existing conda env 'miles_v0512_test'
+[env] python: Python 3.12.13  prefix: /data/shared/conda/miniconda3/envs/miles_v0512_test
+[torch] torch==2.11.0 + torchvision from https://download.pytorch.org/whl/cu129
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Checked 2 packages in 257ms
+[src] installing Megatron-LM editable (--no-deps)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+Resolved 1 package in 7.65s
+   Building megatron-core @ file:///data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-LM
+      Built megatron-core @ file:///data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-LM
+Prepared 1 package in 9.65s
+Uninstalled 1 package in 38ms
+Installed 1 package in 75ms
+ ~ megatron-core==0.16.0rc0 (from file:///data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-LM)
+[src] miles-megatron-source-root.pth -> /data/home/xiuyul/workspace/miles-imp/thirdparty/Megatron-LM
+[src] installing sglang editable from /data/home/xiuyul/workspace/miles-imp/thirdparty/sglang (full dep resolution)
+Using Python 3.12.13 environment at: /data/shared/conda/miniconda3/envs/miles_v0512_test
+  × No solution found when resolving dependencies:
+  ╰─▶ Because only the following versions of cuda-python are available:
+          cuda-python<=13.0.0
+          cuda-python==13.0.1
+          cuda-python==13.0.2
+          cuda-python==13.0.3
+          cuda-python==13.1.0
+          cuda-python==13.1.1
+          cuda-python==13.2.0
+          cuda-python==13.3.0
+          cuda-python==13.3.1
+      and cuda-python==13.0.0 depends on cuda-bindings>=13.0.0,<13.1.dev0,
+      we can conclude that cuda-python>=13.0.0,<13.0.1 depends on
+      cuda-bindings>=13.0.0,<13.1.dev0.
+      And because cuda-python==13.0.1 depends on
+      cuda-bindings>=13.0.1,<13.1.dev0, we can conclude that
+      cuda-python>=13.0.0,<13.0.2 depends on cuda-bindings>=13.0.0,<13.1.dev0.
+      And because cuda-python==13.0.2 depends on
+      cuda-bindings>=13.0.2,<13.1.dev0 and cuda-bindings>=13.1.0,<13.2.dev0,
+      we can conclude that all of:
+          cuda-python>=13.0.0,<13.0.3
+          cuda-python>13.0.3,<13.1.1
+      depend on one of:
+          cuda-bindings>=13.0.0,<13.1.dev0
+          cuda-bindings>=13.1.0,<13.2.dev0
+
+      And because cuda-python==13.1.1 depends on
+      cuda-bindings>=13.1.1,<13.2.dev0 and cuda-bindings>=13.2.0,<13.3.dev0,
+      we can conclude that all of:
+          cuda-python>=13.0.0,<13.0.3
+          cuda-python>13.0.3,<13.3.0
+      depend on one of:
+          cuda-bindings>=13.0.0,<13.1.dev0
+          cuda-bindings>=13.1.0,<13.2.dev0
+          cuda-bindings>=13.2.0,<13.3.dev0
+
+      And because cuda-python==13.3.0 depends on
+      cuda-bindings>=13.3.0,<13.4.dev0 and cuda-bindings>=13.3.1,<13.4.dev0,
+      we can conclude that all of:
+          cuda-python>=13.0.0,<13.0.3
+          cuda-python>13.0.3
+      depend on one of:
+          cuda-bindings>=13.0.0,<13.1.dev0
+          cuda-bindings>=13.1.0,<13.2.dev0
+          cuda-bindings>=13.2.0,<13.3.dev0
+          cuda-bindings>=13.3.0,<13.4.dev0
+
+      And because cuda-python==13.0.3 depends on
+      cuda-bindings>=13.0.3,<13.1.dev0 and torch==2.11.0+cu129 depends on
+      cuda-bindings{sys_platform == 'linux'}>=12.9.4,<13, we can conclude that
+      cuda-python>=13.0.0 and torch==2.11.0+cu129 are incompatible.
+      And because sglang==0.5.12.post2.dev24+gc74db48da depends on
+      cuda-python>=13.0 and torch==2.11.0+cu129, we can conclude that
+      sglang==0.5.12.post2.dev24+gc74db48da cannot be used.
+      And because only sglang[all]==0.5.12.post2.dev24+gc74db48da is available
+      and you require sglang[all], we can conclude that your requirements
+      are unsatisfiable.
+EXIT=1

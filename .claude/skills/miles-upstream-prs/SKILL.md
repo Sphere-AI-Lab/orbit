@@ -5,7 +5,7 @@ description: "Analyze merged PRs on radixark/miles (upstream) since miles-imp's 
 
 # miles-upstream-prs — upstream PR analyzer for miles → miles-imp
 
-Read-only inspection of `radixark/miles` activity since `miles-imp` last synced. Produces a markdown report (cached under `scripts/slurm/docs/debug-notes/`) that `/miles-sync` consumes when drafting the sync PR body.
+Read-only inspection of `radixark/miles` activity since `miles-imp` last synced. Produces a markdown report (recorded under `scripts/slurm/docs/sync-records/`, the git-tracked sync history) that `/miles-sync` consumes when drafting the sync PR body.
 
 ## When to use this skill
 
@@ -110,7 +110,7 @@ This is **secondary**. miles-imp itself IS miles, with modifications — we most
 
 ### Step 7 — Generate report
 
-Write to `scripts/slurm/docs/debug-notes/miles-sync-YYYY-MM-DD/prs.md` (gitignored). Create the folder if it doesn't exist — this is the same folder `/miles-sync` writes `pr-body.md` and `divergence.{patch,stat}` to for the same date, so a sync event's artifacts stay grouped. When running standalone (not as part of a sync), `prs.md` may be the only file in the folder; that's fine.
+Write to `scripts/slurm/docs/sync-records/miles-sync-YYYY-MM-DD/prs.md` (git-tracked; committed with the sync PR — see `sync-records/README.md`). Create the folder if it doesn't exist — this is the same folder `/miles-sync` writes `pr-body.md` and `divergence.{patch,stat}` to for the same date, so a sync event's artifacts stay grouped. When running standalone (not as part of a sync), `prs.md` may be the only file in the folder; that's fine.
 
 Report structure:
 
@@ -159,11 +159,11 @@ Print the report path, summary stats, and the watchlist section to stdout so the
 ## Notes
 
 - The skill is **read-only**: never branches, never commits, never pushes.
-- Reports are local-only (gitignored). If you want to share one, copy it manually.
+- Reports are git-tracked under `scripts/slurm/docs/sync-records/` and ship in the sync PR (miles-sync Step 9 commits the event folder). A standalone scan's `prs.md` sits uncommitted until the next sync PR (or a normal docs PR) picks it up.
 - Date-based mode is provided for "what's been happening upstream lately?" exploratory use, but `merge-base` mode is what `/miles-sync` uses and what you should default to.
 
 ## See also
 
 - [`/miles-sync`](../miles-sync/SKILL.md) — invokes this skill as its Step 2.
 - [`scripts/slurm/setup/extract_pins.py`](../../../scripts/slurm/setup/extract_pins.py) — what consumes Dockerfile changes.
-- [`scripts/slurm/docs/debug-notes/upstream-sync-design.md`](../../../scripts/slurm/docs/debug-notes/upstream-sync-design.md) — design rationale, sglang-sync forward plan.
+- [`scripts/slurm/docs/sync-records/upstream-sync-design.md`](../../../scripts/slurm/docs/sync-records/upstream-sync-design.md) — design rationale, sglang-sync forward plan.
