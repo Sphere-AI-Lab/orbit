@@ -2158,11 +2158,6 @@ def _validate_opd_dagger_args(args) -> None:
         raise ValueError(f"Unsupported --opd-dagger-loss: {loss}")
     if coef > 0 and top_k == 0:
         raise ValueError("--opd-dagger-coef > 0 requires --opd-dagger-top-k > 0.")
-    if coef > 0 and loss != "explicit_cross_entropy":
-        raise ValueError(
-            "--opd-dagger-coef > 0 currently requires "
-            "--opd-dagger-loss=explicit_cross_entropy; cross_entropy is reserved for milestone 02."
-        )
     if top_k == 0:
         return
 

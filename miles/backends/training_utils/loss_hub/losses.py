@@ -18,7 +18,10 @@ from miles.backends.training_utils.loss_hub.math_utils import (
     compute_opsm_mask,
     compute_policy_loss,
 )
-from miles.backends.training_utils.loss_hub.rkld_dagger import compute_explicit_dagger_loss
+from miles.backends.training_utils.loss_hub.rkld_dagger import (
+    compute_explicit_dagger_loss,
+    compute_topk_rest_dagger_loss,
+)
 from miles.backends.training_utils.parallel import get_parallel_state
 from miles.utils.misc import load_function
 from miles.utils.types import RolloutBatch
@@ -305,18 +308,23 @@ def policy_loss_function(
     dagger_coef = float(getattr(args, "opd_dagger_coef", 0.0) or 0.0)
     if dagger_coef > 0:
         dagger_loss_type = getattr(args, "opd_dagger_loss", "cross_entropy")
-        if dagger_loss_type != "explicit_cross_entropy":
-            raise NotImplementedError(
-                f"--opd-dagger-loss={dagger_loss_type!r} is reserved for Top-K + Rest DAgger; "
-                "milestone 01 currently implements only 'explicit_cross_entropy'."
+        if dagger_loss_type == "explicit_cross_entropy":
+            raw_dagger_loss, dagger_metrics = compute_explicit_dagger_loss(
+                args,
+                batch,
+                logits,
+                dagger_response_reducer,
             )
-        explicit_ce, dagger_metrics = compute_explicit_dagger_loss(
-            args,
-            batch,
-            logits,
-            dagger_response_reducer,
-        )
-        dagger_loss = dagger_coef * explicit_ce
+        elif dagger_loss_type == "cross_entropy":
+            raw_dagger_loss, dagger_metrics = compute_topk_rest_dagger_loss(
+                args,
+                batch,
+                logits,
+                dagger_response_reducer,
+            )
+        else:
+            raise ValueError(f"Unsupported --opd-dagger-loss: {dagger_loss_type}")
+        dagger_loss = dagger_coef * raw_dagger_loss
         loss = loss + dagger_loss
         dagger_metrics["loss"] = dagger_loss.detach()
 

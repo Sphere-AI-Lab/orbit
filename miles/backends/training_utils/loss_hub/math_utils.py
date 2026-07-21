@@ -12,6 +12,7 @@ from miles.backends.training_utils.cp_utils import slice_loss_masks_for_local_cp
 from miles.backends.training_utils.parallel import get_parallel_state
 
 _LOG_RATIO_EXP_CLAMP = 20.0
+_TOPK_REST_DEFAULT_ROW_CHUNK_SIZE = 128
 
 
 def _safe_clamp_log_ratio(log_ratio: torch.Tensor) -> torch.Tensor:
@@ -339,6 +340,380 @@ def compute_log_probs(
     logits = logits.unsqueeze(1)
     tokens = tokens.unsqueeze(1)
     return -fused_vocab_parallel_cross_entropy(logits, tokens, process_group)
+
+
+def _all_reduce_if_needed(
+    tensor: torch.Tensor,
+    process_group: dist.ProcessGroup | None,
+    *,
+    op: dist.ReduceOp.RedOpType = dist.ReduceOp.SUM,
+) -> torch.Tensor:
+    _, world_size = _process_group_rank_and_size(process_group)
+    if world_size > 1:
+        dist.all_reduce(tensor, op=op, group=process_group)
+    return tensor
+
+
+def _global_logsumexp_from_local_lse(
+    local_lse: torch.Tensor,
+    process_group: dist.ProcessGroup | None,
+) -> torch.Tensor:
+    """Combine per-shard log-sum-exp values without gathering vocabulary logits."""
+    if local_lse.numel() == 0:
+        return local_lse
+
+    global_max = _all_reduce_if_needed(
+        local_lse.clone(),
+        process_group,
+        op=dist.ReduceOp.MAX,
+    )
+    finite_rows = torch.isfinite(global_max)
+    safe_global_max = torch.where(finite_rows, global_max, global_max.new_zeros(()))
+    local_scaled_sum = torch.where(
+        finite_rows,
+        torch.exp(local_lse - safe_global_max),
+        local_lse.new_zeros(()),
+    )
+    global_scaled_sum = _all_reduce_if_needed(local_scaled_sum, process_group)
+    return torch.where(
+        finite_rows,
+        safe_global_max + torch.log(global_scaled_sum),
+        global_max.new_full((), -torch.inf),
+    )
+
+
+def _local_valid_vocab_size(
+    logits: torch.Tensor,
+    process_group: dist.ProcessGroup | None,
+    vocab_size: int,
+) -> tuple[int, int, int]:
+    tp_rank, tp_size = _process_group_rank_and_size(process_group)
+    local_vocab_size = logits.size(-1)
+    padded_vocab_size = local_vocab_size * tp_size
+    if vocab_size <= 0 or vocab_size > padded_vocab_size:
+        raise ValueError(
+            f"vocab_size={vocab_size} must be in [1, {padded_vocab_size}] for "
+            f"local logits {tuple(logits.shape)} across TP={tp_size}."
+        )
+    local_vocab_start = tp_rank * local_vocab_size
+    local_valid_size = max(0, min(local_vocab_size, vocab_size - local_vocab_start))
+    return local_vocab_start, local_valid_size, tp_size
+
+
+def _local_full_logsumexp(
+    logits: torch.Tensor,
+    *,
+    local_valid_size: int,
+    row_chunk_size: int,
+    accumulation_dtype: torch.dtype,
+) -> torch.Tensor:
+    """Compute local full-partition LSE without a full FP32 logits copy."""
+    num_rows = logits.size(0)
+    if num_rows == 0:
+        return logits.new_empty((0,), dtype=accumulation_dtype)
+    if local_valid_size == 0:
+        return logits.new_full((num_rows,), -torch.inf, dtype=accumulation_dtype)
+
+    chunks = []
+    for row_start in range(0, num_rows, row_chunk_size):
+        row_end = min(num_rows, row_start + row_chunk_size)
+        source = logits[row_start:row_end, :local_valid_size].to(accumulation_dtype)
+        chunks.append(torch.logsumexp(source, dim=-1))
+    return torch.cat(chunks, dim=0)
+
+
+def _local_rest_logsumexp(
+    logits: torch.Tensor,
+    teacher_token_ids: torch.Tensor,
+    candidate_mask: torch.Tensor,
+    *,
+    local_vocab_start: int,
+    local_valid_size: int,
+    row_chunk_size: int,
+    accumulation_dtype: torch.dtype,
+) -> torch.Tensor:
+    """Compute local Rest LSE with bounded temporary `[row_chunk,V_local]` storage."""
+    num_rows = logits.size(0)
+    if num_rows == 0:
+        return logits.new_empty((0,), dtype=accumulation_dtype)
+    if local_valid_size == 0:
+        return logits.new_full((num_rows,), -torch.inf, dtype=accumulation_dtype)
+
+    chunks = []
+    for row_start in range(0, num_rows, row_chunk_size):
+        row_end = min(num_rows, row_start + row_chunk_size)
+        source = logits[row_start:row_end, :local_valid_size]
+        rest_logits = torch.empty(source.shape, device=source.device, dtype=accumulation_dtype)
+        rest_logits.copy_(source)
+
+        chunk_ids = teacher_token_ids[row_start:row_end]
+        chunk_mask = candidate_mask[row_start:row_end]
+        local_ids = chunk_ids - local_vocab_start
+        owner_mask = chunk_mask & (local_ids >= 0) & (local_ids < local_valid_size)
+        for candidate_rank in range(chunk_ids.size(1)):
+            owner_rows = owner_mask[:, candidate_rank]
+            rest_logits[owner_rows, local_ids[owner_rows, candidate_rank]] = -torch.inf
+        chunks.append(torch.logsumexp(rest_logits, dim=-1))
+
+    return torch.cat(chunks, dim=0)
+
+
+class _VocabParallelTopKRestCrossEntropy(torch.autograd.Function):
+    """Stable Top-K + Rest CE over existing tensor-parallel vocabulary shards."""
+
+    @staticmethod
+    def forward(
+        ctx,
+        logits: torch.Tensor,
+        teacher_token_ids: torch.Tensor,
+        teacher_probs: torch.Tensor,
+        teacher_rest_mass: torch.Tensor,
+        candidate_mask: torch.Tensor,
+        process_group: dist.ProcessGroup | None,
+        vocab_size: int,
+        row_chunk_size: int,
+    ) -> tuple[torch.Tensor, ...]:
+        local_vocab_start, local_valid_size, _ = _local_valid_vocab_size(logits, process_group, vocab_size)
+        accumulation_dtype = torch.float64 if logits.dtype == torch.float64 else torch.float32
+
+        local_full_lse = _local_full_logsumexp(
+            logits,
+            local_valid_size=local_valid_size,
+            row_chunk_size=row_chunk_size,
+            accumulation_dtype=accumulation_dtype,
+        )
+        log_z = _global_logsumexp_from_local_lse(local_full_lse, process_group)
+
+        local_rest_lse = _local_rest_logsumexp(
+            logits,
+            teacher_token_ids,
+            candidate_mask,
+            local_vocab_start=local_vocab_start,
+            local_valid_size=local_valid_size,
+            row_chunk_size=row_chunk_size,
+            accumulation_dtype=accumulation_dtype,
+        )
+        log_z_rest = _global_logsumexp_from_local_lse(local_rest_lse, process_group)
+
+        local_ids = teacher_token_ids - local_vocab_start
+        owner_mask = candidate_mask & (local_ids >= 0) & (local_ids < local_valid_size)
+        safe_local_ids = local_ids.clamp(min=0, max=max(logits.size(-1) - 1, 0))
+        selected_logits = logits.gather(dim=-1, index=safe_local_ids).to(accumulation_dtype)
+        local_weighted_selected_logits = torch.where(
+            owner_mask,
+            teacher_probs * selected_logits,
+            selected_logits.new_zeros(()),
+        ).sum(dim=-1)
+        weighted_selected_logits = _all_reduce_if_needed(local_weighted_selected_logits, process_group)
+
+        rest_exists = candidate_mask.sum(dim=-1) < vocab_size
+        # Candidate coverage is structural. If the candidates span the real
+        # vocabulary, floating-point target mass must not create a synthetic
+        # Rest bucket in either forward or backward.
+        teacher_rest_mass = torch.where(
+            rest_exists,
+            teacher_rest_mass,
+            teacher_rest_mass.new_zeros(()),
+        )
+        teacher_topk_mass = teacher_probs.sum(dim=-1)
+        explicit_ce = teacher_topk_mass * log_z - weighted_selected_logits
+        # If p_R=0 and the candidates span the vocabulary, logZ_R is -inf.
+        # Select a finite placeholder before multiplication; do not clamp a
+        # positive Rest term or change its gradient.
+        safe_log_z_rest = torch.where(
+            teacher_rest_mass > 0,
+            log_z_rest,
+            log_z,
+        )
+        rest_ce = teacher_rest_mass * (log_z - safe_log_z_rest)
+        active_rows = candidate_mask.any(dim=-1)
+        explicit_ce = torch.where(active_rows, explicit_ce, explicit_ce.new_zeros(()))
+        rest_ce = torch.where(active_rows, rest_ce, rest_ce.new_zeros(()))
+        per_token_loss = explicit_ce + rest_ce
+
+        student_rest_mass = torch.where(
+            rest_exists,
+            torch.exp(log_z_rest - log_z),
+            log_z.new_zeros(()),
+        )
+
+        ctx.vocab_size = vocab_size
+        ctx.row_chunk_size = row_chunk_size
+        ctx.local_vocab_start = local_vocab_start
+        ctx.local_valid_size = local_valid_size
+        ctx.save_for_backward(
+            logits,
+            teacher_token_ids,
+            teacher_probs,
+            teacher_rest_mass,
+            candidate_mask,
+            log_z,
+            log_z_rest,
+        )
+        ctx.mark_non_differentiable(
+            explicit_ce,
+            rest_ce,
+            teacher_topk_mass,
+            teacher_rest_mass,
+            student_rest_mass,
+        )
+        return (
+            per_token_loss,
+            explicit_ce,
+            rest_ce,
+            teacher_topk_mass,
+            teacher_rest_mass,
+            student_rest_mass,
+        )
+
+    @staticmethod
+    def backward(
+        ctx,
+        grad_per_token_loss: torch.Tensor,
+        _grad_explicit_ce: torch.Tensor | None,
+        _grad_rest_ce: torch.Tensor | None,
+        _grad_teacher_topk_mass: torch.Tensor | None,
+        _grad_teacher_rest_mass: torch.Tensor | None,
+        _grad_student_rest_mass: torch.Tensor | None,
+    ) -> tuple[torch.Tensor | None, ...]:
+        (
+            logits,
+            teacher_token_ids,
+            teacher_probs,
+            teacher_rest_mass,
+            candidate_mask,
+            log_z,
+            log_z_rest,
+        ) = ctx.saved_tensors
+
+        if grad_per_token_loss is None:
+            grad_logits = torch.zeros_like(logits)
+            return grad_logits, None, None, None, None, None, None, None
+
+        local_vocab_start = ctx.local_vocab_start
+        local_valid_size = ctx.local_valid_size
+        row_chunk_size = ctx.row_chunk_size
+        grad_logits = torch.zeros_like(logits)
+        num_rows = logits.size(0)
+
+        for row_start in range(0, num_rows, row_chunk_size):
+            row_end = min(num_rows, row_start + row_chunk_size)
+            if local_valid_size == 0:
+                continue
+
+            accumulation_dtype = torch.float64 if logits.dtype == torch.float64 else torch.float32
+            source = logits[row_start:row_end, :local_valid_size].to(accumulation_dtype)
+            chunk_log_z = log_z[row_start:row_end].unsqueeze(-1)
+            full_probs = torch.exp(source - chunk_log_z)
+
+            chunk_ids = teacher_token_ids[row_start:row_end]
+            chunk_teacher_probs = teacher_probs[row_start:row_end]
+            chunk_mask = candidate_mask[row_start:row_end]
+            local_ids = chunk_ids - local_vocab_start
+            owner_mask = chunk_mask & (local_ids >= 0) & (local_ids < local_valid_size)
+
+            rest_exists = chunk_mask.sum(dim=-1) < ctx.vocab_size
+            safe_source = torch.where(rest_exists.unsqueeze(-1), source, source.new_zeros(()))
+            safe_log_z_rest = torch.where(
+                rest_exists,
+                log_z_rest[row_start:row_end],
+                log_z_rest.new_zeros(()),
+            ).unsqueeze(-1)
+            rest_probs = torch.where(
+                rest_exists.unsqueeze(-1),
+                torch.exp(safe_source - safe_log_z_rest),
+                source.new_zeros(()),
+            )
+            for candidate_rank in range(chunk_ids.size(1)):
+                owner_rows = owner_mask[:, candidate_rank]
+                rest_probs[owner_rows, local_ids[owner_rows, candidate_rank]] = 0.0
+
+            chunk_teacher_rest_mass = teacher_rest_mass[row_start:row_end]
+            # Use the same represented P+p_R mass as forward instead of forcing
+            # a literal 1.0. In exact arithmetic they are equal; this keeps the
+            # custom backward exact under tiny FP32 exp/logsumexp roundoff
+            # without renormalizing the teacher Top-K probabilities.
+            total_teacher_mass = chunk_teacher_probs.sum(dim=-1) + chunk_teacher_rest_mass
+            grad_chunk = (
+                total_teacher_mass.unsqueeze(-1) * full_probs - chunk_teacher_rest_mass.unsqueeze(-1) * rest_probs
+            )
+            for candidate_rank in range(chunk_ids.size(1)):
+                owner_rows = owner_mask[:, candidate_rank]
+                grad_chunk[owner_rows, local_ids[owner_rows, candidate_rank]] -= chunk_teacher_probs[
+                    owner_rows, candidate_rank
+                ]
+
+            grad_chunk = grad_chunk * grad_per_token_loss[row_start:row_end].to(accumulation_dtype).unsqueeze(-1)
+            grad_chunk = torch.where(chunk_mask.any(dim=-1, keepdim=True), grad_chunk, grad_chunk.new_zeros(()))
+            grad_logits[row_start:row_end, :local_valid_size] = grad_chunk.to(dtype=logits.dtype)
+
+        return grad_logits, None, None, None, None, None, None, None
+
+
+def vocab_parallel_topk_rest_cross_entropy(
+    logits: torch.Tensor,
+    teacher_token_ids: torch.Tensor,
+    teacher_probs: torch.Tensor,
+    teacher_rest_mass: torch.Tensor,
+    candidate_mask: torch.Tensor,
+    process_group: dist.ProcessGroup | None,
+    *,
+    vocab_size: int,
+    row_chunk_size: int = _TOPK_REST_DEFAULT_ROW_CHUNK_SIZE,
+) -> dict[str, torch.Tensor]:
+    """Return Stable TP CE for canonical, detached teacher probabilities.
+
+    Shape validation stays here; value/protocol validation belongs to the
+    trainer loss boundary that converts raw teacher log-probs.
+    """
+    if logits.ndim != 2 or logits.size(-1) == 0 or not torch.is_floating_point(logits):
+        raise ValueError(f"Top-K + Rest logits must be floating [T,V_local], got {tuple(logits.shape)}.")
+    if row_chunk_size <= 0:
+        raise ValueError(f"row_chunk_size must be positive, got {row_chunk_size}.")
+
+    teacher_token_ids = torch.as_tensor(teacher_token_ids, device=logits.device, dtype=torch.long).detach()
+    accumulation_dtype = torch.float64 if logits.dtype == torch.float64 else torch.float32
+    teacher_probs = torch.as_tensor(teacher_probs, device=logits.device, dtype=accumulation_dtype).detach()
+    teacher_rest_mass = torch.as_tensor(teacher_rest_mass, device=logits.device, dtype=accumulation_dtype).detach()
+    candidate_mask = torch.as_tensor(candidate_mask, device=logits.device, dtype=torch.bool).detach()
+
+    target_shape = teacher_token_ids.shape
+    if (
+        teacher_token_ids.ndim != 2
+        or teacher_probs.shape != target_shape
+        or candidate_mask.shape != target_shape
+        or teacher_rest_mass.shape != (logits.size(0),)
+        or target_shape[0] != logits.size(0)
+    ):
+        raise ValueError(
+            "Top-K + Rest target shape mismatch: "
+            f"logits={tuple(logits.shape)}, ids={target_shape}, probs={tuple(teacher_probs.shape)}, "
+            f"candidate_mask={tuple(candidate_mask.shape)}, rest_mass={tuple(teacher_rest_mass.shape)}."
+        )
+
+    # The loss boundary in rkld_dagger.py validates IDs, finiteness, duplicate
+    # candidates, and coarse mass before converting raw teacher log-probs. Keep
+    # this primitive synchronization-free apart from its required TP collectives.
+    teacher_probs = torch.where(candidate_mask, teacher_probs, teacher_probs.new_zeros(()))
+
+    outputs = _VocabParallelTopKRestCrossEntropy.apply(
+        logits,
+        teacher_token_ids,
+        teacher_probs,
+        teacher_rest_mass,
+        candidate_mask,
+        process_group,
+        vocab_size,
+        row_chunk_size,
+    )
+    return {
+        "per_token_loss": outputs[0],
+        "explicit_ce": outputs[1],
+        "rest_ce": outputs[2],
+        "teacher_topk_mass": outputs[3],
+        "teacher_rest_mass": outputs[4],
+        "student_rest_mass": outputs[5],
+    }
 
 
 def _prepare_true_on_policy_full_logits(

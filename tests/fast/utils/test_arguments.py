@@ -198,6 +198,10 @@ def test_opd_dagger_accepts_explicit_teacher_sparse_target_contract():
     _validate_opd_dagger_args(_opd_dagger_args())
 
 
+def test_opd_dagger_accepts_complete_topk_rest_cross_entropy():
+    _validate_opd_dagger_args(_opd_dagger_args(opd_dagger_loss="cross_entropy"))
+
+
 def test_opd_dagger_top_k_can_collect_targets_with_zero_loss_coefficient():
     _validate_opd_dagger_args(_opd_dagger_args(opd_dagger_coef=0.0, opd_dagger_loss="cross_entropy"))
 
@@ -215,7 +219,6 @@ def test_opd_dagger_accepts_megatron_padded_vocab_and_reports_masking(caplog):
         ({"opd_dagger_top_k": -1}, r"must be non-negative"),
         ({"opd_dagger_coef": -1.0}, r"must be non-negative"),
         ({"opd_dagger_loss": "invalid"}, r"Unsupported --opd-dagger-loss"),
-        ({"opd_dagger_loss": "cross_entropy"}, r"currently requires.*explicit_cross_entropy"),
         ({"opd_dagger_top_k": 0}, r"requires --opd-dagger-top-k > 0"),
         ({"opd_dagger_top_k": 9}, r"positive vocab_size >= top-k"),
         ({"padded_vocab_size": 7}, r"cannot be smaller than vocab_size"),

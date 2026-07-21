@@ -114,6 +114,19 @@ export ENVPACK_SERVER_WAIT_TIMEOUT=${ENVPACK_SERVER_WAIT_TIMEOUT:-1800}
 # shellcheck disable=SC1090
 source "$MILES_REPO/scripts/models/qwen3-8B.sh"
 
+# Training-layout overrides are used by the numbered OPD parallel smokes. The
+# canonical recipe remains TP=2, PP=1, hence DP=4 on the 8-GPU actor node.
+TRAIN_TP_SIZE=${TRAIN_TP_SIZE:-2}
+TRAIN_PP_SIZE=${TRAIN_PP_SIZE:-1}
+if (( TRAIN_TP_SIZE <= 0 || TRAIN_PP_SIZE <= 0 )); then
+   echo "TRAIN_TP_SIZE and TRAIN_PP_SIZE must be positive" >&2
+   exit 2
+fi
+if (( 8 % (TRAIN_TP_SIZE * TRAIN_PP_SIZE) != 0 )); then
+   echo "Actor world size 8 must be divisible by TRAIN_TP_SIZE * TRAIN_PP_SIZE" >&2
+   exit 2
+fi
+
 # Sampled-token OPD by default (see GRPO_ARGS); the generated run name carries
 # every optional DAgger arm plus sampled top-k and transport mode.
 OPD_TOP_K=${OPD_TOP_K:-0}
@@ -162,9 +175,8 @@ RM_ARGS=(
 )
 
 PERF_ARGS=(
-   --tensor-model-parallel-size 2
-   --sequence-parallel
-   --pipeline-model-parallel-size 1
+   --tensor-model-parallel-size "$TRAIN_TP_SIZE"
+   --pipeline-model-parallel-size "$TRAIN_PP_SIZE"
    --context-parallel-size 1
    --expert-model-parallel-size 1
    --expert-tensor-parallel-size 1
@@ -174,6 +186,9 @@ PERF_ARGS=(
    --use-dynamic-batch-size
    --max-tokens-per-gpu 16384
 )
+if (( TRAIN_TP_SIZE > 1 )); then
+   PERF_ARGS+=(--sequence-parallel)
+fi
 
 GRPO_ARGS=(
    --advantage-estimator grpo

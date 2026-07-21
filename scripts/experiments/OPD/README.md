@@ -92,7 +92,10 @@ sampled KL diagnostics remain under `rollout/kl/*`, and scoring transport stays
 under `opd_scoring/*`. The run completed 50/50 with 3,200 teacher and zero
 student-rescore requests, finite direct CE, no protocol failures, and no
 detectable end-to-end step-time regression versus the sampled-token control.
-Milestone 02 is next; no 100-step extension is required for the G2 gate.
+Milestone 02 is implemented locally; run the `optimize/02a` through `02d`
+validation sequence before composing it with RKLD-PG. No 100-step extension is
+required for the G2 gate. The optimize README is also the normative reference
+for Stable TP `expm1`/clamp semantics and the remaining PDF parity boundaries.
 
 ## Persistent HTTP transport experiment
 
