@@ -14,6 +14,7 @@ instead of shipping placeholder launchers.
 | 02c | `02c-topk-rest-pp2-smoke.sh` | Verify last-pipeline-stage target ownership with TP=2, PP=2, DP=2 | Passed (25085; first attempt 25081 was an IB preflight refusal, not code): 5/5; no PP ownership failure |
 | 02d | `02d-topk-rest-tp2-gate.sh` | Canonical 50-step objective/stability gate after all 5-step smokes pass | Passed (25137): 50/50, CE 0.487→0.407, coarse KL -58.5%, 3,200/0 requests, 149.7 s/step (+1.6% descriptive versus sampled baseline) |
 | 03a | `03a-rkld-topk-rest-smoke.sh` | Five-step TP2 composition smoke: sampled RKLD-PG + Stable-TP Top-K + Rest | Passed (25267): 5/5, both branches active and finite |
+| 03p | `03p-rkld-topk-rest-profile.sh` | Dedicated eight-step hybrid profile with three active post-warmup steps; capture per-rank/per-step operator, NCCL, shape, and CUDA-memory evidence | Trace captured (25278); the original 4.9% / 6x summary is withdrawn because CPU and GPU annotations were double-counted. A reviewer CPU-only rank-0 check is approximately 3.1%; regenerate the corrected CSV before using cross-rank ratios. |
 | 03b | `03b-sampled-rkld-control.sh` | Fresh 50-step sampled-RKLD control from the same commit as the hybrid | Done (25279): 50/50, `I_rkld=0.01584`, median step 143.4 s |
 | 03c | `03c-topk-rest-control.sh` | Fresh 50-step pure Top-K + Rest control from the same commit as the hybrid | Done (25280): 50/50; rerun floors calibrated against job 25137 |
 | 03d | `03d-rkld-topk-rest-gate.sh` | Matched 50-step hybrid decision gate | Inconclusive (25281): guards 1/3/4 passed, RKLD preservation missed by 4.7x its floor, and coarse KL missed by 1.3x; G5 held for a coefficient sweep |
@@ -232,6 +233,7 @@ acceptance checklist:
 | TP=1/2/4 and independent process groups | TP1 gradcheck plus real Gloo TP2/DP2 and TP4 parity passed; NCCL TP2 and TP4 smokes passed as jobs 25079 and 25080. |
 | PP=2 | Runtime validation passed in job 25085 after an unrelated node-IB preflight refusal in job 25081. VPP remains untested. |
 | Zigzag CP=2 / allgather CP | Candidate-axis slicing has a unit test, but no distributed loss/gradient gate; allgather CP is explicitly rejected. |
+| THD/dynamic packing | The canonical 3-node recipe exercises THD packing at CP=1, but no dedicated mixed-length packed-versus-unpacked loss, local-logit-gradient, mask, metric, and per-sample-reducer parity gate exists. |
 | Multimodal/agentic alignment | Multi-turn observation rows are masked. Prompt-only media expansion preserves response targets; response-side media expansion is not hardened and will fail the response-length guard. |
 | Shared tokenizer/vocabulary | The loss enforces IDs inside the student vocabulary. Semantic tokenizer equality is a recipe/deployment contract, not yet verified from the remote teacher endpoint; the Qwen3-32B/8B recipe assumes the shared Qwen3 vocabulary. |
 | FSDP | Not supported: its micro-batch key path is not wired. |
@@ -245,6 +247,18 @@ micro-batch. The duplicate CPU/GPU protocol checks also synchronize per sample.
 The completed 02a-02d build did not export dedicated loss time or peak memory,
 so those metrics remain prerequisites before considering a packed row-index
 interface; this is not a reason to change the objective.
+
+“CP/packing parity” therefore remains incomplete in the strict PDF sense. For
+zigzag CP=2, the missing test must run Stable-TP over the CP-local response rows,
+reconstruct the global result, and compare scalar loss plus every TP rank's local
+logit gradient against the dense/unsharded reference, including padded and empty
+local spans. For packing, the same unequal-length samples must match between the
+current THD-packed layout and an unpacked reference while preserving masks,
+metrics, and the existing sum-of-sample-mean reduction. A global token mean is
+not equivalent because it would overweight longer responses. This gap does not
+block the current CP=1 03 recipes; it limits any claim of general CP/packing
+support. CP is a future milestone: no CP launcher or CP implementation change is
+part of 03.
 
 ## 03 implementation and validation sequence
 
@@ -311,6 +325,93 @@ failure. It uses `opd_kl_coef=1`, `opd_dagger_top_k=2`, and
 `opd_dagger_coef=1` unless explicitly overridden, with distinct coefficients
 encoded in the W&B run name.
 
+After 03a passes, collect the missing operator evidence with the dedicated
+profile arm:
+
+```bash
+HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
+  OPD/optimize/03p-rkld-topk-rest-profile
+```
+
+`03p` uses Miles' existing `TrainProfiler` with `record_shapes`, stacks,
+flops, and `profile_memory=True`. The default run has eight rollout steps: the
+profiler waits for one step, warms up for one, then records three complete
+post-warmup `train_overall` steps (`start=2`, `end=5`). This is deliberately
+bounded; profiling all 50 decision steps would create large traces and could
+change queueing or memory behavior.
+
+The environment flag `MILES_PROFILE_OPD_DAGGER=1` activates ranges that are
+absent from normal runs:
+
+- `operator_forward|rows=...|vlocal=...|k=...` and `operator_backward`;
+- local full-vocabulary and Rest-vocabulary LSE scans;
+- distributed full/Rest LSE, each containing MAX + SUM TP collectives;
+- the selected-candidate TP SUM.
+
+When the flag is absent, the phase symbols alias the original functions at
+module import and the forward/backward decorators return the original callables;
+normal 03b-03d runs do not execute profiler ranges or no-op context managers.
+
+Raw per-rank traces are written under
+`${OPD_PROFILE_DIR:-$HF_CACHE_DIR/opd_profiles/<run-name>}`. Summarize every
+profiled step with the companion tool in this folder:
+
+```bash
+python scripts/experiments/OPD/optimize/summarize_03p_trace.py \
+  /data/shared/opd_profiles/03p-rkld1-top2-rest1-profile \
+  --strict
+```
+
+The generated `03p-step-profile.csv` contains one row per trainer rank and CPU
+`ProfilerStep`. CPU `user_annotation` ranges define logical steps, call counts,
+shapes, and wall time; Kineto's duplicate `gpu_user_annotation` ranges are
+reported separately and never added to CPU wall time. The CSV also contains
+response rows, local vocabulary/K, full/Rest local-scan time, three TP-reduction
+scope times, marker-derived expected collective count, independently observed
+top-level `c10d::allreduce_` counts, GPU-annotation time, NCCL-kernel
+counts/times, whole-step NCCL time, and step/operator CUDA allocated/reserved
+peaks and deltas.
+
+`--strict` checks that every forward call has all CPU phase contracts, a
+backward, memory samples, and independently observed c10d all-reduces in the
+exact per-scope pattern: two inside full TP LSE, two inside Rest TP LSE, and one
+inside selected-candidate TP SUM. Phase markers alone cannot satisfy strict
+mode; a trace with five expected markers and zero observed c10d calls fails.
+
+Archive the raw rank traces, the CSV, commit SHA, run name, profile window, and
+normal 03a/03d W&B links together. Interpret synchronous latency from the slowest
+rank as well as rank spread; report each active step before any aggregate. The
+operator memory peak is total process memory observed during its range, while
+the delta is only a workspace proxy because the CUDA allocator may reuse cached
+blocks. NCCL kernels are timestamp-attributed to the three labeled collective
+scopes and can under-count asynchronous work; they remain diagnostic and are
+not the strict-mode source of truth. Retain raw traces whenever kernel counts
+differ from the one-per-call c10d model.
+
+Historical correction for job 25278: the original summarizer emitted 48 rows
+instead of the expected 8 ranks x 3 CPU steps = 24 because it treated each CPU
+and GPU annotation as a separate logical range. The published 4.9% Stable-TP
+share and 6x Rest/full scan ratio therefore combine incompatible clocks and are
+withdrawn. A reviewer recomputation of rank-0 CPU ranges gives approximately
+14.36 s / 468.87 s = 3.1%. The raw traces are not stored in this repository, so
+the corrected tool must regenerate the CSV before reporting a cross-rank share,
+scan ratio, or collective conclusion from that historical run.
+
+Use this evidence to choose the next systems change:
+
+1. If per-sample TP scope count/time is material, pack micro-batch response rows
+   first (`5B_m -> 5`) while preserving sample offsets and the reducer.
+2. If TP launch/wait time remains material after packing, fuse MAX/SUM payloads
+   (`5 -> 2`).
+3. If local full/Rest scans dominate instead, optimize chunking/kernel work;
+   do not change collectives based only on end-to-end step time.
+4. If operator memory delta or last-rank peak is limiting, sweep row chunk size
+   in a separate profile arm before changing the mathematical objective.
+
+The profiler itself adds synchronization, stack collection, and trace I/O, so
+neither its step time nor its memory peak is an A/B result. Keep `03b`-`03d`
+unprofiled; compare their normal end-to-end step time separately.
+
 Only after 03a passes, launch the same-commit 50-step arms:
 
 ```bash
@@ -324,11 +425,39 @@ HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
   OPD/optimize/03d-rkld-topk-rest-gate
 ```
 
-Use first-10 versus last-10 windows for sampled reverse KL, coarse KL, explicit
-CE, Rest CE, total loss, gradient norm, request counts, retries, and end-to-end
-step time. Jobs 24374 and 25137 remain historical controls; they are not
-substitutes for these current-commit arms. Fully async and staleness remain out
-of G5 until the synchronous composition is stable.
+The 03 decision rule is fixed before launch. For any lower-is-better metric
+`m`, define `I_m(run) = mean_first10(m) - mean_last10(m)`. After 03c finishes,
+use the same-recipe rerun pair 03c versus historical job 25137 to define a
+metric-specific empirical noise floor: the absolute difference between their
+matching window statistics. This N=1 rerun gap is a practical threshold, not a
+confidence interval or a claim of statistical significance. `rollout_seed=42`
+fixes prompt shuffling, but this recipe does not enable deterministic SGLang
+inference, so completion sampling remains stochastic across runs.
+
+Advance 03d only when all of the following hold:
+
+1. It completes 50/50 rollout steps with 64 teacher and zero student-rescore
+   requests per step, zero retry/protocol/alignment failures, finite loss and
+   gradient series, and nonzero RKLD-PG and DAgger branches.
+2. Sampled-RKLD improvement satisfies
+   `I_rkld(03d) >= I_rkld(03b) - epsilon_rkld`.
+3. The last-10 mean of `opd_dagger/rest_mass_abs_error` in 03d is no larger
+   than 03c plus its rerun noise floor. Track the associated
+   `teacher_rest_mass` and `student_rest_mass`; Rest CE falling by itself does
+   not pass this guard.
+4. The last-10 mean of `opd_dagger/explicit_ce` in 03d is no larger than 03c
+   plus its rerun noise floor. Apply the same no-material-regression guard to
+   `opd_dagger/coarse_kl`.
+
+Also report Rest CE, total loss, gradient norm, request counts, retries, and
+normal end-to-end step time. Total loss is an integrity signal, not a
+cross-objective efficacy comparison, because the hybrid sums two terms. Jobs
+24374 and 25137 remain historical references rather than substitutes for the
+same-commit controls; 25137 is used only to calibrate the pure-DAgger rerun
+floor. If any hard guard misses by more than that floor, do not advance from a
+single run: classify the result as inconclusive/regressed and rerun or retune.
+Fully async and staleness remain out of G5 until the synchronous composition is
+stable.
 
 ## 00 characterization outcome
 

@@ -1,7 +1,9 @@
 # Adapt from https://github.com/OpenRLHF/OpenRLHF/blob/10c733694ed9fbb78a0a2ff6a05efc7401584d46/openrlhf/models/utils.py
 # and https://github.com/OpenRLHF/OpenRLHF/blob/10c733694ed9fbb78a0a2ff6a05efc7401584d46/openrlhf/trainer/ppo_utils/experience_maker.py
 
+import os
 from argparse import Namespace
+from functools import wraps
 from pathlib import Path
 
 import torch
@@ -13,6 +15,29 @@ from miles.backends.training_utils.parallel import get_parallel_state
 
 _LOG_RATIO_EXP_CLAMP = 20.0
 _TOPK_REST_DEFAULT_ROW_CHUNK_SIZE = 128
+_PROFILE_OPD_DAGGER = os.environ.get("MILES_PROFILE_OPD_DAGGER", "0") == "1"
+
+
+def _profile_opd_dagger_phase(name: str):
+    """Add a profiler range only in the dedicated OPD profiling process."""
+
+    def decorate(func):
+        if not _PROFILE_OPD_DAGGER:
+            return func
+
+        @wraps(func)
+        def wrapped(*args, **kwargs):
+            profile_name = name
+            if name.endswith("operator_forward") and len(args) >= 3:
+                logits = args[1]
+                teacher_token_ids = args[2]
+                profile_name = f"{name}|rows={logits.size(0)}|vlocal={logits.size(-1)}|k={teacher_token_ids.size(-1)}"
+            with torch.profiler.record_function(profile_name):
+                return func(*args, **kwargs)
+
+        return wrapped
+
+    return decorate
 
 
 def _safe_clamp_log_ratio(log_ratio: torch.Tensor) -> torch.Tensor:
@@ -458,10 +483,18 @@ def _local_rest_logsumexp(
     return torch.cat(chunks, dim=0)
 
 
+_profiled_full_local_lse = _profile_opd_dagger_phase("opd_dagger/stable_tp/full_local_lse")(_local_full_logsumexp)
+_profiled_full_tp_lse = _profile_opd_dagger_phase("opd_dagger/stable_tp/full_tp_lse")(_global_logsumexp_from_local_lse)
+_profiled_rest_local_lse = _profile_opd_dagger_phase("opd_dagger/stable_tp/rest_local_lse")(_local_rest_logsumexp)
+_profiled_rest_tp_lse = _profile_opd_dagger_phase("opd_dagger/stable_tp/rest_tp_lse")(_global_logsumexp_from_local_lse)
+_profiled_selected_tp_sum = _profile_opd_dagger_phase("opd_dagger/stable_tp/selected_tp_sum")(_all_reduce_if_needed)
+
+
 class _VocabParallelTopKRestCrossEntropy(torch.autograd.Function):
     """Stable Top-K + Rest CE over existing tensor-parallel vocabulary shards."""
 
     @staticmethod
+    @_profile_opd_dagger_phase("opd_dagger/stable_tp/operator_forward")
     def forward(
         ctx,
         logits: torch.Tensor,
@@ -476,15 +509,15 @@ class _VocabParallelTopKRestCrossEntropy(torch.autograd.Function):
         local_vocab_start, local_valid_size, _ = _local_valid_vocab_size(logits, process_group, vocab_size)
         accumulation_dtype = torch.float64 if logits.dtype == torch.float64 else torch.float32
 
-        local_full_lse = _local_full_logsumexp(
+        local_full_lse = _profiled_full_local_lse(
             logits,
             local_valid_size=local_valid_size,
             row_chunk_size=row_chunk_size,
             accumulation_dtype=accumulation_dtype,
         )
-        log_z = _global_logsumexp_from_local_lse(local_full_lse, process_group)
+        log_z = _profiled_full_tp_lse(local_full_lse, process_group)
 
-        local_rest_lse = _local_rest_logsumexp(
+        local_rest_lse = _profiled_rest_local_lse(
             logits,
             teacher_token_ids,
             candidate_mask,
@@ -493,7 +526,7 @@ class _VocabParallelTopKRestCrossEntropy(torch.autograd.Function):
             row_chunk_size=row_chunk_size,
             accumulation_dtype=accumulation_dtype,
         )
-        log_z_rest = _global_logsumexp_from_local_lse(local_rest_lse, process_group)
+        log_z_rest = _profiled_rest_tp_lse(local_rest_lse, process_group)
 
         local_ids = teacher_token_ids - local_vocab_start
         owner_mask = candidate_mask & (local_ids >= 0) & (local_ids < local_valid_size)
@@ -504,7 +537,7 @@ class _VocabParallelTopKRestCrossEntropy(torch.autograd.Function):
             teacher_probs * selected_logits,
             selected_logits.new_zeros(()),
         ).sum(dim=-1)
-        weighted_selected_logits = _all_reduce_if_needed(local_weighted_selected_logits, process_group)
+        weighted_selected_logits = _profiled_selected_tp_sum(local_weighted_selected_logits, process_group)
 
         rest_exists = candidate_mask.sum(dim=-1) < vocab_size
         # Candidate coverage is structural. If the candidates span the real
@@ -567,6 +600,7 @@ class _VocabParallelTopKRestCrossEntropy(torch.autograd.Function):
         )
 
     @staticmethod
+    @_profile_opd_dagger_phase("opd_dagger/stable_tp/operator_backward")
     def backward(
         ctx,
         grad_per_token_loss: torch.Tensor,
