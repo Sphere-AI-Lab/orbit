@@ -17,4 +17,4 @@ export OPD_NUM_ROLLOUT=${OPD_NUM_ROLLOUT:-5}
 export WANDB_RUN_NAME=${WANDB_RUN_NAME:-t-top2-legacy}
 
 # shellcheck disable=SC1091
-source "$SCRIPT_DIR/../math_qwen3_32b_8b_3nodes_legacy_teacher/qwen3-8B.sh"
+source "$SCRIPT_DIR/../archive/math_qwen3_32b_8b_3nodes_legacy_teacher/qwen3-8B.sh"

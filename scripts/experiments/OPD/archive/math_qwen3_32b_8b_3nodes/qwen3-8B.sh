@@ -1,21 +1,7 @@
 #!/bin/bash
 #
-# OPD/math_qwen3_32b_8b_3nodes_legacy_teacher/qwen3-8B — historical
-# reproduction recipe for the current Miles teacher-top-k path on dapo-math,
-# Qwen3-8B student <- Qwen3-32B SGLang teacher, 3 dedicated nodes.
-#
-# IMPORTANT: this freezes the legacy behavior before the Top-K DAgger rebuild.
-# Current Miles does not yet backpropagate a [T,K]
-# trainer-side loss. With only-teacher + teacher_p it instead:
-#   1. gets native per-position top-k IDs/logprobs from teacher SGLang;
-#   2. unions those IDs across the response and asks student SGLang to rescore;
-#   3. normalizes teacher weights inside that support;
-#   4. reduces K candidates to one detached scalar per position and injects it
-#      through sampled-token PPO/GRPO advantage.
-# Job 24749 attempted to measure this chain but died at step 0 when the student
-# rescore crashed a decode-concurrent SGLang scheduler. It produced no valid
-# before-distribution or training curve. The recipe is retained only to
-# reproduce that legacy failure while 01 replaces the rescore path.
+# OPD/archive/math_qwen3_32b_8b_3nodes/qwen3-8B — archived OPD baseline on dapo-math,
+# Qwen3-8B student <- Qwen3-32B SGLang teacher, 3 dedicated nodes:
 #
 #   node 1 (head):   teacher — whole node, SGLang TP=8 on GPUs 0-7.
 #                    MILES_RAY_HEAD_NUM_GPUS=0 keeps Ray from scheduling any
@@ -30,33 +16,30 @@
 # The teacher URL uses the head node's routable IP (NOT 127.0.0.1): the
 # RolloutManager that runs the OPD reward fn lives on a worker node here.
 #
-# Scoring policy:
+# Scoring policy (vs the archived sglang_teacher_baseline recipe):
 #   - timeout kept explicit (600s; the implicit aiohttp 300s killed 23787)
 #   - retries 0 — fail fast; with a whole-node teacher a failure means
 #     something real, not queue pressure
-#   - persistent HTTP session enabled by default (already validated separately)
+#   - persistent HTTP session enabled by default; set
+#     OPD_SCORING_PERSISTENT_SESSION=0 for the one-session-per-request A/B arm
 #   - NO in-flight cap (0 = disabled): a TP=8 whole-node teacher absorbs the
 #     full 64-request burst and sglang's continuous batching does the
 #     queueing. Set OPD_SCORING_MAX_INFLIGHT (e.g. 8) if scoring-tail
 #     timeouts ever reappear.
-#   - only-teacher keeps rollout generation clean, but every sample performs
-#     one teacher top-k request followed by one student arbitrary-ID rescore.
 #
-# The default remains a 5-step cap so an upstream SGLang-fix reproduction is
-# bounded. Do not increase OPD_NUM_ROLLOUT for performance characterization on
-# the current stack. No --save is used, so nothing is checkpointed.
+# QUICK-CHECK config otherwise: same data/optimizer/GRPO hyperparameters as
+# the archived sglang_teacher_baseline, no --save (nothing checkpointed).
 #
 # The teacher model is owner-managed (not auto-downloaded by submit.sh):
 #   hf download Qwen/Qwen3-32B --local-dir /data/shared/models/Qwen3-32B
 #
 # Submit:
-#   HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
-#     OPD/math_qwen3_32b_8b_3nodes_legacy_teacher/qwen3-8B
+#   HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh OPD/archive/math_qwen3_32b_8b_3nodes/qwen3-8B
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}
+MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}
 RECIPE_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
 
 # ---------------------------------------------------------------------------
@@ -131,20 +114,36 @@ export ENVPACK_SERVER_WAIT_TIMEOUT=${ENVPACK_SERVER_WAIT_TIMEOUT:-1800}
 # shellcheck disable=SC1090
 source "$MILES_REPO/scripts/models/qwen3-8B.sh"
 
-# Freeze one explicit legacy baseline. OPD_TOP_K remains overridable for later
-# K sweeps, but 0 is rejected because it would silently run sampled-token OPD.
-OPD_TOP_K=${OPD_TOP_K:-2}
-OPD_NUM_ROLLOUT=${OPD_NUM_ROLLOUT:-5}
-if (( OPD_TOP_K <= 0 )); then
-   echo "OPD_TOP_K must be positive for the legacy teacher-top-k baseline" >&2
+# Training-layout overrides are used by the numbered OPD parallel smokes. The
+# canonical recipe remains TP=2, PP=1, hence DP=4 on the 8-GPU actor node.
+TRAIN_TP_SIZE=${TRAIN_TP_SIZE:-2}
+TRAIN_PP_SIZE=${TRAIN_PP_SIZE:-1}
+if (( TRAIN_TP_SIZE <= 0 || TRAIN_PP_SIZE <= 0 )); then
+   echo "TRAIN_TP_SIZE and TRAIN_PP_SIZE must be positive" >&2
    exit 2
 fi
+if (( 8 % (TRAIN_TP_SIZE * TRAIN_PP_SIZE) != 0 )); then
+   echo "Actor world size 8 must be divisible by TRAIN_TP_SIZE * TRAIN_PP_SIZE" >&2
+   exit 2
+fi
+
+# Sampled-token OPD by default (see GRPO_ARGS); the generated run name carries
+# every optional DAgger arm plus sampled top-k and transport mode.
+OPD_TOP_K=${OPD_TOP_K:-0}
+OPD_KL_COEF=${OPD_KL_COEF:-1.0}
+OPD_DAGGER_TOP_K=${OPD_DAGGER_TOP_K:-0}
+OPD_DAGGER_COEF=${OPD_DAGGER_COEF:-0}
+OPD_DAGGER_LOSS=${OPD_DAGGER_LOSS:-explicit_cross_entropy}
 case "${OPD_SCORING_PERSISTENT_SESSION:-1}" in
    1|true) OPD_SCORING_PERSISTENT_SESSION=1 ;;
    0|false) OPD_SCORING_PERSISTENT_SESSION=0 ;;
    *) echo "OPD_SCORING_PERSISTENT_SESSION must be 0/1 or false/true" >&2; exit 2 ;;
 esac
-RUN_NAME=${WANDB_RUN_NAME:-t-top2-legacy}
+DAGGER_RUN_SUFFIX=""
+if [[ "$OPD_DAGGER_TOP_K" != "0" ]]; then
+   DAGGER_RUN_SUFFIX="-dagger-topk${OPD_DAGGER_TOP_K}-${OPD_DAGGER_LOSS}-coef${OPD_DAGGER_COEF}"
+fi
+RUN_NAME=${WANDB_RUN_NAME:-math-opd-qwen3-8B-sglang-t32B-3nodes-topk${OPD_TOP_K}${DAGGER_RUN_SUFFIX}-persistent${OPD_SCORING_PERSISTENT_SESSION}}
 
 CKPT_ARGS=(
    --hf-checkpoint  "$HF_MODEL_DIR"
@@ -156,7 +155,8 @@ ROLLOUT_ARGS=(
    --input-key     prompt
    --apply-chat-template
    --rollout-shuffle
-   --num-rollout   "$OPD_NUM_ROLLOUT"
+   # OPD_NUM_ROLLOUT: short cluster smokes (e.g. 5) without editing the recipe.
+   --num-rollout   "${OPD_NUM_ROLLOUT:-300}"
    --rollout-batch-size      16
    --n-samples-per-prompt    4
    --rollout-max-response-len 16384
@@ -165,8 +165,9 @@ ROLLOUT_ARGS=(
    --balance-data
 )
 
-# The reward fn performs the legacy teacher top-k + student rescore chain. The
-# post-process hook collapses the K candidates to one per-position scalar.
+# The OPD reward fn queries the teacher once per sample. Sampled mode retains
+# response-token log-probs; DAgger mode additionally retains native [T,K]
+# targets from the same response.
 RM_ARGS=(
    --custom-rm-path miles.rollout.on_policy_distillation.reward_func
    --custom-reward-post-process-path miles.rollout.on_policy_distillation.post_process_rewards
@@ -174,9 +175,8 @@ RM_ARGS=(
 )
 
 PERF_ARGS=(
-   --tensor-model-parallel-size 2
-   --sequence-parallel
-   --pipeline-model-parallel-size 1
+   --tensor-model-parallel-size "$TRAIN_TP_SIZE"
+   --pipeline-model-parallel-size "$TRAIN_PP_SIZE"
    --context-parallel-size 1
    --expert-model-parallel-size 1
    --expert-tensor-parallel-size 1
@@ -186,33 +186,44 @@ PERF_ARGS=(
    --use-dynamic-batch-size
    --max-tokens-per-gpu 16384
 )
+if (( TRAIN_TP_SIZE > 1 )); then
+   PERF_ARGS+=(--sequence-parallel)
+fi
 
 GRPO_ARGS=(
    --advantage-estimator grpo
 
    --use-opd
    --opd-type sglang
-   --opd-kl-coef 1.0
-   # only-teacher avoids student top-k extraction during rollout. The current
-   # implementation still constructs a response-wide teacher-ID union and
-   # sends it to student SGLang, producing the N x U rescore response whose
-   # decode-concurrent failure was captured by job 24749.
+   --opd-kl-coef "$OPD_KL_COEF"
+   # 0 = sampled-token OPD: rollout decodes at full speed (top-k>0 costs ~3x
+   # decode on per-token top-logprob extraction) and teacher scoring is a
+   # compact prefill-only request. top-k>0 (Rethinking-OPD) grows the scoring
+   # payload O(len x union of per-position ids): top-k 16 dies at step 0
+   # (jobs 23771/23779); top-k 2 survived 99 steps, then one 16.5k-token
+   # sample's 1827-id union blew the 600s scoring timeout (job 23851).
    --opd-log-prob-top-k "$OPD_TOP_K"
-   --opd-top-k-strategy only-teacher
-   --opd-reward-weight-mode teacher_p
    # Scoring policy for the dedicated-teacher layout (see header): explicit
    # timeout, fail-fast, no in-flight cap (0 = disabled).
    --opd-scoring-timeout "${OPD_SCORING_TIMEOUT:-600}"
    --opd-scoring-max-inflight "${OPD_SCORING_MAX_INFLIGHT:-0}"
    --opd-scoring-retries "${OPD_SCORING_RETRIES:-0}"
 
-   # Pure legacy top-k-scalar objective: no task reward, reference KL, entropy,
-   # or advantage normalization. This preserves the failed operator for bounded
-   # reproduction; it is not the future DAgger loss.
+   # Pure distillation objective: no task/reward KL, reference-loss KL, entropy
+   # bonus, or advantage normalization. OPD_KL_COEF and OPD_DAGGER_COEF select
+   # the sampled RKLD-PG and direct DAgger contributions independently.
    --kl-coef 0
    --kl-loss-coef 0
    --entropy-coef 0
 )
+
+if [[ "$OPD_DAGGER_TOP_K" != "0" ]]; then
+   GRPO_ARGS+=(
+      --opd-dagger-top-k "$OPD_DAGGER_TOP_K"
+      --opd-dagger-coef "$OPD_DAGGER_COEF"
+      --opd-dagger-loss "$OPD_DAGGER_LOSS"
+   )
+fi
 
 if [[ "$OPD_SCORING_PERSISTENT_SESSION" == "0" ]]; then
    GRPO_ARGS+=(--no-opd-scoring-persistent-session)

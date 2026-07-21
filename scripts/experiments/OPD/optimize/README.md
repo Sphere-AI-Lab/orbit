@@ -237,16 +237,18 @@ acceptance checklist:
 | Multimodal/agentic alignment | Multi-turn observation rows are masked. Prompt-only media expansion preserves response targets; response-side media expansion is not hardened and will fail the response-length guard. |
 | Shared tokenizer/vocabulary | The loss enforces IDs inside the student vocabulary. Semantic tokenizer equality is a recipe/deployment contract, not yet verified from the remote teacher endpoint; the Qwen3-32B/8B recipe assumes the shared Qwen3 vocabulary. |
 | FSDP | Not supported: its micro-batch key path is not wired. |
-| `RKLD-PG + lambda * DAgger` hybrid | Composition regression and 03a-03d recipes are implemented; server fast tests, the five-step smoke, and matched 50-step arms remain unrun. The 02 scripts intentionally isolate pure DAgger with sampled RKLD coefficient zero. |
+| `RKLD-PG + lambda * DAgger` hybrid | Composition regression passed; job 25267 passed the five-step smoke, and jobs 25279-25281 completed the matched 50-step arms. Equal coefficients passed integrity, Rest-mass, and explicit-CE guards but missed sampled-RKLD preservation by 4.7x its floor and coarse KL by 1.3x, so G5 is held for a coefficient sweep. |
 
 One systems caveat is separate from mathematical correctness: the current loss
 invokes the Stable TP primitive once per response sample. That is five TP
 reductions per sample (full MAX/SUM, Rest MAX/SUM, selected SUM), with total
 payload `Theta(T)` but latency proportional to the number of samples in the
 micro-batch. The duplicate CPU/GPU protocol checks also synchronize per sample.
-The completed 02a-02d build did not export dedicated loss time or peak memory,
-so those metrics remain prerequisites before considering a packed row-index
-interface; this is not a reason to change the objective.
+The completed 02a-02d build did not export dedicated loss time or peak memory.
+Hybrid profile job 25278 captured the required ranges, but its original summary
+mixed overlapping CPU and GPU annotations. The repository does not retain the
+raw traces needed to regenerate corrected cross-rank time and memory evidence,
+so that run cannot prioritize a packed row-index or collective-fusion change.
 
 “CP/packing parity” therefore remains incomplete in the strict PDF sense. For
 zigzag CP=2, the missing test must run Stable-TP over the CP-local response rows,
@@ -325,8 +327,8 @@ failure. It uses `opd_kl_coef=1`, `opd_dagger_top_k=2`, and
 `opd_dagger_coef=1` unless explicitly overridden, with distinct coefficients
 encoded in the W&B run name.
 
-After 03a passes, collect the missing operator evidence with the dedicated
-profile arm:
+After reproducing the 03a smoke, reproduce the operator evidence with the
+dedicated profile arm:
 
 ```bash
 HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
@@ -397,7 +399,7 @@ withdrawn. A reviewer recomputation of rank-0 CPU ranges gives approximately
 the corrected tool must regenerate the CSV before reporting a cross-rank share,
 scan ratio, or collective conclusion from that historical run.
 
-Use this evidence to choose the next systems change:
+The predeclared decision tree was:
 
 1. If per-sample TP scope count/time is material, pack micro-batch response rows
    first (`5B_m -> 5`) while preserving sample offsets and the reducer.
@@ -412,7 +414,15 @@ The profiler itself adds synchronization, stack collection, and trace I/O, so
 neither its step time nor its memory peak is an A/B result. Keep `03b`-`03d`
 unprofiled; compare their normal end-to-end step time separately.
 
-Only after 03a passes, launch the same-commit 50-step arms:
+Job 25278 recorded three active steps on all eight trainer ranks, but the
+original CSV counted paired CPU and GPU annotations as separate logical rows.
+The resulting 4.9% parent share, 6.0x Rest/full scan ratio, and collective
+priority conclusion are withdrawn. A rank-0 CPU-only spot check is roughly
+3.1%, but it is not a cross-rank result. Rerun `03p` and summarize the retained
+raw traces with the corrected tool before choosing row packing, collective
+fusion, local-scan work, or no operator change.
+
+After 03a passed, the same-commit 50-step arms were launched with:
 
 ```bash
 HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
@@ -425,16 +435,16 @@ HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
   OPD/optimize/03d-rkld-topk-rest-gate
 ```
 
-The 03 decision rule is fixed before launch. For any lower-is-better metric
-`m`, define `I_m(run) = mean_first10(m) - mean_last10(m)`. After 03c finishes,
-use the same-recipe rerun pair 03c versus historical job 25137 to define a
+The 03 decision rule was fixed before launch. For any lower-is-better metric
+`m`, define `I_m(run) = mean_first10(m) - mean_last10(m)`. After 03c finished,
+the same-recipe rerun pair 03c versus historical job 25137 defined a
 metric-specific empirical noise floor: the absolute difference between their
 matching window statistics. This N=1 rerun gap is a practical threshold, not a
 confidence interval or a claim of statistical significance. `rollout_seed=42`
 fixes prompt shuffling, but this recipe does not enable deterministic SGLang
 inference, so completion sampling remains stochastic across runs.
 
-Advance 03d only when all of the following hold:
+The predeclared rule advanced 03d only when all of the following held:
 
 1. It completes 50/50 rollout steps with 64 teacher and zero student-rescore
    requests per step, zero retry/protocol/alignment failures, finite loss and
@@ -458,6 +468,16 @@ floor. If any hard guard misses by more than that floor, do not advance from a
 single run: classify the result as inconclusive/regressed and rerun or retune.
 Fully async and staleness remain out of G5 until the synchronous composition is
 stable.
+
+Jobs 25279, 25280, and 25281 all completed 50/50 with 3,200 teacher and zero
+student-rescore requests, zero retries, and finite branches. The hybrid retained
+sampled-RKLD improvement (`I=0.01284`) but missed the required `0.01531` by
+`0.00247` (4.7x the empirical floor). Its last-10 Rest-mass error (`0.03403`)
+and explicit CE (`0.31903`) beat the DAgger-only control within their guards;
+coarse KL (`0.06914`) exceeded its `0.06747` bound by `0.00167` (1.3x floor).
+Per the predeclared rule, G5 is held. Keep `beta_RKLD=1` and test lower DAgger
+coefficients, starting with `lambda_DAgger` in `{0.25, 0.5}`, before fully async or
+checkpointed quality evaluation.
 
 ## 00 characterization outcome
 
@@ -499,5 +519,8 @@ evidence under the 01 gates.
 ## Numbering rule
 
 Each treatment inherits the same Qwen3-8B student, Qwen3-32B TP=8 teacher,
-3-node placement, data, batch size, optimizer, response limit, and task reward
-of zero. A script should change only the mechanism named in its filename.
+3-node placement, data, batch size, optimizer, response limit, and optimization
+reward of zero. The active base recipe additionally logs Deepscaler correctness
+as `rollout/raw_reward`; this observed score is not copied into `rewards` and
+does not enter advantages. A script should change only the mechanism named in
+its filename.

@@ -401,6 +401,37 @@ def test_fully_async_worker_closes_transport_on_its_owner_loop(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_observed_task_reward_uses_builtin_rm_without_mutating_training_args(monkeypatch):
+    training_args = Namespace(
+        opd_log_task_reward=True,
+        custom_rm_path="miles.rollout.on_policy_distillation.reward_func",
+        rm_type="deepscaler",
+    )
+    sample = Sample(response="answer", label="42", metadata={"dataset": "math", "rm_type": "remote_rm"})
+    call = {}
+
+    async def fake_async_rm(args, received_sample):
+        call.update(args=args, sample=received_sample)
+        return 1
+
+    monkeypatch.setattr("miles.rollout.rm_hub.async_rm", fake_async_rm)
+
+    await opd._record_observed_task_reward(training_args, sample)
+
+    assert call["args"] is not training_args
+    assert call["args"].custom_rm_path is None
+    assert call["args"].rm_type == "deepscaler"
+    assert call["sample"] is not sample
+    assert call["sample"].metadata == {"dataset": "math"}
+    assert training_args.custom_rm_path == "miles.rollout.on_policy_distillation.reward_func"
+    assert sample.metadata == {
+        "dataset": "math",
+        "rm_type": "remote_rm",
+        opd.OPD_TASK_REWARD_METADATA_KEY: 1.0,
+    }
+
+
+@pytest.mark.asyncio
 async def test_reward_func_records_scoring_telemetry(monkeypatch):
     response = {"meta_info": {"input_token_logprobs": [None, [-0.5, 11], [-0.25, 12]]}}
     telemetry = {
@@ -511,8 +542,14 @@ def _sampled_scoring_response(token_ids: list[int]) -> dict:
     }
 
 
-def _sampled_opd_args() -> Namespace:
-    return Namespace(opd_log_prob_top_k=0, reward_key=None)
+def _sampled_opd_args(**overrides) -> Namespace:
+    values = {
+        "opd_log_prob_top_k": 0,
+        "opd_log_task_reward": False,
+        "reward_key": None,
+    }
+    values.update(overrides)
+    return Namespace(**values)
 
 
 def test_sampled_token_post_process_extracts_same_values_from_full_and_response_windows():
@@ -530,6 +567,21 @@ def test_sampled_token_post_process_extracts_same_values_from_full_and_response_
     assert rewards == [0.0, 0.0]
     assert full_window_sample.teacher_log_probs.tolist() == pytest.approx([-0.2, -0.3])
     assert response_window_sample.teacher_log_probs.tolist() == pytest.approx([-0.2, -0.3])
+
+
+def test_observed_task_reward_is_raw_telemetry_but_optimization_reward_stays_zero():
+    sample = Sample(tokens=[10, 11, 12], response_length=2)
+    sample.reward = {"meta_info": {"input_token_logprobs": [None, [-0.2, 11], [-0.3, 12]]}}
+    sample.metadata[opd.OPD_TASK_REWARD_METADATA_KEY] = 1.0
+
+    raw_rewards, rewards = opd.post_process_rewards(
+        _sampled_opd_args(opd_log_task_reward=True),
+        [sample],
+    )
+
+    assert raw_rewards == [1.0]
+    assert rewards == [0.0]
+    assert sample.teacher_log_probs.tolist() == pytest.approx([-0.2, -0.3])
 
 
 def test_sampled_token_post_process_rejects_token_alignment_mismatch():

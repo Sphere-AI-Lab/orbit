@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import logging
 import math
 import time
@@ -26,6 +27,7 @@ TEACHER_ON_STUDENT_STRATEGIES = {"only-student", "union", "xor"}
 STUDENT_ON_TEACHER_STRATEGIES = {"only-teacher", "union", "xor"}
 
 OPD_SCORING_TELEMETRY_KEY = "opd_scoring_telemetry"
+OPD_TASK_REWARD_METADATA_KEY = "raw_reward"
 _TEACHER_TOPK_MASS_TOLERANCE = 1e-5
 
 
@@ -837,7 +839,41 @@ def _compute_topk_reverse_kl(
     return torch.tensor(reverse_kls, dtype=torch.float32)
 
 
+async def _record_observed_task_reward(args: Namespace, sample: Sample) -> None:
+    """Score task correctness without allowing it to enter OPD advantages."""
+    if not getattr(args, "opd_log_task_reward", False):
+        return
+
+    task_rm_args = copy.copy(args)
+    task_rm_args.custom_rm_path = None
+
+    # The observation contract is the configured built-in --rm-type. Dataset
+    # metadata may select another RM for ordinary training, including remote_rm;
+    # do not let that override redirect this monitoring call to OPD's teacher URL.
+    task_rm_sample = copy.copy(sample)
+    task_rm_metadata = dict(sample.metadata) if isinstance(sample.metadata, dict) else {}
+    task_rm_metadata.pop("rm_type", None)
+    task_rm_sample.metadata = task_rm_metadata
+
+    # Import lazily because rm_hub loads this module through the custom-RM path.
+    from miles.rollout.rm_hub import async_rm
+
+    task_reward = await async_rm(task_rm_args, task_rm_sample)
+    try:
+        task_reward = float(task_reward)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"OPD observed task reward must be scalar, got {task_reward!r}.") from exc
+    if not math.isfinite(task_reward):
+        raise ValueError(f"OPD observed task reward must be finite, got {task_reward}.")
+
+    metadata = dict(sample.metadata or {})
+    metadata[OPD_TASK_REWARD_METADATA_KEY] = task_reward
+    sample.metadata = metadata
+
+
 async def reward_func(args: Namespace, sample: Sample, **kwargs: Any) -> dict[str, Any]:
+    await _record_observed_task_reward(args, sample)
+
     dagger_top_k = _get_opd_dagger_top_k(args)
     if dagger_top_k > 0:
         result = await _scoring_post(
@@ -928,12 +964,24 @@ def post_process_rewards(args: Namespace, samples: list[Sample], **kwargs: Any) 
     ``--opd-dagger-top-k>0`` independently retains sampled teacher log-probs
     plus native teacher ``[T,K]`` IDs/log-probs/valid-mask from one request.
     Legacy ``--opd-log-prob-top-k>0`` remains the rollout-side scalar path.
+
+    With ``--opd-log-task-reward``, ``raw_reward`` is the observed task score,
+    while the optimization ``rewards`` returned here remain zero. This keeps
+    task correctness visible in W&B without changing OPD advantages.
     """
-    raw_rewards = [sample.get_reward_value(args) for sample in samples]
+    teacher_rewards = [sample.get_reward_value(args) for sample in samples]
+    if getattr(args, "opd_log_task_reward", False):
+        raw_rewards = []
+        for sample in samples:
+            if OPD_TASK_REWARD_METADATA_KEY not in (sample.metadata or {}):
+                raise ValueError("OPD task-reward logging is enabled, but a sample has no observed task reward.")
+            raw_rewards.append(float(sample.metadata[OPD_TASK_REWARD_METADATA_KEY]))
+    else:
+        raw_rewards = [0.0] * len(samples)
 
     dagger_top_k = _get_opd_dagger_top_k(args)
     if dagger_top_k > 0:
-        for sample, reward in zip(samples, raw_rewards, strict=True):
+        for sample, reward in zip(samples, teacher_rewards, strict=True):
             teacher_response = reward["teacher"]
             sample.teacher_log_probs = _teacher_sampled_log_probs(teacher_response, sample)
             token_ids, log_probs, valid_mask = _teacher_topk_targets(
@@ -947,12 +995,12 @@ def post_process_rewards(args: Namespace, samples: list[Sample], **kwargs: Any) 
             sample.teacher_topk_valid_mask = valid_mask
             sample.opd_reverse_kl = None
         scalar_rewards = [0.0] * len(samples)
-        return scalar_rewards, scalar_rewards
+        return raw_rewards, scalar_rewards
 
     top_k = _get_opd_top_k(args)
     if top_k > 0:
         strategy = _get_top_k_strategy(args)
-        for sample, reward in zip(samples, raw_rewards, strict=True):
+        for sample, reward in zip(samples, teacher_rewards, strict=True):
             _validate_scoring_token_alignment(reward["teacher"], sample, source="teacher")
             if strategy in STUDENT_ON_TEACHER_STRATEGIES:
                 _validate_scoring_token_alignment(
@@ -962,19 +1010,18 @@ def post_process_rewards(args: Namespace, samples: list[Sample], **kwargs: Any) 
                 )
             sample.opd_reverse_kl = _compute_topk_reverse_kl(args, sample, reward)
         scalar_rewards = [0.0] * len(samples)
-        return scalar_rewards, scalar_rewards
+        return raw_rewards, scalar_rewards
 
     teacher_log_probs = [
-        _teacher_sampled_log_probs(reward, sample) for reward, sample in zip(raw_rewards, samples, strict=True)
+        _teacher_sampled_log_probs(reward, sample) for reward, sample in zip(teacher_rewards, samples, strict=True)
     ]
 
     for sample, t_log_probs in zip(samples, teacher_log_probs, strict=True):
         sample.teacher_log_probs = t_log_probs
 
-    # Return scalar rewards for GRPO/PPO advantage estimator.
-    # For pure on-policy distillation, we use 0.0 as the task reward.
-    # The learning signal comes entirely from the OPD KL penalty.
-    # If you have task rewards, you can add them here.
+    # GRPO/PPO consumes only this optimization reward. Keep it zero even when
+    # raw_rewards above contains an observed task score for W&B telemetry.
+    # The learning signal therefore comes entirely from the OPD objectives.
     scalar_rewards = [0.0] * len(samples)
 
-    return scalar_rewards, scalar_rewards
+    return raw_rewards, scalar_rewards

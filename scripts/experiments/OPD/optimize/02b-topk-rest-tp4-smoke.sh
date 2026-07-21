@@ -16,4 +16,4 @@ export TRAIN_PP_SIZE=1
 export WANDB_RUN_NAME=${WANDB_RUN_NAME:-02b-top${OPD_DAGGER_TOP_K}-rest-c${OPD_DAGGER_COEF}-tp4-smoke}
 
 # shellcheck disable=SC1091
-source "$SCRIPT_DIR/../math_qwen3_32b_8b_3nodes/qwen3-8B.sh"
+source "$SCRIPT_DIR/../math_3nodes/qwen3-8B.sh"

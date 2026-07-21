@@ -20,7 +20,7 @@ export WANDB_RUN_NAME=${WANDB_RUN_NAME:-03p-rkld${OPD_KL_COEF}-top${OPD_DAGGER_T
 export MILES_PROFILE_OPD_DAGGER=1
 
 # shellcheck disable=SC1091
-source "$SCRIPT_DIR/../math_qwen3_32b_8b_3nodes/qwen3-8B.sh"
+source "$SCRIPT_DIR/../math_3nodes/qwen3-8B.sh"
 
 PROFILE_STEP_START=${OPD_PROFILE_STEP_START:-2}
 PROFILE_STEP_END=${OPD_PROFILE_STEP_END:-5}

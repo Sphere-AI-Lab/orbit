@@ -1,27 +1,28 @@
 # On-Policy Distillation (OPD) Recipes
 
-The active baseline is `math_qwen3_32b_8b_3nodes/`: Qwen3-8B student,
+The active baseline is `math_3nodes/`: Qwen3-8B student,
 Qwen3-32B SGLang teacher, and one dedicated node each for the teacher, actor,
 and rollout workers. It runs pure sampled-token distillation by default:
-`--opd-kl-coef 1.0`, task reward 0, reward/loss KL 0, entropy 0, and no
-`--normalize-advantages`.
+`--opd-kl-coef 1.0`, optimization reward 0, reward/loss KL 0, entropy 0, and
+no `--normalize-advantages`. Deepscaler also scores every training response,
+but that score is telemetry only: W&B receives it as `rollout/raw_reward`,
+while `rollout/rewards` stays zero and therefore cannot enter advantages. This
+contract is supported only by the canonical SGLang OPD reward/post-process
+hooks. The observed scorer always uses the configured built-in `--rm-type` and
+ignores per-sample `metadata.rm_type` overrides; Megatron OPD rejects the flag.
 
 ```text
-math_qwen3_32b_8b_3nodes/   Active 3-node baseline. Whole-node TP=8 teacher
-                            on the head node, 8-GPU Megatron actor, and 8-GPU
-                            SGLang rollout worker. Also contains the persistent
-                            HTTP treatment described below.
-math_qwen3_32b_8b_3nodes_legacy_teacher/
-                            Frozen reproduction recipe for the legacy
-                            `only-teacher + teacher_p` top-k scalar path. Job
-                            24749 showed that its student-rescore leg crashes
-                            decode-concurrent SGLang v0.5.13 engines at step 0.
+math_3nodes/                Active 3-node baseline. Whole-node TP=8 teacher on
+                            the head node, 8-GPU Megatron actor, and 8-GPU
+                            SGLang rollout worker. Logs training-set math
+                            correctness without optimizing it.
 optimize/                   Numbered teacher-top-k controls and treatments.
                             `00-t-top2-legacy.sh` records the failed legacy
                             characterization; 01+ scripts are added only after
                             their DAgger code paths are runnable.
-archive/                    Historical 1-node smoke recipes; not active
-                            baselines or current validation targets.
+archive/                    Historical 1-node smokes, the former canonical
+                            3-node recipe and HTTP A/B wrapper, and the frozen
+                            legacy teacher-top-k reproduction recipe.
 ```
 
 The active recipe defaults `OPD_TOP_K=0`. This is sampled-token OPD: teacher
@@ -37,13 +38,15 @@ why the legacy top-k recipe is retained for audit/reproduction, not as a
 performance baseline.
 
 The recipe is a quick-check configuration and intentionally omits checkpoint
-saving. W&B uses entity `M3TRL`, project `OPD`.
+saving and held-out eval. `--opd-log-task-reward --rm-type deepscaler` uses
+the labels already present in DAPO-Math-17K; it adds no extra rollout and no
+teacher/student model request. W&B uses entity `M3TRL`, project `OPD`.
 
 Launch (on the slinky cluster, use `HF_CACHE_DIR=/data/shared`; the default
 `/data/shared/hf_cache` is read-only):
 
 ```bash
-HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh OPD/math_qwen3_32b_8b_3nodes/qwen3-8B
+HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh OPD/math_3nodes/qwen3-8B
 ```
 
 ## Legacy teacher-top-k characterization result
@@ -87,9 +90,10 @@ HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
 
 It disables sampled RKLD contribution, keeps the native teacher `K=2` targets,
 and adds only the raw explicit candidate term in the trainer. Direct-loss
-metrics use an independent `opd_dagger/*` W&B section on `train/step`; generic
-sampled KL diagnostics remain under `rollout/kl/*`, and scoring transport stays
-under `opd_scoring/*`. The run completed 50/50 with 3,200 teacher and zero
+metrics use an independent `opd_dagger/*` W&B section on `train/step`;
+policy/reference sampled KL diagnostics remain under `rollout/kl/*`, sampled
+student/teacher OPD diagnostics use `rollout/opd_kl/*`, and scoring transport
+stays under `opd_scoring/*`. The run completed 50/50 with 3,200 teacher and zero
 student-rescore requests, finite direct CE, no protocol failures, and no
 detectable end-to-end step-time regression versus the sampled-token control.
 Milestone 02 is implemented locally; run the `optimize/02a` through `02d`
@@ -97,7 +101,7 @@ validation sequence before composing it with RKLD-PG. No 100-step extension is
 required for the G2 gate. The optimize README is also the normative reference
 for Stable TP `expm1`/clamp semantics and the remaining PDF parity boundaries.
 
-## Persistent HTTP transport experiment
+## Archived persistent HTTP transport experiment
 
 The control run `origin-topk0-response-http` has already completed. The new
 recipe preserves its `top_k=0` setup and the response-window/T+1 scoring change
@@ -105,10 +109,10 @@ from `b88d7cf`; it only changes the aiohttp `ClientSession` lifecycle.
 
 ```bash
 HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
-  OPD/math_qwen3_32b_8b_3nodes/persistent-topk0-response-http
+  OPD/archive/math_qwen3_32b_8b_3nodes/persistent-topk0-response-http
 ```
 
-The new W&B run name is `persistent-topk0-response-http2`; compare it with the
+The treatment W&B run name is `persistent-topk0-response-http2`; compare it with the
 existing `origin-topk0-response-http` run. First verify that the treatment
 reports a high `opd_scoring/client_session_reuse_rate`; then compare
 `opd_scoring/http_s`, `opd_scoring/e2e_latency_s`, overall rollout time, and

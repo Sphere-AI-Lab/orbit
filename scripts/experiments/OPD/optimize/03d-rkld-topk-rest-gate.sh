@@ -16,4 +16,4 @@ export TRAIN_PP_SIZE=1
 export WANDB_RUN_NAME=${WANDB_RUN_NAME:-03d-rkld${OPD_KL_COEF}-top${OPD_DAGGER_TOP_K}-rest${OPD_DAGGER_COEF}-gate}
 
 # shellcheck disable=SC1091
-source "$SCRIPT_DIR/../math_qwen3_32b_8b_3nodes/qwen3-8B.sh"
+source "$SCRIPT_DIR/../math_3nodes/qwen3-8B.sh"
