@@ -26,6 +26,7 @@ TEACHER_ON_STUDENT_STRATEGIES = {"only-student", "union", "xor"}
 STUDENT_ON_TEACHER_STRATEGIES = {"only-teacher", "union", "xor"}
 
 OPD_SCORING_TELEMETRY_KEY = "opd_scoring_telemetry"
+_TEACHER_TOPK_MASS_TOLERANCE = 1e-5
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,13 @@ def _get_top_k_strategy(args: Namespace) -> str:
     if strategy not in TOP_K_STRATEGIES:
         raise ValueError(f"Unknown OPD top-k strategy: {strategy}")
     return strategy
+
+
+def _get_opd_dagger_top_k(args: Namespace) -> int:
+    top_k = int(getattr(args, "opd_dagger_top_k", 0) or 0)
+    if top_k < 0:
+        raise ValueError(f"OPD DAgger top-k must be non-negative, got {top_k}.")
+    return top_k
 
 
 def _get_reward_weight_mode(args: Namespace) -> str:
@@ -561,7 +569,103 @@ def _input_logprob_maps(response: dict[str, Any], field: str, response_length: i
 
 def _teacher_sampled_log_probs(response: dict[str, Any], sample: Sample) -> torch.Tensor:
     input_token_logprobs = _validate_scoring_token_alignment(response, sample, source="teacher")
-    return torch.tensor([item[0] for item in input_token_logprobs], dtype=torch.float32)
+    log_probs = []
+    for position, item in enumerate(input_token_logprobs):
+        if item[0] is None:
+            raise ValueError(f"OPD teacher sampled logprob at response position {position} is missing.")
+        log_prob = float(item[0])
+        if not math.isfinite(log_prob):
+            raise ValueError(f"OPD teacher sampled logprob at response position {position} is not finite.")
+        log_probs.append(log_prob)
+    return torch.tensor(log_probs, dtype=torch.float32)
+
+
+def _logsumexp(values: list[float]) -> float:
+    max_value = max(values)
+    return max_value + math.log(math.fsum(math.exp(value - max_value) for value in values))
+
+
+def _teacher_topk_targets(
+    response: dict[str, Any],
+    sample: Sample,
+    top_k: int,
+    vocab_size: int | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Parse native per-position teacher top-k entries without flattening them into a union."""
+    if top_k <= 0:
+        raise ValueError(f"Teacher Top-K DAgger targets require top_k > 0, got {top_k}.")
+
+    _validate_scoring_token_alignment(response, sample, source="teacher")
+    if sample.response_length == 0:
+        return (
+            torch.empty((0, top_k), dtype=torch.long),
+            torch.empty((0, top_k), dtype=torch.float32),
+            torch.empty((0, top_k), dtype=torch.bool),
+        )
+
+    rows = _trim_input_field(response["meta_info"], "input_top_logprobs", sample.response_length)
+    if len(rows) != sample.response_length:
+        raise ValueError(
+            f"OPD teacher top-k position count mismatch: got {len(rows)}, expected {sample.response_length} "
+            f"(sample index={sample.index}, group_index={sample.group_index})."
+        )
+
+    token_id_rows: list[list[int]] = []
+    log_prob_rows: list[list[float]] = []
+    valid_mask_rows: list[list[bool]] = []
+    for position, row in enumerate(rows):
+        if not isinstance(row, (list, tuple)):
+            raise ValueError(f"OPD teacher top-k row {position} is malformed: {row!r}.")
+        entries = [entry for entry in row if entry is not None]
+        if not entries or len(entries) > top_k:
+            raise ValueError(
+                f"OPD teacher top-k width mismatch at response position {position}: "
+                f"got {len(entries)}, expected between 1 and {top_k}."
+            )
+
+        token_ids: list[int] = []
+        log_probs: list[float] = []
+        for rank, entry in enumerate(entries):
+            if not isinstance(entry, (list, tuple)) or len(entry) < 2 or entry[0] is None or entry[1] is None:
+                raise ValueError(
+                    f"OPD teacher top-k entry at response position {position}, rank {rank} is malformed: {entry!r}."
+                )
+            token_id = _top_entry_token_id(entry)
+            log_prob = _top_entry_logprob(entry)
+            if not math.isfinite(log_prob):
+                raise ValueError(
+                    f"OPD teacher top-k logprob at response position {position}, rank {rank} is not finite."
+                )
+            if token_id < 0 or (vocab_size is not None and token_id >= vocab_size):
+                expected_range = f"[0, {vocab_size})" if vocab_size is not None else "non-negative"
+                raise ValueError(
+                    f"OPD teacher top-k token id at response position {position}, rank {rank} "
+                    f"is outside {expected_range}: {token_id}."
+                )
+            token_ids.append(token_id)
+            log_probs.append(log_prob)
+
+        if len(set(token_ids)) != len(token_ids):
+            raise ValueError(f"OPD teacher top-k row {position} contains duplicate token ids: {token_ids}.")
+        log_top_mass = _logsumexp(log_probs)
+        log_mass_limit = math.log1p(_TEACHER_TOPK_MASS_TOLERANCE)
+        if log_top_mass > log_mass_limit:
+            raise ValueError(
+                f"OPD teacher top-k probability mass exceeds 1 at response position {position}: "
+                f"log_mass={log_top_mass:.9g}, tolerance={_TEACHER_TOPK_MASS_TOLERANCE}."
+            )
+        valid_width = len(token_ids)
+        token_ids.extend([0] * (top_k - valid_width))
+        log_probs.extend([-math.inf] * (top_k - valid_width))
+        token_id_rows.append(token_ids)
+        log_prob_rows.append(log_probs)
+        valid_mask_rows.append([True] * valid_width + [False] * (top_k - valid_width))
+
+    return (
+        torch.tensor(token_id_rows, dtype=torch.long),
+        torch.tensor(log_prob_rows, dtype=torch.float32),
+        torch.tensor(valid_mask_rows, dtype=torch.bool),
+    )
 
 
 def _student_top_logprobs(sample: Sample, response_length: int) -> TopLogprobs:
@@ -734,6 +838,22 @@ def _compute_topk_reverse_kl(
 
 
 async def reward_func(args: Namespace, sample: Sample, **kwargs: Any) -> dict[str, Any]:
+    dagger_top_k = _get_opd_dagger_top_k(args)
+    if dagger_top_k > 0:
+        result = await _scoring_post(
+            args,
+            args.rm_url,
+            _score_payload(
+                sample.tokens,
+                response_length=sample.response_length,
+                top_k=dagger_top_k,
+            ),
+            target="teacher",
+            response_length=sample.response_length,
+        )
+        _record_scoring_telemetry(sample, result.telemetry)
+        return {"teacher": result.response}
+
     top_k = _get_opd_top_k(args)
     if top_k == 0:
         result = await _scoring_post(
@@ -802,16 +922,35 @@ def _record_scoring_telemetry(sample: Sample, telemetry: dict[str, Any]) -> None
 def post_process_rewards(args: Namespace, samples: list[Sample], **kwargs: Any) -> tuple[list[float], list[float]]:
     """Extract OPD signals from teacher responses.
 
-    ``--opd-log-prob-top-k=0`` preserves the original sampled-token OPD path:
-    store teacher log-probs and let training compute ``student_logp - teacher_logp``.
+    ``--opd-log-prob-top-k=0`` preserves sampled RKLD-PG: store sampled
+    teacher log-probs and let training compute ``student_logp - teacher_logp``.
 
-    ``--opd-log-prob-top-k>0`` follows the practical recipe from
-    "Rethinking On-Policy Distillation" by forming a top-k token set per
-    response position and storing a precomputed weighted reverse-KL estimate.
+    ``--opd-dagger-top-k>0`` independently retains sampled teacher log-probs
+    plus native teacher ``[T,K]`` IDs/log-probs/valid-mask from one request.
+    Legacy ``--opd-log-prob-top-k>0`` remains the rollout-side scalar path.
     """
     raw_rewards = [sample.get_reward_value(args) for sample in samples]
 
-    if _get_opd_top_k(args) > 0:
+    dagger_top_k = _get_opd_dagger_top_k(args)
+    if dagger_top_k > 0:
+        for sample, reward in zip(samples, raw_rewards, strict=True):
+            teacher_response = reward["teacher"]
+            sample.teacher_log_probs = _teacher_sampled_log_probs(teacher_response, sample)
+            token_ids, log_probs, valid_mask = _teacher_topk_targets(
+                teacher_response,
+                sample,
+                dagger_top_k,
+                vocab_size=getattr(args, "vocab_size", None),
+            )
+            sample.teacher_topk_token_ids = token_ids
+            sample.teacher_topk_log_probs = log_probs
+            sample.teacher_topk_valid_mask = valid_mask
+            sample.opd_reverse_kl = None
+        scalar_rewards = [0.0] * len(samples)
+        return scalar_rewards, scalar_rewards
+
+    top_k = _get_opd_top_k(args)
+    if top_k > 0:
         strategy = _get_top_k_strategy(args)
         for sample, reward in zip(samples, raw_rewards, strict=True):
             _validate_scoring_token_alignment(reward["teacher"], sample, source="teacher")

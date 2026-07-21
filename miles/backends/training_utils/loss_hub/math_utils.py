@@ -273,6 +273,50 @@ def compute_policy_loss(
     return pg_losses, clipfrac
 
 
+def _process_group_rank_and_size(process_group: dist.ProcessGroup | None) -> tuple[int, int]:
+    if process_group is None:
+        return 0, 1
+
+    rank_fn = getattr(process_group, "rank", None)
+    size_fn = getattr(process_group, "size", None)
+    if callable(rank_fn) and callable(size_fn):
+        return int(rank_fn()), int(size_fn())
+    return dist.get_rank(process_group), dist.get_world_size(process_group)
+
+
+def _mask_padded_vocab_logits(
+    logits: torch.Tensor,
+    process_group: dist.ProcessGroup | None,
+    vocab_size: int | None,
+) -> torch.Tensor:
+    """Exclude Megatron's appended dummy vocabulary from a sharded softmax."""
+    if vocab_size is None:
+        return logits
+    if vocab_size <= 0:
+        raise ValueError(f"vocab_size must be positive, got {vocab_size}.")
+    if not torch.is_floating_point(logits) or logits.size(-1) <= 0:
+        raise ValueError(f"Expected floating-point logits with a non-empty vocabulary, got {tuple(logits.shape)}.")
+
+    tp_rank, tp_size = _process_group_rank_and_size(process_group)
+    local_vocab_size = logits.size(-1)
+    padded_vocab_size = local_vocab_size * tp_size
+    if not 0 <= tp_rank < tp_size:
+        raise ValueError(f"Invalid tensor-parallel rank/size: rank={tp_rank}, size={tp_size}.")
+    if vocab_size > padded_vocab_size:
+        raise ValueError(
+            f"Configured vocab_size={vocab_size} exceeds the sharded logits vocabulary "
+            f"({local_vocab_size} x {tp_size} = {padded_vocab_size})."
+        )
+
+    local_vocab_start = tp_rank * local_vocab_size
+    local_valid_size = max(0, min(local_vocab_size, vocab_size - local_vocab_start))
+    if local_valid_size == local_vocab_size:
+        return logits
+
+    padding_mask = torch.arange(local_vocab_size, device=logits.device) >= local_valid_size
+    return logits.masked_fill(padding_mask, torch.finfo(logits.dtype).min)
+
+
 def compute_log_probs(
     logits: torch.Tensor,
     tokens: torch.Tensor,
@@ -285,6 +329,8 @@ def compute_log_probs(
         full_logits = _gather_true_on_policy_full_logits(logits, process_group, vocab_size=vocab_size)
         log_probs = torch.log_softmax(full_logits, dim=-1)
         return log_probs.gather(dim=-1, index=tokens.unsqueeze(-1)).squeeze(-1)
+
+    logits = _mask_padded_vocab_logits(logits, process_group, vocab_size)
 
     # TODO: when megatron is not installed, fall back to naive implementation
     from megatron.core.fusions.fused_cross_entropy import fused_vocab_parallel_cross_entropy

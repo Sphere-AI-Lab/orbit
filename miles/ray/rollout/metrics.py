@@ -127,6 +127,20 @@ def _compute_opd_scoring_metrics(all_samples: list[Sample]) -> dict[str, float |
     if not calls:
         return {}
 
+    # Matrix-shape proxy: native top-k is N*K; arbitrary-ID rescoring is N*U.
+    enriched_calls = []
+    for call in calls:
+        enriched = dict(call)
+        returned_positions = call.get("returned_positions")
+        requested_token_ids = call.get("requested_token_ids")
+        top_k = call.get("top_k")
+        if isinstance(returned_positions, (int, float)):
+            requested_count = requested_token_ids if isinstance(requested_token_ids, (int, float)) else 0
+            top_k_count = top_k if isinstance(top_k, (int, float)) else 0
+            enriched["candidate_logprob_cells"] = returned_positions * (requested_count + top_k_count)
+        enriched_calls.append(enriched)
+    calls = enriched_calls
+
     metrics: dict[str, float | int] = {
         "opd_scoring/sample_count": sample_count,
         "opd_scoring/request_count": len(calls),
@@ -137,7 +151,8 @@ def _compute_opd_scoring_metrics(all_samples: list[Sample]) -> dict[str, float |
         ),
     }
 
-    for target in sorted({str(call.get("target")) for call in calls if call.get("target")}):
+    targets = sorted({str(call.get("target")) for call in calls if call.get("target")})
+    for target in targets:
         metrics[f"opd_scoring/{target}_request_count"] = sum(call.get("target") == target for call in calls)
 
     session_reuse = [
@@ -154,6 +169,7 @@ def _compute_opd_scoring_metrics(all_samples: list[Sample]) -> dict[str, float |
         "input_tokens",
         "response_tokens",
         "requested_token_ids",
+        "candidate_logprob_cells",
         "request_body_bytes",
         "response_body_bytes",
         "returned_positions",
@@ -183,6 +199,8 @@ def _compute_opd_scoring_metrics(all_samples: list[Sample]) -> dict[str, float |
         "body_read_s",
         "json_decode_s",
         "response_body_bytes",
+        "requested_token_ids",
+        "candidate_logprob_cells",
         "input_tokens",
         "returned_positions",
     )
@@ -196,6 +214,33 @@ def _compute_opd_scoring_metrics(all_samples: list[Sample]) -> dict[str, float |
         metrics[f"{prefix}/p50"] = np.percentile(array, 50).item()
         metrics[f"{prefix}/p95"] = np.percentile(array, 95).item()
         metrics[f"{prefix}/max"] = np.max(array).item()
+
+    target_distribution_fields = (
+        "e2e_latency_s",
+        "http_s",
+        "semaphore_wait_s",
+        "body_read_s",
+        "json_decode_s",
+        "request_body_bytes",
+        "response_body_bytes",
+        "input_tokens",
+        "response_tokens",
+        "requested_token_ids",
+        "candidate_logprob_cells",
+        "returned_positions",
+    )
+    for target in targets:
+        target_calls = [call for call in calls if call.get("target") == target]
+        for field in target_distribution_fields:
+            values = [float(call[field]) for call in target_calls if isinstance(call.get(field), (int, float))]
+            if not values:
+                continue
+            array = np.asarray(values, dtype=np.float64)
+            prefix = f"opd_scoring/{target}/{field}"
+            metrics[f"{prefix}/mean"] = np.mean(array).item()
+            metrics[f"{prefix}/p50"] = np.percentile(array, 50).item()
+            metrics[f"{prefix}/p95"] = np.percentile(array, 95).item()
+            metrics[f"{prefix}/max"] = np.max(array).item()
 
     return metrics
 

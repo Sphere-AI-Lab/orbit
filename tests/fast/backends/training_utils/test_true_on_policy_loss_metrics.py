@@ -160,6 +160,56 @@ def test_zero_weighted_entropy_nan_does_not_poison_policy_loss(monkeypatch):
     torch.testing.assert_close(metrics["entropy_loss"], torch.tensor(0.0))
 
 
+def test_policy_loss_adds_explicit_dagger_term_and_keeps_metric_namespace(monkeypatch):
+    args = _make_args(use_rollout_logprobs=False)
+    args.opd_dagger_coef = 2.0
+    args.opd_dagger_loss = "explicit_cross_entropy"
+    batch = _make_batch(
+        old_log_probs=torch.tensor([0.10, 0.20], dtype=torch.float32),
+        rollout_log_probs=torch.tensor([0.10, 0.20], dtype=torch.float32),
+    )
+
+    monkeypatch.setattr(
+        loss_utils,
+        "get_parallel_state",
+        lambda: SimpleNamespace(tp=SimpleNamespace(group=None)),
+    )
+    _patch_single_rank_loss_helpers(monkeypatch)
+    monkeypatch.setattr(
+        loss_utils,
+        "get_log_probs_and_entropy",
+        lambda *args, **kwargs: {"log_probs": [torch.tensor([0.10, 0.20], dtype=torch.float32)]},
+    )
+    monkeypatch.setattr(
+        loss_utils,
+        "compute_policy_loss",
+        lambda ppo_kl, advantages, eps_clip, eps_clip_high: (
+            torch.zeros_like(ppo_kl),
+            torch.zeros_like(ppo_kl),
+        ),
+    )
+
+    def fake_dagger_loss(args, batch, logits, reducer):
+        explicit_ce = logits.sum() * 0 + 0.75
+        return explicit_ce, {
+            "explicit_ce": explicit_ce.detach(),
+            "teacher_topk_mass": explicit_ce.new_tensor(0.9),
+        }
+
+    monkeypatch.setattr(loss_utils, "compute_explicit_dagger_loss", fake_dagger_loss)
+    loss, metrics = loss_utils.policy_loss_function(
+        args,
+        batch,
+        logits=torch.zeros((1, 3, 8), dtype=torch.float32),
+        sum_of_sample_mean=lambda tensor: tensor.float().mean(),
+    )
+
+    torch.testing.assert_close(loss, torch.tensor(1.5))
+    torch.testing.assert_close(metrics["opd_dagger/explicit_ce"], torch.tensor(0.75))
+    torch.testing.assert_close(metrics["opd_dagger/loss"], torch.tensor(1.5))
+    torch.testing.assert_close(metrics["opd_dagger/teacher_topk_mass"], torch.tensor(0.9))
+
+
 def test_zero_weighted_kl_nan_does_not_poison_policy_loss(monkeypatch):
     args = _make_args(use_rollout_logprobs=False)
     args.use_kl_loss = True

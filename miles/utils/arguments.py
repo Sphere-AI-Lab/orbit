@@ -1199,8 +1199,8 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 type=int,
                 default=0,
                 help=(
-                    "Number of top-k tokens to use for the re-think OPD token-level reward. "
-                    "Set to 0 to use sampled-token OPD."
+                    "Number of candidates for the legacy rollout-side top-k scalar path. "
+                    "Keep at 0 for sampled RKLD-PG and for the independent DAgger branch."
                 ),
             )
             parser.add_argument(
@@ -1208,7 +1208,33 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 type=str,
                 choices=["only-student", "only-teacher", "intersection", "union", "xor"],
                 default="only-student",
-                help="Token set strategy for top-k OPD.",
+                help="Token set strategy for the legacy rollout-side top-k scalar path.",
+            )
+            parser.add_argument(
+                "--opd-dagger-top-k",
+                type=int,
+                default=0,
+                help=(
+                    "Number of native teacher top-k targets per response position for the independent "
+                    "train-side DAgger branch. 0 disables DAgger and adds no scoring or training overhead."
+                ),
+            )
+            parser.add_argument(
+                "--opd-dagger-coef",
+                type=float,
+                default=0.0,
+                help="Coefficient for the additive Top-K DAgger loss. Default is 0.0 (disabled).",
+            )
+            parser.add_argument(
+                "--opd-dagger-loss",
+                type=str,
+                choices=["explicit_cross_entropy", "cross_entropy"],
+                default="cross_entropy",
+                help=(
+                    "Train-side objective for native teacher Top-K targets. "
+                    "'explicit_cross_entropy' is the Top-K-only 01 ablation; "
+                    "'cross_entropy' is the complete Top-K + Rest DAgger objective."
+                ),
             )
             parser.add_argument(
                 "--opd-reward-weight-mode",
@@ -2119,6 +2145,53 @@ def _resolve_eval_datasets(args) -> list[EvalDatasetConfig]:
     return eval_datasets
 
 
+def _validate_opd_dagger_args(args) -> None:
+    top_k = int(getattr(args, "opd_dagger_top_k", 0) or 0)
+    coef = float(getattr(args, "opd_dagger_coef", 0.0) or 0.0)
+    loss = getattr(args, "opd_dagger_loss", "cross_entropy")
+
+    if top_k < 0:
+        raise ValueError("--opd-dagger-top-k must be non-negative.")
+    if coef < 0:
+        raise ValueError("--opd-dagger-coef must be non-negative.")
+    if loss not in {"explicit_cross_entropy", "cross_entropy"}:
+        raise ValueError(f"Unsupported --opd-dagger-loss: {loss}")
+    if coef > 0 and top_k == 0:
+        raise ValueError("--opd-dagger-coef > 0 requires --opd-dagger-top-k > 0.")
+    if coef > 0 and loss != "explicit_cross_entropy":
+        raise ValueError(
+            "--opd-dagger-coef > 0 currently requires "
+            "--opd-dagger-loss=explicit_cross_entropy; cross_entropy is reserved for milestone 02."
+        )
+    if top_k == 0:
+        return
+
+    vocab_size = getattr(args, "vocab_size", None)
+    padded_vocab_size = getattr(args, "padded_vocab_size", None)
+    if vocab_size is not None and (vocab_size <= 0 or top_k > vocab_size):
+        raise ValueError(
+            f"--opd-dagger-top-k={top_k} requires a positive vocab_size >= top-k; got vocab_size={vocab_size}."
+        )
+    if vocab_size is not None and padded_vocab_size is not None and padded_vocab_size < vocab_size:
+        raise ValueError(
+            f"padded_vocab_size={padded_vocab_size} cannot be smaller than vocab_size={vocab_size} for OPD DAgger."
+        )
+    if vocab_size is not None and padded_vocab_size is not None and padded_vocab_size > vocab_size:
+        logger.info(
+            "OPD DAgger will exclude %d Megatron dummy vocabulary logits from candidate softmax normalization.",
+            padded_vocab_size - vocab_size,
+        )
+    if not getattr(args, "use_opd", False):
+        raise ValueError("--opd-dagger-top-k > 0 requires --use-opd.")
+    if getattr(args, "opd_type", None) != "sglang":
+        raise ValueError("--opd-dagger-top-k is currently supported only with --opd-type=sglang.")
+    if (getattr(args, "opd_log_prob_top_k", 0) or 0) > 0:
+        raise ValueError(
+            "--opd-dagger-top-k cannot be combined with legacy --opd-log-prob-top-k > 0; "
+            "keep --opd-log-prob-top-k=0 so sampled RKLD remains active."
+        )
+
+
 def miles_validate_args(args):
     args.eval_datasets = _resolve_eval_datasets(args)
 
@@ -2217,6 +2290,7 @@ def miles_validate_args(args):
             )
 
     # Validate on-policy distillation (OPD) arguments
+    _validate_opd_dagger_args(args)
     if args.use_opd:
         if args.opd_type is None:
             raise ValueError("--opd-type must be specified when --use-opd is enabled. Choose 'sglang' or 'megatron'.")

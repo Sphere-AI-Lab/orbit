@@ -7,6 +7,7 @@ from argparse import Namespace
 from types import SimpleNamespace
 
 import pytest
+import torch
 from tests.ci.ci_register import register_cpu_ci
 
 from miles.rollout import on_policy_distillation as opd
@@ -466,6 +467,42 @@ async def test_teacher_topk_reward_func_uses_response_window_for_both_scoring_ca
     assert calls[1][2]["token_ids_logprob"] == [21, 22]
 
 
+@pytest.mark.asyncio
+async def test_dagger_teacher_topk_reward_func_uses_one_teacher_request(monkeypatch):
+    calls = []
+    teacher_response = {
+        "meta_info": {
+            "input_token_logprobs": [None, [-0.3, 11], [-0.4, 12]],
+            "input_top_logprobs": [
+                None,
+                [[-0.1, 21], [-0.2, 22]],
+                [[-0.3, 23], [-0.4, 24]],
+            ],
+        }
+    }
+
+    async def fake_scoring_post(args, url, payload, *, target, response_length):
+        calls.append((target, response_length, payload))
+        return opd._ScoringPostResult(response=teacher_response, telemetry={"target": target})
+
+    monkeypatch.setattr(opd, "_scoring_post", fake_scoring_post)
+    sample = Sample(tokens=[7, 8, 9, 11, 12], response_length=2)
+    args = Namespace(
+        opd_log_prob_top_k=0,
+        opd_dagger_top_k=2,
+        rm_url="http://teacher/generate",
+    )
+
+    reward = await opd.reward_func(args, sample)
+
+    assert reward == {"teacher": teacher_response}
+    assert [target for target, _, _ in calls] == ["teacher"]
+    assert calls[0][1] == sample.response_length
+    assert calls[0][2]["top_logprobs_num"] == 2
+    assert "token_ids_logprob" not in calls[0][2]
+    assert sample.metadata[opd.OPD_SCORING_TELEMETRY_KEY] == [{"target": "teacher"}]
+
+
 def _sampled_scoring_response(token_ids: list[int]) -> dict:
     return {
         "meta_info": {
@@ -512,6 +549,121 @@ def test_sampled_token_post_process_rejects_short_scoring_response():
 
     with pytest.raises(ValueError, match=r"teacher scoring token count mismatch: got 1.*expected 2"):
         opd.post_process_rewards(_sampled_opd_args(), [sample])
+
+
+def test_sampled_token_post_process_rejects_nonfinite_teacher_logprob():
+    sample = Sample(tokens=[10, 11, 12], response_length=2)
+    sample.reward = {
+        "meta_info": {
+            "input_token_logprobs": [None, [-math.inf, 11], [-0.3, 12]],
+        }
+    }
+
+    with pytest.raises(ValueError, match=r"sampled logprob at response position 0 is not finite"):
+        opd.post_process_rewards(_sampled_opd_args(), [sample])
+
+
+def _opd_dagger_args() -> Namespace:
+    return Namespace(
+        opd_log_prob_top_k=0,
+        opd_dagger_top_k=2,
+        vocab_size=64,
+        reward_key=None,
+    )
+
+
+def _opd_dagger_response(top_logprobs: list) -> dict:
+    return {
+        "teacher": {
+            "meta_info": {
+                "input_token_logprobs": [None, [-0.3, 11], [-0.4, 12]],
+                "input_top_logprobs": [None, *top_logprobs],
+            }
+        }
+    }
+
+
+def test_opd_dagger_post_process_preserves_sampled_rkld_and_native_t_by_k_targets():
+    top_log_probs = [
+        [math.log(0.6), math.log(0.4)],
+        [math.log(0.5), math.log(0.2)],
+    ]
+    sample = Sample(tokens=[7, 8, 9, 11, 12], response_length=2)
+    sample.reward = _opd_dagger_response(
+        [
+            [[top_log_probs[0][0], 21], [top_log_probs[0][1], 22]],
+            [[top_log_probs[1][0], 23], [top_log_probs[1][1], 24]],
+        ]
+    )
+
+    raw_rewards, rewards = opd.post_process_rewards(_opd_dagger_args(), [sample])
+
+    assert raw_rewards == rewards == [0.0]
+    torch.testing.assert_close(sample.teacher_log_probs, torch.tensor([-0.3, -0.4], dtype=torch.float32))
+    assert sample.teacher_topk_token_ids.tolist() == [[21, 22], [23, 24]]
+    torch.testing.assert_close(
+        sample.teacher_topk_log_probs,
+        torch.tensor(top_log_probs, dtype=torch.float32),
+    )
+    assert sample.teacher_topk_valid_mask.tolist() == [[True, True], [True, True]]
+    assert sample.opd_reverse_kl is None
+    sample.validate()
+
+
+def test_opd_dagger_post_process_masks_rows_with_fewer_than_k_targets():
+    sample = Sample(tokens=[7, 8, 9, 11, 12], response_length=2)
+    sample.reward = _opd_dagger_response(
+        [
+            [[math.log(0.7), 21]],
+            [[math.log(0.5), 23], [math.log(0.2), 24]],
+        ]
+    )
+
+    opd.post_process_rewards(_opd_dagger_args(), [sample])
+
+    assert sample.teacher_topk_token_ids.tolist() == [[21, 0], [23, 24]]
+    assert sample.teacher_topk_valid_mask.tolist() == [[True, False], [True, True]]
+    assert torch.isneginf(sample.teacher_topk_log_probs[0, 1])
+    sample.validate()
+
+
+def test_opd_dagger_post_process_rejects_duplicate_ids():
+    sample = Sample(tokens=[7, 8, 9, 11, 12], response_length=2)
+    sample.reward = _opd_dagger_response(
+        [
+            [[math.log(0.6), 21], [math.log(0.3), 21]],
+            [[math.log(0.5), 23], [math.log(0.2), 24]],
+        ]
+    )
+
+    with pytest.raises(ValueError, match=r"row 0 contains duplicate token ids"):
+        opd.post_process_rewards(_opd_dagger_args(), [sample])
+
+
+def test_opd_dagger_post_process_rejects_teacher_mass_above_one():
+    sample = Sample(tokens=[7, 8, 9, 11, 12], response_length=2)
+    sample.reward = _opd_dagger_response(
+        [
+            [[math.log(0.8), 21], [math.log(0.4), 22]],
+            [[math.log(0.5), 23], [math.log(0.2), 24]],
+        ]
+    )
+
+    with pytest.raises(ValueError, match=r"probability mass exceeds 1 at response position 0"):
+        opd.post_process_rewards(_opd_dagger_args(), [sample])
+
+
+def test_opd_dagger_post_process_rejects_teacher_id_outside_student_vocab():
+    sample = Sample(tokens=[7, 8, 9, 11, 12], response_length=2)
+    sample.reward = _opd_dagger_response(
+        [
+            [[math.log(0.6), 21], [math.log(0.3), 64]],
+            [[math.log(0.5), 23], [math.log(0.2), 24]],
+        ]
+    )
+
+    with pytest.raises(ValueError, match=r"outside \[0, 64\): 64"):
+        opd.post_process_rewards(_opd_dagger_args(), [sample])
 
 
 def _teacher_payload():

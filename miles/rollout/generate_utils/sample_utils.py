@@ -1,6 +1,8 @@
 from copy import deepcopy
 from dataclasses import fields
 
+import torch
+
 from miles.utils.types import Sample
 
 _OPD_STUDENT_TOP_LOGPROBS_KEY = "opd_student_top_logprobs"
@@ -43,6 +45,55 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
         av = av if av is not None else [0.0] * a.response_length
         bv = bv if bv is not None else [0.0] * b.response_length
         return av + [0.0] * obs_len + bv
+
+    def _merge_teacher_topk_targets():
+        a_ids = a.teacher_topk_token_ids
+        a_log_probs = a.teacher_topk_log_probs
+        a_valid_mask = a.teacher_topk_valid_mask
+        b_ids = b.teacher_topk_token_ids
+        b_log_probs = b.teacher_topk_log_probs
+        b_valid_mask = b.teacher_topk_valid_mask
+        targets = (a_ids, a_log_probs, a_valid_mask, b_ids, b_log_probs, b_valid_mask)
+        if all(value is None for value in targets):
+            return None, None, None
+        assert all(
+            value is not None for value in targets
+        ), "teacher top-k targets must include ids/log-probs/valid-mask on both samples when merging"
+        assert (
+            a_ids.shape[1] == b_ids.shape[1]
+        ), f"teacher top-k width mismatch: a.K={a_ids.shape[1]}, b.K={b_ids.shape[1]}"
+        assert (
+            a_ids.device
+            == b_ids.device
+            == a_log_probs.device
+            == b_log_probs.device
+            == a_valid_mask.device
+            == b_valid_mask.device
+        ), "teacher top-k targets must use the same device across merged turns"
+        assert (
+            a_ids.dtype == b_ids.dtype
+            and a_log_probs.dtype == b_log_probs.dtype
+            and a_valid_mask.dtype == b_valid_mask.dtype
+        ), "teacher top-k targets must use the same dtype across merged turns"
+
+        top_k = a_ids.shape[1]
+        observation_ids = torch.zeros((obs_len, top_k), dtype=a_ids.dtype, device=a_ids.device)
+        observation_log_probs = torch.full(
+            (obs_len, top_k),
+            -torch.inf,
+            dtype=a_log_probs.dtype,
+            device=a_log_probs.device,
+        )
+        observation_valid_mask = torch.zeros(
+            (obs_len, top_k),
+            dtype=torch.bool,
+            device=a_valid_mask.device,
+        )
+        return (
+            torch.cat((a_ids, observation_ids, b_ids), dim=0),
+            torch.cat((a_log_probs, observation_log_probs, b_log_probs), dim=0),
+            torch.cat((a_valid_mask, observation_valid_mask, b_valid_mask), dim=0),
+        )
 
     def _pop_opd_student_top_logprobs(metadata):
         if metadata is None:
@@ -103,6 +154,7 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
             assert a.rollout_indexer_topk.shape[0] <= b.rollout_indexer_topk.shape[0]
         assert a.status == Sample.Status.COMPLETED, f"a.status must be COMPLETED, got {a.status}"
 
+        teacher_topk_token_ids, teacher_topk_log_probs, teacher_topk_valid_mask = _merge_teacher_topk_targets()
         return _create_with_all_fields(
             Sample,
             group_index=_merge_equal_value("group_index"),
@@ -120,6 +172,9 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
             rollout_log_probs=a.rollout_log_probs + [0.0] * obs_len + b.rollout_log_probs,
             teacher_log_probs=_merge_optional_per_token("teacher_log_probs"),
             opd_reverse_kl=_merge_optional_per_token("opd_reverse_kl"),
+            teacher_topk_token_ids=teacher_topk_token_ids,
+            teacher_topk_log_probs=teacher_topk_log_probs,
+            teacher_topk_valid_mask=teacher_topk_valid_mask,
             rollout_routed_experts=b.rollout_routed_experts,
             rollout_indexer_topk=b.rollout_indexer_topk,
             remove_sample=_merge_equal_value("remove_sample"),

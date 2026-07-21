@@ -27,6 +27,7 @@ class TestOpdScoringMetrics:
                             "input_tokens": 100,
                             "response_tokens": 40,
                             "requested_token_ids": 0,
+                            "top_k": 2,
                             "request_body_bytes": 500,
                             "response_body_bytes": 1_000,
                             "returned_positions": 100,
@@ -52,6 +53,7 @@ class TestOpdScoringMetrics:
                             "input_tokens": 200,
                             "response_tokens": 80,
                             "requested_token_ids": 3,
+                            "top_k": 0,
                             "request_body_bytes": None,
                             "response_body_bytes": 3_000,
                             "returned_positions": 200,
@@ -82,6 +84,7 @@ class TestOpdScoringMetrics:
         assert metrics["opd_scoring/input_tokens_total"] == 300
         assert metrics["opd_scoring/response_tokens_total"] == 120
         assert metrics["opd_scoring/requested_token_ids_total"] == 3
+        assert metrics["opd_scoring/candidate_logprob_cells_total"] == 800
         assert metrics["opd_scoring/request_body_bytes_total"] == 500
         assert metrics["opd_scoring/request_body_bytes_coverage"] == 0.5
         assert metrics["opd_scoring/response_body_bytes_total"] == 4_000
@@ -96,6 +99,19 @@ class TestOpdScoringMetrics:
         assert metrics["opd_scoring/e2e_latency_s/p50"] == 2.0
         assert metrics["opd_scoring/e2e_latency_s/p95"] == pytest.approx(2.9)
         assert metrics["opd_scoring/e2e_latency_s/max"] == 3.0
+        assert metrics["opd_scoring/teacher/requested_token_ids/max"] == 0
+        assert metrics["opd_scoring/teacher/candidate_logprob_cells/max"] == 200
+        assert metrics["opd_scoring/teacher/returned_positions/max"] == 100
+        assert metrics["opd_scoring/teacher/response_body_bytes/max"] == 1_000
+        assert metrics["opd_scoring/teacher/e2e_latency_s/p95"] == 1.0
+        assert metrics["opd_scoring/student/requested_token_ids/max"] == 3
+        assert metrics["opd_scoring/student/candidate_logprob_cells/max"] == 600
+        assert metrics["opd_scoring/student/returned_positions/max"] == 200
+        assert metrics["opd_scoring/student/response_tokens/max"] == 80
+        assert metrics["opd_scoring/student/response_body_bytes/max"] == 3_000
+        assert metrics["opd_scoring/student/e2e_latency_s/p95"] == 3.0
+        assert metrics["opd_scoring/student/http_s/max"] == 2.0
+        assert metrics["opd_scoring/student/semaphore_wait_s/max"] == 0.5
 
     def test_wandb_keys_use_a_separate_top_level_section(self, monkeypatch):
         sample = make_samples_grouped(1, 1)[0]

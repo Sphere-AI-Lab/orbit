@@ -49,6 +49,17 @@ def test_slice_log_prob_with_cp_uses_sequence_shards_for_sglang_ulysses(monkeypa
     )
 
 
+def test_slice_response_tensor_with_cp_preserves_candidate_axis(monkeypatch):
+    monkeypatch.setattr(
+        cp_utils, "get_parallel_state", lambda: _parallel_state(cp_size=4, cp_rank=2, cp_comm_type="a2a")
+    )
+    targets = torch.arange(14, dtype=torch.long).view(7, 2)
+
+    sliced = cp_utils.slice_response_tensor_with_cp(targets, total_length=11, response_length=7)
+
+    torch.testing.assert_close(sliced, targets[[1, 2]])
+
+
 def test_regular_cp_still_uses_zigzag_response_slice(monkeypatch):
     monkeypatch.setattr(
         cp_utils, "get_parallel_state", lambda: _parallel_state(cp_size=2, cp_rank=1, cp_comm_type="p2p")

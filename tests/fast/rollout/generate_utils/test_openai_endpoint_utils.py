@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+import torch
 
 from miles.rollout.generate_utils.openai_endpoint_utils import (
     OpenAIEndpointTracer,
@@ -287,6 +288,66 @@ class TestMultiTurnPrefixChain:
         assert merged.teacher_log_probs == [-1.0, -1.1, 0.0, 0.0, -1.2, -1.3]
         assert len(merged.teacher_log_probs) == merged.response_length
         merged.validate()  # the new teacher_log_probs length assertion must hold
+
+    def test_two_turn_merge_propagates_teacher_topk_targets(self):
+        tok = _mock_tokenizer()
+        records = [
+            _make_record(prompt_token_ids=[1, 2, 3], output_token_ids=[10, 11]),
+            _make_record(
+                prompt_token_ids=[1, 2, 3, 10, 11, 20, 21],
+                output_token_ids=[30, 31],
+            ),
+        ]
+        samples = compute_samples_from_openai_records(_ARGS, _make_input_sample(), records, tok)
+        samples[0].teacher_topk_token_ids = torch.tensor([[101, 102], [103, 104]], dtype=torch.long)
+        samples[0].teacher_topk_log_probs = torch.tensor([[-0.1, -0.2], [-0.3, -0.4]])
+        samples[0].teacher_topk_valid_mask = torch.ones((2, 2), dtype=torch.bool)
+        samples[1].teacher_topk_token_ids = torch.tensor([[105, 106], [107, 108]], dtype=torch.long)
+        samples[1].teacher_topk_log_probs = torch.tensor([[-0.5, -0.6], [-0.7, -0.8]])
+        samples[1].teacher_topk_valid_mask = torch.ones((2, 2), dtype=torch.bool)
+
+        merged = merge_samples(samples, tok)
+
+        assert merged.teacher_topk_token_ids.tolist() == [
+            [101, 102],
+            [103, 104],
+            [0, 0],
+            [0, 0],
+            [105, 106],
+            [107, 108],
+        ]
+        torch.testing.assert_close(
+            merged.teacher_topk_log_probs[[0, 1, 4, 5]],
+            torch.tensor([[-0.1, -0.2], [-0.3, -0.4], [-0.5, -0.6], [-0.7, -0.8]]),
+        )
+        assert torch.isneginf(merged.teacher_topk_log_probs[2:4]).all()
+        assert merged.teacher_topk_valid_mask.tolist() == [
+            [True, True],
+            [True, True],
+            [False, False],
+            [False, False],
+            [True, True],
+            [True, True],
+        ]
+        assert merged.teacher_topk_token_ids.shape == (merged.response_length, 2)
+        merged.validate()
+
+    def test_two_turn_merge_rejects_partial_teacher_topk_targets(self):
+        tok = _mock_tokenizer()
+        records = [
+            _make_record(prompt_token_ids=[1, 2, 3], output_token_ids=[10, 11]),
+            _make_record(
+                prompt_token_ids=[1, 2, 3, 10, 11, 20, 21],
+                output_token_ids=[30, 31],
+            ),
+        ]
+        samples = compute_samples_from_openai_records(_ARGS, _make_input_sample(), records, tok)
+        samples[0].teacher_topk_token_ids = torch.tensor([[101, 102], [103, 104]], dtype=torch.long)
+        samples[0].teacher_topk_log_probs = torch.tensor([[-0.1, -0.2], [-0.3, -0.4]])
+        samples[0].teacher_topk_valid_mask = torch.ones((2, 2), dtype=torch.bool)
+
+        with pytest.raises(AssertionError, match="must include ids/log-probs/valid-mask"):
+            merge_samples(samples, tok)
 
     def test_two_turn_merge_propagates_opd_student_top_logprobs_metadata(self):
         """Top-k OPD student top-logprobs are per-token metadata, not equal metadata."""

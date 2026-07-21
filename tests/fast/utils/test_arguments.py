@@ -5,7 +5,11 @@ from unittest.mock import patch
 
 import pytest
 
-from miles.utils.arguments import _maybe_apply_dumper_overrides, get_miles_extra_args_provider
+from miles.utils.arguments import (
+    _maybe_apply_dumper_overrides,
+    _validate_opd_dagger_args,
+    get_miles_extra_args_provider,
+)
 from miles.utils.misc import function_registry
 
 PATH_ARGS = ["--rollout-function-path", "--custom-generate-function-path"]
@@ -141,3 +145,85 @@ def test_recompute_logprobs_via_prefill_flag_is_parsed():
     args = parser.parse_args(["--recompute-logprobs-via-prefill"] + REQUIRED_ARGS)
 
     assert args.recompute_logprobs_via_prefill is True
+
+
+def test_opd_dagger_defaults_are_disabled():
+    parser = argparse.ArgumentParser()
+    get_miles_extra_args_provider()(parser)
+
+    args = parser.parse_args(REQUIRED_ARGS)
+
+    assert args.opd_dagger_top_k == 0
+    assert args.opd_dagger_coef == 0.0
+    assert args.opd_dagger_loss == "cross_entropy"
+
+
+def test_opd_dagger_arguments_are_parsed():
+    parser = argparse.ArgumentParser()
+    get_miles_extra_args_provider()(parser)
+
+    args = parser.parse_args(
+        [
+            "--opd-dagger-top-k",
+            "2",
+            "--opd-dagger-coef",
+            "0.5",
+            "--opd-dagger-loss",
+            "explicit_cross_entropy",
+        ]
+        + REQUIRED_ARGS
+    )
+
+    assert args.opd_dagger_top_k == 2
+    assert args.opd_dagger_coef == 0.5
+    assert args.opd_dagger_loss == "explicit_cross_entropy"
+
+
+def _opd_dagger_args(**overrides) -> SimpleNamespace:
+    values = {
+        "use_opd": True,
+        "opd_type": "sglang",
+        "opd_log_prob_top_k": 0,
+        "opd_dagger_top_k": 2,
+        "opd_dagger_coef": 1.0,
+        "opd_dagger_loss": "explicit_cross_entropy",
+        "vocab_size": 8,
+        "padded_vocab_size": 8,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_opd_dagger_accepts_explicit_teacher_sparse_target_contract():
+    _validate_opd_dagger_args(_opd_dagger_args())
+
+
+def test_opd_dagger_top_k_can_collect_targets_with_zero_loss_coefficient():
+    _validate_opd_dagger_args(_opd_dagger_args(opd_dagger_coef=0.0, opd_dagger_loss="cross_entropy"))
+
+
+def test_opd_dagger_accepts_megatron_padded_vocab_and_reports_masking(caplog):
+    with caplog.at_level("INFO"):
+        _validate_opd_dagger_args(_opd_dagger_args(padded_vocab_size=10))
+
+    assert "exclude 2 Megatron dummy vocabulary logits" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("overrides", "error"),
+    [
+        ({"opd_dagger_top_k": -1}, r"must be non-negative"),
+        ({"opd_dagger_coef": -1.0}, r"must be non-negative"),
+        ({"opd_dagger_loss": "invalid"}, r"Unsupported --opd-dagger-loss"),
+        ({"opd_dagger_loss": "cross_entropy"}, r"currently requires.*explicit_cross_entropy"),
+        ({"opd_dagger_top_k": 0}, r"requires --opd-dagger-top-k > 0"),
+        ({"opd_dagger_top_k": 9}, r"positive vocab_size >= top-k"),
+        ({"padded_vocab_size": 7}, r"cannot be smaller than vocab_size"),
+        ({"use_opd": False}, r"requires --use-opd"),
+        ({"opd_type": "megatron"}, r"only with --opd-type=sglang"),
+        ({"opd_log_prob_top_k": 2}, r"cannot be combined with legacy"),
+    ],
+)
+def test_opd_dagger_rejects_incompatible_configuration(overrides, error):
+    with pytest.raises(ValueError, match=error):
+        _validate_opd_dagger_args(_opd_dagger_args(**overrides))

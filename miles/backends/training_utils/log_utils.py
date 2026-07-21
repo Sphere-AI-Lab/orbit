@@ -1,6 +1,6 @@
 import logging
 from argparse import Namespace
-from math import isclose
+from math import isclose, isfinite
 
 import numpy as np
 import psutil
@@ -13,11 +13,49 @@ from miles.utils.metric_utils import compute_pass_rate, compute_rollout_step
 from miles.utils.types import RolloutBatch
 
 from ...utils import tracking_utils
-from .cp_utils import get_sum_of_sample_mean
+from .cp_utils import get_local_response_loss_masks, get_sum_of_sample_mean
 from .data import DataIterator
 from .parallel import get_parallel_state
 
 logger = logging.getLogger(__name__)
+
+
+def _reduce_gathered_log_dicts(
+    metric_name: str,
+    gathered_log_dict: list[dict[str, float]],
+    reduction_by_key: dict[str, str] | None = None,
+) -> dict[str, float]:
+    """Reduce already-gathered scalar metrics without adding another collective."""
+    if not gathered_log_dict:
+        return {}
+
+    reduction_by_key = reduction_by_key or {}
+    expected_keys = gathered_log_dict[0].keys()
+    for rank, rank_metrics in enumerate(gathered_log_dict[1:], start=1):
+        if rank_metrics.keys() != expected_keys:
+            raise ValueError(
+                f"Metric keys differ across ranks: rank 0={list(expected_keys)}, "
+                f"rank {rank}={list(rank_metrics.keys())}."
+            )
+
+    reduced = {}
+    for key in expected_keys:
+        values = [rank_metrics[key] for rank_metrics in gathered_log_dict]
+        reduction = reduction_by_key.get(key, "mean")
+        if reduction == "mean":
+            value = sum(values) / len(values)
+        elif reduction in {"min", "max"}:
+            # Empty CP response shards contribute +/-inf sentinels. Ignore them
+            # while reducing extrema; a normal training batch has at least one
+            # finite response value globally.
+            finite_values = [value for value in values if isfinite(float(value))]
+            if not finite_values:
+                continue
+            value = min(finite_values) if reduction == "min" else max(finite_values)
+        else:
+            raise ValueError(f"Unsupported metric reduction {reduction!r} for {key!r}.")
+        reduced[f"{metric_name}/{key}"] = value
+    return reduced
 
 
 def gather_log_data(
@@ -25,13 +63,16 @@ def gather_log_data(
     args: Namespace,
     rollout_id: int,
     log_dict: dict[str, float],
+    reduction_by_key: dict[str, str] | None = None,
 ) -> dict[str, float] | None:
     """
     Gather per-rank metrics, reduce by mean on the DP source rank, and log.
 
-    Expects `log_dict` to contain plain scalars. The DP source rank prints and
-    optionally logs to WandB/TensorBoard with a step derived from `rollout_id` and
-    batch sizes. Returns the reduced dict on the DP source rank; returns None on others.
+    Expects `log_dict` to contain plain scalars. Metrics default to a mean across
+    ranks; `reduction_by_key` may select min/max for distribution extrema. The DP
+    source rank prints and optionally logs to WandB/TensorBoard with a step derived
+    from `rollout_id` and batch sizes. Returns the reduced dict on the DP source
+    rank; returns None on others.
     """
 
     parallel_state = get_parallel_state()
@@ -48,9 +89,7 @@ def gather_log_data(
     )
 
     if pg.rank == 0:
-        reduced_log_dict = {
-            f"{metric_name}/{key}": sum([d[key] for d in gathered_log_dict]) / dp_size for key in log_dict
-        }
+        reduced_log_dict = _reduce_gathered_log_dicts(metric_name, gathered_log_dict, reduction_by_key)
         logger.info(f"{metric_name} {rollout_id}: {reduced_log_dict}")
 
         # Calculate step once to avoid duplication
@@ -93,6 +132,140 @@ def aggregate_forward_results(
     return rollout_data
 
 
+def _get_rollout_kl_log_ratio_groups(
+    args: Namespace,
+    rollout_data: RolloutBatch,
+) -> dict[str, list[torch.Tensor]]:
+    """Return sampled log-ratios grouped by their two distributions.
+
+    ``kl`` retains the existing policy/reference namespace used by ordinary RL
+    and follows the same trainer-vs-rollout policy-logprob selection as advantage
+    computation. ``opd_kl`` is reserved for student/teacher sampled OPD. Keeping
+    these groups separate prevents two different targets from sharing one W&B
+    time series.
+    """
+    groups: dict[str, list[torch.Tensor]] = {}
+    policy_log_probs_key = "rollout_log_probs" if getattr(args, "use_rollout_logprobs", False) else "log_probs"
+    policy_log_probs = rollout_data.get(policy_log_probs_key)
+    ref_log_probs = rollout_data.get("ref_log_probs")
+    if policy_log_probs and ref_log_probs:
+        if len(policy_log_probs) != len(ref_log_probs):
+            raise ValueError(
+                f"Rollout KL batch mismatch: {policy_log_probs_key}={len(policy_log_probs)}, "
+                f"ref_log_probs={len(ref_log_probs)}."
+            )
+
+        policy_ref_log_ratios = []
+        for sample_index, (policy, reference) in enumerate(zip(policy_log_probs, ref_log_probs, strict=True)):
+            policy = torch.as_tensor(policy)
+            reference = torch.as_tensor(reference, device=policy.device)
+            if policy.shape != reference.shape:
+                raise ValueError(
+                    f"Rollout KL shape mismatch at sample {sample_index}: "
+                    f"{policy_log_probs_key}={tuple(policy.shape)}, reference={tuple(reference.shape)}."
+                )
+            policy_ref_log_ratios.append(policy - reference)
+        groups["kl"] = policy_ref_log_ratios
+
+    sampled_opd_log_ratios = rollout_data.get("opd_reverse_kl")
+    if sampled_opd_log_ratios and int(getattr(args, "opd_log_prob_top_k", 0) or 0) == 0:
+        groups["opd_kl"] = sampled_opd_log_ratios
+
+    return groups
+
+
+def _compute_rollout_kl_statistics(
+    args: Namespace,
+    rollout_data: RolloutBatch,
+    cp_size: int,
+) -> tuple[dict[str, float], dict[str, str]]:
+    """Compute sampled KL estimators over active response tokens.
+
+    For d = log q(a|h) - log p(a|h), sampled under q:
+      k1 = d
+      k2 = 0.5 * d^2
+      k3 = exp(-d) - 1 + d
+
+    Policy/ref log-probs supply q=policy and p=reference under ``kl/*``.
+    Sampled OPD supplies q=student and p=teacher under ``opd_kl/*``. Both are
+    emitted when both pairs are available. Legacy top-k detached scalars are
+    excluded from the sampled OPD group.
+    """
+    log_ratio_groups = _get_rollout_kl_log_ratio_groups(args, rollout_data)
+    if not log_ratio_groups:
+        return {}, {}
+
+    response_lengths = rollout_data["response_lengths"]
+    total_lengths = rollout_data["total_lengths"]
+    loss_masks = rollout_data["loss_masks"]
+    max_seq_lens = rollout_data.get("max_seq_lens", None)
+    local_masks = get_local_response_loss_masks(
+        total_lengths,
+        response_lengths,
+        loss_masks,
+        args.qkv_format,
+        max_seq_lens,
+    )
+    sample_mean = get_sum_of_sample_mean(
+        total_lengths,
+        response_lengths,
+        loss_masks,
+        qkv_format=args.qkv_format,
+        max_seq_lens=max_seq_lens,
+    )
+    metrics: dict[str, float] = {}
+    reduction_by_key: dict[str, str] = {}
+    for metric_group, log_ratios in log_ratio_groups.items():
+        if len(log_ratios) != len(local_masks):
+            raise ValueError(
+                f"Rollout KL metric batch mismatch for {metric_group}: "
+                f"log_ratios={len(log_ratios)}, local_masks={len(local_masks)}."
+            )
+
+        estimator_chunks: dict[str, list[torch.Tensor]] = {"k1": [], "k2": [], "k3": []}
+        bool_masks = []
+        for sample_index, (log_ratio, local_mask) in enumerate(zip(log_ratios, local_masks, strict=True)):
+            d = torch.as_tensor(log_ratio).detach().to(dtype=torch.float64)
+            mask = torch.as_tensor(local_mask, device=d.device, dtype=torch.bool)
+            if d.ndim != 1 or d.shape != mask.shape:
+                raise ValueError(
+                    f"Rollout KL metric shape mismatch for {metric_group} at sample {sample_index}: "
+                    f"log_ratio={tuple(d.shape)}, local_mask={tuple(mask.shape)}."
+                )
+            if not torch.isfinite(d[mask]).all():
+                raise ValueError(
+                    f"Rollout KL metric received a non-finite active {metric_group} log-ratio "
+                    f"at sample {sample_index}."
+                )
+
+            # Mask before exp so observation/sentinel rows cannot create infinities.
+            d = torch.where(mask, d, d.new_zeros(()))
+            estimator_chunks["k1"].append(d)
+            estimator_chunks["k2"].append(0.5 * d.square())
+            estimator_chunks["k3"].append(torch.expm1(-d) + d)
+            bool_masks.append(mask)
+
+        for estimator, chunks in estimator_chunks.items():
+            values = torch.cat(chunks, dim=0)
+            active_values = torch.cat(
+                [chunk[mask] for chunk, mask in zip(chunks, bool_masks, strict=True)],
+                dim=0,
+            )
+            mean = cp_size * sample_mean(values) / len(loss_masks)
+            prefix = f"{metric_group}/{estimator}"
+            metrics[f"{prefix}/mean"] = mean.item()
+            if active_values.numel() == 0:
+                metrics[f"{prefix}/min"] = float("inf")
+                metrics[f"{prefix}/max"] = float("-inf")
+            else:
+                metrics[f"{prefix}/min"] = active_values.min().item()
+                metrics[f"{prefix}/max"] = active_values.max().item()
+            reduction_by_key[f"{prefix}/min"] = "min"
+            reduction_by_key[f"{prefix}/max"] = "max"
+
+    return metrics, reduction_by_key
+
+
 def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatch) -> None:
     """
     Summarize rollout fields and log reduced metrics on PP last stage, TP rank 0.
@@ -120,6 +293,9 @@ def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatc
                 "sample_indices",
                 "rollout_routed_experts",
                 "rollout_indexer_topk",
+                "teacher_topk_token_ids",
+                "teacher_topk_log_probs",
+                "teacher_topk_valid_mask",
                 "max_seq_lens",
                 "dynamic_global_batch_size",
                 "weight_versions",
@@ -172,7 +348,15 @@ def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatc
                 raise ValueError(f"Unsupported type: {type(val)} for key: {key}")
             log_dict[key] = val.item() if isinstance(val, torch.Tensor) else val
 
-        reduced_log_dict = gather_log_data("rollout", args, rollout_id, log_dict)
+        kl_metrics, reduction_by_key = _compute_rollout_kl_statistics(args, rollout_data, cp_size)
+        log_dict.update(kl_metrics)
+        reduced_log_dict = gather_log_data(
+            "rollout",
+            args,
+            rollout_id,
+            log_dict,
+            reduction_by_key=reduction_by_key,
+        )
         if args.ci_test and not args.ci_disable_logprobs_checker and reduced_log_dict is not None:
             if (
                 rollout_id == 0
@@ -442,10 +626,10 @@ def log_train_step(
     accumulated_step_id = rollout_id * num_steps_per_rollout + step_id
     role_tag = "" if role == "actor" else f"{role}-"
 
-    log_dict_out = {
-        f"train/{role_tag}{key}": val.mean().item() if isinstance(val, torch.Tensor) else val
-        for key, val in loss_dict.items()
-    }
+    log_dict_out = {}
+    for key, val in loss_dict.items():
+        output_key = key if key.startswith("opd_dagger/") else f"train/{role_tag}{key}"
+        log_dict_out[output_key] = val.mean().item() if isinstance(val, torch.Tensor) else val
     log_dict_out[f"train/{role_tag}grad_norm"] = float(grad_norm)
 
     if extra_metrics:

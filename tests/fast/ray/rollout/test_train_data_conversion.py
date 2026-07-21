@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 import ray
+import torch
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.fast.ray.rollout.conftest import make_args, make_sample, make_samples_grouped
@@ -112,6 +113,42 @@ class TestConvertSamplesToTrainData:
             custom_reward_post_process_func=None,
         )
         assert out["rollout_log_probs"][0] == [-0.1, -0.2, -0.3, -0.4]
+
+    def test_teacher_topk_targets_passed_through_as_sparse_tensors(self):
+        args = make_args(rewards_normalization=False)
+        sample = make_sample(response_length=2)
+        sample.teacher_topk_token_ids = torch.tensor([[10, 11], [12, 13]], dtype=torch.long)
+        sample.teacher_topk_log_probs = torch.tensor([[-0.1, -0.2], [-0.3, -0.4]], dtype=torch.float32)
+        sample.teacher_topk_valid_mask = torch.ones((2, 2), dtype=torch.bool)
+
+        out = convert_samples_to_train_data(
+            args,
+            [sample],
+            metadata={},
+            custom_convert_samples_to_train_data_func=None,
+            custom_reward_post_process_func=None,
+        )
+
+        torch.testing.assert_close(out["teacher_topk_token_ids"][0], sample.teacher_topk_token_ids)
+        torch.testing.assert_close(out["teacher_topk_log_probs"][0], sample.teacher_topk_log_probs)
+        torch.testing.assert_close(out["teacher_topk_valid_mask"][0], sample.teacher_topk_valid_mask)
+
+    def test_teacher_topk_targets_require_a_complete_batch_contract(self):
+        args = make_args(rewards_normalization=False)
+        first = make_sample(index=0, response_length=2)
+        second = make_sample(index=1, response_length=2)
+        first.teacher_topk_token_ids = torch.tensor([[10, 11], [12, 13]], dtype=torch.long)
+        first.teacher_topk_log_probs = torch.tensor([[-0.1, -0.2], [-0.3, -0.4]], dtype=torch.float32)
+        first.teacher_topk_valid_mask = torch.ones((2, 2), dtype=torch.bool)
+
+        with pytest.raises(AssertionError, match="must all be present on every sample"):
+            convert_samples_to_train_data(
+                args,
+                [first, second],
+                metadata={},
+                custom_convert_samples_to_train_data_func=None,
+                custom_reward_post_process_func=None,
+            )
 
     def test_optional_field_round_number_from_metadata(self):
         args = make_args(rewards_normalization=False)
@@ -431,11 +468,26 @@ class TestSplitTrainDataByDp:
             "sample_indices": [0, 1],
             "rollout_log_probs": [[-0.1], [-0.2]],
             "round_number": [1, 2],
+            "teacher_topk_token_ids": [
+                torch.tensor([[10, 11]], dtype=torch.long),
+                torch.tensor([[12, 13]], dtype=torch.long),
+            ],
+            "teacher_topk_log_probs": [
+                torch.tensor([[-0.1, -0.2]], dtype=torch.float32),
+                torch.tensor([[-0.3, -0.4]], dtype=torch.float32),
+            ],
+            "teacher_topk_valid_mask": [
+                torch.ones((1, 2), dtype=torch.bool),
+                torch.ones((1, 2), dtype=torch.bool),
+            ],
         }
         refs = split_train_data_by_dp(args, data, dp_size=2)
         parts = [ray.get(r.inner) for r in refs]
         assert "rollout_log_probs" in parts[0]
         assert "round_number" in parts[0]
+        assert "teacher_topk_token_ids" in parts[0]
+        assert "teacher_topk_log_probs" in parts[0]
+        assert "teacher_topk_valid_mask" in parts[0]
 
     def test_shared_keys_not_split(self):
         """raw_reward, total_lengths, dynamic_global_batch_size are shared, not split."""

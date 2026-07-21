@@ -28,6 +28,52 @@ def _rollout_logprob_dtype(args: Namespace) -> torch.dtype:
     return torch.float32
 
 
+def _move_opd_dagger_targets_to_device(rollout_data: RolloutBatch, device: torch.device | str) -> None:
+    """Move the detached teacher Top-K DAgger contract without changing its per-sample shape."""
+    keys = (
+        "teacher_topk_token_ids",
+        "teacher_topk_log_probs",
+        "teacher_topk_valid_mask",
+    )
+    present = tuple(rollout_data.get(key) is not None for key in keys)
+    if not any(present):
+        return
+    if not all(present):
+        raise ValueError("OPD DAgger targets require ids, log-probs, and valid-mask together.")
+
+    ids_list = rollout_data["teacher_topk_token_ids"]
+    log_probs_list = rollout_data["teacher_topk_log_probs"]
+    valid_mask_list = rollout_data["teacher_topk_valid_mask"]
+    if not (len(ids_list) == len(log_probs_list) == len(valid_mask_list)):
+        raise ValueError(
+            "OPD DAgger target batch length mismatch: "
+            f"ids={len(ids_list)}, log_probs={len(log_probs_list)}, valid_mask={len(valid_mask_list)}."
+        )
+
+    moved_ids = []
+    moved_log_probs = []
+    moved_valid_masks = []
+    for sample_index, (ids, log_probs, valid_mask) in enumerate(
+        zip(ids_list, log_probs_list, valid_mask_list, strict=True)
+    ):
+        ids = torch.as_tensor(ids, dtype=torch.long, device=device)
+        log_probs = torch.as_tensor(log_probs, dtype=torch.float32, device=device)
+        valid_mask = torch.as_tensor(valid_mask, dtype=torch.bool, device=device)
+        if ids.ndim != 2 or ids.shape != log_probs.shape or ids.shape != valid_mask.shape:
+            raise ValueError(
+                f"OPD DAgger target shape mismatch at sample {sample_index}: "
+                f"ids={tuple(ids.shape)}, log_probs={tuple(log_probs.shape)}, "
+                f"valid_mask={tuple(valid_mask.shape)}."
+            )
+        moved_ids.append(ids)
+        moved_log_probs.append(log_probs)
+        moved_valid_masks.append(valid_mask)
+
+    rollout_data["teacher_topk_token_ids"] = moved_ids
+    rollout_data["teacher_topk_log_probs"] = moved_log_probs
+    rollout_data["teacher_topk_valid_mask"] = moved_valid_masks
+
+
 def get_rollout_data(args: Namespace, rollout_data_ref: Box) -> RolloutBatch:
     parallel_state = get_parallel_state()
     # Fetch data through ray on CPU, not sure if this will be performance bottleneck.
@@ -45,6 +91,10 @@ def get_rollout_data(args: Namespace, rollout_data_ref: Box) -> RolloutBatch:
     rollout_data["loss_masks"] = [
         torch.tensor(t, dtype=torch.int, device=torch.cuda.current_device()) for t in rollout_data["loss_masks"]
     ]
+    _move_opd_dagger_targets_to_device(
+        rollout_data,
+        torch.device("cuda", torch.cuda.current_device()),
+    )
     if "multimodal_train_inputs" in rollout_data:
         # Move multimodal training tensors to GPU in advance
         rollout_data["multimodal_train_inputs"] = [

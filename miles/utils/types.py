@@ -34,6 +34,11 @@ class Sample:
     remove_sample: bool = False
     teacher_log_probs: list[float] | None = None  # Log probabilities from teacher model for OPD
     opd_reverse_kl: list[float] | None = None  # Precomputed per-token OPD reverse-KL estimate
+    # Native per-position sparse targets from the teacher. All three tensors have shape
+    # (response_length, top_k) and stay on CPU while the sample crosses Ray.
+    teacher_topk_token_ids: torch.Tensor | None = None
+    teacher_topk_log_probs: torch.Tensor | None = None
+    teacher_topk_valid_mask: torch.Tensor | None = None
 
     class Status(Enum):
         PENDING = "pending"
@@ -179,6 +184,61 @@ class Sample:
             assert (
                 len(self.opd_reverse_kl) == self.response_length
             ), f"opd_reverse_kl length ({len(self.opd_reverse_kl)}) != response_length ({self.response_length})"
+        topk_presence = (
+            self.teacher_topk_token_ids is not None,
+            self.teacher_topk_log_probs is not None,
+            self.teacher_topk_valid_mask is not None,
+        )
+        assert all(topk_presence) or not any(topk_presence), (
+            "teacher_topk_token_ids, teacher_topk_log_probs, and teacher_topk_valid_mask "
+            "must either all be present or all be None"
+        )
+        if all(topk_presence):
+            assert isinstance(self.teacher_topk_token_ids, torch.Tensor), "teacher_topk_token_ids must be a tensor"
+            assert isinstance(self.teacher_topk_log_probs, torch.Tensor), "teacher_topk_log_probs must be a tensor"
+            assert isinstance(self.teacher_topk_valid_mask, torch.Tensor), "teacher_topk_valid_mask must be a tensor"
+            assert (
+                self.teacher_topk_token_ids.ndim == 2
+            ), f"teacher_topk_token_ids must have shape [T, K], got {tuple(self.teacher_topk_token_ids.shape)}"
+            assert (
+                self.teacher_topk_log_probs.ndim == 2
+            ), f"teacher_topk_log_probs must have shape [T, K], got {tuple(self.teacher_topk_log_probs.shape)}"
+            assert (
+                self.teacher_topk_valid_mask.ndim == 2
+            ), f"teacher_topk_valid_mask must have shape [T, K], got {tuple(self.teacher_topk_valid_mask.shape)}"
+            assert (
+                self.teacher_topk_token_ids.shape
+                == self.teacher_topk_log_probs.shape
+                == self.teacher_topk_valid_mask.shape
+            ), (
+                "teacher top-k tensor shape mismatch: "
+                f"ids={tuple(self.teacher_topk_token_ids.shape)}, "
+                f"log_probs={tuple(self.teacher_topk_log_probs.shape)}, "
+                f"valid_mask={tuple(self.teacher_topk_valid_mask.shape)}"
+            )
+            assert self.teacher_topk_token_ids.shape[0] == self.response_length, (
+                f"teacher top-k response dimension ({self.teacher_topk_token_ids.shape[0]}) "
+                f"!= response_length ({self.response_length})"
+            )
+            assert self.teacher_topk_token_ids.shape[1] > 0, "teacher top-k tensors must have K > 0"
+            assert (
+                self.teacher_topk_token_ids.dtype == torch.long
+            ), f"teacher_topk_token_ids must use torch.long, got {self.teacher_topk_token_ids.dtype}"
+            assert torch.is_floating_point(
+                self.teacher_topk_log_probs
+            ), f"teacher_topk_log_probs must be floating point, got {self.teacher_topk_log_probs.dtype}"
+            assert (
+                self.teacher_topk_valid_mask.dtype == torch.bool
+            ), f"teacher_topk_valid_mask must use torch.bool, got {self.teacher_topk_valid_mask.dtype}"
+
+            valid_log_probs = self.teacher_topk_log_probs[self.teacher_topk_valid_mask]
+            invalid_log_probs = self.teacher_topk_log_probs[~self.teacher_topk_valid_mask]
+            invalid_token_ids = self.teacher_topk_token_ids[~self.teacher_topk_valid_mask]
+            assert torch.isfinite(valid_log_probs).all(), "valid teacher_topk_log_probs must be finite"
+            assert torch.isneginf(
+                invalid_log_probs
+            ).all(), "invalid teacher_topk_log_probs must use -inf sentinel values"
+            assert (invalid_token_ids == 0).all(), "invalid teacher_topk_token_ids must use 0 sentinel values"
         if self.rollout_routed_experts is not None:
             actual = len(self.rollout_routed_experts)
             expect = len(self.tokens) - 1
@@ -203,6 +263,10 @@ class Sample:
             self.teacher_log_probs = self.teacher_log_probs[:-n]
         if self.opd_reverse_kl is not None:
             self.opd_reverse_kl = self.opd_reverse_kl[:-n]
+        if self.teacher_topk_token_ids is not None:
+            self.teacher_topk_token_ids = self.teacher_topk_token_ids[:-n]
+            self.teacher_topk_log_probs = self.teacher_topk_log_probs[:-n]
+            self.teacher_topk_valid_mask = self.teacher_topk_valid_mask[:-n]
         if self.metadata and "opd_student_top_logprobs" in self.metadata:
             self.metadata["opd_student_top_logprobs"] = self.metadata["opd_student_top_logprobs"][:-n]
         if self.loss_mask is not None:
@@ -228,8 +292,13 @@ class Sample:
         self.loss_mask = None
         self.weight_versions = []
         self.rollout_log_probs = None
+        self.teacher_log_probs = None
+        self.opd_reverse_kl = None
         self.rollout_routed_experts = None
         self.rollout_indexer_topk = None
+        self.teacher_topk_token_ids = None
+        self.teacher_topk_log_probs = None
+        self.teacher_topk_valid_mask = None
         self.status = Sample.Status.ABORTED
         self.non_generation_time = 0.0
         self.spec_info = Sample.SpecInfo()

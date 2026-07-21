@@ -88,6 +88,22 @@ def convert_samples_to_train_data(
     if samples[0].opd_reverse_kl is not None:
         train_data["opd_reverse_kl"] = [sample.opd_reverse_kl for sample in samples]
 
+    sparse_target_presence = [
+        (
+            sample.teacher_topk_token_ids is not None,
+            sample.teacher_topk_log_probs is not None,
+            sample.teacher_topk_valid_mask is not None,
+        )
+        for sample in samples
+    ]
+    if any(any(presence) for presence in sparse_target_presence):
+        assert all(
+            all(presence) for presence in sparse_target_presence
+        ), "teacher top-k ids/log-probs/valid-mask must all be present on every sample in a training batch"
+        train_data["teacher_topk_token_ids"] = [sample.teacher_topk_token_ids for sample in samples]
+        train_data["teacher_topk_log_probs"] = [sample.teacher_topk_log_probs for sample in samples]
+        train_data["teacher_topk_valid_mask"] = [sample.teacher_topk_valid_mask for sample in samples]
+
     x = metadata.get("dynamic_global_batch_size")
     assert args.use_dynamic_global_batch_size == (x is not None)
     if x is not None:
@@ -157,6 +173,9 @@ def split_train_data_by_dp(args, data, dp_size):
             "prompt",
             "teacher_log_probs",
             "opd_reverse_kl",
+            "teacher_topk_token_ids",
+            "teacher_topk_log_probs",
+            "teacher_topk_valid_mask",
             "weight_versions",
         ]:
             if key not in data:

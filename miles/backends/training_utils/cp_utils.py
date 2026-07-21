@@ -395,6 +395,40 @@ def allgather_cp_redistribute(
         res[key] = new_values
 
 
+def slice_response_tensor_with_cp(
+    tensor: list | torch.Tensor,
+    total_length: int,
+    response_length: int,
+    qkv_format: str = "thd",
+    max_token_len: int | None = None,
+) -> list | torch.Tensor:
+    """Slice a response-aligned tensor into the local zigzag CP layout.
+
+    The first dimension must be the full response axis. Remaining dimensions
+    are preserved, so this works for both scalar log-probs ``[T]`` and sparse
+    teacher targets ``[T, K]``.
+    """
+    assert len(tensor) == response_length
+
+    parallel_state = get_parallel_state()
+    cp_size = parallel_state.cp.size
+
+    if cp_size == 1:
+        return tensor
+
+    prompt_length = total_length - response_length
+    _, _, logits_offset, _ = get_logits_and_tokens_offset_with_cp(
+        total_length, response_length, qkv_format, max_token_len
+    )
+
+    chunk_1 = tensor[logits_offset[0][0] - (prompt_length - 1) : logits_offset[0][1] - (prompt_length - 1)]
+    chunk_2 = tensor[logits_offset[1][0] - (prompt_length - 1) : logits_offset[1][1] - (prompt_length - 1)]
+
+    if isinstance(tensor, list):
+        return chunk_1 + chunk_2
+    return torch.cat([chunk_1, chunk_2], dim=0)
+
+
 def slice_log_prob_with_cp(
     log_prob: list[float] | torch.Tensor,
     total_length: int,
@@ -402,26 +436,8 @@ def slice_log_prob_with_cp(
     qkv_format: str = "thd",
     max_token_len: int | None = None,
 ) -> list[float] | torch.Tensor:
-    assert len(log_prob) == response_length
-
-    parallel_state = get_parallel_state()
-    cp_size = parallel_state.cp.size
-
-    if cp_size == 1:
-        return log_prob
-
-    prompt_length = total_length - response_length
-    _, _, logits_offset, _ = get_logits_and_tokens_offset_with_cp(
-        total_length, response_length, qkv_format, max_token_len
-    )
-
-    chunk_1 = log_prob[logits_offset[0][0] - (prompt_length - 1) : logits_offset[0][1] - (prompt_length - 1)]
-    chunk_2 = log_prob[logits_offset[1][0] - (prompt_length - 1) : logits_offset[1][1] - (prompt_length - 1)]
-
-    if isinstance(log_prob, list):
-        return chunk_1 + chunk_2
-    else:
-        return torch.cat([chunk_1, chunk_2], dim=0)
+    """Backward-compatible scalar-response wrapper."""
+    return slice_response_tensor_with_cp(log_prob, total_length, response_length, qkv_format, max_token_len)
 
 
 def build_gdn_cp_context(module: nn.Module, cu_seqlens: torch.Tensor, device: torch.device):

@@ -18,6 +18,7 @@ from miles.backends.training_utils.loss_hub.math_utils import (
     compute_opsm_mask,
     compute_policy_loss,
 )
+from miles.backends.training_utils.loss_hub.rkld_dagger import compute_explicit_dagger_loss
 from miles.backends.training_utils.parallel import get_parallel_state
 from miles.utils.misc import load_function
 from miles.utils.types import RolloutBatch
@@ -52,9 +53,9 @@ class LossFunction(Protocol):
             `(loss, metrics)`:
               * `loss`: scalar tensor with grad, un-rescaled (the dispatcher
                 applies Megatron scaling on top).
-              * `metrics`: dict of detached 0-d scalars; surfaced under `train/`
-                in the training log / wandb. Keys per loss type are documented
-                on each implementation.
+              * `metrics`: dict of detached 0-d scalars; normally surfaced under
+                `train/` in the training log / wandb. Explicit top-level metric
+                namespaces such as `opd_dagger/` remain independent sections.
         """
         ...
 
@@ -90,6 +91,7 @@ def policy_loss_function(
         are enabled.
     """
     parallel_state = get_parallel_state()
+    dagger_response_reducer = sum_of_sample_mean
     advantages = torch.cat(batch["advantages"], dim=0)
     old_log_probs = batch["rollout_log_probs"] if args.use_rollout_logprobs else batch["log_probs"]
 
@@ -299,6 +301,25 @@ def policy_loss_function(
         if args.kl_loss_coef != 0:
             loss = loss + args.kl_loss_coef * kl_loss
 
+    dagger_metrics = {}
+    dagger_coef = float(getattr(args, "opd_dagger_coef", 0.0) or 0.0)
+    if dagger_coef > 0:
+        dagger_loss_type = getattr(args, "opd_dagger_loss", "cross_entropy")
+        if dagger_loss_type != "explicit_cross_entropy":
+            raise NotImplementedError(
+                f"--opd-dagger-loss={dagger_loss_type!r} is reserved for Top-K + Rest DAgger; "
+                "milestone 01 currently implements only 'explicit_cross_entropy'."
+            )
+        explicit_ce, dagger_metrics = compute_explicit_dagger_loss(
+            args,
+            batch,
+            logits,
+            dagger_response_reducer,
+        )
+        dagger_loss = dagger_coef * explicit_ce
+        loss = loss + dagger_loss
+        dagger_metrics["loss"] = dagger_loss.detach()
+
     # make sure the gradient could backprop correctly.
     if log_probs.numel() == 0:
         loss += 0 * logits.sum()
@@ -358,6 +379,8 @@ def policy_loss_function(
     if batch.get("opd_reverse_kl") is not None:
         opd_reverse_kl = torch.cat(batch["opd_reverse_kl"], dim=0)
         reported_loss["opd_reverse_kl"] = sum_of_sample_mean(opd_reverse_kl).clone().detach()
+
+    reported_loss.update({f"opd_dagger/{key}": value for key, value in dagger_metrics.items()})
 
     return loss, reported_loss
 

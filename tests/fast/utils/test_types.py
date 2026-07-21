@@ -1,9 +1,10 @@
-"""Unit tests for Sample.strip_last_output_tokens."""
+"""Unit tests for Sample per-token state lifecycle."""
 
 from unittest.mock import MagicMock
 
 import numpy
 import pytest
+import torch
 
 from miles.utils.types import Sample
 
@@ -105,3 +106,101 @@ class TestStripLastOutputTokens:
         original_tokens = list(s.tokens)
         s.strip_last_output_tokens(-1, tokenizer)
         assert s.tokens == original_tokens
+
+
+class TestTeacherTopKTargets:
+    def test_validate_accepts_matching_sparse_targets(self):
+        sample = _make_sample([1], [2, 3])
+        sample.teacher_topk_token_ids = torch.tensor([[10, 11], [12, 13]], dtype=torch.long)
+        sample.teacher_topk_log_probs = torch.tensor([[-0.1, -0.2], [-0.3, -0.4]], dtype=torch.float32)
+        sample.teacher_topk_valid_mask = torch.ones((2, 2), dtype=torch.bool)
+
+        sample.validate()
+
+    def test_validate_requires_ids_log_probs_and_mask_as_a_contract(self):
+        sample = _make_sample([1], [2, 3])
+        sample.teacher_topk_token_ids = torch.tensor([[10, 11], [12, 13]], dtype=torch.long)
+
+        with pytest.raises(AssertionError, match="must either all be present"):
+            sample.validate()
+
+    @pytest.mark.parametrize(
+        ("ids", "log_probs", "valid_mask", "error"),
+        [
+            (
+                torch.tensor([10, 11]),
+                torch.tensor([-0.1, -0.2]),
+                torch.tensor([True, True]),
+                r"shape \[T, K\]",
+            ),
+            (
+                torch.tensor([[10, 11], [12, 13]]),
+                torch.tensor([[-0.1], [-0.2]]),
+                torch.ones((2, 2), dtype=torch.bool),
+                "tensor shape mismatch",
+            ),
+            (
+                torch.tensor([[10, 11]]),
+                torch.tensor([[-0.1, -0.2]]),
+                torch.ones((1, 2), dtype=torch.bool),
+                "response dimension",
+            ),
+        ],
+    )
+    def test_validate_rejects_invalid_sparse_target_shapes(self, ids, log_probs, valid_mask, error):
+        sample = _make_sample([1], [2, 3])
+        sample.teacher_topk_token_ids = ids.long()
+        sample.teacher_topk_log_probs = log_probs.float()
+        sample.teacher_topk_valid_mask = valid_mask.bool()
+
+        with pytest.raises(AssertionError, match=error):
+            sample.validate()
+
+    def test_validate_accepts_masked_padding_sentinels(self):
+        sample = _make_sample([1], [2, 3])
+        sample.teacher_topk_token_ids = torch.tensor([[10, 0], [12, 13]], dtype=torch.long)
+        sample.teacher_topk_log_probs = torch.tensor([[-0.1, -torch.inf], [-0.3, -0.4]], dtype=torch.float32)
+        sample.teacher_topk_valid_mask = torch.tensor([[True, False], [True, True]], dtype=torch.bool)
+
+        sample.validate()
+
+    def test_validate_rejects_nonfinite_valid_log_probs(self):
+        sample = _make_sample([1], [2])
+        sample.teacher_topk_token_ids = torch.tensor([[10, 11]], dtype=torch.long)
+        sample.teacher_topk_log_probs = torch.tensor([[-0.1, -torch.inf]], dtype=torch.float32)
+        sample.teacher_topk_valid_mask = torch.ones((1, 2), dtype=torch.bool)
+
+        with pytest.raises(AssertionError, match="must be finite"):
+            sample.validate()
+
+    def test_strip_slices_sparse_targets_by_response_position(self, tokenizer):
+        sample = _make_sample([1], [2, 3, 4])
+        sample.teacher_topk_token_ids = torch.tensor([[10, 11], [12, 13], [14, 15]], dtype=torch.long)
+        sample.teacher_topk_log_probs = torch.tensor([[-0.1, -0.2], [-0.3, -0.4], [-0.5, -0.6]], dtype=torch.float32)
+        sample.teacher_topk_valid_mask = torch.ones((3, 2), dtype=torch.bool)
+
+        sample.strip_last_output_tokens(1, tokenizer)
+
+        assert sample.teacher_topk_token_ids.tolist() == [[10, 11], [12, 13]]
+        torch.testing.assert_close(
+            sample.teacher_topk_log_probs,
+            torch.tensor([[-0.1, -0.2], [-0.3, -0.4]], dtype=torch.float32),
+        )
+        assert sample.teacher_topk_valid_mask.tolist() == [[True, True], [True, True]]
+        sample.validate()
+
+    def test_reset_for_retry_clears_sparse_targets(self):
+        sample = _make_sample([1], [2])
+        sample.teacher_log_probs = [-0.3]
+        sample.opd_reverse_kl = [0.2]
+        sample.teacher_topk_token_ids = torch.tensor([[10, 11]], dtype=torch.long)
+        sample.teacher_topk_log_probs = torch.tensor([[-0.1, -0.2]], dtype=torch.float32)
+        sample.teacher_topk_valid_mask = torch.ones((1, 2), dtype=torch.bool)
+
+        sample.reset_for_retry()
+
+        assert sample.teacher_log_probs is None
+        assert sample.opd_reverse_kl is None
+        assert sample.teacher_topk_token_ids is None
+        assert sample.teacher_topk_log_probs is None
+        assert sample.teacher_topk_valid_mask is None
