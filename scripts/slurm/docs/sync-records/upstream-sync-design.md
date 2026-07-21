@@ -10,8 +10,8 @@
 miles-sync-YYYY-MM-DD/
 ├── prs.md            ← /miles-upstream-prs report (always)
 ├── pr-body.md        ← /miles-sync drafted PR body (only when sync runs)
-├── divergence.patch  ← git diff vs upstream after sync (only when sync runs)
-└── divergence.stat   ← git diff --stat companion (only when sync runs)
+├── divergence.patch  ← git diff vs upstream after sync — LOCAL-ONLY (gitignored)
+└── divergence.stat   ← git diff --stat companion (only when sync runs; tracked)
 ```
 
 This keeps sync-records/ tidy as more syncs accumulate. Standalone `/miles-upstream-prs` runs (no sync) create the folder with only `prs.md`. Future `/sglang-sync` and similar workflows should follow the same pattern (`sglang-sync-YYYY-MM-DD/`, etc.).
@@ -253,7 +253,7 @@ Similar to sglang-sync but lower priority:
 1. **CI integration**: should miles-sync produce a PR that triggers a CI run, and if CI fails, should the skill auto-amend (no — one-commit invariant) or surface failures back to the user?
 2. **`verify_env.py` automation**: it needs a GPU salloc. Could detect `$SLURM_JOB_ID` and conditionally run, but cross-cluster portability hurts. Current decision: leave to operator via the PR's test-plan checklist.
 3. **Multiple sync branches**: if a sync attempt is abandoned, should subsequent invocations clean up the stale `sync-upstream-YYYYMMDD` branch? Currently skill says "add numeric suffix" — fine for v1.
-4. **Drift baseline**: should we keep `divergence.patch` files around for trending? Cheap and useful, but each sync's folder accumulates over time. Probably auto-prune oldest miles-sync-YYYY-MM-DD/ folders to last 5.
+4. **Drift baseline**: ~~should we keep `divergence.patch` files around for trending?~~ RESOLVED 2026-07-21: full patches are NOT tracked (gitignored; they were most of the record bulk). They're derivable on demand — `git diff <merge-base>..<sync-tip>` with the SHAs from `pr-body.md` — since sync PRs merge with preserved upstream SHAs. Only `divergence.stat` ships, so folders stay small and no pruning is needed.
 
 ---
 

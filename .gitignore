@@ -209,6 +209,11 @@ _examples_synced/
 # upstream-sync records ARE tracked history (incl. raw install logs) — un-ignore
 # them from global patterns like *.log so a sync's full context survives in git
 !/scripts/slurm/docs/sync-records/**
+# ...EXCEPT full divergence patches: derivable on demand via
+# `git diff <merge-base>..<sync-tip>` (SHAs are in each record's pr-body.md);
+# only the small divergence.stat summary is tracked
+/scripts/slurm/docs/sync-records/**/divergence.patch
+/scripts/slurm/docs/sync-records/**/divergence.patch.gz
 
 # Claude Code runtime lock for /loop and scheduled tasks
 .claude/scheduled_tasks.lock

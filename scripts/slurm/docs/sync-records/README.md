@@ -29,7 +29,7 @@ only freeform files — mirror-commit classification, publish script, re-apply n
 | file | producer | content |
 |---|---|---|
 | `prs.md` | `/miles-upstream-prs` | INPUT — pre-merge report: upstream PRs since last sync, watchlist hits |
-| `divergence.patch[.gz]` | `/miles-sync` step 7 | full drift vs upstream after the sync |
+| `divergence.patch` | `/miles-sync` step 7 | full drift vs upstream — generated locally as a review aid, **NOT committed** (gitignored; regenerate with `git diff <merge-base>..<sync-tip>`, SHAs in `pr-body.md`) |
 | `divergence.stat` | `/miles-sync` step 7 | the `--stat` summary of the above |
 | `pr-body.md` | `/miles-sync` step 8 | OUTPUT — the body of OUR sync PR, as merged |
 
@@ -42,9 +42,11 @@ dated — the next sync's operator reads these cold.
 
 - **Record folders are committed in the sync PR** as a separate `[docs] sync record`
   commit on top of the single code/pins commit — the code commit stays clean.
-- **Files > 1000 KB must be gzipped** (`gzip -9`) — the repo's
-  `check-added-large-files` pre-commit hook caps files at 1000 KB (`--maxkb=1000`). In practice this only
-  hits large `divergence.patch` files; read them with `zless` / `zgrep`.
+- **Full divergence patches are not committed** — they were most of the record's
+  bulk and are derivable from git (the sync PRs merge with preserved upstream SHAs,
+  and `pr-body.md` records merge-base and tip). Only `divergence.stat` ships.
+- **Files > 1000 KB must be gzipped** (`gzip -9`) if you do need to track one — the
+  repo's `check-added-large-files` pre-commit hook caps files at 1000 KB (`--maxkb=1000`).
 - **The divergence diff excludes this directory** (`':(exclude)scripts/slurm/docs/sync-records'`)
   — records describe drift, they aren't drift.
 - Notes added *after* the sync PR merged (post-merge incidents, validation follow-ups)

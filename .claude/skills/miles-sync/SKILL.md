@@ -230,9 +230,12 @@ mkdir -p "$EVENT_DIR"
 # Exclude sync-records itself: records describe drift, they aren't drift.
 git diff upstream/main -- ./ ':(exclude)scripts/slurm/docs/sync-records' > "$EVENT_DIR/divergence.patch"
 git diff --stat upstream/main -- ./ ':(exclude)scripts/slurm/docs/sync-records' > "$EVENT_DIR/divergence.stat"
-# The repo's check-added-large-files hook caps files at 1000 KB — gzip if over:
-[[ $(stat -c%s "$EVENT_DIR/divergence.patch") -gt 1024000 ]] && gzip -9 "$EVENT_DIR/divergence.patch"
 ```
+
+`divergence.patch` is a LOCAL review aid — gitignored, never committed (it would be
+most of the record's bulk, and it's derivable later: `git diff <merge-base>..<sync-tip>`
+with the SHAs from `pr-body.md`). Only the small `divergence.stat` ships in the record
+(Step 9's `git add` picks up exactly that automatically).
 
 Show the `--stat` to the user — this is our "drift surface" against upstream after the sync. Note: `$EVENT_DIR` should already exist from Step 2 (where `/miles-upstream-prs` wrote `prs.md` to the same folder); `mkdir -p` is defensive.
 
@@ -243,7 +246,7 @@ Write the PR body to `$EVENT_DIR/pr-body.md` (i.e. `scripts/slurm/docs/sync-reco
 - The `--stat` at `$EVENT_DIR/divergence.stat` (Step 7) for the divergence section.
 - Any noteworthy pins/install changes from Step 5.
 
-When linking inside the body, use **relative paths** (e.g. `[prs.md](prs.md)`, `[divergence.stat](divergence.stat)`) — files are siblings in the same folder.
+When linking inside the body, use **relative paths** (e.g. `[prs.md](prs.md)`, `[divergence.stat](divergence.stat)`) — files are siblings in the same folder. Do NOT link `divergence.patch` (untracked, local-only).
 
 Template:
 
