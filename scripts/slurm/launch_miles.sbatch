@@ -530,9 +530,13 @@ if [[ -z "${HF_TORCHDIST_DIR:-}" ]]; then
 elif [[ ! -f "$HF_TORCHDIST_DIR/latest_checkpointed_iteration.txt" ]]; then
     echo "[convert] $HF_TORCHDIST_DIR missing — converting on $HEAD_NODE"
     mkdir -p "$HF_TORCHDIST_DIR"
+    # Pre-export instead of listing in --export: srun's NAME=VALUE list splits
+    # on commas, which corrupts serialized args for MoE models (see the
+    # matching fix in lib/ray_lifecycle.sh).
+    export MODEL_ARGS_STR HF_MODEL_DIR HF_TORCHDIST_DIR
     MODEL_ARGS_STR=$(printf '%q ' "${MODEL_ARGS[@]}")
     srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$HEAD_NODE" \
-         --export=ALL,MODEL_ARGS_STR="$MODEL_ARGS_STR",HF_MODEL_DIR="$HF_MODEL_DIR",HF_TORCHDIST_DIR="$HF_TORCHDIST_DIR" \
+         --export=ALL \
          bash -c "$NODE_PREAMBLE"'
             cd "'"$MILES_REPO"'"
             eval "set -- $MODEL_ARGS_STR"
@@ -602,8 +606,11 @@ if [[ -n "${ENVPACK_REMOTE_SERVER_CMD:-}" ]]; then
     : "${ENVPACK_SERVER_NODE:?ENVPACK_SERVER_NODE_COUNT must reserve an envpack node}"
     : "${ENVPACK_SERVER_URL:?ENVPACK_SERVER_URL must be set for remote envpack server}"
     echo "[envpack-server] $ENVPACK_SERVER_NODE: $ENVPACK_REMOTE_SERVER_CMD"
+    # Pre-export: a comma inside the command would be split by srun's --export
+    # list (see the matching fix in lib/ray_lifecycle.sh).
+    export ENVPACK_REMOTE_SERVER_CMD
     srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$ENVPACK_SERVER_NODE" \
-         --export=ALL,ENVPACK_REMOTE_SERVER_CMD="$ENVPACK_REMOTE_SERVER_CMD" \
+         --export=ALL \
          bash -c "$ENVPACK_NODE_PREAMBLE"'
             cd "'"$MILES_REPO"'"
             eval "$ENVPACK_REMOTE_SERVER_CMD"

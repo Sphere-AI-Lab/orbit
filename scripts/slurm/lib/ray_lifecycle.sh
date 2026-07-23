@@ -141,8 +141,16 @@ ray_submit_and_wait() {
     rm -f "$MILES_TRAIN_STATUS_FILE" "$MILES_TRAIN_STATUS_FILE".tmp.* 2>/dev/null || true
     rm -f "$RUN_DIR/train_status.json" "$RUN_DIR"/train_status.json.tmp.* 2>/dev/null || true
     local submit_out submit_rc
+    # srun's --export NAME=VALUE list splits on commas with no escape syntax,
+    # so any serialized arg value containing a comma (e.g. the MoE
+    # --moe-layer-freq "[1,1,...]" list) silently truncates MILES_ARGS_STR at
+    # its first comma — job 27805 lost everything from --rollout-batch-size on.
+    # Ship it through the process environment instead; --export=ALL carries it
+    # verbatim.
+    export MILES_ARGS_STR
+    MILES_ARGS_STR="$(printf '%q ' "${MILES_ARGS[@]}")"
     submit_out=$(srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$HEAD_NODE" \
-         --export=ALL,RAY_ADDRESS="$RAY_ADDRESS",MILES_TRAIN_ENTRY="$TRAIN_ENTRY",MILES_TRAIN_STATUS_FILE="$MILES_TRAIN_STATUS_FILE",MILES_ARGS_STR="$(printf '%q ' "${MILES_ARGS[@]}")" \
+         --export=ALL,RAY_ADDRESS="$RAY_ADDRESS",MILES_TRAIN_ENTRY="$TRAIN_ENTRY",MILES_TRAIN_STATUS_FILE="$MILES_TRAIN_STATUS_FILE" \
          bash -c "$NODE_PREAMBLE"'
             cd '"$MILES_REPO"'
             RUNTIME_ENV_JSON=$(python - <<EOF
