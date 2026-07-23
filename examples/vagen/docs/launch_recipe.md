@@ -77,12 +77,12 @@ Default `eval/samples.jsonl` is the heldout (map-disjoint-from-train) split
 built by `examples/vagen/scripts/<dataset>-main.sh`.
 
 **Why no `--eval-max-prompt-len`** (sokoban specifically): miles'
-`filter_long_prompt` (in `data.py`) returns `False` (not the sample list)
-when the sample prompt is a messages list — which it is when
-`--apply-chat-template` is off and `--multimodal-keys` is on. With
-`max_length=None` the filter is skipped entirely. Our prompt is overridden
-inside our `generate()` anyway (rebuilt from `env.reset`), so length-
-filtering on the placeholder is meaningless.
+`filter_long_prompt` (in `data.py`) skips filtering and returns the samples
+unchanged when `max_length=None` or when the sample prompt is a messages list.
+The latter applies when `--apply-chat-template` is off and
+`--multimodal-keys` is on. Our prompt is overridden inside our `generate()`
+anyway (rebuilt from `env.reset`), so length-filtering on the placeholder is
+meaningless.
 
 ## Wandb
 

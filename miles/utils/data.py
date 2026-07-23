@@ -82,20 +82,27 @@ def _parse_generalized_path(s: str):
 
 def filter_long_prompt(origin_samples: list[Sample], tokenizer, processor, max_length: int | None) -> list[Sample]:
     if max_length is None:
-        return False
+        return origin_samples
 
     if not isinstance(origin_samples[0].prompt, str):
         logger.warning(
             "Skipping max_length check for list prompt. Set apply_chat_template=True to enable length filtering."
         )
-        return False
+        return origin_samples
 
     if processor:
         filtered_samples = []
         for sample in origin_samples:
             from miles.utils.processing_utils import process_vision_info
 
-            multimodal_inputs = process_vision_info(sample.prompt, processor)
+            # Chat-template flows already extracted vision inputs from the
+            # message list when the Sample was built; by now sample.prompt is
+            # the templated string, which qwen's extract_vision_info cannot
+            # parse (it indexes messages as dicts). Reuse the stored inputs and
+            # only re-extract for flows that never populated them.
+            multimodal_inputs = sample.multimodal_inputs
+            if multimodal_inputs is None:
+                multimodal_inputs = process_vision_info(sample.prompt, processor)
             processor_output = call_processor(processor, sample.prompt, multimodal_inputs)
             input_ids = processor_output["input_ids"][0]
             if len(input_ids) <= max_length:
