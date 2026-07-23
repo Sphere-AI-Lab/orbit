@@ -10,11 +10,46 @@ from miles.utils.arguments import (
     _validate_opd_dagger_args,
     _validate_opd_task_reward_args,
     get_miles_extra_args_provider,
+    hf_validate_args,
 )
 from miles.utils.misc import function_registry
 
 PATH_ARGS = ["--rollout-function-path", "--custom-generate-function-path"]
 REQUIRED_ARGS = ["--rollout-batch-size", "64"]
+
+
+def _hf_validation_args(*, untie_embeddings: bool) -> SimpleNamespace:
+    return SimpleNamespace(
+        model_name="qwen3-vl",
+        context_parallel_size=1,
+        untie_embeddings_and_output_weights=untie_embeddings,
+    )
+
+
+def test_hf_validate_args_uses_outer_tying_value_for_qwen3_vl_moe() -> None:
+    text_config = SimpleNamespace(model_type="qwen3_vl_moe_text", tie_word_embeddings=True)
+    hf_config = SimpleNamespace(model_type="qwen3_vl_moe", text_config=text_config, tie_word_embeddings=False)
+
+    hf_validate_args(_hf_validation_args(untie_embeddings=True), hf_config)
+
+    assert text_config.tie_word_embeddings is False
+
+
+def test_hf_validate_args_rejects_qwen3_vl_moe_outer_tying_mismatch() -> None:
+    text_config = SimpleNamespace(model_type="qwen3_vl_moe_text", tie_word_embeddings=False)
+    hf_config = SimpleNamespace(model_type="qwen3_vl_moe", text_config=text_config, tie_word_embeddings=True)
+
+    with pytest.raises(AssertionError, match="tie_word_embeddings in hf config True"):
+        hf_validate_args(_hf_validation_args(untie_embeddings=True), hf_config)
+
+
+def test_hf_validate_args_preserves_text_tying_for_other_composite_models() -> None:
+    text_config = SimpleNamespace(model_type="synthetic_vlm_text", tie_word_embeddings=False)
+    hf_config = SimpleNamespace(model_type="synthetic_vlm", text_config=text_config, tie_word_embeddings=True)
+
+    hf_validate_args(_hf_validation_args(untie_embeddings=True), hf_config)
+
+    assert text_config.tie_word_embeddings is False
 
 
 def make_class_with_add_arguments():

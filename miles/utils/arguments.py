@@ -2672,6 +2672,12 @@ def hf_validate_args(args, hf_config):
 
     # multimodal models have different config structure
     if hasattr(hf_config, "text_config"):
+        # Qwen3-VL MoE checkpoints serialize tie_word_embeddings on the outer
+        # config while the text sub-config omits it and receives a conflicting
+        # transformers default. Keep this repair model-specific: other
+        # composite models may define the text sub-config as authoritative.
+        if getattr(hf_config, "model_type", "") == "qwen3_vl_moe":
+            hf_config.text_config.tie_word_embeddings = hf_config.tie_word_embeddings
         hf_config = hf_config.text_config
 
     if hasattr(hf_config, "rope_parameters") and isinstance(hf_config.rope_parameters, dict):
