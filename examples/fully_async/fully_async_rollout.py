@@ -138,7 +138,7 @@ def get_global_worker(args, data_buffer: DataSource):
     with _worker_lock:
         if _global_worker is None or not _global_worker.worker_thread.is_alive():
             print("Creating new global async worker...")
-            _global_worker = AsyncRolloutWorker(args, data_buffer, concurrency=args.sglang_server_concurrency)
+            _global_worker = AsyncRolloutWorker(args, data_buffer)
             _global_worker.start()
         return _global_worker
 
@@ -167,10 +167,18 @@ class AsyncRolloutWorker:
     Supports continuous running, independent of rollout function lifecycle
     """
 
-    def __init__(self, args, data_buffer: DataSource, concurrency=10):
+    def __init__(self, args, data_buffer: DataSource):
+        if args.async_max_concurrent_samples is not None:
+            client_capacity = (
+                args.sglang_server_concurrency * args.rollout_num_gpus // args.rollout_num_gpus_per_engine
+            )
+            if args.async_max_concurrent_samples > client_capacity:
+                print(
+                    f"--async-max-concurrent-samples ({args.async_max_concurrent_samples}) exceeds the "
+                    f"client concurrency cap ({client_capacity}); the excess queues on the semaphore"
+                )
         self.args = args
         self.data_buffer = data_buffer  # Directly save data_buffer reference
-        self.concurrency = concurrency
         self.running = True
         self.prefetch_batches = max(1, int(getattr(args, "fully_async_prefetch_batches", 1)))
         self.max_concurrent_tasks = args.rollout_batch_size * self.prefetch_batches
@@ -225,7 +233,14 @@ class AsyncRolloutWorker:
 
         active_tasks = set()
         self._active_tasks = active_tasks
-        max_concurrent_tasks = self.max_concurrent_tasks
+        if self.args.async_max_concurrent_samples is not None:
+            # Absolute override (upstream #1677): decouples the active window
+            # from the batch size entirely.
+            max_concurrent_tasks = max(1, self.args.async_max_concurrent_samples // self.args.n_samples_per_prompt)
+        else:
+            # Prefetch pipeline depth: rollout_batch_size * fully_async_prefetch_batches
+            # (replaces the upstream legacy one-batch default; prefetch defaults to 1).
+            max_concurrent_tasks = self.max_concurrent_tasks
         group_id_counter = 0
         print(
             "Fully async worker prefetch: "
