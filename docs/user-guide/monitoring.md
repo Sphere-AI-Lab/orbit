@@ -46,7 +46,7 @@ should be supplied via Ray's `env_vars` rather than baked into the launch script
 | `train/pg_clipfrac` | < 0.2 | > 0.5 means policy is moving fast → drop LR |
 
 Panel names follow what `loss.py` and the rollout logger emit; Miles's wandb metrics
-live under `train/`, `rollout/`, `perf/`, `multi_turn/`, `passrate/` namespaces.
+live under `train/`, `rollout/`, `perf/`, `interaction/`, `passrate/` namespaces.
 
 ## Custom loggers
 

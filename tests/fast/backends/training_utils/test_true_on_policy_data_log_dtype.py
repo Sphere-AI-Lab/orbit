@@ -235,6 +235,53 @@ def test_gathered_metric_reduction_uses_global_min_and_max():
     assert reduced["rollout/opd_kl/k1/max"] == 1.1
 
 
+def test_multi_turn_metrics_emit_compact_interaction_section(monkeypatch):
+    captured = {}
+    parallel_state = SimpleNamespace(
+        tp=SimpleNamespace(rank=0),
+        is_pp_last_stage=True,
+    )
+
+    monkeypatch.setattr(log_utils, "get_parallel_state", lambda: parallel_state)
+
+    def fake_gather(metric_name, args, rollout_id, log_dict, reduction_by_key=None):
+        captured["metric_name"] = metric_name
+        captured["rollout_id"] = rollout_id
+        captured["log_dict"] = log_dict
+        captured["reduction_by_key"] = reduction_by_key
+
+    monkeypatch.setattr(log_utils, "gather_log_data", fake_gather)
+
+    log_utils.log_multi_turn_data(
+        rollout_id=7,
+        args=Namespace(rollout_max_response_len=8),
+        rollout_data={
+            "loss_masks": [
+                torch.tensor([1, 0, 1], dtype=torch.int32),
+                torch.tensor([1, 0], dtype=torch.int32),
+            ],
+            "round_number": [1, 3],
+        },
+    )
+
+    assert captured["metric_name"] == "interaction"
+    assert captured["rollout_id"] == 7
+    assert captured["log_dict"] == pytest.approx(
+        {
+            "raw_tokens/max": 3.0,
+            "length_cap_ratio": 0.0,
+            "observation_tokens/mean": 1.0,
+            "observation_token_ratio": 5 / 12,
+            "rounds/mean": 2.0,
+            "rounds/max": 3.0,
+        }
+    )
+    assert captured["reduction_by_key"] == {
+        "raw_tokens/max": "max",
+        "rounds/max": "max",
+    }
+
+
 def test_opd_dagger_train_metrics_keep_an_independent_top_level_section():
     metrics = log_utils.log_train_step(
         args=Namespace(),

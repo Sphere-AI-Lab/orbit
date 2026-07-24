@@ -8,7 +8,7 @@
 #
 # The teacher scores the sampled response token at every active position. Task
 # reward is logged for observation only; it remains zero in the optimization
-# reward. DAgger is disabled by default and can be enabled by the isolated 03
+# reward. DAgger is disabled by default and can be enabled by numbered objective
 # wrappers without changing this recipe's model, data, or parallel layout. This
 # recipe does not enable eval, checkpoint saving, multi-turn generation, context
 # parallelism, or fully async execution.
@@ -111,7 +111,7 @@ RM_ARGS=(
 )
 
 # Keep the legacy rollout-side top-k scalar path disabled. Sampled RKLD is
-# controlled independently by OPD_KL_COEF; the 03 wrappers add trainer-direct
+# controlled independently by OPD_KL_COEF; objective wrappers add trainer-direct
 # DAgger arguments through DAGGER_ARGS below.
 GRPO_ARGS=(
    --advantage-estimator grpo
@@ -199,26 +199,30 @@ LAYOUT_ARGS=(
    --rollout-num-gpus 8
 )
 
-MILES_ARGS=(
-   "${LAYOUT_ARGS[@]}"
-   "${MODEL_ARGS[@]}"
-   "${CKPT_ARGS[@]}"
-   "${MULTIMODAL_ARGS[@]}"
-   "${ROLLOUT_ARGS[@]}"
-   "${RM_ARGS[@]}"
-   "${OPTIMIZER_ARGS[@]}"
-   "${GRPO_ARGS[@]}"
-)
+build_opd_multimodal_miles_args() {
+   MILES_ARGS=(
+      "${LAYOUT_ARGS[@]}"
+      "${MODEL_ARGS[@]}"
+      "${CKPT_ARGS[@]}"
+      "${MULTIMODAL_ARGS[@]}"
+      "${ROLLOUT_ARGS[@]}"
+      "${RM_ARGS[@]}"
+      "${OPTIMIZER_ARGS[@]}"
+      "${GRPO_ARGS[@]}"
+   )
 
-if ((OPD_DAGGER_TOP_K > 0)); then
-   MILES_ARGS+=("${DAGGER_ARGS[@]}")
-fi
+   if ((OPD_DAGGER_TOP_K > 0)); then
+      MILES_ARGS+=("${DAGGER_ARGS[@]}")
+   fi
 
-MILES_ARGS+=(
-   "${MONITOR_ARGS[@]}"
-   "${WANDB_ARGS[@]}"
-   "${PERF_ARGS[@]}"
-   "${SGLANG_ARGS[@]}"
-   "${MISC_ARGS[@]}"
-   "${FT_ARGS[@]}"
-)
+   MILES_ARGS+=(
+      "${MONITOR_ARGS[@]}"
+      "${WANDB_ARGS[@]}"
+      "${PERF_ARGS[@]}"
+      "${SGLANG_ARGS[@]}"
+      "${MISC_ARGS[@]}"
+      "${FT_ARGS[@]}"
+   )
+}
+
+build_opd_multimodal_miles_args

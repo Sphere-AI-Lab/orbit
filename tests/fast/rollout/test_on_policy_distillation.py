@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import itertools
 import math
 import queue
@@ -8,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from examples.geo3k_vlm_multi_turn import rollout as geo3k_rollout
 from tests.ci.ci_register import register_cpu_ci
 
 from miles.rollout import on_policy_distillation as opd
@@ -639,6 +641,435 @@ async def test_multimodal_exact_suffix_dagger_round_trip_preserves_native_target
     assert sample.teacher_topk_valid_mask.tolist() == [[True, True], [True, True]]
     assert sample.metadata[opd.OPD_SCORING_TELEMETRY_KEY] == [{"target": "teacher"}]
     sample.validate()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("dagger_top_k", [0, 2])
+async def test_geo3k_multiturn_exact_suffix_keeps_actions_active_and_observations_inert(
+    monkeypatch,
+    dagger_top_k,
+):
+    calls = []
+    teacher_response = {
+        "meta_info": {
+            "input_token_logprobs": [
+                None,
+                [-0.1, 11],
+                [-0.2, 12],
+                [-8.0, 31],
+                [-8.0, 32],
+                [-0.3, 13],
+                [-0.4, 14],
+            ],
+            "input_top_logprobs": [
+                None,
+                [[math.log(0.6), 21], [math.log(0.3), 22]],
+                [[math.log(0.5), 23], [math.log(0.2), 24]],
+                [],
+                [],
+                [[math.log(0.7), 25], [math.log(0.2), 26]],
+                [[math.log(0.4), 27], [math.log(0.3), 28]],
+            ],
+        }
+    }
+
+    async def fake_scoring_post(args, url, payload, *, target, response_length):
+        calls.append((target, response_length, payload))
+        return opd._ScoringPostResult(response=teacher_response, telemetry={"target": target})
+
+    monkeypatch.setattr(opd, "encode_image_for_rollout_engine", lambda image: f"encoded-{image}")
+    monkeypatch.setattr(opd, "_scoring_post", fake_scoring_post)
+
+    # Two sampled assistant spans surround a text-only Geo3K tool observation.
+    # The complete suffix remains position-preserving, while loss_mask decides
+    # which rows may contribute to RKLD or DAgger.
+    sample = Sample(
+        prompt="rendered Geo3K prompt",
+        tokens=[7, 8, 9, 11, 12, 31, 32, 13, 14],
+        response_length=6,
+        loss_mask=[1, 1, 0, 0, 1, 1],
+        multimodal_inputs={"images": ["geometry-image"]},
+    )
+    args = Namespace(
+        opd_log_prob_top_k=0,
+        opd_dagger_top_k=dagger_top_k,
+        opd_log_task_reward=False,
+        sglang_mm_exact_scoring_suffix=True,
+        rm_url="http://teacher/generate",
+        reward_key=None,
+        vocab_size=128,
+    )
+
+    sample.reward = await opd.reward_func(args, sample)
+    raw_rewards, rewards = opd.post_process_rewards(args, [sample])
+
+    assert raw_rewards == rewards == [0.0]
+    assert len(calls) == 1
+    target, response_length, payload = calls[0]
+    assert target == "teacher"
+    assert response_length == 6
+    assert payload["text"] == sample.prompt
+    assert payload["image_data"] == ["encoded-geometry-image"]
+    assert payload["scoring_suffix_ids"] == [11, 12, 31, 32, 13, 14]
+    assert "input_ids" not in payload
+    torch.testing.assert_close(sample.teacher_log_probs, torch.tensor([-0.1, -0.2, 0.0, 0.0, -0.3, -0.4]))
+
+    if dagger_top_k:
+        assert payload["top_logprobs_num"] == 2
+        assert sample.teacher_topk_token_ids.tolist() == [
+            [21, 22],
+            [23, 24],
+            [0, 0],
+            [0, 0],
+            [25, 26],
+            [27, 28],
+        ]
+        assert sample.teacher_topk_valid_mask.tolist() == [
+            [True, True],
+            [True, True],
+            [False, False],
+            [False, False],
+            [True, True],
+            [True, True],
+        ]
+        assert torch.isneginf(sample.teacher_topk_log_probs[2:4]).all()
+    else:
+        assert "top_logprobs_num" not in payload
+        assert sample.teacher_topk_token_ids is None
+
+    sample.validate()
+
+
+@pytest.mark.parametrize(
+    ("context_limit", "existing_response", "expected_budget"),
+    [
+        (None, [], 20),
+        (10, [11, 12], 5),
+    ],
+)
+def test_geo3k_multiturn_keeps_response_and_context_budgets_separate(
+    context_limit,
+    existing_response,
+    expected_budget,
+):
+    prompt_ids = [7, 8, 9]
+    tokenizer = SimpleNamespace(encode=lambda _prompt, add_special_tokens: list(prompt_ids))
+    state = SimpleNamespace(tokenizer=tokenizer, processor=None)
+    sample = Sample(
+        prompt="rendered Geo3K prompt",
+        tokens=[*prompt_ids, *existing_response],
+    )
+    args = Namespace(rollout_max_context_len=context_limit)
+
+    _image_data, response_tokens, budget, _multimodal_inputs, _generation_tokens = geo3k_rollout._prepare_start_state(
+        sample,
+        state,
+        args,
+        {"max_new_tokens": 20},
+    )
+
+    assert response_tokens == existing_response
+    assert budget == expected_budget
+
+
+@pytest.mark.asyncio
+async def test_geo3k_multiturn_rejects_observation_that_exceeds_remaining_budget(monkeypatch):
+    class FakeEnv:
+        closed = False
+
+        def reset(self):
+            return None
+
+        def close(self):
+            self.closed = True
+
+    def decode(tokens, *, skip_special_tokens):
+        assert skip_special_tokens is False
+        return "decoded:" + ",".join(str(token) for token in tokens)
+
+    env = FakeEnv()
+    state = SimpleNamespace(tokenizer=SimpleNamespace(decode=decode), processor=None)
+    generation_inputs = []
+
+    monkeypatch.setattr(
+        geo3k_rollout,
+        "_initialize_resources",
+        lambda args, sample: (env, None, {"max_turns": 2}, state, "http://rollout/generate"),
+    )
+    monkeypatch.setattr(
+        geo3k_rollout,
+        "_prepare_start_state",
+        lambda sample, state, args, sampling_params: (None, [], 3, [], [7, 8, 9]),
+    )
+
+    async def fake_run_inference_step(_url, tokens, *_args, **_kwargs):
+        generation_inputs.append(list(tokens))
+        return (
+            "first action",
+            [11],
+            [-0.1],
+            "stop",
+            {"weight_version": "v1", "prompt_tokens": 3},
+        )
+
+    monkeypatch.setattr(geo3k_rollout, "_run_inference_step", fake_run_inference_step)
+    monkeypatch.setattr(
+        geo3k_rollout,
+        "_process_env_step",
+        lambda *args, **kwargs: ([31, 32, 33], [31, 32, 33], [], None, None, False),
+    )
+
+    sample = Sample(
+        prompt="rendered Geo3K prompt",
+        tokens=[7, 8, 9],
+        loss_mask=[],
+        rollout_log_probs=[],
+        metadata={},
+    )
+    args = Namespace(partial_rollout=False)
+
+    result = await geo3k_rollout.generate(args, sample, {"max_new_tokens": 3})
+
+    assert result is sample
+    assert sample.tokens == [7, 8, 9, 11]
+    assert sample.response_length == 1
+    assert sample.response_length <= 3
+    assert sample.loss_mask == [1]
+    assert sample.rollout_log_probs == [-0.1]
+    assert sample.status is Sample.Status.TRUNCATED
+    assert sample.response == "decoded:11"
+    assert generation_inputs == [[7, 8, 9]]
+    assert env.closed is True
+    sample.validate()
+
+
+@pytest.mark.asyncio
+async def test_geo3k_multiturn_rollout_records_rounds_and_action_observation_masks(monkeypatch):
+    class FakeEnv:
+        closed = False
+        reset_called = False
+
+        def reset(self):
+            self.reset_called = True
+
+        def close(self):
+            self.closed = True
+
+    def decode(tokens, *, skip_special_tokens):
+        assert skip_special_tokens is False
+        return "decoded:" + ",".join(str(token) for token in tokens)
+
+    env = FakeEnv()
+    state = SimpleNamespace(tokenizer=SimpleNamespace(decode=decode), processor=None)
+    responses = iter(
+        [
+            (
+                "first action",
+                [11, 12],
+                [-0.1, -0.2],
+                "stop",
+                {"weight_version": "v1", "prompt_tokens": 3},
+            ),
+            (
+                "second action",
+                [13, 14],
+                [-0.3, -0.4],
+                "stop",
+                {"weight_version": "v2", "prompt_tokens": 7},
+            ),
+        ]
+    )
+    observations = iter(
+        [
+            ([31, 32], [31, 32], [], None, None, False),
+            (None, None, None, None, None, True),
+        ]
+    )
+    generation_inputs = []
+
+    monkeypatch.setattr(
+        geo3k_rollout,
+        "_initialize_resources",
+        lambda args, sample: (env, None, {"max_turns": 3}, state, "http://rollout/generate"),
+    )
+    monkeypatch.setattr(
+        geo3k_rollout,
+        "_prepare_start_state",
+        lambda sample, state, args, sampling_params: (None, [], 20, [], [7, 8, 9]),
+    )
+
+    async def fake_run_inference_step(_url, tokens, *_args, **_kwargs):
+        generation_inputs.append(list(tokens))
+        return next(responses)
+
+    monkeypatch.setattr(geo3k_rollout, "_run_inference_step", fake_run_inference_step)
+    monkeypatch.setattr(geo3k_rollout, "_process_env_step", lambda *args, **kwargs: next(observations))
+
+    sample = Sample(
+        prompt="rendered Geo3K prompt",
+        tokens=[7, 8, 9],
+        loss_mask=[],
+        rollout_log_probs=[],
+    )
+    args = Namespace(partial_rollout=False)
+
+    result = await geo3k_rollout.generate(args, sample, {"max_new_tokens": 20})
+
+    assert result is sample
+    assert sample.tokens == [7, 8, 9, 11, 12, 31, 32, 13, 14]
+    assert sample.response_length == 6
+    assert sample.loss_mask == [1, 1, 0, 0, 1, 1]
+    assert sample.rollout_log_probs == [-0.1, -0.2, 0.0, 0.0, -0.3, -0.4]
+    assert sample.metadata["round_number"] == 2
+    assert sample.weight_versions == ["v1", "v2"]
+    assert sample.status is Sample.Status.COMPLETED
+    assert sample.response == "decoded:11,12,31,32,13,14"
+    assert generation_inputs == [[7, 8, 9], [7, 8, 9, 11, 12, 31, 32]]
+    assert env.closed is True
+    sample.validate()
+
+
+@pytest.mark.asyncio
+async def test_geo3k_multiturn_generation_preserves_noncanonical_prior_action_ids(monkeypatch):
+    image_token_id = 151655
+    expanded_prompt_ids = [7, image_token_id, image_token_id, image_token_id, 9]
+    compact_prompt_ids = [7, image_token_id, 9]
+    noncanonical_action_ids = [41, 42]
+
+    class FakeTokenizer:
+        bos_token_id = None
+
+        def encode(self, text, *, add_special_tokens):
+            assert add_special_tokens is False
+            if text == "rendered Geo3K prompt":
+                return list(compact_prompt_ids)
+            if text == "JK":
+                return [34070]
+            raise AssertionError(f"unexpected text passed to tokenizer: {text!r}")
+
+        def decode(self, token_ids, *, skip_special_tokens=False):
+            if list(token_ids) == noncanonical_action_ids:
+                return "JK"
+            assert skip_special_tokens is False
+            return "decoded:" + ",".join(str(token_id) for token_id in token_ids)
+
+    class FakeProcessor:
+        def __call__(self, *, text, images):
+            assert text == "rendered Geo3K prompt"
+            assert images == ["image-a"]
+            return {"input_ids": [list(expanded_prompt_ids)]}
+
+    class FakeEnv:
+        def reset(self):
+            return None
+
+        def close(self):
+            return None
+
+    tokenizer = FakeTokenizer()
+    assert tokenizer.encode(
+        tokenizer.decode(noncanonical_action_ids),
+        add_special_tokens=False,
+    ) == [34070]
+
+    state = SimpleNamespace(tokenizer=tokenizer, processor=FakeProcessor())
+    monkeypatch.setattr(
+        geo3k_rollout,
+        "_initialize_resources",
+        lambda args, sample: (
+            FakeEnv(),
+            None,
+            {"max_turns": 2},
+            state,
+            "http://rollout/generate",
+        ),
+    )
+    monkeypatch.setattr(
+        geo3k_rollout,
+        "encode_image_for_rollout_engine",
+        lambda image: f"encoded-{image}",
+    )
+
+    observations = iter(
+        [
+            ([31], [31], [], None, None, False),
+            (None, None, None, None, None, True),
+        ]
+    )
+    monkeypatch.setattr(
+        geo3k_rollout,
+        "_process_env_step",
+        lambda *args, **kwargs: next(observations),
+    )
+
+    payloads = []
+    responses = iter(
+        [
+            {
+                "text": "JK",
+                "meta_info": {
+                    "output_token_logprobs": [[-0.1, 41], [-0.2, 42]],
+                    "finish_reason": {"type": "stop"},
+                    "prompt_tokens": len(expanded_prompt_ids),
+                    "weight_version": "v1",
+                },
+            },
+            {
+                "text": "done",
+                "meta_info": {
+                    "output_token_logprobs": [[-0.3, 13]],
+                    "finish_reason": {"type": "stop"},
+                    "prompt_tokens": len(expanded_prompt_ids) + 3,
+                    "weight_version": "v1",
+                },
+            },
+        ]
+    )
+
+    async def fake_post(_url, payload):
+        payloads.append(copy.deepcopy(payload))
+        return next(responses)
+
+    monkeypatch.setattr(geo3k_rollout, "post", fake_post)
+
+    sample = Sample(
+        prompt="rendered Geo3K prompt",
+        multimodal_inputs={"images": ["image-a"]},
+        metadata={},
+    )
+    args = Namespace(
+        partial_rollout=False,
+        rollout_max_context_len=None,
+    )
+
+    result = await geo3k_rollout.generate(args, sample, {"max_new_tokens": 20})
+
+    assert result is sample
+    assert payloads[0]["input_ids"] == compact_prompt_ids
+    assert payloads[1]["input_ids"] == [
+        *compact_prompt_ids,
+        *noncanonical_action_ids,
+        31,
+    ]
+    assert payloads[0]["image_data"] == payloads[1]["image_data"] == ["encoded-image-a"]
+    assert sample.tokens == [
+        *expanded_prompt_ids,
+        *noncanonical_action_ids,
+        31,
+        13,
+    ]
+    assert sample.loss_mask == [1, 1, 0, 1]
+    assert sample.rollout_log_probs == [-0.1, -0.2, 0.0, -0.3]
+    sample.validate()
+
+
+def test_geo3k_multiturn_generation_rejects_server_retokenization_drift():
+    with pytest.raises(RuntimeError, match="token alignment mismatch"):
+        geo3k_rollout._validate_multimodal_generation_alignment(
+            {"prompt_tokens": 7},
+            expected_prompt_tokens=8,
+            image_data=["encoded-image"],
+        )
 
 
 @pytest.mark.asyncio

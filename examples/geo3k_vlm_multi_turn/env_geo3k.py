@@ -30,8 +30,8 @@ class Geo3kEnv(BaseInteractionEnv):
 
     The model is expected to emit a <tool_call>{...}</tool_call> payload that includes
     an `answer` argument. We run the math reward checker against the ground truth and
-    return the score as the next observation. The episode ends immediately after each
-    step; responses are provided but no further turns are taken.
+    return the score as the next observation. A supported tool call continues the
+    interaction until `max_turns`; a response without a tool call ends the episode.
     """
 
     def __init__(self, *, ground_truth: str | None = None, max_turns: int | None = None):

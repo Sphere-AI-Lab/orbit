@@ -460,7 +460,7 @@ def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatc
 
 def log_multi_turn_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatch) -> None:
     """
-    Log multi-turn auxiliary metrics such as raw/observed response lengths and rounds.
+    Log interaction structure without duplicating generic rollout-length metrics.
 
     Operates only on PP last stage and TP rank 0. Uses GPU tensors when available
     to compute statistics without host transfers.
@@ -468,34 +468,36 @@ def log_multi_turn_data(rollout_id: int, args: Namespace, rollout_data: RolloutB
     parallel_state = get_parallel_state()
     if parallel_state.tp.rank == 0 and parallel_state.is_pp_last_stage:
         log_dict = {}
+        reduction_by_key = {}
         for key, val in rollout_data.items():
             if key == "loss_masks":
-                if val:  # Check if val is not empty
-                    device = val[0].device  # Get device from first tensor
-
-                    # Vectorized length calculation using torch
+                if val:
+                    device = val[0].device
                     raw_response_lengths = torch.tensor([v.shape[0] for v in val], dtype=torch.float32, device=device)
-                    log_dict["raw_response_length/response_length_mean"] = raw_response_lengths.mean().item()
-                    log_dict["raw_response_length/response_length_max"] = raw_response_lengths.max().item()
-                    log_dict["raw_response_length/response_length_min"] = raw_response_lengths.min().item()
-                    log_dict["raw_response_length/response_length_clip_ratio"] = (
+                    active_response_lengths = torch.stack([v.float().sum() for v in val])
+                    observation_lengths = raw_response_lengths - active_response_lengths
+
+                    log_dict["raw_tokens/max"] = raw_response_lengths.max().item()
+                    reduction_by_key["raw_tokens/max"] = "max"
+                    log_dict["length_cap_ratio"] = (
                         (raw_response_lengths >= args.rollout_max_response_len).float().mean().item()
                     )
-
-                    # Vectorized sum calculation using torch - stay on GPU
-                    wo_obs_response_lengths = torch.tensor(
-                        [v.sum().item() for v in val], dtype=torch.float32, device=device
+                    log_dict["observation_tokens/mean"] = observation_lengths.mean().item()
+                    log_dict["observation_token_ratio"] = (
+                        (observation_lengths / raw_response_lengths.clamp_min(1)).mean().item()
                     )
-                    log_dict["wo_obs_response_length/response_length_mean"] = wo_obs_response_lengths.mean().item()
-                    log_dict["wo_obs_response_length/response_length_max"] = wo_obs_response_lengths.max().item()
-                    log_dict["wo_obs_response_length/response_length_min"] = wo_obs_response_lengths.min().item()
             if key == "round_number":
-                # Use numpy for vectorized round number statistics
                 round_number_array = np.array(val)
-                log_dict["multi_turn_metric/round_number_mean"] = np.mean(round_number_array)
-                log_dict["multi_turn_metric/round_number_max"] = np.max(round_number_array)
-                log_dict["multi_turn_metric/round_number_min"] = np.min(round_number_array)
-        gather_log_data("multi_turn", args, rollout_id, log_dict)
+                log_dict["rounds/mean"] = np.mean(round_number_array)
+                log_dict["rounds/max"] = np.max(round_number_array)
+                reduction_by_key["rounds/max"] = "max"
+        gather_log_data(
+            "interaction",
+            args,
+            rollout_id,
+            log_dict,
+            reduction_by_key=reduction_by_key,
+        )
 
 
 def log_passrate(rollout_id: int, args: Namespace, rollout_data: RolloutBatch) -> None:

@@ -87,6 +87,10 @@ def _encode_observation_for_generation(
     else:
         formatted_prompt = [message]
 
+    compact_prompt_ids = None
+    if isinstance(formatted_prompt, str):
+        compact_prompt_ids = tokenizer.encode(formatted_prompt, add_special_tokens=False)
+
     multimodal_inputs = None
     multimodal_train_inputs = None
     if processor:
@@ -102,14 +106,25 @@ def _encode_observation_for_generation(
         } or None
     else:
         prompt_ids = tokenizer.encode(formatted_prompt, add_special_tokens=False)
+        compact_prompt_ids = list(prompt_ids)
 
     if trim_length:
         prompt_ids = prompt_ids[trim_length:]
+        if compact_prompt_ids is not None:
+            compact_prompt_ids = compact_prompt_ids[trim_length:]
 
     image_data = []
     if multimodal_inputs and multimodal_inputs.get("images"):
         image_data = [encode_image_for_rollout_engine(img) for img in multimodal_inputs["images"]]
-    return prompt_ids, image_data, multimodal_inputs, multimodal_train_inputs
+    if compact_prompt_ids is None:
+        if image_data:
+            raise ValueError(
+                "Multimodal observation turns require a rendered string prompt so "
+                "SGLang can expand compact media placeholders without retokenizing "
+                "prior sampled actions."
+            )
+        compact_prompt_ids = list(prompt_ids)
+    return prompt_ids, compact_prompt_ids, image_data, multimodal_inputs, multimodal_train_inputs
 
 
 def _merge_multimodal_train_inputs(chunks: list[dict | None]) -> dict | None:
@@ -153,6 +168,12 @@ def _initialize_resources(args: Any, sample: Sample):
 
 def _prepare_initial_inputs(sample: Sample, processor, tokenizer):
     if processor:
+        if not isinstance(sample.prompt, str) or not sample.prompt:
+            raise ValueError(
+                "Multimodal multi-turn generation requires a non-empty rendered string prompt "
+                "to preserve sampled action IDs across turns."
+            )
+        compact_prompt_ids = tokenizer.encode(sample.prompt, add_special_tokens=False)
         processor_output = processor(text=sample.prompt, **(sample.multimodal_inputs or {}))
         prompt_ids = processor_output["input_ids"][0]
         sample.multimodal_train_inputs = {
@@ -160,15 +181,18 @@ def _prepare_initial_inputs(sample: Sample, processor, tokenizer):
         } or None
     else:
         prompt_ids = tokenizer.encode(sample.prompt, add_special_tokens=False)
+        compact_prompt_ids = list(prompt_ids)
 
     image_data = []
     if sample.multimodal_inputs and sample.multimodal_inputs.get("images"):
         image_data = [encode_image_for_rollout_engine(img) for img in sample.multimodal_inputs["images"]]
-    return prompt_ids, image_data, sample.multimodal_train_inputs
+    return prompt_ids, compact_prompt_ids, image_data, sample.multimodal_train_inputs
 
 
 def _prepare_start_state(sample: Sample, state, args: Any, sampling_params: dict):
-    prompt_ids, image_data, init_mm_train = _prepare_initial_inputs(sample, state.processor, state.tokenizer)
+    prompt_ids, compact_prompt_ids, image_data, init_mm_train = _prepare_initial_inputs(
+        sample, state.processor, state.tokenizer
+    )
     current_image_data = image_data
     multimodal_train_inputs_buffer: list[dict | None] = []
     if init_mm_train:
@@ -177,16 +201,18 @@ def _prepare_start_state(sample: Sample, state, args: Any, sampling_params: dict
     if not sample.tokens:
         sample.tokens = list(prompt_ids)
     response_tokens: list[int] = sample.tokens[len(prompt_ids) :] if len(sample.tokens) >= len(prompt_ids) else []
+    generation_tokens = [*compact_prompt_ids, *response_tokens]
     sample.loss_mask = sample.loss_mask or []
     sample.rollout_log_probs = sample.rollout_log_probs or []
     sample.response_length = len(response_tokens)
 
-    budget = None
+    remaining_budgets = []
+    if sampling_params.get("max_new_tokens") is not None:
+        remaining_budgets.append(sampling_params["max_new_tokens"] - len(response_tokens))
     if args.rollout_max_context_len is not None:
-        budget = args.rollout_max_context_len - len(sample.tokens)
-    elif sampling_params.get("max_new_tokens") is not None:
-        budget = sampling_params["max_new_tokens"] - len(sample.tokens)
-    return current_image_data, response_tokens, budget, multimodal_train_inputs_buffer
+        remaining_budgets.append(args.rollout_max_context_len - len(sample.tokens))
+    budget = min(remaining_budgets) if remaining_budgets else None
+    return current_image_data, response_tokens, budget, multimodal_train_inputs_buffer, generation_tokens
 
 
 async def _run_inference_step(url: str, tokens: list[int], sampling_params: dict, image_data, tokenizer):
@@ -209,28 +235,61 @@ async def _run_inference_step(url: str, tokens: list[int], sampling_params: dict
     return response_text, new_tokens, new_log_probs, finish_type, output["meta_info"]
 
 
+def _validate_multimodal_generation_alignment(meta_info: dict, expected_prompt_tokens: int, image_data) -> None:
+    """Require SGLang's rebuilt multimodal prefix to match the trainer token stream."""
+    if not image_data:
+        return
+
+    actual_prompt_tokens = meta_info.get("prompt_tokens")
+    if actual_prompt_tokens is None:
+        raise RuntimeError(
+            "Multimodal multi-turn generation requires SGLang to return meta_info.prompt_tokens "
+            "for exact-action alignment validation."
+        )
+    if int(actual_prompt_tokens) != expected_prompt_tokens:
+        raise RuntimeError(
+            "Multimodal multi-turn generation token alignment mismatch: "
+            f"trainer_expected={expected_prompt_tokens}, sglang_prompt_tokens={actual_prompt_tokens}. "
+            "Send compact media placeholders with exact sampled suffix IDs and keep "
+            "SGLANG_MM_AVOID_RETOKENIZE=1."
+        )
+
+
 def _process_env_step(env: BaseInteractionEnv, response_text: str, tokenizer, processor, args, sample_metadata):
     observation, done, _ = env.step(response_text)
     if done:
-        return None, None, None, None, True
+        return None, None, None, None, None, True
 
     next_user_message = env.format_observation(observation)
-    obs_prompt_ids, obs_image_data, obs_multimodal_inputs, obs_multimodal_train_inputs = (
-        _encode_observation_for_generation(
-            tokenizer,
-            processor,
-            next_user_message,
-            sample_metadata,
-            args.apply_chat_template,
-            args.apply_chat_template_kwargs,
-        )
+    (
+        obs_prompt_ids,
+        compact_obs_prompt_ids,
+        obs_image_data,
+        obs_multimodal_inputs,
+        obs_multimodal_train_inputs,
+    ) = _encode_observation_for_generation(
+        tokenizer,
+        processor,
+        next_user_message,
+        sample_metadata,
+        args.apply_chat_template,
+        args.apply_chat_template_kwargs,
     )
 
     bos_id = tokenizer.bos_token_id
     if bos_id is not None and obs_prompt_ids and obs_prompt_ids[0] == bos_id:
         obs_prompt_ids = obs_prompt_ids[1:]
+    if bos_id is not None and compact_obs_prompt_ids and compact_obs_prompt_ids[0] == bos_id:
+        compact_obs_prompt_ids = compact_obs_prompt_ids[1:]
 
-    return obs_prompt_ids, obs_image_data, obs_multimodal_inputs, obs_multimodal_train_inputs, False
+    return (
+        obs_prompt_ids,
+        compact_obs_prompt_ids,
+        obs_image_data,
+        obs_multimodal_inputs,
+        obs_multimodal_train_inputs,
+        False,
+    )
 
 
 def _append_to_sample(
@@ -312,9 +371,13 @@ async def generate(args: Any, sample: Sample, sampling_params) -> Sample:
 
     env, env_module, config, state, url = _initialize_resources(args, sample)
     sampling_params = sampling_params.copy()
-    current_image_data, response_tokens, budget, multimodal_train_inputs_buffer = _prepare_start_state(
-        sample, state, args, sampling_params
-    )
+    (
+        current_image_data,
+        response_tokens,
+        budget,
+        multimodal_train_inputs_buffer,
+        generation_tokens,
+    ) = _prepare_start_state(sample, state, args, sampling_params)
     try:
         env.reset()
         if budget is not None and budget <= 0:
@@ -326,9 +389,25 @@ async def generate(args: Any, sample: Sample, sampling_params) -> Sample:
             if budget is not None:
                 cur_sampling_params["max_new_tokens"] = budget
 
+            expected_prompt_tokens = len(sample.tokens)
             response_text, new_response_tokens, new_response_log_probs, finish_type, meta_info = (
-                await _run_inference_step(url, sample.tokens, cur_sampling_params, current_image_data, state.tokenizer)
+                await _run_inference_step(
+                    url,
+                    generation_tokens,
+                    cur_sampling_params,
+                    current_image_data,
+                    state.tokenizer,
+                )
             )
+            _validate_multimodal_generation_alignment(
+                meta_info,
+                expected_prompt_tokens,
+                current_image_data,
+            )
+            # Miles' multi-turn logger consumes this top-level field after
+            # rollout conversion. It is telemetry only and does not affect
+            # rewards, masks, scoring, or the trainer objective.
+            sample.metadata["round_number"] = turn_idx + 1
             # Record this generation call's engine weight version. SGLang issues one call
             # per turn, so we append each one (weight_versions is a list); the min across
             # turns (Sample.oldest_weight_version) is what the fully-async staleness filter
@@ -341,6 +420,7 @@ async def generate(args: Any, sample: Sample, sampling_params) -> Sample:
             if "weight_version" in meta_info:
                 sample.weight_versions.append(meta_info["weight_version"])
             _append_to_sample(sample, response_tokens, new_response_tokens, new_response_log_probs, loss_mask_val=1)
+            generation_tokens.extend(new_response_tokens)
             budget = _update_budget(budget, len(new_response_tokens))
 
             if _should_stop_on_finish(sample, finish_type):
@@ -349,15 +429,27 @@ async def generate(args: Any, sample: Sample, sampling_params) -> Sample:
                 sample.status = Sample.Status.TRUNCATED
                 break
 
-            obs_prompt_ids, obs_image_data, obs_multimodal_inputs, obs_multimodal_train_inputs, done = (
-                _process_env_step(env, response_text, state.tokenizer, state.processor, args, sample.metadata)
-            )
+            (
+                obs_prompt_ids,
+                compact_obs_prompt_ids,
+                obs_image_data,
+                obs_multimodal_inputs,
+                obs_multimodal_train_inputs,
+                done,
+            ) = _process_env_step(env, response_text, state.tokenizer, state.processor, args, sample.metadata)
             if done:
                 sample.status = Sample.Status.COMPLETED
                 break
 
+            if budget is not None and len(obs_prompt_ids) > budget:
+                # Keep environment observations atomic instead of exceeding the
+                # response/context cap or appending a partial tool result.
+                sample.status = Sample.Status.TRUNCATED
+                break
+
             obs_log_probs = [0.0] * len(obs_prompt_ids)
             _append_to_sample(sample, response_tokens, obs_prompt_ids, obs_log_probs, loss_mask_val=0)
+            generation_tokens.extend(compact_obs_prompt_ids)
             budget = _update_budget(budget, len(obs_prompt_ids))
 
             current_image_data = _update_multimodal_state(

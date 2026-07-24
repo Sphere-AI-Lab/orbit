@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "experiment": "04a-geo3k-multiturn-rkld-smoke",
+  "wandb_run_name": "opd-mm-04a-geo3k-mt-rkld-smoke",
+  "job_id": 26525,
+  "recorded_date": "2026-07-16",
+  "status": "passed",
+  "historical_budget_note": "This run predates response/context budget separation. Its configured response limit was reduced by the processor-expanded initial prompt, so it does not validate corrected response-cap or length-cap-ratio semantics.",
+  "source": {
+    "report_commit": "c7fbba136b805c356369bc574b6889d564c8364f",
+    "provenance": "Exact series transcribed from the retained cluster run logs and embedded in presentation/opd_multimodal_multiturns.html by the report commit."
+  },
+  "configuration": {
+    "optimizer_steps": 5,
+    "samples_per_step": 64,
+    "max_turns": 3,
+    "objective": "sampled_rkld",
+    "opd_kl_coef": 1.0,
+    "opd_log_prob_top_k": 0,
+    "opd_dagger_top_k": 0,
+    "context_parallel_size": 1
+  },
+  "exact_series": {
+    "step": [0, 1, 2, 3, 4],
+    "round_number": {
+      "min": [1.0, 1.0, 1.0, 1.0, 1.0],
+      "mean": [1.953125, 2.109375, 1.8125, 1.921875, 1.90625],
+      "max": [3.0, 3.0, 3.0, 3.0, 3.0]
+    },
+    "response_length_mean": {
+      "raw": [2130.109375, 1199.953125, 2572.140625, 1900.484375, 2589.40625],
+      "active_only": [2076.625, 1145.359375, 2531.59375, 1853.296875, 2539.875],
+      "masked_observation": [53.484375, 54.59375, 40.546875, 47.1875, 49.53125]
+    },
+    "train_opd_reverse_kl": [
+      0.402160108089447,
+      0.3111300468444824,
+      0.3138677477836609,
+      0.2765146493911743,
+      0.2555704712867737
+    ]
+  },
+  "derived": {
+    "round_number_mean_across_steps": 1.940625,
+    "masked_observation_tokens_per_sample": {
+      "min": 40.546875,
+      "max": 54.59375,
+      "mean": 49.06875
+    },
+    "rkld": {
+      "first": 0.402160108089447,
+      "last": 0.2555704712867737,
+      "absolute_change": -0.14658963680267334,
+      "relative_change_percent": -36.45056629288288
+    }
+  },
+  "reported_checks_without_embedded_series": {
+    "fast_test_subset": "82 passed",
+    "duration_minutes": 26,
+    "alignment_errors": 0,
+    "mask_length_errors": 0,
+    "nan_errors": 0,
+    "oom_errors": 0,
+    "teacher_requests_per_kept_sample": 1.0,
+    "student_requests": 0,
+    "gradient_norm_peaks_approx": [32, 27]
+  },
+  "limitations": [
+    "This is a five-step systems gate, not a convergence or quality result.",
+    "Per-step gradient norm, request transport, scoring latency, memory, task reward, and step-time series were not committed with job 26525 and must be retained for the longer synchronous reference.",
+    "The recorded round min/max values predate the global-extrema reducer fix. Because the values equal the structural bounds 1 and 3, they still imply that every contributing distributed rank observed those bounds in this run."
+  ]
+}
