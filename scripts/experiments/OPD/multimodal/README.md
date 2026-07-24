@@ -1177,6 +1177,192 @@ Verdict: mechanism study passed; either old-policy reference is defensible at
 this scale, and selecting a production default needs a trainer-bound or
 wider-staleness regime where the two can actually separate. Watch items:
 three early treatment grad spikes with immediate recovery (10a 146.5/355.2 at
-steps 3/25, the larger coinciding with that run's max mismatch; 10b 231.8 at
+steps 3/25; step 25 mismatch 0.0311 was near, but not equal to, the run maximum
+0.0320 at step 19; 10b 231.8 at
 step 7; no control step exceeds 100). Evidence:
 `results/10a-job-27455.json`, `results/10b-job-27456.json`.
+
+## 11: Fixed held-out Geo3K quality evaluation (12k rerun)
+
+Milestone `11` answers the quality question that the shuffled
+`rollout/raw_reward` series in `09` cannot answer. It evaluates every model on
+one content-addressed subset of `VeraIsHere/geo3k_imgurl_processed/test.parquet`.
+The default contract (revised 2026-07-21) is 30 unique prompts selected by a
+deterministic content hash with seed `20260720` from the *image-clean* test
+population: a test record is eligible only if neither its exact record
+fingerprint nor its media fingerprint appears in the training split. Prompt-text
+collisions do not exclude a record — the processed Geo3K `problem` field is a
+fixed protocol wrapper around generic titles such as "Find x.", so identical
+text over a different diagram is a different problem, not leakage. The exclusion
+is explicit and counted in the manifest metadata, never silent.
+
+The revision was forced by measurement, not preference: of the 601 unique test
+records, 299 share an exact record (1) or bit-identical image bytes (298) with
+the training split — the upstream Geo3K splits are by problem, not by diagram —
+leaving 302 image-clean candidates, which can never satisfy the original strict
+256-prompt/all-fingerprints contract. The 2026-07-21 decision keeps a small
+30-prompt fixed manifest and folds every non-evaluated test record into the
+Milestone-11 student training prompts, excluding the 6 records that share an
+image with an evaluated prompt. The generated
+`opd_eval_seed20260720_n30.train_augmented.parquet` therefore holds
+`2101 train + 565 test = 2666` rows, and the overlay rewrites the student
+recipes' `--prompt-data` to it (`11a`/`11b` teacher references are untouched).
+Note two consequences: 11c/11d train on a larger prompt pool than 04–10 did,
+and the n=30 Wilson 95% interval is wide (±≈0.18 at p≈0.5) — raise
+`OPD_EVAL_NUM_PROMPTS` (≤302 eligible) if a tighter interval is worth the eval
+wall-clock.
+
+The generated parquet carries a stable `opd_eval_id`, source-row index, manifest
+size, seed, and manifest fingerprint for every prompt. The same fingerprint must
+appear in all four runs. Re-sourcing a recipe validates the existing manifest,
+eval config, and augmented train parquet against the source-file hashes, ordered
+prompt IDs, and every row value, so a stale, corrupted, or silently changed
+split fails before Ray starts. The data manifest remains independent of decoding
+length. The generated eval-config identity includes the trajectory budget, for
+example `opd_eval_seed20260720_n30.ctx12000.eval.json`, so the archived 4k config
+cannot be silently reused by the 12k rerun.
+
+Evaluation uses the same Geo3K multimodal multi-turn protocol as training:
+
+```text
+fixed prompts             = 30 image-clean held-out test records
+student training prompts  = train + non-evaluated test records (2666 rows)
+generation                = greedy, one trajectory per prompt
+trajectory budget         = 12000 total tokens, including multimodal prompt,
+                            every assistant generation and every observation
+max turns                 = 3 rounds
+quality metric            = rule-based Geo3K answer accuracy + Wilson 95% CI
+student eval checkpoints  = model steps 0, 5, 10, ..., 200
+optimization reward       = unchanged: task reward remains telemetry-only
+checkpoint saving         = disabled
+```
+
+The eval dataset selects `examples.geo3k_vlm_multi_turn.fixed_eval.generate`
+through a per-dataset `--eval-config`. Training keeps the original
+`examples.geo3k_vlm_multi_turn.rollout.generate` callback and metadata contract.
+On eval only, the wrapper assigns the built-in `math` task reward before Miles
+can invoke the OPD custom RM. Student evaluation therefore generates with the
+current Student SGLang weights but issues no teacher-scoring request and cannot
+enter the training batch or loss.
+
+The budget wording is deliberate. Geo3K's custom rollout is not using
+`--rollout-max-response-len` as a fresh allowance on each turn: it initializes
+one remaining budget after subtracting the processor-expanded prompt, then
+subtracts every generated and observation token. Milestone 11 therefore sets
+both `--rollout-max-context-len 12000` and `--rollout-max-response-len 12000`.
+The first flag makes the cumulative context contract explicit; the second keeps
+the underlying SGLang request ceiling and generated eval config consistent.
+`--max-tokens-per-gpu 16384` remains above the 12k trajectory cap, so this does
+not introduce a new trainer parallelism or packing path.
+
+The two reference jobs run each teacher as the evaluated actor, not as an OPD
+score-only sidecar:
+
+1. `11a`: `Qwen3-VL-8B-Thinking`, eval-only on two nodes;
+2. `11b`: `Qwen3-VL-30B-A3B-Thinking`, eval-only on two nodes.
+
+The student jobs are synchronous three-node runs because the current fully
+async rollout callback rejects evaluation. They inherit the completed `06`
+hybrid contract unchanged: `sampled RKLD coefficient = 1`, teacher Top-K `= 2`,
+Top-K + Rest coefficient `= 0.5`, trainer-recomputed pre-update `q_old`, and
+task reward excluded from optimization. `11c` uses the 8B-Thinking teacher;
+`11d` uses the 30B-A3B-Thinking teacher and retains the proven 0.80 Student
+SGLang memory fraction.
+
+Milestone 11 submits with `HF_CACHE_DIR=/data/shared`. That is the tree every
+completed 00-10 run actually used (see any retained `args.json`): the models
+live under `/data/shared/models` — including both Thinking teachers — and the
+Geo3K parquet plus the generated eval manifest live under the user-writable
+`/data/shared/data/geo3k_imgurl_processed`. The historically documented
+`/data/shared/hf_cache` is a read-only mirror without the Thinking teachers;
+the fixed-eval overlay now rejects such a location before allocation instead
+of failing on a manifest-write traceback.
+
+Run the references once, then smoke each training arm before the full horizon:
+
+```bash
+HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
+  OPD/multimodal/11a-geo3k-fixed-eval-teacher8b-reference
+
+HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
+  OPD/multimodal/11b-geo3k-fixed-eval-teacher30b-reference
+
+OPD_NUM_ROLLOUT=5 WANDB_RUN_NAME=opd-mm-11c-teacher8b-fixed-eval-ctx12000-smoke \
+  HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
+  OPD/multimodal/11c-geo3k-multiturn-hybrid-sync-eval-teacher8b-200step
+
+OPD_NUM_ROLLOUT=5 WANDB_RUN_NAME=opd-mm-11d-teacher30b-fixed-eval-ctx12000-smoke \
+  HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
+  OPD/multimodal/11d-geo3k-multiturn-hybrid-sync-eval-teacher30b-200step
+```
+
+Inspect the two teacher references before allocating the student runs. The 12k
+protocol is intended to remove length as the dominant confound. The original
+gate required each reference to truncate at most 3/30 trajectories; measurement
+amended it (decision 2026-07-21). At 12k the references truncate 11/30 and
+9/30, but the tail is not budget-driven: 10 of the 11 are the same prompts
+that truncated at 4k (tripling the budget only halved the rate), truncated
+trajectories score zero, and completed trajectories top out at p90 ~7.8k, far
+below the cap. The binding criterion is therefore that completed-trajectory
+p90 sits well below the budget (met at 12k); the residual truncation is a
+Thinking-decoding property of a fixed hard-prompt subset and is reported, not
+budgeted away. After the references pass and both
+smokes record eval points at exactly 0 and 5, launch the wrappers
+without overrides for 200 steps. Each full student arm performs 41 evaluations,
+or 1,230 held-out trajectories. An eval blocks the synchronous driver and uses
+the same Student SGLang engines, but the 30 prompt tasks are submitted
+concurrently and bounded by the existing SGLang semaphore; only the turns within
+one trajectory are sequential. Include this cost in wall-clock reporting rather
+than comparing directly with the eval-free `09` runs. Exploratory launches may
+override `OPD_EVAL_INTERVAL` (minimum 2) and `OPD_EVAL_NUM_PROMPTS` (≤302); Gate 27
+smokes keep interval 5 to preserve the required step-0/step-5 pair, and the
+canonical quality curves keep 5 steps and 30 prompts. The generated W&B name
+encodes interval, prompt count and context budget so an override cannot
+masquerade as the canonical arm. `OPD_EVAL_MAX_CONTEXT_LEN` is available for an
+explicit noncanonical length study; the canonical rerun is 12,000.
+
+Primary W&B metrics live under `eval/geo3k_fixed/*`: `accuracy`,
+`accuracy_ci95_low/high`, `num_prompts`, `truncated_rate`, and mean/min/max for
+response, active, observation tokens, and rounds. Compact per-prompt JSONL
+evidence is written to `$MILES_RUN_DIR/fixed_eval/geo3k_fixed/step_XXXX.jsonl`.
+The standard Slurm launcher injects `MILES_RUN_DIR`; a nonstandard direct launch
+without it still logs aggregate metrics but warns and skips JSONL. Gates 25-28
+continue to require the JSONL evidence. All rerun references share the same
+12,000-token, three-round contract; always interpret accuracy together with
+`truncated_rate`, response length, and rounds even after the larger budget.
+Accuracy and the raw student-to-teacher gap are primary. A normalized gap-closure
+view may be computed after the run as
+`(student_t - student_0) / (teacher - student_0)` only when the teacher baseline
+is above the initial student; it must never replace the raw accuracy and CI.
+
+Status: **the 12k rerun ran on 2026-07-21: references complete (0.6333 /
+0.7000, jobs 27848/27849, amended gate), smokes exact (27850/27851), and the
+200-step arms were deliberately stopped at 58/64 optimizer steps after 3 h 16 m
+(jobs 27854/27855, ~12 h projected wall-clock at the 12k budget).** The partial
+12k window already answers two questions: the early trough is not a 4k budget
+artifact (both arms crater to 0.067 at step 25 with 28-29/30 held-out
+trajectories truncated — a truncation blowout, students overshoot even 12k
+during the distribution shock) and both arms recover to roughly their starting
+level by steps 40-60 (11c 0.50@55, 11d 0.47@60) while the 12k teachers sit
+above at 0.633 / 0.700. Whether the recovery crosses the teacher lines over
+the remaining 140 steps is unmeasured. Partial-window training invariants all
+verified from `results/11a`-`11d-ctx12000-job-*.json`; 12k curves are Figures
+14a-14b in the HTML report. The archived 4k history follows.
+
+Archived 4k status: **the 4k mechanism/evidence pass completed on 2026-07-21;
+the quality interpretation is superseded.** Archived
+references 27803/27811, smokes 27814/27815 and 200-step arms 27816/27817 remain
+useful diagnostics. Teacher references landed at 0.367
+(8B-Thinking) and 0.500 (30B-A3B) — both below the untouched 0.57-0.63
+Instruct student, so gap closure is undefined and raw accuracy is the only
+legal reading. Both student arms fell through an early trough (minima 0.033 /
+0.133) and settled at their matched teacher's budget-constrained level
+(last-five 0.313 vs 0.367; 0.420 vs 0.500) while held-out truncation doubled:
+under the old 4,096-total-token protocol the hybrid objective transferred the
+teachers' long-form behavior faster than task accuracy. That protocol counted
+the expanded multimodal prompt and observations against the nominal response
+limit, producing 50-63% teacher truncation; it cannot carry the final quality
+claim. Per-step series live in
+`results/11a`-`11d-job-*.json`; curves are Figures 13a-13b in the HTML report.
+The current 11a-11d wrappers use a new `ctx12000` run/config identity. The server
+gate and exact acceptance checks are in `SERVER_VALIDATION.md` Gates 25-28.

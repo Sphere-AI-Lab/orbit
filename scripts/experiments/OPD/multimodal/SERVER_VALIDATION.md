@@ -1044,7 +1044,8 @@ trajectories. Cost: train time median 6.65 vs 8.72 s, step time 18.44 vs
 generation wait at this topology. Staleness: 56 recycles (1.75% overhead),
 observed max 3 vs bound 2 (recycled), queue peak 2/32, zero version-query
 failures. Watch items: grad spikes 146.5 (step 3) and 355.2 (step 25 — the
-ladder's largest, coinciding with this run's max mismatch 0.0311) with
+ladder's largest; mismatch 0.0311 was near, but not equal to, the run maximum
+0.0320 at step 19) with
 immediate recovery; 09b never exceeds 100. Full series in
 `results/10a-job-27455.json`.
 
@@ -1086,10 +1087,229 @@ recorded). 5 transient version-query failures logged loudly and recovered
 7 (above-median but not maximal mismatch at that step), immediate recovery;
 09d never exceeds 100. Full series in `results/10b-job-27456.json`.
 
-Gates 0–24 are now closed; no further gate is scheduled. The recorded
-follow-ups (length-controlled quality study, pure-RL control, teacher cost
-study, and a trainer-bound or wider-staleness regime where the two q_old
-references could actually separate) start on request.
+Gates 0–24 are closed. Gates 25–28 implement the fixed held-out quality study.
+Their original 4k runs passed the systems/evidence contract on 2026-07-21, but
+the quality interpretation is superseded: the Geo3K custom rollout counted the
+expanded prompt and observations inside that nominal limit, and teacher
+truncation reached 50–63%. The current 11a–11d recipes reopen the same four gates
+under one explicit 12,000-token trajectory budget.
+
+## Gates 25-26: Fixed-Set Teacher References
+
+Run the focused server tests before allocating GPUs:
+
+```bash
+python -m pytest -q tests/fast/rollout/test_geo3k_fixed_eval.py
+bash -n scripts/experiments/OPD/multimodal/11*.sh
+```
+
+Launch each teacher exactly once. Milestone 11 submits with
+`HF_CACHE_DIR=/data/shared` (writable data tree + both Thinking teachers; the
+read-only `/data/shared/hf_cache` mirror is rejected by the overlay):
+
+```bash
+HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
+  OPD/multimodal/11a-geo3k-fixed-eval-teacher8b-reference
+
+HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
+  OPD/multimodal/11b-geo3k-fixed-eval-teacher30b-reference
+```
+
+Both are two-node, eval-only jobs: one eight-GPU Megatron actor and one TP=8
+SGLang rollout engine. They run `train.py` with `--num-rollout 0`; they do not
+start an OPD teacher sidecar, optimize a loss, or save a checkpoint. Accept each
+reference only if:
+
+1. manifest preparation reports `size=30`, seed `20260720`, the same full
+   fingerprint, and the expected selection stats (`test_unique=601`,
+   `excluded_train_record=1`, `excluded_train_media=298`, `eligible=302`,
+   `augmented_train_rows=2666`); subsequent jobs must report
+   `action=validated` for the manifest, eval config, and augmented train file;
+2. W&B contains exactly one `eval/step=0` point with
+   `eval/geo3k_fixed/num_prompts=30` and finite binary accuracy plus Wilson CI;
+3. the compact JSONL contains 30 unique `opd_eval_id` values and the same
+   manifest fingerprint, with no duplicate or missing prompt;
+4. `args.json` contains exactly one `--rollout-max-context-len 12000` and one
+   `--rollout-max-response-len 12000`; the eval config path ends in
+   `.ctx12000.eval.json` and reports `max_response_len=12000`;
+5. there is no training step, OPD scoring traffic, checkpoint output, or
+   non-finite required telemetry;
+6. length is no longer the binding constraint for the completing population:
+   completed-trajectory p90 must sit well below the 12k budget. (Amended
+   2026-07-21 from the original "at most 3/30 truncated": the measured 12k tail
+   — 11/30 and 9/30, with 10 of 11 identical to the 4k truncation set, zero
+   reward on every truncated trajectory, completed p90 ~7.8k — is a fixed
+   hard-prompt set where Thinking decoding does not converge, not a budget
+   artifact any feasible cap removes. Report the tail; do not gate on it.)
+
+**12k Gates 27-28 result: smokes passed; arms stopped early by decision
+(2026-07-21).** Smokes 27850/27851 (27 m 53 s / 32 m 48 s): exactly two eval
+points each, 11c 0.6667 → 0.6333, 11d 0.5667 → 0.6333; `args.json` clean
+(augmented prompt-data, both 12000 flags, `ctx12000` config, hybrid
+coefficients, no save). Same-checkpoint step-0 wobble widened to 5/30 flips at
+12k (was 2-4/30 at 4k) — longer greedy trajectories amplify decode divergence;
+keep reading windows. Full arms 27854/27855 ran 58 and 64 optimizer steps
+(3 h 16 m each, ~12 h projected) before a deliberate scancel to cap
+wall-clock; 12 and 13 eval points landed. Partial-window invariants all hold
+(`results/11c,11d-ctx12000-job-*.json`): additivity ≤ 9e-8, `pg_loss` ≡
+`opd_reverse_kl` at every step, hard-zero optimization reward, exactly 64
+teacher requests per step, zero checkpoints, all series finite. Measured
+story: both arms crater to 0.067 at step 25 in a truncation blowout (28-29/30
+held-out trajectories truncated — the early distribution shock overshoots even
+12k), then recover to roughly the starting level (11c 0.50@55, 11d 0.47@60)
+with truncation relaxing back toward the teacher band. The remaining 140-step
+question — whether recovery crosses the teacher lines — is unmeasured.
+
+**12k reference result: passed under the amended gate (2026-07-21).** 11a job
+`27848` (9 m 21 s): 0.6333 [0.455, 0.781], 11/30 truncated, mean response
+6,858 tokens, completed p90 7,801, 1.83 rounds. 11b job `27849` (13 m 12 s):
+0.7000 [0.521, 0.833], 9/30 truncated, mean response 6,000 tokens, completed
+p90 7,556, 2.13 rounds. Same fingerprint `2458…9447`, 30 unique IDs, no OPD
+traffic, no checkpoints. Both references now sit above the 4k student start —
+gap closure is defined for the first time. Launch note: the first submission
+pair (jobs 27846/27847) died in `RolloutManager` init because
+`--rollout-max-context-len` woke `filter_long_prompt` on the VLM path for the
+first time and it re-parsed templated string prompts as message lists; fixed
+in `bc2b722f` (reuse the Sample's stored multimodal inputs) with unit tests
+plus a real-processor integration check (30/30 and 2666/2666 rows kept at
+max_length=11999).
+
+Record the two accuracies as horizontal reference levels. They are generated
+task performance under the same three-round Geo3K tool protocol, not teacher
+prefill likelihoods and not a claim that the larger teacher must score higher.
+The shared 12,000-token trajectory cap includes the processor-expanded
+multimodal prompt, every assistant generation and every environment observation;
+it is one cumulative budget, not 12k per turn. Read accuracy and its CI together
+with `truncated_rate`, response length, and rounds.
+
+**Archived 4k result: systems contract passed; quality reference superseded.**
+11a job `27803` (12 m 37 s):
+`Qwen3-VL-8B-Thinking` accuracy **0.3667** [0.219, 0.545], 19/30 truncated,
+mean response 2,972 tokens, 1.47 rounds. 11b job `27811` (13 m 48 s):
+`Qwen3-VL-30B-A3B-Thinking` accuracy **0.5000** [0.331, 0.669], 15/30
+truncated, mean response 2,727 tokens, 1.80 rounds. Every acceptance item held:
+one step-0 point, 30 unique IDs, fingerprint `2458…9447`, `action=validated`
+artifacts, zero OPD scoring traffic, zero checkpoints. Both references sit
+*below* the untouched 8B-Instruct student (0.57–0.63 at step 0) — the Thinking
+teachers spend the budget on long reasoning and truncate more, so the gap-
+closure view is undefined and raw accuracy is the only legal reading. Getting
+here consumed three first-time-path fixes now in the tree: `6552051` (eval-only
+`--lr-decay-iters 1`; job 27802 died on the Megatron scheduler assert),
+`960d831` (srun `--export` comma-splits serialized args; job 27805 lost
+everything after `--moe-layer-freq`), and `feee8c5` (the initial unblock for a
+spurious `tie_word_embeddings=True` default in the VL-MoE text sub-config; job
+27808). Commit `0b47ba5` then replaced that model-specific skip with the final
+strict contract: propagate the outer VL config's serialized tying value into
+the text sub-config before validating it against Megatron.
+Evidence: `results/11a-job-27803.json`, `results/11b-job-27811.json`. These files
+remain the baseline that motivated the 12k rerun; they are not the new teacher
+reference levels. Current 12k reference jobs: **pending**.
+
+## Gates 27-28: Synchronous Student Curves
+
+First run a five-step smoke for each teacher arm:
+
+```bash
+OPD_NUM_ROLLOUT=5 WANDB_RUN_NAME=opd-mm-11c-teacher8b-fixed-eval-ctx12000-smoke \
+  HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
+  OPD/multimodal/11c-geo3k-multiturn-hybrid-sync-eval-teacher8b-200step
+
+OPD_NUM_ROLLOUT=5 WANDB_RUN_NAME=opd-mm-11d-teacher30b-fixed-eval-ctx12000-smoke \
+  HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
+  OPD/multimodal/11d-geo3k-multiturn-hybrid-sync-eval-teacher30b-200step
+```
+
+Before accepting either smoke, inspect `args.json`. It must show synchronous
+`train.py`, the original Geo3K training generate callback, `opd-kl-coef=1`,
+`opd-dagger-top-k=2`, `opd-dagger-coef=0.5`, no
+`--opd-optimize-task-reward`, no `--use-rollout-logprobs`, no fully-async flags,
+and no save flag. `--prompt-data` must be the
+`opd_eval_seed20260720_n30.train_augmented.parquet` file (train plus the
+non-evaluated test records), not the original `train.parquet`. Eval must be a
+separate `opd_eval_seed20260720_n30.ctx12000.eval.json`; both rollout length
+flags must equal 12000. The smoke must produce exactly two points at model steps
+0 and 5.
+The step-0 student accuracy should agree between arms because both are the
+untouched 8B-Instruct checkpoint; investigate any difference larger than one
+prompt before proceeding.
+
+Then launch the full runs:
+
+```bash
+HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
+  OPD/multimodal/11c-geo3k-multiturn-hybrid-sync-eval-teacher8b-200step
+
+HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
+  OPD/multimodal/11d-geo3k-multiturn-hybrid-sync-eval-teacher30b-200step
+```
+
+Each full arm must produce 41 fixed-set points at model steps
+`0, 5, 10, ..., 200`, each with 30 unique IDs and the teacher-reference
+fingerprint. Apply all synchronous 06 hybrid invariants on training batches:
+finite/additive losses, exact suffix alignment, one teacher request per kept
+sample, zero Student SGLang rescoring, hard-zero optimization reward, finite
+gradients, and no checkpoint. Evaluation must not increase OPD scoring request
+counts: its task-reward wrapper finishes before the custom OPD RM can run.
+
+Each eval blocks the synchronous driver from starting the next training rollout
+and reuses the Student SGLang engines. The 30 prompt tasks are nevertheless
+submitted concurrently under the existing SGLang semaphore; only turns inside a
+single trajectory are sequential. Treat eval as explicit wall-clock overhead,
+but do not assume a particular training step timer includes it. The normal Slurm
+launcher must inject `MILES_RUN_DIR`; a warning about a missing value means the
+aggregate metrics may exist but the required per-prompt JSONL evidence does not.
+Student recipe overrides require `OPD_EVAL_INTERVAL >= 2`: interval 1 makes the
+pre-train and post-step-1 callbacks share `rollout_id=0`, so the overlay rejects
+it instead of mislabeling metrics and overwriting `step_0000.jsonl`.
+
+Report raw accuracy with Wilson intervals, initial/final/best accuracy, the
+student-to-matched-teacher gap, response length, truncation and rounds. Do not
+use `rollout/raw_reward` as the quality curve and do not claim monotonicity from
+five-step sampling. Normalized gap closure is secondary and defined only when
+the matched teacher accuracy exceeds student step zero. At n=30 one prompt is
+3.3 accuracy points and the Wilson interval is wide by construction — plot the
+CI band, not the point estimate alone. Include the 1,230 eval trajectories per
+arm when reporting runtime; these synchronous jobs are not a systems-speed A/B
+against the eval-free fully-async 09 runs. Remember the 11c/11d training pool is
+the augmented 2,666-prompt file, so training-batch telemetry is not
+prompt-population-matched to 04-10 either.
+
+**Archived 4k result: systems contract passed; quality curve superseded.**
+Smokes: 11c job `27814` (19 m 34 s) step 0
+→ 5 accuracy 0.5667 → 0.6333; 11d job `27815` (24 m 06 s) 0.5667 → 0.5333;
+exactly two points each, arms identical at step 0 (17/30), `args.json` clean
+(augmented `--prompt-data`, hybrid flags, no save/async/rollout-lp flags).
+Full arms: 11c job `27816` (3 h 33 m), 11d job `27817` (3 h 25 m); each emitted
+all 41 points at steps 0, 5, …, 200 with 30 unique IDs and the shared
+fingerprint at every point; no checkpoint; eval added no OPD scoring traffic.
+The committed `train_series` independently reproduces the 200-step trajectories,
+bit-equality checks and loss additivity to its six-decimal storage precision
+(maximum reconstructed residual 1e-6). The `verifications` block retains the
+full-precision summaries parsed from each server `run.log`: additivity residual
+4.5e-8 / 2.7e-7, `pg_loss` bit-equal `opd_reverse_kl` 200/200 per arm,
+`ppo_kl`/`pg_clipfrac` exact 0.0 and ESS exact 1.0 (trainer-`q_old` machinery
+structurally inert, as milestone 10 predicted), optimization reward hard 0.0,
+teacher requests exactly 12,800 per arm (evaluation added none), zero
+checkpoints, all series finite. The latter counters are committed derived
+assertions rather than raw per-step series; the cluster `run.log` remains their
+source artifact. Watch item: grad-norm spikes above 100 with
+immediate recovery — 11c one spike (229.5 at step 25), 11d four (up to 510.9
+at step 48, median 0.92); no 09/10 control exceeded 100, and the spikes sit in
+the same early phase as the eval trough.
+
+The measured quality story: from the Instruct start (0.633 / 0.567 at step 0)
+both arms fall through an early trough (11c minimum 0.033 at step 30; 11d
+0.133 at step 20) and recover only to their matched teacher's level —
+first/middle/last-five windows 0.480/0.313/0.313 (11c, teacher 0.367) and
+0.447/0.453/0.420 (11d, teacher 0.500). Held-out truncation roughly doubles
+(≈10/30 → ≈21 and ≈17/30) as mean responses grow 1.7k → ~3k tokens and
+completed rounds fall — the students inherit Thinking-style length under a cap
+that penalizes it. Caveats to carry into any retelling: n=30 (±0.18 CI
+half-width), same-checkpoint greedy evals wobble 2–4 prompts across runs
+(step-0 11c-full read 0.633 vs 0.567 elsewhere), truncated trajectories can
+still score. Evidence: `results/11c-job-27816.json`,
+`results/11d-job-27817.json`; per-prompt JSONL under each run's
+`fixed_eval/geo3k_fixed/`. Current 12k smokes and full arms: **pending**.
 
 ## Failure Triage
 
