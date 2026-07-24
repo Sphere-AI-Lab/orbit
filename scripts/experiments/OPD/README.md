@@ -34,12 +34,18 @@ multimodal/                 Staged Qwen3-VL OPD ladder. `00`–`06` establish
                             GRPO advantage with distillation invariants
                             untouched, recycling enforcement-tested, 8.4
                             ms/active token at prefetch 2.
-                            `09` closes the roadmap with a 200-step two-teacher
-                            matrix (8B-Thinking vs 30B-A3B → 8B-Instruct, jobs
+                            `09` runs a 200-step two-teacher matrix
+                            (8B-Thinking vs 30B-A3B → 8B-Instruct, jobs
                             27429–27435): invariants exact across 410 steps,
                             K=2 coverage stable in both arms, students drift
                             toward Thinking-length responses (budget lever
-                            recorded for full runs).
+                            recorded for full runs). `10` closes the roadmap
+                            with a paired rollout-q_old A/B over both 09 arms
+                            (jobs 27455/27456): objective parity, the PPO
+                            ratio measured non-degenerate for the first time
+                            (the 02–09 default made it identically 1), and the
+                            saved trainer forward absorbed as generation wait
+                            at this topology.
 archive/                    Historical 1-node smokes, the former canonical
                             3-node recipe and HTTP A/B wrapper, and the frozen
                             legacy teacher-top-k reproduction recipe.

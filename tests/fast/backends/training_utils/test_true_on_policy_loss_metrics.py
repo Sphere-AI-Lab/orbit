@@ -61,7 +61,14 @@ def _patch_single_rank_loss_helpers(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("use_rollout_logprobs", "train_log_probs", "old_log_probs", "rollout_log_probs", "expected_abs_diff"),
+    (
+        "use_rollout_logprobs",
+        "train_log_probs",
+        "old_log_probs",
+        "rollout_log_probs",
+        "expected_reference_abs_diff",
+        "expected_current_abs_diff",
+    ),
     [
         (
             False,
@@ -69,6 +76,7 @@ def _patch_single_rank_loss_helpers(monkeypatch):
             torch.tensor([0.10, 0.20], dtype=torch.float32),
             torch.tensor([0.40, 0.80], dtype=torch.float32),
             0.45,
+            0.0,
         ),
         (
             True,
@@ -76,6 +84,7 @@ def _patch_single_rank_loss_helpers(monkeypatch):
             torch.tensor([0.10, 0.20], dtype=torch.float32),
             torch.tensor([0.40, 0.80], dtype=torch.float32),
             0.0,
+            0.15,
         ),
     ],
 )
@@ -85,7 +94,8 @@ def test_train_rollout_logprob_abs_diff_uses_policy_loss_reference_logprobs(
     train_log_probs: torch.Tensor,
     old_log_probs: torch.Tensor,
     rollout_log_probs: torch.Tensor,
-    expected_abs_diff: float,
+    expected_reference_abs_diff: float,
+    expected_current_abs_diff: float,
 ):
     args = _make_args(use_rollout_logprobs=use_rollout_logprobs)
     batch = _make_batch(old_log_probs=old_log_probs, rollout_log_probs=rollout_log_probs)
@@ -121,7 +131,9 @@ def test_train_rollout_logprob_abs_diff_uses_policy_loss_reference_logprobs(
     )
 
     assert torch.isfinite(loss)
-    torch.testing.assert_close(metrics["train_rollout_logprob_abs_diff"], torch.tensor(expected_abs_diff))
+    torch.testing.assert_close(metrics["train_rollout_logprob_abs_diff"], torch.tensor(expected_reference_abs_diff))
+    torch.testing.assert_close(metrics["current_rollout_logprob_abs_diff"], torch.tensor(expected_current_abs_diff))
+    assert torch.isfinite(metrics["current_rollout_kl"])
 
 
 def test_zero_weighted_entropy_nan_does_not_poison_policy_loss(monkeypatch):

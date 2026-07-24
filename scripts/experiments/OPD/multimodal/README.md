@@ -1071,3 +1071,112 @@ the rerun at 0.80 completed clean. The 09d gate now defaults that override to
 Engine death still cascades to job death in the async
 path (no engine-level recovery) — recorded as a launcher/manager follow-up.
 Evidence: `results/09b-job-27432.json`, `results/09d-job-27435.json`.
+
+## 10: Rollout log-probs as the old-policy reference
+
+Milestone `10` is a paired old-policy-source experiment over the two completed
+`09` long-window arms. It keeps the model pair, pure-hybrid objective, Geo3K
+multi-turn data, prefetch-two scheduler, staleness bound, memory fractions,
+teacher topology, 200-step horizon, task-reward telemetry, and no-checkpoint
+contract fixed. The treatment adds exactly one existing Miles flag:
+
+```text
+--use-rollout-logprobs
+```
+
+The default `09` path accepts actions sampled by Student SGLang at weight
+version `v`, then asks the trainer actor at its pre-update version `v+k` to
+recompute those sampled-action log-probs. That detached recomputation supplies
+both `q_old` in sampled RKLD and the old-policy side of sampled-token PPO. It
+does not keep a second actor checkpoint, but it does run one additional
+forward-only pass over the accepted batch.
+
+The `10` treatment instead reuses the log-probs emitted when each action was
+sampled. It therefore makes `q_old = q_rollout`, skips the trainer pre-update
+log-prob forward, and exposes the behavior/trainer gap directly in the PPO
+ratio. Teacher sampled log-probs, native `[T,2]` targets, current trainer
+logits, Top-K + Rest DAgger, optimizer settings, and all parallel groups remain
+unchanged. This is neither TIS nor a new clipping rule.
+
+The two possibilities have different, legitimate biases:
+
+- trainer-recomputed `q_old` makes the ratio close to one and can damp the
+  numerical effect of asynchronous age and SGLang/Megatron log-prob mismatch;
+  it is a stable local surrogate, but not the exact behavior-policy reference;
+- rollout `q_old` is faithful to the policy that generated the action and saves
+  a trainer forward, but stale samples and backend mismatch now enter the PPO
+  ratio and RKLD coefficient. That may improve estimator fidelity or increase
+  variance. The direction is empirical, not assumed.
+
+Launch the two 200-step treatments:
+
+```bash
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/10a-geo3k-multiturn-hybrid-fully-async-rollout-qold-same-size-gate
+
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/10b-geo3k-multiturn-hybrid-fully-async-rollout-qold-big-small-gate
+```
+
+Compare `10a` with `09b` and `10b` with `09d`; do not compare 10a directly
+with 10b to infer the old-policy-source effect. Preserve the existing
+first/middle/last windows and exclude the fully-async step-zero completion-order
+artifact from trend claims.
+
+The metric semantics matter:
+
+- `train/train_rollout_logprob_abs_diff` and `train/train_rollout_kl` compare
+  the policy-loss reference with rollout log-probs. They are zero by definition
+  in `10` and must not be reported as improved mismatch.
+- `train/current_rollout_logprob_abs_diff` and
+  `train/current_rollout_kl` compare the live training forward with rollout
+  log-probs without another forward or any gradient contribution. These are the
+  non-degenerate mismatch diagnostics for `10`.
+- `train/ppo_kl`, `train/pg_clipfrac`, and `train/ess_ratio` show how much of
+  that mismatch actually enters the sampled-token policy update. A stable run
+  requires finite values, no sustained clip-fraction saturation, and no ESS
+  collapse.
+- `perf/log_probs_time` should disappear or become zero because the detached
+  pre-update actor forward is skipped. Also compare active-token cost,
+  `perf/train_time`, wait ratio, and tokens/GPU/s; wall-clock alone is confounded
+  by response-length and completion-order changes.
+
+Retain every `09` correctness guard: one teacher request per kept sample, zero
+Student SGLang rescoring, exact suffix alignment, finite/additive hybrid losses,
+valid DAgger identities, hard-zero optimization reward, bounded accepted
+staleness, and no checkpoint saving. Also compare sampled RKLD, coarse KL,
+Rest-mass error, gradients, response length, truncation, rounds, and observed
+task reward. The experiment passes as a mechanism study if both treatments
+finish 200 steps without violating those guards; choosing a default requires
+the paired stability, objective, and systems evidence rather than a single
+lower curve.
+
+**Result: both gates passed (2026-07-19; 10a job 27455, 77 min; 10b job
+27456, 81 min; commit `65ae6baa`).** Both treatments finished 200/200 steps
+with every 09 guard intact and objective trajectories indistinguishable from
+their controls (sampled RKLD last-window 0.033 vs 0.033 same-size and 0.096
+vs 0.095 big-small; coarse KL, Rest error and Top-2 mass likewise — the 09
+teacher-matrix gap is preserved unchanged). The mechanism is now measured
+instead of assumed. In the 09 controls the trainer-recomputed `q_old` equals
+the training forward bit-exactly (one optimizer step per rollout step), so
+`ppo_kl`/`pg_clipfrac` are exact 0.0 and `ess_ratio` exact 1.0 at all 400
+control steps — the PPO clipping machinery was structurally inert throughout
+02–09, a property this milestone makes explicit for the first time. Under
+rollout `q_old` the ~0.016 nats/token SGLang↔Megatron mismatch enters the
+ratio and stays harmless: median `ppo_kl` ~1e-3, clip fraction 0.3–0.6% (max
+2.8%), ESS never below 0.989. The mismatch band itself is unchanged
+(`current_rollout_abs_diff` 0.016–0.021 vs the controls' diagnostic
+0.015–0.019); `train_rollout_*` reads 0.0 at all 400 treatment steps exactly
+as the definition check predicts, and the `pg_loss`/`opd_reverse_kl` float
+fingerprint flips from bit-equal (400/400 control steps) to unequal (400/400
+treatment steps, median |Δ| ~1.3e-3). The cost story has two halves: the
+~2 s/step detached forward disappears (`perf/log_probs_time` absent; trainer
+time −2 s) but median step time is flat because this topology is
+generation-bound — the saving is absorbed as rollout wait (0.53 → 0.65).
+Verdict: mechanism study passed; either old-policy reference is defensible at
+this scale, and selecting a production default needs a trainer-bound or
+wider-staleness regime where the two can actually separate. Watch items:
+three early treatment grad spikes with immediate recovery (10a 146.5/355.2 at
+steps 3/25, the larger coinciding with that run's max mismatch; 10b 231.8 at
+step 7; no control step exceeds 100). Evidence:
+`results/10a-job-27455.json`, `results/10b-job-27456.json`.

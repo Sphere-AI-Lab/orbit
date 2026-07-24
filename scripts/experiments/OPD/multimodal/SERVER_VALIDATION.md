@@ -985,6 +985,112 @@ scoring remains a small part of the overlapped window; a retopologized
 GPU-seconds-per-scored-token study remains future work as scoped. Grads
 0.6–79.3 (median 1.0). Full series in `results/09d-job-27435.json`.
 
+## Gate 23: Same-Size Rollout-q_old 200-Step A/B
+
+Launch the treatment paired with Gate 21:
+
+```bash
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/10a-geo3k-multiturn-hybrid-fully-async-rollout-qold-same-size-gate
+```
+
+Before accepting the job, inspect the effective command. It must match `09b`
+on the Qwen3-VL-8B-Thinking teacher, 8B-Instruct student, 200 rollouts,
+prefetch two, staleness bound two, pure-hybrid coefficients, task-reward
+telemetry, and no-save contract. The only added training-semantic flag is
+`--use-rollout-logprobs`; reject `--use-tis` and `--get-mismatch-metrics`.
+The latter would restore the pre-update forward and invalidate the cost arm.
+
+Apply every Gate 21 correctness invariant. In addition:
+
+1. `perf/log_probs_time` must be absent or zero while normal trainer forward
+   and backward remain present.
+2. Treat zero `train/train_rollout_*` as a definition check only. Use
+   `train/current_rollout_logprob_abs_diff`, `train/current_rollout_kl`,
+   `train/ppo_kl`, `train/pg_clipfrac`, and `train/ess_ratio` for mismatch and
+   update stability.
+3. Stop on non-finite ratios, sustained clipping saturation, ESS collapse,
+   objective-identity failure, or any accepted sample outside the configured
+   staleness contract.
+4. Compare against job `27432` using matched first/middle/last windows after
+   excluding step zero. Report sampled RKLD, coarse KL, Rest-mass error,
+   gradient distribution, active-token cost, train time, wait ratio, response
+   length, truncation, rounds, and task-reward telemetry.
+
+**Result: passed.** Job 27455 (slinky-[5,56,28], head/teacher slinky-5, 77
+minutes, 2026-07-19) completed 200/200 steps at commit `65ae6baa` after the
+66-test focused suite passed locally. The effective command was verified
+single-variable against 09b before acceptance: only `--use-rollout-logprobs`
+added; TIS/mismatch flags absent. Every Gate 21 invariant held: additivity
+max 5.96e-8, CE/coarse-KL identities ≤ 7.45e-8, 64 kept-sample requests per
+step with the 224 extra requests exactly 4 × the 56 recycled groups (scored
+before recycling — the same accounting exists in 09b: 13,000 requests vs
+12,800 kept), zero retries, zero alignment errors, zero student rescores,
+`rollout/rewards` hard 0.0, no checkpoints. `perf/log_probs_time` and
+`log_probs_tflops` are absent from all 200 perf records (09b pays ~2.06
+s/step); `train_rollout_*` is 0.0 at all 200 steps (definition check).
+`current_rollout_logprob_abs_diff` runs 0.016/0.017/0.021 (windowed medians)
+vs 09b's diagnostic 0.016/0.019/0.015 — the band is unchanged; only its role
+moved. Update stability: median `ppo_kl` 1.05e-3 (max 3.4e-3), median clip
+fraction 0.56% (max 2.5%), ESS ≥ 0.98939 — the 09b control is identically
+0/0/1 at every step, so the ratio went from structurally inert to
+measured-and-small. The float fingerprint flipped as predicted: `pg_loss` ≠
+`opd_reverse_kl` at 200/200 steps (median |Δ| 1.35e-3) vs bit-equality at
+200/200 in 09b. Objectives are indistinguishable from control: RKLD
+0.195/0.048/0.033 vs 0.192/0.054/0.033, coarse KL 0.173/0.035/0.024 vs
+0.181/0.040/0.025, flat Top-2 mass, same length/truncation/reward
+trajectories. Cost: train time median 6.65 vs 8.72 s, step time 18.44 vs
+18.86 s, wait ratio 0.650 vs 0.533 — the saved forward is absorbed as
+generation wait at this topology. Staleness: 56 recycles (1.75% overhead),
+observed max 3 vs bound 2 (recycled), queue peak 2/32, zero version-query
+failures. Watch items: grad spikes 146.5 (step 3) and 355.2 (step 25 — the
+ladder's largest, coinciding with this run's max mismatch 0.0311) with
+immediate recovery; 09b never exceeds 100. Full series in
+`results/10a-job-27455.json`.
+
+## Gate 24: Big-to-Small Rollout-q_old 200-Step A/B
+
+Launch the treatment paired with Gate 22:
+
+```bash
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/10b-geo3k-multiturn-hybrid-fully-async-rollout-qold-big-small-gate
+```
+
+Confirm the 30B-A3B-Thinking teacher, 8B-Instruct student, TP=8 teacher,
+prefetch two, and the successful `09d` Student SGLang memory fraction of 0.80.
+Apply the same semantic, mismatch, stability, timing, and stop rules as Gate 23.
+Compare only against successful job `27435`, not the earlier OOMed submission.
+Interpret the pair as an old-policy-reference A/B; the cross-teacher difference
+remains the separate `09` model-matrix question.
+
+**Result: passed.** Job 27456 (slinky-[34,37,3], head/teacher slinky-34, 81
+minutes, 2026-07-19) completed 200/200 steps with the 0.80 memory fraction and
+zero OOM. Same verification pattern as Gate 23, all green: additivity max
+5.96e-8, identities ≤ 1.19e-7, `rollout/rewards` hard 0.0, no checkpoints,
+`log_probs_time` absent (09d pays ~1.99 s/step), `train_rollout_*` zero at
+all 200 steps, fingerprint flipped (`pg_loss` ≠ `opd_reverse_kl` 200/200,
+median |Δ| 1.32e-3, vs bit-equality in 09d). Mismatch band unchanged:
+`current_rollout_abs_diff` 0.017/0.016/0.017 vs 09d's diagnostic
+0.017/0.018/0.015. Stability: median `ppo_kl` 8.1e-4 (max 6.8e-3), clip
+fraction 0.29% (max 2.8%), ESS ≥ 0.98960; 09d control identically 0/0/1.
+Objective parity: RKLD 0.266/0.112/0.096 vs 0.253/0.117/0.095, coarse KL
+0.253/0.080/0.068 vs 0.244/0.086/0.069 — the 09 teacher-matrix gap is
+preserved unchanged under the new reference. Cost: train time median 6.35 vs
+8.52 s, step time 18.29 vs 18.16 s, wait ratio 0.653 vs 0.525 — same
+generation-bound absorption as 10a. Scoring accounting: 13,064 requests =
+12,800 kept + 264 recycled-then-discarded (the collector counted 67 recycles;
+one group was recycled before its scoring completed — benign ordering,
+recorded). 5 transient version-query failures logged loudly and recovered
+(same router transient as 09b's 4). Watch item: one grad spike 231.8 at step
+7 (above-median but not maximal mismatch at that step), immediate recovery;
+09d never exceeds 100. Full series in `results/10b-job-27456.json`.
+
+Gates 0–24 are now closed; no further gate is scheduled. The recorded
+follow-ups (length-controlled quality study, pure-RL control, teacher cost
+study, and a trainer-bound or wider-staleness regime where the two q_old
+references could actually separate) start on request.
+
 ## Failure Triage
 
 - `scoring_suffix_ids` rejected as an unknown field: the teacher is running an
@@ -1018,3 +1124,7 @@ GPU-seconds-per-scored-token study remains future work as scoped. Grads
   interpreting OPD + RL curves; the explicit composition contract is broken.
 - teacher queue growth or memory pressure: record queue depth, scoring latency
   and GPU memory before setting `OPD_SCORING_MAX_INFLIGHT` to a finite value.
+- zero `train/train_rollout_*` in `10` is expected and not evidence of zero
+  staleness. Missing/non-finite `train/current_rollout_*`, saturated
+  `train/pg_clipfrac`, or collapsed `train/ess_ratio` is the relevant triage
+  path; retain the effective command and sampled-token diagnostics.

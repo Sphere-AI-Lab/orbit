@@ -119,6 +119,10 @@ GRPO_ARGS=(
    --opd-type sglang
    --opd-kl-coef "$OPD_KL_COEF"
    --opd-log-prob-top-k 0
+   # Miles carries sampled RKLD through its PPO reducer. These explicit values
+   # are the existing symmetric defaults, not an OPD-specific tuning choice.
+   --eps-clip 0.2
+   --eps-clip-high 0.2
    --sglang-mm-exact-scoring-suffix
    --opd-scoring-timeout "${OPD_SCORING_TIMEOUT:-600}"
    --opd-scoring-max-inflight "${OPD_SCORING_MAX_INFLIGHT:-0}"
