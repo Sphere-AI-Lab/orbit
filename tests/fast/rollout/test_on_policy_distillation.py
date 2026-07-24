@@ -1456,6 +1456,8 @@ def _sampled_opd_args(**overrides) -> Namespace:
     values = {
         "opd_log_prob_top_k": 0,
         "opd_log_task_reward": False,
+        "opd_optimize_task_reward": False,
+        "opd_task_reward_coef": 1.0,
         "reward_key": None,
     }
     values.update(overrides)
@@ -1492,6 +1494,38 @@ def test_observed_task_reward_is_raw_telemetry_but_optimization_reward_stays_zer
     assert raw_rewards == [1.0]
     assert rewards == [0.0]
     assert sample.teacher_log_probs.tolist() == pytest.approx([-0.2, -0.3])
+
+
+def test_observed_task_reward_can_drive_group_normalized_grpo_with_an_explicit_coefficient():
+    task_rewards = [0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0]
+    samples = []
+    for task_reward in task_rewards:
+        sample = Sample(tokens=[10, 11], response_length=1)
+        sample.reward = _sampled_scoring_response([11])
+        sample.metadata[opd.OPD_TASK_REWARD_METADATA_KEY] = task_reward
+        samples.append(sample)
+
+    raw_rewards, rewards = opd.post_process_rewards(
+        _sampled_opd_args(
+            opd_log_task_reward=True,
+            opd_optimize_task_reward=True,
+            opd_task_reward_coef=0.5,
+            advantage_estimator="grpo",
+            rewards_normalization=True,
+            grpo_std_normalization=True,
+            n_samples_per_prompt=4,
+            rollout_batch_size=2,
+        ),
+        samples,
+    )
+
+    expected = torch.tensor(task_rewards, dtype=torch.float32).reshape(2, 4)
+    expected = expected - expected.mean(dim=-1, keepdim=True)
+    expected = 0.5 * expected / (expected.std(dim=-1, keepdim=True) + 1e-6)
+    assert raw_rewards == task_rewards
+    torch.testing.assert_close(torch.tensor(rewards), expected.flatten())
+    for sample in samples:
+        torch.testing.assert_close(sample.teacher_log_probs, torch.tensor([-0.1]))
 
 
 def test_sampled_token_post_process_rejects_token_alignment_mismatch():
@@ -1612,6 +1646,30 @@ def test_opd_dagger_post_process_preserves_sampled_rkld_and_native_t_by_k_target
     assert sample.teacher_topk_valid_mask.tolist() == [[True, True], [True, True]]
     assert sample.opd_reverse_kl is None
     sample.validate()
+
+
+def test_opd_dagger_post_process_can_return_task_optimization_reward_without_changing_sparse_targets():
+    sample = Sample(tokens=[7, 8, 9, 11, 12], response_length=2)
+    sample.reward = _opd_dagger_response(
+        [
+            [[math.log(0.6), 21], [math.log(0.4), 22]],
+            [[math.log(0.5), 23], [math.log(0.2), 24]],
+        ]
+    )
+    sample.metadata[opd.OPD_TASK_REWARD_METADATA_KEY] = 1.0
+    args = _opd_dagger_args()
+    args.opd_log_task_reward = True
+    args.opd_optimize_task_reward = True
+    args.opd_task_reward_coef = 0.25
+    args.advantage_estimator = "grpo"
+    args.rewards_normalization = False
+
+    raw_rewards, rewards = opd.post_process_rewards(args, [sample])
+
+    assert raw_rewards == [1.0]
+    assert rewards == [0.25]
+    assert sample.teacher_topk_token_ids.tolist() == [[21, 22], [23, 24]]
+    assert sample.teacher_topk_valid_mask.all()
 
 
 def test_opd_dagger_post_process_masks_rows_with_fewer_than_k_targets():

@@ -165,9 +165,14 @@ MONITOR_ARGS=(
    --use-rollout-entropy
 )
 
+# Student rollout engines. 0.85 held through milestone 08; the 09d 200-step
+# prefetch-2 run OOMed a student engine at step 65 (4.64 GiB burst against
+# 2.84 GiB free + 9 GiB fragmented reserve) as responses drifted longer, so the
+# fraction is now overridable per-recipe without changing the validated default.
+OPD_STUDENT_MEM_FRACTION=${OPD_STUDENT_MEM_FRACTION:-0.85}
 SGLANG_ARGS=(
    --rollout-num-gpus-per-engine 1
-   --sglang-mem-fraction-static 0.85
+   --sglang-mem-fraction-static "$OPD_STUDENT_MEM_FRACTION"
 )
 
 MISC_ARGS=(

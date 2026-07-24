@@ -946,6 +946,39 @@ async def _record_observed_task_reward(args: Namespace, sample: Sample) -> None:
     sample.metadata = metadata
 
 
+def _task_optimization_rewards(args: Namespace, raw_rewards: list[float]) -> list[float]:
+    """Build the base RL reward while preserving the logging-only default.
+
+    Custom reward post-processing bypasses Miles' generic reward-normalization
+    branch, so the opt-in OPD path mirrors that branch here. The coefficient is
+    applied after normalization so it remains an effective objective weight.
+    """
+    if not getattr(args, "opd_optimize_task_reward", False):
+        return [0.0] * len(raw_rewards)
+
+    rewards = torch.tensor(raw_rewards, dtype=torch.float32)
+    advantage_estimator = getattr(args, "advantage_estimator", None)
+    if advantage_estimator in {"grpo", "gspo", "reinforce_plus_plus_baseline"} and getattr(
+        args, "rewards_normalization", True
+    ):
+        group_size = int(getattr(args, "n_samples_per_prompt", len(raw_rewards)))
+        rollout_batch_size = int(getattr(args, "rollout_batch_size", 1))
+        expected_size = group_size * rollout_batch_size
+        if rewards.numel() == expected_size:
+            rewards = rewards.reshape(-1, group_size)
+        else:
+            # Match the generic dynamic/uneven-group fallback: normalize the
+            # available samples as one group when the canonical shape is absent.
+            rewards = rewards.reshape(1, -1)
+
+        rewards = rewards - rewards.mean(dim=-1, keepdim=True)
+        if advantage_estimator in {"grpo", "gspo"} and getattr(args, "grpo_std_normalization", True):
+            rewards = rewards / (rewards.std(dim=-1, keepdim=True) + 1e-6)
+
+    coefficient = float(getattr(args, "opd_task_reward_coef", 1.0))
+    return (coefficient * rewards).flatten().tolist()
+
+
 async def reward_func(args: Namespace, sample: Sample, **kwargs: Any) -> dict[str, Any]:
     multimodal_inputs = sample.multimodal_inputs or {}
     images = multimodal_inputs.get("images")
@@ -1077,9 +1110,9 @@ def post_process_rewards(args: Namespace, samples: list[Sample], **kwargs: Any) 
     plus native teacher ``[T,K]`` IDs/log-probs/valid-mask from one request.
     Legacy ``--opd-log-prob-top-k>0`` remains the rollout-side scalar path.
 
-    With ``--opd-log-task-reward``, ``raw_reward`` is the observed task score,
-    while the optimization ``rewards`` returned here remain zero. This keeps
-    task correctness visible in W&B without changing OPD advantages.
+    With ``--opd-log-task-reward``, ``raw_reward`` is the observed task score.
+    The optimization reward remains zero unless the independent
+    ``--opd-optimize-task-reward`` switch is enabled.
     """
     teacher_rewards = [sample.get_reward_value(args) for sample in samples]
     if getattr(args, "opd_log_task_reward", False):
@@ -1090,6 +1123,7 @@ def post_process_rewards(args: Namespace, samples: list[Sample], **kwargs: Any) 
             raw_rewards.append(float(sample.metadata[OPD_TASK_REWARD_METADATA_KEY]))
     else:
         raw_rewards = [0.0] * len(samples)
+    scalar_rewards = _task_optimization_rewards(args, raw_rewards)
 
     dagger_top_k = _get_opd_dagger_top_k(args)
     if dagger_top_k > 0:
@@ -1106,7 +1140,6 @@ def post_process_rewards(args: Namespace, samples: list[Sample], **kwargs: Any) 
             sample.teacher_topk_log_probs = log_probs
             sample.teacher_topk_valid_mask = valid_mask
             sample.opd_reverse_kl = None
-        scalar_rewards = [0.0] * len(samples)
         return raw_rewards, scalar_rewards
 
     top_k = _get_opd_top_k(args)
@@ -1121,7 +1154,6 @@ def post_process_rewards(args: Namespace, samples: list[Sample], **kwargs: Any) 
                     source="student",
                 )
             sample.opd_reverse_kl = _compute_topk_reverse_kl(args, sample, reward)
-        scalar_rewards = [0.0] * len(samples)
         return raw_rewards, scalar_rewards
 
     teacher_log_probs = [
@@ -1130,10 +1162,5 @@ def post_process_rewards(args: Namespace, samples: list[Sample], **kwargs: Any) 
 
     for sample, t_log_probs in zip(samples, teacher_log_probs, strict=True):
         sample.teacher_log_probs = t_log_probs
-
-    # GRPO/PPO consumes only this optimization reward. Keep it zero even when
-    # raw_rewards above contains an observed task score for W&B telemetry.
-    # The learning signal therefore comes entirely from the OPD objectives.
-    scalar_rewards = [0.0] * len(samples)
 
     return raw_rewards, scalar_rewards

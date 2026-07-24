@@ -230,14 +230,22 @@ def _compute_zero_std_metrics(args, all_samples: list[Sample]):
     if args.advantage_estimator == "ppo":
         return {}
 
+    def _reward_value(sample: Sample):
+        if getattr(args, "use_opd", False) and getattr(args, "opd_log_task_reward", False):
+            metadata = sample.metadata or {}
+            if "raw_reward" not in metadata:
+                raise ValueError("OPD task-reward logging is enabled, but sample.metadata['raw_reward'] is missing.")
+            return metadata["raw_reward"]
+        return sample.get_reward_value(args)
+
     def _is_zero_std(samples: list[Sample]):
-        rewards = [sample.get_reward_value(args) for sample in samples]
+        rewards = [_reward_value(sample) for sample in samples]
         return len(rewards) == 0 or all(rewards[0] == r for r in rewards)
 
     all_sample_groups = group_by(all_samples, lambda s: s.group_index)
     interesting_sample_groups = [g for g in all_sample_groups.values() if _is_zero_std(g)]
 
-    interesting_rewards = [round(float(g[0].get_reward_value(args)), 1) for g in interesting_sample_groups]
+    interesting_rewards = [round(float(_reward_value(g[0])), 1) for g in interesting_sample_groups]
 
     counts = {reward: len(items) for reward, items in group_by(interesting_rewards).items()}
     log_dict = {f"zero_std/count_{reward:g}": count for reward, count in counts.items()}

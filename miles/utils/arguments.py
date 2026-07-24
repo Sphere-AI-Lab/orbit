@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import math
 import os
 from typing import Any
 from urllib.parse import urlsplit
@@ -1215,8 +1216,27 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 default=False,
                 help=(
                     "In SGLang OPD, evaluate each training response with the configured built-in --rm-type and "
-                    "expose the result as rollout/raw_reward for monitoring only. The optimization reward remains "
-                    "zero. Requires the canonical OPD reward and reward-post-process hooks."
+                    "expose the result as rollout/raw_reward. The optimization reward remains zero unless "
+                    "--opd-optimize-task-reward is enabled. Requires the canonical OPD reward and "
+                    "reward-post-process hooks."
+                ),
+            )
+            parser.add_argument(
+                "--opd-optimize-task-reward",
+                action="store_true",
+                default=False,
+                help=(
+                    "Use the task score collected by --opd-log-task-reward as the base RL reward before applying "
+                    "the OPD advantage. Disabled by default so task-reward logging remains telemetry-only."
+                ),
+            )
+            parser.add_argument(
+                "--opd-task-reward-coef",
+                type=float,
+                default=1.0,
+                help=(
+                    "Scale applied to the task optimization reward after the configured GRPO/GSPO group "
+                    "normalization. Used only with --opd-optimize-task-reward."
                 ),
             )
             parser.add_argument(
@@ -2213,7 +2233,15 @@ def _validate_opd_dagger_args(args) -> None:
 
 
 def _validate_opd_task_reward_args(args) -> None:
-    if not getattr(args, "opd_log_task_reward", False):
+    log_task_reward = bool(getattr(args, "opd_log_task_reward", False))
+    optimize_task_reward = bool(getattr(args, "opd_optimize_task_reward", False))
+    task_reward_coef = float(getattr(args, "opd_task_reward_coef", 1.0))
+
+    if not math.isfinite(task_reward_coef) or task_reward_coef < 0:
+        raise ValueError("--opd-task-reward-coef must be finite and non-negative.")
+    if optimize_task_reward and not log_task_reward:
+        raise ValueError("--opd-optimize-task-reward requires --opd-log-task-reward.")
+    if not log_task_reward:
         return
     if not getattr(args, "use_opd", False):
         raise ValueError("--opd-log-task-reward requires --use-opd.")

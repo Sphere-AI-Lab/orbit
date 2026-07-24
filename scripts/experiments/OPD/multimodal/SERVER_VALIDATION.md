@@ -667,6 +667,324 @@ because nothing exceeded the bound at prefetch 1. Full per-step series,
 collector telemetry and explicit missing-evidence items are in
 `results/07b-job-27272.json`.
 
+## Gate 15: Five-Step Synchronous OPD + Task-RL Composition Smoke
+
+Run the focused argument, rollout conversion and OPD tests on the cluster, then
+launch:
+
+```bash
+python -m pytest -q \
+  tests/fast/utils/test_arguments.py \
+  tests/fast/rollout/test_on_policy_distillation.py \
+  tests/fast/ray/rollout/test_train_data_conversion.py \
+  tests/fast/backends/training_utils/test_true_on_policy_loss_metrics.py
+
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/08a-geo3k-multiturn-opd-rl-sync-smoke
+```
+
+This gate changes only the base scalar reward relative to `06a`. Verify that
+`rollout/raw_reward` is still the unmodified math score, while the optimization
+reward is group-normalized and enters the policy advantage with coefficient
+one. Every `06a` hybrid, scoring, sparse-target and multi-turn invariant must
+remain valid. In particular, task reward must not alter teacher sampled
+log-probs or native `[T,2]` targets, and masked observation positions must stay
+inert in all three objective components.
+
+Do not advance on an all-constant reward sample: at least one prompt group must
+contain both correct and incorrect samples so group centering is exercised.
+Retain per-step raw reward, advantage mean/min/max, sampled RKLD, DAgger loss,
+coarse KL, total loss, gradient norm and request counts.
+
+**Result: passed.** Focused suite `141/141`, then job `27415` (22 min,
+slinky-[5,28,56], miles `38ad568a`) completed all five steps on 2026-07-18.
+Every 06a invariant held: additivity max residual 5.96e-8, CE identity
+7.45e-8, coarse-KL identity 2.98e-8, both branches nonzero, 64 = 64 = 64
+sample/request/teacher-request per step, zero retries, zero alignment errors,
+`valid_position_ratio` = 1.0 at every step (masked observation rows inert in
+all three objective components), rounds > 1 every batch. `rollout/raw_reward`
+remained the unmodified math score (0.45–0.86). The task component's presence
+in the policy advantage was verified positively, not assumed, via two
+independent observations: (1) `rollout/rewards` means moved from the hard 0.0
+of every 02–07 run to ±1e-9/−3.7e-9 float residues — the signature of real
+nonzero group-centered per-sample values being averaged; (2) a
+float-fingerprint discriminator: in 06b/07b
+(rewards hard-zero) `train/pg_loss` equals `train/opd_reverse_kl` bit-exactly
+at all 40 steps, while 08a shows residues up to 5.96e-8 at 2/5 steps — exactly
+the signature of a nonzero group-centered A_task entering per-sample advantages
+and cancelling from the scalar loss by construction (the mean of centered
+values is zero; the signal lives in the gradient). Note the scalar-loss
+equality is therefore expected and NOT evidence of a missing task component —
+`train/pg_loss` cannot show it; the residue pattern and reward telemetry can.
+These fingerprints establish that at least one prompt group had reward
+variation, which is the smoke criterion. The contemporaneous
+`rollout/zero_std/*` series cannot establish that every group was mixed:
+before the metric fix it inspected OPD's teacher-response payload rather than
+`sample.metadata["raw_reward"]`. Future reruns use the corrected task-reward
+source for all-zero/all-one group percentages.
+Gradient norms 7.8–34.8 with the familiar short-batch step-0 peak.
+
+## Gate 16: Twenty-Step Synchronous OPD + Task-RL Reference
+
+After Gate 15 passes, launch:
+
+```bash
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/08b-geo3k-multiturn-opd-rl-sync-reference
+```
+
+Apply every Gate 15 invariant at all twenty steps. This is the matched
+synchronous reference for separating task-objective behavior from scheduling
+effects; retain a machine-readable snapshot with all three branches and the
+same timing/memory evidence contract as `06b`.
+
+**Result: passed.** Job `27423` (32 min, slinky-[5,28,56], miles `38ad568a`)
+completed all twenty steps on 2026-07-18. Every Gate 15 invariant held:
+additivity max residual 8.94e-8, identities ≤ 1.19e-7, 64 = 64 = 64 with zero
+retries and zero alignment errors, `valid_position_ratio` = 1.0, rounds > 1
+at every step. The task component stayed verifiably active (e-9 reward-mean
+residues at 18/20 steps and pg-vs-`opd_reverse_kl` float residues at 8/20
+steps). Per-group task-reward composition was not measured correctly in this
+historical run; its pre-fix `rollout/zero_std/*` series read teacher payloads.
+The OPD objectives were not distorted by the
+added reward: sampled RKLD 0.320 → 0.231 and coarse KL 0.374 → 0.173 —
+matching the reward-free 06b bands (0.322 → 0.221 / 0.379 → 0.162) — with
+teacher mass 0.920 → 0.911 and non-worsening rest error (max 0.074).
+Token-normalized 21.06 ms/token, within the 06b band (20.44). Two watch
+items: (1) an isolated grad-norm spike of 216.8 at step 13 (neighbors normal,
+loss kept descending; largest in the ladder — still a single event, no
+clipping change justified); (2) raw task reward declined 0.584 → 0.413
+first-five/last-five while `truncated_ratio` rose 0.45 → 0.70–0.75 and mean
+response length grew to ~3,200. Truncated responses are still scored and can
+be correct, so the observed decline is strongly correlated with the truncation
+ceiling rather than mechanically caused by a zero-reward rule. This is a
+sample-mix/budget diagnostic, not evidence that reward optimization degraded
+the task; a longer generation budget is the lever if it persists.
+
+## Gate 17: Five-Step Fully-Async OPD + Task-RL Prefetch-Two Smoke
+
+After Gate 15 passes, launch:
+
+```bash
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/08c-geo3k-multiturn-opd-rl-fully-async-smoke
+```
+
+The objective is identical to Gate 15. Scheduling matches `07a` except that
+`fully_async_prefetch_batches=2`, allowing 32 prompt groups / 128 sample
+requests to be active. Keep `max_weight_staleness=2`, completed-queue cap 32
+and update interval one. Advance only when every objective invariant remains
+valid, engine versions are observable, queue growth is bounded, stale work is
+recycled rather than trained, and the wider window makes forward progress
+without teacher overload, OOM or shutdown failure.
+
+**Result: passed.** The first submission (job `27424`) was killed by the
+preflight NCCL probe: slinky-54's memlock cap is still 8 MiB
+(`ibv_create_cq ENOMEM` on all 8 of its ranks, 2/2 attempts) — despite the
+same-day fleet fix; direct probe evidence supersedes the running-job inference
+that had cleared it. The resubmission (job `27425`, 23 min,
+slinky-[52,36,20]) completed all five steps. Every objective invariant held
+(additivity 5.96e-8, 64 = 64, zero retries/alignment errors), the task
+component stayed active by the two valid observations from Gate 15; historical
+per-group task-reward composition remains unavailable. In addition —
+the load-bearing first — **the recycle path was exercised on-cluster for the
+first time**: at prefetch 2, five prompt groups generated at weight version 1
+reached staleness 3 > 2 when the engine hit version 4 and were reset and
+returned to the data source rather than trained (`Recycled stale group …`
+log lines retained; final-rollout stats recycled=5, avg 1.4, max 3). Forward
+progress continued through the recycles, the completed queue peaked at 1
+against its cap of 32, engine-version queries never failed, and the worker
+shut down cleanly. The 07b watch item "a recycle event has never been
+exercised" is closed.
+
+## Gate 18: Twenty-Step Fully-Async OPD + Task-RL Prefetch-Two Gate
+
+After Gates 16 and 17 pass, launch:
+
+```bash
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/08d-geo3k-multiturn-opd-rl-fully-async-gate
+```
+
+Compare Gate 18 against Gate 16 for objective behavior and against `07b` for
+producer-window behavior. Use active-token-normalized cost rather than raw step
+boundaries. Retain average/max staleness, stale recycle count, completed queue,
+trainer wait ratio, teacher latency, task reward, sampled RKLD, coarse KL,
+Rest-mass error, train/rollout mismatch, gradients and explicit missing
+evidence. Passing this gate validates the OPD + task-RL mechanism under bounded
+fully-async scheduling; it does not establish downstream quality from twenty
+shuffled optimizer steps.
+
+**Result: passed.** Job `27427` (18 min, slinky-[5,56,28], miles `38ad568a`)
+completed all twenty steps on 2026-07-18. Every Gate 15/17 invariant held:
+additivity ≤ 8.94e-8, identities ≤ 8.94e-8, 64 = 64 with zero retries and
+zero alignment errors, `valid_position_ratio` = 1.0, and the task component
+verifiably in the advantage through reward-mean residues and a pg-vs-RKLD
+fingerprint at 6/20 steps. The historical pre-fix `rollout/zero_std/*` series
+does not establish all-groups mixed correctness. **Recycling ran as a sustained
+regime, not a one-off**: 33 prompt
+groups exceeded the staleness bound across the run and were reset and
+regenerated (10.3% regeneration overhead against 320 accepted groups);
+accepted-sample staleness averaged 0.0–1.6 per rollout; the completed queue
+peaked at 1 against its cap of 32; engine-version queries never failed; the
+worker shut down cleanly. Objective behavior vs Gate 16: same last-five bands
+(sampled RKLD 0.407 → 0.216 vs 08b 0.231; coarse KL 0.489 → 0.189 vs 0.173).
+Producer-window behavior vs `07b`, token-normalized as prescribed:
+**8.36 ms/active token vs 13.42 (pf1) and 21.06 (08b sync)** — the ladder
+519 → 644 → 1,181 tokens/GPU/s with trainer wait-ratio 0.854 → 0.774 → 0.621
+— while the measured train/rollout mismatch rose modestly with the wider
+window (logprob abs-diff median 0.0128 sync → 0.0145 pf1 → 0.0161 pf2,
+max 0.0383; train-rollout KL median 0.00111). Watch items: a 204.3 grad-norm
+spike at step 4 (with 08b's 216.8 this is the second ~200-class event, both
+in the reward arm — nothing above 113 in 02–07; N=2 upgrades it to a pattern
+worth a dedicated look before long runs, though no clipping change is made
+from these gates); the raw-reward trajectory again declined under a rising
+truncation ceiling (same confound as Gate 16); and recycled generation is
+unmetered work — 33 recycled at pf2 vs 5 in the pf2 smoke and 0 at pf1 —
+promote recycle counts to structured telemetry before pushing prefetch
+higher. Full series in `results/08d-job-27427.json`.
+
+## Gate 19: Same-Size Fully-Async Pure-Hybrid Smoke
+
+Download `Qwen/Qwen3-VL-8B-Thinking` under the shared model cache, then launch:
+
+```bash
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/09a-geo3k-multiturn-hybrid-fully-async-same-size-smoke
+```
+
+Confirm that the teacher is `Qwen3-VL-8B-Thinking`, the student remains
+`Qwen3-VL-8B-Instruct`, and fully-async prefetch is two. The effective objective
+must match `07` exactly: sampled RKLD coefficient one, Top-2 + Rest coefficient
+`0.5`, task reward logged but absent from optimization. Reject any run containing
+`--opd-optimize-task-reward`.
+
+Apply all Gate 13 hybrid, exact-suffix, multi-turn, queue and staleness
+invariants. Raw task reward must be finite and present, but it need not increase:
+the batches are shuffled online samples consumed in completion order.
+
+**Result: passed.** `Qwen/Qwen3-VL-8B-Thinking` was downloaded to the shared
+cache (17 GB, vision tower verified in `config.json` alongside both existing
+checkpoints). Job `27430` (15.5 min, slinky-[20,36,52], miles `77bc0c79`)
+completed all five steps on 2026-07-18. Teacher identity confirmed in the
+serving line (`--model-path .../Qwen3-VL-8B-Thinking --tp 8`); the pure-hybrid
+contract is doubly fingerprinted — `train/pg_loss` equals
+`train/opd_reverse_kl` bit-exactly at every step AND `rollout/rewards` is hard
+0.0 (the same discriminator that proves presence in the 08 runs proves absence
+here); no `--opd-optimize-task-reward` appears in the effective command.
+Additivity 5.96e-8, 64 = 64 with zero retries and zero alignment errors,
+`valid_position_ratio` = 1.0, rounds > 1, raw task reward present as telemetry
+(0.34–1.0). Prefetch-2 staleness behaved as in 08: 5 groups recycled at
+staleness 3, queue peak 2/32, zero version-query failures, clean shutdown.
+Early matrix signal worth carrying into Gate 21: the same-size teacher runs
+hotter on Top-2 coverage (teacher mass 0.915–0.962 vs the 30B arm's ~0.92
+band) and the smoke's hybrid loss sits lower (0.49 vs 0.67 at step 4) — the
+8B-Thinking distribution is closer to the 8B-Instruct student.
+
+## Gate 20: Big-to-Small Fully-Async Pure-Hybrid Smoke
+
+Launch the matched prefetch-two smoke with the established 30B teacher:
+
+```bash
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/09c-geo3k-multiturn-hybrid-fully-async-big-small-smoke
+```
+
+The only intended model-contract difference from Gate 19 is the teacher
+checkpoint: `Qwen3-VL-30B-A3B-Thinking`. Keep the 8B-Instruct student, TP=8
+teacher service, objective, data, sampler, prefetch window and age bound fixed.
+
+**Result: passed.** Job `27429` (13 min, slinky-[5,56,28], miles `77bc0c79`)
+completed all five steps on 2026-07-18 with the established 30B teacher at the
+identical prefetch-2 contract. Same double fingerprint of the pure-hybrid
+objective (bit-equal `pg_loss`/`opd_reverse_kl`, hard-zero `rollout/rewards`),
+additivity 5.96e-8, 64 = 64, zero retries/alignment errors,
+`valid_position_ratio` = 1.0, rounds > 1, raw reward telemetry present
+(first batch scored 1.0 — an easy draw, noted only as telemetry). Staleness:
+7 groups recycled at staleness 3, queue peak 0, zero query failures. The two
+arms are now matched on code revision, prefetch window and topology; only the
+teacher checkpoint differs going into Gates 21/22.
+
+## Gate 21: Same-Size 200-Step Gate
+
+After Gate 19 passes, launch:
+
+```bash
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/09b-geo3k-multiturn-hybrid-fully-async-same-size-gate
+```
+
+Retain a machine-readable snapshot covering reward, response length and rounds,
+both OPD branches, DAgger identities, teacher transport, gradient, staleness,
+queue behavior and active-token cost. Confirm `num-rollout=200` and that the
+effective command contains no checkpoint-save option.
+
+**Result: passed.** Job `27432` (73 min, slinky-[52,36,20], miles `77bc0c79`)
+completed all 200 steps on 2026-07-18 — the ladder's first long window. Every
+invariant held at every step: additivity 5.96e-8, identities ≤ 8.94e-8, the
+pure-hybrid double fingerprint (bit-equal `pg_loss`/`opd_reverse_kl` at 200/200
+steps, hard-zero `rollout/rewards`), 64 = 64 with zero retries and zero
+alignment errors, `valid_position_ratio` = 1.0, no checkpoint-save option.
+Staleness machinery at scale: 50 groups recycled (1.6% overhead), observed max
+staleness 4 (recycled per the bound), queue peak 5/32, and 4 transient
+version-query failures that recovered without cascading (the 6253d3f5
+fallback + warning working in production). Objectives near-converged: sampled
+RKLD 0.257 → 0.055 (mid) → 0.032 (last-five); coarse KL 0.258 → 0.040 → 0.024.
+**Teacher Top-2 mass was flat 0.937 → 0.937 with rest-mass error declining
+0.052 → 0.019 — the K=2 coverage-narrowing watch item does not materialize at
+200 steps in this arm.** Cost: 5.71 ms/active token median, 1,674
+tokens/GPU/s, steady step 18.9 s. Reward telemetry: full-run mean 0.306 with
+windows 0.669 (completion-order-biased first window) → 0.327 → 0.266 as active
+length grew 1,658 → 3,254 and truncation reached 0.75 — the length-drift /
+truncation-ceiling pattern, now sustained over a long window. Grad norms
+0.4–41.2 (median 0.8, no ~200-class spike in this reward-free arm). Full
+series in `results/09b-job-27432.json`.
+
+## Gate 22: Big-to-Small 200-Step Gate
+
+After Gate 20 passes, launch:
+
+```bash
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/09d-geo3k-multiturn-hybrid-fully-async-big-small-gate
+```
+
+Compare Gates 21 and 22 as a 200-step teacher model matrix. Do not compare only
+the first/last raw-reward points: report full-run means/windows and condition
+them on response length and completion order. The gate establishes compatible
+fully-async hybrid training, not a causal downstream-quality ranking. Confirm
+`num-rollout=200` and no checkpoint-save option before launch.
+
+**Result: passed on the second run.** The first submission (job `27431`,
+student mem fraction 0.85) failed at step 65: a student rollout engine OOMed
+(4.64 GiB burst against 2.84 GiB free plus 9 GiB fragmented reserve) as
+responses drifted long under prefetch 2; the engine death cascaded — router
+500s on the version endpoint (loudly, thanks to the warning added in
+`6253d3f5`), then the trainer died on `pause_generation` (connection
+refused). Fix `e67ceed4` parameterized `OPD_STUDENT_MEM_FRACTION` (default
+0.85 in the shared base); the 09d gate now defaults the successful long-window
+setting to 0.80. The rerun (job `27435`, 72 min, slinky-[5,56,28], fraction
+0.80) completed all 200 steps with **zero OOM**. Every invariant held:
+additivity 5.96e-8, identities 7.45e-8, pure-hybrid double fingerprint at
+200/200 steps, 64 = 64, zero retries/alignment errors, no checkpoint saving.
+Staleness: 53 recycled (1.7%), max observed 4, queue peak 3, zero query
+failures. The 200-step teacher matrix vs Gate 21, per the pre-registered
+discipline (full-run windows, conditioned on length; first batch excluded as
+a completion-order artifact): the student closes on the same-size teacher
+roughly 3× further at every window (RKLD 0.361 → 0.117 → 0.095 vs 09b's
+0.257 → 0.055 → 0.032; coarse KL 0.437 → 0.085 → 0.069 vs 0.258 → 0.040 →
+0.024) — a distribution-proximity result, not a quality ranking. Teacher
+Top-2 mass flat at 0.927 → 0.927 (coverage stable in BOTH arms). Both arms
+double active response length (~1,660 → ~3,120) with truncation 0.66; the 30B
+arm holds a higher reward band throughout (full-run mean 0.368 vs 0.306,
+last-five 0.344 vs 0.266) with lower truncation. Completion order and the
+different length/truncation trajectories prevent a causal teacher-quality
+ranking.
+Cost parity at the current topology: 5.78 vs 5.71 ms/active token. Teacher
+scoring remains a small part of the overlapped window; a retopologized
+GPU-seconds-per-scored-token study remains future work as scoped. Grads
+0.6–79.3 (median 1.0). Full series in `results/09d-job-27435.json`.
+
 ## Failure Triage
 
 - `scoring_suffix_ids` rejected as an unknown field: the teacher is running an
@@ -695,5 +1013,8 @@ collector telemetry and explicit missing-evidence items are in
 - missing fully-async worker startup, unbounded completed-queue growth, repeated
   stale recycling without batch progress, or a shutdown hang in `07`: stop the
   run and retain queue/staleness logs before changing the prefetch window.
+- nonzero raw task reward but zero task component in `08`, non-centered GRPO
+  task rewards, or task-reward changes to teacher targets: stop before
+  interpreting OPD + RL curves; the explicit composition contract is broken.
 - teacher queue growth or memory pressure: record queue depth, scoring latency
   and GPU memory before setting `OPD_SCORING_MAX_INFLIGHT` to a finite value.

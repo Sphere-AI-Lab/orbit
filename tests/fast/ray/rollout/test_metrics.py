@@ -114,6 +114,16 @@ class TestDistillationRpcMetrics:
 
 
 class TestComputeZeroStdMetrics:
+    @staticmethod
+    def _make_opd_samples(raw_rewards: list[float]) -> list[Sample]:
+        samples = make_samples_grouped(1, len(raw_rewards))
+        for index, (sample, raw_reward) in enumerate(zip(samples, raw_rewards, strict=True)):
+            # Distinct teacher payloads reproduce the OPD path: sample.reward is
+            # transport data, while metadata carries the scalar task score.
+            sample.reward = {"teacher": {"request_id": index}}
+            sample.metadata["raw_reward"] = raw_reward
+        return samples
+
     def test_returns_empty_for_ppo_regardless_of_reward_distribution(self):
         args = make_args(advantage_estimator="ppo")
         out = _compute_zero_std_metrics(args, make_samples_grouped(2, 4, rewards=[1.0] * 8))
@@ -147,6 +157,43 @@ class TestComputeZeroStdMetrics:
         assert out["zero_std/count_0.5"] == 2
         assert out["zero_std/all_zero_percentage"] == 0.0
         assert out["zero_std/all_one_percentage"] == 0.0
+
+    def test_opd_all_zero_group_uses_observed_task_reward(self):
+        args = make_args(
+            advantage_estimator="grpo",
+            reward_key=None,
+            use_opd=True,
+            opd_log_task_reward=True,
+        )
+        out = _compute_zero_std_metrics(args, self._make_opd_samples([0.0] * 4))
+
+        assert out["zero_std/count_0"] == 1
+        assert out["zero_std/all_zero_percentage"] == 1.0
+        assert out["zero_std/all_one_percentage"] == 0.0
+
+    def test_opd_all_one_group_uses_observed_task_reward(self):
+        args = make_args(
+            advantage_estimator="grpo",
+            reward_key=None,
+            use_opd=True,
+            opd_log_task_reward=True,
+        )
+        out = _compute_zero_std_metrics(args, self._make_opd_samples([1.0] * 4))
+
+        assert out["zero_std/count_1"] == 1
+        assert out["zero_std/all_zero_percentage"] == 0.0
+        assert out["zero_std/all_one_percentage"] == 1.0
+
+    def test_opd_mixed_group_uses_observed_task_reward(self):
+        args = make_args(
+            advantage_estimator="grpo",
+            reward_key=None,
+            use_opd=True,
+            opd_log_task_reward=True,
+        )
+        out = _compute_zero_std_metrics(args, self._make_opd_samples([0.0, 1.0, 0.0, 1.0]))
+
+        assert out == {"zero_std/all_zero_percentage": 0.0, "zero_std/all_one_percentage": 0.0}
 
     def test_empty_samples_does_not_crash(self):
         args = make_args(advantage_estimator="grpo", reward_key=None)

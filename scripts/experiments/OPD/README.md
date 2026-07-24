@@ -27,7 +27,19 @@ multimodal/                 Staged Qwen3-VL OPD ladder. `00`–`06` establish
                             their hybrid composition. `07` runs the same fixed
                             hybrid under fully-async scheduling. All gates
                             through `07b` passed; staleness is observed, not
-                            assumed (see the `6253d3f5` collector fix).
+                            assumed (see the `6253d3f5` collector fix). `08`
+                            explicitly composes normalized task reward with
+                            hybrid OPD; its sync and prefetch-two async gates
+                            all passed (jobs 27415–27427) — reward enters the
+                            GRPO advantage with distillation invariants
+                            untouched, recycling enforcement-tested, 8.4
+                            ms/active token at prefetch 2.
+                            `09` closes the roadmap with a 200-step two-teacher
+                            matrix (8B-Thinking vs 30B-A3B → 8B-Instruct, jobs
+                            27429–27435): invariants exact across 410 steps,
+                            K=2 coverage stable in both arms, students drift
+                            toward Thinking-length responses (budget lever
+                            recorded for full runs).
 archive/                    Historical 1-node smokes, the former canonical
                             3-node recipe and HTTP A/B wrapper, and the frozen
                             legacy teacher-top-k reproduction recipe.
@@ -48,7 +60,10 @@ performance baseline.
 The recipe is a quick-check configuration and intentionally omits checkpoint
 saving and held-out eval. `--opd-log-task-reward --rm-type deepscaler` uses
 the labels already present in DAPO-Math-17K; it adds no extra rollout and no
-teacher/student model request. W&B uses entity `M3TRL`, project `OPD`.
+teacher/student model request. It remains telemetry-only unless paired with
+`--opd-optimize-task-reward`; `--opd-task-reward-coef` then scales the reward
+after the standard group normalization. W&B uses entity `M3TRL`, project
+`OPD`.
 
 Launch (on the slinky cluster, use `HF_CACHE_DIR=/data/shared`; the default
 `/data/shared/hf_cache` is read-only):

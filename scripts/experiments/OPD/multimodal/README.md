@@ -14,6 +14,41 @@ through `06` passed. Milestone `07` is now prepared as a scheduling-only
 comparison: it reuses the complete `06` hybrid contract in Miles' existing
 fully-async rollout worker, without adding another OPD algorithm path.
 
+## Canonical 200-step baseline
+
+Use
+`baseline/baseline-geo3k-multimodal-multiturn-fully-async-200step.sh` as the frozen
+end-to-end baseline. Unlike the numbered milestone wrappers, it is a complete
+experiment recipe: model pair, processed Geo3K multi-turn data, teacher
+sidecar, hybrid objective, fully-async scheduler, parallel layout, optimizer,
+monitoring, and no-save guards are visible in one file. It imports only the
+canonical `scripts/models/qwen3-8B.sh` model definition.
+
+The baseline fixes the following training contract:
+
+- Qwen3-VL-30B-A3B-Thinking SGLang teacher and Qwen3-VL-8B-Instruct student;
+- 200 rollout steps on `VeraIsHere/geo3k_imgurl_processed`;
+- sampled RKLD-PG with coefficient `1`;
+- trainer-side Top-K + Rest DAgger with `K=2`, coefficient `0.5`, and
+  `cross_entropy`;
+- `--use-rollout-logprobs`, so both the detached RKLD reference and PPO
+  denominator use the Student SGLang behavior-policy snapshot;
+- explicit symmetric PPO clipping at `0.2/0.2`, with no TIS or dual clip;
+- fully async prefetch `2`, maximum accepted weight staleness `2`, and no
+  separate trainer old-logprob recomputation;
+- task reward telemetry only and no checkpoint saving.
+
+Submit it directly:
+
+```bash
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/baseline/baseline-geo3k-multimodal-multiturn-fully-async-200step
+```
+
+The numbered `00`-`11` files remain as development gates and historical A/B
+evidence. New work should compare against the canonical baseline rather than
+reconstructing a launch through the milestone inheritance chain.
+
 The G11 correction used by `02` is an exact text-suffix scoring contract. Miles
 sends the rendered prompt and ordered raw images, the scoring SGLang server
 builds its own multimodal prefix, and only then appends the sampled response
@@ -796,3 +831,243 @@ the snapshot: a step-0 grad-norm spike (113, short-response batch, early
 short-batch class) and the fact that no recycle event has yet been exercised
 on-cluster. Evidence: `results/07b-job-27272.json`. These remain systems
 measurements, not model-quality claims.
+
+## 08: Geo3K multi-turn OPD + task RL
+
+Milestone `08` promotes the task score that earlier recipes logged only as
+`rollout/raw_reward` into an explicit, opt-in base RL objective. The logging
+contract does not change: without `--opd-optimize-task-reward`, optimization
+reward remains exactly zero. With the flag enabled, Miles applies the same
+group reward transformation as the standard GRPO path and then composes the
+three already-separated signals:
+
+```text
+A_task  = group_normalize(r_task)
+A_total = task_reward_coef * A_task
+          + opd_kl_coef * (log p_teacher(y | h) - log q_old(y | h))
+
+L_total = L_PG(q_current, stop_gradient(A_total))
+          + dagger_coef * L_TopK+Rest(q_current, teacher_targets)
+```
+
+The task coefficient is applied after group normalization, so it remains a
+real objective weight rather than being divided back out by standardization.
+The sampled RKLD term still uses the trainer's detached pre-update `q_old` for
+the accepted batch; these recipes do not enable `--use-rollout-logprobs`.
+Sampler staleness therefore changes which states/actions arrive, while the
+reported train/rollout mismatch measures the gap between sampler logprobs and
+that trainer recomputation. Top-K + Rest uses the differentiable logits from
+the policy-loss forward. No TIS, new importance ratio, teacher request or
+Student SGLang rescore is introduced.
+
+The gate is staged so a new objective and a wider async producer window are not
+first tested at the same time:
+
+```bash
+# 1. New task-RL + OPD composition, synchronous, five steps.
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/08a-geo3k-multiturn-opd-rl-sync-smoke
+
+# 2. Matched synchronous twenty-step reference.
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/08b-geo3k-multiturn-opd-rl-sync-reference
+
+# 3. Same objective under fully async scheduling, five steps, prefetch two.
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/08c-geo3k-multiturn-opd-rl-fully-async-smoke
+
+# 4. Matched fully async twenty-step gate.
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/08d-geo3k-multiturn-opd-rl-fully-async-gate
+```
+
+`08a/08b` source the completed synchronous `06` contract and add only:
+
+```text
+--opd-optimize-task-reward
+--opd-task-reward-coef 1
+```
+
+`08c/08d` source the completed async `07` contract, add the same task-reward
+flags, and set `--fully-async-prefetch-batches 2`. With rollout batch size 16
+and four samples per prompt, this allows 32 prompt groups / 128 sample requests
+to be active. The completed queue cap remains 32 groups and the accepted age
+bound remains two weight versions. The existing warning contract permits this
+window because `prefetch=2 <= max_weight_staleness+1=3`.
+
+Advance `08a` only when task rewards are non-constant in at least one prompt
+group and the resulting base GRPO advantages are finite and group-centered.
+Every `06` invariant must still hold: both OPD branches nonzero, loss
+additivity, both DAgger identities, one teacher response per sample, exact-ID
+alignment and multi-turn masks. Also retain task reward, total advantages,
+gradient norm and each objective branch so coefficient-scale failures are
+distinguishable.
+
+Advance `08c` only after `08a`; additionally require observable staleness,
+bounded queue growth and forward progress at prefetch two. Run `08b/08d` only
+after their matching smokes pass. Compare those twenty-step references using
+raw task reward windows, sampled RKLD, coarse KL, Rest-mass error, gradient
+scale, staleness, stale recycle count, trainer waiting and active-token cost.
+Short shuffled runs remain mechanism evidence, not downstream quality proof.
+
+The completed `07b` run is the OPD-only async control. A topology-matched pure
+RL control remains a separate follow-up: it should not launch or score against
+the fixed teacher, so it must not be faked by setting OPD coefficients to zero
+inside the three-node OPD recipe.
+
+All four `08` gates passed on 2026-07-18 (08a job `27415`, 08b job `27423`,
+08c job `27425` after a preflight resubmission, 08d job `27427`; focused suite
+`141/141`). The synchronous pair proved the objective composition: every 06
+invariant held while the group-normalized math score verifiably entered the
+GRPO base advantage — verified by two valid observations rather than assumed,
+because group centering cancels the task term from the scalar loss by
+construction (`rollout/rewards` float residues vs the hard 0.0 of every 02–07
+run; a pg-loss vs `opd_reverse_kl` float fingerprint present only in the 08
+runs). The historical `rollout/zero_std/*` values cannot establish that every
+prompt group was mixed: before the metric fix they compared OPD teacher-response
+payloads instead of `sample.metadata["raw_reward"]`. The fingerprints establish
+the smoke requirement that at least one group had nonzero centered reward; a
+future rerun must use the corrected metric for per-group composition. The OPD
+objectives were not distorted: 08b landed in the reward-free 06b bands
+(sampled RKLD `0.320 -> 0.231` vs `0.322 -> 0.221`; coarse KL
+`0.374 -> 0.173` vs `0.379 -> 0.162`) at `21.06 ms/active token`.
+
+The async pair proved the wider window: prefetch 2 exercised the recycle path
+on-cluster for the first time (08c: 5 groups at staleness 3 reset and
+regenerated; 08d: 33 across twenty steps, 10.3% regeneration overhead, none
+trained) and closed the scheduling ladder at `8.36 ms/active token`
+(sync `21.06` -> prefetch-1 `13.42` -> prefetch-2 `8.36`;
+`519 -> 644 -> 1,181 tokens/GPU/s`; trainer wait-ratio
+`0.854 -> 0.774 -> 0.621`), with the measured train/rollout mismatch rising
+modestly (abs-diff median `0.0128 -> 0.0145 -> 0.0161`). Objective bands
+matched the synchronous 08b reference.
+
+Three watch items are recorded in the snapshots
+(`results/08b-job-27423.json`, `results/08d-job-27427.json`): two ~200-class
+grad-norm spikes, one in each 08 reference (216.8 and 204.3 — nothing above
+113 in 02–07; both in the reward arm, so N=2 justifies a dedicated look
+before long runs, but not a clipping change from these gates); the raw-reward
+trajectory declining under a truncation ratio that rises to ~0.6–0.75 as
+responses drift toward the Thinking teacher's length (a generation-budget
+confound, not a quality claim in either direction); and recycled generation
+being unmetered work that should become structured telemetry before prefetch
+is pushed higher. Ops note: the first 08c submission (job `27424`) was
+preflight-killed by slinky-54's persistent memlock cap — direct probe
+evidence supersedes the running-job inference that had cleared that node.
+
+## 09: Fully-async teacher behavior and capacity matrix
+
+Milestone `09` branches from the completed pure-hybrid `07` contract, not from
+the task-RL `08` recipes. Both arms remain multimodal, multi-turn and fully
+async with prefetch two. They retain `--opd-log-task-reward` for observation but
+do not add `--opd-optimize-task-reward`; the base GRPO reward is therefore zero
+and all gradients still come from sampled RKLD-PG plus trainer-direct Top-K +
+Rest:
+
+```text
+sampled RKLD coefficient = 1
+teacher Top-K            = 2
+Top-K + Rest coefficient = 0.5
+task reward               = rollout/raw_reward telemetry only
+```
+
+The two model arms are:
+
+1. same size: `Qwen3-VL-8B-Thinking` teacher to
+   `Qwen3-VL-8B-Instruct` student (`09a/09b`);
+2. big to small: `Qwen3-VL-30B-A3B-Thinking` teacher to the same
+   `Qwen3-VL-8B-Instruct` student (`09c/09d`).
+
+The big-to-small pair is the model pair already validated by `07`, but `09c/09d`
+rerun it at prefetch two and on the same code revision as the same-size arm.
+Both recipes pin the teacher to the existing TP=8 head-node layout. This first
+matrix therefore changes the teacher checkpoint/capacity without introducing a
+serving-topology change; a later cost study may retopologize each teacher and
+must then report GPU-seconds per scored token rather than comparing latency
+alone.
+
+Download the additional same-size teacher before launching `09a`:
+
+```bash
+hf download Qwen/Qwen3-VL-8B-Thinking \
+  --local-dir /data/shared/hf_cache/models/Qwen3-VL-8B-Thinking
+```
+
+Run the smoke for each arm before either 200-step gate:
+
+```bash
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/09a-geo3k-multiturn-hybrid-fully-async-same-size-smoke
+
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/09c-geo3k-multiturn-hybrid-fully-async-big-small-smoke
+
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/09b-geo3k-multiturn-hybrid-fully-async-same-size-gate
+
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/09d-geo3k-multiturn-hybrid-fully-async-big-small-gate
+```
+
+`rollout/raw_reward` is the fraction of the current 64 sampled responses whose
+last boxed answer matches the Geo3K label. It is an online training-batch
+diagnostic, not a fixed evaluation set. Each step contains 16 shuffled prompts
+with four correlated samples per prompt, uses temperature one, and the
+fully-async collector consumes groups in completion order. Short/easy groups
+can therefore enter earlier batches while long/hard groups finish later.
+
+That distinction is visible in `07b`: step zero had raw reward `0.9375` but was
+also an unusually short batch (mean raw/active response lengths `1021/552`),
+whereas later batches commonly contained `2300-3360` raw tokens. First-five to
+last-five reward moved `0.613 -> 0.450`; excluding the step-zero outlier, steps
+1-5 averaged `0.534`. The synchronous references also moved down, but by
+different amounts (`04b`: `0.575 -> 0.519`; `06b`: `0.616 -> 0.425`). Because
+none of those objectives optimized task reward and the prompt batches differ at
+every step, the repeated direction is a watch item, not evidence of a measured
+quality regression.
+
+Neither arm enables checkpoint saving: the inherited checkpoint arguments load
+the 8B-Instruct student only, and the 09 wrappers reject `--save`, `--save-*` or
+`--async-save` if a shared recipe introduces one later.
+
+Do not require monotonic raw reward to pass `09`. Require finite reward logging,
+then compare the two arms using the full-run reward distribution together with
+response length, rounds, sampled RKLD, coarse KL, Rest-mass error, teacher
+latency/bytes, staleness and active-token-normalized cost. A causal model-quality
+claim requires a fixed held-out prompt set or matched per-prompt evaluation;
+these 200-step online gates establish model-pair compatibility and training
+behavior only.
+
+All four `09` gates passed on 2026-07-18 (09a job `27430`, 09b job `27432`,
+09c job `27429`, 09d job `27435` after an OOM resubmission; the smokes ran
+13–15 min, the 200-step gates ~72 min each). The pure-hybrid contract is
+doubly fingerprinted in every run (bit-equal `pg_loss`/`opd_reverse_kl` and
+hard-zero `rollout/rewards`); every invariant held across 410 total optimizer
+steps; no checkpoints were written.
+
+The 200-step matrix, per the pre-registered discipline (full-run windows
+conditioned on length; the first async batch excluded as a completion-order
+artifact — it is the fastest/easiest generations and scores ~1.0 in every
+async run): the student closes on the same-size `8B-Thinking` teacher roughly
+3x further at every window (sampled RKLD `0.257 -> 0.032` vs `0.361 -> 0.095`;
+coarse KL `0.258 -> 0.024` vs `0.437 -> 0.069`) — distribution proximity, not
+a quality ranking. Teacher Top-2 mass is flat in BOTH arms (0.937 / 0.927
+first-five = last-five) with declining rest error: the K=2 coverage-narrowing
+watch item does not materialize at this horizon. Both arms roughly double
+active response length (~1,660 -> ~3,100–3,250); under the fixed generation
+budget, truncation reaches 0.66–0.75 while reward and completed-round telemetry
+move down (full-run reward means 0.368 for the 30B arm vs 0.306 for the 8B arm).
+Truncated samples are still scored and can be correct, so this is a strong
+budget-pressure correlation rather than a deterministic reward rule or a
+teacher-quality ranking. Cost is near-identical at this window: 5.71 vs 5.78
+ms/active token; the retopologized
+GPU-seconds-per-scored-token study remains future work.
+
+Ops: the first 09d run (job `27431`) OOMed a student engine at step 65 under
+prefetch-2 length drift; commit `e67ceed4` made the student mem fraction
+overridable (`OPD_STUDENT_MEM_FRACTION`; shared-base default remains 0.85) and
+the rerun at 0.80 completed clean. The 09d gate now defaults that override to
+0.80 so the checked-in recipe reproduces the successful long-window setting.
+Engine death still cascades to job death in the async
+path (no engine-level recovery) — recorded as a launcher/manager follow-up.
+Evidence: `results/09b-job-27432.json`, `results/09d-job-27435.json`.

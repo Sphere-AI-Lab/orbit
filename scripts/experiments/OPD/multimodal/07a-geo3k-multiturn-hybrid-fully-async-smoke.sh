@@ -17,17 +17,20 @@ export MILES_TRAIN_ENTRY=train_async.py
 # remain owned by 06a and cannot be changed by this scheduling wrapper.
 export OPD_NUM_ROLLOUT=${OPD_NUM_ROLLOUT:-5}
 export WANDB_RUN_NAME=${WANDB_RUN_NAME:-opd-mm-07a-geo3k-mt-hybrid-fully-async-smoke}
+FULLY_ASYNC_PREFETCH_BATCHES=${FULLY_ASYNC_PREFETCH_BATCHES:-1}
 
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/06a-geo3k-multiturn-hybrid-smoke.sh"
 
-# Conservative first gate: keep one rollout batch actively generating, allow
-# at most two completed batches to wait in CPU memory, and recycle work more
-# than two rollout-engine weight versions old. No TIS/importance-ratio option
-# is enabled; sampled RKLD and trainer-direct DAgger retain the 06 semantics.
+# The completed 07 gate defaults to one active rollout batch. Later recipes may
+# override the prefetch window without duplicating the fully-async contract.
+# The queue cap allows at most two completed batches to wait in CPU memory, and
+# work more than two rollout-engine weight versions old is recycled. No
+# TIS/importance-ratio option is enabled; sampled RKLD and trainer-direct DAgger
+# retain the 06 semantics.
 FULLY_ASYNC_ARGS=(
    --rollout-function-path examples.fully_async.fully_async_rollout.generate_rollout_fully_async
-   --fully-async-prefetch-batches 1
+   --fully-async-prefetch-batches "$FULLY_ASYNC_PREFETCH_BATCHES"
    --fully-async-max-completed-queue-groups 32
    --max-weight-staleness 2
    --update-weights-interval 1

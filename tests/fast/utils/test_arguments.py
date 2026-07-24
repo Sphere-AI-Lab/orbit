@@ -205,6 +205,8 @@ def test_opd_dagger_defaults_are_disabled():
     assert args.opd_dagger_coef == 0.0
     assert args.opd_dagger_loss == "cross_entropy"
     assert args.opd_log_task_reward is False
+    assert args.opd_optimize_task_reward is False
+    assert args.opd_task_reward_coef == 1.0
 
 
 def test_opd_task_reward_logging_argument_is_parsed():
@@ -219,6 +221,8 @@ def test_opd_task_reward_logging_argument_is_parsed():
 def _opd_task_reward_args(**overrides):
     values = {
         "opd_log_task_reward": True,
+        "opd_optimize_task_reward": False,
+        "opd_task_reward_coef": 1.0,
         "use_opd": True,
         "opd_type": "sglang",
         "rm_type": "deepscaler",
@@ -227,6 +231,18 @@ def _opd_task_reward_args(**overrides):
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+def test_opd_task_reward_optimization_arguments_are_parsed():
+    parser = argparse.ArgumentParser()
+    get_miles_extra_args_provider()(parser)
+
+    args = parser.parse_args(
+        ["--opd-log-task-reward", "--opd-optimize-task-reward", "--opd-task-reward-coef", "0.5"] + REQUIRED_ARGS
+    )
+
+    assert args.opd_optimize_task_reward is True
+    assert args.opd_task_reward_coef == 0.5
 
 
 @pytest.mark.parametrize(
@@ -245,6 +261,14 @@ def _opd_task_reward_args(**overrides):
             _opd_task_reward_args(rm_type="boxed_remote_rm"),
             r"does not support remote_rm",
         ),
+        (
+            SimpleNamespace(opd_log_task_reward=False, opd_optimize_task_reward=True),
+            r"requires --opd-log-task-reward",
+        ),
+        (
+            SimpleNamespace(opd_log_task_reward=False, opd_task_reward_coef=-1.0),
+            r"must be finite and non-negative",
+        ),
     ],
 )
 def test_opd_task_reward_logging_rejects_incomplete_configuration(args, error):
@@ -254,6 +278,10 @@ def test_opd_task_reward_logging_rejects_incomplete_configuration(args, error):
 
 def test_opd_task_reward_logging_accepts_builtin_verifier():
     _validate_opd_task_reward_args(_opd_task_reward_args())
+
+
+def test_opd_task_reward_optimization_accepts_builtin_verifier():
+    _validate_opd_task_reward_args(_opd_task_reward_args(opd_optimize_task_reward=True, opd_task_reward_coef=0.5))
 
 
 def _opd_sglang_scoring_args(**overrides) -> SimpleNamespace:
