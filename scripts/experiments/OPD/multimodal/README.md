@@ -8,9 +8,11 @@ sampled RKLD on the three-node teacher/actor/rollout layout. Milestone `03`
 keeps that validated layout fixed and isolates trainer-side teacher Top-K + Rest
 DAgger. Milestone `04` changes only the rollout sequence and establishes the
 Geo3K multi-turn sampled-RKLD reference; milestone `05` applies the sparse
-Top-K + Rest objective to that same sequence. Both smoke/reference pairs passed.
-Milestone `06` now prepares their synchronous hybrid composition before any
-asynchronous experiment.
+Top-K + Rest objective to that same sequence. Milestone `06` composes both
+objectives from one teacher response. All synchronous smoke/reference pairs
+through `06` passed. Milestone `07` is now prepared as a scheduling-only
+comparison: it reuses the complete `06` hybrid contract in Miles' existing
+fully-async rollout worker, without adding another OPD algorithm path.
 
 The G11 correction used by `02` is an exact text-suffix scoring contract. Miles
 sends the rendered prompt and ordered raw images, the scoring SGLang server
@@ -655,4 +657,142 @@ cost with `04b` and `05b`; raw step time alone is not sufficient. Because
 on-policy batches are shuffled and stochastic, objective monotonicity is not a
 hard gate. Passing `06b` establishes a synchronous systems reference before
 fully async work; it does not establish downstream quality or an optimal loss
-coefficient. Both `06` scripts are prepared and have not yet run.
+coefficient.
+
+Both gates passed on 2026-07-18. Job `27180` completed the five-step smoke and
+job `27208` completed all twenty reference steps. The focused fast subset was
+`90/90`; both branches stayed finite and nonzero; total-loss additivity held to
+a maximum residual of `5.96e-8`; one teacher request served each kept sample;
+and all DAgger identities and multi-turn mask invariants held. First-five to
+last-five windows moved sampled RKLD `0.322 -> 0.221` and coarse KL
+`0.379 -> 0.162`. These are within-run finite-training diagnostics, not model
+quality measurements.
+
+The hybrid reached a similar last-five coarse-KL band to the independent pure
+DAgger reference (`0.162` versus `0.174`) while its teacher Top-2 mass ended in
+a less narrowed band (`0.901` versus `0.881`). This pattern is consistent with
+the sampled RKLD branch acting as an anchor, but one stochastic run per arm
+does not isolate objective causality. Active-token-normalized cost was
+`20.44 ms/token`, inside the `04b`/`05b` reference band.
+
+Two evidence limits remain explicit. The retained JSON lacks per-step actor GPU
+memory, and zero Student SGLang requests/alignment errors are retained in the
+cluster log rather than as per-step JSON series. The next implementation gate
+holds this synchronous hybrid contract fixed and changes scheduling only.
+
+## 07: Geo3K multi-turn hybrid OPD under fully-async scheduling
+
+Milestone `07` does not change the objective established by `06`. It switches
+the training entry point to `train_async.py` and selects
+`examples.fully_async.fully_async_rollout.generate_rollout_fully_async`. The
+persistent background worker continuously performs the existing per-sample
+sequence:
+
+```text
+Student SGLang multi-turn generation
+  -> one fixed-teacher exact-suffix Top-2 request
+  -> completed hybrid Sample queue
+  -> Megatron trainer consumes the next batch
+```
+
+Generation plus teacher scoring is therefore one producer pipeline, overlapped
+with the trainer consumer. This first gate does not split teacher scoring into
+a separate queue, change EnvPack, or add a new SGLang/Megatron backend path.
+
+The two student probability roles remain deliberately different. Sampled
+RKLD-PG uses a detached old-policy sampled-token score as its coefficient and
+applies that coefficient to the differentiable sampled-action policy loss.
+Top-K + Rest DAgger never uses that old sampled score: its fixed teacher
+`[T,2]` targets reach the trainer, where the current student logits reconstruct
+the explicit-token and Rest probabilities. Fully async scheduling may age the
+sampled state, but it does not turn trainer-current DAgger logits into stale
+rollout-side logits. The canonical `07` recipes do not enable TIS or any new
+importance-ratio correction; they bound rollout-engine age and measure the
+existing train/rollout mismatch instead.
+
+The canonical scheduling settings are intentionally conservative:
+
+```text
+MILES_TRAIN_ENTRY=train_async.py
+--fully-async-prefetch-batches 1
+--fully-async-max-completed-queue-groups 32
+--max-weight-staleness 2
+--update-weights-interval 1
+```
+
+With `rollout_batch_size=16`, the worker keeps at most sixteen prompt groups
+actively generating. The completed-queue soft cap allows two additional
+batches to wait in CPU memory; already-running groups can finish beyond the
+cap. Stale groups are reset and returned to the data source, which clears their
+response, rollout log-probs, teacher sampled log-probs and sparse teacher
+targets before regeneration.
+
+Run the focused async lifecycle and hybrid tests before the five-step smoke:
+
+```bash
+python -m pytest -q \
+  tests/fast/backends/training_utils/test_true_on_policy_loss_metrics.py \
+  tests/fast/rollout/test_on_policy_distillation.py \
+  tests/fast/ray/rollout/test_train_data_conversion.py
+
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/07a-geo3k-multiturn-hybrid-fully-async-smoke
+```
+
+`07a` advances only when all five optimizer steps preserve every `06a`
+algorithmic invariant and additionally show:
+
+1. `train_async.py` and the persistent fully-async worker are both active;
+2. one teacher request still supplies sampled RKLD and native `[T,2]` targets,
+   with zero Student SGLang rescore requests;
+3. exact-suffix alignment, multi-turn masks, total-loss additivity and both
+   DAgger identities remain valid;
+4. accepted sample weight versions are finite and bounded, stale groups are
+   recycled rather than trained, and the completed queue remains bounded;
+5. persistent OPD transport closes on the worker's owner event loop; and
+6. gradients, masses, scoring transport and rollout/train/total timing remain
+   finite without NaN, OOM, timeout or deadlock.
+
+After `07a` passes, launch the matched twenty-step gate:
+
+```bash
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/07b-geo3k-multiturn-hybrid-fully-async-gate
+```
+
+`07b` changes only the optimizer-step count and W&B identity. Compare it with
+`06b` using active-token-normalized cost and trainer waiting, not raw step time
+alone: an async step drains already-completed groups and therefore has a
+different timing boundary. Retain sampled RKLD, coarse KL, Rest-mass error,
+weight-version statistics, stale recycle count, queue observations, teacher
+latency, active-token throughput and explicit missing-evidence notes. This is a
+scheduling/staleness systems gate, not a full-training or model-quality claim.
+
+Both gates passed on 2026-07-18: `07a` on its second run (job `27263`) and
+`07b` on job `27272` (92/92 focused tests, including two added with the fix
+below). The first smoke (job `27256`) completed all five steps with every
+algorithmic invariant intact but exposed a real defect: the collector's
+engine-weight-version query targeted the router's `/model_info`, which the
+sgl-router does not expose (it only proxies the legacy `/get_model_info`), so
+every query 404ed silently and the staleness filter ran inert — the same
+silent-failure class as the earlier missing per-turn weight versions, one hop
+further down the chain. Commit `6253d3f5` adds the endpoint fallback and logs
+consecutive query failures at warning level; staleness is now an observed
+quantity (20/20 rollouts printed stats in `07b`: avg 0.0–0.9, max touching
+but never exceeding the bound of 2, zero recycles, zero query failures).
+This router-specific fallback intentionally differs from
+`sglang_engine.get_weight_version`, which contacts the SGLang server directly
+and uses the legacy `/get_weight_version` route.
+
+Under the identical hybrid contract, `07b` landed in the same last-five bands
+as the synchronous `06b` reference (sampled RKLD `0.391 -> 0.211` vs `0.221`;
+coarse KL `0.465 -> 0.182` vs `0.162`) while active-token-normalized cost fell
+`20.44 -> 13.42 ms/token`, trainer wait-ratio fell `0.854 -> 0.774`, and
+generated-token throughput rose `524 -> 644 tokens/GPU/s` — at the most
+conservative window (prefetch 1). The measured train/rollout mismatch grew as
+designed and stayed small (logprob abs-diff median `0.0127 -> 0.0145`;
+train-rollout KL median `0.00055 -> 0.00104`). Two watch items are recorded in
+the snapshot: a step-0 grad-norm spike (113, short-response batch, early
+short-batch class) and the fact that no recycle event has yet been exercised
+on-cluster. Evidence: `results/07b-job-27272.json`. These remain systems
+measurements, not model-quality claims.

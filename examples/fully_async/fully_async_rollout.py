@@ -7,6 +7,7 @@ import time
 
 import aiohttp
 
+from miles.rollout.base_types import RolloutFnTrainOutput
 from miles.rollout.data_source import DataSource
 from miles.rollout.sglang_rollout import GenerateState, generate_and_rm_group
 from miles.utils.async_utils import run
@@ -16,34 +17,111 @@ logger = logging.getLogger(__name__)
 
 
 def group_oldest_weight_version(group: list[Sample]) -> int | None:
-    """Return the minimum weight version across all trajectories and turns in a group."""
-    versions = [s.oldest_weight_version for s in group if s.oldest_weight_version is not None]
+    """Return the minimum version only when every trajectory reports one."""
+    versions = []
+    for sample in group:
+        version = sample.oldest_weight_version
+        if version is None:
+            return None
+        versions.append(version)
     return min(versions) if versions else None
 
 
-class _CachedWeightVersion:
-    """Throttled query for the current engine weight version via /model_info."""
+def _build_staleness_metrics(
+    accepted_staleness_values: list[int],
+    observed_sample_attempts: int,
+    recycled_over_cap_sample_attempts: int,
+) -> dict[str, float]:
+    """Build compact acceptance metrics for one rollout step.
 
-    def __init__(self, ttl: float = 1.0):
+    ``over_cap_ratio`` counts completed sample attempts rejected and recycled
+    before training, divided by all attempts whose staleness was observable.
+    """
+    metrics = {}
+    if accepted_staleness_values:
+        metrics["fully_async/accepted_staleness/mean"] = sum(accepted_staleness_values) / len(
+            accepted_staleness_values
+        )
+        metrics["fully_async/accepted_staleness/min"] = min(accepted_staleness_values)
+        metrics["fully_async/accepted_staleness/max"] = max(accepted_staleness_values)
+    if observed_sample_attempts:
+        metrics["fully_async/accepted_staleness/over_cap_ratio"] = (
+            recycled_over_cap_sample_attempts / observed_sample_attempts
+        )
+    return metrics
+
+
+class _CachedWeightVersion:
+    """Throttled, fail-closed query for the current engine weight version.
+
+    The primary /model_info route is shared, but the legacy fallback depends on
+    the target: direct SGLang servers expose /get_weight_version, while the
+    sgl-router proxies /get_model_info. This collector queries the router, so a
+    direct-server fallback would 404 and leave the staleness filter inert.
+
+    A cached value is valid only for ``ttl`` seconds. Once it expires, a failed
+    refresh returns ``None`` rather than the stale value. Repeated failures use
+    bounded exponential backoff so the collector can wait without hammering the
+    router.
+    """
+
+    ENDPOINTS = ("/model_info", "/get_model_info")
+
+    def __init__(self, ttl: float = 1.0, retry_initial: float = 0.1, retry_max: float = 2.0):
         self._ttl = ttl
+        self._retry_initial = max(0.0, retry_initial)
+        self._retry_max = max(self._retry_initial, retry_max)
+        self._retry_delay = self._retry_initial
+        self._next_retry_at = 0.0
         self._value: int | None = None
         self._last_query: float = 0.0
+        self._consecutive_failures = 0
 
     async def get(self, args) -> int | None:
         now = time.monotonic()
         if self._value is not None and (now - self._last_query) < self._ttl:
             return self._value
-        url = f"http://{args.sglang_router_ip}:{args.sglang_router_port}/model_info"
+        if now < self._next_retry_at:
+            return None
+        base = f"http://{args.sglang_router_ip}:{args.sglang_router_port}"
+        errors = []
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=2)) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        self._value = int(data["weight_version"])
-                        self._last_query = now
+                for endpoint in self.ENDPOINTS:
+                    try:
+                        async with session.get(f"{base}{endpoint}", timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                            if resp.status != 200:
+                                errors.append(f"{endpoint}: HTTP {resp.status}")
+                                continue
+                            data = await resp.json()
+                            if data.get("weight_version") is None:
+                                errors.append(f"{endpoint}: no weight_version in response")
+                                continue
+                            self._value = int(data["weight_version"])
+                            self._last_query = now
+                            self._consecutive_failures = 0
+                            self._retry_delay = self._retry_initial
+                            self._next_retry_at = 0.0
+                            return self._value
+                    except Exception as e:
+                        errors.append(f"{endpoint}: {e!r}")
         except Exception as e:
-            logger.debug(f"Failed to query engine weight version: {e}")
-        return self._value
+            errors.append(repr(e))
+        self._value = None
+        self._consecutive_failures += 1
+        retry_delay = self._retry_delay
+        self._next_retry_at = now + retry_delay
+        self._retry_delay = min(max(self._retry_delay * 2, self._retry_initial), self._retry_max)
+        log = (
+            logger.warning
+            if self._consecutive_failures <= 3 or self._consecutive_failures % 100 == 0
+            else logger.debug
+        )
+        log(
+            f"Failed to query engine weight version ({self._consecutive_failures} consecutive failures); "
+            f"the staleness filter will admit no data and retry in {retry_delay:.2f}s: {'; '.join(errors)}"
+        )
+        return None
 
 
 _cached_version = _CachedWeightVersion()
@@ -282,7 +360,9 @@ class AsyncRolloutWorker:
         return self.max_completed_queue_groups
 
 
-async def generate_rollout_async(args, rollout_id: int, data_buffer: DataSource) -> list[list[Sample]]:
+async def generate_rollout_async(
+    args, rollout_id: int, data_buffer: DataSource
+) -> tuple[list[list[Sample]], dict[str, float]]:
     """
     Simplified asynchronous rollout generation - using global continuous worker
     """
@@ -299,6 +379,9 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer: DataSource)
     do_print = True
     stale_groups_recycled = 0
     staleness_values = []
+    accepted_staleness_values = []
+    observed_staleness_sample_attempts = 0
+    recycled_over_cap_sample_attempts = 0
 
     use_staleness_filter = getattr(args, "max_weight_staleness", None) is not None
 
@@ -317,6 +400,16 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer: DataSource)
     no_progress_timeout = 30.0  # Warn if no progress for 30 seconds
 
     while len(data) < target_data_size:
+        # A configured staleness bound is a correctness contract. Query before
+        # draining the worker queue so completed groups remain pending while the
+        # current engine version is unobservable.
+        current_engine_version = None
+        if use_staleness_filter:
+            current_engine_version = await _cached_version.get(args)
+            if current_engine_version is None:
+                await asyncio.sleep(0.01)
+                continue
+
         # Collect completed results
         # Do not drain more completed groups than this rollout call can consume.
         # Stale or aborted groups are reset and returned to the data buffer below;
@@ -331,11 +424,6 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer: DataSource)
 
         if made_progress:
             last_progress_time = time.time()
-
-        # Query current engine version once per collection batch (cached/throttled)
-        current_engine_version = None
-        if use_staleness_filter:
-            current_engine_version = await _cached_version.get(args)
 
         # Process completed groups in order (try to maintain order, but not strict requirement)
         processed_any = False
@@ -368,10 +456,17 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer: DataSource)
 
             # Staleness filter: discard groups whose oldest weight version is too far behind
             oldest = group_oldest_weight_version(group)
-            if oldest is not None and current_engine_version is not None:
+            if use_staleness_filter:
+                if oldest is None:
+                    raise RuntimeError(
+                        f"completed group {group_id} has no rollout weight version; "
+                        "cannot enforce max_weight_staleness"
+                    )
                 staleness = current_engine_version - oldest
                 staleness_values.append(staleness)
+                observed_staleness_sample_attempts += len(group)
                 if staleness > args.max_weight_staleness:
+                    recycled_over_cap_sample_attempts += len(group)
                     try:
                         for s in group:
                             s.reset_for_retry()
@@ -386,6 +481,7 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer: DataSource)
                     )
                     # don't count as processed for training
                     continue
+                accepted_staleness_values.append(staleness)
 
             if do_print:
                 print(
@@ -417,10 +513,17 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer: DataSource)
     print(f"Rollout completed in {duration:.2f}s! Global worker queue size: {worker.get_queue_size()}")
     if stale_groups_recycled > 0 or staleness_values:
         avg_staleness = sum(staleness_values) / len(staleness_values) if staleness_values else 0
+        accepted_avg_staleness = (
+            sum(accepted_staleness_values) / len(accepted_staleness_values) if accepted_staleness_values else 0
+        )
+        accepted_max_staleness = max(accepted_staleness_values) if accepted_staleness_values else 0
         print(
             f"Staleness stats: recycled={stale_groups_recycled}, "
             f"avg_staleness={avg_staleness:.1f}, "
-            f"max_staleness={max(staleness_values) if staleness_values else 0}"
+            f"max_staleness={max(staleness_values) if staleness_values else 0}, "
+            f"accepted_groups={len(accepted_staleness_values)}, "
+            f"accepted_avg_staleness={accepted_avg_staleness:.1f}, "
+            f"accepted_max_staleness={accepted_max_staleness}"
         )
 
     if data:
@@ -431,15 +534,20 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer: DataSource)
         )
 
     data = sorted(data, key=lambda group: group[0].index)
-    return data
+    metrics = _build_staleness_metrics(
+        accepted_staleness_values,
+        observed_staleness_sample_attempts,
+        recycled_over_cap_sample_attempts,
+    )
+    return data, metrics
 
 
 def generate_rollout_fully_async(args, rollout_id, data_buffer: DataSource, evaluation=False):
     if evaluation:
         raise ValueError("Evaluation mode not supported in simple async rollout")
 
-    completed_samples = run(generate_rollout_async(args, rollout_id, data_buffer))
-    return completed_samples
+    completed_samples, metrics = run(generate_rollout_async(args, rollout_id, data_buffer))
+    return RolloutFnTrainOutput(samples=completed_samples, metrics=metrics)
 
 
 # RolloutManager calls this hook before closing the default background loop.

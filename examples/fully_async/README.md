@@ -64,6 +64,12 @@ sampled again instead of being dropped. A useful starting point is:
 --max-weight-staleness 2
 ```
 
+When this filter is enabled, observing the current engine weight version is
+mandatory. If both router version endpoints fail, the collector leaves completed
+groups pending and retries with bounded exponential backoff. It never substitutes
+an expired cached version or admits a group whose rollout weight version is
+missing.
+
 Large prefetch windows with a small staleness limit can waste sampler work,
 because many completed groups may be recycled before training. The worker emits
 a warning when `fully_async_prefetch_batches > max_weight_staleness + 1`.

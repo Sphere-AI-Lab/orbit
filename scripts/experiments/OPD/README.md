@@ -20,11 +20,14 @@ optimize/                   Numbered teacher-top-k controls and treatments.
                             `00-t-top2-legacy.sh` records the failed legacy
                             characterization; 01+ scripts are added only after
                             their DAgger code paths are runnable.
-multimodal/                 Staged Qwen3-VL OPD ladder. `00`–`05` establish
+multimodal/                 Staged Qwen3-VL OPD ladder. `00`–`06` establish
                             image-conditioned exact-suffix scoring, sampled
                             RKLD, trainer-direct Top-K + Rest, and synchronous
-                            Geo3K multi-turn references for both objectives.
-                            `06a`/`06b` prepare their synchronous hybrid gate.
+                            Geo3K multi-turn references for each objective and
+                            their hybrid composition. `07` runs the same fixed
+                            hybrid under fully-async scheduling. All gates
+                            through `07b` passed; staleness is observed, not
+                            assumed (see the `6253d3f5` collector fix).
 archive/                    Historical 1-node smokes, the former canonical
                             3-node recipe and HTTP A/B wrapper, and the frozen
                             legacy teacher-top-k reproduction recipe.

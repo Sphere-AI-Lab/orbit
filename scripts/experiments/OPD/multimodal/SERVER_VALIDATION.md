@@ -526,19 +526,146 @@ quality or coefficient optimality.
 **Result: passed.** Job `27208` (41 min, slinky-[11,44,13], miles `51f7571b`)
 completed all twenty steps on 2026-07-18. Every Gate 11 invariant held at every
 step; additivity max residual 5.96e-8. First-five/last-five windows: sampled
-RKLD 0.322 → 0.221 AND coarse KL 0.379 → 0.162 — the hybrid drives the sparse
-objective as hard as pure DAgger (05b: 0.431 → 0.174) while simultaneously
-lowering the sampled objective. Coverage narrowing is milder than pure DAgger:
-teacher top-2 mass 0.920 → 0.901 (05b reached 0.881) and rest-mass error
-0.064 → 0.061 (non-worsening, max 0.070) — the RKLD anchor appears to hold the
-policy in better-covered regions. Token-normalized 20.44 ms/token inside the
+RKLD 0.322 → 0.221 and coarse KL 0.379 → 0.162. The hybrid reaches a similar
+last-five coarse-KL band to the independent pure DAgger run (05b: 0.174) while
+also lowering its sampled diagnostic. Coverage narrowing is milder in this
+run: teacher top-2 mass 0.920 → 0.901 (05b reached 0.881) and rest-mass error
+0.064 → 0.061 (max 0.070). This pattern is consistent with an RKLD anchor, but
+one stochastic run per arm does not isolate objective causality.
+Token-normalized 20.44 ms/token inside the
 04b (19.78) / 05b (20.53) band; steady step 47.1 s median; gradient norms
-3.9–27.0 (median 6.6). The first 06b submission (job 27187) died pre-training
-to a Ray bring-up race — the launcher's GPU-wait loop timed out at 0/16 and
-proceeded instead of retrying (bring-up fix candidate); the resubmission hit
-the same race but the workers joined before the trainer scheduled, so the run
-proceeded normally. Full per-step series in `results/06b-job-27208.json`;
-per-step actor memory remains the explicit missing-evidence item.
+3.9–27.0 (median 6.6). The late-window sample mix had longer active responses and
+higher teacher-scoring latency while token-normalized total cost stayed in the
+reference band; retain both as async-capacity diagnostics rather than an
+operator-regression claim. Full per-step series in
+`results/06b-job-27208.json`; per-step actor memory remains missing, and the
+zero Student SGLang/alignment counts are retained only in the cluster log.
+
+## Gate 13: Five-Step Geo3K Multi-Turn Hybrid Fully-Async Smoke
+
+Run the Gate 11 focused tests, including the fully-async OPD transport lifecycle
+coverage in `test_on_policy_distillation.py`, then launch:
+
+```bash
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/07a-geo3k-multiturn-hybrid-fully-async-smoke
+```
+
+`07a` retains the exact `06a` model pair, data, multi-turn generator, hybrid
+coefficients, teacher scoring contract, optimizer and
+TP=4/DP=2/SP/PP=1/CP=1 layout. It changes scheduling only:
+
+```text
+MILES_TRAIN_ENTRY=train_async.py
+rollout_function=generate_rollout_fully_async
+prefetch_batches=1
+completed_queue_soft_cap=32 prompt groups
+max_weight_staleness=2
+update_weights_interval=1
+```
+
+No TIS or new importance-ratio correction is enabled. Advance only when all
+five optimizer steps complete and:
+
+- every Gate 11 hybrid objective, additivity, DAgger identity, exact-ID and
+  multi-turn mask invariant still holds;
+- the persistent worker continues producing generation-plus-teacher-scored
+  groups while the trainer consumes completed groups;
+- teacher requests equal kept samples, with zero Student SGLang rescore
+  requests, malformed targets, retries or alignment failures;
+- rollout weight-version statistics are present and finite; any group rejected
+  by the configured staleness bound is reset and regenerated rather than
+  entering the train batch;
+- completed-queue observations remain bounded and there is no unbounded manager
+  memory growth, collector stall or shutdown hang; and
+- branch losses, gradients, masses, scoring transport and timing remain finite
+  without protocol, timeout, NaN or OOM errors.
+
+Record the worker's start/end queue sizes, average/max observed staleness and
+stale recycle count from the cluster log even when those values are zero. Do
+not submit Gate 14 until Gate 13 passes.
+
+**Result: passed on the second run.** The focused suite ran `92/92` (two new
+tests added with the fix below). The first submission (job `27256`,
+slinky-[11,13,44], 2026-07-18) completed all five steps with every algorithmic
+invariant intact (additivity residuals ≤ 3e-8, 64 = 64 teacher requests per
+step, zero retries, bounded queue 0–1, clean worker shutdown, rc = 0) — but
+the log contained **no `Staleness stats` line**: the collector's engine
+weight-version query hit the router's `/model_info`, which the sgl-router does
+not expose (it only proxies the legacy `/get_model_info`), so every query
+404ed, was swallowed at debug level, and the staleness filter ran inert —
+sample-side versions were recorded (`rollout/weight_version/mean` 1.0 → 3.66)
+but no group could ever be rejected. This is the same silent-inert failure
+class as the earlier multi-turn weight-version gap, one hop further down the
+chain. Fix `6253d3f5`: the collector now falls back
+`/model_info` → `/get_model_info` because it queries the sgl-router. This is
+deliberately different from `sglang_engine.get_weight_version`, which contacts
+the SGLang server directly and falls back to `/get_weight_version`. The
+collector also logs consecutive query failures at warning level. The rerun
+(job `27263`, 15 min, same nodes) passed every criterion **with the staleness
+machinery observable**: per-rollout `Staleness stats` lines recycled=0 with
+avg_staleness 0.0/0.0/0.8/0.7/0.8 and max_staleness 0/0/1/2/2 (touching but
+not exceeding the bound of 2 — nothing was eligible for recycling under
+prefetch=1), zero `Failed to query engine weight version` warnings,
+`train_async.py` + persistent worker active, additivity max residual 2.98e-8,
+both DAgger identities ≤ 5.96e-8, both branches nonzero, completed queue 0 at
+every drain (cap 32 never approached), weight versions finite
+(mean 1.0 → 3.58), zero alignment/malformed/rescore events, and a clean
+`16 tasks stop → worker stopped → thread stopped` shutdown (the tail
+tracebacks are wandb atexit teardown noise, not miles state).
+
+## Gate 14: Twenty-Step Geo3K Multi-Turn Hybrid Fully-Async Reference
+
+After Gate 13 passes, launch:
+
+```bash
+HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
+  OPD/multimodal/07b-geo3k-multiturn-hybrid-fully-async-gate
+```
+
+`07b` sources the complete `07a` recipe and changes only the optimizer-step
+count from five to twenty and the W&B run name to
+`opd-mm-07b-geo3k-mt-hybrid-fully-async-gate`. Apply every Gate 13 invariant at
+all steps. Retain a machine-readable snapshot covering both objective branches,
+loss identities, multi-turn composition, weight versions, scoring transport,
+gradient, timing and throughput; retain queue and recycle evidence from the log
+until it is promoted to structured W&B telemetry.
+
+Use `06b` as the synchronous systems reference. Compare active-token-normalized
+cost, generated-token throughput, trainer waiting and teacher scoring latency.
+Do not interpret raw step-time boundaries as equivalent between synchronous and
+fully-async drivers, and do not claim model quality or an unbiased off-policy
+estimator from this short bounded-staleness run.
+
+**Result: passed.** Job `27272` (36 min, slinky-[26,44,13], miles `6253d3f5`)
+completed all twenty steps on 2026-07-18. (The first submission, job `27266`,
+was killed by the preflight NCCL probe: slinky-30 memlock 8 MiB regression,
+`ibv_create_cq ENOMEM` on all 8 of its ranks — the 7th node minted by the
+slurmd-restart memlock class; resubmitted with it excluded.) Every Gate 13
+invariant held at all steps: additivity max residual 5.96e-8, DAgger identity
+residuals ≤ 1.19e-7, both branches nonzero, 64 = 64 = 64
+sample/request/teacher-request per step, zero retries, zero alignment errors.
+The staleness machinery stayed observable end to end: 20/20 rollouts printed
+`Staleness stats` (avg 0.0–0.9; max touched the bound of 2 in 11/20 rollouts
+and never exceeded it; 0 recycles; 0 version-query failures), the completed
+queue stayed 0–1 against its cap of 32, and weight versions ran finite
+(mean 1.0 → 18.8). Objectives landed in the same last-five bands as the
+synchronous 06b reference: sampled RKLD 0.391 → 0.211 (06b 0.221) and coarse
+KL 0.465 → 0.182 (06b 0.162); teacher top-2 mass 0.922 → 0.911 with
+non-worsening rest-mass error (max 0.074). Scheduling A/B against 06b using
+the prescribed token-normalized quantities: 13.42 vs 20.44 ms/active token
+(−34%), trainer wait-ratio median 0.774 vs 0.854, generated-token throughput
+644 vs 524 tokens/GPU/s (+23%), teacher scoring e2e mean median 0.38 vs
+0.58 s (async spreads requests instead of bursting them per step). The
+measured train/rollout mismatch grew as designed and stayed small: logprob
+abs-diff median 0.0145 (max 0.0295) vs 06b's 0.0127 (max 0.0151);
+train-rollout KL median 0.00104 vs 0.00055. Watch items: grad-norm 113 at
+step 0 on a short-response batch (early short-batch class — steps 1–19 stayed
+4.0–62.8, median 8.3, vs 06b's 3.9–27.0; no clipping enabled, both objectives
+descended smoothly), and a recycle event has never been exercised on-cluster
+because nothing exceeded the bound at prefetch 1. Full per-step series,
+collector telemetry and explicit missing-evidence items are in
+`results/07b-job-27272.json`.
 
 ## Failure Triage
 
@@ -565,5 +692,8 @@ per-step actor memory remains the explicit missing-evidence item.
 - zero objective branch, failed total-loss additivity, duplicate teacher
   requests or any Student SGLang request in `06`: stop before interpreting the
   hybrid curves; the intended single-response composition is not active.
+- missing fully-async worker startup, unbounded completed-queue growth, repeated
+  stale recycling without batch progress, or a shutdown hang in `07`: stop the
+  run and retain queue/staleness logs before changing the prefetch window.
 - teacher queue growth or memory pressure: record queue depth, scoring latency
   and GPU memory before setting `OPD_SCORING_MAX_INFLIGHT` to a finite value.

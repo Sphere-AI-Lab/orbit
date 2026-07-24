@@ -476,6 +476,222 @@ def test_fully_async_worker_closes_transport_on_its_owner_loop(monkeypatch):
     assert fully_async_rollout.generate_rollout_fully_async.dispose is fully_async_rollout.stop_global_worker
 
 
+def test_fully_async_staleness_metrics_report_accepted_range_and_recycled_ratio():
+    from examples.fully_async import fully_async_rollout
+
+    metrics = fully_async_rollout._build_staleness_metrics(
+        accepted_staleness_values=[0, 2, 4],
+        observed_sample_attempts=16,
+        recycled_over_cap_sample_attempts=4,
+    )
+
+    assert metrics == {
+        "fully_async/accepted_staleness/mean": 2,
+        "fully_async/accepted_staleness/min": 0,
+        "fully_async/accepted_staleness/max": 4,
+        "fully_async/accepted_staleness/over_cap_ratio": 0.25,
+    }
+
+
+def test_fully_async_group_weight_version_fails_closed_when_any_sample_is_missing():
+    from examples.fully_async import fully_async_rollout
+
+    complete_group = [
+        Sample(weight_versions=["7", "5"]),
+        Sample(weight_versions=["6"]),
+    ]
+    partial_group = [complete_group[0], Sample()]
+
+    assert fully_async_rollout.group_oldest_weight_version(complete_group) == 5
+    assert fully_async_rollout.group_oldest_weight_version(partial_group) is None
+
+
+def test_fully_async_wrapper_returns_step_metrics(monkeypatch):
+    from examples.fully_async import fully_async_rollout
+    from miles.rollout.base_types import RolloutFnTrainOutput
+
+    sentinel = object()
+    samples = [[Sample()]]
+    metrics = {"fully_async/accepted_staleness/max": 2}
+
+    monkeypatch.setattr(fully_async_rollout, "generate_rollout_async", lambda *_args: sentinel)
+    monkeypatch.setattr(fully_async_rollout, "run", lambda value: (samples, metrics) if value is sentinel else None)
+
+    output = fully_async_rollout.generate_rollout_fully_async(
+        Namespace(),
+        rollout_id=0,
+        data_buffer=SimpleNamespace(),
+    )
+
+    assert isinstance(output, RolloutFnTrainOutput)
+    assert output.samples is samples
+    assert output.metrics == metrics
+
+
+class _FakeVersionResponse:
+    def __init__(self, status, payload=None):
+        self.status = status
+        self._payload = payload or {}
+
+    async def json(self):
+        return self._payload
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakeVersionSession:
+    """Exact-URL fake for aiohttp.ClientSession.get (404 for unknown routes)."""
+
+    def __init__(self, routes):
+        self._routes = routes
+        self.requested = []
+
+    def get(self, url, **_kwargs):
+        self.requested.append(url)
+        return self._routes.get(url, _FakeVersionResponse(404))
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def test_cached_weight_version_falls_back_to_get_model_info(monkeypatch):
+    from examples.fully_async import fully_async_rollout
+
+    base = "http://10.0.0.1:3976"
+    session = _FakeVersionSession(
+        {
+            # The sgl-router only exposes the legacy route; /model_info 404s.
+            f"{base}/get_model_info": _FakeVersionResponse(200, {"weight_version": 7}),
+        }
+    )
+    monkeypatch.setattr(fully_async_rollout.aiohttp, "ClientSession", lambda *a, **k: session)
+
+    args = Namespace(sglang_router_ip="10.0.0.1", sglang_router_port=3976)
+    cache = fully_async_rollout._CachedWeightVersion()
+    assert asyncio.run(cache.get(args)) == 7
+    assert session.requested == [f"{base}/model_info", f"{base}/get_model_info"]
+
+    # Within the TTL the cached value is returned without new requests.
+    assert asyncio.run(cache.get(args)) == 7
+    assert len(session.requested) == 2
+
+
+def test_cached_weight_version_returns_none_when_all_endpoints_fail(monkeypatch):
+    from examples.fully_async import fully_async_rollout
+
+    session = _FakeVersionSession({})
+    monkeypatch.setattr(fully_async_rollout.aiohttp, "ClientSession", lambda *a, **k: session)
+
+    args = Namespace(sglang_router_ip="10.0.0.1", sglang_router_port=3976)
+    cache = fully_async_rollout._CachedWeightVersion(retry_initial=0)
+    assert asyncio.run(cache.get(args)) is None
+    assert cache._consecutive_failures == 1
+
+    # Recovery after the endpoint starts answering resets the failure counter.
+    base = "http://10.0.0.1:3976"
+    session._routes[f"{base}/get_model_info"] = _FakeVersionResponse(200, {"weight_version": 3})
+    assert asyncio.run(cache.get(args)) == 3
+    assert cache._consecutive_failures == 0
+
+
+def test_cached_weight_version_does_not_reuse_expired_value_after_refresh_failure(monkeypatch):
+    from examples.fully_async import fully_async_rollout
+
+    base = "http://10.0.0.1:3976"
+    session = _FakeVersionSession(
+        {
+            f"{base}/get_model_info": _FakeVersionResponse(200, {"weight_version": 7}),
+        }
+    )
+    monkeypatch.setattr(fully_async_rollout.aiohttp, "ClientSession", lambda *a, **k: session)
+
+    args = Namespace(sglang_router_ip="10.0.0.1", sglang_router_port=3976)
+    cache = fully_async_rollout._CachedWeightVersion(ttl=1.0, retry_initial=10.0)
+    assert asyncio.run(cache.get(args)) == 7
+
+    # The confirmed value has expired, and both refresh routes now fail. The
+    # stale value must not be returned as if it were the current engine version.
+    cache._last_query -= 2.0
+    session._routes.clear()
+    assert asyncio.run(cache.get(args)) is None
+    assert cache._value is None
+    request_count = len(session.requested)
+
+    # Calls during retry backoff remain unobservable and do not hammer the router.
+    assert asyncio.run(cache.get(args)) is None
+    assert len(session.requested) == request_count
+
+
+@pytest.mark.asyncio
+async def test_fully_async_collector_keeps_groups_pending_until_weight_version_is_observable(monkeypatch):
+    from examples.fully_async import fully_async_rollout
+
+    events = []
+    sample = Sample(
+        index=0,
+        prompt="prompt",
+        response="response",
+        label="label",
+        reward=0,
+        weight_versions=["5"],
+    )
+
+    class _FakeWorker:
+        def __init__(self):
+            self.drain_calls = 0
+
+        def get_completed_groups(self, max_items):
+            self.drain_calls += 1
+            events.append("drain")
+            assert max_items == 1
+            return [(0, [sample])]
+
+        def get_queue_size(self):
+            return 1
+
+        def get_max_concurrent_tasks(self):
+            return 1
+
+        def get_max_completed_queue_groups(self):
+            return 1
+
+    class _VersionSequence:
+        def __init__(self):
+            self.values = iter([None, 5])
+
+        async def get(self, _args):
+            value = next(self.values)
+            events.append(f"version:{value}")
+            return value
+
+    worker = _FakeWorker()
+    monkeypatch.setattr(fully_async_rollout, "get_global_worker", lambda *_args: worker)
+    monkeypatch.setattr(fully_async_rollout, "_cached_version", _VersionSequence())
+
+    args = Namespace(
+        rollout_global_dataset=True,
+        rollout_batch_size=1,
+        max_weight_staleness=2,
+    )
+    data, metrics = await fully_async_rollout.generate_rollout_async(
+        args,
+        rollout_id=0,
+        data_buffer=SimpleNamespace(),
+    )
+
+    assert data == [[sample]]
+    assert metrics["fully_async/accepted_staleness/max"] == 0
+    assert worker.drain_calls == 1
+    assert events == ["version:None", "version:5", "drain"]
+
+
 @pytest.mark.asyncio
 async def test_observed_task_reward_uses_builtin_rm_without_mutating_training_args(monkeypatch):
     training_args = Namespace(
