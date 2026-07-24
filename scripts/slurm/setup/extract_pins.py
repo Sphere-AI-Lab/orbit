@@ -96,7 +96,6 @@ PIN_GROUPS: list[tuple[str, list[Pin]]] = [
         [
             Pin("TE_VERSION", DOCKERFILE, r'transformer_engine\[pytorch\]==([^"\s]+)"'),
             Pin("MBRIDGE_COMMIT", DOCKERFILE, r"ISEEKYAN/mbridge\.git@([0-9a-f]{7,40})"),
-            Pin("TMS_COMMIT", DOCKERFILE, r"fzyzcjy/torch_memory_saver\.git@([0-9a-f]{7,40})"),
             Pin(
                 "FLASH_ATTN_INTERFACE_COMMIT",
                 DOCKERFILE,
@@ -155,6 +154,23 @@ def read_active_wheels_tag(default: str) -> str:
     return default
 
 
+# torch_memory_saver: upstream's Dockerfile installs the git TIP (unpinned since
+# #1773/#1774, 2026-07) so there is nothing left to extract. Bare-metal rebuilds
+# must stay reproducible, so this is a hand-owned pin instead: preserved from
+# pins.env, bumped by hand during miles-sync when upstream moves.
+TMS_COMMIT_DEFAULT = "6d5bce48"
+
+
+def read_preserved(key: str, default: str) -> str:
+    """A hand-owned pin: preserved from the committed pins.env; `default` only
+    applies on first bootstrap (pins.env absent or lacking the key)."""
+    if PINS_FILE.exists():
+        m = re.search(rf"^{key}=\$\{{{key}:-(\S+)\}}", PINS_FILE.read_text(), re.MULTILINE)
+        if m:
+            return m.group(1)
+    return default
+
+
 def derive_index_urls(wheels_tag: str) -> dict[str, str]:
     """Derive wheel-index URLs from the ACTIVE wheels-tag cu prefix. SGL_WHL_INDEX_URL
     carries sgl-project's +cuNNN local-version builds of sglang-kernel/sgl-deep-gemm —
@@ -177,6 +193,9 @@ def extract() -> dict[str, str]:
             values[pin.key] = search(pin)
     for pin in UPSTREAM_PINS:
         values[pin.key] = search(pin)
+
+    # Hand-owned pins (no upstream source to extract from):
+    values["TMS_COMMIT"] = read_preserved("TMS_COMMIT", TMS_COMMIT_DEFAULT)
 
     # ACTIVE sglang stack: preserve MILES_WHEELS_TAG, derive the rest from the map.
     active = read_active_wheels_tag(default=values["UPSTREAM_WHEELS_TAG"])
@@ -250,6 +269,11 @@ def render(values: dict[str, str]) -> str:
     out.append(f"TORCH_INDEX_URL=${{TORCH_INDEX_URL:-{values['TORCH_INDEX_URL']}}}")
     out.append(f"FLASHINFER_INDEX_URL=${{FLASHINFER_INDEX_URL:-{values['FLASHINFER_INDEX_URL']}}}")
     out.append(f"SGL_WHL_INDEX_URL=${{SGL_WHL_INDEX_URL:-{values['SGL_WHL_INDEX_URL']}}}")
+
+    out.append("")
+    out.append("# Hand-owned: upstream Dockerfile installs torch_memory_saver from git TIP")
+    out.append("# (unpinned since 2026-07 #1773); we keep a pin for reproducible rebuilds.")
+    out.append(f"TMS_COMMIT=${{TMS_COMMIT:-{values['TMS_COMMIT']}}}")
     out.append("")
     return "\n".join(out)
 
@@ -283,6 +307,12 @@ def pending_notice(values: dict[str, str]) -> str | None:
     cu prefix is a deployment property, not a version lag — upstream's Dockerfile
     moved to cu130 wheels while bare-metal is driver-bound to the cu129 line
     (CUDA-12.8 driver), so a cu129-vs-cu130 difference alone is not 'pending'."""
+    if not _tag_sglang_version(values["UPSTREAM_WHEELS_TAG"]):
+        # 2026-07 naming: upstream wheels tags are torch-ABI-only (cu130-x86_64,
+        # no sglang-version suffix; releases are republished only on torch bumps).
+        # There is no version component to lag behind — the real guard is the
+        # torch-ABI consistency check in abi_errors().
+        return None
     if _tag_sglang_version(values["MILES_WHEELS_TAG"]) != _tag_sglang_version(values["UPSTREAM_WHEELS_TAG"]):
         return (
             f"[sglang-sync pending] ACTIVE MILES_WHEELS_TAG={values['MILES_WHEELS_TAG']} "

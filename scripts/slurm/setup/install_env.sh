@@ -479,7 +479,9 @@ echo "[src] installing Megatron-Bridge editable from $MEGATRON_BRIDGE_SRC (--no-
 $UV -e "$MEGATRON_BRIDGE_SRC" --no-deps --no-build-isolation
 
 echo "[deps] torch_memory_saver @ $TMS_COMMIT (for miles/backends/megatron_utils/actor.py)"
-$UV --no-cache-dir --force-reinstall "git+https://github.com/fzyzcjy/torch_memory_saver.git@$TMS_COMMIT"
+# Newer TMS source builds need TMS_CUDA_MAJOR (upstream #1774); derive from the env's torch.
+TMS_CUDA_MAJOR=$("$CONDA_PREFIX/bin/python" -c "import torch; print(torch.version.cuda.split('.')[0])") \
+    $UV --no-cache-dir --force-reinstall "git+https://github.com/fzyzcjy/torch_memory_saver.git@$TMS_COMMIT"
 
 _install_cudnn_for_torch "before transformer_engine_torch source build"
 
@@ -676,12 +678,9 @@ $UV -r "$MILES_REPO/requirements.txt"
 echo "[deps] miles editable"
 $UV -e "$MILES_REPO" --no-deps
 
-# numpy 1.x for megatron — mirrors upstream docker/Dockerfile's late
-# `pip install "numpy<2"`. scipy must be capped WITH it: sglang's unpinned
-# `scipy` resolves to 1.18+ whose runtime requires numpy>=2 (its _sputils
-# references np.long, absent in numpy 1.26 → AttributeError breaks
-# `import sglang`/`import megatron.bridge`). scipy 1.15.x runs on numpy 1.26.
-$UV 'numpy<2' 'scipy<1.16'
+# numpy: upstream dropped its late `pip install "numpy<2"` at the sglang-v0.5.14
+# bump (#1587) — the current Megatron/sglang line runs on numpy 2.x, so the old
+# numpy<2 + scipy<1.16 pairing cap is gone with it (2026-07-24 sync decision).
 
 echo "[deps] mooncake-transfer-engine==$MOONCAKE_VERSION (sglang docker base)"
 $UV "mooncake-transfer-engine==$MOONCAKE_VERSION"
