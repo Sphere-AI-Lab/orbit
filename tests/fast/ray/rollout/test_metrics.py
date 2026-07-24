@@ -5,18 +5,18 @@ from tests.fast.ray.rollout.conftest import make_args, make_samples_grouped
 
 from miles.ray.rollout import metrics as rollout_metrics
 from miles.ray.rollout.metrics import (
+    _compute_distillation_rpc_metrics,
     _compute_metrics_from_samples,
-    _compute_opd_scoring_metrics,
     _compute_zero_std_metrics,
 )
 from miles.utils.types import Sample
 
 
-class TestOpdScoringMetrics:
+class TestDistillationRpcMetrics:
     def test_no_telemetry_emits_no_metrics(self):
-        assert _compute_opd_scoring_metrics([Sample()]) == {}
+        assert _compute_distillation_rpc_metrics([Sample()]) == {}
 
-    def test_aggregates_counts_bytes_and_latency_percentiles(self):
+    def test_emits_only_compact_health_and_payload_metrics(self):
         samples = [
             Sample(
                 metadata={
@@ -72,46 +72,26 @@ class TestOpdScoringMetrics:
             ),
         ]
 
-        metrics = _compute_opd_scoring_metrics(samples)
+        metrics = _compute_distillation_rpc_metrics(samples)
 
-        assert metrics["opd_scoring/sample_count"] == 2
-        assert metrics["opd_scoring/request_count"] == 2
-        assert metrics["opd_scoring/retry_count"] == 1
-        assert metrics["opd_scoring/transport_retry_count"] == 2
-        assert metrics["opd_scoring/stale_connection_retry_count"] == 1
-        assert metrics["opd_scoring/teacher_request_count"] == 1
-        assert metrics["opd_scoring/student_request_count"] == 1
-        assert metrics["opd_scoring/input_tokens_total"] == 300
-        assert metrics["opd_scoring/response_tokens_total"] == 120
-        assert metrics["opd_scoring/requested_token_ids_total"] == 3
-        assert metrics["opd_scoring/candidate_logprob_cells_total"] == 800
-        assert metrics["opd_scoring/request_body_bytes_total"] == 500
-        assert metrics["opd_scoring/request_body_bytes_coverage"] == 0.5
-        assert metrics["opd_scoring/response_body_bytes_total"] == 4_000
-        assert metrics["opd_scoring/returned_positions_total"] == 300
-        assert metrics["opd_scoring/response_bytes_per_returned_position"] == pytest.approx(4_000 / 300)
-        assert metrics["opd_scoring/response_bytes_per_response_token"] == pytest.approx(4_000 / 120)
-        assert metrics["opd_scoring/returned_positions_per_response_token"] == pytest.approx(300 / 120)
-        assert metrics["opd_scoring/client_session_reuse_rate"] == 0.5
-        assert metrics["opd_scoring/connection_reuse_rate"] == 0.5
-        assert metrics["opd_scoring/transport_attempts_total"] == 4
-        assert metrics["opd_scoring/e2e_latency_s/mean"] == 2.0
-        assert metrics["opd_scoring/e2e_latency_s/p50"] == 2.0
-        assert metrics["opd_scoring/e2e_latency_s/p95"] == pytest.approx(2.9)
-        assert metrics["opd_scoring/e2e_latency_s/max"] == 3.0
-        assert metrics["opd_scoring/teacher/requested_token_ids/max"] == 0
-        assert metrics["opd_scoring/teacher/candidate_logprob_cells/max"] == 200
-        assert metrics["opd_scoring/teacher/returned_positions/max"] == 100
-        assert metrics["opd_scoring/teacher/response_body_bytes/max"] == 1_000
-        assert metrics["opd_scoring/teacher/e2e_latency_s/p95"] == 1.0
-        assert metrics["opd_scoring/student/requested_token_ids/max"] == 3
-        assert metrics["opd_scoring/student/candidate_logprob_cells/max"] == 600
-        assert metrics["opd_scoring/student/returned_positions/max"] == 200
-        assert metrics["opd_scoring/student/response_tokens/max"] == 80
-        assert metrics["opd_scoring/student/response_body_bytes/max"] == 3_000
-        assert metrics["opd_scoring/student/e2e_latency_s/p95"] == 3.0
-        assert metrics["opd_scoring/student/http_s/max"] == 2.0
-        assert metrics["opd_scoring/student/semaphore_wait_s/max"] == 0.5
+        assert set(metrics) == {
+            "distillation_rpc/teacher/requests_per_sample",
+            "distillation_rpc/student/requests_per_sample",
+            "distillation_rpc/retry_rate",
+            "distillation_rpc/e2e_latency_s/p95",
+            "distillation_rpc/semaphore_wait_s/p95",
+            "distillation_rpc/connection_reuse_rate",
+            "distillation_rpc/payload/response_body_bytes_p95",
+            "distillation_rpc/payload/candidate_logprob_cells_max",
+        }
+        assert metrics["distillation_rpc/teacher/requests_per_sample"] == 0.5
+        assert metrics["distillation_rpc/student/requests_per_sample"] == 0.5
+        assert metrics["distillation_rpc/retry_rate"] == 0.5
+        assert metrics["distillation_rpc/e2e_latency_s/p95"] == pytest.approx(2.9)
+        assert metrics["distillation_rpc/semaphore_wait_s/p95"] == pytest.approx(0.48)
+        assert metrics["distillation_rpc/connection_reuse_rate"] == 0.5
+        assert metrics["distillation_rpc/payload/response_body_bytes_p95"] == pytest.approx(2_900)
+        assert metrics["distillation_rpc/payload/candidate_logprob_cells_max"] == 600
 
     def test_wandb_keys_use_a_separate_top_level_section(self, monkeypatch):
         sample = make_samples_grouped(1, 1)[0]
@@ -126,8 +106,9 @@ class TestOpdScoringMetrics:
 
         rollout_metrics.log_rollout_data(0, args, [sample], rollout_extra_metrics=None, rollout_time=1.0)
 
-        assert logged["opd_scoring/request_count"] == 1
-        assert not any(key.startswith("rollout/opd_scoring/") for key in logged)
+        assert logged["distillation_rpc/teacher/requests_per_sample"] == 1
+        assert logged["distillation_rpc/student/requests_per_sample"] == 0
+        assert not any(key.startswith("rollout/distillation_rpc/") for key in logged)
         assert "rollout/response_len/mean" in logged
         assert "perf/rollout_time" in logged
 

@@ -11,6 +11,7 @@ from typing import Any
 import aiohttp
 import torch
 
+from miles.utils.processing_utils import encode_image_for_rollout_engine
 from miles.utils.types import Sample
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,9 @@ def _score_payload(
     response_length: int,
     top_k: int = 0,
     token_ids: list[int] | None = None,
+    image_data: list[str] | None = None,
+    prompt: str | None = None,
+    use_exact_mm_scoring_suffix: bool = False,
 ) -> dict[str, Any]:
     if response_length < 0 or response_length > len(input_ids):
         raise ValueError(
@@ -107,24 +111,57 @@ def _score_payload(
             "OPD scoring requires at least one prompt token before the response: "
             f"response_length={response_length}, len(input_ids)={len(input_ids)}."
         )
+    if image_data and response_length == 0:
+        raise ValueError(
+            "Multimodal OPD scoring requires a non-empty text response suffix; "
+            "skip empty-response samples instead of sending input_ids through "
+            "the multimodal retokenization path."
+        )
 
     payload = {
-        "input_ids": input_ids,
         "sampling_params": {
             "temperature": 0,
             "max_new_tokens": 0,
             "skip_special_tokens": False,
         },
         "return_logprob": True,
+    }
+    if image_data and response_length > 0 and use_exact_mm_scoring_suffix:
+        if not isinstance(prompt, str) or not prompt:
+            raise ValueError(
+                "Multimodal OPD scoring requires a non-empty rendered string prompt "
+                "so the scoring model can apply its own multimodal processor."
+            )
+        # Let the scoring model own visual tokenization. The sampled text tail
+        # remains an exact action sequence and is appended server-side only
+        # after multimodal preprocessing has finished.
+        payload["text"] = prompt
+        payload["scoring_suffix_ids"] = input_ids[-response_length:]
+    else:
+        payload["input_ids"] = input_ids
         # Keep the complete prefix in input_ids, but only materialize logprobs
         # from one token before the response so every response token is scored.
-        "logprob_start_len": prompt_length - 1,
-    }
+        payload["logprob_start_len"] = prompt_length - 1
     if top_k > 0:
         payload["top_logprobs_num"] = top_k
     if token_ids:
         payload["token_ids_logprob"] = token_ids
+    if image_data:
+        payload["image_data"] = image_data
     return payload
+
+
+def _scoring_image_data(sample: Sample) -> list[str] | None:
+    """Encode the sample's ordered images once for all OPD scoring routes."""
+    multimodal_inputs = sample.multimodal_inputs or {}
+    videos = multimodal_inputs.get("videos")
+    if videos is not None and len(videos) > 0:
+        raise NotImplementedError("OPD scoring supports images but does not yet support video inputs.")
+
+    images = multimodal_inputs.get("images")
+    if images is None or len(images) == 0:
+        return None
+    return [encode_image_for_rollout_engine(image) for image in images]
 
 
 def _student_score_url(args: Namespace) -> str:
@@ -383,8 +420,23 @@ async def _post_json(
 def _payload_input_token_count(payload: dict[str, Any]) -> int:
     input_ids = payload.get("input_ids") or []
     if input_ids and isinstance(input_ids[0], list):
-        return sum(len(ids) for ids in input_ids)
-    return len(input_ids)
+        input_token_count = sum(len(ids) for ids in input_ids)
+    else:
+        input_token_count = len(input_ids)
+
+    suffix_ids = payload.get("scoring_suffix_ids") or []
+    if suffix_ids and isinstance(suffix_ids[0], list):
+        suffix_token_count = sum(len(ids) for ids in suffix_ids)
+    else:
+        suffix_token_count = len(suffix_ids)
+    return input_token_count + suffix_token_count
+
+
+def _response_input_token_count(response: dict[str, Any]) -> int | None:
+    prompt_tokens = (response.get("meta_info") or {}).get("prompt_tokens")
+    if isinstance(prompt_tokens, int) and prompt_tokens >= 0:
+        return prompt_tokens
+    return None
 
 
 def _returned_position_count(response: dict[str, Any]) -> int:
@@ -453,6 +505,7 @@ async def _scoring_post(
         telemetry["attempts"] = attempt
         try:
             result = await post_once()
+            response_input_tokens = _response_input_token_count(result.response)
             telemetry.update(
                 {
                     "e2e_latency_s": time.monotonic() - overall_start,
@@ -468,6 +521,8 @@ async def _scoring_post(
                     "returned_positions": _returned_position_count(result.response),
                 }
             )
+            if response_input_tokens is not None:
+                telemetry["input_tokens"] = response_input_tokens
             return _ScoringPostResult(response=result.response, telemetry=telemetry)
         except (TimeoutError, asyncio.TimeoutError, aiohttp.ClientError) as exc:
             last_exc = exc
@@ -515,8 +570,21 @@ def _trim_input_field(meta_info: dict[str, Any], field: str, response_length: in
     return values[1:][-response_length:] if response_length > 0 else []
 
 
+def _response_loss_mask(sample: Sample) -> list[bool]:
+    if sample.loss_mask is None:
+        return [True] * sample.response_length
+    if len(sample.loss_mask) != sample.response_length:
+        raise ValueError(
+            f"OPD scoring loss-mask length mismatch: got {len(sample.loss_mask)}, "
+            f"expected {sample.response_length} (sample index={sample.index}, "
+            f"group_index={sample.group_index})."
+        )
+    return [bool(value) for value in sample.loss_mask]
+
+
 def _validate_scoring_token_alignment(response: dict[str, Any], sample: Sample, *, source: str) -> list[Any]:
     response_length = sample.response_length
+    loss_mask = _response_loss_mask(sample)
     if response_length == 0:
         return []
 
@@ -537,28 +605,25 @@ def _validate_scoring_token_alignment(response: dict[str, Any], sample: Sample, 
             f"expected {response_length} (sample index={sample.index}, group_index={sample.group_index})."
         )
 
-    returned_token_ids = []
-    for position, entry in enumerate(entries):
+    expected_token_ids = sample.tokens[-response_length:]
+    for position, (entry, expected_token_id, is_active) in enumerate(
+        zip(entries, expected_token_ids, loss_mask, strict=True)
+    ):
+        if not is_active:
+            continue
         if not isinstance(entry, (list, tuple)) or len(entry) < 2 or entry[1] is None:
             raise ValueError(
                 f"OPD {source} scoring returned a malformed input_token_logprobs entry at response "
                 f"position {position}: {entry!r}."
             )
-        returned_token_ids.append(int(entry[1]))
-
-    expected_token_ids = sample.tokens[-response_length:]
-    if returned_token_ids != expected_token_ids:
-        mismatch_position = next(
-            i
-            for i, (returned, expected) in enumerate(zip(returned_token_ids, expected_token_ids, strict=True))
-            if returned != expected
-        )
-        raise ValueError(
-            f"OPD {source} scoring token alignment mismatch at response position {mismatch_position}: "
-            f"got token id {returned_token_ids[mismatch_position]}, expected "
-            f"{expected_token_ids[mismatch_position]} (sample index={sample.index}, "
-            f"group_index={sample.group_index}, response_length={response_length})."
-        )
+        returned_token_id = int(entry[1])
+        if returned_token_id != expected_token_id:
+            raise ValueError(
+                f"OPD {source} scoring token alignment mismatch at response position {position}: "
+                f"got token id {returned_token_id}, expected {expected_token_id} "
+                f"(sample index={sample.index}, group_index={sample.group_index}, "
+                f"response_length={response_length})."
+            )
 
     return entries
 
@@ -571,8 +636,12 @@ def _input_logprob_maps(response: dict[str, Any], field: str, response_length: i
 
 def _teacher_sampled_log_probs(response: dict[str, Any], sample: Sample) -> torch.Tensor:
     input_token_logprobs = _validate_scoring_token_alignment(response, sample, source="teacher")
+    loss_mask = _response_loss_mask(sample)
     log_probs = []
-    for position, item in enumerate(input_token_logprobs):
+    for position, (item, is_active) in enumerate(zip(input_token_logprobs, loss_mask, strict=True)):
+        if not is_active:
+            log_probs.append(0.0)
+            continue
         if item[0] is None:
             raise ValueError(f"OPD teacher sampled logprob at response position {position} is missing.")
         log_prob = float(item[0])
@@ -615,7 +684,13 @@ def _teacher_topk_targets(
     token_id_rows: list[list[int]] = []
     log_prob_rows: list[list[float]] = []
     valid_mask_rows: list[list[bool]] = []
-    for position, row in enumerate(rows):
+    loss_mask = _response_loss_mask(sample)
+    for position, (row, is_active) in enumerate(zip(rows, loss_mask, strict=True)):
+        if not is_active:
+            token_id_rows.append([0] * top_k)
+            log_prob_rows.append([-math.inf] * top_k)
+            valid_mask_rows.append([False] * top_k)
+            continue
         if not isinstance(row, (list, tuple)):
             raise ValueError(f"OPD teacher top-k row {position} is malformed: {row!r}.")
         entries = [entry for entry in row if entry is not None]
@@ -872,7 +947,29 @@ async def _record_observed_task_reward(args: Namespace, sample: Sample) -> None:
 
 
 async def reward_func(args: Namespace, sample: Sample, **kwargs: Any) -> dict[str, Any]:
+    multimodal_inputs = sample.multimodal_inputs or {}
+    images = multimodal_inputs.get("images")
+    if images is not None and len(images) > 0 and sample.response_length == 0:
+        await _record_observed_task_reward(args, sample)
+        dagger_top_k = _get_opd_dagger_top_k(args)
+        # There are no sampled actions to score. Preserve the reward payload
+        # shape expected by post_process_rewards without encoding images or
+        # issuing an unsafe or useless multimodal prefill request.
+        if dagger_top_k > 0:
+            return {"teacher": {}}
+
+        top_k = _get_opd_top_k(args)
+        if top_k == 0:
+            return {}
+
+        reward_payload: dict[str, Any] = {"teacher": {}}
+        if _get_top_k_strategy(args) in STUDENT_ON_TEACHER_STRATEGIES:
+            reward_payload["student_on_teacher"] = {}
+        return reward_payload
+
+    image_data = _scoring_image_data(sample)
     await _record_observed_task_reward(args, sample)
+    use_exact_mm_scoring_suffix = bool(getattr(args, "sglang_mm_exact_scoring_suffix", False))
 
     dagger_top_k = _get_opd_dagger_top_k(args)
     if dagger_top_k > 0:
@@ -883,6 +980,9 @@ async def reward_func(args: Namespace, sample: Sample, **kwargs: Any) -> dict[st
                 sample.tokens,
                 response_length=sample.response_length,
                 top_k=dagger_top_k,
+                image_data=image_data,
+                prompt=sample.prompt,
+                use_exact_mm_scoring_suffix=use_exact_mm_scoring_suffix,
             ),
             target="teacher",
             response_length=sample.response_length,
@@ -895,7 +995,13 @@ async def reward_func(args: Namespace, sample: Sample, **kwargs: Any) -> dict[st
         result = await _scoring_post(
             args,
             args.rm_url,
-            _score_payload(sample.tokens, response_length=sample.response_length),
+            _score_payload(
+                sample.tokens,
+                response_length=sample.response_length,
+                image_data=image_data,
+                prompt=sample.prompt,
+                use_exact_mm_scoring_suffix=use_exact_mm_scoring_suffix,
+            ),
             target="teacher",
             response_length=sample.response_length,
         )
@@ -914,6 +1020,9 @@ async def reward_func(args: Namespace, sample: Sample, **kwargs: Any) -> dict[st
         response_length=sample.response_length,
         top_k=top_k if strategy in TEACHER_TOP_STRATEGIES else 0,
         token_ids=teacher_token_ids,
+        image_data=image_data,
+        prompt=sample.prompt,
+        use_exact_mm_scoring_suffix=use_exact_mm_scoring_suffix,
     )
     teacher_result = await _scoring_post(
         args,
@@ -936,6 +1045,9 @@ async def reward_func(args: Namespace, sample: Sample, **kwargs: Any) -> dict[st
                 sample.tokens,
                 response_length=sample.response_length,
                 token_ids=student_token_ids,
+                image_data=image_data,
+                prompt=sample.prompt,
+                use_exact_mm_scoring_suffix=use_exact_mm_scoring_suffix,
             ),
             target="student",
             response_length=sample.response_length,

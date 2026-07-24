@@ -67,5 +67,6 @@ def test_wandb_registers_opd_metric_sections(monkeypatch):
 
     wandb_utils._init_wandb_common()
 
-    assert (("opd_scoring/*",), {"step_metric": "rollout/step"}) in define_calls
+    assert (("distillation_rpc/*",), {"step_metric": "rollout/step"}) in define_calls
     assert (("opd_dagger/*",), {"step_metric": "train/step"}) in define_calls
+    assert not any(call[0] == ("opd_scoring/*",) for call in define_calls)

@@ -65,7 +65,7 @@ def log_rollout_data(rollout_id, args, samples, rollout_extra_metrics, rollout_t
     log_dict = {**(rollout_extra_metrics or {})}
     log_dict |= dict_add_prefix(_compute_metrics_from_samples(args, samples), "rollout/")
     log_dict |= dict_add_prefix(_compute_perf_metrics_from_samples(args, samples, rollout_time), "perf/")
-    log_dict |= _compute_opd_scoring_metrics(samples)
+    log_dict |= _compute_distillation_rpc_metrics(samples)
     logger.info(f"perf {rollout_id}: {log_dict}")
     step = compute_rollout_step(args, rollout_id)
     log_dict["rollout/step"] = step
@@ -112,7 +112,14 @@ def _compute_metrics_from_samples(args, samples):
     return log_dict
 
 
-def _compute_opd_scoring_metrics(all_samples: list[Sample]) -> dict[str, float | int]:
+def _compute_distillation_rpc_metrics(all_samples: list[Sample]) -> dict[str, float | int]:
+    """Publish a compact health summary for distillation scoring RPCs.
+
+    The per-request metadata remains intentionally detailed for debug dumps and
+    local inspection. W&B only receives the signals needed to detect extra
+    student rescoring, retries, queue pressure, connection churn, and payload
+    growth.
+    """
     calls = []
     sample_count = 0
     for sample in all_samples:
@@ -142,105 +149,45 @@ def _compute_opd_scoring_metrics(all_samples: list[Sample]) -> dict[str, float |
     calls = enriched_calls
 
     metrics: dict[str, float | int] = {
-        "opd_scoring/sample_count": sample_count,
-        "opd_scoring/request_count": len(calls),
-        "opd_scoring/retry_count": sum(max(0, int(call.get("attempts", 1)) - 1) for call in calls),
-        "opd_scoring/transport_retry_count": sum(max(0, int(call.get("transport_attempts", 1)) - 1) for call in calls),
-        "opd_scoring/stale_connection_retry_count": sum(
-            max(0, int(call.get("stale_connection_retry_count", 0))) for call in calls
+        "distillation_rpc/teacher/requests_per_sample": (
+            sum(call.get("target") == "teacher" for call in calls) / sample_count
         ),
+        "distillation_rpc/student/requests_per_sample": (
+            sum(call.get("target") == "student" for call in calls) / sample_count
+        ),
+        "distillation_rpc/retry_rate": np.mean(
+            [
+                int(
+                    int(call.get("attempts", 1)) > 1
+                    or int(call.get("transport_attempts", 1)) > 1
+                    or int(call.get("stale_connection_retry_count", 0)) > 0
+                )
+                for call in calls
+            ]
+        ).item(),
     }
-
-    targets = sorted({str(call.get("target")) for call in calls if call.get("target")})
-    for target in targets:
-        metrics[f"opd_scoring/{target}_request_count"] = sum(call.get("target") == target for call in calls)
-
-    session_reuse = [
-        call["client_session_reused"] for call in calls if isinstance(call.get("client_session_reused"), bool)
-    ]
-    if session_reuse:
-        metrics["opd_scoring/client_session_reuse_rate"] = sum(session_reuse) / len(session_reuse)
 
     connection_reuse = [call["connection_reused"] for call in calls if isinstance(call.get("connection_reused"), bool)]
     if connection_reuse:
-        metrics["opd_scoring/connection_reuse_rate"] = sum(connection_reuse) / len(connection_reuse)
+        metrics["distillation_rpc/connection_reuse_rate"] = sum(connection_reuse) / len(connection_reuse)
 
-    total_fields = (
-        "input_tokens",
-        "response_tokens",
-        "requested_token_ids",
-        "candidate_logprob_cells",
-        "request_body_bytes",
-        "response_body_bytes",
-        "returned_positions",
-        "transport_attempts",
-    )
-    for field in total_fields:
-        values = [call[field] for call in calls if isinstance(call.get(field), (int, float))]
-        if values:
-            metrics[f"opd_scoring/{field}_total"] = sum(values)
-        if field == "request_body_bytes":
-            metrics["opd_scoring/request_body_bytes_coverage"] = len(values) / len(calls)
-
-    response_bytes = metrics.get("opd_scoring/response_body_bytes_total", 0)
-    returned_positions = metrics.get("opd_scoring/returned_positions_total", 0)
-    if returned_positions:
-        metrics["opd_scoring/response_bytes_per_returned_position"] = response_bytes / returned_positions
-
-    response_tokens = metrics.get("opd_scoring/response_tokens_total", 0)
-    if response_tokens:
-        metrics["opd_scoring/response_bytes_per_response_token"] = response_bytes / response_tokens
-        metrics["opd_scoring/returned_positions_per_response_token"] = returned_positions / response_tokens
-
-    distribution_fields = (
-        "e2e_latency_s",
-        "http_s",
-        "semaphore_wait_s",
-        "body_read_s",
-        "json_decode_s",
-        "response_body_bytes",
-        "requested_token_ids",
-        "candidate_logprob_cells",
-        "input_tokens",
-        "returned_positions",
-    )
-    for field in distribution_fields:
+    percentile_fields = {
+        "e2e_latency_s": "distillation_rpc/e2e_latency_s/p95",
+        "semaphore_wait_s": "distillation_rpc/semaphore_wait_s/p95",
+        "response_body_bytes": "distillation_rpc/payload/response_body_bytes_p95",
+    }
+    for field, key in percentile_fields.items():
         values = [float(call[field]) for call in calls if isinstance(call.get(field), (int, float))]
-        if not values:
-            continue
-        array = np.asarray(values, dtype=np.float64)
-        prefix = f"opd_scoring/{field}"
-        metrics[f"{prefix}/mean"] = np.mean(array).item()
-        metrics[f"{prefix}/p50"] = np.percentile(array, 50).item()
-        metrics[f"{prefix}/p95"] = np.percentile(array, 95).item()
-        metrics[f"{prefix}/max"] = np.max(array).item()
+        if values:
+            metrics[key] = np.percentile(np.asarray(values, dtype=np.float64), 95).item()
 
-    target_distribution_fields = (
-        "e2e_latency_s",
-        "http_s",
-        "semaphore_wait_s",
-        "body_read_s",
-        "json_decode_s",
-        "request_body_bytes",
-        "response_body_bytes",
-        "input_tokens",
-        "response_tokens",
-        "requested_token_ids",
-        "candidate_logprob_cells",
-        "returned_positions",
-    )
-    for target in targets:
-        target_calls = [call for call in calls if call.get("target") == target]
-        for field in target_distribution_fields:
-            values = [float(call[field]) for call in target_calls if isinstance(call.get(field), (int, float))]
-            if not values:
-                continue
-            array = np.asarray(values, dtype=np.float64)
-            prefix = f"opd_scoring/{target}/{field}"
-            metrics[f"{prefix}/mean"] = np.mean(array).item()
-            metrics[f"{prefix}/p50"] = np.percentile(array, 50).item()
-            metrics[f"{prefix}/p95"] = np.percentile(array, 95).item()
-            metrics[f"{prefix}/max"] = np.max(array).item()
+    candidate_cells = [
+        float(call["candidate_logprob_cells"])
+        for call in calls
+        if isinstance(call.get("candidate_logprob_cells"), (int, float))
+    ]
+    if candidate_cells:
+        metrics["distillation_rpc/payload/candidate_logprob_cells_max"] = max(candidate_cells)
 
     return metrics
 

@@ -20,6 +20,9 @@ optimize/                   Numbered teacher-top-k controls and treatments.
                             `00-t-top2-legacy.sh` records the failed legacy
                             characterization; 01+ scripts are added only after
                             their DAgger code paths are runnable.
+multimodal/                 Staged VLM OPD bring-up. `00` validates the exact
+                            Qwen3-VL teacher-prefill contract without training
+                            before multimodal data is wired into OPD scoring.
 archive/                    Historical 1-node smokes, the former canonical
                             3-node recipe and HTTP A/B wrapper, and the frozen
                             legacy teacher-top-k reproduction recipe.

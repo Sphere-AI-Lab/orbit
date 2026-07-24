@@ -43,6 +43,17 @@ def _build_prefill_scoring_payload(
     if sample.multimodal_inputs and sample.multimodal_inputs.get("images"):
         image_data = sample.multimodal_inputs["images"]
         payload["image_data"] = [encode_image_for_rollout_engine(image) for image in image_data]
+        if sample.response_length > 0 and getattr(args, "sglang_mm_exact_scoring_suffix", False):
+            if not isinstance(sample.prompt, str) or not sample.prompt:
+                raise ValueError(
+                    "Multimodal SGLang prefill recompute requires a non-empty rendered "
+                    "string prompt so the scoring model can apply its own multimodal "
+                    "processor."
+                )
+            payload.pop("input_ids")
+            payload.pop("logprob_start_len")
+            payload["text"] = sample.prompt
+            payload["scoring_suffix_ids"] = sample.tokens[-sample.response_length :]
 
     return payload
 

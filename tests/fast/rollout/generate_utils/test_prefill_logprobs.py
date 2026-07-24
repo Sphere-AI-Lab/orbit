@@ -73,6 +73,97 @@ async def test_recompute_rollout_logprobs_via_prefill_checks_token_alignment(mon
 
 
 @pytest.mark.asyncio
+async def test_multimodal_prefill_recompute_uses_exact_response_suffix(monkeypatch):
+    sample = Sample(
+        prompt="rendered multimodal prompt",
+        tokens=[10, 11, 20, 21],
+        response_length=2,
+        multimodal_inputs={"images": ["image-a"]},
+        status=Sample.Status.COMPLETED,
+    )
+    args = SimpleNamespace(
+        recompute_logprobs_via_prefill=True,
+        sglang_enable_lora=False,
+        sglang_mm_exact_scoring_suffix=True,
+    )
+    seen = {}
+
+    async def fake_post(url, payload, headers=None):
+        seen["payload"] = payload
+        return {
+            "meta_info": {
+                "input_token_logprobs": [
+                    (None, 11),
+                    (-0.1, 20),
+                    (-0.2, 21),
+                ]
+            }
+        }
+
+    monkeypatch.setattr(prefill_logprobs, "post", fake_post)
+    monkeypatch.setattr(
+        prefill_logprobs,
+        "encode_image_for_rollout_engine",
+        lambda image: f"encoded-{image}",
+    )
+
+    await prefill_logprobs.recompute_rollout_logprobs_via_prefill(
+        args,
+        sample,
+        url="http://localhost/generate",
+        sampling_params={"temperature": 1, "max_new_tokens": 128},
+    )
+
+    assert sample.rollout_log_probs == [-0.1, -0.2]
+    assert seen["payload"]["text"] == sample.prompt
+    assert seen["payload"]["scoring_suffix_ids"] == [20, 21]
+    assert seen["payload"]["image_data"] == ["encoded-image-a"]
+    assert "input_ids" not in seen["payload"]
+    assert "logprob_start_len" not in seen["payload"]
+
+
+def test_multimodal_prefill_nonrendered_prompt_rejects_exact_suffix_payload(monkeypatch):
+    sample = Sample(
+        prompt=[{"role": "user", "content": "prompt"}],
+        tokens=[10, 11, 20],
+        response_length=1,
+        multimodal_inputs={"images": ["image-a"]},
+    )
+    args = SimpleNamespace(sglang_enable_lora=False, sglang_mm_exact_scoring_suffix=True)
+    monkeypatch.setattr(
+        prefill_logprobs,
+        "encode_image_for_rollout_engine",
+        lambda image: f"encoded-{image}",
+    )
+
+    with pytest.raises(ValueError, match="rendered string prompt"):
+        prefill_logprobs._build_prefill_scoring_payload(args, sample, {"max_new_tokens": 128})
+
+
+def test_multimodal_prefill_keeps_legacy_payload_when_exact_suffix_is_disabled(monkeypatch):
+    sample = Sample(
+        prompt=[{"role": "user", "content": "prompt"}],
+        tokens=[10, 11, 20],
+        response_length=1,
+        multimodal_inputs={"images": ["image-a"]},
+    )
+    args = SimpleNamespace(sglang_enable_lora=False, sglang_mm_exact_scoring_suffix=False)
+    monkeypatch.setattr(
+        prefill_logprobs,
+        "encode_image_for_rollout_engine",
+        lambda image: f"encoded-{image}",
+    )
+
+    payload = prefill_logprobs._build_prefill_scoring_payload(args, sample, {"max_new_tokens": 128})
+
+    assert payload["input_ids"] == sample.tokens
+    assert payload["logprob_start_len"] == 1
+    assert payload["image_data"] == ["encoded-image-a"]
+    assert "text" not in payload
+    assert "scoring_suffix_ids" not in payload
+
+
+@pytest.mark.asyncio
 async def test_recompute_samples_flushes_each_batch_and_batches_prefill_score(monkeypatch):
     samples = [
         Sample(tokens=[10, 11, 20], response_length=1, status=Sample.Status.COMPLETED),

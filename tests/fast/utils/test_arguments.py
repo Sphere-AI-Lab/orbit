@@ -8,6 +8,7 @@ import pytest
 from miles.utils.arguments import (
     _maybe_apply_dumper_overrides,
     _validate_opd_dagger_args,
+    _validate_opd_sglang_scoring_args,
     _validate_opd_task_reward_args,
     get_miles_extra_args_provider,
     hf_validate_args,
@@ -183,6 +184,17 @@ def test_recompute_logprobs_via_prefill_flag_is_parsed():
     assert args.recompute_logprobs_via_prefill is True
 
 
+def test_sglang_mm_exact_scoring_suffix_is_opt_in():
+    parser = argparse.ArgumentParser()
+    get_miles_extra_args_provider()(parser)
+
+    default_args = parser.parse_args(REQUIRED_ARGS)
+    enabled_args = parser.parse_args(["--sglang-mm-exact-scoring-suffix"] + REQUIRED_ARGS)
+
+    assert default_args.sglang_mm_exact_scoring_suffix is False
+    assert enabled_args.sglang_mm_exact_scoring_suffix is True
+
+
 def test_opd_dagger_defaults_are_disabled():
     parser = argparse.ArgumentParser()
     get_miles_extra_args_provider()(parser)
@@ -242,6 +254,66 @@ def test_opd_task_reward_logging_rejects_incomplete_configuration(args, error):
 
 def test_opd_task_reward_logging_accepts_builtin_verifier():
     _validate_opd_task_reward_args(_opd_task_reward_args())
+
+
+def _opd_sglang_scoring_args(**overrides) -> SimpleNamespace:
+    values = {
+        "use_opd": True,
+        "opd_type": "sglang",
+        "rm_url": "http://teacher:30000/generate",
+        "custom_rm_path": "miles.rollout.on_policy_distillation.reward_func",
+        "custom_reward_post_process_path": "miles.rollout.on_policy_distillation.post_process_rewards",
+        "group_rm": False,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_opd_sglang_scoring_accepts_complete_production_wiring():
+    _validate_opd_sglang_scoring_args(_opd_sglang_scoring_args())
+
+
+@pytest.mark.parametrize(
+    ("overrides", "error"),
+    [
+        ({"rm_url": None}, r"requires --rm-url"),
+        ({"rm_url": "teacher:30000/generate"}, r"valid HTTP\(S\)"),
+        ({"custom_rm_path": None}, r"requires --custom-rm-path"),
+        ({"custom_reward_post_process_path": None}, r"requires --custom-reward-post-process-path"),
+        ({"group_rm": True}, r"does not support --group-rm"),
+    ],
+)
+def test_opd_sglang_scoring_rejects_incomplete_or_incompatible_wiring(overrides, error):
+    with pytest.raises(ValueError, match=error):
+        _validate_opd_sglang_scoring_args(_opd_sglang_scoring_args(**overrides))
+
+
+def test_opd_sglang_scoring_preserves_custom_hook_extension_points():
+    _validate_opd_sglang_scoring_args(
+        _opd_sglang_scoring_args(
+            custom_rm_path="custom.reward_func",
+            custom_reward_post_process_path="custom.post_process_rewards",
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"use_opd": False},
+        {"opd_type": "megatron"},
+    ],
+)
+def test_opd_sglang_scoring_validation_does_not_change_other_modes(overrides):
+    _validate_opd_sglang_scoring_args(
+        _opd_sglang_scoring_args(
+            rm_url=None,
+            custom_rm_path=None,
+            custom_reward_post_process_path=None,
+            group_rm=True,
+            **overrides,
+        )
+    )
 
 
 def test_opd_dagger_arguments_are_parsed():

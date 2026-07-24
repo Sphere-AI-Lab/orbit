@@ -100,6 +100,70 @@ def test_score_payload_materializes_only_the_response_window():
     assert payload["logprob_start_len"] == 2
     assert payload["top_logprobs_num"] == 4
     assert payload["token_ids_logprob"] == [21, 22]
+    assert "image_data" not in payload
+
+
+def test_score_payload_uses_teacher_processed_prefix_and_exact_response_suffix_for_images():
+    image_data = ["encoded-a", "encoded-b"]
+
+    payload = opd._score_payload(
+        [10, 11, 12],
+        response_length=1,
+        image_data=image_data,
+        prompt="rendered multimodal prompt",
+        use_exact_mm_scoring_suffix=True,
+    )
+
+    assert payload["image_data"] is image_data
+    assert payload["text"] == "rendered multimodal prompt"
+    assert payload["scoring_suffix_ids"] == [12]
+    assert "input_ids" not in payload
+    assert "logprob_start_len" not in payload
+
+
+def test_score_payload_keeps_legacy_multimodal_path_when_exact_suffix_is_disabled():
+    input_ids = [10, 11, 12]
+
+    payload = opd._score_payload(
+        input_ids,
+        response_length=1,
+        image_data=["encoded-image"],
+        prompt="rendered multimodal prompt",
+        use_exact_mm_scoring_suffix=False,
+    )
+
+    assert payload["input_ids"] is input_ids
+    assert payload["logprob_start_len"] == 1
+    assert "text" not in payload
+    assert "scoring_suffix_ids" not in payload
+
+
+def test_score_payload_requires_rendered_prompt_for_exact_multimodal_scoring():
+    with pytest.raises(ValueError, match="rendered string prompt"):
+        opd._score_payload(
+            [10, 11, 12],
+            response_length=1,
+            image_data=["encoded-image"],
+            prompt=None,
+            use_exact_mm_scoring_suffix=True,
+        )
+
+
+def test_score_payload_rejects_empty_multimodal_response():
+    with pytest.raises(ValueError, match="non-empty text response suffix"):
+        opd._score_payload(
+            [10, 11, 12],
+            response_length=0,
+            image_data=["encoded-image"],
+            prompt="rendered multimodal prompt",
+        )
+
+
+def test_scoring_response_prompt_tokens_replace_request_side_token_estimate():
+    response = {"meta_info": {"prompt_tokens": 137}}
+
+    assert opd._payload_input_token_count({"scoring_suffix_ids": [41, 42]}) == 2
+    assert opd._response_input_token_count(response) == 137
 
 
 def test_score_payload_with_empty_response_starts_at_last_prompt_token():
@@ -129,7 +193,12 @@ async def test_scoring_post_retries_asyncio_timeout(monkeypatch):
         if calls == 1:
             raise asyncio.TimeoutError
         return opd._PostJsonResult(
-            response={"meta_info": {"input_token_logprobs": [None, [-0.5, 1]]}},
+            response={
+                "meta_info": {
+                    "prompt_tokens": 137,
+                    "input_token_logprobs": [None, [-0.5, 1]],
+                }
+            },
             request_body_bytes=128,
             response_body_bytes=256,
             body_read_s=0.01,
@@ -159,9 +228,14 @@ async def test_scoring_post_retries_asyncio_timeout(monkeypatch):
         response_length=1,
     )
 
-    assert result.response == {"meta_info": {"input_token_logprobs": [None, [-0.5, 1]]}}
+    assert result.response == {
+        "meta_info": {
+            "prompt_tokens": 137,
+            "input_token_logprobs": [None, [-0.5, 1]],
+        }
+    }
     assert result.telemetry["attempts"] == 2
-    assert result.telemetry["input_tokens"] == 1
+    assert result.telemetry["input_tokens"] == 137
     assert result.telemetry["response_tokens"] == 1
     assert result.telemetry["request_body_bytes"] == 128
     assert result.telemetry["response_body_bytes"] == 256
@@ -456,8 +530,185 @@ async def test_reward_func_records_scoring_telemetry(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("dagger_top_k", [0, 2])
+async def test_reward_func_attaches_ordered_images_to_sampled_and_dagger_teacher_requests(
+    monkeypatch,
+    dagger_top_k,
+):
+    calls = []
+    encoded_images = []
+
+    def fake_encode(image):
+        encoded = f"encoded-{image}"
+        encoded_images.append(encoded)
+        return encoded
+
+    async def fake_scoring_post(args, url, payload, *, target, response_length):
+        calls.append((target, payload))
+        return opd._ScoringPostResult(response={"meta_info": {}}, telemetry={"target": target})
+
+    monkeypatch.setattr(opd, "encode_image_for_rollout_engine", fake_encode)
+    monkeypatch.setattr(opd, "_scoring_post", fake_scoring_post)
+    sample = Sample(
+        prompt="rendered multimodal prompt",
+        tokens=[10, 11, 12],
+        response_length=2,
+        multimodal_inputs={"images": ["image-a", "image-b"]},
+    )
+    args = Namespace(
+        opd_log_prob_top_k=0,
+        opd_dagger_top_k=dagger_top_k,
+        sglang_mm_exact_scoring_suffix=True,
+        rm_url="http://teacher/generate",
+    )
+
+    await opd.reward_func(args, sample)
+
+    assert encoded_images == ["encoded-image-a", "encoded-image-b"]
+    assert len(calls) == 1
+    assert calls[0][0] == "teacher"
+    assert calls[0][1]["image_data"] == encoded_images
+    assert calls[0][1]["text"] == sample.prompt
+    assert calls[0][1]["scoring_suffix_ids"] == [11, 12]
+    assert "input_ids" not in calls[0][1]
+    if dagger_top_k:
+        assert calls[0][1]["top_logprobs_num"] == dagger_top_k
+    else:
+        assert "top_logprobs_num" not in calls[0][1]
+
+
+@pytest.mark.asyncio
+async def test_multimodal_exact_suffix_dagger_round_trip_preserves_native_targets(monkeypatch):
+    calls = []
+    teacher_response = {
+        "meta_info": {
+            "input_token_logprobs": [None, [-0.3, 11], [-0.4, 12]],
+            "input_top_logprobs": [
+                None,
+                [[math.log(0.6), 21], [math.log(0.3), 22]],
+                [[math.log(0.5), 23], [math.log(0.2), 24]],
+            ],
+        }
+    }
+
+    async def fake_scoring_post(args, url, payload, *, target, response_length):
+        calls.append((target, response_length, payload))
+        return opd._ScoringPostResult(response=teacher_response, telemetry={"target": target})
+
+    monkeypatch.setattr(opd, "encode_image_for_rollout_engine", lambda image: f"encoded-{image}")
+    monkeypatch.setattr(opd, "_scoring_post", fake_scoring_post)
+    sample = Sample(
+        prompt="rendered multimodal prompt",
+        tokens=[7, 8, 9, 11, 12],
+        response_length=2,
+        multimodal_inputs={"images": ["image-a"]},
+    )
+    args = Namespace(
+        opd_log_prob_top_k=0,
+        opd_dagger_top_k=2,
+        opd_log_task_reward=False,
+        sglang_mm_exact_scoring_suffix=True,
+        rm_url="http://teacher/generate",
+        reward_key=None,
+        vocab_size=64,
+    )
+
+    sample.reward = await opd.reward_func(args, sample)
+    raw_rewards, rewards = opd.post_process_rewards(args, [sample])
+
+    assert raw_rewards == rewards == [0.0]
+    assert len(calls) == 1
+    target, response_length, payload = calls[0]
+    assert target == "teacher"
+    assert response_length == 2
+    assert payload["text"] == sample.prompt
+    assert payload["image_data"] == ["encoded-image-a"]
+    assert payload["scoring_suffix_ids"] == [11, 12]
+    assert payload["top_logprobs_num"] == 2
+    assert "input_ids" not in payload
+    assert "token_ids_logprob" not in payload
+    torch.testing.assert_close(sample.teacher_log_probs, torch.tensor([-0.3, -0.4]))
+    assert sample.teacher_topk_token_ids.tolist() == [[21, 22], [23, 24]]
+    torch.testing.assert_close(
+        sample.teacher_topk_log_probs,
+        torch.tensor(
+            [[math.log(0.6), math.log(0.3)], [math.log(0.5), math.log(0.2)]],
+            dtype=torch.float32,
+        ),
+    )
+    assert sample.teacher_topk_valid_mask.tolist() == [[True, True], [True, True]]
+    assert sample.metadata[opd.OPD_SCORING_TELEMETRY_KEY] == [{"target": "teacher"}]
+    sample.validate()
+
+
+@pytest.mark.asyncio
+async def test_reward_func_rejects_video_before_scoring_request(monkeypatch):
+    async def unexpected_scoring_post(*args, **kwargs):
+        raise AssertionError("video input must fail before the scoring request")
+
+    monkeypatch.setattr(opd, "_scoring_post", unexpected_scoring_post)
+    sample = Sample(
+        tokens=[10, 11, 12],
+        response_length=2,
+        multimodal_inputs={"videos": [object()]},
+    )
+    args = Namespace(opd_log_prob_top_k=0, rm_url="http://teacher/generate")
+
+    with pytest.raises(NotImplementedError, match="does not yet support video"):
+        await opd.reward_func(args, sample)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("dagger_top_k", "top_k", "strategy", "expected_reward"),
+    [
+        (0, 0, "only-student", {}),
+        (2, 0, "only-student", {"teacher": {}}),
+        (0, 2, "only-teacher", {"teacher": {}, "student_on_teacher": {}}),
+    ],
+)
+async def test_multimodal_empty_response_skips_scoring_request(
+    monkeypatch,
+    dagger_top_k,
+    top_k,
+    strategy,
+    expected_reward,
+):
+    async def unexpected_scoring_post(*args, **kwargs):
+        raise AssertionError("empty multimodal responses must not issue scoring requests")
+
+    def unexpected_image_encode(*args, **kwargs):
+        raise AssertionError("empty multimodal responses must not encode images")
+
+    monkeypatch.setattr(opd, "_scoring_post", unexpected_scoring_post)
+    monkeypatch.setattr(opd, "encode_image_for_rollout_engine", unexpected_image_encode)
+    sample = Sample(
+        prompt="rendered multimodal prompt",
+        tokens=[10, 11, 12],
+        response_length=0,
+        multimodal_inputs={"images": ["image-a"]},
+    )
+    args = Namespace(
+        opd_log_prob_top_k=top_k,
+        opd_dagger_top_k=dagger_top_k,
+        opd_top_k_strategy=strategy,
+        rm_url="http://teacher/generate",
+    )
+
+    reward = await opd.reward_func(args, sample)
+
+    assert reward == expected_reward
+    assert opd.OPD_SCORING_TELEMETRY_KEY not in (sample.metadata or {})
+
+
+@pytest.mark.asyncio
 async def test_teacher_topk_reward_func_uses_response_window_for_both_scoring_calls(monkeypatch):
     calls = []
+    encoded_images = []
+
+    def fake_encode(image):
+        encoded_images.append(image)
+        return f"encoded-{image}"
 
     async def fake_scoring_post(args, url, payload, *, target, response_length):
         calls.append((target, response_length, payload))
@@ -477,11 +728,18 @@ async def test_teacher_topk_reward_func_uses_response_window_for_both_scoring_ca
             }
         return opd._ScoringPostResult(response=response, telemetry={"target": target})
 
+    monkeypatch.setattr(opd, "encode_image_for_rollout_engine", fake_encode)
     monkeypatch.setattr(opd, "_scoring_post", fake_scoring_post)
-    sample = Sample(tokens=[7, 8, 9, 11, 12], response_length=2)
+    sample = Sample(
+        prompt="rendered multimodal prompt",
+        tokens=[7, 8, 9, 11, 12],
+        response_length=2,
+        multimodal_inputs={"images": ["image-a", "image-b"]},
+    )
     args = Namespace(
         opd_log_prob_top_k=2,
         opd_top_k_strategy="only-teacher",
+        sglang_mm_exact_scoring_suffix=True,
         rm_url="http://teacher/generate",
         sglang_router_ip="student",
         sglang_router_port=30000,
@@ -492,8 +750,13 @@ async def test_teacher_topk_reward_func_uses_response_window_for_both_scoring_ca
     assert set(reward) == {"teacher", "student_on_teacher"}
     assert [target for target, _, _ in calls] == ["teacher", "student"]
     assert all(response_length == 2 for _, response_length, _ in calls)
-    assert all(payload["input_ids"] is sample.tokens for _, _, payload in calls)
-    assert all(payload["logprob_start_len"] == 2 for _, _, payload in calls)
+    assert all(payload["text"] == sample.prompt for _, _, payload in calls)
+    assert all(payload["scoring_suffix_ids"] == [11, 12] for _, _, payload in calls)
+    assert all("input_ids" not in payload for _, _, payload in calls)
+    assert all("logprob_start_len" not in payload for _, _, payload in calls)
+    assert encoded_images == ["image-a", "image-b"]
+    assert calls[0][2]["image_data"] is calls[1][2]["image_data"]
+    assert calls[0][2]["image_data"] == ["encoded-image-a", "encoded-image-b"]
     assert calls[0][2]["top_logprobs_num"] == 2
     assert calls[1][2]["token_ids_logprob"] == [21, 22]
 
@@ -615,6 +878,48 @@ def test_sampled_token_post_process_rejects_nonfinite_teacher_logprob():
         opd.post_process_rewards(_sampled_opd_args(), [sample])
 
 
+def test_sampled_token_post_process_maps_masked_observation_rows_to_zero():
+    sample = Sample(tokens=[10, 11, 12], response_length=2, loss_mask=[1, 0])
+    sample.reward = {
+        "meta_info": {
+            "input_token_logprobs": [None, [-0.2, 11], None],
+        }
+    }
+
+    opd.post_process_rewards(_sampled_opd_args(), [sample])
+
+    assert sample.teacher_log_probs.tolist() == pytest.approx([-0.2, 0.0])
+
+
+def test_sampled_token_post_process_keeps_active_rows_strict_when_other_rows_are_masked():
+    sample = Sample(tokens=[10, 11, 12], response_length=2, loss_mask=[1, 0])
+    sample.reward = {
+        "meta_info": {
+            "input_token_logprobs": [None, None, [-0.3, 12]],
+        }
+    }
+
+    with pytest.raises(ValueError, match=r"malformed input_token_logprobs entry at response position 0"):
+        opd.post_process_rewards(_sampled_opd_args(), [sample])
+
+
+def test_sampled_token_post_process_ignores_masked_token_id_mismatch():
+    sample = Sample(tokens=[10, 11, 12], response_length=2, loss_mask=[1, 0])
+    sample.reward = _sampled_scoring_response([10, 11, 99])
+
+    opd.post_process_rewards(_sampled_opd_args(), [sample])
+
+    assert sample.teacher_log_probs.tolist() == pytest.approx([-0.2, 0.0])
+
+
+def test_sampled_token_post_process_rejects_loss_mask_length_mismatch():
+    sample = Sample(tokens=[10, 11, 12], response_length=2, loss_mask=[1])
+    sample.reward = _sampled_scoring_response([10, 11, 12])
+
+    with pytest.raises(ValueError, match=r"loss-mask length mismatch: got 1, expected 2"):
+        opd.post_process_rewards(_sampled_opd_args(), [sample])
+
+
 def _opd_dagger_args() -> Namespace:
     return Namespace(
         opd_log_prob_top_k=0,
@@ -676,6 +981,25 @@ def test_opd_dagger_post_process_masks_rows_with_fewer_than_k_targets():
     assert sample.teacher_topk_token_ids.tolist() == [[21, 0], [23, 24]]
     assert sample.teacher_topk_valid_mask.tolist() == [[True, False], [True, True]]
     assert torch.isneginf(sample.teacher_topk_log_probs[0, 1])
+    sample.validate()
+
+
+def test_opd_dagger_post_process_maps_masked_observation_rows_to_inert_targets():
+    sample = Sample(tokens=[7, 8, 9, 11, 12], response_length=2, loss_mask=[1, 0])
+    sample.reward = _opd_dagger_response(
+        [
+            [[math.log(0.7), 21], [math.log(0.2), 22]],
+            None,
+        ]
+    )
+    sample.reward["teacher"]["meta_info"]["input_token_logprobs"][-1] = None
+
+    opd.post_process_rewards(_opd_dagger_args(), [sample])
+
+    assert sample.teacher_log_probs.tolist() == pytest.approx([-0.3, 0.0])
+    assert sample.teacher_topk_token_ids.tolist() == [[21, 22], [0, 0]]
+    assert sample.teacher_topk_valid_mask.tolist() == [[True, True], [False, False]]
+    assert torch.isneginf(sample.teacher_topk_log_probs[1]).all()
     sample.validate()
 
 

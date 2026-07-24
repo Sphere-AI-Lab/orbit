@@ -3,6 +3,7 @@ import json
 import logging
 import os
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 from sglang_router.launch_router import RouterArgs
@@ -173,6 +174,17 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 help=(
                     "Recompute rollout logprobs via SGLang prefill instead of decode kernels. "
                     "Only needed for models whose prefill and decode paths are not numerically identical."
+                ),
+            )
+            parser.add_argument(
+                "--sglang-mm-exact-scoring-suffix",
+                action="store_true",
+                default=False,
+                help=(
+                    "For multimodal SGLang prefill scoring, let the scoring model "
+                    "process the rendered prompt and media locally, then append exact "
+                    "sampled text IDs through scoring_suffix_ids. Disabled by default "
+                    "for compatibility with SGLang servers that do not expose this field."
                 ),
             )
             parser.add_argument(
@@ -2223,6 +2235,31 @@ def _validate_opd_task_reward_args(args) -> None:
         )
 
 
+def _validate_opd_sglang_scoring_args(args) -> None:
+    if not getattr(args, "use_opd", False) or getattr(args, "opd_type", None) != "sglang":
+        return
+
+    rm_url = str(getattr(args, "rm_url", None) or "").strip()
+    parsed_url = urlsplit(rm_url)
+    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+        raise ValueError("--opd-type=sglang requires --rm-url to be a valid HTTP(S) teacher scoring endpoint.")
+
+    custom_rm_path = getattr(args, "custom_rm_path", None)
+    if not custom_rm_path:
+        raise ValueError("--opd-type=sglang requires --custom-rm-path for per-sample teacher scoring.")
+
+    post_process_path = getattr(args, "custom_reward_post_process_path", None)
+    if not post_process_path:
+        raise ValueError(
+            "--opd-type=sglang requires --custom-reward-post-process-path to materialize teacher targets."
+        )
+
+    if getattr(args, "group_rm", False):
+        raise ValueError(
+            "--opd-type=sglang does not support --group-rm; OPD teacher scoring consumes one Sample per request."
+        )
+
+
 def miles_validate_args(args):
     args.eval_datasets = _resolve_eval_datasets(args)
 
@@ -2354,6 +2391,7 @@ def miles_validate_args(args):
                 )
 
         elif args.opd_type == "sglang":
+            _validate_opd_sglang_scoring_args(args)
             if args.opd_teacher_load is not None:
                 raise ValueError(
                     "--opd-teacher-load should not be set when --opd-type=sglang. "
