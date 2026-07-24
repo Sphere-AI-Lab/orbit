@@ -193,7 +193,9 @@ RUN_NAME=${WANDB_RUN_NAME:-opd-mm-baseline-geo3k-mt-async-rollout-qold-200step}
 WANDB_ARGS=(
    --use-wandb
    --wandb-team M3TRL
-   --wandb-project OPD
+   # Override the destination project per-run via WANDB_PROJECT (e.g.
+   # WANDB_PROJECT=baseline for runs that belong with the team baselines).
+   --wandb-project "${WANDB_PROJECT:-OPD}"
    --wandb-group "$RUN_NAME"
    --disable-wandb-random-suffix
 )
