@@ -673,7 +673,20 @@ fi
 # ---------- miles itself + its python-only requirements ------------------
 
 echo "[deps] requirements.txt"
-$UV -r "$MILES_REPO/requirements.txt"
+# nvidia-resiliency-ext (upstream FT stack, #1598) ships manylinux_2_39-only
+# wheels; this cluster's glibc is 2.35 and the FT features are flag-gated and
+# unused here (miles references the package only in a docstring). Filter it
+# out below that glibc rather than failing the whole install.
+glibc_minor=$(getconf GNU_LIBC_VERSION | awk '{split($2, v, "."); print v[2]}')
+if [ "${glibc_minor:-0}" -ge 39 ]; then
+    $UV -r "$MILES_REPO/requirements.txt"
+else
+    echo "[deps] glibc 2.${glibc_minor} < 2.39 — installing requirements.txt without nvidia-resiliency-ext (FT-only, manylinux_2_39 wheels)"
+    _req_filtered=$(mktemp /tmp/miles-requirements-XXXX.txt)
+    grep -v '^nvidia-resiliency-ext' "$MILES_REPO/requirements.txt" > "$_req_filtered"
+    $UV -r "$_req_filtered"
+    rm -f "$_req_filtered"
+fi
 
 echo "[deps] miles editable"
 $UV -e "$MILES_REPO" --no-deps
