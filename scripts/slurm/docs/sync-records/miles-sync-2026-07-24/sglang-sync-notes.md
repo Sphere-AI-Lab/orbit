@@ -42,11 +42,12 @@ Completed:
 - `sync-v0.5.15-20260724` is published on `impossible-inc/sglang`.
 - The branch tip is `38d4bbef599e3375f143f48a27c659910ebdd064`,
   exactly matching the Miles gitlink.
+- The mirror review is open as
+  [impossible-inc/sglang#5](https://github.com/impossible-inc/sglang/pull/5).
 
 Not yet executed:
 
-- Open the review PR from `sync-v0.5.15-20260724` to `sglang-miles`.
-- After review, archive the old line and lease-guarded force-advance
+- After PR #5 review, archive the old line and lease-guarded force-advance
   `sglang-miles`. Do not perform this landing while the PRs are only being
   opened for review.
 

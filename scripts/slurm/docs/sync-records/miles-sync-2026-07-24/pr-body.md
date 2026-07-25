@@ -46,10 +46,11 @@ Patch-shipped unit tests on the new pin: **54 passed + 13 subtests** (scoring su
 
 Mirror publication status: `sync-v0.5.15-20260724` is already published and
 resolves to the exact Miles gitlink `38d4bbef5`. The review PR to
-`sglang-miles` is still pending. After that PR is reviewed, landing requires
-archiving `sglang-miles-v0.5.13-final`, then a lease-guarded force-advance of
-the rebased line and a date tag. The Miles PR must not merge before that mirror
-landing completes.
+`sglang-miles` is [impossible-inc/sglang#5](https://github.com/impossible-inc/sglang/pull/5).
+It is intentionally non-fast-forward because the upstream line was rebased.
+After review, landing requires archiving `sglang-miles-v0.5.13-final`, then a
+lease-guarded force-advance of the rebased line and a date tag. **This Miles PR
+is blocked by #5 and must not merge before that mirror landing completes.**
 
 ## Pin / install changes
 
