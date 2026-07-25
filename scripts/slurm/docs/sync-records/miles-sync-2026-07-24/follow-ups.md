@@ -12,3 +12,17 @@ Stable window = rollout steps 100-200, mean(median):
 
 New runs land in M3TRL/baseline; same perf/* keys (verified present in merged
 metrics.py). Compare on the same window once the reruns pass step 200.
+
+## Trainer perf deltas root-caused (2026-07-25, see baseline-validation.html §4)
+
+- actor_train_time +32% / tok_s & tflops ×0.75 = `--recompute-granularity full` finally
+  HONORED on the bridge path (#1483; pre-sync silently dropped). Hardware parity confirmed
+  (×4/3-corrected tflops 270.6 vs 265.0). log_probs_time invariance = the env is clean.
+- KNOB OPEN: dropping --recompute-* from the two baseline recipes reclaims ~25% trainer
+  speed (recipes ran without it for months at 4k response len) but costs memory headroom;
+  end-to-end benefit ≈0 for async (trainer not bottleneck), ≈ +13% for the OPD pipeline.
+  Decide when the OPD cadence starts to matter.
+- tflops across the sync boundary is NON-comparable (factor-3 convention doesn't credit
+  the recompute forward). Compare ×4/3-corrected values instead.
+- async data_preprocess 7.0→0.6s = June-era reference env artifact (torch 2.9.1 /
+  transformers 4.x / old ray shard transfer); OPD pair shows parity (1.03≈1.02s). Closed.

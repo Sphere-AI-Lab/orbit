@@ -141,8 +141,7 @@ uniformly ~4–5 s faster post-sync.</p>
 <p>The distillation objective reproduces essentially exactly (rKL to the third decimal); reward sits
 0.03–0.05 <em>above</em> the reference in every window (favourable side of run noise). The mild
 rollout_time regression (+2 s/step, −4% throughput) ran on a different node trio
-(slinky-13/42/44 vs the July-19 set) and is within node-to-node variation observed before; flagged
-for a re-check if it persists on the next OPD run, not a blocker.</p>
+(slinky-13/42/44 vs the July-19 set) and is within node-to-node variation observed before; now fully root-caused in §4: it is the activation-recompute semantics change showing through (the OPD pipeline cannot hide extra trainer time behind generation wait), not an efficiency loss.</p>
 <figure id="fig-opd-reward"><svg viewBox="0 0 560 232" role="img"><line x1="46" y1="202" x2="548" y2="202" stroke="#999" stroke-width="1"/>
 <line x1="46" y1="14" x2="46" y2="202" stroke="#999" stroke-width="1"/>
 <line x1="46" y1="202" x2="46" y2="206" stroke="#999"/>
@@ -201,7 +200,91 @@ for a re-check if it persists on the next OPD run, not a blocker.</p>
 <line x1="346" y1="40" x2="364" y2="40" stroke="#b94b31" stroke-width="2.4"/>
 <text x="369" y="43" font-size="10" fill="#333">27456 pre-sync (m10b)</text></svg><figcaption>Fig 4 — OPD 200-step baseline: rollout/opd_reverse_kl vs step (MA-5). The distillation objective reproduces to the third decimal in matched windows (0.1246/0.1242 at steps 50-100; 0.0954/0.0958 at 150-199).</figcaption></figure>
 
-<h2>4 · What the validation exercised</h2>
+
+<h2>4 · Trainer-side metric anatomy — why the perf/* families moved</h2>
+
+<p>Side-by-side wandb panels show the post-sync runs (purple) with <em>lower</em>
+<code>actor_train_tok_per_s</code>/<code>actor_train_tflops</code>, <em>higher</em>
+<code>actor_train_time</code>, <em>lower</em> <code>wait_time_ratio</code> and (async pair)
+<em>much lower</em> <code>data_preprocess_time</code> — while end-to-end speed improved.
+All of it reduces to one semantic change plus one env-generation artifact. Definitions first
+(code anchors in <code>miles/backends/megatron_utils/actor.py</code> and
+<code>miles/utils/train_metric_utils.py</code>):</p>
+
+<table>
+<tr><th>metric</th><th>definition (what the timer actually wraps)</th></tr>
+<tr><td><code>perf/train_wait_time</code></td><td>Inverse timer: accumulates whenever the actor is <em>outside</em> the train block — idle waiting for the next staleness-admissible batch <b>plus</b> data fetch/preprocess and iterator build.</td></tr>
+<tr><td><code>perf/data_preprocess_time</code></td><td><code>get_rollout_data()</code>: <code>ray.get</code> of this rank's DP shard (includes cross-node object transfer of the image-heavy payload) + host→GPU moves of tokens/masks/multimodal tensors/OPD targets. Counted <em>inside train_wait</em>, not train.</td></tr>
+<tr><td><code>perf/train_time</code></td><td>The train block: optional old-log-prob forward (GRPO recompute path; forward-only) + advantages + rollout metric logging + actor_train.</td></tr>
+<tr><td><code>perf/actor_train_time</code></td><td>Megatron <code>train()</code> only — forward+backward+optimizer over all microbatches. So <code>train_time − actor_train_time ≈ log_probs_time</code>. The OPD run uses <code>--use-rollout-logprobs</code> (no log-prob forward) and indeed shows train_time ≈ actor_train_time (8.18 vs 8.15 s).</td></tr>
+<tr><td><code>perf/step_time</code>, <code>perf/wait_time_ratio</code></td><td><code>step_time = train_wait + train</code>; <code>wait_time_ratio = train_wait / step_time</code> (trainer idle share).</td></tr>
+<tr><td><code>perf/actor_train_tok_per_s</code></td><td>Σ seq_lens / actor_train_time.</td></tr>
+<tr><td><code>perf/actor_train_tflops</code></td><td><b>3</b> × model fwd-FLOPs / actor_train_time. The constant 3 (1 forward + 2 backward) <em>assumes no activation recomputation</em> — a recompute forward does real hardware work that this convention refuses to credit.</td></tr>
+</table>
+
+<h3>Step-time decomposition (means over matched windows)</h3>
+<table>
+<tr><th></th><th colspan="2">async pair (steps 200–1700)</th><th colspan="2">OPD pair (steps 100–199)</th></tr>
+<tr><th>metric (s unless noted)</th><th>post 28789</th><th>pre 21354</th><th>post 28790</th><th>pre 27456</th></tr>
+<tr><td>train_wait_time</td><td>18.66</td><td>28.24</td><td>11.75</td><td>11.57</td></tr>
+<tr><td>&nbsp;&nbsp;└ data_preprocess_time</td><td class="good">0.61</td><td>7.03</td><td>1.03</td><td>1.02</td></tr>
+<tr><td>train_time</td><td>20.60</td><td>16.84</td><td>8.18</td><td>6.19</td></tr>
+<tr><td>&nbsp;&nbsp;└ log_probs_time (fwd-only)</td><td><b>5.04</b></td><td><b>4.99</b></td><td>—</td><td>—</td></tr>
+<tr><td>&nbsp;&nbsp;└ actor_train_time</td><td class="warn">15.42</td><td>11.66</td><td class="warn">8.15</td><td>6.15</td></tr>
+<tr><td>step_time</td><td class="good">39.25</td><td>45.08</td><td>19.94</td><td>17.75</td></tr>
+<tr><td>wait_time_ratio</td><td>0.452</td><td>0.605</td><td>0.576</td><td>0.641</td></tr>
+<tr><td>actor_train_tok_per_s</td><td>35,457</td><td>46,367</td><td>28,735</td><td>35,565</td></tr>
+<tr><td>actor_train_tflops (reported)</td><td>203.0</td><td>265.0</td><td>173.0</td><td>212.5</td></tr>
+<tr><td>actor_train_tflops (×4/3 recompute-corrected)</td><td class="good">270.6</td><td>—</td><td>230.6</td><td>—</td></tr>
+</table>
+
+<h3>Root cause 1 — activation recomputation is now actually on</h3>
+<p>Both recipes have always requested <code>--recompute-granularity full --recompute-method uniform
+--recompute-num-layers 1</code>. On the bridge (<code>megatron_to_hf_mode=bridge</code>) path the
+pre-sync code <b>silently dropped</b> those flags before they reached the provider; upstream #1483's
+<code>_apply_bridge_runtime_config</code> — merged in this sync — propagates them (its own comment:
+&ldquo;activation recompute (silently dropped before → no checkpointing → OOM at long context)&rdquo;).
+So the pre-sync purple-vs-brown gap is <em>no-recompute vs full-recompute</em>, not an efficiency loss.
+Evidence chain:</p>
+<ul>
+<li><b>The 4/3 signature</b>: full recompute re-runs the forward during backward — ideal cost goes from
+3 forward-equivalents (1F+2F) to 4 → time ×1.33, tok/s and tflops ×0.75. Measured:
+actor_train_time ×1.32 (async) and ×1.325 (OPD); tok/s ×0.765 / tflops ×0.766 (async).</li>
+<li><b>The forward-only control</b>: <code>log_probs_time</code> is a pure forward pass and recompute
+cannot touch it — it is <b>unchanged</b> (5.04 vs 4.99 s). An env-level regression (kernel/cuDNN/numpy)
+would have slowed this pass too. It didn't.</li>
+<li><b>Hardware throughput parity</b>: crediting the recompute forward (×4/3), the async trainer does
+270.6 effective TFLOPS vs 265.0 pre-sync — <b>the GPUs are working exactly as hard (+2%)</b>; the
+reported metric drops purely because its factor-3 convention books recompute as overhead.</li>
+</ul>
+
+<h3>Root cause 2 — wait_time_ratio and the two pipelines</h3>
+<p><b>Async pair</b>: generation got faster (v0.5.15 engines) so idle wait shrank (28.2→18.7 s, helped
+by −6.4 s preprocess inside the wait), while train grew (recompute) — ratio 0.605→0.452. Trainer
+utilization went <em>up</em> and end-to-end step_time still fell 13%: the trainer was never the
+bottleneck in this pipeline, so honoring recompute cost almost nothing end-to-end.
+<b>OPD pair</b>: generation-side wait is unchanged (11.6≈11.8 s — teacher-scoring pipeline didn't
+speed up), so the +2.0 s of recompute passes straight through to step_time (+2.2 s = the entire
+&ldquo;+13% rollout_time&rdquo; flagged in §3). Same cause, different exposure.</p>
+
+<h3>Root cause 3 — the async data_preprocess drop (7.0 → 0.6 s)</h3>
+<p>Timer scope and the fetch/H2D code path are line-identical pre/post sync, and the OPD pair —
+whose reference ran on a July torch-2.11 env — shows <b>no</b> difference (1.03 vs 1.02 s). The
+7 s belongs to the June-era reference stack (torch 2.9.1, transformers 4.x, older ray): the
+image-heavy DP shard's serialization/cross-node object transfer was simply slower two env
+generations ago. Attributed to the stack refresh, not to a sync code change; not worth deeper
+root-causing (it is a win, and the current stack is the one we keep).</p>
+
+<div class="note">
+<b>Knob decision (recorded in follow-ups):</b> the recipes ran fine for months without recompute at
+4k response length, so dropping <code>--recompute-*</code> would reclaim ~25% trainer speed — but it
+buys almost nothing end-to-end where the trainer isn't the bottleneck (async), and costs the memory
+headroom the flags were meant to provide. Recommendation: keep recompute (honored semantics), treat
+reported <code>actor_train_tflops</code> across the sync boundary as non-comparable, and compare the
+recompute-corrected number instead.
+</div>
+
+<h2>5 · What the validation exercised</h2>
 <table>
 <tr><th>layer</th><th>change under test</th><th>covered by</th></tr>
 <tr><td>miles merge</td><td>187 upstream commits + 20 hand-resolved conflicts (FT series, session scale-out, tracking refactor, actor factory, filter_long_prompt fusion, prefetch-over-#1677 layering)</td><td>both runs end-to-end</td></tr>
@@ -209,7 +292,7 @@ for a re-check if it persists on the next OPD run, not a blocker.</p>
 <tr><td>env</td><td>numpy 2.3.5 (cap removed), transformers 5.12.1, TMS 6d5bce48, v0.5.15 +cu129 kernels</td><td>clean-slate install (job 28782, 12m32s, verify green) + both runs</td></tr>
 </table>
 
-<h2>5 · Incidents found &amp; fixed during validation</h2>
+<h2>6 · Incidents found &amp; fixed during validation</h2>
 <table>
 <tr><th>incident</th><th>root cause</th><th>fix (commit)</th></tr>
 <tr><td>install job 28781 failed</td><td><code>nvidia-resiliency-ext</code> (upstream FT dep) ships manylinux_2_39-only wheels; cluster glibc is 2.35. miles references the package only in a docstring.</td><td>glibc-gated filter in install_env.sh</td></tr>
