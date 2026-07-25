@@ -34,8 +34,8 @@ sglang pin <code>38d4bbef5</code> = sglang-miles v0.5.15-31 + 4 local patches ·
 <div class="verdict">
 <b>Verdict: the post-sync stack reproduces both baselines and is faster on the pure-RL async path.</b>
 Learning parity holds to the third decimal on reward and reverse-KL in every matched window;
-the async recipe runs 11-26% faster; the post-sync async run has already outlived the pre-sync
-reference (step 2026 vs 1756) with zero incidents across a 22h+ flight that spanned the
+the async recipe runs 11-26% faster; the post-sync async run outlived the pre-sync
+reference (final step 2034 vs 1756) with zero incidents across its 22h43m flight, which spanned the
 2026-07-25 network disruption (no wandb logging gap &gt; 10 min in either run).
 </div>
 
@@ -49,7 +49,7 @@ reference (step 2026 vs 1756) with zero incidents across a 22h+ flight that span
     <td>same recipe, pre-sync stack (v0.5.13)</td><td>reference</td><td>200/200</td><td>1h11m</td><td>finished</td></tr>
 <tr><td><a href="https://wandb.ai/M3TRL/baseline/runs/28789">28789</a> baseline-geo3k-vlm-mt-fullyasync-pf2-3node-sync0515</td>
     <td>async/geo3k-vlm-mt-fully-async-prefetch2 (1 trainer + 16 engines, 3 nodes)</td>
-    <td>post-sync</td><td>2026+ (running)</td><td>22h+ (still up)</td><td class="good">healthy</td></tr>
+    <td>post-sync</td><td>2034</td><td>22h43m</td><td class="good">stopped by decision (recipe default --num-rollout 3000; data sufficient)</td></tr>
 <tr><td><a href="https://wandb.ai/M3TRL/baseline/runs/21354">21354</a> baseline-geo3k-async-mt-pf2-3node</td>
     <td>same recipe, pre-sync stack (06-29)</td><td>reference</td><td>1756 (crashed)</td><td>23h</td><td>crashed</td></tr>
 </table>
