@@ -394,6 +394,34 @@ trainer-side timing metric — exactly as designed.</p>
 sampling luck — 470@17 (new) vs 232@7 (reference) are two rolls of the same die. The <em>class</em>
 is deterministic (guaranteed by L1–L3); the <em>instance</em> is random.</p>
 
+<h3>Why eps_clip cannot catch this — and why the spikes self-extinguish</h3>
+<p><b>PPO clip is a trust-region gate, not a gradient bound.</b> The clipped surrogate
+<code>−min(r·A, clip(r,1−ε,1+ε)·A)</code> zeroes a token's gradient only when the ratio has
+<em>already escaped</em> the band in the profitable direction ((A&gt;0, r&gt;1+ε) or (A&lt;0,
+r&lt;1−ε)). In this pipeline every batch receives exactly <b>one</b> optimizer pass (no PPO
+epochs), so r deviates from 1 only through staleness — ppo_kl ≈ 0.0007 ⇒ r ≈ 1±0.03, deep inside
+the ±0.2/0.28 band. Measured <code>pg_clipfrac</code>: 0.24% steady, 2.8% even at the spike — for
+&gt;97% of tokens the surrogate sits on the unclipped branch where the gradient is
+<code>−A·∇log p</code> with r≈1: <b>the advantage multiplies through at full magnitude</b>.
+Classic PPO gets |A| boundedness from advantage whitening; this run has
+<code>normalize_advantages=False</code> and OPD injects raw k1 as A, so nothing between the teacher
+score and the optimizer bounds magnitude except <code>clip_grad</code>.</p>
+<p><b>Why the spike class fades after the early era</b> (measured on 28790):</p>
+<table>
+<tr><th>window (rollout steps)</th><th>5–25</th><th>50–80</th><th>100–150</th><th>160–199</th></tr>
+<tr><td>k1/max (mean of per-step max)</td><td>29.4</td><td>19.6</td><td>14.2</td><td>13.3</td></tr>
+<tr><td>k1/mean</td><td>0.312</td><td>0.130</td><td>0.104</td><td>0.095</td></tr>
+</table>
+<p>Three reinforcing reasons. (a) <em>The objective is literally minimizing it</em>: RKLD-PG's
+reward is −k1, so E[k1] falls by construction (0.312→0.095). (b) <em>On-policy self-extinction</em>:
+a 30-nat token receives the strongest possible push <em>down</em> on its own log-probability — the
+student stops sampling exactly the tokens that disagree most, and because rollouts are on-policy,
+those tokens then vanish from future batches (off-policy distillation has no such feedback).
+(c) <em>Spikes need mass, and the mass is gone</em>: a spike requires whole disagreement-dense
+trajectories (thousands of correlated elevated tokens), which early sampling produces routinely and
+converged sampling essentially never; a lone 13-nat token among ~200k contributes nothing to the
+batch norm. Empirically grad_norm never exceeds 1.35 after step 50.</p>
+
 <h3>Severity assessment</h3>
 <table>
 <tr><th>regime</th><th>verdict</th></tr>
