@@ -361,7 +361,36 @@ when supply is tight, as trainer <em>wait</em>. During this particular storm sup
 but tight (the wave surplus kept train_wait at ~2 s), so the spike is invisible in every
 trainer-side timing metric — exactly as designed.</p>
 
-<h2>6 · What the validation exercised</h2>
+
+<h2>6 · OPD train-side metrics — definitions, the zero pair, and the early grad spike</h2>
+
+<table>
+<tr><th>metric</th><th>definition</th></tr>
+<tr><td><code>train/ess_ratio</code></td><td>Effective-sample-size fraction under importance weighting. Per-token weights <code>w = exp(log p_train − log q_old)</code> (= <code>exp(−ppo_kl)</code>); per-sample masked sums give <code>ESS = (Σw)² / (N·Σw²)</code>, aggregated over the batch. 1.0 ⇔ all weights equal ⇔ perfectly on-policy; the run sits at 0.9986 steady (0.986 worst dip) — negligible weight dispersion at staleness cap 2.</td></tr>
+<tr><td><code>train/ppo_kl</code></td><td>Mean of <code>log q_old − log p_train</code> at sampled tokens — how far the trainer has moved from the behaviour policy within the staleness window. Steady ≈ 0.0007.</td></tr>
+<tr><td><code>train/train_rollout_logprob_abs_diff</code>, <code>train/train_rollout_kl</code></td><td>Compare <b>q_old</b> against the rollout engine's logprobs. Under <code>--use-rollout-logprobs</code>, q_old <em>is</em> the rollout logprobs, so this pair is <b>zero by definition</b> — the flat-0 panels are correct wiring, not a bug. The source comment says exactly this (&ldquo;zero by definition under --use-rollout-logprobs; retained for backward compatibility&rdquo;).</td></tr>
+<tr><td><code>train/current_rollout_logprob_abs_diff</code>, <code>train/current_rollout_kl</code></td><td>The <b>live</b> replacement pair: compares the current trainer forward against the rollout engine. Non-degenerate in this run (steady 0.0007, early max 0.007) — this is the panel to watch for trainer↔engine numerics drift in rollout-q_old runs.</td></tr>
+</table>
+
+<h3>The early grad_norm spike is a reproduced recipe characteristic</h3>
+<table>
+<tr><th></th><th>post-sync 28790</th><th>pre-sync 27456 (m10b)</th></tr>
+<tr><td>grad_norm peak (pre-clip)</td><td>470.9 @ step 17</td><td>231.8 @ step 7</td></tr>
+<tr><td>co-located spikes (same step)</td><td>pg_loss 0.90 · reverse-KL 0.84</td><td>pg_loss 0.61 · reverse-KL 0.57</td></tr>
+<tr><td>late means (steps 100–199)</td><td>pg 0.0988 · rKL 0.0997 · ess 0.9986 · current_rollout_kl 0.0007</td><td>pg 0.0989 · rKL 0.0998 · ess 0.9985 · current_rollout_kl 0.0007</td></tr>
+</table>
+<p><b>Mechanism.</b> In the first ~25 steps the student is farthest from the teacher (reverse-KL floor
+0.3–0.4). A batch that draws outlier trajectories — tokens the student sampled but the teacher assigns
+very low probability — produces a large sampled-RKLD term (0.84/0.57 at the spike step), whose gradient
+dominates the step: pg_loss, reverse-KL and grad_norm spike <em>together on the same batch</em> in both
+runs. The reported grad_norm is <em>pre-clipping</em>; gradient clipping bounds the actual update, so
+the transient leaves no trace (all series settle within ~10 steps and late-window means match to the
+third decimal). Which step draws the outlier batch is run noise — 470@17 vs 232@7 is the same
+phenomenon, not a regression. This is the benign, early-transient form of the grad-spike phenomenology
+from the m12 q_old study: chronic spiking appeared only on the <em>recompute</em>-q_old arm at wide
+staleness (cap 4); the rollout-q_old configuration used here shows only this cold-start transient.</p>
+
+<h2>7 · What the validation exercised</h2>
 <table>
 <tr><th>layer</th><th>change under test</th><th>covered by</th></tr>
 <tr><td>miles merge</td><td>187 upstream commits + 20 hand-resolved conflicts (FT series, session scale-out, tracking refactor, actor factory, filter_long_prompt fusion, prefetch-over-#1677 layering)</td><td>both runs end-to-end</td></tr>
@@ -369,7 +398,7 @@ trainer-side timing metric — exactly as designed.</p>
 <tr><td>env</td><td>numpy 2.3.5 (cap removed), transformers 5.12.1, TMS 6d5bce48, v0.5.15 +cu129 kernels</td><td>clean-slate install (job 28782, 12m32s, verify green) + both runs</td></tr>
 </table>
 
-<h2>7 · Incidents found &amp; fixed during validation</h2>
+<h2>8 · Incidents found &amp; fixed during validation</h2>
 <table>
 <tr><th>incident</th><th>root cause</th><th>fix (commit)</th></tr>
 <tr><td>install job 28781 failed</td><td><code>nvidia-resiliency-ext</code> (upstream FT dep) ships manylinux_2_39-only wheels; cluster glibc is 2.35. miles references the package only in a docstring.</td><td>glibc-gated filter in install_env.sh</td></tr>
