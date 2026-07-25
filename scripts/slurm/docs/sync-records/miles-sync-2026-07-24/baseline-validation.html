@@ -219,7 +219,7 @@ All of it reduces to one semantic change plus one env-generation artifact. Defin
 <tr><td><code>perf/actor_train_time</code></td><td>Megatron <code>train()</code> only — forward+backward+optimizer over all microbatches. So <code>train_time − actor_train_time ≈ log_probs_time</code>. The OPD run uses <code>--use-rollout-logprobs</code> (no log-prob forward) and indeed shows train_time ≈ actor_train_time (8.18 vs 8.15 s).</td></tr>
 <tr><td><code>perf/step_time</code>, <code>perf/wait_time_ratio</code></td><td><code>step_time = train_wait + train</code>; <code>wait_time_ratio = train_wait / step_time</code> (trainer idle share).</td></tr>
 <tr><td><code>perf/actor_train_tok_per_s</code></td><td>Σ seq_lens / actor_train_time.</td></tr>
-<tr><td><code>perf/actor_train_tflops</code></td><td><b>3</b> × model fwd-FLOPs / actor_train_time. The constant 3 (1 forward + 2 backward) <em>assumes no activation recomputation</em> — a recompute forward does real hardware work that this convention refuses to credit.</td></tr>
+<tr><td><code>perf/actor_train_tflops</code></td><td><b>3</b> × model fwd-FLOPs / actor_train_time. The fixed constant 3 (1 forward + 2 backward) is the standard <b>MFU convention</b> (model-FLOPs utilization, PaLM-style): it counts only the mathematically necessary FLOPs and deliberately books any recompute forward as overhead. The alternative <b>HFU convention</b> (hardware-FLOPs) would use 4 under full recompute.</td></tr>
 </table>
 
 <h3>Step-time decomposition (means over matched windows)</h3>
@@ -266,6 +266,18 @@ bottleneck in this pipeline, so honoring recompute cost almost nothing end-to-en
 <b>OPD pair</b>: generation-side wait is unchanged (11.6≈11.8 s — teacher-scoring pipeline didn't
 speed up), so the +2.0 s of recompute passes straight through to step_time (+2.2 s = the entire
 &ldquo;+13% rollout_time&rdquo; flagged in §3). Same cause, different exposure.</p>
+
+<div class="verdict">
+<b>Are the metrics computed correctly? Yes — nothing to fix.</b>
+<code>actor_train_time</code> is a direct wall-clock measurement and <code>actor_train_tok_per_s</code>
+is real goodput (useful tokens per second) — both report the recompute cost honestly, because you
+genuinely produce 25% fewer trained tokens per second with full recompute on.
+<code>actor_train_tflops</code> uses the fixed-3 MFU convention on purpose: it answers &ldquo;how much
+<em>useful</em> model compute per second&rdquo;, which is the right number for comparing training
+configurations. The only usage rule it imposes: when two runs differ in recompute settings, their MFU
+numbers are measuring different workloads — multiply the recompute-on side by 4/3 (the HFU view) to
+compare hardware utilization, which is what shows the 270.6-vs-265.0 parity above.
+</div>
 
 <h3>Root cause 3 — the async data_preprocess drop (7.0 → 0.6 s)</h3>
 <p>Timer scope and the fetch/H2D code path are line-identical pre/post sync, and the OPD pair —
