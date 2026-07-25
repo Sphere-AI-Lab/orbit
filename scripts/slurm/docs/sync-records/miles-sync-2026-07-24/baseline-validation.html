@@ -379,34 +379,43 @@ trainer-side timing metric — exactly as designed.</p>
 <tr><td>co-located spikes (same step)</td><td>pg_loss 0.90 · reverse-KL 0.84</td><td>pg_loss 0.61 · reverse-KL 0.57</td></tr>
 <tr><td>late means (steps 100–199)</td><td>pg 0.0988 · rKL 0.0997 · ess 0.9986 · current_rollout_kl 0.0007</td><td>pg 0.0989 · rKL 0.0998 · ess 0.9985 · current_rollout_kl 0.0007</td></tr>
 </table>
-<p><b>Forensics (28790).</b> The per-token k1 term <code>log q_old − log p_teacher</code> is
-chronically heavy-tailed in the early era: <code>rollout/opd_kl/k1/max</code> sits at <b>27–33 nats
-per token on every step</b> from 13–23 — every batch contains student-sampled tokens to which the
-teacher assigns ~e<sup>−30</sup> probability. Step 17 is not the appearance of outliers but their
-<em>mass</em>: k1 <em>mean</em> jumps to 0.84 vs 0.2–0.4 on neighbouring steps (and its raw_reward,
-0.719, was the <em>highest</em> in the window — these are not degenerate-failure trajectories).
-Because the k1 value feeds the objective as an advantage and <b>nothing clamps it</b> — PPO's
-<code>eps_clip</code> bounds the probability <em>ratio</em>, not the advantage — a handful of
-30-nat tokens can dominate a batch gradient, hence the 470 pre-clip norm.</p>
+<h3>The full causal chain (each layer verified in code)</h3>
+<table>
+<tr><th>layer</th><th>what happens</th></tr>
+<tr><td><b>L1 · objective</b></td><td>This recipe is pure distillation (task reward is telemetry-only). Teacher scoring emits per-token k1 = <code>log q_old − log p_teacher</code> (<code>_compute_topk_reverse_kl</code>, Top-2+Rest approximation) shipped to the trainer as <code>sample.opd_reverse_kl</code>.</td></tr>
+<tr><td><b>L2 · injection — the weak point</b></td><td><code>apply_opd_kl_to_advantages</code> is one line: <code>advantages[i] = adv − opd_kl_coef·reverse_kl</code> (coef 1.0, per-token, detached, <b>no clamp anywhere</b>; this run has <code>normalize_advantages=False</code>). PPO's <code>eps_clip</code> bounds the probability <em>ratio</em> side only — advantage magnitude passes through untouched.</td></tr>
+<tr><td><b>L3 · early-era baseline</b></td><td>Student is farthest from teacher at cold start: <code>k1/max</code> is 27–33 nats/token on <em>every</em> step 13–23 — tokens the teacher prices at e<sup>−30</sup> are always present, not just at the spike.</td></tr>
+<tr><td><b>L4 · the trigger batch</b></td><td>Step 17's distinction is outlier <em>mass</em>: k1 mean 0.84 = 4× neighbours — moving a 512-sample mean that far takes whole trajectories, not stray tokens. And that batch's task reward was the window's <em>highest</em> (0.719): these were <b>correct answers in a style the 30B-Thinking teacher dislikes</b>. A pure-distillation objective presses on task-correct trajectories exactly as hard — that is its nature, not a bug.</td></tr>
+<tr><td><b>L5 · gradient formation</b></td><td>Per-token pg gradient scales with |advantage|: one 31-nat token contributes like 31 ordinary tokens; thousands of 4×-elevated tokens stack into a 470 pre-clip global norm. pg_loss/reverse-KL spike in lockstep (same source); ppo_kl/clipfrac barely move (the ratio side <em>is</em> guarded by eps_clip).</td></tr>
+<tr><td><b>L6 · application &amp; recovery</b></td><td><code>clip_grad=1.0</code>, and the steady pre-clip norm is mean 0.84 / p95 1.04 — half of <em>normal</em> steps already clip. The spike step's parameter displacement is therefore exactly ordinary-sized; its direction is the batch's true objective gradient, merely low-SNR (dominated by few trajectories). Aftermath: no NaN, ppo_kl peak 0.017, all series back in band within ~10 steps, endpoint parity with the reference to the third decimal.</td></tr>
+</table>
 
-<p><b>What the spike actually did.</b> <code>clip_grad=1.0</code>, and the steady-state pre-clip
-norm is mean 0.84 / median 0.82 / p95 1.04 — i.e. roughly half of <em>normal</em> steps already run
-at the clip boundary. Clipping rescales the spike step to exactly the same parameter displacement
-as any ordinary step; only its <em>direction</em> was chosen by the outlier tokens. Measured
-aftermath: ppo_kl peaked at 0.017 (the policy barely moved), every series recovered within ~10
-steps, and late-window means match the pre-sync reference to the third decimal.</p>
+<p><b>Class vs instance.</b> Which early batch draws a disagreement-dense trajectory cluster is
+sampling luck — 470@17 (new) vs 232@7 (reference) are two rolls of the same die. The <em>class</em>
+is deterministic (guaranteed by L1–L3); the <em>instance</em> is random.</p>
 
-<p><b>Verdict — contained, not healthy.</b> The spike is a genuine pathology signal (an unclamped
-heavy-tailed estimator meeting a low-signal batch), and its damage is limited today only by the
-bluntest possible instrument (global grad clipping) plus favourable conditions (staleness cap 2,
-rollout-q_old). The m12 study showed exactly this mechanism turning chronic on the recompute-q_old
-arm at staleness cap 4 — spike clusters and negative RKLD. Treat the single early spike as
-tolerated cold-start noise <em>and</em> as a standing reminder that the k1 advantage path has no
-source-level protection. Mitigation levers, in order of directness (recorded in follow-ups):
-per-token winsorization of the k1 advantage (e.g. clamp to ±10 nats — kills the class at the
-source, small documented bias), an RKLD/DAgger coefficient warm-up over the first ~30 steps
-(the spike era is precisely the max-teacher-distance era), and keeping <code>clip_grad=1.0</code>
-as the backstop it already is.</p>
+<h3>Severity assessment</h3>
+<table>
+<tr><th>regime</th><th>verdict</th></tr>
+<tr><td>current config (rollout-q_old, staleness cap 2)</td><td>benign cold-start transient; zero damage (endpoint parity is the proof)</td></tr>
+<tr><td>degraded conditions (m12: recompute-q_old, cap 4)</td><td><b>the same mechanism turns chronic</b> — spike clusters at steps 83–98, peak 381, negative RKLD (empirically shown)</td></tr>
+<tr><td>structural</td><td>the advantage path has <b>zero source-level protection</b>; all safety rests on grad clipping (the bluntest last-line tool) plus currently-mild conditions</td></tr>
+</table>
+
+<h3>Mitigation options and trade-offs</h3>
+<ol>
+<li><b>Per-token k1 winsorization</b> (clamp to ±K nats before advantage injection) — kills the class at the source; an e<sup>−30</sup> token keeps its gradient <em>direction</em>, only the magnitude is capped; small, documentable bias. Pick K from the observed k1 distribution (p99), not by fiat.</li>
+<li><b>Coefficient warm-up</b> (ramp opd_kl_coef over the first ~30 steps) — covers precisely the max-distance era; simplest; no steady-state protection.</li>
+<li><b><code>normalize_advantages=True</code></b> would suppress outliers automatically but changes the objective's semantics — that is a different experiment, not a fix.</li>
+<li>Keep <code>clip_grad=1.0</code> as the backstop it already is.</li>
+</ol>
+<p><b>Recommendation:</b> leave the frozen baselines untouched (their value is comparability).
+If the wide-staleness direction (m12 follow-on) restarts, do (1) first with (2) alongside — in that
+regime this class stops being a one-off transient and becomes daily weather.</p>
+
+<div class="note"><b>One-line verdict:</b> the spike is the inevitable product of an unclamped
+heavy-tailed estimator meeting a disagreement-dense batch — currently caged by grad clipping and
+mild conditions. The cage is real; remember what lives inside it.</div>
 
 <h2>7 · What the validation exercised</h2>
 <table>
