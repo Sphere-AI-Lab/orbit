@@ -4,11 +4,16 @@ Sync with upstream `radixark/miles` — **187 upstream commits** merged (merge-b
 
 Major upstream content: the fault-tolerance megaseries (~50 commits: witness ids, independent-DP cells, in-memory checkpoints, heartbeat/control-server, event logging), multi-LoRA (7 parts), session-server scale-out (N instances on a port range), metric-history CI gate, miles dashboard, disk-delta weight sync, dual-clip PPO, GLM-5 LoRA RL, entropy observation, pass@k relocation, and two sglang bumps (v0.5.14, v0.5.15).
 
-## Commits on top of the merge
+## Fork-side changes on top of the merge
 
 | commit | what |
 |---|---|
 | `f3e2c8d3` | pins/install refresh + sglang v0.5.15 advance (single bundle commit; see below) |
+| `dc1fac05` | make the OPD baseline W&B project configurable without changing the default |
+| `8d5726f8` | skip the unused `nvidia-resiliency-ext` package on cluster glibc older than 2.39 |
+| `1a134f6d` | put the environment cuDNN directory first for batch-shell and envpack-server scopes |
+| `3d743d4a` | apply the repository pre-commit import cleanup to the merged tree |
+| sync-record commits | capture the upstream analysis, SGLang patch classification, cluster validation, performance comparison, and OPD spike retrospective |
 
 ## Conflicts resolved (20 files — all reviewed per-file)
 
@@ -39,7 +44,12 @@ Three test-double updates were needed (not regressions): fakes lacked upstream's
 
 Patch-shipped unit tests on the new pin: **54 passed + 13 subtests** (scoring suffix ×3 files, pretokenized IDs, io_struct).
 
-Mirror publish plan (waits for approval, ordered): push `sync-v0.5.15-20260724` branch → open review PR (per impossible-inc/sglang #1/#2 convention) → archive `sglang-miles-v0.5.13-final` + date tag → lease-guarded force-advance `sglang-miles` → date-tag new tip.
+Mirror publication status: `sync-v0.5.15-20260724` is already published and
+resolves to the exact Miles gitlink `38d4bbef5`. The review PR to
+`sglang-miles` is still pending. After that PR is reviewed, landing requires
+archiving `sglang-miles-v0.5.13-final`, then a lease-guarded force-advance of
+the rebased line and a date tag. The Miles PR must not merge before that mirror
+landing completes.
 
 ## Pin / install changes
 
@@ -51,7 +61,10 @@ Mirror publish plan (waits for approval, ordered): push `sync-v0.5.15-20260724` 
 
 ## ⚠️ Attention items
 
-- **Env rebuild required before the next run**: sglang tree is now v0.5.15 (editable install picks it up immediately) while the env's binary deps are still the v0.5.13-era set — rebuild with `install_env.sh` and expect `transformers` to move under the new `<5.13` cap and **numpy to major-bump to 2.x** (validation owns this risk per the test plan).
+- **The validated environment changed materially**: the clean rebuild installed
+  numpy 2.3.5, transformers 5.12.1, TMS `6d5bce48`, and the cu129 SGLang
+  kernels. Future deployments must use `install_env.sh`; reusing the old
+  v0.5.13-era environment is outside the validated configuration.
 - **FT megaseries / multi-LoRA / dashboard are flag-gated** — nothing enables them by default; our recipes are unaffected until opted in.
 - **`fully-async` knobs**: `--async-max-concurrent-samples` (upstream, absolute) vs `--fully-async-prefetch-batches` (ours, pipeline depth) both live; explicit absolute setting wins. Unification is a recorded follow-up.
 - **Launcher watchdog sentinel retirement** is a recorded follow-up for when the launcher reads upstream's FT event stream instead.
@@ -63,14 +76,26 @@ Mirror publish plan (waits for approval, ordered): push `sync-v0.5.15-20260724` 
 
 ## Validation
 
-Done locally (pre-push):
+Static and fast validation:
 - [x] Fast tests on merged tree: `test_data_filter_long_prompt` 4/4, `test_on_policy_distillation` **68/68**, `test_true_on_policy_loss_metrics` 8/8.
 - [x] sglang patch unit tests on the new pin: **54 passed + 13 subtests**.
-- [x] `extract_pins.py --check` exit 0, no pending; black/isort clean on all hand-edited files.
+- [x] `extract_pins.py --check` exit 0 with no pending.
+- [x] Repository pre-commit hooks pass across the complete PR diff.
 
-Remaining (post-push, fresh GPU salloc):
-- [ ] `bash scripts/slurm/setup/install_env.sh` clean-slate rebuild (numpy 2.x + transformers <5.13 + v0.5.15 kernels land here).
-- [ ] `python scripts/slurm/setup/verify_env.py` all checks pass.
-- [ ] Sanity-launch: geo3k multimodal multiturn OPD smoke (06a) to completion + a fully-async 3-node smoke to first eval.
+Fresh cluster environment and end-to-end validation:
+- [x] Clean `install_env.sh` rebuild completed in job 28782; `verify_env.py`
+  passed with numpy 2.3.5, transformers 5.12.1, TMS `6d5bce48`, and the
+  v0.5.15/cu129 SGLang dependency line.
+- [x] Fully async Geo3K baseline run 28789 reached 2034 optimizer steps over
+  22h43m and was stopped intentionally. Across matched windows, rollout time
+  improved by 9–14%, effective token throughput improved by 15–26%, and reward
+  stayed within 0.006 of the pre-sync baseline.
+- [x] Multimodal multiturn OPD baseline run 28790 completed 200/200 steps.
+  Stable-window sampled reverse-KL reproduced within 0.0004 of the pre-sync
+  baseline; the higher trainer time is explained by the bridge path now
+  honoring full activation recomputation.
+
+Detailed curves, metric definitions, and validation boundaries are recorded in
+[`baseline-validation.html`](baseline-validation.html).
 
 ⚠️ **Merge mode**: this PR MUST be merged via **"Create a merge commit"**. Squash or rebase will break future `merge-base` detection (upstream SHAs must survive).

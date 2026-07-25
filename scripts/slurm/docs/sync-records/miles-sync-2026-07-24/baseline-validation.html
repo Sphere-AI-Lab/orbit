@@ -1,474 +1,1680 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>miles-sync 2026-07-24 — baseline validation (sglang v0.5.15 stack)</title>
-<style>
-  body { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-         max-width: 900px; margin: 2rem auto; padding: 0 1.2rem; color: #222; line-height: 1.55; }
-  h1 { font-size: 1.45rem; border-bottom: 2px solid #1f7ea6; padding-bottom: .4rem; }
-  h2 { font-size: 1.15rem; margin-top: 2.2rem; color: #17465c; }
-  table { border-collapse: collapse; margin: .8rem 0; font-size: .86rem; width: 100%; }
-  th, td { border: 1px solid #ccc; padding: .35rem .55rem; text-align: right; }
-  th { background: #f0f5f7; text-align: center; }
-  td:first-child, th:first-child { text-align: left; }
-  .good { color: #1a7a34; font-weight: 600; }
-  .warn { color: #a0632a; font-weight: 600; }
-  .verdict { background: #eef6ee; border-left: 4px solid #1a7a34; padding: .7rem 1rem; margin: 1rem 0; }
-  .note { background: #f7f4ec; border-left: 4px solid #b98c31; padding: .6rem 1rem; margin: .8rem 0; font-size: .88rem; }
-  figure { margin: 1.2rem 0; }
-  figure svg { width: 100%; height: auto; background: #fdfdfd; border: 1px solid #e4e4e4; }
-  figcaption { font-size: .82rem; color: #555; margin-top: .3rem; }
-  code { background: #f2f2f2; padding: 0 .25em; font-size: .88em; }
-  .meta { color: #666; font-size: .85rem; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Validation report for the 2026-07-24 IMP-Miles upstream sync and SGLang v0.5.15 bundle.">
+  <title>IMP-Miles upstream sync: baseline validation</title>
+  <style data-source="reports/report-template/report.css">
+    :root {
+      --paper: #fdfcf9;
+      --paper-deep: #f4f0e7;
+      --ink: #292725;
+      --ink-soft: #554f4a;
+      --muted: #756e67;
+      --faint: #9c948b;
+      --line: #d9d2c8;
+      --line-soft: #ebe6dd;
+      --warm: #b94b31;
+      --warm-soft: #f6dfd5;
+      --amber: #c98932;
+      --amber-soft: #f7ebcf;
+      --blue: #4d7f8f;
+      --blue-soft: #dcebef;
+      --green: #5d7864;
+      --green-soft: #e1ebe2;
+      --teal: #2f756d;
+      --teal-soft: #dcece8;
+      --code: #a83e2b;
+      --code-bg: #f2eee7;
+      --serif: "Iowan Old Style", "Iowan Old Style BT", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+      --sans: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --mono: SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; scroll-padding-top: 84px; }
+    body {
+      margin: 0;
+      overflow-x: clip;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--serif);
+      font-size: 17px;
+      line-height: 1.62;
+      letter-spacing: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+    a {
+      color: inherit;
+      text-decoration-color: color-mix(in srgb, var(--warm) 48%, transparent);
+      text-underline-offset: 3px;
+    }
+    a:hover { color: var(--warm); }
+    a:focus-visible,
+    button:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 3px;
+    }
+    code,
+    .mono {
+      font-family: var(--mono);
+      font-size: .88em;
+      font-variant-numeric: tabular-nums;
+    }
+    code {
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: var(--code-bg);
+      color: var(--code);
+      overflow-wrap: anywhere;
+    }
+
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 56px;
+      padding: 0 24px;
+      border-bottom: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
+      background: color-mix(in srgb, var(--paper) 91%, transparent);
+      backdrop-filter: blur(14px);
+      font: 13px/1 var(--sans);
+    }
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      text-decoration: none;
+    }
+    .brand strong { font-size: 15px; font-weight: 650; }
+    .brand span { color: var(--muted); }
+    .site-nav { display: flex; gap: 24px; }
+    .site-nav a { color: var(--ink-soft); text-decoration: none; }
+
+    .title-block {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 74px 28px 26px;
+      text-align: center;
+      animation: page-fade 600ms ease-out both;
+    }
+    .eyebrow {
+      margin: 0 0 16px;
+      color: var(--warm);
+      font: 650 12px/1.4 var(--sans);
+      text-transform: uppercase;
+    }
+    h1 {
+      max-width: 880px;
+      margin: 0 auto;
+      font: 500 56px/1.08 var(--serif);
+      letter-spacing: 0;
+      text-wrap: balance;
+    }
+    .title-thesis {
+      max-width: 740px;
+      margin: 18px auto 0;
+      color: var(--teal);
+      font: 650 13px/1.4 var(--sans);
+      text-transform: uppercase;
+    }
+    .subtitle {
+      max-width: 720px;
+      margin: 17px auto 0;
+      color: var(--ink-soft);
+      font-size: 18px;
+      line-height: 1.52;
+    }
+    .byline {
+      margin: 14px 0 0;
+      color: var(--muted);
+      font: 13px/1.55 var(--sans);
+    }
+
+    .hero-flow {
+      display: grid;
+      grid-template-columns: 1fr 58px 1fr 58px 1fr;
+      align-items: center;
+      max-width: 860px;
+      min-height: 150px;
+      margin: 38px auto 4px;
+      text-align: left;
+    }
+    .flow-stage { min-width: 0; text-align: center; }
+    .flow-label {
+      margin-bottom: 11px;
+      color: var(--muted);
+      font: 12px/1.3 var(--sans);
+    }
+    .flow-title { margin-top: 10px; font: 650 14px/1.35 var(--sans); }
+    .flow-note {
+      min-height: 34px;
+      margin-top: 3px;
+      color: var(--muted);
+      font: 12px/1.4 var(--sans);
+    }
+    .flow-markers {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 5px;
+      min-height: 34px;
+    }
+    .marker {
+      display: inline-grid;
+      place-items: center;
+      min-width: 34px;
+      height: 31px;
+      padding: 0 7px;
+      border: 1px solid color-mix(in srgb, var(--warm) 32%, var(--line));
+      border-radius: 4px;
+      background: var(--warm-soft);
+      color: #733421;
+      font: 650 11px/1 var(--mono);
+    }
+    .marker.cool {
+      border-color: color-mix(in srgb, var(--blue) 32%, var(--line));
+      background: var(--blue-soft);
+      color: #285766;
+    }
+    .marker.green {
+      border-color: color-mix(in srgb, var(--green) 32%, var(--line));
+      background: var(--green-soft);
+      color: #365f40;
+    }
+    .marker.pale { background: transparent; color: var(--muted); }
+    .flow-arrow {
+      position: relative;
+      height: 1px;
+      margin: 0 16px;
+      background: var(--line);
+    }
+    .flow-arrow::after {
+      content: "";
+      position: absolute;
+      right: 0;
+      top: -4px;
+      width: 8px;
+      height: 8px;
+      border-top: 1px solid var(--muted);
+      border-right: 1px solid var(--muted);
+      transform: rotate(45deg);
+    }
+
+    .page-grid {
+      display: grid;
+      grid-template-columns: 190px minmax(0, 780px) 150px;
+      gap: 42px;
+      justify-content: center;
+      max-width: 1380px;
+      margin: 0 auto;
+      padding: 18px 28px 92px;
+    }
+    .toc {
+      position: sticky;
+      top: 88px;
+      align-self: start;
+      font: 13px/1.42 var(--sans);
+    }
+    .toc-title {
+      margin: 0 0 13px;
+      color: var(--faint);
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+    .toc ol {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      border-left: 1px solid var(--line);
+    }
+    .toc a {
+      position: relative;
+      display: block;
+      padding: 6px 0 6px 17px;
+      color: var(--muted);
+      text-decoration: none;
+      transition: color 180ms ease, transform 180ms ease;
+    }
+    .toc a::before {
+      content: "";
+      position: absolute;
+      left: -1px;
+      top: 8px;
+      width: 2px;
+      height: 16px;
+      background: transparent;
+    }
+    .toc a.active { color: var(--ink); transform: translateX(3px); }
+    .toc a.active::before { background: var(--warm); }
+
+    .article {
+      grid-column: 2;
+      min-width: 0;
+      animation: page-fade 600ms 80ms ease-out both;
+    }
+    .article > h2 {
+      scroll-margin-top: 84px;
+      margin: 72px 0 20px;
+      font: 600 32px/1.26 var(--serif);
+      letter-spacing: 0;
+    }
+    .article > h2:first-of-type { margin-top: 10px; }
+    .article h3 {
+      margin: 42px 0 15px;
+      font: 400 22px/1.36 var(--serif);
+      letter-spacing: 0;
+    }
+    .article p { margin: 0 0 23px; }
+    .article ul,
+    .article ol { margin: 0 0 24px; padding-left: 24px; }
+    .article li { margin: 5px 0; }
+    strong,
+    b { font-weight: 650; }
+
+    .callout {
+      margin: 28px 0;
+      padding: 18px 0 18px 22px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      border-left: 3px solid var(--warm);
+    }
+    .callout p:last-child,
+    .callout ul:last-child { margin-bottom: 0; }
+    .callout.good { border-left-color: var(--green); }
+    .callout.warn { border-left-color: var(--amber); }
+    .source-note {
+      color: var(--muted);
+      font: 13px/1.55 var(--sans);
+    }
+    .status {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font: 650 11px/1.35 var(--sans);
+      white-space: nowrap;
+    }
+    .status.good { color: #365f40; background: var(--green-soft); }
+    .status.warn { color: #77511c; background: var(--amber-soft); }
+    .status.bad { color: #873623; background: var(--warm-soft); }
+    .status.info { color: #285766; background: var(--blue-soft); }
+
+    .metric-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin: 34px 0 42px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .metric {
+      min-width: 0;
+      padding: 19px 17px 21px;
+      border-right: 1px solid var(--line-soft);
+    }
+    .metric:first-child { padding-left: 0; }
+    .metric:last-child { padding-right: 0; border-right: 0; }
+    .metric-value {
+      display: block;
+      color: var(--teal);
+      font: 600 30px/1.05 var(--serif);
+      font-variant-numeric: tabular-nums;
+    }
+    .metric-value.warm { color: var(--warm); }
+    .metric-label {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+      font: 11px/1.45 var(--sans);
+    }
+
+    table {
+      width: 100%;
+      margin: 30px 0 38px;
+      border-collapse: collapse;
+      font: 13px/1.48 var(--sans);
+    }
+    caption {
+      margin-bottom: 10px;
+      color: var(--muted);
+      font: 12px/1.5 var(--sans);
+      text-align: left;
+    }
+    th,
+    td {
+      padding: 10px 9px;
+      border-bottom: 1px solid var(--line-soft);
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+      text-transform: uppercase;
+    }
+    td:first-child,
+    th:first-child { padding-left: 0; }
+    td:last-child,
+    th:last-child { padding-right: 0; }
+    .numeric {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .figure-shell {
+      margin: 34px -44px 52px;
+      padding: 24px 30px 30px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--paper-deep) 30%, var(--paper));
+    }
+    .figure-head {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 9px 14px;
+      align-items: baseline;
+      margin-bottom: 23px;
+      font-family: var(--sans);
+    }
+    .figure-number {
+      color: var(--teal);
+      font: 700 11px/1 var(--mono);
+      text-transform: uppercase;
+    }
+    .figure-title { font: 650 19px/1.25 var(--serif); }
+    .figure-subtitle {
+      grid-column: 2;
+      margin-top: -3px;
+      color: var(--muted);
+      font: 12px/1.5 var(--mono);
+    }
+    .figure-caption {
+      margin: 22px 0 0;
+      color: var(--muted);
+      font: 12px/1.55 var(--sans);
+    }
+
+    .control-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 22px;
+    }
+    .control-label {
+      align-self: center;
+      margin-right: 3px;
+      color: var(--muted);
+      font: 650 10px/1 var(--sans);
+      text-transform: uppercase;
+    }
+    .seg-button {
+      appearance: none;
+      padding: 7px 10px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      background: transparent;
+      color: var(--ink-soft);
+      cursor: pointer;
+      font: 650 11px/1 var(--sans);
+    }
+    .seg-button:hover { border-color: var(--faint); color: var(--ink); }
+    .seg-button[aria-pressed="true"] {
+      border-color: color-mix(in srgb, var(--teal) 52%, var(--line));
+      background: var(--teal-soft);
+      color: #285b55;
+    }
+    .paired-chart {
+      padding: 2px 0 4px;
+      font-family: var(--sans);
+    }
+    .paired-row {
+      display: grid;
+      grid-template-columns: 100px minmax(0, 1fr);
+      gap: 14px;
+      align-items: center;
+      margin: 18px 0;
+    }
+    .paired-window {
+      color: var(--ink-soft);
+      font: 650 12px/1.35 var(--mono);
+    }
+    .paired-bars { display: grid; gap: 7px; }
+    .paired-line {
+      display: grid;
+      grid-template-columns: 62px minmax(0, 1fr) 65px;
+      gap: 9px;
+      align-items: center;
+    }
+    .series-label,
+    .series-value {
+      color: var(--muted);
+      font: 11px/1.25 var(--sans);
+    }
+    .series-value {
+      color: var(--ink);
+      text-align: right;
+      font-weight: 650;
+      font-variant-numeric: tabular-nums;
+    }
+    .bar-track {
+      height: 11px;
+      border-left: 1px solid var(--line);
+      background: var(--line-soft);
+      overflow: hidden;
+    }
+    .bar-fill {
+      width: var(--value);
+      height: 100%;
+      background: var(--teal);
+      transform-origin: left center;
+      transition: width 360ms ease;
+    }
+    .bar-fill.reference { background: var(--warm); opacity: .78; }
+    .chart-axis {
+      display: flex;
+      justify-content: space-between;
+      margin: 4px 65px 0 176px;
+      color: var(--faint);
+      font: 10px/1 var(--mono);
+    }
+    .chart-insight {
+      min-height: 21px;
+      margin: 18px 0 0;
+      color: var(--teal);
+      font: 650 12px/1.5 var(--sans);
+    }
+
+    .bundle-flow {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0;
+      margin: 6px 0 8px;
+      counter-reset: bundle;
+    }
+    .bundle-step {
+      position: relative;
+      min-width: 0;
+      padding: 18px 18px 18px 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      counter-increment: bundle;
+    }
+    .bundle-step:not(:last-child)::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      right: 8px;
+      width: 14px;
+      height: 1px;
+      background: var(--line);
+    }
+    .bundle-step:not(:last-child)::before {
+      content: "";
+      position: absolute;
+      top: calc(50% - 3px);
+      right: 8px;
+      width: 6px;
+      height: 6px;
+      border-top: 1px solid var(--muted);
+      border-right: 1px solid var(--muted);
+      transform: rotate(45deg);
+    }
+    .bundle-kicker {
+      display: block;
+      color: var(--warm);
+      font: 700 10px/1.3 var(--mono);
+      text-transform: uppercase;
+    }
+    .bundle-step strong {
+      display: block;
+      margin: 8px 24px 5px 0;
+      font: 650 14px/1.35 var(--sans);
+    }
+    .bundle-step span:last-child {
+      display: block;
+      margin-right: 24px;
+      color: var(--muted);
+      font: 11px/1.45 var(--sans);
+    }
+
+    .objective-lanes {
+      display: grid;
+      gap: 16px;
+    }
+    .objective-lane {
+      display: grid;
+      grid-template-columns: 126px 1fr;
+      min-width: 0;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .lane-label {
+      padding: 18px 16px 18px 0;
+      border-right: 1px solid var(--line-soft);
+    }
+    .lane-label strong {
+      display: block;
+      color: var(--teal);
+      font: 700 11px/1.3 var(--mono);
+      text-transform: uppercase;
+    }
+    .lane-label span {
+      display: block;
+      margin-top: 6px;
+      color: var(--muted);
+      font: 11px/1.4 var(--sans);
+    }
+    .lane-path {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      align-items: stretch;
+      padding-left: 16px;
+    }
+    .lane-node {
+      position: relative;
+      padding: 18px 20px 18px 0;
+    }
+    .lane-node:not(:last-child)::after {
+      content: "→";
+      position: absolute;
+      top: 20px;
+      right: 5px;
+      color: var(--faint);
+      font: 14px/1 var(--sans);
+    }
+    .lane-node strong {
+      display: block;
+      margin-right: 10px;
+      font: 650 12px/1.35 var(--sans);
+    }
+    .lane-node span {
+      display: block;
+      margin: 5px 12px 0 0;
+      color: var(--muted);
+      font: 10px/1.4 var(--mono);
+      overflow-wrap: anywhere;
+    }
+
+    .equation-block {
+      margin: 30px -26px;
+      padding: 25px 26px;
+      overflow-x: auto;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--blue-soft) 37%, var(--paper));
+      text-align: center;
+    }
+    .equation-line {
+      white-space: nowrap;
+      font: 20px/1.55 var(--serif);
+    }
+    .equation-caption {
+      margin-top: 11px;
+      color: var(--muted);
+      font: 12px/1.45 var(--sans);
+      text-align: left;
+    }
+
+    .stack-chart { display: grid; gap: 16px; }
+    .stack-row {
+      display: grid;
+      grid-template-columns: 96px minmax(0, 1fr) 54px;
+      gap: 12px;
+      align-items: center;
+    }
+    .stack-label {
+      color: var(--ink-soft);
+      font: 650 11px/1.35 var(--sans);
+    }
+    .stack-track {
+      display: flex;
+      height: 20px;
+      background: var(--line-soft);
+      overflow: hidden;
+    }
+    .stack-segment { height: 100%; }
+    .stack-segment.prep { background: var(--amber); }
+    .stack-segment.wait { background: color-mix(in srgb, var(--amber) 32%, var(--line-soft)); }
+    .stack-segment.logp { background: var(--blue); }
+    .stack-segment.actor { background: var(--teal); }
+    .stack-segment.other { background: var(--faint); }
+    .stack-value {
+      text-align: right;
+      font: 650 11px/1 var(--mono);
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+      margin: 18px 0 0 108px;
+      color: var(--muted);
+      font: 10px/1.35 var(--sans);
+    }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .legend i {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+    }
+
+    .staleness-grid {
+      display: grid;
+      grid-template-columns: repeat(9, minmax(0, 1fr));
+      gap: 8px;
+      align-items: end;
+      height: 190px;
+      padding: 18px 6px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .stale-column {
+      display: grid;
+      grid-template-rows: 1fr auto auto;
+      height: 100%;
+      align-items: end;
+      text-align: center;
+    }
+    .stale-bar {
+      width: 74%;
+      min-height: 2px;
+      margin: 0 auto;
+      background: var(--warm);
+      opacity: .82;
+      transform-origin: bottom;
+    }
+    .stale-value {
+      margin-top: 7px;
+      color: var(--ink);
+      font: 650 10px/1 var(--mono);
+    }
+    .stale-step {
+      margin-top: 8px;
+      color: var(--faint);
+      font: 10px/1 var(--mono);
+    }
+
+    .log-bars {
+      display: grid;
+      gap: 14px;
+      margin-top: 8px;
+    }
+    .log-row {
+      display: grid;
+      grid-template-columns: 150px minmax(0, 1fr) 86px;
+      gap: 12px;
+      align-items: center;
+    }
+    .log-label {
+      color: var(--ink-soft);
+      font: 11px/1.35 var(--sans);
+    }
+    .log-track {
+      height: 14px;
+      background: var(--line-soft);
+      overflow: hidden;
+    }
+    .log-fill {
+      width: var(--value);
+      height: 100%;
+      background: var(--warm);
+      transform-origin: left;
+    }
+    .log-fill.reference { background: var(--amber); }
+    .log-fill.late { background: var(--green); }
+    .log-value {
+      text-align: right;
+      font: 650 11px/1 var(--mono);
+    }
+
+    .decay-grid {
+      display: grid;
+      grid-template-columns: 100px repeat(4, minmax(0, 1fr));
+      gap: 8px 12px;
+      align-items: end;
+      margin-top: 10px;
+    }
+    .decay-heading,
+    .decay-label {
+      color: var(--muted);
+      font: 10px/1.3 var(--sans);
+    }
+    .decay-heading { text-align: center; }
+    .decay-label {
+      align-self: center;
+      font-weight: 650;
+    }
+    .decay-cell {
+      display: grid;
+      align-content: end;
+      height: 92px;
+      border-bottom: 1px solid var(--line);
+    }
+    .decay-bar {
+      width: 64%;
+      height: var(--value);
+      min-height: 3px;
+      margin: 0 auto;
+      background: var(--teal);
+      transform-origin: bottom;
+    }
+    .decay-bar.mean { background: var(--blue); }
+    .decay-value {
+      margin: 6px 0 4px;
+      text-align: center;
+      font: 650 10px/1 var(--mono);
+    }
+
+    .finding {
+      margin: 28px 0;
+      padding: 20px 0 20px 20px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      border-left: 2px solid var(--green);
+    }
+    .finding.warn { border-left-color: var(--amber); }
+    .finding.bad { border-left-color: var(--warm); }
+    .finding h3 { margin-top: 0; font-size: 20px; }
+
+    .next-steps {
+      display: grid;
+      gap: 0;
+      margin: 28px 0 36px;
+      counter-reset: next-step;
+      border-top: 1px solid var(--line);
+    }
+    .next-step {
+      display: grid;
+      grid-template-columns: 48px minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: start;
+      padding: 18px 0;
+      border-bottom: 1px solid var(--line);
+      counter-increment: next-step;
+    }
+    .next-step::before {
+      content: counter(next-step, decimal-leading-zero);
+      color: var(--warm);
+      font: 700 11px/1.4 var(--mono);
+    }
+    .next-step strong {
+      display: block;
+      font: 650 14px/1.35 var(--sans);
+    }
+    .next-step p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font: 12px/1.5 var(--sans);
+    }
+
+    .reference-list {
+      display: grid;
+      grid-template-columns: 120px minmax(0, 1fr);
+      gap: 8px 16px;
+      margin: 24px 0;
+      font: 12px/1.5 var(--sans);
+    }
+    .reference-list dt { color: var(--muted); }
+    .reference-list dd { margin: 0; overflow-wrap: anywhere; }
+
+    footer {
+      margin-top: 64px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font: 12px/1.55 var(--sans);
+    }
+    .reveal { opacity: 0; transform: translateY(10px); }
+    .reveal.is-visible {
+      opacity: 1;
+      transform: none;
+      transition: opacity 520ms ease, transform 520ms ease;
+    }
+    .reveal.is-visible .stale-bar,
+    .reveal.is-visible .decay-bar {
+      animation: bar-grow 620ms cubic-bezier(.22,.8,.28,1) both;
+    }
+    .reveal.is-visible .bar-fill,
+    .reveal.is-visible .log-fill {
+      animation: bar-in 620ms cubic-bezier(.22,.8,.28,1) both;
+    }
+
+    @keyframes page-fade { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes bar-grow { from { opacity: .25; transform: scaleY(0); } }
+    @keyframes bar-in { from { opacity: .25; transform: scaleX(0); } to { opacity: 1; transform: scaleX(1); } }
+
+    @media (max-width: 1160px) {
+      .page-grid { grid-template-columns: minmax(0, 780px); }
+      .article { grid-column: 1; }
+      .toc {
+        position: static;
+        grid-row: 1;
+        padding: 14px 0 18px;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+      .toc ol {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 17px;
+        border: 0;
+      }
+      .toc a { padding: 4px 0; }
+      .toc a::before { display: none; }
+      .toc a.active { color: var(--warm); transform: none; }
+    }
+
+    @media (max-width: 820px) {
+      .figure-shell { margin-right: -14px; margin-left: -14px; padding-right: 14px; padding-left: 14px; }
+      .metric-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .metric:nth-child(2) { border-right: 0; }
+      .metric:nth-child(-n+2) { border-bottom: 1px solid var(--line-soft); }
+      .bundle-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .bundle-step:nth-child(2)::after,
+      .bundle-step:nth-child(2)::before { display: none; }
+      .objective-lane { grid-template-columns: 1fr; }
+      .lane-label { border-right: 0; border-bottom: 1px solid var(--line-soft); }
+      .lane-path { padding-left: 0; }
+    }
+
+    @media (max-width: 720px) {
+      .site-header { height: 52px; padding: 0 17px; }
+      .brand span,
+      .site-nav { display: none; }
+      .title-block { padding: 42px 26px 14px; text-align: left; }
+      h1 { font-size: 36px; line-height: 1.12; }
+      .title-thesis,
+      .subtitle { margin-left: 0; }
+      .subtitle { margin-top: 15px; font-size: 17px; }
+      .byline { font-size: 12px; }
+      .hero-flow {
+        grid-template-columns: 1fr;
+        gap: 10px;
+        min-height: 0;
+        margin-top: 25px;
+      }
+      .flow-stage { text-align: left; }
+      .flow-label,
+      .flow-note { display: none; }
+      .flow-title { margin-top: 6px; }
+      .flow-markers { justify-content: flex-start; }
+      .flow-arrow {
+        width: 1px;
+        height: 16px;
+        margin: 0 0 0 18px;
+      }
+      .flow-arrow::after {
+        right: -4px;
+        top: auto;
+        bottom: 0;
+        transform: rotate(135deg);
+      }
+      .page-grid { padding: 22px 26px 70px; }
+      .article > h2 { margin-top: 50px; font-size: 26px; }
+      .article h3 { margin-top: 38px; font-size: 21px; }
+      .metric-strip { grid-template-columns: 1fr; }
+      .metric {
+        padding: 16px 0;
+        border-right: 0;
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .metric:last-child { border-bottom: 0; }
+      table { display: table; width: 100%; overflow: visible; font-size: 13px; }
+      table thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+      }
+      table tbody,
+      table tr,
+      table td { display: block; width: 100%; }
+      table tr {
+        padding: 15px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      table td {
+        display: grid;
+        grid-template-columns: 88px minmax(0, 1fr);
+        gap: 12px;
+        padding: 4px 0;
+        border: 0;
+        text-align: left;
+        white-space: normal;
+      }
+      table td::before {
+        content: attr(data-label);
+        color: var(--faint);
+        font: 650 10px/1.45 var(--sans);
+        text-transform: uppercase;
+      }
+      .paired-row { grid-template-columns: 1fr; gap: 8px; }
+      .paired-line { grid-template-columns: 48px minmax(0, 1fr) 58px; }
+      .chart-axis { margin-left: 57px; }
+      .bundle-flow { grid-template-columns: 1fr; }
+      .bundle-step { padding-right: 0; }
+      .bundle-step::after,
+      .bundle-step::before { display: none !important; }
+      .lane-path { grid-template-columns: 1fr; }
+      .lane-node {
+        padding: 14px 0;
+        border-bottom: 1px solid var(--line-soft);
+      }
+      .lane-node:last-child { border-bottom: 0; }
+      .lane-node::after { display: none; }
+      .equation-block {
+        margin-right: -10px;
+        margin-left: -10px;
+        padding-right: 10px;
+        padding-left: 10px;
+        text-align: left;
+      }
+      .stack-row { grid-template-columns: 78px minmax(0, 1fr) 46px; gap: 8px; }
+      .legend { margin-left: 0; }
+      .staleness-grid { gap: 4px; }
+      .stale-value { font-size: 9px; }
+      .log-row { grid-template-columns: 100px minmax(0, 1fr) 65px; gap: 8px; }
+      .decay-grid { grid-template-columns: 74px repeat(4, minmax(0, 1fr)); gap: 6px; }
+      .next-step { grid-template-columns: 36px minmax(0, 1fr); }
+      .next-step .status { grid-column: 2; justify-self: start; }
+      .reference-list { grid-template-columns: 1fr; gap: 2px; }
+      .reference-list dd { margin-bottom: 10px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *,
+      *::before,
+      *::after {
+        animation-duration: 1ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 1ms !important;
+      }
+      .reveal { opacity: 1; transform: none; }
+    }
+
+    @media print {
+      .site-header,
+      .toc,
+      .control-row { display: none; }
+      .title-block { padding-top: 20px; }
+      .page-grid { display: block; max-width: 780px; padding: 0; }
+      .figure-shell { break-inside: avoid; margin-right: 0; margin-left: 0; }
+      .reveal { opacity: 1; transform: none; }
+    }
+  </style>
 </head>
 <body>
+  <header class="site-header">
+    <a class="brand" href="#top"><strong>IMP-Miles</strong><span>upstream sync / validation report</span></a>
+    <nav class="site-nav" aria-label="Page navigation">
+      <a href="#summary">TL;DR</a>
+      <a href="#evidence">Results</a>
+      <a href="#mechanisms">Mechanisms</a>
+      <a href="#next">Next gate</a>
+    </nav>
+  </header>
 
-<h1>Baseline validation — 2026-07-24 upstream sync (sglang v0.5.15 stack)</h1>
-<p class="meta">Branch <code>sync-upstream-20260723</code> · merge <code>21b82323</code> (187 upstream commits) ·
-sglang pin <code>38d4bbef5</code> = sglang-miles v0.5.15-31 + 4 local patches · env <code>miles_v0515</code>
-(torch 2.11.0+cu129, numpy 2.3.5, transformers 5.12.1) · report generated 2026-07-25.</p>
+  <section class="title-block" id="top">
+    <p class="eyebrow">Technical validation report · 25 July 2026</p>
+    <h1>Upstream sync baseline validation</h1>
+    <p class="title-thesis">The frozen v0.5.15 stack reproduces learning and improves the fully async path</p>
+    <p class="subtitle">A matched comparison of the 2026-07-24 Miles sync against the pre-sync pure-RL and OPD baselines, with the trainer performance delta, staleness behavior, and OPD gradient spike traced to their actual mechanisms.</p>
+    <p class="byline"><span class="mono">sync-upstream-20260723@15dc6728</span> · merge <span class="mono">21b82323</span> · upstream snapshot <span class="mono">c94c2fa9</span><br>SGLang <span class="mono">38d4bbef5</span> · torch 2.11.0+cu129 · 3-node H200 runs</p>
 
-<div class="verdict">
-<b>Verdict: the post-sync stack reproduces both baselines and is faster on the pure-RL async path.</b>
-Learning parity holds to the third decimal on reward and reverse-KL in every matched window;
-the async recipe runs 11-26% faster; the post-sync async run outlived the pre-sync
-reference (final step 2034 vs 1756) with zero incidents across its 22h43m flight, which spanned the
-2026-07-25 network disruption (no wandb logging gap &gt; 10 min in either run).
-</div>
+    <div class="hero-flow" role="img" aria-label="The validated sync flow: fork main plus 187 upstream commits and a four-patch SGLang v0.5.15 bundle were rebuilt and tested with pure RL and OPD baselines">
+      <div class="flow-stage">
+        <div class="flow-label">input · fork baseline</div>
+        <div class="flow-markers">
+          <span class="marker">main</span><span class="marker pale">+</span><span class="marker">187</span>
+        </div>
+        <div class="flow-title">Merge the upstream snapshot</div>
+        <div class="flow-note">Preserve upstream SHAs and local OPD behavior</div>
+      </div>
+      <div class="flow-arrow" aria-hidden="true"></div>
+      <div class="flow-stage">
+        <div class="flow-label">bundle · serving and ABI</div>
+        <div class="flow-markers">
+          <span class="marker cool">v0.5.15</span><span class="marker pale">+</span><span class="marker cool">4 patches</span>
+        </div>
+        <div class="flow-title">Align SGLang and pins</div>
+        <div class="flow-note">One torch-compatible deployment bundle</div>
+      </div>
+      <div class="flow-arrow" aria-hidden="true"></div>
+      <div class="flow-stage">
+        <div class="flow-label">result · cluster evidence</div>
+        <div class="flow-markers">
+          <span class="marker green">2034 RL</span><span class="marker pale">+</span><span class="marker green">200 OPD</span>
+        </div>
+        <div class="flow-title">Re-run both baselines</div>
+        <div class="flow-note">Learning parity, speed, and stability gates</div>
+      </div>
+    </div>
+  </section>
 
-<h2>1 · Run matrix</h2>
-<table>
-<tr><th>run</th><th>recipe</th><th>role</th><th>steps</th><th>duration</th><th>outcome</th></tr>
-<tr><td><a href="https://wandb.ai/M3TRL/baseline/runs/28790">28790</a> baseline-opd-…-200step-sync0515</td>
-    <td>OPD/multimodal/baseline 200-step (teacher 30B TP8 + trainer 8B + 8 engines, 3 nodes)</td>
-    <td>post-sync</td><td>200/200</td><td>1h31m</td><td class="good">SUCCEEDED</td></tr>
-<tr><td><a href="https://wandb.ai/M3TRL/OPD/runs/27456">27456</a> opd-mm-10b (m10 winner, frozen-baseline source)</td>
-    <td>same recipe, pre-sync stack (v0.5.13)</td><td>reference</td><td>200/200</td><td>1h11m</td><td>finished</td></tr>
-<tr><td><a href="https://wandb.ai/M3TRL/baseline/runs/28789">28789</a> baseline-geo3k-vlm-mt-fullyasync-pf2-3node-sync0515</td>
-    <td>async/geo3k-vlm-mt-fully-async-prefetch2 (1 trainer + 16 engines, 3 nodes)</td>
-    <td>post-sync</td><td>2034</td><td>22h43m</td><td class="good">stopped by decision (recipe default --num-rollout 3000; data sufficient)</td></tr>
-<tr><td><a href="https://wandb.ai/M3TRL/baseline/runs/21354">21354</a> baseline-geo3k-async-mt-pf2-3node</td>
-    <td>same recipe, pre-sync stack (06-29)</td><td>reference</td><td>1756 (crashed)</td><td>23h</td><td>crashed</td></tr>
-</table>
+  <div class="page-grid">
+    <nav class="toc" aria-label="Table of contents">
+      <p class="toc-title">Contents</p>
+      <ol>
+        <li><a href="#summary">Verdict</a></li>
+        <li><a href="#scope">Validated snapshot</a></li>
+        <li><a href="#evidence">Run evidence</a></li>
+        <li><a href="#async">Fully async result</a></li>
+        <li><a href="#opd">OPD result</a></li>
+        <li><a href="#mechanisms">Mechanisms</a></li>
+        <li><a href="#staleness">Staleness</a></li>
+        <li><a href="#spike">Gradient spike</a></li>
+        <li><a href="#validation">Validation boundary</a></li>
+        <li><a href="#next">Next gate</a></li>
+      </ol>
+    </nav>
 
-<h2>2 · Async pair (pure RL) — 28789 vs 21354</h2>
-<table>
-<tr><th>window (steps)</th><th colspan="2">raw_reward</th><th colspan="2">rollout_time (s)</th><th colspan="2">effective tok/gpu/s</th><th>speedup</th></tr>
-<tr><th></th><th>post</th><th>pre</th><th>post</th><th>pre</th><th>post</th><th>pre</th><th></th></tr>
-<tr><td>100–200</td><td>0.756</td><td>0.750</td><td class="good">36.6</td><td>40.3</td><td class="good">779</td><td>617</td><td class="good">+26%</td></tr>
-<tr><td>200–1000</td><td>0.856</td><td>0.855</td><td class="good">35.5</td><td>40.3</td><td class="good">566</td><td>482</td><td class="good">+17%</td></tr>
-<tr><td>1000–1700</td><td>0.911</td><td>0.913</td><td class="good">35.3</td><td>41.0</td><td class="good">488</td><td>424</td><td class="good">+15%</td></tr>
-</table>
-<p>Truncation ratio matches window-for-window (0.086/0.089 · 0.036/0.038 · 0.020/0.023);
-repetition_frac is 0 in both. Throughput declines with step in <em>both</em> runs because responses
-shorten as reward climbs — wall-clock per step (rollout_time) is the clean speed signal, and it is
-uniformly ~4–5 s faster post-sync.</p>
-<figure id="fig-async-reward"><svg viewBox="0 0 560 232" role="img"><line x1="46" y1="202" x2="548" y2="202" stroke="#999" stroke-width="1"/>
-<line x1="46" y1="14" x2="46" y2="202" stroke="#999" stroke-width="1"/>
-<line x1="46" y1="202" x2="46" y2="206" stroke="#999"/>
-<text x="46" y="217" font-size="9" fill="#666" text-anchor="middle">0</text>
-<line x1="168" y1="202" x2="168" y2="206" stroke="#999"/>
-<text x="168" y="217" font-size="9" fill="#666" text-anchor="middle">500</text>
-<line x1="291" y1="202" x2="291" y2="206" stroke="#999"/>
-<text x="291" y="217" font-size="9" fill="#666" text-anchor="middle">1000</text>
-<line x1="413" y1="202" x2="413" y2="206" stroke="#999"/>
-<text x="413" y="217" font-size="9" fill="#666" text-anchor="middle">1500</text>
-<line x1="536" y1="202" x2="536" y2="206" stroke="#999"/>
-<text x="536" y="217" font-size="9" fill="#666" text-anchor="middle">2000</text>
-<line x1="42" y1="202" x2="46" y2="202" stroke="#999"/>
-<line x1="46" y1="202" x2="548" y2="202" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="205" font-size="9" fill="#666" text-anchor="end">0.3</text>
-<line x1="42" y1="148" x2="46" y2="148" stroke="#999"/>
-<line x1="46" y1="148" x2="548" y2="148" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="151" font-size="9" fill="#666" text-anchor="end">0.5</text>
-<line x1="42" y1="95" x2="46" y2="95" stroke="#999"/>
-<line x1="46" y1="95" x2="548" y2="95" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="98" font-size="9" fill="#666" text-anchor="end">0.7</text>
-<line x1="42" y1="41" x2="46" y2="41" stroke="#999"/>
-<line x1="46" y1="41" x2="548" y2="41" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="44" font-size="9" fill="#666" text-anchor="end">0.9</text><polyline fill="none" stroke="#b94b31" stroke-width="1.6" points="46.0,105.3 48.4,120.2 50.9,123.5 53.3,123.6 55.8,112.1 58.2,106.0 60.7,103.0 63.1,115.1 65.6,106.8 68.0,106.1 70.5,85.3 72.9,85.5 75.4,89.0 77.8,93.0 80.3,97.6 82.7,86.0 85.2,80.8 87.6,63.8 90.1,59.5 92.5,60.9 95.0,71.2 97.4,72.2 99.9,65.8 102.3,61.9 104.8,61.9 107.2,65.2 109.7,65.4 112.1,64.5 114.6,65.1 117.0,61.0 119.5,71.7 121.9,70.8 124.4,61.0 126.8,50.4 129.3,53.3 131.7,68.6 134.2,71.5 136.6,77.8 139.1,77.1 141.5,75.7 144.0,68.6 146.4,66.1 148.8,60.9 151.3,52.8 153.7,50.2 156.2,50.0 158.6,49.1 161.1,51.9 163.5,61.9 166.0,73.3 168.4,68.2 170.9,59.1 173.3,48.1 175.8,50.7 178.2,55.3 180.7,62.8 183.1,65.2 185.6,67.7 188.0,61.6 190.5,53.2 192.9,48.1 195.4,43.4 197.8,42.5 200.3,46.2 202.7,58.8 205.2,64.2 207.6,63.7 210.1,54.6 212.5,63.3 215.0,61.6 217.4,63.1 219.9,47.0 222.3,39.7 224.8,35.9 227.2,38.8 229.7,44.8 232.1,41.8 234.6,46.2 237.0,40.8 239.5,47.6 241.9,48.4 244.4,49.7 246.8,50.2 249.2,47.2 251.7,45.5 254.1,44.2 256.6,42.3 259.0,44.6 261.5,42.7 263.9,43.9 266.4,39.7 268.8,40.9 271.3,42.5 273.7,52.3 276.2,50.4 278.6,49.1 281.1,42.7 283.5,43.4 286.0,40.8 288.4,40.1 290.9,36.2 293.3,36.2 295.8,39.9 298.2,35.9 300.7,39.7 303.1,37.8 305.6,41.8 308.0,43.7 310.5,39.2 312.9,48.1 315.4,46.7 317.8,45.3 320.3,35.9 322.7,31.5 325.2,32.9 327.6,35.3 330.1,37.1 332.5,36.6 335.0,41.6 337.4,40.6 339.9,42.9 342.3,42.9 344.8,40.9 347.2,40.8 349.6,35.9 352.1,34.3 354.5,36.4 357.0,40.4 359.4,44.2 361.9,45.3 364.3,41.5 366.8,48.3 369.2,46.3 371.7,44.6 374.1,45.6 376.6,43.2 379.0,46.2 381.5,33.6 383.9,32.4 386.4,28.9 388.8,31.3 391.3,33.9 393.7,35.2 396.2,31.3 398.6,32.9 401.1,33.2 403.5,36.6 406.0,35.2 408.4,42.5 410.9,41.8 413.3,43.2 415.8,31.7 418.2,28.3 420.7,26.1 423.1,30.1 425.6,30.6 428.0,27.6 430.5,31.0 432.9,34.3 435.4,40.9 437.8,39.0 440.3,44.1 442.7,38.0 445.2,30.3 447.6,32.4 450.0,38.0 452.5,41.8 454.9,33.9 457.4,31.8 459.8,33.6 462.3,33.1 464.7,33.8 467.2,33.1 469.6,34.8 472.1,35.2 474.5,37.1"/><polyline fill="none" stroke="#1f7ea6" stroke-width="1.6" points="46.0,59.1 48.4,92.4 50.9,100.4 53.3,118.6 55.8,108.2 58.2,99.7 60.7,97.1 63.1,95.1 65.6,96.4 68.0,89.5 70.5,88.5 72.9,78.3 75.4,81.8 77.8,85.9 80.3,96.5 82.7,92.7 85.2,88.3 87.6,78.5 90.1,82.2 92.5,78.2 95.0,85.2 97.4,77.1 99.9,81.8 102.3,79.9 104.8,87.8 107.2,82.9 109.7,76.8 112.1,70.5 114.6,60.3 117.0,59.8 119.5,62.6 121.9,66.5 124.4,65.1 126.8,62.8 129.3,75.2 131.7,70.5 134.2,67.0 136.6,61.6 139.1,66.3 141.5,58.2 144.0,50.7 146.4,50.2 148.8,48.3 151.3,52.5 153.7,47.9 156.2,48.6 158.6,42.7 161.1,47.2 163.5,58.6 166.0,63.0 168.4,64.2 170.9,59.5 173.3,54.9 175.8,46.7 178.2,44.6 180.7,48.4 183.1,62.8 185.6,65.1 188.0,68.9 190.5,53.3 192.9,53.2 195.4,43.5 197.8,51.1 200.3,52.6 202.7,63.7 205.2,58.1 207.6,49.5 210.1,41.5 212.5,51.2 215.0,50.0 217.4,43.0 219.9,33.6 222.3,38.5 224.8,43.9 227.2,56.0 229.7,53.9 232.1,60.5 234.6,46.3 237.0,45.3 239.5,44.2 241.9,44.2 244.4,42.5 246.8,40.4 249.2,40.8 251.7,39.0 254.1,35.5 256.6,46.9 259.0,62.6 261.5,55.1 263.9,45.3 266.4,32.4 268.8,36.9 271.3,43.9 273.7,46.3 276.2,45.8 278.6,37.3 281.1,34.5 283.5,35.3 286.0,40.9 288.4,41.5 290.9,42.3 293.3,40.2 295.8,37.1 298.2,32.9 300.7,35.3 303.1,43.5 305.6,48.1 308.0,41.1 310.5,40.6 312.9,46.9 315.4,52.3 317.8,48.6 320.3,39.4 322.7,30.6 325.2,27.5 327.6,32.4 330.1,33.4 332.5,40.6 335.0,36.2 337.4,42.0 339.9,38.5 342.3,43.2 344.8,40.1 347.2,33.8 349.6,32.4 352.1,33.1 354.5,33.1 357.0,32.0 359.4,29.0 361.9,33.2 364.3,38.8 366.8,42.3 369.2,36.9 371.7,31.0 374.1,34.3 376.6,49.7 379.0,52.3 381.5,44.2 383.9,32.0 386.4,27.5 388.8,31.7 391.3,30.8 393.7,27.8 396.2,33.6 398.6,39.5 401.1,42.5 403.5,33.2 406.0,28.5 408.4,30.4 410.9,30.6 413.3,30.6 415.8,25.7 418.2,27.6 420.7,32.0 423.1,38.8 425.6,38.3 428.0,31.0 430.5,28.0 432.9,27.1 435.4,31.1 437.8,29.7 440.3,32.7 442.7,31.1 445.2,32.7 447.6,30.4 450.0,36.2 452.5,32.7 454.9,30.1 457.4,22.4 459.8,25.4 462.3,26.8 464.7,29.2 467.2,32.2 469.6,36.4 472.1,37.6 474.5,33.9 477.0,32.7 479.4,33.2 481.9,30.1 484.3,28.2 486.8,29.4 489.2,33.1 491.7,36.6 494.1,33.6 496.6,33.1 499.0,32.9 501.5,35.5 503.9,41.6 506.4,40.6 508.8,36.7 511.3,29.0 513.7,29.4 516.2,31.1 518.6,34.6 521.1,34.1 523.5,29.7 526.0,29.7 528.4,32.5 530.9,39.5 533.3,32.7 535.8,33.1 538.2,30.4 540.7,36.2"/><line x1="246" y1="178" x2="264" y2="178" stroke="#1f7ea6" stroke-width="2.4"/>
-<text x="269" y="181" font-size="10" fill="#333">28789 post-sync (v0.5.15 stack)</text>
-<line x1="246" y1="192" x2="264" y2="192" stroke="#b94b31" stroke-width="2.4"/>
-<text x="269" y="195" font-size="10" fill="#333">21354 pre-sync reference</text></svg><figcaption>Fig 1 — async pf2-3node: rollout/raw_reward vs step (MA-3). The two trajectories are statistically indistinguishable across 1,700+ steps.</figcaption></figure>
-<figure id="fig-async-time"><svg viewBox="0 0 560 232" role="img"><line x1="46" y1="202" x2="548" y2="202" stroke="#999" stroke-width="1"/>
-<line x1="46" y1="14" x2="46" y2="202" stroke="#999" stroke-width="1"/>
-<line x1="46" y1="202" x2="46" y2="206" stroke="#999"/>
-<text x="46" y="217" font-size="9" fill="#666" text-anchor="middle">0</text>
-<line x1="168" y1="202" x2="168" y2="206" stroke="#999"/>
-<text x="168" y="217" font-size="9" fill="#666" text-anchor="middle">500</text>
-<line x1="291" y1="202" x2="291" y2="206" stroke="#999"/>
-<text x="291" y="217" font-size="9" fill="#666" text-anchor="middle">1000</text>
-<line x1="413" y1="202" x2="413" y2="206" stroke="#999"/>
-<text x="413" y="217" font-size="9" fill="#666" text-anchor="middle">1500</text>
-<line x1="536" y1="202" x2="536" y2="206" stroke="#999"/>
-<text x="536" y="217" font-size="9" fill="#666" text-anchor="middle">2000</text>
-<line x1="42" y1="202" x2="46" y2="202" stroke="#999"/>
-<line x1="46" y1="202" x2="548" y2="202" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="205" font-size="9" fill="#666" text-anchor="end">20</text>
-<line x1="42" y1="155" x2="46" y2="155" stroke="#999"/>
-<line x1="46" y1="155" x2="548" y2="155" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="158" font-size="9" fill="#666" text-anchor="end">30</text>
-<line x1="42" y1="108" x2="46" y2="108" stroke="#999"/>
-<line x1="46" y1="108" x2="548" y2="108" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="111" font-size="9" fill="#666" text-anchor="end">40</text>
-<line x1="42" y1="61" x2="46" y2="61" stroke="#999"/>
-<line x1="46" y1="61" x2="548" y2="61" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="64" font-size="9" fill="#666" text-anchor="end">50</text>
-<line x1="42" y1="14" x2="46" y2="14" stroke="#999"/>
-<line x1="46" y1="14" x2="548" y2="14" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="17" font-size="9" fill="#666" text-anchor="end">60</text><polyline fill="none" stroke="#b94b31" stroke-width="1.6" points=""/><polyline fill="none" stroke="#1f7ea6" stroke-width="1.6" points=""/><line x1="366" y1="26" x2="384" y2="26" stroke="#1f7ea6" stroke-width="2.4"/>
-<text x="389" y="29" font-size="10" fill="#333">28789 post-sync</text>
-<line x1="366" y1="40" x2="384" y2="40" stroke="#b94b31" stroke-width="2.4"/>
-<text x="389" y="43" font-size="10" fill="#333">21354 pre-sync</text></svg><figcaption>Fig 2 — async pf2-3node: perf/rollout_time (s, MA-5). Post-sync runs a consistent ~4-5 s/step faster (~11-13%).</figcaption></figure>
+    <article class="article">
+      <h2 id="summary">1 · Verdict: merge-quality evidence for the frozen snapshot</h2>
+      <div class="callout good">
+        <ul>
+          <li><strong>Learning behavior reproduced.</strong> Pure-RL reward differs by at most 0.006 in the three matched windows. OPD reverse-KL agrees after the cold-start window: 0.1246 vs 0.1242 at steps 50–100 and 0.0954 vs 0.0958 at steps 150–199.</li>
+          <li><strong>The fully async path improved.</strong> Wall-clock rollout time is 9–14% lower and effective token throughput is 15–26% higher, depending on the matched window.</li>
+          <li><strong>The OPD path is slower for an understood reason.</strong> Upstream's bridge now honors full activation recomputation. The additional trainer work is hidden by sampler wait in the async pipeline, but passes directly into OPD step time.</li>
+          <li><strong>The successful runs are stable.</strong> The post-sync async run reached step 2034 over 22h43m and was stopped by decision; the OPD baseline completed 200/200 steps.</li>
+          <li><strong>One estimator risk remains visible.</strong> Sampled RKLD injects an unclamped per-token k1 into advantages. Global gradient clipping contained the early spike, but it is the only source-level safety backstop in this recipe.</li>
+        </ul>
+      </div>
 
-<h2>3 · OPD pair (distillation) — 28790 vs 27456</h2>
-<table>
-<tr><th>window (steps)</th><th colspan="2">raw_reward (telemetry)</th><th colspan="2">reverse-KL</th><th colspan="2">truncated ratio</th></tr>
-<tr><th></th><th>post</th><th>pre</th><th>post</th><th>pre</th><th>post</th><th>pre</th></tr>
-<tr><td>0–25</td><td>0.537</td><td>0.491</td><td>0.326</td><td>0.287</td><td>0.429</td><td>0.480</td></tr>
-<tr><td>50–100</td><td>0.409</td><td>0.377</td><td class="good">0.1246</td><td class="good">0.1242</td><td>0.603</td><td>0.630</td></tr>
-<tr><td>150–199</td><td>0.442</td><td>0.415</td><td class="good">0.0954</td><td class="good">0.0958</td><td>0.571</td><td>0.599</td></tr>
-</table>
-<table>
-<tr><th>speed (steps 100–200)</th><th>post 28790</th><th>pre 27456</th><th>delta</th></tr>
-<tr><td>perf/rollout_time (s)</td><td>16.7</td><td>14.7</td><td class="warn">+13%</td></tr>
-<tr><td>tok/gpu/s</td><td>1629</td><td>1698</td><td class="warn">−4%</td></tr>
-<tr><td>effective tok/gpu/s</td><td>1617</td><td>1685</td><td class="warn">−4%</td></tr>
-</table>
-<p>The distillation objective reproduces essentially exactly (rKL to the third decimal); reward sits
-0.03–0.05 <em>above</em> the reference in every window (favourable side of run noise). The mild
-rollout_time regression (+2 s/step, −4% throughput) ran on a different node trio
-(slinky-13/42/44 vs the July-19 set) and is within node-to-node variation observed before; now fully root-caused in §4: it is the activation-recompute semantics change showing through (the OPD pipeline cannot hide extra trainer time behind generation wait), not an efficiency loss.</p>
-<figure id="fig-opd-reward"><svg viewBox="0 0 560 232" role="img"><line x1="46" y1="202" x2="548" y2="202" stroke="#999" stroke-width="1"/>
-<line x1="46" y1="14" x2="46" y2="202" stroke="#999" stroke-width="1"/>
-<line x1="46" y1="202" x2="46" y2="206" stroke="#999"/>
-<text x="46" y="217" font-size="9" fill="#666" text-anchor="middle">0</text>
-<line x1="172" y1="202" x2="172" y2="206" stroke="#999"/>
-<text x="172" y="217" font-size="9" fill="#666" text-anchor="middle">50</text>
-<line x1="297" y1="202" x2="297" y2="206" stroke="#999"/>
-<text x="297" y="217" font-size="9" fill="#666" text-anchor="middle">100</text>
-<line x1="422" y1="202" x2="422" y2="206" stroke="#999"/>
-<text x="422" y="217" font-size="9" fill="#666" text-anchor="middle">150</text>
-<line x1="548" y1="202" x2="548" y2="206" stroke="#999"/>
-<text x="548" y="217" font-size="9" fill="#666" text-anchor="middle">200</text>
-<line x1="42" y1="178" x2="46" y2="178" stroke="#999"/>
-<line x1="46" y1="178" x2="548" y2="178" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="182" font-size="9" fill="#666" text-anchor="end">0.3</text>
-<line x1="42" y1="132" x2="46" y2="132" stroke="#999"/>
-<line x1="46" y1="132" x2="548" y2="132" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="134" font-size="9" fill="#666" text-anchor="end">0.4</text>
-<line x1="42" y1="84" x2="46" y2="84" stroke="#999"/>
-<line x1="46" y1="84" x2="548" y2="84" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="88" font-size="9" fill="#666" text-anchor="end">0.5</text>
-<line x1="42" y1="38" x2="46" y2="38" stroke="#999"/>
-<line x1="46" y1="38" x2="548" y2="38" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="41" font-size="9" fill="#666" text-anchor="end">0.6</text><polyline fill="none" stroke="#b94b31" stroke-width="1.6" points="46.0,14.0 48.5,14.0 51.0,14.0 53.5,14.0 56.0,14.0 58.5,52.2 61.1,59.5 63.6,56.6 66.1,55.1 68.6,63.9 71.1,49.3 73.6,61.0 76.1,66.9 78.6,78.6 81.1,74.2 83.7,93.3 86.2,93.3 88.7,103.6 91.2,97.7 93.7,128.6 96.2,97.7 98.7,122.7 101.2,127.1 103.7,147.7 106.2,141.8 108.8,199.1 111.3,202.0 113.8,202.0 116.3,202.0 118.8,202.0 121.3,202.0 123.8,202.0 126.3,202.0 128.8,197.6 131.3,185.8 133.8,185.8 136.4,191.7 138.9,184.4 141.4,202.0 143.9,202.0 146.4,202.0 148.9,202.0 151.4,202.0 153.9,184.4 156.4,191.7 158.9,193.2 161.5,174.1 164.0,190.2 166.5,202.0 169.0,200.5 171.5,188.8 174.0,182.9 176.5,165.3 179.0,157.9 181.5,157.9 184.1,156.5 186.6,162.3 189.1,178.5 191.6,163.8 194.1,171.2 196.6,159.4 199.1,168.2 201.6,156.5 204.1,159.4 206.6,135.9 209.2,143.2 211.7,137.4 214.2,128.6 216.7,128.6 219.2,149.1 221.7,140.3 224.2,124.2 226.7,146.2 229.2,141.8 231.7,135.9 234.2,138.8 236.8,155.0 239.3,138.8 241.8,138.8 244.3,133.0 246.8,131.5 249.3,122.7 251.8,130.0 254.3,143.2 256.8,162.3 259.4,166.8 261.9,177.0 264.4,171.2 266.9,162.3 269.4,133.0 271.9,130.0 274.4,128.6 276.9,116.8 279.4,115.3 281.9,122.7 284.4,118.3 287.0,110.9 289.5,118.3 292.0,135.9 294.5,134.4 297.0,135.9 299.5,119.8 302.0,128.6 304.5,113.9 307.0,119.8 309.6,138.8 312.1,171.2 314.6,147.7 317.1,149.1 319.6,127.1 322.1,119.8 324.6,91.8 327.1,102.1 329.6,102.1 332.1,124.2 334.6,118.3 337.2,130.0 339.7,127.1 342.2,128.6 344.7,140.3 347.2,137.4 349.7,128.6 352.2,118.3 354.7,103.6 357.2,106.5 359.8,102.1 362.3,103.6 364.8,118.3 367.3,112.4 369.8,91.8 372.3,108.0 374.8,108.0 377.3,110.9 379.8,112.4 382.3,124.2 384.9,105.1 387.4,118.3 389.9,115.3 392.4,147.7 394.9,131.5 397.4,135.9 399.9,130.0 402.4,124.2 404.9,90.4 407.4,102.1 409.9,108.0 412.5,87.4 415.0,94.8 417.5,133.0 420.0,140.3 422.5,146.2 425.0,159.4 427.5,157.9 430.0,118.3 432.5,110.9 435.1,109.5 437.6,122.7 440.1,102.1 442.6,118.3 445.1,110.9 447.6,116.8 450.1,103.6 452.6,108.0 455.1,108.0 457.6,99.2 460.1,96.3 462.7,96.3 465.2,112.4 467.7,109.5 470.2,113.9 472.7,96.3 475.2,116.8 477.7,115.3 480.2,115.3 482.7,115.3 485.2,103.6 487.8,100.7 490.3,90.4 492.8,90.4 495.3,99.2 497.8,138.8 500.3,125.6 502.8,135.9 505.3,150.6 507.8,155.0 510.4,150.6 512.9,140.3 515.4,141.8 517.9,121.2 520.4,130.0 522.9,131.5 525.4,149.1 527.9,156.5 530.4,160.9 532.9,144.7 535.5,135.9 538.0,159.4 540.5,157.9 543.0,157.9 545.5,165.3"/><polyline fill="none" stroke="#1f7ea6" stroke-width="1.6" points="46.0,14.0 48.5,14.0 51.0,14.0 53.5,14.0 56.0,14.0 58.5,28.7 61.1,52.2 63.6,77.2 66.1,55.1 68.6,46.3 71.1,40.4 73.6,47.8 76.1,40.4 78.6,53.7 81.1,80.1 83.7,77.2 86.2,78.6 88.7,59.5 91.2,77.2 93.7,72.8 96.2,78.6 98.7,75.7 101.2,102.1 103.7,103.6 106.2,118.3 108.8,152.1 111.3,162.3 113.8,184.4 116.3,177.0 118.8,175.6 121.3,165.3 123.8,177.0 126.3,160.9 128.8,181.4 131.3,185.8 133.8,202.0 136.4,182.9 138.9,196.1 141.4,194.7 143.9,196.1 146.4,187.3 148.9,202.0 151.4,197.6 153.9,197.6 156.4,194.7 158.9,196.1 161.5,191.7 164.0,199.1 166.5,185.8 169.0,184.4 171.5,177.0 174.0,159.4 176.5,152.1 179.0,143.2 181.5,140.3 184.1,147.7 186.6,160.9 189.1,149.1 191.6,153.5 194.1,157.9 196.6,146.2 199.1,149.1 201.6,159.4 204.1,153.5 206.6,147.7 209.2,147.7 211.7,131.5 214.2,118.3 216.7,125.6 219.2,119.8 221.7,99.2 224.2,112.4 226.7,118.3 229.2,106.5 231.7,122.7 234.2,127.1 236.8,116.8 239.3,112.4 241.8,118.3 244.3,109.5 246.8,103.6 249.3,100.7 251.8,115.3 254.3,121.2 256.8,138.8 259.4,162.3 261.9,169.7 264.4,155.0 266.9,153.5 269.4,135.9 271.9,118.3 274.4,127.1 276.9,127.1 279.4,134.4 281.9,112.4 284.4,115.3 287.0,94.8 289.5,91.8 292.0,84.5 294.5,97.7 297.0,94.8 299.5,83.0 302.0,94.8 304.5,100.7 307.0,109.5 309.6,133.0 312.1,168.2 314.6,143.2 317.1,138.8 319.6,121.2 322.1,109.5 324.6,94.8 327.1,109.5 329.6,90.4 332.1,96.3 334.6,94.8 337.2,97.7 339.7,103.6 342.2,115.3 344.7,116.8 347.2,113.9 349.7,96.3 352.2,74.2 354.7,72.8 357.2,81.6 359.8,66.9 362.3,91.8 364.8,97.7 367.3,97.7 369.8,74.2 372.3,91.8 374.8,86.0 377.3,99.2 379.8,109.5 382.3,119.8 384.9,97.7 387.4,93.3 389.9,83.0 392.4,83.0 394.9,90.4 397.4,115.3 399.9,119.8 402.4,109.5 404.9,109.5 407.4,106.5 409.9,115.3 412.5,100.7 415.0,122.7 417.5,118.3 420.0,137.4 422.5,119.8 425.0,119.8 427.5,121.2 430.0,141.8 432.5,118.3 435.1,122.7 437.6,137.4 440.1,124.2 442.6,105.1 445.1,119.8 447.6,94.8 450.1,88.9 452.6,80.1 455.1,94.8 457.6,68.3 460.1,88.9 462.7,84.5 465.2,109.5 467.7,84.5 470.2,86.0 472.7,81.6 475.2,108.0 477.7,84.5 480.2,88.9 482.7,113.9 485.2,125.6 487.8,87.4 490.3,88.9 492.8,102.1 495.3,69.8 497.8,78.6 500.3,106.5 502.8,110.9 505.3,113.9 507.8,155.0 510.4,152.1 512.9,122.7 515.4,128.6 517.9,121.2 520.4,112.4 522.9,118.3 525.4,133.0 527.9,130.0 530.4,133.0 532.9,134.4 535.5,125.6 538.0,146.2 540.5,153.5 543.0,144.7 545.5,138.8"/><line x1="346" y1="26" x2="364" y2="26" stroke="#1f7ea6" stroke-width="2.4"/>
-<text x="369" y="29" font-size="10" fill="#333">28790 post-sync</text>
-<line x1="346" y1="40" x2="364" y2="40" stroke="#b94b31" stroke-width="2.4"/>
-<text x="369" y="43" font-size="10" fill="#333">27456 pre-sync (m10b)</text></svg><figcaption>Fig 3 — OPD 200-step baseline: task raw_reward vs step (MA-5, telemetry-only signal). Same shape; post-sync sits 0.03-0.05 above throughout.</figcaption></figure>
-<figure id="fig-opd-rkl"><svg viewBox="0 0 560 232" role="img"><line x1="46" y1="202" x2="548" y2="202" stroke="#999" stroke-width="1"/>
-<line x1="46" y1="14" x2="46" y2="202" stroke="#999" stroke-width="1"/>
-<line x1="46" y1="202" x2="46" y2="206" stroke="#999"/>
-<text x="46" y="217" font-size="9" fill="#666" text-anchor="middle">0</text>
-<line x1="172" y1="202" x2="172" y2="206" stroke="#999"/>
-<text x="172" y="217" font-size="9" fill="#666" text-anchor="middle">50</text>
-<line x1="297" y1="202" x2="297" y2="206" stroke="#999"/>
-<text x="297" y="217" font-size="9" fill="#666" text-anchor="middle">100</text>
-<line x1="422" y1="202" x2="422" y2="206" stroke="#999"/>
-<text x="422" y="217" font-size="9" fill="#666" text-anchor="middle">150</text>
-<line x1="548" y1="202" x2="548" y2="206" stroke="#999"/>
-<text x="548" y="217" font-size="9" fill="#666" text-anchor="middle">200</text>
-<line x1="42" y1="202" x2="46" y2="202" stroke="#999"/>
-<line x1="46" y1="202" x2="548" y2="202" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="205" font-size="9" fill="#666" text-anchor="end">0.0</text>
-<line x1="42" y1="160" x2="46" y2="160" stroke="#999"/>
-<line x1="46" y1="160" x2="548" y2="160" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="163" font-size="9" fill="#666" text-anchor="end">0.1</text>
-<line x1="42" y1="118" x2="46" y2="118" stroke="#999"/>
-<line x1="46" y1="118" x2="548" y2="118" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="121" font-size="9" fill="#666" text-anchor="end">0.2</text>
-<line x1="42" y1="77" x2="46" y2="77" stroke="#999"/>
-<line x1="46" y1="77" x2="548" y2="77" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="80" font-size="9" fill="#666" text-anchor="end">0.3</text>
-<line x1="42" y1="35" x2="46" y2="35" stroke="#999"/>
-<line x1="46" y1="35" x2="548" y2="35" stroke="#eee" stroke-width="0.6"/>
-<text x="39" y="38" font-size="9" fill="#666" text-anchor="end">0.4</text><polyline fill="none" stroke="#b94b31" stroke-width="1.6" points="46.0,43.3 48.5,52.5 51.0,48.4 53.5,53.2 56.0,53.3 58.5,63.2 61.1,64.5 63.6,49.4 66.1,51.6 68.6,55.4 71.1,55.6 73.6,39.2 76.1,65.8 78.6,70.1 81.1,73.7 83.7,75.1 86.2,98.6 88.7,99.1 91.2,100.9 93.7,105.1 96.2,105.8 98.7,107.7 101.2,112.0 103.7,113.6 106.2,114.9 108.8,119.3 111.3,121.1 113.8,121.0 116.3,121.4 118.8,123.1 121.3,123.1 123.8,122.9 126.3,123.8 128.8,125.5 131.3,124.7 133.8,123.9 136.4,125.5 138.9,126.6 141.4,127.6 143.9,128.1 146.4,129.7 148.9,129.6 151.4,129.6 153.9,129.7 156.4,131.0 158.9,131.8 161.5,132.9 164.0,134.1 166.5,135.8 169.0,138.0 171.5,139.4 174.0,140.5 176.5,141.1 179.0,140.5 181.5,140.2 184.1,141.1 186.6,142.1 189.1,142.9 191.6,144.8 194.1,146.0 196.6,146.6 199.1,146.8 201.6,147.3 204.1,147.2 206.6,148.0 209.2,147.8 211.7,148.2 214.2,148.6 216.7,148.8 219.2,148.5 221.7,149.8 224.2,150.7 226.7,151.8 229.2,152.4 231.7,152.7 234.2,151.9 236.8,151.8 239.3,151.4 241.8,151.5 244.3,151.8 246.8,152.4 249.3,152.6 251.8,152.4 254.3,152.4 256.8,152.7 259.4,152.9 261.9,153.0 264.4,153.1 266.9,153.2 269.4,152.8 271.9,152.5 274.4,152.2 276.9,152.6 279.4,152.7 281.9,153.3 284.4,154.1 287.0,154.3 289.5,153.9 292.0,154.0 294.5,154.2 297.0,153.9 299.5,154.7 302.0,155.9 304.5,156.0 307.0,156.4 309.6,156.9 312.1,156.7 314.6,156.7 317.1,157.4 319.6,157.2 322.1,157.2 324.6,158.1 327.1,158.6 329.6,159.0 332.1,159.2 334.6,159.3 337.2,158.3 339.7,157.9 342.2,158.4 344.7,157.6 347.2,158.1 349.7,158.5 352.2,158.4 354.7,158.1 357.2,158.1 359.8,157.8 362.3,158.3 364.8,158.0 367.3,158.1 369.8,158.8 372.3,158.7 374.8,159.3 377.3,159.8 379.8,159.0 382.3,158.9 384.9,158.9 387.4,158.5 389.9,158.3 392.4,159.1 394.9,159.2 397.4,159.9 399.9,160.1 402.4,160.7 404.9,160.7 407.4,161.3 409.9,160.7 412.5,160.9 415.0,160.6 417.5,160.6 420.0,160.0 422.5,160.5 425.0,160.5 427.5,160.4 430.0,160.6 432.5,160.4 435.1,160.4 437.6,160.2 440.1,161.1 442.6,161.0 445.1,162.1 447.6,162.3 450.1,162.3 452.6,161.8 455.1,161.8 457.6,162.0 460.1,162.0 462.7,162.4 465.2,163.0 467.7,163.4 470.2,162.9 472.7,163.1 475.2,162.8 477.7,162.3 480.2,162.3 482.7,162.4 485.2,162.2 487.8,162.0 490.3,162.6 492.8,162.4 495.3,161.9 497.8,161.3 500.3,161.8 502.8,161.9 505.3,161.1 507.8,161.3 510.4,162.0 512.9,161.7 515.4,161.4 517.9,162.5 520.4,163.0 522.9,162.6 525.4,162.8 527.9,162.4 530.4,162.4 532.9,162.0 535.5,162.3 538.0,161.9 540.5,162.1 543.0,161.4 545.5,161.6"/><polyline fill="none" stroke="#1f7ea6" stroke-width="1.6" points="46.0,17.9 48.5,41.0 51.0,30.1 53.5,35.9 56.0,41.9 58.5,56.5 61.1,60.4 63.6,76.3 66.1,81.6 68.6,82.6 71.1,81.4 73.6,85.4 76.1,71.6 78.6,75.0 81.1,67.7 83.7,68.2 86.2,68.7 88.7,35.2 91.2,22.3 93.7,37.2 96.2,42.4 98.7,42.2 101.2,71.8 103.7,87.6 106.2,88.7 108.8,90.4 111.3,93.8 113.8,117.8 116.3,119.0 118.8,120.6 121.3,121.4 123.8,121.8 126.3,121.6 128.8,124.4 131.3,124.9 133.8,124.5 136.4,125.2 138.9,127.8 141.4,127.0 143.9,127.5 146.4,128.6 148.9,129.2 151.4,128.7 153.9,130.1 156.4,131.0 158.9,131.4 161.5,132.2 164.0,133.7 166.5,134.6 169.0,136.1 171.5,138.1 174.0,139.1 176.5,139.9 179.0,139.5 181.5,139.9 184.1,139.9 186.6,140.7 189.1,141.8 191.6,143.3 194.1,144.5 196.6,145.7 199.1,146.2 201.6,146.6 204.1,147.2 206.6,147.7 209.2,147.9 211.7,148.3 214.2,148.5 216.7,148.9 219.2,148.6 221.7,149.9 224.2,151.0 226.7,151.3 229.2,151.7 231.7,152.7 234.2,151.9 236.8,151.3 239.3,151.5 241.8,151.6 244.3,151.5 246.8,151.8 249.3,152.4 251.8,152.8 254.3,152.7 256.8,152.4 259.4,152.9 261.9,152.9 264.4,152.8 266.9,153.2 269.4,153.3 271.9,152.5 274.4,152.6 276.9,152.5 279.4,152.3 281.9,153.1 284.4,154.0 287.0,153.6 289.5,153.6 292.0,154.7 294.5,154.3 297.0,154.6 299.5,155.5 302.0,155.9 304.5,155.9 307.0,156.4 309.6,156.3 312.1,155.9 314.6,156.8 317.1,157.0 319.6,156.6 322.1,157.6 324.6,158.5 327.1,158.5 329.6,158.9 332.1,160.0 334.6,159.0 337.2,158.1 339.7,157.9 342.2,157.6 344.7,157.6 347.2,157.8 349.7,158.4 352.2,158.3 354.7,157.9 357.2,157.4 359.8,157.8 362.3,157.6 364.8,157.7 367.3,158.3 369.8,158.8 372.3,158.9 374.8,159.2 377.3,159.7 379.8,159.3 382.3,159.2 384.9,159.3 387.4,159.5 389.9,159.4 392.4,160.1 394.9,160.4 397.4,160.6 399.9,160.6 402.4,160.9 404.9,160.3 407.4,160.3 409.9,160.1 412.5,160.5 415.0,159.7 417.5,160.2 420.0,159.4 422.5,159.8 425.0,159.9 427.5,160.4 430.0,159.9 432.5,160.3 435.1,160.7 437.6,160.3 440.1,161.1 442.6,161.4 445.1,161.8 447.6,161.8 450.1,161.7 452.6,161.6 455.1,161.4 457.6,161.6 460.1,161.0 462.7,161.7 465.2,161.7 467.7,162.5 470.2,162.6 472.7,162.8 475.2,162.9 477.7,163.4 480.2,163.4 482.7,163.1 485.2,163.0 487.8,162.5 490.3,162.3 492.8,161.5 495.3,161.8 497.8,161.9 500.3,161.8 502.8,162.1 505.3,162.2 507.8,162.0 510.4,162.2 512.9,162.5 515.4,162.6 517.9,163.0 520.4,163.0 522.9,162.6 525.4,162.8 527.9,162.1 530.4,162.7 532.9,162.5 535.5,162.9 538.0,162.9 540.5,162.4 543.0,161.9 545.5,162.8"/><line x1="346" y1="26" x2="364" y2="26" stroke="#1f7ea6" stroke-width="2.4"/>
-<text x="369" y="29" font-size="10" fill="#333">28790 post-sync</text>
-<line x1="346" y1="40" x2="364" y2="40" stroke="#b94b31" stroke-width="2.4"/>
-<text x="369" y="43" font-size="10" fill="#333">27456 pre-sync (m10b)</text></svg><figcaption>Fig 4 — OPD 200-step baseline: rollout/opd_reverse_kl vs step (MA-5). The distillation objective reproduces to the third decimal in matched windows (0.1246/0.1242 at steps 50-100; 0.0954/0.0958 at 150-199).</figcaption></figure>
+      <div class="metric-strip" aria-label="Headline validation metrics">
+        <div class="metric"><span class="metric-value">187</span><span class="metric-label">Upstream commits in merge <span class="mono">21b82323</span></span></div>
+        <div class="metric"><span class="metric-value">2034</span><span class="metric-label">Post-sync fully async optimizer steps</span></div>
+        <div class="metric"><span class="metric-value">200/200</span><span class="metric-label">Post-sync OPD baseline completion</span></div>
+        <div class="metric"><span class="metric-value warm">0</span><span class="metric-label">Pin inconsistencies from <span class="mono">extract_pins.py --check</span></span></div>
+      </div>
 
+      <p><strong>Decision boundary.</strong> This report validates one explicit snapshot, not a moving branch name: upstream Miles at <code>c94c2fa9</code>, fork changes through <code>15dc6728</code>, and SGLang at <code>38d4bbef5</code>. Official upstream has since advanced by ten commits to <code>59c73017</code>. Those commits are not part of these runs and must not inherit this report's pass status.</p>
 
-<h2>4 · Trainer-side metric anatomy — why the perf/* families moved</h2>
+      <h2 id="scope">2 · Validated snapshot: code, serving, pins, and runs move as one bundle</h2>
+      <p>The sync is more than a Git merge. Miles source changes, the fork's SGLang mirror, the torch ABI, prebuilt wheels, install logic, and preserved local patches form one deployment unit. The validation closes that unit end to end.</p>
 
-<p>Side-by-side wandb panels show the post-sync runs (purple) with <em>lower</em>
-<code>actor_train_tok_per_s</code>/<code>actor_train_tflops</code>, <em>higher</em>
-<code>actor_train_time</code>, <em>lower</em> <code>wait_time_ratio</code> and (async pair)
-<em>much lower</em> <code>data_preprocess_time</code> — while end-to-end speed improved.
-All of it reduces to one semantic change plus one env-generation artifact. Definitions first
-(code anchors in <code>miles/backends/megatron_utils/actor.py</code> and
-<code>miles/utils/train_metric_utils.py</code>):</p>
+      <figure class="figure-shell" id="bundle">
+        <div class="figure-head">
+          <span class="figure-number">Fig. 1</span>
+          <span class="figure-title">The unit that was actually validated</span>
+          <span class="figure-subtitle">Input: fork main + upstream snapshot · Output: a reproducible bare-metal training stack</span>
+        </div>
+        <div class="bundle-flow" role="img" aria-label="Four-stage sync bundle: merge Miles, reapply fork behavior, align SGLang and pins, rebuild and run baselines">
+          <section class="bundle-step">
+            <span class="bundle-kicker">01 · Miles</span>
+            <strong>Merge 187 commits</strong>
+            <span>20 conflict files reviewed; upstream structure plus fork behavior retained.</span>
+          </section>
+          <section class="bundle-step">
+            <span class="bundle-kicker">02 · Fork</span>
+            <strong>Preserve local contracts</strong>
+            <span>OPD, multimodal, fully async, envpack adapter, launch and CI behavior.</span>
+          </section>
+          <section class="bundle-step">
+            <span class="bundle-kicker">03 · SGLang</span>
+            <strong>Advance to v0.5.15</strong>
+            <span>Four local patches re-applied; one obsolete flush patch retired.</span>
+          </section>
+          <section class="bundle-step">
+            <span class="bundle-kicker">04 · Evidence</span>
+            <strong>Rebuild and execute</strong>
+            <span>Clean install, pin verification, pure-RL async run, and OPD run.</span>
+          </section>
+        </div>
+        <figcaption class="figure-caption"><strong>Takeaway:</strong> a sync pass applies to the exact source and dependency bundle above. Advancing any one side, including the upstream Miles tip, creates a new validation target.</figcaption>
+      </figure>
 
-<table>
-<tr><th>metric</th><th>definition (what the timer actually wraps)</th></tr>
-<tr><td><code>perf/train_wait_time</code></td><td>Inverse timer: accumulates whenever the actor is <em>outside</em> the train block — idle waiting for the next staleness-admissible batch <b>plus</b> data fetch/preprocess and iterator build.</td></tr>
-<tr><td><code>perf/data_preprocess_time</code></td><td><code>get_rollout_data()</code>: <code>ray.get</code> of this rank's DP shard (includes cross-node object transfer of the image-heavy payload) + host→GPU moves of tokens/masks/multimodal tensors/OPD targets. Counted <em>inside train_wait</em>, not train.</td></tr>
-<tr><td><code>perf/train_time</code></td><td>The train block: optional old-log-prob forward (GRPO recompute path; forward-only) + advantages + rollout metric logging + actor_train.</td></tr>
-<tr><td><code>perf/actor_train_time</code></td><td>Megatron <code>train()</code> only — forward+backward+optimizer over all microbatches. So <code>train_time − actor_train_time ≈ log_probs_time</code>. The OPD run uses <code>--use-rollout-logprobs</code> (no log-prob forward) and indeed shows train_time ≈ actor_train_time (8.18 vs 8.15 s).</td></tr>
-<tr><td><code>perf/step_time</code>, <code>perf/wait_time_ratio</code></td><td><code>step_time = train_wait + train</code>; <code>wait_time_ratio = train_wait / step_time</code> (trainer idle share).</td></tr>
-<tr><td><code>perf/actor_train_tok_per_s</code></td><td>Σ seq_lens / actor_train_time.</td></tr>
-<tr><td><code>perf/actor_train_tflops</code></td><td><b>3</b> × model fwd-FLOPs / actor_train_time. The fixed constant 3 (1 forward + 2 backward) is the standard <b>MFU convention</b> (model-FLOPs utilization, PaLM-style): it counts only the mathematically necessary FLOPs and deliberately books any recompute forward as overhead. The alternative <b>HFU convention</b> (hardware-FLOPs) would use 4 under full recompute.</td></tr>
-</table>
+      <table>
+        <caption>Snapshot identity and deployment state.</caption>
+        <thead><tr><th scope="col">Layer</th><th scope="col">Revision</th><th scope="col">State</th><th scope="col">Evidence</th></tr></thead>
+        <tbody>
+          <tr><td>Miles fork</td><td class="mono">15dc6728</td><td><span class="status good">Clean / pushed</span></td><td>Local branch equals <span class="mono">origin/sync-upstream-20260723</span>.</td></tr>
+          <tr><td>Upstream snapshot</td><td class="mono">c94c2fa9</td><td><span class="status good">Merged</span></td><td>Second parent of merge <span class="mono">21b82323</span>; original upstream SHAs preserved.</td></tr>
+          <tr><td>SGLang</td><td class="mono">38d4bbef5</td><td><span class="status good">Resolvable</span></td><td>Mirror branch <span class="mono">sync-v0.5.15-20260724</span>; v0.5.15-31 plus four patches.</td></tr>
+          <tr><td>Pin bundle</td><td class="mono">miles_v0515</td><td><span class="status good">Consistent</span></td><td>torch 2.11.0+cu129, numpy 2.3.5, transformers 5.12.1; pin check exits 0.</td></tr>
+        </tbody>
+      </table>
 
-<h3>Step-time decomposition (means over matched windows)</h3>
-<table>
-<tr><th></th><th colspan="2">async pair (steps 200–1700)</th><th colspan="2">OPD pair (steps 100–199)</th></tr>
-<tr><th>metric (s unless noted)</th><th>post 28789</th><th>pre 21354</th><th>post 28790</th><th>pre 27456</th></tr>
-<tr><td>train_wait_time</td><td>18.66</td><td>28.24</td><td>11.75</td><td>11.57</td></tr>
-<tr><td>&nbsp;&nbsp;└ data_preprocess_time</td><td class="good">0.61</td><td>7.03</td><td>1.03</td><td>1.02</td></tr>
-<tr><td>train_time</td><td>20.60</td><td>16.84</td><td>8.18</td><td>6.19</td></tr>
-<tr><td>&nbsp;&nbsp;└ log_probs_time (fwd-only)</td><td><b>5.04</b></td><td><b>4.99</b></td><td>—</td><td>—</td></tr>
-<tr><td>&nbsp;&nbsp;└ actor_train_time</td><td class="warn">15.42</td><td>11.66</td><td class="warn">8.15</td><td>6.15</td></tr>
-<tr><td>step_time</td><td class="good">39.25</td><td>45.08</td><td>19.94</td><td>17.75</td></tr>
-<tr><td>wait_time_ratio</td><td>0.452</td><td>0.605</td><td>0.576</td><td>0.641</td></tr>
-<tr><td>actor_train_tok_per_s</td><td>35,457</td><td>46,367</td><td>28,735</td><td>35,565</td></tr>
-<tr><td>actor_train_tflops (reported)</td><td>203.0</td><td>265.0</td><td>173.0</td><td>212.5</td></tr>
-<tr><td>actor_train_tflops (×4/3 recompute-corrected)</td><td class="good">270.6</td><td>—</td><td>230.6</td><td>—</td></tr>
-</table>
+      <h2 id="evidence">3 · Run evidence: two matched comparisons, not one blended claim</h2>
+      <p>The pure-RL and OPD comparisons answer different questions. The async pair tests scheduling, rollout throughput, staleness admission, and long-horizon stability. The OPD pair tests exact multimodal teacher scoring, sampled RKLD, Top-K+Rest DAgger, and trainer-side loss behavior.</p>
 
-<h3>Root cause 1 — activation recomputation is now actually on</h3>
-<p>Both recipes have always requested <code>--recompute-granularity full --recompute-method uniform
---recompute-num-layers 1</code>. On the bridge (<code>megatron_to_hf_mode=bridge</code>) path the
-pre-sync code <b>silently dropped</b> those flags before they reached the provider; upstream #1483's
-<code>_apply_bridge_runtime_config</code> — merged in this sync — propagates them (its own comment:
-&ldquo;activation recompute (silently dropped before → no checkpointing → OOM at long context)&rdquo;).
-So the pre-sync purple-vs-brown gap is <em>no-recompute vs full-recompute</em>, not an efficiency loss.
-Evidence chain:</p>
-<ul>
-<li><b>The 4/3 signature</b>: full recompute re-runs the forward during backward — ideal cost goes from
-3 forward-equivalents (1F+2F) to 4 → time ×1.33, tok/s and tflops ×0.75. Measured:
-actor_train_time ×1.32 (async) and ×1.325 (OPD); tok/s ×0.765 / tflops ×0.766 (async).</li>
-<li><b>The forward-only control</b>: <code>log_probs_time</code> is a pure forward pass and recompute
-cannot touch it — it is <b>unchanged</b> (5.04 vs 4.99 s). An env-level regression (kernel/cuDNN/numpy)
-would have slowed this pass too. It didn't.</li>
-<li><b>Hardware throughput parity</b>: crediting the recompute forward (×4/3), the async trainer does
-270.6 effective TFLOPS vs 265.0 pre-sync — <b>the GPUs are working exactly as hard (+2%)</b>; the
-reported metric drops purely because its factor-3 convention books recompute as overhead.</li>
-</ul>
+      <table>
+        <caption>Runs used in this report. W&amp;B links are the source of the embedded window means.</caption>
+        <thead><tr><th scope="col">Run</th><th scope="col">Configuration</th><th scope="col">Role</th><th scope="col">Outcome</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><a href="https://wandb.ai/M3TRL/baseline/runs/28789">28789</a></td>
+            <td>Pure RL · Geo3K VLM multi-turn · fully async · prefetch 2 · 3 nodes</td>
+            <td>Post-sync</td>
+            <td><span class="status good">2034 steps</span> · 22h43m · stopped by decision</td>
+          </tr>
+          <tr>
+            <td><a href="https://wandb.ai/M3TRL/baseline/runs/21354">21354</a></td>
+            <td>Same pure-RL recipe · pre-sync stack</td>
+            <td>Reference</td>
+            <td><span class="status warn">1756 steps</span> · later crashed</td>
+          </tr>
+          <tr>
+            <td><a href="https://wandb.ai/M3TRL/baseline/runs/28790">28790</a></td>
+            <td>Hybrid OPD · 30B teacher TP8 · 8B student · 8 engines · 3 nodes</td>
+            <td>Post-sync</td>
+            <td><span class="status good">200/200</span> · 1h31m</td>
+          </tr>
+          <tr>
+            <td><a href="https://wandb.ai/M3TRL/OPD/runs/27456">27456</a></td>
+            <td>Same hybrid OPD recipe · pre-sync v0.5.13 stack</td>
+            <td>Reference</td>
+            <td><span class="status good">200/200</span> · 1h11m</td>
+          </tr>
+        </tbody>
+      </table>
 
-<h3>Root cause 2 — wait_time_ratio and the two pipelines</h3>
-<p><b>Async pair</b>: generation got faster (v0.5.15 engines) so idle wait shrank (28.2→18.7 s, helped
-by −6.4 s preprocess inside the wait), while train grew (recompute) — ratio 0.605→0.452. Trainer
-utilization went <em>up</em> and end-to-end step_time still fell 13%: the trainer was never the
-bottleneck in this pipeline, so honoring recompute cost almost nothing end-to-end.
-<b>OPD pair</b>: generation-side wait is unchanged (11.6≈11.8 s — teacher-scoring pipeline didn't
-speed up), so the +2.0 s of recompute passes straight through to step_time (+2.2 s = the entire
-&ldquo;+13% rollout_time&rdquo; flagged in §3). Same cause, different exposure.</p>
+      <h2 id="async">4 · Fully async: learning matches while generation becomes faster</h2>
+      <p>Reward, truncation, and repetition show no material regression. The clean speed signal is rollout wall time because generated responses shorten as the model improves, making raw tokens per second decline in both runs even while the system is healthy.</p>
 
-<div class="verdict">
-<b>Are the metrics computed correctly? Yes — nothing to fix.</b>
-<code>actor_train_time</code> is a direct wall-clock measurement and <code>actor_train_tok_per_s</code>
-is real goodput (useful tokens per second) — both report the recompute cost honestly, because you
-genuinely produce 25% fewer trained tokens per second with full recompute on.
-<code>actor_train_tflops</code> uses the fixed-3 MFU convention on purpose: it answers &ldquo;how much
-<em>useful</em> model compute per second&rdquo;, which is the right number for comparing training
-configurations. The only usage rule it imposes: when two runs differ in recompute settings, their MFU
-numbers are measuring different workloads — multiply the recompute-on side by 4/3 (the HFU view) to
-compare hardware utilization, which is what shows the 270.6-vs-265.0 parity above.
-</div>
+      <figure class="figure-shell interactive-chart" data-chart="async">
+        <div class="figure-head">
+          <span class="figure-number">Fig. 2</span>
+          <span class="figure-title">Pure-RL matched-window comparison</span>
+          <span class="figure-subtitle">Toggle the metric · each bar is a window mean · post-sync vs pre-sync reference</span>
+        </div>
+        <div class="control-row" role="group" aria-label="Select pure RL comparison metric">
+          <span class="control-label">Metric</span>
+          <button class="seg-button" type="button" data-metric="reward" aria-pressed="true">Raw reward</button>
+          <button class="seg-button" type="button" data-metric="rollout" aria-pressed="false">Rollout time</button>
+          <button class="seg-button" type="button" data-metric="throughput" aria-pressed="false">Effective throughput</button>
+        </div>
+        <div class="paired-chart" role="img" aria-live="polite" aria-label="Pure RL raw reward comparison across matched windows"></div>
+        <div class="chart-insight" aria-live="polite"></div>
+        <figcaption class="figure-caption"><strong>Takeaway:</strong> the learning signal is matched, while post-sync wall-clock rollout is lower in every window. The previous report's empty rollout-time SVG has been replaced with the validated window means rather than an invented time series.</figcaption>
+      </figure>
 
-<h3>Root cause 3 — the async data_preprocess drop (7.0 → 0.6 s)</h3>
-<p>Timer scope and the fetch/H2D code path are line-identical pre/post sync, and the OPD pair —
-whose reference ran on a July torch-2.11 env — shows <b>no</b> difference (1.03 vs 1.02 s). The
-7 s belongs to the June-era reference stack (torch 2.9.1, transformers 4.x, older ray): the
-image-heavy DP shard's serialization/cross-node object transfer was simply slower two env
-generations ago. Attributed to the stack refresh, not to a sync code change; not worth deeper
-root-causing (it is a win, and the current stack is the one we keep).</p>
+      <table>
+        <caption>Pure-RL window means. “Speedup” is separated into wall-clock and effective-throughput views.</caption>
+        <thead><tr><th scope="col">Window</th><th scope="col" class="numeric">Reward post / pre</th><th scope="col" class="numeric">Time post / pre</th><th scope="col" class="numeric">Wall-clock</th><th scope="col" class="numeric">Effective tok/GPU/s</th></tr></thead>
+        <tbody>
+          <tr><td>100–200</td><td class="numeric">0.756 / 0.750</td><td class="numeric">36.6 / 40.3 s</td><td class="numeric">9.2% faster</td><td class="numeric">779 / 617 · +26%</td></tr>
+          <tr><td>200–1000</td><td class="numeric">0.856 / 0.855</td><td class="numeric">35.5 / 40.3 s</td><td class="numeric">11.9% faster</td><td class="numeric">566 / 482 · +17%</td></tr>
+          <tr><td>1000–1700</td><td class="numeric">0.911 / 0.913</td><td class="numeric">35.3 / 41.0 s</td><td class="numeric">13.9% faster</td><td class="numeric">488 / 424 · +15%</td></tr>
+        </tbody>
+      </table>
 
-<div class="note">
-<b>Knob decision (recorded in follow-ups):</b> the recipes ran fine for months without recompute at
-4k response length, so dropping <code>--recompute-*</code> would reclaim ~25% trainer speed — but it
-buys almost nothing end-to-end where the trainer isn't the bottleneck (async), and costs the memory
-headroom the flags were meant to provide. Recommendation: keep recompute (honored semantics), treat
-reported <code>actor_train_tflops</code> across the sync boundary as non-comparable, and compare the
-recompute-corrected number instead.
-</div>
+      <p class="source-note">Truncation ratios also match window-for-window: 0.086/0.089, 0.036/0.038, and 0.020/0.023. Repetition fraction is zero in both runs. “Statistically indistinguishable” is intentionally not claimed because this report does not include a pre-registered statistical test.</p>
 
+      <h2 id="opd">5 · OPD: stable-window reverse-KL parity, with a separate trainer-side DAgger term</h2>
+      <p>The hybrid OPD baseline optimizes two distinct terms. Sampled RKLD uses the rollout action and becomes a detached advantage coefficient. Top-K+Rest DAgger uses the teacher's sparse distribution and produces a direct trainer-side cross-entropy gradient. Task reward is logged but does not enter this recipe's optimization objective.</p>
 
+      <figure class="figure-shell interactive-chart" data-chart="opd">
+        <div class="figure-head">
+          <span class="figure-number">Fig. 3</span>
+          <span class="figure-title">OPD matched-window comparison</span>
+          <span class="figure-subtitle">Cold start is shown explicitly · stable-window parity should not be projected backward onto steps 0–25</span>
+        </div>
+        <div class="control-row" role="group" aria-label="Select OPD comparison metric">
+          <span class="control-label">Metric</span>
+          <button class="seg-button" type="button" data-metric="rkl" aria-pressed="true">Reverse-KL</button>
+          <button class="seg-button" type="button" data-metric="reward" aria-pressed="false">Task reward</button>
+          <button class="seg-button" type="button" data-metric="truncation" aria-pressed="false">Truncation ratio</button>
+        </div>
+        <div class="paired-chart" role="img" aria-live="polite" aria-label="OPD reverse KL comparison across matched windows"></div>
+        <div class="chart-insight" aria-live="polite"></div>
+        <figcaption class="figure-caption"><strong>Takeaway:</strong> reverse-KL differs in the cold-start window, then reproduces to within 0.0004 in both stable windows. Reward telemetry is 0.027–0.046 higher post-sync, but it is not the optimized objective.</figcaption>
+      </figure>
 
-<h3>Appendix — how activation recomputation actually works</h3>
-<p>Backprop needs each layer's forward-time inputs: for <code>y = W·x</code>, the weight gradient is
-<code>dL/dW = dL/dy · x&#7488;</code> — you cannot compute it without <code>x</code>, and nonlinearities
-similarly need their forward values. The default is to keep every layer's interior activations
-(QKV projections, attention output, the 3&times;-wide MLP intermediate, norm inputs, &hellip;) alive from
-forward until backward consumes them — roughly tens of bytes-of-hidden-width per token per layer.
-For this 8B run (36 layers &times; 16,384 tokens/GPU &times; 4096 hidden &times; ~20&times; multiplier, bf16)
-that is an <b>80–100 GB-class</b> activation footprint: activations, not weights, are what explodes
-with context length.</p>
-<pre style="font-size:.8rem; background:#f7f7f7; border:1px solid #e2e2e2; padding: .6rem .8rem; overflow-x:auto;">
-no recompute:    F1 F2 &hellip; F36 | B36 B35 &hellip; B1        all 36 layers' interiors held until used
-full recompute:  F1 F2 &hellip; F36 | (F36&#8617;&rarr;B36) &hellip; (F1&#8617;&rarr;B1)   store only per-layer inputs;
-                                                     re-run layer i's forward just before B_i;
-                                                     one layer's interior alive at a time
-</pre>
-<p>Cost accounting (1F = one forward's FLOPs): forward = 1F; backward = 2F (each forward matmul has
-two same-sized backward matmuls, <code>dx</code> and <code>dW</code> — irreducible). No recompute:
-3F. Full recompute: 1F + (1F re-forward + 2F) = 4F &rarr; time &times;4/3, which is exactly the
-measured &times;1.32. The flags: <code>granularity full</code> = whole layers (vs <code>selective</code>
-= attention interiors only — note FlashAttention already recomputes its own interiors, so on this
-stack <code>full</code>'s savings come mainly from MLP/norm/projection tensors);
-<code>method uniform</code> + <code>num-layers 1</code> = a checkpoint every single layer (maximum
-memory savings, full 4/3 cost). Pre-sync these runs fit in H200 memory at 4k response length
-without any of this — which is why the silently-dropped flags went unnoticed and the old runs were
-33% faster on the trainer.</p>
+      <figure class="figure-shell" id="objective">
+        <div class="figure-head">
+          <span class="figure-number">Fig. 4</span>
+          <span class="figure-title">The actual hybrid OPD dataflow</span>
+          <span class="figure-subtitle">Two objectives share one teacher request but retain different gradient semantics</span>
+        </div>
+        <div class="objective-lanes" role="img" aria-label="Sampled RKLD uses rollout q old and teacher sampled log probability to modify advantages, while Top-K plus Rest DAgger sends sparse teacher targets to a direct trainer cross entropy loss">
+          <section class="objective-lane">
+            <div class="lane-label"><strong>Sampled RKLD</strong><span>Policy-gradient lane · coefficient 1.0</span></div>
+            <div class="lane-path">
+              <div class="lane-node"><strong>Rollout action</strong><span>y_t, log q_old(y_t)</span></div>
+              <div class="lane-node"><strong>Teacher sampled score</strong><span>log p_T(y_t)</span></div>
+              <div class="lane-node"><strong>Trainer k1</strong><span>log q_old - log p_T</span></div>
+              <div class="lane-node"><strong>Advantage injection</strong><span>A_t ← A_t - β k1</span></div>
+            </div>
+          </section>
+          <section class="objective-lane">
+            <div class="lane-label"><strong>Top-K+Rest</strong><span>Direct DAgger lane · coefficient 0.5</span></div>
+            <div class="lane-path">
+              <div class="lane-node"><strong>Teacher targets</strong><span>IDs, log p, mask [T,2]</span></div>
+              <div class="lane-node"><strong>Rest mass</strong><span>p_R = 1 - Σ p_i</span></div>
+              <div class="lane-node"><strong>Current student</strong><span>q_θ from live trainer logits</span></div>
+              <div class="lane-node"><strong>Direct CE</strong><span>L_TopK+Rest → logits</span></div>
+            </div>
+          </section>
+        </div>
+        <div class="equation-block">
+          <div class="equation-line" aria-label="Total loss equals sampled reverse KL policy-gradient loss plus one half times Top-K plus Rest DAgger loss">
+            L<sub>total</sub> = L<sub>RKLD-PG</sub> + 0.5 L<sub>Top-K+Rest</sub>
+          </div>
+          <div class="equation-caption"><code>--opd-log-prob-top-k 0</code> keeps sampled RKLD exact at the sampled token. <code>--opd-dagger-top-k 2</code> independently carries teacher <code>[T,2]</code> targets. Under <code>--use-rollout-logprobs</code>, <code>q_old</code> is the behavior-policy logprob returned by SGLang; <code>q_θ</code> remains the live trainer forward and receives gradients.</div>
+        </div>
+        <figcaption class="figure-caption"><strong>Correction:</strong> teacher scoring does not emit a Top-2+Rest scalar as <code>sample.opd_reverse_kl</code> in this recipe. The DAgger path explicitly sets that field to <code>None</code>, retains sampled teacher logprobs for RKLD, and transports sparse teacher targets for the separate direct loss.</figcaption>
+      </figure>
 
-<h2>5 · Fully-async admission metrics — the accepted_staleness family</h2>
+      <h2 id="mechanisms">6 · Performance mechanism: recomputation is now honored, not newly inefficient</h2>
+      <p>Both recipes already requested full activation recomputation. Before the sync, the Megatron-Bridge path silently dropped those flags. Upstream's bridge runtime configuration now propagates them, so the post-sync actor re-runs each layer's forward immediately before its backward. That trades memory headroom for approximately one extra forward-equivalent of work.</p>
 
-<p>Definitions (<code>examples/fully_async/fully_async_rollout.py::_build_staleness_metrics</code>,
-logged once per rollout step by the collector):</p>
-<table>
-<tr><th>metric</th><th>definition</th></tr>
-<tr><td><code>accepted_staleness/mean·min·max</code></td><td>Staleness (current engine weight version &minus; group's oldest generation version) of the groups <em>admitted into this train batch</em>. By construction max &le; <code>max_weight_staleness</code> (2 here) — inadmissible groups never appear in this statistic.</td></tr>
-<tr><td><code>accepted_staleness/over_cap_ratio</code></td><td><code>recycled_over_cap_sample_attempts / observed_sample_attempts</code>: of all completed sample-attempts the collector examined this step, the fraction whose staleness exceeded the cap and were <b>recycled back to the buffer for regeneration</b> (their decode work is discarded). It measures admission-gate rejections, not anything about the train step itself.</td></tr>
-</table>
+      <figure class="figure-shell" id="time-decomposition">
+        <div class="figure-head">
+          <span class="figure-number">Fig. 5</span>
+          <span class="figure-title">Matched step-time decomposition</span>
+          <span class="figure-subtitle">Absolute seconds on a common 45.08 s scale · wait includes data preparation</span>
+        </div>
+        <div class="stack-chart" role="img" aria-label="Stacked step-time bars comparing async and OPD post-sync and reference runs">
+          <div class="stack-row">
+            <div class="stack-label">Async post</div>
+            <div class="stack-track">
+              <span class="stack-segment prep" style="width:1.35%"></span>
+              <span class="stack-segment wait" style="width:40.04%"></span>
+              <span class="stack-segment logp" style="width:11.18%"></span>
+              <span class="stack-segment actor" style="width:34.21%"></span>
+              <span class="stack-segment other" style="width:.29%"></span>
+            </div>
+            <div class="stack-value">39.25</div>
+          </div>
+          <div class="stack-row">
+            <div class="stack-label">Async ref</div>
+            <div class="stack-track">
+              <span class="stack-segment prep" style="width:15.60%"></span>
+              <span class="stack-segment wait" style="width:47.05%"></span>
+              <span class="stack-segment logp" style="width:11.07%"></span>
+              <span class="stack-segment actor" style="width:25.86%"></span>
+              <span class="stack-segment other" style="width:.42%"></span>
+            </div>
+            <div class="stack-value">45.08</div>
+          </div>
+          <div class="stack-row">
+            <div class="stack-label">OPD post</div>
+            <div class="stack-track">
+              <span class="stack-segment prep" style="width:2.28%"></span>
+              <span class="stack-segment wait" style="width:23.78%"></span>
+              <span class="stack-segment actor" style="width:18.08%"></span>
+              <span class="stack-segment other" style="width:.09%"></span>
+            </div>
+            <div class="stack-value">19.94</div>
+          </div>
+          <div class="stack-row">
+            <div class="stack-label">OPD ref</div>
+            <div class="stack-track">
+              <span class="stack-segment prep" style="width:2.26%"></span>
+              <span class="stack-segment wait" style="width:23.40%"></span>
+              <span class="stack-segment actor" style="width:13.64%"></span>
+              <span class="stack-segment other" style="width:.07%"></span>
+            </div>
+            <div class="stack-value">17.75</div>
+          </div>
+        </div>
+        <div class="legend" aria-label="Step time component legend">
+          <span><i style="background:var(--amber)"></i>data preparation</span>
+          <span><i style="background:color-mix(in srgb, var(--amber) 32%, var(--line-soft))"></i>other wait</span>
+          <span><i style="background:var(--blue)"></i>old-logprob forward</span>
+          <span><i style="background:var(--teal)"></i>actor train</span>
+          <span><i style="background:var(--faint)"></i>other train</span>
+        </div>
+        <figcaption class="figure-caption"><strong>Takeaway:</strong> async saves 9.6 s of wait and absorbs the 3.8 s actor increase; OPD wait is unchanged, so its 2.0 s actor increase appears directly in step time.</figcaption>
+      </figure>
 
-<h3>Why it spikes in the first few steps (measured, run 28789)</h3>
-<table>
-<tr><th>step</th><th>0</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>&hellip;steady</th></tr>
-<tr><td>over_cap_ratio</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0.26</td><td class="warn">0.54</td><td>0.29</td><td>0.31</td><td>0.03</td><td>~0.08 mean</td></tr>
-<tr><td>accepted mean (max)</td><td>0 (0)</td><td>0 (0)</td><td>1 (1)</td><td>1.9 (2)</td><td>2 (2)</td><td>1.95 (2)</td><td>1.8 (2)</td><td>1.8 (2)</td><td>2 (2)</td><td>~1.6 (2)</td></tr>
-<tr><td>train_wait (s)</td><td>102</td><td>2.4</td><td>2.5</td><td>2.0</td><td>2.1</td><td>1.5</td><td>1.4</td><td>1.6</td><td>2.7</td><td>10–20</td></tr>
-</table>
-<p><b>The cold-start cohort wave.</b> At t=0 the worker launches its entire active window at once —
-<code>rollout_batch_size &times; prefetch = 128</code> prompt groups, all conditioned on weight
-version 0. The fast prompts of that synchronized wave finish first and feed the trainer a surplus
-of ready batches (train_wait &asymp; 2 s at steps 1–13 vs 10–20 s in steady state), so the weight
-version advances every ~45 s. Meanwhile the wave's long-tail prompts — slowest exactly at step 0,
-when the untrained model writes its longest, most-truncated responses — are still decoding on
-v0–v2. By the time they complete, the current version is 4–7, their staleness is 3+, and the
-admission gate recycles them <em>en masse</em>: over_cap peaks at 0.54 around step 5. Once the
-original cohort drains, launches are naturally staggered (one new launch per completion), only the
-individually-slowest generations straddle &gt;2 updates, and the ratio settles into the noisy
-0–0.2 band. This is a one-time synchronization artifact of startup, not drift.</p>
-<p><b>Why train_time is unaffected.</b> The admission gate decides <em>which</em> groups fill the
-batch, never its size or token budget: every step trains exactly
-<code>rollout_batch_size</code> groups under the same <code>--max-tokens-per-gpu 16384</code>
-dynamic batching, so per-step train compute is invariant to recycling. The cost of an over-cap
-storm lands elsewhere — as discarded sampler decode (the recycled groups' generation work) and,
-when supply is tight, as trainer <em>wait</em>. During this particular storm supply was anything
-but tight (the wave surplus kept train_wait at ~2 s), so the spike is invisible in every
-trainer-side timing metric — exactly as designed.</p>
+      <table>
+        <caption>Trainer metric anatomy over matched windows.</caption>
+        <thead><tr><th scope="col">Metric</th><th scope="col" class="numeric">Async post / pre</th><th scope="col" class="numeric">OPD post / pre</th><th scope="col">Interpretation</th></tr></thead>
+        <tbody>
+          <tr><td>Actor train time</td><td class="numeric">15.42 / 11.66 s</td><td class="numeric">8.15 / 6.15 s</td><td>Approximately ×1.32, the expected full-recompute signature.</td></tr>
+          <tr><td>Old-logprob forward</td><td class="numeric">5.04 / 4.99 s</td><td class="numeric">none</td><td>Unchanged control: the environment and kernels did not broadly regress.</td></tr>
+          <tr><td>Reported actor TFLOPS</td><td class="numeric">203.0 / 265.0</td><td class="numeric">173.0 / 212.5</td><td>MFU uses a fixed 3F numerator and books the recompute forward as overhead.</td></tr>
+          <tr><td>Recompute-corrected TFLOPS</td><td class="numeric">270.6 / 265.0</td><td class="numeric">230.6 / n/a</td><td>The async hardware view is effectively at parity (+2%).</td></tr>
+        </tbody>
+      </table>
 
+      <div class="callout">
+        <p><strong>Operational decision.</strong> Keep recomputation enabled for the validated baseline. Removing it could reclaim roughly 25% of actor speed, but costs the memory headroom the flags were intended to provide. It yields little end-to-end benefit when async sampling is the bottleneck; it matters more for the synchronous OPD cadence and should be a separate controlled experiment.</p>
+      </div>
 
-<h2>6 · OPD train-side metrics — definitions, the zero pair, and the early grad spike</h2>
+      <h2 id="staleness">7 · Fully async admission: the startup spike is a cohort effect</h2>
+      <p><code>accepted_staleness</code> describes only groups admitted into the training batch. <code>over_cap_ratio</code> measures completed attempts rejected by the cap and recycled for regeneration. A high rejection ratio therefore signals discarded sampler work, not an oversized or stale train batch.</p>
 
-<table>
-<tr><th>metric</th><th>definition</th></tr>
-<tr><td><code>train/ess_ratio</code></td><td>Effective-sample-size fraction under importance weighting. Per-token weights <code>w = exp(log p_train − log q_old)</code> (= <code>exp(−ppo_kl)</code>); per-sample masked sums give <code>ESS = (Σw)² / (N·Σw²)</code>, aggregated over the batch. 1.0 ⇔ all weights equal ⇔ perfectly on-policy; the run sits at 0.9986 steady (0.986 worst dip) — negligible weight dispersion at staleness cap 2.</td></tr>
-<tr><td><code>train/ppo_kl</code></td><td>Mean of <code>log q_old − log p_train</code> at sampled tokens — how far the trainer has moved from the behaviour policy within the staleness window. Steady ≈ 0.0007.</td></tr>
-<tr><td><code>train/train_rollout_logprob_abs_diff</code>, <code>train/train_rollout_kl</code></td><td>Compare <b>q_old</b> against the rollout engine's logprobs. Under <code>--use-rollout-logprobs</code>, q_old <em>is</em> the rollout logprobs, so this pair is <b>zero by definition</b> — the flat-0 panels are correct wiring, not a bug. The source comment says exactly this (&ldquo;zero by definition under --use-rollout-logprobs; retained for backward compatibility&rdquo;).</td></tr>
-<tr><td><code>train/current_rollout_logprob_abs_diff</code>, <code>train/current_rollout_kl</code></td><td>The <b>live</b> replacement pair: compares the current trainer forward against the rollout engine. Non-degenerate in this run (steady 0.0007, early max 0.007) — this is the panel to watch for trainer↔engine numerics drift in rollout-q_old runs.</td></tr>
-</table>
+      <figure class="figure-shell" id="staleness-wave">
+        <div class="figure-head">
+          <span class="figure-number">Fig. 6</span>
+          <span class="figure-title">Cold-start over-cap cohort wave</span>
+          <span class="figure-subtitle">Run 28789 · rejected sample-attempt fraction by rollout step · cap = 2 versions</span>
+        </div>
+        <div class="staleness-grid" role="img" aria-label="Over cap ratio is zero at steps zero through three, rises to 0.26 at step four, peaks at 0.54 at step five, then falls toward 0.03 by step eight">
+          <div class="stale-column"><div class="stale-bar" style="height:0%"></div><span class="stale-value">0</span><span class="stale-step">0</span></div>
+          <div class="stale-column"><div class="stale-bar" style="height:0%"></div><span class="stale-value">0</span><span class="stale-step">1</span></div>
+          <div class="stale-column"><div class="stale-bar" style="height:0%"></div><span class="stale-value">0</span><span class="stale-step">2</span></div>
+          <div class="stale-column"><div class="stale-bar" style="height:0%"></div><span class="stale-value">0</span><span class="stale-step">3</span></div>
+          <div class="stale-column"><div class="stale-bar" style="height:48%"></div><span class="stale-value">.26</span><span class="stale-step">4</span></div>
+          <div class="stale-column"><div class="stale-bar" style="height:100%"></div><span class="stale-value">.54</span><span class="stale-step">5</span></div>
+          <div class="stale-column"><div class="stale-bar" style="height:54%"></div><span class="stale-value">.29</span><span class="stale-step">6</span></div>
+          <div class="stale-column"><div class="stale-bar" style="height:57%"></div><span class="stale-value">.31</span><span class="stale-step">7</span></div>
+          <div class="stale-column"><div class="stale-bar" style="height:6%"></div><span class="stale-value">.03</span><span class="stale-step">8</span></div>
+        </div>
+        <figcaption class="figure-caption"><strong>Mechanism:</strong> 128 prompt groups launch together on weight version 0. Fast completions advance the trainer while long-tail responses remain on old weights. Those late members finish around steps 4–7 and are rejected together. Once the synchronized cohort drains, launches stagger naturally and the mean rejection ratio settles near 0.08.</figcaption>
+      </figure>
 
-<h3>The early grad_norm spike is a reproduced recipe characteristic</h3>
-<table>
-<tr><th></th><th>post-sync 28790</th><th>pre-sync 27456 (m10b)</th></tr>
-<tr><td>grad_norm peak (pre-clip)</td><td>470.9 @ step 17</td><td>231.8 @ step 7</td></tr>
-<tr><td>co-located spikes (same step)</td><td>pg_loss 0.90 · reverse-KL 0.84</td><td>pg_loss 0.61 · reverse-KL 0.57</td></tr>
-<tr><td>late means (steps 100–199)</td><td>pg 0.0988 · rKL 0.0997 · ess 0.9986 · current_rollout_kl 0.0007</td><td>pg 0.0989 · rKL 0.0998 · ess 0.9985 · current_rollout_kl 0.0007</td></tr>
-</table>
-<h3>The full causal chain (each layer verified in code)</h3>
-<table>
-<tr><th>layer</th><th>what happens</th></tr>
-<tr><td><b>L1 · objective</b></td><td>This recipe is pure distillation (task reward is telemetry-only). Teacher scoring emits per-token k1 = <code>log q_old − log p_teacher</code> (<code>_compute_topk_reverse_kl</code>, Top-2+Rest approximation) shipped to the trainer as <code>sample.opd_reverse_kl</code>.</td></tr>
-<tr><td><b>L2 · injection — the weak point</b></td><td><code>apply_opd_kl_to_advantages</code> is one line: <code>advantages[i] = adv − opd_kl_coef·reverse_kl</code> (coef 1.0, per-token, detached, <b>no clamp anywhere</b>; this run has <code>normalize_advantages=False</code>). PPO's <code>eps_clip</code> bounds the probability <em>ratio</em> side only — advantage magnitude passes through untouched.</td></tr>
-<tr><td><b>L3 · early-era baseline</b></td><td>Student is farthest from teacher at cold start: <code>k1/max</code> is 27–33 nats/token on <em>every</em> step 13–23 — tokens the teacher prices at e<sup>−30</sup> are always present, not just at the spike.</td></tr>
-<tr><td><b>L4 · the trigger batch</b></td><td>Step 17's distinction is outlier <em>mass</em>: k1 mean 0.84 = 4× neighbours — moving a 512-sample mean that far takes whole trajectories, not stray tokens. And that batch's task reward was the window's <em>highest</em> (0.719): these were <b>correct answers in a style the 30B-Thinking teacher dislikes</b>. A pure-distillation objective presses on task-correct trajectories exactly as hard — that is its nature, not a bug.</td></tr>
-<tr><td><b>L5 · gradient formation</b></td><td>Per-token pg gradient scales with |advantage|: one 31-nat token contributes like 31 ordinary tokens; thousands of 4×-elevated tokens stack into a 470 pre-clip global norm. pg_loss/reverse-KL spike in lockstep (same source); ppo_kl/clipfrac barely move (the ratio side <em>is</em> guarded by eps_clip).</td></tr>
-<tr><td><b>L6 · application &amp; recovery</b></td><td><code>clip_grad=1.0</code>, and the steady pre-clip norm is mean 0.84 / p95 1.04 — half of <em>normal</em> steps already clip. The spike step's parameter displacement is therefore exactly ordinary-sized; its direction is the batch's true objective gradient, merely low-SNR (dominated by few trajectories). Aftermath: no NaN, ppo_kl peak 0.017, all series back in band within ~10 steps, endpoint parity with the reference to the third decimal.</td></tr>
-</table>
+      <p>The gate does not change per-step training compute: every accepted batch still contains the configured number of groups under the same token budget. During the startup wave, ready supply is abundant, so trainer wait remains low even while sampler decode is discarded. This is why the spike is not visible in actor timing.</p>
 
-<p><b>Class vs instance.</b> Which early batch draws a disagreement-dense trajectory cluster is
-sampling luck — 470@17 (new) vs 232@7 (reference) are two rolls of the same die. The <em>class</em>
-is deterministic (guaranteed by L1–L3); the <em>instance</em> is random.</p>
+      <h2 id="spike">8 · OPD gradient spike: contained, reproducible, and correctly attributed</h2>
+      <p>The current recipe uses rollout logprobs as <code>q_old</code>. At cold start, some sampled tokens are tens of nats more likely under the student than under the teacher. That heavy-tailed sampled k1 enters advantages without clamping. PPO's ratio clip does not cap advantage magnitude; global gradient clipping is the final backstop.</p>
 
-<h3>Why eps_clip cannot catch this — and why the spikes self-extinguish</h3>
-<p><b>PPO clip is a trust-region gate, not a gradient bound.</b> The clipped surrogate
-<code>−min(r·A, clip(r,1−ε,1+ε)·A)</code> zeroes a token's gradient only when the ratio has
-<em>already escaped</em> the band in the profitable direction ((A&gt;0, r&gt;1+ε) or (A&lt;0,
-r&lt;1−ε)). In this pipeline every batch receives exactly <b>one</b> optimizer pass (no PPO
-epochs), so r deviates from 1 only through staleness — ppo_kl ≈ 0.0007 ⇒ r ≈ 1±0.03, deep inside
-the ±0.2/0.28 band. Measured <code>pg_clipfrac</code>: 0.24% steady, 2.8% even at the spike — for
-&gt;97% of tokens the surrogate sits on the unclipped branch where the gradient is
-<code>−A·∇log p</code> with r≈1: <b>the advantage multiplies through at full magnitude</b>.
-Classic PPO gets |A| boundedness from advantage whitening; this run has
-<code>normalize_advantages=False</code> and OPD injects raw k1 as A, so nothing between the teacher
-score and the optimizer bounds magnitude except <code>clip_grad</code>.</p>
-<p><b>Why the spike class fades after the early era</b> (measured on 28790):</p>
-<table>
-<tr><th>window (rollout steps)</th><th>5–25</th><th>50–80</th><th>100–150</th><th>160–199</th></tr>
-<tr><td>k1/max (mean of per-step max)</td><td>29.4</td><td>19.6</td><td>14.2</td><td>13.3</td></tr>
-<tr><td>k1/mean</td><td>0.312</td><td>0.130</td><td>0.104</td><td>0.095</td></tr>
-</table>
-<p>Three reinforcing reasons. (a) <em>The objective is literally minimizing it</em>: RKLD-PG's
-reward is −k1, so E[k1] falls by construction (0.312→0.095). (b) <em>On-policy self-extinction</em>:
-a 30-nat token receives the strongest possible push <em>down</em> on its own log-probability — the
-student stops sampling exactly the tokens that disagree most, and because rollouts are on-policy,
-those tokens then vanish from future batches (off-policy distillation has no such feedback).
-(c) <em>Spikes need mass, and the mass is gone</em>: a spike requires whole disagreement-dense
-trajectories (thousands of correlated elevated tokens), which early sampling produces routinely and
-converged sampling essentially never; a lone 13-nat token among ~200k contributes nothing to the
-batch norm. Empirically grad_norm never exceeds 1.35 after step 50.</p>
+      <div class="equation-block">
+        <div class="equation-line" aria-label="OPD advantage equals task advantage minus beta times log q old minus log p teacher">
+          A<sub>t</sub><sup>OPD</sup> = A<sub>t</sub><sup>task</sup> − β [log q<sub>old</sub>(y<sub>t</sub>|h<sub>t</sub>) − log p<sub>T</sub>(y<sub>t</sub>|h<sub>t</sub>)]
+        </div>
+        <div class="equation-caption">In this baseline, task reward is telemetry-only, <code>β=1</code>, and advantage normalization is disabled. The bracketed term is detached before it scales the sampled-token policy gradient.</div>
+      </div>
 
-<h3>Severity assessment</h3>
-<table>
-<tr><th>regime</th><th>verdict</th></tr>
-<tr><td>current config (rollout-q_old, staleness cap 2)</td><td>benign cold-start transient; zero damage (endpoint parity is the proof)</td></tr>
-<tr><td>degraded conditions (m12: recompute-q_old, cap 4)</td><td><b>the same mechanism turns chronic</b> — spike clusters at steps 83–98, peak 381, negative RKLD (empirically shown)</td></tr>
-<tr><td>structural</td><td>the advantage path has <b>zero source-level protection</b>; all safety rests on grad clipping (the bluntest last-line tool) plus currently-mild conditions</td></tr>
-</table>
+      <figure class="figure-shell" id="gradient-spike">
+        <div class="figure-head">
+          <span class="figure-number">Fig. 7</span>
+          <span class="figure-title">Early pre-clip gradient peaks and late recovery</span>
+          <span class="figure-subtitle">Bar width uses log10(value + 1) so the late regime remains visible</span>
+        </div>
+        <div class="log-bars" role="img" aria-label="Post-sync gradient norm peaks at 470.9 at step 17, the reference peaks at 231.8 at step 7, and the post-sync run stays below 1.35 after step 50">
+          <div class="log-row"><span class="log-label">Post-sync peak · step 17</span><div class="log-track"><div class="log-fill" style="--value:100%"></div></div><span class="log-value">470.9</span></div>
+          <div class="log-row"><span class="log-label">Reference peak · step 7</span><div class="log-track"><div class="log-fill reference" style="--value:88.5%"></div></div><span class="log-value">231.8</span></div>
+          <div class="log-row"><span class="log-label">Post-sync max · step ≥ 50</span><div class="log-track"><div class="log-fill late" style="--value:13.9%"></div></div><span class="log-value">≤ 1.35</span></div>
+        </div>
+        <figcaption class="figure-caption"><strong>Takeaway:</strong> the precise spike step is sampling luck, but the spike class is reproducible. Both runs show an early event, and the post-sync run recovers without NaN or endpoint drift because <code>clip_grad=1.0</code> bounds the applied update.</figcaption>
+      </figure>
 
-<h3>Mitigation options and trade-offs</h3>
-<ol>
-<li><b>Per-token k1 winsorization</b> (clamp to ±K nats before advantage injection) — kills the class at the source; an e<sup>−30</sup> token keeps its gradient <em>direction</em>, only the magnitude is capped; small, documentable bias. Pick K from the observed k1 distribution (p99), not by fiat.</li>
-<li><b>Coefficient warm-up</b> (ramp opd_kl_coef over the first ~30 steps) — covers precisely the max-distance era; simplest; no steady-state protection.</li>
-<li><b><code>normalize_advantages=True</code></b> would suppress outliers automatically but changes the objective's semantics — that is a different experiment, not a fix.</li>
-<li>Keep <code>clip_grad=1.0</code> as the backstop it already is.</li>
-</ol>
-<p><b>Recommendation:</b> leave the frozen baselines untouched (their value is comparability).
-If the wide-staleness direction (m12 follow-on) restarts, do (1) first with (2) alongside — in that
-regime this class stops being a one-off transient and becomes daily weather.</p>
+      <figure class="figure-shell" id="k1-decay">
+        <div class="figure-head">
+          <span class="figure-number">Fig. 8</span>
+          <span class="figure-title">The heavy-tail signal decays as the on-policy student aligns</span>
+          <span class="figure-subtitle">Run 28790 · window means · each row is independently normalized to its first window</span>
+        </div>
+        <div class="decay-grid" role="img" aria-label="k1 maximum mean declines from 29.4 to 13.3 nats and k1 mean declines from 0.312 to 0.095 across training windows">
+          <div></div><div class="decay-heading">5–25</div><div class="decay-heading">50–80</div><div class="decay-heading">100–150</div><div class="decay-heading">160–199</div>
+          <div class="decay-label">k1 / max</div>
+          <div class="decay-cell"><div class="decay-bar" style="--value:100%"></div><div class="decay-value">29.4</div></div>
+          <div class="decay-cell"><div class="decay-bar" style="--value:66.7%"></div><div class="decay-value">19.6</div></div>
+          <div class="decay-cell"><div class="decay-bar" style="--value:48.3%"></div><div class="decay-value">14.2</div></div>
+          <div class="decay-cell"><div class="decay-bar" style="--value:45.2%"></div><div class="decay-value">13.3</div></div>
+          <div class="decay-label">k1 / mean</div>
+          <div class="decay-cell"><div class="decay-bar mean" style="--value:100%"></div><div class="decay-value">.312</div></div>
+          <div class="decay-cell"><div class="decay-bar mean" style="--value:41.7%"></div><div class="decay-value">.130</div></div>
+          <div class="decay-cell"><div class="decay-bar mean" style="--value:33.3%"></div><div class="decay-value">.104</div></div>
+          <div class="decay-cell"><div class="decay-bar mean" style="--value:30.4%"></div><div class="decay-value">.095</div></div>
+        </div>
+        <figcaption class="figure-caption"><strong>Mechanism:</strong> the objective pushes down sampled tokens with the largest disagreement. Because future rollouts are on-policy, those actions become less likely to reappear, so both tail magnitude and disagreement-dense trajectories diminish.</figcaption>
+      </figure>
 
-<div class="note"><b>One-line verdict:</b> the spike is the inevitable product of an unclamped
-heavy-tailed estimator meeting a disagreement-dense batch — currently caged by grad clipping and
-mild conditions. The cage is real; remember what lives inside it.</div>
+      <section class="finding warn">
+        <h3>8.1 What the current evidence licenses</h3>
+        <p><strong>Current recipe:</strong> benign cold-start transient under rollout <code>q_old</code>, staleness cap 2, and global gradient clipping.<br><strong>Wider-staleness direction:</strong> not cleared by this result. Earlier recompute-<code>q_old</code>, cap-4 evidence showed chronic spike clusters and negative RKLD.<br><strong>Hardening order:</strong> if that direction resumes, measure the k1 distribution, then test per-token winsorization and an RKLD coefficient warm-up as explicit algorithm changes. Do not rewrite the frozen baseline.</p>
+      </section>
 
-<h2>7 · What the validation exercised</h2>
-<table>
-<tr><th>layer</th><th>change under test</th><th>covered by</th></tr>
-<tr><td>miles merge</td><td>187 upstream commits + 20 hand-resolved conflicts (FT series, session scale-out, tracking refactor, actor factory, filter_long_prompt fusion, prefetch-over-#1677 layering)</td><td>both runs end-to-end</td></tr>
-<tr><td>sglang v0.5.15</td><td>rebased sglang-miles line + 4 re-applied patches (mrope gate, cu12 flavors, exact scoring, qwen-vl pretokenized IDs); flush_cache patch retired in favour of upstream #31962</td><td>16-engine async flight (weight updates ×2000+), teacher exact-suffix scoring in 28790</td></tr>
-<tr><td>env</td><td>numpy 2.3.5 (cap removed), transformers 5.12.1, TMS 6d5bce48, v0.5.15 +cu129 kernels</td><td>clean-slate install (job 28782, 12m32s, verify green) + both runs</td></tr>
-</table>
+      <h2 id="validation">9 · Validation boundary: what passed, what changed, and what did not</h2>
+      <table>
+        <caption>Evidence attached to the frozen snapshot.</caption>
+        <thead><tr><th scope="col">Layer</th><th scope="col">Change under test</th><th scope="col">Evidence</th><th scope="col">Verdict</th></tr></thead>
+        <tbody>
+          <tr><td>Miles merge</td><td>187 commits; FT, session scale-out, tracking, actor factory, prompt filtering, prefetch layering</td><td>Both baseline families end to end</td><td><span class="status good">Passed</span></td></tr>
+          <tr><td>SGLang v0.5.15</td><td>Four re-applied patches; pause-aware flush patch retired in favor of upstream behavior</td><td>16-engine async flight and exact teacher suffix scoring</td><td><span class="status good">Passed</span></td></tr>
+          <tr><td>Environment</td><td>numpy 2.3.5, transformers 5.12.1, TMS 6d5bce48, cu129 kernels</td><td>Clean install job 28782; verify green; both runs</td><td><span class="status good">Passed</span></td></tr>
+          <tr><td>Fast tests</td><td>Prompt filtering, OPD, true-on-policy metric paths</td><td>4/4, 68/68, 8/8</td><td><span class="status good">Passed</span></td></tr>
+          <tr><td>SGLang patch tests</td><td>Exact scoring, pretokenized IDs, request structures</td><td>54 tests plus 13 subtests</td><td><span class="status good">Passed</span></td></tr>
+        </tbody>
+      </table>
 
-<h2>8 · Incidents found &amp; fixed during validation</h2>
-<table>
-<tr><th>incident</th><th>root cause</th><th>fix (commit)</th></tr>
-<tr><td>install job 28781 failed</td><td><code>nvidia-resiliency-ext</code> (upstream FT dep) ships manylinux_2_39-only wheels; cluster glibc is 2.35. miles references the package only in a docstring.</td><td>glibc-gated filter in install_env.sh</td></tr>
-<tr><td>run 28788 failed at teacher startup</td><td>sglang v0.5.15 dlopens <code>libcudnn_heuristic</code> at model-runner import; the batch-shell scope that launches head-node envpack servers lacked the env cuDNN dir on <code>LD_LIBRARY_PATH</code>, so the loader resolved <code>libcudnn_graph</code> to an older system copy (undefined symbol). Invisible pre-sync: v0.5.13 never exercised that dlopen.</td><td>cuDNN prepend added to batch-shell + envpack-server scopes in launch_miles.sbatch</td></tr>
-</table>
+      <h3>9.1 Validation incidents closed before the successful runs</h3>
+      <table>
+        <thead><tr><th scope="col">Incident</th><th scope="col">Root cause</th><th scope="col">Resolution</th></tr></thead>
+        <tbody>
+          <tr><td>Install job 28781</td><td><code>nvidia-resiliency-ext</code> publishes manylinux_2_39 wheels; cluster glibc is 2.35.</td><td><span class="mono">8d5726f8</span> gates the unused package by glibc version.</td></tr>
+          <tr><td>Teacher startup 28788</td><td>Batch-shell and envpack-server scopes resolved cuDNN graph libraries from an older system path.</td><td><span class="mono">1a134f6d</span> prepends the environment cuDNN directory to <code>LD_LIBRARY_PATH</code>.</td></tr>
+        </tbody>
+      </table>
 
-<div class="note">
-<b>Network disruption (2026-07-25):</b> neither run recorded a wandb logging gap &gt; 10 minutes and
-28789's launcher log shows zero health-check kills or CLUSTER_DEAD events across the window — the
-incident did not reach the cluster fabric or the runs.
-</div>
+      <div class="callout warn">
+        <p><strong>Not part of the validated stack.</strong> Official <code>radixark/miles/main</code> is now at <code>59c73017</code>, ten commits after <code>c94c2fa9</code>. The delta includes session sample-assembly extraction, an <code>actor_factory</code> change, NVFP4 work, and Docker/TransformerEngine updates. Session assembly and actor construction touch prior conflict surfaces; incorporating them requires a new sync event and invalidates this report as evidence for the new tip.</p>
+      </div>
 
-<p class="meta">Data: wandb M3TRL/baseline (runs 21354, 28789, 28790) + M3TRL/OPD (27456), windows are
-means over <code>rollout/step</code> ranges; curves smoothed with short moving averages as captioned.
-Companion records: <code>pr-body.md</code>, <code>sglang-sync-notes.md</code>, <code>follow-ups.md</code> in this folder.</p>
+      <h2 id="next">10 · Next gate: ship the validated snapshot, then start a new incremental sync</h2>
+      <p>The repository's <code>miles-sync</code> skill treats a sync as an auditable snapshot. It forbids silently absorbing new upstream commits after validation, requires a merge commit so upstream ancestry survives, and requires explicit approval before creating or updating the PR.</p>
 
+      <div class="next-steps" aria-label="Recommended next actions">
+        <section class="next-step">
+          <div><strong>Freeze the current scope at upstream <span class="mono">c94c2fa9</span></strong><p>The clean install, pin check, fast tests, 2034-step async run, and 200-step OPD run all apply to this exact snapshot.</p></div>
+          <span class="status good">Recommended</span>
+        </section>
+        <section class="next-step">
+          <div><strong>Refresh and review the tracked PR body</strong><p>Update <a href="pr-body.md"><span class="mono">pr-body.md</span></a> so its validation checklist reflects the completed install and baseline runs, then check for an existing PR before creating one. No push or PR mutation should occur without explicit approval.</p></div>
+          <span class="status warn">Approval gate</span>
+        </section>
+        <section class="next-step">
+          <div><strong>Merge with “Create a merge commit”</strong><p>Do not squash or rebase. Future syncs depend on the original upstream SHAs remaining reachable through merge-base analysis.</p></div>
+          <span class="status bad">Hard rule</span>
+        </section>
+        <section class="next-step">
+          <div><strong>Handle the ten newer commits in a fresh sync branch</strong><p>Start from the then-current <span class="mono">main</span>, read only this latest sync record, run the upstream-PR pre-analysis, and stop for user review on any conflict. Re-run the affected fast tests and at least short pure-RL and OPD gates.</p></div>
+          <span class="status info">Next event</span>
+        </section>
+      </div>
+
+      <section class="finding">
+        <h3>10.1 Why not extend this branch now?</h3>
+        <p>The current branch already has a coherent proof chain from merge to deployment to learning curves. Adding the latest ten commits would change session assembly, actor construction, dependencies, and the tested tree after the evidence was collected. A smaller follow-up sync is easier to review and gives the new changes an honest validation boundary.</p>
+      </section>
+
+      <h3>10.2 Source record</h3>
+      <dl class="reference-list">
+        <dt>Sync body</dt><dd><a href="pr-body.md">pr-body.md</a></dd>
+        <dt>Follow-ups</dt><dd><a href="follow-ups.md">follow-ups.md</a></dd>
+        <dt>SGLang notes</dt><dd><a href="sglang-sync-notes.md">sglang-sync-notes.md</a></dd>
+        <dt>Upstream inventory</dt><dd><a href="prs.md">prs.md</a></dd>
+        <dt>Divergence</dt><dd><a href="divergence.stat">divergence.stat</a></dd>
+        <dt>Baseline recipe</dt><dd><span class="mono">scripts/experiments/OPD/multimodal/baseline/baseline-geo3k-multimodal-multiturn-fully-async-200step.sh</span></dd>
+      </dl>
+
+      <footer>
+        Updated 2026-07-25 · Data provenance: W&amp;B runs 28789, 21354, 28790, and 27456; committed sync records; current repository code paths<br>
+        Revision: <span class="mono">sync-upstream-20260723@15dc6728</span> · Page structure: <span class="mono">reports/report-template</span> / <span class="mono">reports/MOE</span> · self-contained, no network assets
+      </footer>
+    </article>
+  </div>
+
+  <script data-source="reports/report-template/report.js">
+    (function () {
+      "use strict";
+
+      document.querySelectorAll("table").forEach((table) => {
+        const labels = [...table.querySelectorAll("thead th")].map((cell) => cell.textContent.trim());
+        table.querySelectorAll("tbody tr").forEach((row) => {
+          [...row.children].forEach((cell, index) => {
+            cell.dataset.label = labels[index] || "Value";
+          });
+        });
+      });
+
+      const chartData = {
+        async: {
+          windows: ["100–200", "200–1000", "1000–1700"],
+          metrics: {
+            reward: {
+              label: "Raw reward",
+              max: 1,
+              post: [0.756, 0.856, 0.911],
+              reference: [0.750, 0.855, 0.913],
+              format: (value) => value.toFixed(3),
+              axis: "1.0",
+              aria: "Pure RL raw reward comparison across matched windows",
+              insight: "Maximum absolute reward delta: 0.006. Learning behavior is closely matched."
+            },
+            rollout: {
+              label: "Rollout time",
+              max: 45,
+              post: [36.6, 35.5, 35.3],
+              reference: [40.3, 40.3, 41.0],
+              format: (value) => `${value.toFixed(1)} s`,
+              axis: "45 s",
+              aria: "Pure RL rollout time comparison across matched windows",
+              insight: "Post-sync wall-clock rollout time is 9.2%, 11.9%, and 13.9% lower."
+            },
+            throughput: {
+              label: "Effective throughput",
+              max: 850,
+              post: [779, 566, 488],
+              reference: [617, 482, 424],
+              format: (value) => `${value} tok/GPU/s`,
+              axis: "850",
+              aria: "Pure RL effective token throughput comparison across matched windows",
+              insight: "Effective token throughput is 26%, 17%, and 15% higher post-sync."
+            }
+          }
+        },
+        opd: {
+          windows: ["0–25", "50–100", "150–199"],
+          metrics: {
+            rkl: {
+              label: "Reverse-KL",
+              max: 0.35,
+              post: [0.326, 0.1246, 0.0954],
+              reference: [0.287, 0.1242, 0.0958],
+              format: (value) => value < 0.2 ? value.toFixed(4) : value.toFixed(3),
+              axis: "0.35",
+              aria: "OPD reverse KL comparison across matched windows",
+              insight: "Cold start differs; both stable windows agree within 0.0004."
+            },
+            reward: {
+              label: "Task reward telemetry",
+              max: 0.6,
+              post: [0.537, 0.409, 0.442],
+              reference: [0.491, 0.377, 0.415],
+              format: (value) => value.toFixed(3),
+              axis: "0.60",
+              aria: "OPD task reward telemetry comparison across matched windows",
+              insight: "Post-sync task reward telemetry is 0.027–0.046 higher; it is not optimized."
+            },
+            truncation: {
+              label: "Truncation ratio",
+              max: 0.7,
+              post: [0.429, 0.603, 0.571],
+              reference: [0.480, 0.630, 0.599],
+              format: (value) => value.toFixed(3),
+              axis: "0.70",
+              aria: "OPD truncation ratio comparison across matched windows",
+              insight: "Post-sync truncation is 0.027–0.051 lower in each matched window."
+            }
+          }
+        }
+      };
+
+      function renderChart(shell, metricKey) {
+        const chartKey = shell.dataset.chart;
+        const group = chartData[chartKey];
+        const metric = group.metrics[metricKey];
+        const target = shell.querySelector(".paired-chart");
+        const insight = shell.querySelector(".chart-insight");
+        target.replaceChildren();
+        target.setAttribute("aria-label", metric.aria);
+
+        group.windows.forEach((windowLabel, index) => {
+          const row = document.createElement("div");
+          row.className = "paired-row";
+
+          const label = document.createElement("div");
+          label.className = "paired-window";
+          label.textContent = windowLabel;
+
+          const bars = document.createElement("div");
+          bars.className = "paired-bars";
+
+          [
+            ["Post-sync", metric.post[index], ""],
+            ["Reference", metric.reference[index], "reference"]
+          ].forEach(([series, value, variant]) => {
+            const line = document.createElement("div");
+            line.className = "paired-line";
+
+            const seriesLabel = document.createElement("span");
+            seriesLabel.className = "series-label";
+            seriesLabel.textContent = series;
+
+            const track = document.createElement("div");
+            track.className = "bar-track";
+            const fill = document.createElement("div");
+            fill.className = `bar-fill ${variant}`.trim();
+            fill.style.setProperty("--value", `${Math.max(0, Math.min(100, value / metric.max * 100))}%`);
+            track.append(fill);
+
+            const seriesValue = document.createElement("span");
+            seriesValue.className = "series-value";
+            seriesValue.textContent = metric.format(value);
+
+            line.append(seriesLabel, track, seriesValue);
+            bars.append(line);
+          });
+
+          row.append(label, bars);
+          target.append(row);
+        });
+
+        const axis = document.createElement("div");
+        axis.className = "chart-axis";
+        axis.innerHTML = `<span>0</span><span>${metric.axis}</span>`;
+        target.append(axis);
+        insight.textContent = metric.insight;
+
+        shell.querySelectorAll(".seg-button").forEach((button) => {
+          button.setAttribute("aria-pressed", String(button.dataset.metric === metricKey));
+        });
+      }
+
+      document.querySelectorAll(".interactive-chart").forEach((shell) => {
+        const active = shell.querySelector('.seg-button[aria-pressed="true"]');
+        renderChart(shell, active ? active.dataset.metric : shell.querySelector(".seg-button").dataset.metric);
+        shell.querySelectorAll(".seg-button").forEach((button) => {
+          button.addEventListener("click", () => renderChart(shell, button.dataset.metric));
+        });
+      });
+
+      const revealItems = document.querySelectorAll("figure, .finding, .callout, .metric-strip");
+      revealItems.forEach((item) => item.classList.add("reveal"));
+
+      const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if ("IntersectionObserver" in window && !reduceMotion) {
+        const revealObserver = new IntersectionObserver((entries, observer) => {
+          entries.forEach((entry) => {
+            if (!entry.isIntersecting) return;
+            entry.target.classList.add("is-visible");
+            observer.unobserve(entry.target);
+          });
+        }, { rootMargin: "0px 0px -12% 0px", threshold: 0.08 });
+        revealItems.forEach((item) => revealObserver.observe(item));
+      } else {
+        revealItems.forEach((item) => item.classList.add("is-visible"));
+      }
+
+      const tocLinks = [...document.querySelectorAll(".toc a[href^='#']")];
+      const tocTargets = tocLinks
+        .map((link) => document.querySelector(link.getAttribute("href")))
+        .filter(Boolean);
+
+      if ("IntersectionObserver" in window) {
+        const tocObserver = new IntersectionObserver((entries) => {
+          const visible = entries
+            .filter((entry) => entry.isIntersecting)
+            .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+          if (!visible) return;
+          tocLinks.forEach((link) => {
+            link.classList.toggle("active", link.getAttribute("href") === `#${visible.target.id}`);
+          });
+        }, { rootMargin: "-18% 0px -70% 0px", threshold: 0 });
+        tocTargets.forEach((target) => tocObserver.observe(target));
+      }
+    })();
+  </script>
 </body>
 </html>

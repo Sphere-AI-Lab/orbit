@@ -35,16 +35,26 @@ torch unchanged (2.11.0) → ACTIVE bundle stays `cu129-x86_64-v0.5.12` (bundle-
 - Unit tests on final pin: **54 passed + 13 subtests**
   (test_scoring_suffix{,_scheduler,_api}, test_pretokenized_input_ids, test_io_struct).
 
-## Publish plan (Step 8 — NOT executed yet; waits for explicit approval)
+## Publication status and remaining landing plan
+
+Completed:
+
+- `sync-v0.5.15-20260724` is published on `impossible-inc/sglang`.
+- The branch tip is `38d4bbef599e3375f143f48a27c659910ebdd064`,
+  exactly matching the Miles gitlink.
+
+Not yet executed:
+
+- Open the review PR from `sync-v0.5.15-20260724` to `sglang-miles`.
+- After review, archive the old line and lease-guarded force-advance
+  `sglang-miles`. Do not perform this landing while the PRs are only being
+  opened for review.
 
 ```bash
 S=thirdparty/sglang; NEWPIN=38d4bbef599e3375f143f48a27c659910ebdd064
-# 1. anchor branch (non-force; makes the pin fetchable + gc-safe)
-git -C $S checkout -B sync-v0.5.15-20260724 "$NEWPIN"
-git -C $S push origin refs/heads/sync-v0.5.15-20260724:refs/heads/sync-v0.5.15-20260724
-# 2. review PR sync-v0.5.15-20260724 -> sglang-miles on impossible-inc/sglang (history track,
+# 1. review PR sync-v0.5.15-20260724 -> sglang-miles on impossible-inc/sglang (history track,
 #    per PR #1 v0.5.12 / PR #2 v0.5.13 precedent) — BEFORE the force-advance
-# 3. archive old tip, then lease-guarded force-advance + date tags
+# 2. after review, archive old tip, then lease-guarded force-advance + date tags
 OLD=$(git -C $S ls-remote origin sglang-miles | awk '{print $1}')   # expect 27d5e97c3
 git -C $S push origin "$OLD:refs/heads/sglang-miles-v0.5.13-final"
 git -C $S tag sglang-miles-v0.5.13-20260724 "$OLD" && git -C $S push origin sglang-miles-v0.5.13-20260724
