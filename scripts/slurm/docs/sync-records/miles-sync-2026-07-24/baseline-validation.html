@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>miles-sync 2026-07-24 — baseline validation (sglang v0.5.15 stack)</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+         max-width: 900px; margin: 2rem auto; padding: 0 1.2rem; color: #222; line-height: 1.55; }
+  h1 { font-size: 1.45rem; border-bottom: 2px solid #1f7ea6; padding-bottom: .4rem; }
+  h2 { font-size: 1.15rem; margin-top: 2.2rem; color: #17465c; }
+  table { border-collapse: collapse; margin: .8rem 0; font-size: .86rem; width: 100%; }
+  th, td { border: 1px solid #ccc; padding: .35rem .55rem; text-align: right; }
+  th { background: #f0f5f7; text-align: center; }
+  td:first-child, th:first-child { text-align: left; }
+  .good { color: #1a7a34; font-weight: 600; }
+  .warn { color: #a0632a; font-weight: 600; }
+  .verdict { background: #eef6ee; border-left: 4px solid #1a7a34; padding: .7rem 1rem; margin: 1rem 0; }
+  .note { background: #f7f4ec; border-left: 4px solid #b98c31; padding: .6rem 1rem; margin: .8rem 0; font-size: .88rem; }
+  figure { margin: 1.2rem 0; }
+  figure svg { width: 100%; height: auto; background: #fdfdfd; border: 1px solid #e4e4e4; }
+  figcaption { font-size: .82rem; color: #555; margin-top: .3rem; }
+  code { background: #f2f2f2; padding: 0 .25em; font-size: .88em; }
+  .meta { color: #666; font-size: .85rem; }
+</style>
+</head>
+<body>
+
+<h1>Baseline validation — 2026-07-24 upstream sync (sglang v0.5.15 stack)</h1>
+<p class="meta">Branch <code>sync-upstream-20260723</code> · merge <code>21b82323</code> (187 upstream commits) ·
+sglang pin <code>38d4bbef5</code> = sglang-miles v0.5.15-31 + 4 local patches · env <code>miles_v0515</code>
+(torch 2.11.0+cu129, numpy 2.3.5, transformers 5.12.1) · report generated 2026-07-25.</p>
+
+<div class="verdict">
+<b>Verdict: the post-sync stack reproduces both baselines and is faster on the pure-RL async path.</b>
+Learning parity holds to the third decimal on reward and reverse-KL in every matched window;
+the async recipe runs 11-26% faster; the post-sync async run has already outlived the pre-sync
+reference (step 2026 vs 1756) with zero incidents across a 22h+ flight that spanned the
+2026-07-25 network disruption (no wandb logging gap &gt; 10 min in either run).
+</div>
+
+<h2>1 · Run matrix</h2>
+<table>
+<tr><th>run</th><th>recipe</th><th>role</th><th>steps</th><th>duration</th><th>outcome</th></tr>
+<tr><td><a href="https://wandb.ai/M3TRL/baseline/runs/28790">28790</a> baseline-opd-…-200step-sync0515</td>
+    <td>OPD/multimodal/baseline 200-step (teacher 30B TP8 + trainer 8B + 8 engines, 3 nodes)</td>
+    <td>post-sync</td><td>200/200</td><td>1h31m</td><td class="good">SUCCEEDED</td></tr>
+<tr><td><a href="https://wandb.ai/M3TRL/OPD/runs/27456">27456</a> opd-mm-10b (m10 winner, frozen-baseline source)</td>
+    <td>same recipe, pre-sync stack (v0.5.13)</td><td>reference</td><td>200/200</td><td>1h11m</td><td>finished</td></tr>
+<tr><td><a href="https://wandb.ai/M3TRL/baseline/runs/28789">28789</a> baseline-geo3k-vlm-mt-fullyasync-pf2-3node-sync0515</td>
+    <td>async/geo3k-vlm-mt-fully-async-prefetch2 (1 trainer + 16 engines, 3 nodes)</td>
+    <td>post-sync</td><td>2026+ (running)</td><td>22h+ (still up)</td><td class="good">healthy</td></tr>
+<tr><td><a href="https://wandb.ai/M3TRL/baseline/runs/21354">21354</a> baseline-geo3k-async-mt-pf2-3node</td>
+    <td>same recipe, pre-sync stack (06-29)</td><td>reference</td><td>1756 (crashed)</td><td>23h</td><td>crashed</td></tr>
+</table>
+
+<h2>2 · Async pair (pure RL) — 28789 vs 21354</h2>
+<table>
+<tr><th>window (steps)</th><th colspan="2">raw_reward</th><th colspan="2">rollout_time (s)</th><th colspan="2">effective tok/gpu/s</th><th>speedup</th></tr>
+<tr><th></th><th>post</th><th>pre</th><th>post</th><th>pre</th><th>post</th><th>pre</th><th></th></tr>
+<tr><td>100–200</td><td>0.756</td><td>0.750</td><td class="good">36.6</td><td>40.3</td><td class="good">779</td><td>617</td><td class="good">+26%</td></tr>
+<tr><td>200–1000</td><td>0.856</td><td>0.855</td><td class="good">35.5</td><td>40.3</td><td class="good">566</td><td>482</td><td class="good">+17%</td></tr>
+<tr><td>1000–1700</td><td>0.911</td><td>0.913</td><td class="good">35.3</td><td>41.0</td><td class="good">488</td><td>424</td><td class="good">+15%</td></tr>
+</table>
+<p>Truncation ratio matches window-for-window (0.086/0.089 · 0.036/0.038 · 0.020/0.023);
+repetition_frac is 0 in both. Throughput declines with step in <em>both</em> runs because responses
+shorten as reward climbs — wall-clock per step (rollout_time) is the clean speed signal, and it is
+uniformly ~4–5 s faster post-sync.</p>
+<figure id="fig-async-reward"><svg viewBox="0 0 560 232" role="img"><line x1="46" y1="202" x2="548" y2="202" stroke="#999" stroke-width="1"/>
+<line x1="46" y1="14" x2="46" y2="202" stroke="#999" stroke-width="1"/>
+<line x1="46" y1="202" x2="46" y2="206" stroke="#999"/>
+<text x="46" y="217" font-size="9" fill="#666" text-anchor="middle">0</text>
+<line x1="168" y1="202" x2="168" y2="206" stroke="#999"/>
+<text x="168" y="217" font-size="9" fill="#666" text-anchor="middle">500</text>
+<line x1="291" y1="202" x2="291" y2="206" stroke="#999"/>
+<text x="291" y="217" font-size="9" fill="#666" text-anchor="middle">1000</text>
+<line x1="413" y1="202" x2="413" y2="206" stroke="#999"/>
+<text x="413" y="217" font-size="9" fill="#666" text-anchor="middle">1500</text>
+<line x1="536" y1="202" x2="536" y2="206" stroke="#999"/>
+<text x="536" y="217" font-size="9" fill="#666" text-anchor="middle">2000</text>
+<line x1="42" y1="202" x2="46" y2="202" stroke="#999"/>
+<line x1="46" y1="202" x2="548" y2="202" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="205" font-size="9" fill="#666" text-anchor="end">0.3</text>
+<line x1="42" y1="148" x2="46" y2="148" stroke="#999"/>
+<line x1="46" y1="148" x2="548" y2="148" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="151" font-size="9" fill="#666" text-anchor="end">0.5</text>
+<line x1="42" y1="95" x2="46" y2="95" stroke="#999"/>
+<line x1="46" y1="95" x2="548" y2="95" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="98" font-size="9" fill="#666" text-anchor="end">0.7</text>
+<line x1="42" y1="41" x2="46" y2="41" stroke="#999"/>
+<line x1="46" y1="41" x2="548" y2="41" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="44" font-size="9" fill="#666" text-anchor="end">0.9</text><polyline fill="none" stroke="#b94b31" stroke-width="1.6" points="46.0,105.3 48.4,120.2 50.9,123.5 53.3,123.6 55.8,112.1 58.2,106.0 60.7,103.0 63.1,115.1 65.6,106.8 68.0,106.1 70.5,85.3 72.9,85.5 75.4,89.0 77.8,93.0 80.3,97.6 82.7,86.0 85.2,80.8 87.6,63.8 90.1,59.5 92.5,60.9 95.0,71.2 97.4,72.2 99.9,65.8 102.3,61.9 104.8,61.9 107.2,65.2 109.7,65.4 112.1,64.5 114.6,65.1 117.0,61.0 119.5,71.7 121.9,70.8 124.4,61.0 126.8,50.4 129.3,53.3 131.7,68.6 134.2,71.5 136.6,77.8 139.1,77.1 141.5,75.7 144.0,68.6 146.4,66.1 148.8,60.9 151.3,52.8 153.7,50.2 156.2,50.0 158.6,49.1 161.1,51.9 163.5,61.9 166.0,73.3 168.4,68.2 170.9,59.1 173.3,48.1 175.8,50.7 178.2,55.3 180.7,62.8 183.1,65.2 185.6,67.7 188.0,61.6 190.5,53.2 192.9,48.1 195.4,43.4 197.8,42.5 200.3,46.2 202.7,58.8 205.2,64.2 207.6,63.7 210.1,54.6 212.5,63.3 215.0,61.6 217.4,63.1 219.9,47.0 222.3,39.7 224.8,35.9 227.2,38.8 229.7,44.8 232.1,41.8 234.6,46.2 237.0,40.8 239.5,47.6 241.9,48.4 244.4,49.7 246.8,50.2 249.2,47.2 251.7,45.5 254.1,44.2 256.6,42.3 259.0,44.6 261.5,42.7 263.9,43.9 266.4,39.7 268.8,40.9 271.3,42.5 273.7,52.3 276.2,50.4 278.6,49.1 281.1,42.7 283.5,43.4 286.0,40.8 288.4,40.1 290.9,36.2 293.3,36.2 295.8,39.9 298.2,35.9 300.7,39.7 303.1,37.8 305.6,41.8 308.0,43.7 310.5,39.2 312.9,48.1 315.4,46.7 317.8,45.3 320.3,35.9 322.7,31.5 325.2,32.9 327.6,35.3 330.1,37.1 332.5,36.6 335.0,41.6 337.4,40.6 339.9,42.9 342.3,42.9 344.8,40.9 347.2,40.8 349.6,35.9 352.1,34.3 354.5,36.4 357.0,40.4 359.4,44.2 361.9,45.3 364.3,41.5 366.8,48.3 369.2,46.3 371.7,44.6 374.1,45.6 376.6,43.2 379.0,46.2 381.5,33.6 383.9,32.4 386.4,28.9 388.8,31.3 391.3,33.9 393.7,35.2 396.2,31.3 398.6,32.9 401.1,33.2 403.5,36.6 406.0,35.2 408.4,42.5 410.9,41.8 413.3,43.2 415.8,31.7 418.2,28.3 420.7,26.1 423.1,30.1 425.6,30.6 428.0,27.6 430.5,31.0 432.9,34.3 435.4,40.9 437.8,39.0 440.3,44.1 442.7,38.0 445.2,30.3 447.6,32.4 450.0,38.0 452.5,41.8 454.9,33.9 457.4,31.8 459.8,33.6 462.3,33.1 464.7,33.8 467.2,33.1 469.6,34.8 472.1,35.2 474.5,37.1"/><polyline fill="none" stroke="#1f7ea6" stroke-width="1.6" points="46.0,59.1 48.4,92.4 50.9,100.4 53.3,118.6 55.8,108.2 58.2,99.7 60.7,97.1 63.1,95.1 65.6,96.4 68.0,89.5 70.5,88.5 72.9,78.3 75.4,81.8 77.8,85.9 80.3,96.5 82.7,92.7 85.2,88.3 87.6,78.5 90.1,82.2 92.5,78.2 95.0,85.2 97.4,77.1 99.9,81.8 102.3,79.9 104.8,87.8 107.2,82.9 109.7,76.8 112.1,70.5 114.6,60.3 117.0,59.8 119.5,62.6 121.9,66.5 124.4,65.1 126.8,62.8 129.3,75.2 131.7,70.5 134.2,67.0 136.6,61.6 139.1,66.3 141.5,58.2 144.0,50.7 146.4,50.2 148.8,48.3 151.3,52.5 153.7,47.9 156.2,48.6 158.6,42.7 161.1,47.2 163.5,58.6 166.0,63.0 168.4,64.2 170.9,59.5 173.3,54.9 175.8,46.7 178.2,44.6 180.7,48.4 183.1,62.8 185.6,65.1 188.0,68.9 190.5,53.3 192.9,53.2 195.4,43.5 197.8,51.1 200.3,52.6 202.7,63.7 205.2,58.1 207.6,49.5 210.1,41.5 212.5,51.2 215.0,50.0 217.4,43.0 219.9,33.6 222.3,38.5 224.8,43.9 227.2,56.0 229.7,53.9 232.1,60.5 234.6,46.3 237.0,45.3 239.5,44.2 241.9,44.2 244.4,42.5 246.8,40.4 249.2,40.8 251.7,39.0 254.1,35.5 256.6,46.9 259.0,62.6 261.5,55.1 263.9,45.3 266.4,32.4 268.8,36.9 271.3,43.9 273.7,46.3 276.2,45.8 278.6,37.3 281.1,34.5 283.5,35.3 286.0,40.9 288.4,41.5 290.9,42.3 293.3,40.2 295.8,37.1 298.2,32.9 300.7,35.3 303.1,43.5 305.6,48.1 308.0,41.1 310.5,40.6 312.9,46.9 315.4,52.3 317.8,48.6 320.3,39.4 322.7,30.6 325.2,27.5 327.6,32.4 330.1,33.4 332.5,40.6 335.0,36.2 337.4,42.0 339.9,38.5 342.3,43.2 344.8,40.1 347.2,33.8 349.6,32.4 352.1,33.1 354.5,33.1 357.0,32.0 359.4,29.0 361.9,33.2 364.3,38.8 366.8,42.3 369.2,36.9 371.7,31.0 374.1,34.3 376.6,49.7 379.0,52.3 381.5,44.2 383.9,32.0 386.4,27.5 388.8,31.7 391.3,30.8 393.7,27.8 396.2,33.6 398.6,39.5 401.1,42.5 403.5,33.2 406.0,28.5 408.4,30.4 410.9,30.6 413.3,30.6 415.8,25.7 418.2,27.6 420.7,32.0 423.1,38.8 425.6,38.3 428.0,31.0 430.5,28.0 432.9,27.1 435.4,31.1 437.8,29.7 440.3,32.7 442.7,31.1 445.2,32.7 447.6,30.4 450.0,36.2 452.5,32.7 454.9,30.1 457.4,22.4 459.8,25.4 462.3,26.8 464.7,29.2 467.2,32.2 469.6,36.4 472.1,37.6 474.5,33.9 477.0,32.7 479.4,33.2 481.9,30.1 484.3,28.2 486.8,29.4 489.2,33.1 491.7,36.6 494.1,33.6 496.6,33.1 499.0,32.9 501.5,35.5 503.9,41.6 506.4,40.6 508.8,36.7 511.3,29.0 513.7,29.4 516.2,31.1 518.6,34.6 521.1,34.1 523.5,29.7 526.0,29.7 528.4,32.5 530.9,39.5 533.3,32.7 535.8,33.1 538.2,30.4 540.7,36.2"/><line x1="246" y1="178" x2="264" y2="178" stroke="#1f7ea6" stroke-width="2.4"/>
+<text x="269" y="181" font-size="10" fill="#333">28789 post-sync (v0.5.15 stack)</text>
+<line x1="246" y1="192" x2="264" y2="192" stroke="#b94b31" stroke-width="2.4"/>
+<text x="269" y="195" font-size="10" fill="#333">21354 pre-sync reference</text></svg><figcaption>Fig 1 — async pf2-3node: rollout/raw_reward vs step (MA-3). The two trajectories are statistically indistinguishable across 1,700+ steps.</figcaption></figure>
+<figure id="fig-async-time"><svg viewBox="0 0 560 232" role="img"><line x1="46" y1="202" x2="548" y2="202" stroke="#999" stroke-width="1"/>
+<line x1="46" y1="14" x2="46" y2="202" stroke="#999" stroke-width="1"/>
+<line x1="46" y1="202" x2="46" y2="206" stroke="#999"/>
+<text x="46" y="217" font-size="9" fill="#666" text-anchor="middle">0</text>
+<line x1="168" y1="202" x2="168" y2="206" stroke="#999"/>
+<text x="168" y="217" font-size="9" fill="#666" text-anchor="middle">500</text>
+<line x1="291" y1="202" x2="291" y2="206" stroke="#999"/>
+<text x="291" y="217" font-size="9" fill="#666" text-anchor="middle">1000</text>
+<line x1="413" y1="202" x2="413" y2="206" stroke="#999"/>
+<text x="413" y="217" font-size="9" fill="#666" text-anchor="middle">1500</text>
+<line x1="536" y1="202" x2="536" y2="206" stroke="#999"/>
+<text x="536" y="217" font-size="9" fill="#666" text-anchor="middle">2000</text>
+<line x1="42" y1="202" x2="46" y2="202" stroke="#999"/>
+<line x1="46" y1="202" x2="548" y2="202" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="205" font-size="9" fill="#666" text-anchor="end">20</text>
+<line x1="42" y1="155" x2="46" y2="155" stroke="#999"/>
+<line x1="46" y1="155" x2="548" y2="155" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="158" font-size="9" fill="#666" text-anchor="end">30</text>
+<line x1="42" y1="108" x2="46" y2="108" stroke="#999"/>
+<line x1="46" y1="108" x2="548" y2="108" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="111" font-size="9" fill="#666" text-anchor="end">40</text>
+<line x1="42" y1="61" x2="46" y2="61" stroke="#999"/>
+<line x1="46" y1="61" x2="548" y2="61" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="64" font-size="9" fill="#666" text-anchor="end">50</text>
+<line x1="42" y1="14" x2="46" y2="14" stroke="#999"/>
+<line x1="46" y1="14" x2="548" y2="14" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="17" font-size="9" fill="#666" text-anchor="end">60</text><polyline fill="none" stroke="#b94b31" stroke-width="1.6" points=""/><polyline fill="none" stroke="#1f7ea6" stroke-width="1.6" points=""/><line x1="366" y1="26" x2="384" y2="26" stroke="#1f7ea6" stroke-width="2.4"/>
+<text x="389" y="29" font-size="10" fill="#333">28789 post-sync</text>
+<line x1="366" y1="40" x2="384" y2="40" stroke="#b94b31" stroke-width="2.4"/>
+<text x="389" y="43" font-size="10" fill="#333">21354 pre-sync</text></svg><figcaption>Fig 2 — async pf2-3node: perf/rollout_time (s, MA-5). Post-sync runs a consistent ~4-5 s/step faster (~11-13%).</figcaption></figure>
+
+<h2>3 · OPD pair (distillation) — 28790 vs 27456</h2>
+<table>
+<tr><th>window (steps)</th><th colspan="2">raw_reward (telemetry)</th><th colspan="2">reverse-KL</th><th colspan="2">truncated ratio</th></tr>
+<tr><th></th><th>post</th><th>pre</th><th>post</th><th>pre</th><th>post</th><th>pre</th></tr>
+<tr><td>0–25</td><td>0.537</td><td>0.491</td><td>0.326</td><td>0.287</td><td>0.429</td><td>0.480</td></tr>
+<tr><td>50–100</td><td>0.409</td><td>0.377</td><td class="good">0.1246</td><td class="good">0.1242</td><td>0.603</td><td>0.630</td></tr>
+<tr><td>150–199</td><td>0.442</td><td>0.415</td><td class="good">0.0954</td><td class="good">0.0958</td><td>0.571</td><td>0.599</td></tr>
+</table>
+<table>
+<tr><th>speed (steps 100–200)</th><th>post 28790</th><th>pre 27456</th><th>delta</th></tr>
+<tr><td>perf/rollout_time (s)</td><td>16.7</td><td>14.7</td><td class="warn">+13%</td></tr>
+<tr><td>tok/gpu/s</td><td>1629</td><td>1698</td><td class="warn">−4%</td></tr>
+<tr><td>effective tok/gpu/s</td><td>1617</td><td>1685</td><td class="warn">−4%</td></tr>
+</table>
+<p>The distillation objective reproduces essentially exactly (rKL to the third decimal); reward sits
+0.03–0.05 <em>above</em> the reference in every window (favourable side of run noise). The mild
+rollout_time regression (+2 s/step, −4% throughput) ran on a different node trio
+(slinky-13/42/44 vs the July-19 set) and is within node-to-node variation observed before; flagged
+for a re-check if it persists on the next OPD run, not a blocker.</p>
+<figure id="fig-opd-reward"><svg viewBox="0 0 560 232" role="img"><line x1="46" y1="202" x2="548" y2="202" stroke="#999" stroke-width="1"/>
+<line x1="46" y1="14" x2="46" y2="202" stroke="#999" stroke-width="1"/>
+<line x1="46" y1="202" x2="46" y2="206" stroke="#999"/>
+<text x="46" y="217" font-size="9" fill="#666" text-anchor="middle">0</text>
+<line x1="172" y1="202" x2="172" y2="206" stroke="#999"/>
+<text x="172" y="217" font-size="9" fill="#666" text-anchor="middle">50</text>
+<line x1="297" y1="202" x2="297" y2="206" stroke="#999"/>
+<text x="297" y="217" font-size="9" fill="#666" text-anchor="middle">100</text>
+<line x1="422" y1="202" x2="422" y2="206" stroke="#999"/>
+<text x="422" y="217" font-size="9" fill="#666" text-anchor="middle">150</text>
+<line x1="548" y1="202" x2="548" y2="206" stroke="#999"/>
+<text x="548" y="217" font-size="9" fill="#666" text-anchor="middle">200</text>
+<line x1="42" y1="178" x2="46" y2="178" stroke="#999"/>
+<line x1="46" y1="178" x2="548" y2="178" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="182" font-size="9" fill="#666" text-anchor="end">0.3</text>
+<line x1="42" y1="132" x2="46" y2="132" stroke="#999"/>
+<line x1="46" y1="132" x2="548" y2="132" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="134" font-size="9" fill="#666" text-anchor="end">0.4</text>
+<line x1="42" y1="84" x2="46" y2="84" stroke="#999"/>
+<line x1="46" y1="84" x2="548" y2="84" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="88" font-size="9" fill="#666" text-anchor="end">0.5</text>
+<line x1="42" y1="38" x2="46" y2="38" stroke="#999"/>
+<line x1="46" y1="38" x2="548" y2="38" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="41" font-size="9" fill="#666" text-anchor="end">0.6</text><polyline fill="none" stroke="#b94b31" stroke-width="1.6" points="46.0,14.0 48.5,14.0 51.0,14.0 53.5,14.0 56.0,14.0 58.5,52.2 61.1,59.5 63.6,56.6 66.1,55.1 68.6,63.9 71.1,49.3 73.6,61.0 76.1,66.9 78.6,78.6 81.1,74.2 83.7,93.3 86.2,93.3 88.7,103.6 91.2,97.7 93.7,128.6 96.2,97.7 98.7,122.7 101.2,127.1 103.7,147.7 106.2,141.8 108.8,199.1 111.3,202.0 113.8,202.0 116.3,202.0 118.8,202.0 121.3,202.0 123.8,202.0 126.3,202.0 128.8,197.6 131.3,185.8 133.8,185.8 136.4,191.7 138.9,184.4 141.4,202.0 143.9,202.0 146.4,202.0 148.9,202.0 151.4,202.0 153.9,184.4 156.4,191.7 158.9,193.2 161.5,174.1 164.0,190.2 166.5,202.0 169.0,200.5 171.5,188.8 174.0,182.9 176.5,165.3 179.0,157.9 181.5,157.9 184.1,156.5 186.6,162.3 189.1,178.5 191.6,163.8 194.1,171.2 196.6,159.4 199.1,168.2 201.6,156.5 204.1,159.4 206.6,135.9 209.2,143.2 211.7,137.4 214.2,128.6 216.7,128.6 219.2,149.1 221.7,140.3 224.2,124.2 226.7,146.2 229.2,141.8 231.7,135.9 234.2,138.8 236.8,155.0 239.3,138.8 241.8,138.8 244.3,133.0 246.8,131.5 249.3,122.7 251.8,130.0 254.3,143.2 256.8,162.3 259.4,166.8 261.9,177.0 264.4,171.2 266.9,162.3 269.4,133.0 271.9,130.0 274.4,128.6 276.9,116.8 279.4,115.3 281.9,122.7 284.4,118.3 287.0,110.9 289.5,118.3 292.0,135.9 294.5,134.4 297.0,135.9 299.5,119.8 302.0,128.6 304.5,113.9 307.0,119.8 309.6,138.8 312.1,171.2 314.6,147.7 317.1,149.1 319.6,127.1 322.1,119.8 324.6,91.8 327.1,102.1 329.6,102.1 332.1,124.2 334.6,118.3 337.2,130.0 339.7,127.1 342.2,128.6 344.7,140.3 347.2,137.4 349.7,128.6 352.2,118.3 354.7,103.6 357.2,106.5 359.8,102.1 362.3,103.6 364.8,118.3 367.3,112.4 369.8,91.8 372.3,108.0 374.8,108.0 377.3,110.9 379.8,112.4 382.3,124.2 384.9,105.1 387.4,118.3 389.9,115.3 392.4,147.7 394.9,131.5 397.4,135.9 399.9,130.0 402.4,124.2 404.9,90.4 407.4,102.1 409.9,108.0 412.5,87.4 415.0,94.8 417.5,133.0 420.0,140.3 422.5,146.2 425.0,159.4 427.5,157.9 430.0,118.3 432.5,110.9 435.1,109.5 437.6,122.7 440.1,102.1 442.6,118.3 445.1,110.9 447.6,116.8 450.1,103.6 452.6,108.0 455.1,108.0 457.6,99.2 460.1,96.3 462.7,96.3 465.2,112.4 467.7,109.5 470.2,113.9 472.7,96.3 475.2,116.8 477.7,115.3 480.2,115.3 482.7,115.3 485.2,103.6 487.8,100.7 490.3,90.4 492.8,90.4 495.3,99.2 497.8,138.8 500.3,125.6 502.8,135.9 505.3,150.6 507.8,155.0 510.4,150.6 512.9,140.3 515.4,141.8 517.9,121.2 520.4,130.0 522.9,131.5 525.4,149.1 527.9,156.5 530.4,160.9 532.9,144.7 535.5,135.9 538.0,159.4 540.5,157.9 543.0,157.9 545.5,165.3"/><polyline fill="none" stroke="#1f7ea6" stroke-width="1.6" points="46.0,14.0 48.5,14.0 51.0,14.0 53.5,14.0 56.0,14.0 58.5,28.7 61.1,52.2 63.6,77.2 66.1,55.1 68.6,46.3 71.1,40.4 73.6,47.8 76.1,40.4 78.6,53.7 81.1,80.1 83.7,77.2 86.2,78.6 88.7,59.5 91.2,77.2 93.7,72.8 96.2,78.6 98.7,75.7 101.2,102.1 103.7,103.6 106.2,118.3 108.8,152.1 111.3,162.3 113.8,184.4 116.3,177.0 118.8,175.6 121.3,165.3 123.8,177.0 126.3,160.9 128.8,181.4 131.3,185.8 133.8,202.0 136.4,182.9 138.9,196.1 141.4,194.7 143.9,196.1 146.4,187.3 148.9,202.0 151.4,197.6 153.9,197.6 156.4,194.7 158.9,196.1 161.5,191.7 164.0,199.1 166.5,185.8 169.0,184.4 171.5,177.0 174.0,159.4 176.5,152.1 179.0,143.2 181.5,140.3 184.1,147.7 186.6,160.9 189.1,149.1 191.6,153.5 194.1,157.9 196.6,146.2 199.1,149.1 201.6,159.4 204.1,153.5 206.6,147.7 209.2,147.7 211.7,131.5 214.2,118.3 216.7,125.6 219.2,119.8 221.7,99.2 224.2,112.4 226.7,118.3 229.2,106.5 231.7,122.7 234.2,127.1 236.8,116.8 239.3,112.4 241.8,118.3 244.3,109.5 246.8,103.6 249.3,100.7 251.8,115.3 254.3,121.2 256.8,138.8 259.4,162.3 261.9,169.7 264.4,155.0 266.9,153.5 269.4,135.9 271.9,118.3 274.4,127.1 276.9,127.1 279.4,134.4 281.9,112.4 284.4,115.3 287.0,94.8 289.5,91.8 292.0,84.5 294.5,97.7 297.0,94.8 299.5,83.0 302.0,94.8 304.5,100.7 307.0,109.5 309.6,133.0 312.1,168.2 314.6,143.2 317.1,138.8 319.6,121.2 322.1,109.5 324.6,94.8 327.1,109.5 329.6,90.4 332.1,96.3 334.6,94.8 337.2,97.7 339.7,103.6 342.2,115.3 344.7,116.8 347.2,113.9 349.7,96.3 352.2,74.2 354.7,72.8 357.2,81.6 359.8,66.9 362.3,91.8 364.8,97.7 367.3,97.7 369.8,74.2 372.3,91.8 374.8,86.0 377.3,99.2 379.8,109.5 382.3,119.8 384.9,97.7 387.4,93.3 389.9,83.0 392.4,83.0 394.9,90.4 397.4,115.3 399.9,119.8 402.4,109.5 404.9,109.5 407.4,106.5 409.9,115.3 412.5,100.7 415.0,122.7 417.5,118.3 420.0,137.4 422.5,119.8 425.0,119.8 427.5,121.2 430.0,141.8 432.5,118.3 435.1,122.7 437.6,137.4 440.1,124.2 442.6,105.1 445.1,119.8 447.6,94.8 450.1,88.9 452.6,80.1 455.1,94.8 457.6,68.3 460.1,88.9 462.7,84.5 465.2,109.5 467.7,84.5 470.2,86.0 472.7,81.6 475.2,108.0 477.7,84.5 480.2,88.9 482.7,113.9 485.2,125.6 487.8,87.4 490.3,88.9 492.8,102.1 495.3,69.8 497.8,78.6 500.3,106.5 502.8,110.9 505.3,113.9 507.8,155.0 510.4,152.1 512.9,122.7 515.4,128.6 517.9,121.2 520.4,112.4 522.9,118.3 525.4,133.0 527.9,130.0 530.4,133.0 532.9,134.4 535.5,125.6 538.0,146.2 540.5,153.5 543.0,144.7 545.5,138.8"/><line x1="346" y1="26" x2="364" y2="26" stroke="#1f7ea6" stroke-width="2.4"/>
+<text x="369" y="29" font-size="10" fill="#333">28790 post-sync</text>
+<line x1="346" y1="40" x2="364" y2="40" stroke="#b94b31" stroke-width="2.4"/>
+<text x="369" y="43" font-size="10" fill="#333">27456 pre-sync (m10b)</text></svg><figcaption>Fig 3 — OPD 200-step baseline: task raw_reward vs step (MA-5, telemetry-only signal). Same shape; post-sync sits 0.03-0.05 above throughout.</figcaption></figure>
+<figure id="fig-opd-rkl"><svg viewBox="0 0 560 232" role="img"><line x1="46" y1="202" x2="548" y2="202" stroke="#999" stroke-width="1"/>
+<line x1="46" y1="14" x2="46" y2="202" stroke="#999" stroke-width="1"/>
+<line x1="46" y1="202" x2="46" y2="206" stroke="#999"/>
+<text x="46" y="217" font-size="9" fill="#666" text-anchor="middle">0</text>
+<line x1="172" y1="202" x2="172" y2="206" stroke="#999"/>
+<text x="172" y="217" font-size="9" fill="#666" text-anchor="middle">50</text>
+<line x1="297" y1="202" x2="297" y2="206" stroke="#999"/>
+<text x="297" y="217" font-size="9" fill="#666" text-anchor="middle">100</text>
+<line x1="422" y1="202" x2="422" y2="206" stroke="#999"/>
+<text x="422" y="217" font-size="9" fill="#666" text-anchor="middle">150</text>
+<line x1="548" y1="202" x2="548" y2="206" stroke="#999"/>
+<text x="548" y="217" font-size="9" fill="#666" text-anchor="middle">200</text>
+<line x1="42" y1="202" x2="46" y2="202" stroke="#999"/>
+<line x1="46" y1="202" x2="548" y2="202" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="205" font-size="9" fill="#666" text-anchor="end">0.0</text>
+<line x1="42" y1="160" x2="46" y2="160" stroke="#999"/>
+<line x1="46" y1="160" x2="548" y2="160" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="163" font-size="9" fill="#666" text-anchor="end">0.1</text>
+<line x1="42" y1="118" x2="46" y2="118" stroke="#999"/>
+<line x1="46" y1="118" x2="548" y2="118" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="121" font-size="9" fill="#666" text-anchor="end">0.2</text>
+<line x1="42" y1="77" x2="46" y2="77" stroke="#999"/>
+<line x1="46" y1="77" x2="548" y2="77" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="80" font-size="9" fill="#666" text-anchor="end">0.3</text>
+<line x1="42" y1="35" x2="46" y2="35" stroke="#999"/>
+<line x1="46" y1="35" x2="548" y2="35" stroke="#eee" stroke-width="0.6"/>
+<text x="39" y="38" font-size="9" fill="#666" text-anchor="end">0.4</text><polyline fill="none" stroke="#b94b31" stroke-width="1.6" points="46.0,43.3 48.5,52.5 51.0,48.4 53.5,53.2 56.0,53.3 58.5,63.2 61.1,64.5 63.6,49.4 66.1,51.6 68.6,55.4 71.1,55.6 73.6,39.2 76.1,65.8 78.6,70.1 81.1,73.7 83.7,75.1 86.2,98.6 88.7,99.1 91.2,100.9 93.7,105.1 96.2,105.8 98.7,107.7 101.2,112.0 103.7,113.6 106.2,114.9 108.8,119.3 111.3,121.1 113.8,121.0 116.3,121.4 118.8,123.1 121.3,123.1 123.8,122.9 126.3,123.8 128.8,125.5 131.3,124.7 133.8,123.9 136.4,125.5 138.9,126.6 141.4,127.6 143.9,128.1 146.4,129.7 148.9,129.6 151.4,129.6 153.9,129.7 156.4,131.0 158.9,131.8 161.5,132.9 164.0,134.1 166.5,135.8 169.0,138.0 171.5,139.4 174.0,140.5 176.5,141.1 179.0,140.5 181.5,140.2 184.1,141.1 186.6,142.1 189.1,142.9 191.6,144.8 194.1,146.0 196.6,146.6 199.1,146.8 201.6,147.3 204.1,147.2 206.6,148.0 209.2,147.8 211.7,148.2 214.2,148.6 216.7,148.8 219.2,148.5 221.7,149.8 224.2,150.7 226.7,151.8 229.2,152.4 231.7,152.7 234.2,151.9 236.8,151.8 239.3,151.4 241.8,151.5 244.3,151.8 246.8,152.4 249.3,152.6 251.8,152.4 254.3,152.4 256.8,152.7 259.4,152.9 261.9,153.0 264.4,153.1 266.9,153.2 269.4,152.8 271.9,152.5 274.4,152.2 276.9,152.6 279.4,152.7 281.9,153.3 284.4,154.1 287.0,154.3 289.5,153.9 292.0,154.0 294.5,154.2 297.0,153.9 299.5,154.7 302.0,155.9 304.5,156.0 307.0,156.4 309.6,156.9 312.1,156.7 314.6,156.7 317.1,157.4 319.6,157.2 322.1,157.2 324.6,158.1 327.1,158.6 329.6,159.0 332.1,159.2 334.6,159.3 337.2,158.3 339.7,157.9 342.2,158.4 344.7,157.6 347.2,158.1 349.7,158.5 352.2,158.4 354.7,158.1 357.2,158.1 359.8,157.8 362.3,158.3 364.8,158.0 367.3,158.1 369.8,158.8 372.3,158.7 374.8,159.3 377.3,159.8 379.8,159.0 382.3,158.9 384.9,158.9 387.4,158.5 389.9,158.3 392.4,159.1 394.9,159.2 397.4,159.9 399.9,160.1 402.4,160.7 404.9,160.7 407.4,161.3 409.9,160.7 412.5,160.9 415.0,160.6 417.5,160.6 420.0,160.0 422.5,160.5 425.0,160.5 427.5,160.4 430.0,160.6 432.5,160.4 435.1,160.4 437.6,160.2 440.1,161.1 442.6,161.0 445.1,162.1 447.6,162.3 450.1,162.3 452.6,161.8 455.1,161.8 457.6,162.0 460.1,162.0 462.7,162.4 465.2,163.0 467.7,163.4 470.2,162.9 472.7,163.1 475.2,162.8 477.7,162.3 480.2,162.3 482.7,162.4 485.2,162.2 487.8,162.0 490.3,162.6 492.8,162.4 495.3,161.9 497.8,161.3 500.3,161.8 502.8,161.9 505.3,161.1 507.8,161.3 510.4,162.0 512.9,161.7 515.4,161.4 517.9,162.5 520.4,163.0 522.9,162.6 525.4,162.8 527.9,162.4 530.4,162.4 532.9,162.0 535.5,162.3 538.0,161.9 540.5,162.1 543.0,161.4 545.5,161.6"/><polyline fill="none" stroke="#1f7ea6" stroke-width="1.6" points="46.0,17.9 48.5,41.0 51.0,30.1 53.5,35.9 56.0,41.9 58.5,56.5 61.1,60.4 63.6,76.3 66.1,81.6 68.6,82.6 71.1,81.4 73.6,85.4 76.1,71.6 78.6,75.0 81.1,67.7 83.7,68.2 86.2,68.7 88.7,35.2 91.2,22.3 93.7,37.2 96.2,42.4 98.7,42.2 101.2,71.8 103.7,87.6 106.2,88.7 108.8,90.4 111.3,93.8 113.8,117.8 116.3,119.0 118.8,120.6 121.3,121.4 123.8,121.8 126.3,121.6 128.8,124.4 131.3,124.9 133.8,124.5 136.4,125.2 138.9,127.8 141.4,127.0 143.9,127.5 146.4,128.6 148.9,129.2 151.4,128.7 153.9,130.1 156.4,131.0 158.9,131.4 161.5,132.2 164.0,133.7 166.5,134.6 169.0,136.1 171.5,138.1 174.0,139.1 176.5,139.9 179.0,139.5 181.5,139.9 184.1,139.9 186.6,140.7 189.1,141.8 191.6,143.3 194.1,144.5 196.6,145.7 199.1,146.2 201.6,146.6 204.1,147.2 206.6,147.7 209.2,147.9 211.7,148.3 214.2,148.5 216.7,148.9 219.2,148.6 221.7,149.9 224.2,151.0 226.7,151.3 229.2,151.7 231.7,152.7 234.2,151.9 236.8,151.3 239.3,151.5 241.8,151.6 244.3,151.5 246.8,151.8 249.3,152.4 251.8,152.8 254.3,152.7 256.8,152.4 259.4,152.9 261.9,152.9 264.4,152.8 266.9,153.2 269.4,153.3 271.9,152.5 274.4,152.6 276.9,152.5 279.4,152.3 281.9,153.1 284.4,154.0 287.0,153.6 289.5,153.6 292.0,154.7 294.5,154.3 297.0,154.6 299.5,155.5 302.0,155.9 304.5,155.9 307.0,156.4 309.6,156.3 312.1,155.9 314.6,156.8 317.1,157.0 319.6,156.6 322.1,157.6 324.6,158.5 327.1,158.5 329.6,158.9 332.1,160.0 334.6,159.0 337.2,158.1 339.7,157.9 342.2,157.6 344.7,157.6 347.2,157.8 349.7,158.4 352.2,158.3 354.7,157.9 357.2,157.4 359.8,157.8 362.3,157.6 364.8,157.7 367.3,158.3 369.8,158.8 372.3,158.9 374.8,159.2 377.3,159.7 379.8,159.3 382.3,159.2 384.9,159.3 387.4,159.5 389.9,159.4 392.4,160.1 394.9,160.4 397.4,160.6 399.9,160.6 402.4,160.9 404.9,160.3 407.4,160.3 409.9,160.1 412.5,160.5 415.0,159.7 417.5,160.2 420.0,159.4 422.5,159.8 425.0,159.9 427.5,160.4 430.0,159.9 432.5,160.3 435.1,160.7 437.6,160.3 440.1,161.1 442.6,161.4 445.1,161.8 447.6,161.8 450.1,161.7 452.6,161.6 455.1,161.4 457.6,161.6 460.1,161.0 462.7,161.7 465.2,161.7 467.7,162.5 470.2,162.6 472.7,162.8 475.2,162.9 477.7,163.4 480.2,163.4 482.7,163.1 485.2,163.0 487.8,162.5 490.3,162.3 492.8,161.5 495.3,161.8 497.8,161.9 500.3,161.8 502.8,162.1 505.3,162.2 507.8,162.0 510.4,162.2 512.9,162.5 515.4,162.6 517.9,163.0 520.4,163.0 522.9,162.6 525.4,162.8 527.9,162.1 530.4,162.7 532.9,162.5 535.5,162.9 538.0,162.9 540.5,162.4 543.0,161.9 545.5,162.8"/><line x1="346" y1="26" x2="364" y2="26" stroke="#1f7ea6" stroke-width="2.4"/>
+<text x="369" y="29" font-size="10" fill="#333">28790 post-sync</text>
+<line x1="346" y1="40" x2="364" y2="40" stroke="#b94b31" stroke-width="2.4"/>
+<text x="369" y="43" font-size="10" fill="#333">27456 pre-sync (m10b)</text></svg><figcaption>Fig 4 — OPD 200-step baseline: rollout/opd_reverse_kl vs step (MA-5). The distillation objective reproduces to the third decimal in matched windows (0.1246/0.1242 at steps 50-100; 0.0954/0.0958 at 150-199).</figcaption></figure>
+
+<h2>4 · What the validation exercised</h2>
+<table>
+<tr><th>layer</th><th>change under test</th><th>covered by</th></tr>
+<tr><td>miles merge</td><td>187 upstream commits + 20 hand-resolved conflicts (FT series, session scale-out, tracking refactor, actor factory, filter_long_prompt fusion, prefetch-over-#1677 layering)</td><td>both runs end-to-end</td></tr>
+<tr><td>sglang v0.5.15</td><td>rebased sglang-miles line + 4 re-applied patches (mrope gate, cu12 flavors, exact scoring, qwen-vl pretokenized IDs); flush_cache patch retired in favour of upstream #31962</td><td>16-engine async flight (weight updates ×2000+), teacher exact-suffix scoring in 28790</td></tr>
+<tr><td>env</td><td>numpy 2.3.5 (cap removed), transformers 5.12.1, TMS 6d5bce48, v0.5.15 +cu129 kernels</td><td>clean-slate install (job 28782, 12m32s, verify green) + both runs</td></tr>
+</table>
+
+<h2>5 · Incidents found &amp; fixed during validation</h2>
+<table>
+<tr><th>incident</th><th>root cause</th><th>fix (commit)</th></tr>
+<tr><td>install job 28781 failed</td><td><code>nvidia-resiliency-ext</code> (upstream FT dep) ships manylinux_2_39-only wheels; cluster glibc is 2.35. miles references the package only in a docstring.</td><td>glibc-gated filter in install_env.sh</td></tr>
+<tr><td>run 28788 failed at teacher startup</td><td>sglang v0.5.15 dlopens <code>libcudnn_heuristic</code> at model-runner import; the batch-shell scope that launches head-node envpack servers lacked the env cuDNN dir on <code>LD_LIBRARY_PATH</code>, so the loader resolved <code>libcudnn_graph</code> to an older system copy (undefined symbol). Invisible pre-sync: v0.5.13 never exercised that dlopen.</td><td>cuDNN prepend added to batch-shell + envpack-server scopes in launch_miles.sbatch</td></tr>
+</table>
+
+<div class="note">
+<b>Network disruption (2026-07-25):</b> neither run recorded a wandb logging gap &gt; 10 minutes and
+28789's launcher log shows zero health-check kills or CLUSTER_DEAD events across the window — the
+incident did not reach the cluster fabric or the runs.
+</div>
+
+<p class="meta">Data: wandb M3TRL/baseline (runs 21354, 28789, 28790) + M3TRL/OPD (27456), windows are
+means over <code>rollout/step</code> ranges; curves smoothed with short moving averages as captioned.
+Companion records: <code>pr-body.md</code>, <code>sglang-sync-notes.md</code>, <code>follow-ups.md</code> in this folder.</p>
+
+</body>
+</html>
