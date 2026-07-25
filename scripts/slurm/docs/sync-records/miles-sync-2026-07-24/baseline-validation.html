@@ -296,7 +296,72 @@ reported <code>actor_train_tflops</code> across the sync boundary as non-compara
 recompute-corrected number instead.
 </div>
 
-<h2>5 · What the validation exercised</h2>
+
+
+<h3>Appendix — how activation recomputation actually works</h3>
+<p>Backprop needs each layer's forward-time inputs: for <code>y = W·x</code>, the weight gradient is
+<code>dL/dW = dL/dy · x&#7488;</code> — you cannot compute it without <code>x</code>, and nonlinearities
+similarly need their forward values. The default is to keep every layer's interior activations
+(QKV projections, attention output, the 3&times;-wide MLP intermediate, norm inputs, &hellip;) alive from
+forward until backward consumes them — roughly tens of bytes-of-hidden-width per token per layer.
+For this 8B run (36 layers &times; 16,384 tokens/GPU &times; 4096 hidden &times; ~20&times; multiplier, bf16)
+that is an <b>80–100 GB-class</b> activation footprint: activations, not weights, are what explodes
+with context length.</p>
+<pre style="font-size:.8rem; background:#f7f7f7; border:1px solid #e2e2e2; padding: .6rem .8rem; overflow-x:auto;">
+no recompute:    F1 F2 &hellip; F36 | B36 B35 &hellip; B1        all 36 layers' interiors held until used
+full recompute:  F1 F2 &hellip; F36 | (F36&#8617;&rarr;B36) &hellip; (F1&#8617;&rarr;B1)   store only per-layer inputs;
+                                                     re-run layer i's forward just before B_i;
+                                                     one layer's interior alive at a time
+</pre>
+<p>Cost accounting (1F = one forward's FLOPs): forward = 1F; backward = 2F (each forward matmul has
+two same-sized backward matmuls, <code>dx</code> and <code>dW</code> — irreducible). No recompute:
+3F. Full recompute: 1F + (1F re-forward + 2F) = 4F &rarr; time &times;4/3, which is exactly the
+measured &times;1.32. The flags: <code>granularity full</code> = whole layers (vs <code>selective</code>
+= attention interiors only — note FlashAttention already recomputes its own interiors, so on this
+stack <code>full</code>'s savings come mainly from MLP/norm/projection tensors);
+<code>method uniform</code> + <code>num-layers 1</code> = a checkpoint every single layer (maximum
+memory savings, full 4/3 cost). Pre-sync these runs fit in H200 memory at 4k response length
+without any of this — which is why the silently-dropped flags went unnoticed and the old runs were
+33% faster on the trainer.</p>
+
+<h2>5 · Fully-async admission metrics — the accepted_staleness family</h2>
+
+<p>Definitions (<code>examples/fully_async/fully_async_rollout.py::_build_staleness_metrics</code>,
+logged once per rollout step by the collector):</p>
+<table>
+<tr><th>metric</th><th>definition</th></tr>
+<tr><td><code>accepted_staleness/mean·min·max</code></td><td>Staleness (current engine weight version &minus; group's oldest generation version) of the groups <em>admitted into this train batch</em>. By construction max &le; <code>max_weight_staleness</code> (2 here) — inadmissible groups never appear in this statistic.</td></tr>
+<tr><td><code>accepted_staleness/over_cap_ratio</code></td><td><code>recycled_over_cap_sample_attempts / observed_sample_attempts</code>: of all completed sample-attempts the collector examined this step, the fraction whose staleness exceeded the cap and were <b>recycled back to the buffer for regeneration</b> (their decode work is discarded). It measures admission-gate rejections, not anything about the train step itself.</td></tr>
+</table>
+
+<h3>Why it spikes in the first few steps (measured, run 28789)</h3>
+<table>
+<tr><th>step</th><th>0</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>&hellip;steady</th></tr>
+<tr><td>over_cap_ratio</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0.26</td><td class="warn">0.54</td><td>0.29</td><td>0.31</td><td>0.03</td><td>~0.08 mean</td></tr>
+<tr><td>accepted mean (max)</td><td>0 (0)</td><td>0 (0)</td><td>1 (1)</td><td>1.9 (2)</td><td>2 (2)</td><td>1.95 (2)</td><td>1.8 (2)</td><td>1.8 (2)</td><td>2 (2)</td><td>~1.6 (2)</td></tr>
+<tr><td>train_wait (s)</td><td>102</td><td>2.4</td><td>2.5</td><td>2.0</td><td>2.1</td><td>1.5</td><td>1.4</td><td>1.6</td><td>2.7</td><td>10–20</td></tr>
+</table>
+<p><b>The cold-start cohort wave.</b> At t=0 the worker launches its entire active window at once —
+<code>rollout_batch_size &times; prefetch = 128</code> prompt groups, all conditioned on weight
+version 0. The fast prompts of that synchronized wave finish first and feed the trainer a surplus
+of ready batches (train_wait &asymp; 2 s at steps 1–13 vs 10–20 s in steady state), so the weight
+version advances every ~45 s. Meanwhile the wave's long-tail prompts — slowest exactly at step 0,
+when the untrained model writes its longest, most-truncated responses — are still decoding on
+v0–v2. By the time they complete, the current version is 4–7, their staleness is 3+, and the
+admission gate recycles them <em>en masse</em>: over_cap peaks at 0.54 around step 5. Once the
+original cohort drains, launches are naturally staggered (one new launch per completion), only the
+individually-slowest generations straddle &gt;2 updates, and the ratio settles into the noisy
+0–0.2 band. This is a one-time synchronization artifact of startup, not drift.</p>
+<p><b>Why train_time is unaffected.</b> The admission gate decides <em>which</em> groups fill the
+batch, never its size or token budget: every step trains exactly
+<code>rollout_batch_size</code> groups under the same <code>--max-tokens-per-gpu 16384</code>
+dynamic batching, so per-step train compute is invariant to recycling. The cost of an over-cap
+storm lands elsewhere — as discarded sampler decode (the recycled groups' generation work) and,
+when supply is tight, as trainer <em>wait</em>. During this particular storm supply was anything
+but tight (the wave surplus kept train_wait at ~2 s), so the spike is invisible in every
+trainer-side timing metric — exactly as designed.</p>
+
+<h2>6 · What the validation exercised</h2>
 <table>
 <tr><th>layer</th><th>change under test</th><th>covered by</th></tr>
 <tr><td>miles merge</td><td>187 upstream commits + 20 hand-resolved conflicts (FT series, session scale-out, tracking refactor, actor factory, filter_long_prompt fusion, prefetch-over-#1677 layering)</td><td>both runs end-to-end</td></tr>
@@ -304,7 +369,7 @@ recompute-corrected number instead.
 <tr><td>env</td><td>numpy 2.3.5 (cap removed), transformers 5.12.1, TMS 6d5bce48, v0.5.15 +cu129 kernels</td><td>clean-slate install (job 28782, 12m32s, verify green) + both runs</td></tr>
 </table>
 
-<h2>6 · Incidents found &amp; fixed during validation</h2>
+<h2>7 · Incidents found &amp; fixed during validation</h2>
 <table>
 <tr><th>incident</th><th>root cause</th><th>fix (commit)</th></tr>
 <tr><td>install job 28781 failed</td><td><code>nvidia-resiliency-ext</code> (upstream FT dep) ships manylinux_2_39-only wheels; cluster glibc is 2.35. miles references the package only in a docstring.</td><td>glibc-gated filter in install_env.sh</td></tr>
