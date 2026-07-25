@@ -12,9 +12,9 @@ from tqdm import tqdm
 
 from miles.backends.training_utils.parallel import get_parallel_state
 from miles.utils.distributed_utils import get_gloo_group, init_process_group
+from miles.utils.lora import LORA_ADAPTER_NAME
 from miles.utils.timer import timer
 
-from miles.utils.lora import LORA_ADAPTER_NAME
 from ..common import _check_weight_sync_results
 from ..hf_weight_iterator_base import HfWeightIteratorBase
 from .mixin import DistBucketedWeightUpdateMixin

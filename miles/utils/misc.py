@@ -147,8 +147,6 @@ def exec_command_all_ray_node(
     Args:
         num_nodes: If set, only use the first `num_nodes` nodes instead of all alive nodes.
     """
-    import ray
-    from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
     ray.init(address="auto")
     try:
@@ -194,7 +192,6 @@ def exec_command_all_ray_node(
 
 
 def get_current_node_ip():
-    import ray
 
     address = ray._private.services.get_node_ip_address()
     # strip ipv6 address
@@ -203,7 +200,6 @@ def get_current_node_ip():
 
 
 def get_free_port(start_port=10000, consecutive=1):
-    from miles.utils.http_utils import is_port_available
 
     # find the port where port, port + 1, port + 2, ... port + consecutive - 1 are all available
     port = start_port
