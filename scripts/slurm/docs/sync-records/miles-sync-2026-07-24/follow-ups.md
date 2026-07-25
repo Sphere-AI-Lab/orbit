@@ -26,3 +26,13 @@ metrics.py). Compare on the same window once the reruns pass step 200.
   the recompute forward). Compare ×4/3-corrected values instead.
 - async data_preprocess 7.0→0.6s = June-era reference env artifact (torch 2.9.1 /
   transformers 4.x / old ray shard transfer); OPD pair shows parity (1.03≈1.02s). Closed.
+
+## OPD k1-advantage spike hardening (from 28790 forensics, 2026-07-25)
+
+- Early grad spikes (470 pre-clip @ step17; ref run 232 @ step7) come from the UNCLAMPED
+  per-token k1 advantage (teacher e^-30 on some student tokens; k1/max 27-33 nats on every
+  early step). eps_clip bounds the ratio, not the advantage; only clip_grad=1.0 contains it.
+- Levers if we want to kill the class: (1) winsorize per-token k1 advantage (±10 nats) in
+  on_policy_distillation.py before it becomes reward; (2) RKLD/dagger coef warmup over first
+  ~30 steps; (3) leave clip_grad as backstop. m12 showed the chronic form on recompute-q_old
+  at cap 4 — priority rises if we widen staleness again.

@@ -379,16 +379,34 @@ trainer-side timing metric — exactly as designed.</p>
 <tr><td>co-located spikes (same step)</td><td>pg_loss 0.90 · reverse-KL 0.84</td><td>pg_loss 0.61 · reverse-KL 0.57</td></tr>
 <tr><td>late means (steps 100–199)</td><td>pg 0.0988 · rKL 0.0997 · ess 0.9986 · current_rollout_kl 0.0007</td><td>pg 0.0989 · rKL 0.0998 · ess 0.9985 · current_rollout_kl 0.0007</td></tr>
 </table>
-<p><b>Mechanism.</b> In the first ~25 steps the student is farthest from the teacher (reverse-KL floor
-0.3–0.4). A batch that draws outlier trajectories — tokens the student sampled but the teacher assigns
-very low probability — produces a large sampled-RKLD term (0.84/0.57 at the spike step), whose gradient
-dominates the step: pg_loss, reverse-KL and grad_norm spike <em>together on the same batch</em> in both
-runs. The reported grad_norm is <em>pre-clipping</em>; gradient clipping bounds the actual update, so
-the transient leaves no trace (all series settle within ~10 steps and late-window means match to the
-third decimal). Which step draws the outlier batch is run noise — 470@17 vs 232@7 is the same
-phenomenon, not a regression. This is the benign, early-transient form of the grad-spike phenomenology
-from the m12 q_old study: chronic spiking appeared only on the <em>recompute</em>-q_old arm at wide
-staleness (cap 4); the rollout-q_old configuration used here shows only this cold-start transient.</p>
+<p><b>Forensics (28790).</b> The per-token k1 term <code>log q_old − log p_teacher</code> is
+chronically heavy-tailed in the early era: <code>rollout/opd_kl/k1/max</code> sits at <b>27–33 nats
+per token on every step</b> from 13–23 — every batch contains student-sampled tokens to which the
+teacher assigns ~e<sup>−30</sup> probability. Step 17 is not the appearance of outliers but their
+<em>mass</em>: k1 <em>mean</em> jumps to 0.84 vs 0.2–0.4 on neighbouring steps (and its raw_reward,
+0.719, was the <em>highest</em> in the window — these are not degenerate-failure trajectories).
+Because the k1 value feeds the objective as an advantage and <b>nothing clamps it</b> — PPO's
+<code>eps_clip</code> bounds the probability <em>ratio</em>, not the advantage — a handful of
+30-nat tokens can dominate a batch gradient, hence the 470 pre-clip norm.</p>
+
+<p><b>What the spike actually did.</b> <code>clip_grad=1.0</code>, and the steady-state pre-clip
+norm is mean 0.84 / median 0.82 / p95 1.04 — i.e. roughly half of <em>normal</em> steps already run
+at the clip boundary. Clipping rescales the spike step to exactly the same parameter displacement
+as any ordinary step; only its <em>direction</em> was chosen by the outlier tokens. Measured
+aftermath: ppo_kl peaked at 0.017 (the policy barely moved), every series recovered within ~10
+steps, and late-window means match the pre-sync reference to the third decimal.</p>
+
+<p><b>Verdict — contained, not healthy.</b> The spike is a genuine pathology signal (an unclamped
+heavy-tailed estimator meeting a low-signal batch), and its damage is limited today only by the
+bluntest possible instrument (global grad clipping) plus favourable conditions (staleness cap 2,
+rollout-q_old). The m12 study showed exactly this mechanism turning chronic on the recompute-q_old
+arm at staleness cap 4 — spike clusters and negative RKLD. Treat the single early spike as
+tolerated cold-start noise <em>and</em> as a standing reminder that the k1 advantage path has no
+source-level protection. Mitigation levers, in order of directness (recorded in follow-ups):
+per-token winsorization of the k1 advantage (e.g. clamp to ±10 nats — kills the class at the
+source, small documented bias), an RKLD/DAgger coefficient warm-up over the first ~30 steps
+(the spike era is precisely the max-teacher-distance era), and keeping <code>clip_grad=1.0</code>
+as the backstop it already is.</p>
 
 <h2>7 · What the validation exercised</h2>
 <table>
