@@ -44,6 +44,8 @@ Completed:
   exactly matching the Miles gitlink.
 - The mirror review is open as
   [impossible-inc/sglang#5](https://github.com/impossible-inc/sglang/pull/5).
+- The consuming Miles sync is open as draft
+  [impossible-inc/miles-imp#41](https://github.com/impossible-inc/miles-imp/pull/41).
 
 Not yet executed:
 

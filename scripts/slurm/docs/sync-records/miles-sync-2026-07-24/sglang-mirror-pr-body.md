@@ -6,7 +6,9 @@
 Advance the mirror's `sglang-miles` to the current `sgl-project/sglang@sglang-miles`
 tip **`94949da73` = v0.5.15-31** (rebased upstream line; torch stays 2.11.0), with the
 local miles patch stack re-applied on top. Consumed by impossible-inc/miles-imp's
-2026-07-24 upstream sync (branch `sync-upstream-20260723`, pin `38d4bbef5`).
+2026-07-24 upstream sync
+([impossible-inc/miles-imp#41](https://github.com/impossible-inc/miles-imp/pull/41),
+branch `sync-upstream-20260723`, pin `38d4bbef5`).
 
 ## Contents (base + 4 local patches)
 
