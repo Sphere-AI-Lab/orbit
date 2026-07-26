@@ -59,16 +59,13 @@ PINS_FILE = REPO_ROOT / "scripts" / "slurm" / "setup" / "pins.env"
 
 # ---------------------------------------------------------------------------
 # WHEELS_STACK — the single source of truth for "what an sglang wheels tag
-# means". Maps a miles-wheels release tag to the (sglang base tag, torch ABI,
-# sglang_router version) it was built against. The torch/sglang fields are read
-# off the release's own name on GitHub (e.g. cu129-x86_64-v0.5.12 is published
-# as "SGLang v0.5.12 / torch 2.11.0"); the old cu129-x86_64 line is the v0.5.10
-# / torch 2.9.1 bundle. ADD A ROW HERE as part of sglang-sync whenever you point
-# MILES_WHEELS_TAG at a new release.
+# means". Maps a miles-wheels release tag to the (sglang source line, torch ABI,
+# sglang_router version) validated by the upstream image or our bare-metal
+# smoke. Upstream now publishes rolling CUDA/architecture tags, so update the
+# existing row during sglang-sync when that release's binary set changes.
 # ---------------------------------------------------------------------------
 WHEELS_STACK: dict[str, dict[str, str]] = {
-    "cu129-x86_64": {"sglang": "v0.5.10", "torch": "2.9.1", "router": "0.3.2"},
-    "cu129-x86_64-v0.5.12": {"sglang": "v0.5.12", "torch": "2.11.0", "router": "0.3.2"},
+    "cu129-x86_64": {"sglang": "v0.5.15", "torch": "2.11.0", "router": "0.3.2"},
 }
 
 
@@ -344,9 +341,8 @@ def resolve_tag(tag: str) -> int:
 
 def tag_for_sglang(base: str) -> int:
     """Reverse-lookup: print the wheels tag whose WHEELS_STACK row has sglang==base.
-    sglang-sync's no-arg path uses this instead of string-concatenating
-    `cu129-x86_64-<base>` — the legacy v0.5.10 tag is suffix-less (`cu129-x86_64`),
-    so the convention only holds for newer bases. Exit 2 on no/ambiguous match."""
+    sglang-sync's no-arg path uses this because rolling release tags do not
+    encode a source version. Exit 2 on no/ambiguous match."""
     matches = [t for t, s in WHEELS_STACK.items() if s["sglang"] == base]
     if len(matches) == 1:
         print(matches[0])
@@ -354,7 +350,7 @@ def tag_for_sglang(base: str) -> int:
     if not matches:
         print(
             f"FATAL: no WHEELS_STACK tag maps to sglang {base!r}. Add a row in {Path(__file__).name} "
-            f"(new miles-wheels releases are named cu129-x86_64-{base}).",
+            "after validating the matching rolling miles-wheels release.",
             file=sys.stderr,
         )
         return 2

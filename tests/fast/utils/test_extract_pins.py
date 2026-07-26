@@ -27,9 +27,9 @@ def _pin_values(
 ) -> dict[str, str]:
     return {
         "MILES_SGLANG_SOURCE_VERSION": source_version,
-        "MILES_WHEELS_TAG": "cu129-x86_64-v0.5.12",
+        "MILES_WHEELS_TAG": "cu129-x86_64",
         "MILES_WHEELS_TORCH_VERSION": "2.11.0",
-        "MILES_WHEELS_SGLANG_VERSION": "v0.5.12",
+        "MILES_WHEELS_SGLANG_VERSION": "v0.5.15",
         "UPSTREAM_SGLANG_IMAGE_TAG": upstream_image_tag,
         "UPSTREAM_WHEELS_TAG": upstream_wheels_tag,
     }

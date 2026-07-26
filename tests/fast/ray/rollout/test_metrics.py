@@ -102,7 +102,7 @@ class TestDistillationRpcMetrics:
         def capture_log(args, metrics, step_key):
             logged.update(metrics)
 
-        monkeypatch.setattr(rollout_metrics.tracking_utils, "log", capture_log)
+        monkeypatch.setattr(rollout_metrics.tracking, "log", capture_log)
         args = make_args(wandb_always_use_train_step=False)
 
         rollout_metrics.log_rollout_data(0, args, [sample], rollout_extra_metrics=None, rollout_time=1.0)

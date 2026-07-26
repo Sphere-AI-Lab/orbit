@@ -319,6 +319,23 @@ gh pr create --repo impossible-inc/miles-imp \
 
 The `--body-file` form uses the exact draft the user just approved — no last-minute edits, no placeholders.
 
+#### Review/CI repairs after publication
+
+HARD RULE 4 governs the branch prepared before the first push. Once the PR is
+public, do not rewrite its history merely to preserve the single-commit shape.
+For a real issue found by CI or review:
+
+1. Make the smallest focused follow-up commit and run the relevant validation.
+2. Update the checked-in `pr-body.md` change table and validation claims so
+   every follow-up is represented.
+3. Regenerate `divergence.stat` from the recorded upstream tip, excluding the
+   sync-record directory as in Step 7.
+4. Push normally and update the live PR body from `pr-body.md`.
+
+Record that the public review-repair protocol was used. Do not claim the
+single-commit invariant still holds, and do not force-push unless the user
+explicitly requests a history rewrite.
+
 ### Step 10 — Report
 
 Print:

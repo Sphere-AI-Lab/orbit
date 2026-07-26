@@ -129,8 +129,14 @@ if not evals:
     print("  (none yet)")
 else:
     for eid, d in evals:
-        # top-level eval/<dataset> key (count==1 slash)
-        acc_keys = [k for k in d if k.startswith('eval/') and k.count('/') == 1]
+        # Select the dataset score, not top-level diagnostics logged before it.
+        acc_keys = [
+            k for k in d
+            if k.startswith('eval/')
+            and k.count('/') == 1
+            and k != 'eval/step'
+            and not k.endswith(('-none_reward_ratio', '-truncated_ratio'))
+        ]
         if not acc_keys: continue
         acc_key = acc_keys[0]
         rl_key = next((k for k in d if k.endswith('/response_len/mean')), None)

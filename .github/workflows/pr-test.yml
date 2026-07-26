@@ -151,8 +151,8 @@ jobs:
         --labels ${{ needs.resolve-ci-policy.outputs.raw_labels }}
     secrets: inherit
 
-  # Stage C: heavy multi-GPU suites (8-GPU H100 / 4-GPU H200 / 2-GPU H200).
-  # Gated by `run-ci-h100-gpu` (8-GPU H100) / `run-ci-h200-gpu` (4-/2-GPU H200) for the same reason as Stage B: this fork has no
+  # Stage C: heavy multi-GPU suites (8-GPU H100 / 8-/4-/2-GPU H200).
+  # Gated by `run-ci-h100-gpu` (8-GPU H100) / `run-ci-h200-gpu` (8-/4-/2-GPU H200) for the same reason as Stage B: this fork has no
   # self-hosted GPU runners, so without the gate these jobs would queue forever
   # on every PR. Remove the label check (or just keep adding the label) once GPU
   # runners are attached to impossible-inc/miles-imp.
@@ -187,7 +187,8 @@ jobs:
       needs.resolve-ci-policy.result == 'success' &&
       needs.resolve-ci-image.result == 'success' &&
       (needs.stage-a-cpu.result == 'success' ||
-        (needs.stage-a-cpu.result == 'failure' && needs.resolve-ci-policy.outputs.bypass_fastfail == 'true'))
+        (needs.stage-a-cpu.result == 'failure' && needs.resolve-ci-policy.outputs.bypass_fastfail == 'true')) &&
+      ((github.event_name == 'workflow_dispatch') || ((github.event_name == 'schedule' || contains(github.event.pull_request.labels.*.name, 'nightly'))) || (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'run-ci-h200-gpu')))
     strategy:
       fail-fast: false
       matrix:

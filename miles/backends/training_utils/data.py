@@ -100,7 +100,7 @@ def get_rollout_data(
     ]
     _move_opd_dagger_targets_to_device(
         rollout_data,
-        torch.device("cuda", torch.cuda.current_device()),
+        torch.cuda.current_device(),
     )
     if args.enable_witness:
         seq_witness_ids = rollout_data.pop("seq_witness_ids")
