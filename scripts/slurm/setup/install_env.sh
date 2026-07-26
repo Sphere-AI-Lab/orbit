@@ -249,19 +249,15 @@ MEGATRON_SRC="$THIRDPARTY_DIR/Megatron-LM"
 SGLANG_SRC=${SGLANG_SRC:-$THIRDPARTY_DIR/sglang}
 MEGATRON_BRIDGE_SRC="$THIRDPARTY_DIR/Megatron-Bridge"
 
-# Report source/bundle label lag, then fail closed on the actual torch ABI.
-# A newer sglang source may reuse an older bundle label when torch matches;
-# `git describe` is only diagnostic and may be unavailable in a shallow clone.
+# Verify the hand-owned source pin against the checkout, then fail closed on
+# the actual torch ABI. The source may reuse an older wheels bundle when torch
+# matches; `git describe` is only diagnostic and may be unavailable in a
+# shallow clone.
 sub_sglang_base=$(git -C "$SGLANG_SRC" describe --tags --abbrev=0 2>/dev/null || echo "")
-if [[ -n "${MILES_WHEELS_SGLANG_VERSION:-}" && -n "$sub_sglang_base" \
-      && "$sub_sglang_base" != "$MILES_WHEELS_SGLANG_VERSION" ]]; then
-    # A lagging bundle is VALID when torch matches: the bundle wheels
-    # (FA2/FA3/apex/router/gateway) are torch-ABI-bound, not sglang-version-bound —
-    # upstream's own Dockerfile pairs the v0.5.13 sglang image with the v0.5.12
-    # wheels bundle, and the pairing is validated bare-metal (2026-07 sync). The
-    # torch pin check below is the real safety and stays FATAL.
-    echo "[pins] WARN: sglang source is $sub_sglang_base but the wheels bundle is $MILES_WHEELS_SGLANG_VERSION" >&2
-    echo "[pins]       (MILES_WHEELS_TAG=$MILES_WHEELS_TAG). OK while their torch matches (checked next)." >&2
+if [[ -n "${MILES_SGLANG_SOURCE_VERSION:-}" && -n "$sub_sglang_base" \
+      && "$sub_sglang_base" != "$MILES_SGLANG_SOURCE_VERSION" ]]; then
+    echo "[pins] WARN: sglang source is $sub_sglang_base but MILES_SGLANG_SOURCE_VERSION=$MILES_SGLANG_SOURCE_VERSION" >&2
+    echo "[pins]       Update the hand-owned source pin as part of sglang-sync." >&2
 fi
 # The submodule's own torch pin must equal TORCH_VERSION (catches a hand-set
 # TORCH_VERSION override that disagrees with what sglang was built against).

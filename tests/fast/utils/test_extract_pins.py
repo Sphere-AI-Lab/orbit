@@ -35,6 +35,21 @@ def _pin_values(
     }
 
 
+def _render_values() -> dict[str, str]:
+    values = {pin.key: f"test-{pin.key.lower()}" for _, pins in extract_pins.PIN_GROUPS for pin in pins}
+    values.update(_pin_values())
+    values.update(
+        {
+            "SGLANG_ROUTER_VERSION": "0.3.2",
+            "TORCH_INDEX_URL": "https://download.pytorch.org/whl/cu129",
+            "FLASHINFER_INDEX_URL": "https://flashinfer.ai/whl/cu129",
+            "SGL_WHL_INDEX_URL": "https://docs.sglang.ai/whl/cu129",
+            "TMS_COMMIT": "deadbeef",
+        }
+    )
+    return values
+
+
 def test_versionless_upstream_wheels_allow_bundle_to_lag_matching_source() -> None:
     assert extract_pins.pending_notice(_pin_values()) is None
 
@@ -59,6 +74,6 @@ def test_versioned_upstream_wheels_still_compare_source_to_image() -> None:
 
 
 def test_render_records_hand_owned_source_version() -> None:
-    values = extract_pins.extract()
-
-    assert "MILES_SGLANG_SOURCE_VERSION=${MILES_SGLANG_SOURCE_VERSION:-v0.5.15}" in extract_pins.render(values)
+    assert "MILES_SGLANG_SOURCE_VERSION=${MILES_SGLANG_SOURCE_VERSION:-v0.5.15}" in extract_pins.render(
+        _render_values()
+    )
