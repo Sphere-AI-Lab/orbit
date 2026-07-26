@@ -249,11 +249,9 @@ MEGATRON_SRC="$THIRDPARTY_DIR/Megatron-LM"
 SGLANG_SRC=${SGLANG_SRC:-$THIRDPARTY_DIR/sglang}
 MEGATRON_BRIDGE_SRC="$THIRDPARTY_DIR/Megatron-Bridge"
 
-# Fail closed on submodule ↔ ACTIVE-pins mismatch (needs the actual submodule
-# HEAD, which only git can see — complements the file-derivable preflight ABI
-# guard up top). The sglang line just checked out must match the wheels bundle
-# the ACTIVE pins describe, else we'd build sglang vX but install vY's torch-ABI
-# wheels. Skipped if `git describe` finds no tag (shallow/odd clone).
+# Report source/bundle label lag, then fail closed on the actual torch ABI.
+# A newer sglang source may reuse an older bundle label when torch matches;
+# `git describe` is only diagnostic and may be unavailable in a shallow clone.
 sub_sglang_base=$(git -C "$SGLANG_SRC" describe --tags --abbrev=0 2>/dev/null || echo "")
 if [[ -n "${MILES_WHEELS_SGLANG_VERSION:-}" && -n "$sub_sglang_base" \
       && "$sub_sglang_base" != "$MILES_WHEELS_SGLANG_VERSION" ]]; then

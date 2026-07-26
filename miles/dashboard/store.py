@@ -76,7 +76,7 @@ class Record:
 
 @dataclass
 class MetricsRecord(Record):
-    """One ``tracking_utils.log()`` payload."""
+    """One ``tracking.log()`` payload."""
 
     stream: ClassVar[Stream] = Stream.METRICS
     ts: float

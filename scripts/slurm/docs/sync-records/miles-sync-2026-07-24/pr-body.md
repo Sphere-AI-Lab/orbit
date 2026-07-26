@@ -55,8 +55,17 @@ is blocked by #5 and must not merge before that mirror landing completes.**
 ## Pin / install changes
 
 - **`pins.env`**: `UPSTREAM_*` → v0.5.15 / `cu130-x86_64` (upstream's new **torch-ABI-only wheels-tag naming** — no sglang-version suffix; releases republished only on torch bumps). ACTIVE untouched.
+- **SGLang source and wheel identity are now separate pins**:
+  `MILES_SGLANG_SOURCE_VERSION=v0.5.15` tracks the checked-out source line,
+  while `MILES_WHEELS_SGLANG_VERSION=v0.5.12` remains metadata for the
+  torch-compatible wheel release. This makes the intentional bundle lag
+  explicit instead of overloading the wheel label as source identity.
 - **`TMS_COMMIT` becomes a hand-owned pin at `6d5bce48`** — upstream unpinned torch_memory_saver (#1773); we keep determinism for bare-metal rebuilds. `extract_pins.py` gains `read_preserved()`; the dead Dockerfile pattern is gone.
-- **`extract_pins.py` pending comparator**: version-less upstream tags no longer trip `[sglang-sync pending]` (nothing to version-compare; the torch-ABI check in `abi_errors()` is the real guard). `--check` is clean at exit 0 with **no pending**.
+- **`extract_pins.py` pending comparator**: compares the ACTIVE source line
+  directly with `UPSTREAM_SGLANG_IMAGE_TAG`, so version-less wheel tags cannot
+  hide a future source lag. Wheel/source label lag remains legal when the
+  independent torch-ABI check passes. `--check` is clean at exit 0 with **no
+  pending**.
 - **`install_env.sh`**: `TMS_CUDA_MAJOR` derived from the env's torch for the newer TMS source build (#1774); **`numpy<2` + `scipy<1.16` cap removed** — upstream dropped the numpy 1.x force at the v0.5.14 bump (#1587); the merged `requirements.txt` (installed directly) brings `transformers<5.13`, blake3/xxhash/zstandard, nvidia-resiliency-ext, psycopg, polars==1.42.1.
 - **Deliberately NOT mirrored** (model-family-specific, unused here): Emerging-Optimizers (Muon — import is try/except-guarded), tilelang/tile_kernels/FlashQLA (DSV4/Qwen-GDN), causal-conv1d/mamba-ssm (nemotron-h).
 
@@ -67,6 +76,10 @@ is blocked by #5 and must not merge before that mirror landing completes.**
   kernels. Future deployments must use `install_env.sh`; reusing the old
   v0.5.13-era environment is outside the validated configuration.
 - **FT megaseries / multi-LoRA / dashboard are flag-gated** — nothing enables them by default; our recipes are unaffected until opted in.
+- **Claude skill rename**: upstream removed `/doc-first-principle` and replaced
+  it with the broader `/doc-dev` workflow. The old documentation-first behavior
+  is still available as `/doc-dev --docfirst`, but the command name and default
+  mode changed.
 - **`fully-async` knobs**: `--async-max-concurrent-samples` (upstream, absolute) vs `--fully-async-prefetch-batches` (ours, pipeline depth) both live; explicit absolute setting wins. Unification is a recorded follow-up.
 - **Launcher watchdog sentinel retirement** is a recorded follow-up for when the launcher reads upstream's FT event stream instead.
 - **Upstream `sglang-miles` tip == our pin base** (v0.5.15-31) at sync time; no deferred sglang delta.

@@ -451,14 +451,14 @@ def _log_wandb_turn_stats(args, *, prefix: str, step_key: str, step: int, **stat
     if not getattr(args, "use_wandb", False):
         return
     try:
-        from miles.utils import tracking_utils
+        from miles.utils.tracking_utils import tracking
     except Exception as exc:
-        logger.warning("dump_samples: tracking_utils import failed (%s); skipping wandb mirror", exc)
+        logger.warning("dump_samples: tracking import failed (%s); skipping wandb mirror", exc)
         return
     log_dict = {f"{prefix}/{k}": v for k, v in stats.items()}
     log_dict[step_key] = step
     try:
-        tracking_utils.log(args, log_dict, step_key=step_key)
+        tracking.log(args, log_dict, step_key=step_key)
     except Exception as exc:
         logger.warning("dump_samples: wandb mirror failed at step=%d: %s", step, exc)
 
@@ -475,9 +475,9 @@ def _log_wandb_bucket_solve_rates(
     if not bucket_counts or not getattr(args, "use_wandb", False):
         return
     try:
-        from miles.utils import tracking_utils
+        from miles.utils.tracking_utils import tracking
     except Exception as exc:
-        logger.warning("dump_samples: tracking_utils import failed (%s); skipping bucket wandb mirror", exc)
+        logger.warning("dump_samples: tracking import failed (%s); skipping bucket wandb mirror", exc)
         return
     log_dict = {
         f"{prefix}/{bucket}/solve_rate": bucket_success.get(bucket, 0) / count
@@ -486,6 +486,6 @@ def _log_wandb_bucket_solve_rates(
     }
     log_dict[step_key] = step
     try:
-        tracking_utils.log(args, log_dict, step_key=step_key)
+        tracking.log(args, log_dict, step_key=step_key)
     except Exception as exc:
         logger.warning("dump_samples: bucket wandb mirror failed at step=%d: %s", step, exc)

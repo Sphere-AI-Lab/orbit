@@ -86,6 +86,7 @@ Mapping:
 | `TORCH_VERSION` | `thirdparty/sglang/python/pyproject.toml` | extracted (submodule) |
 | `TE_VERSION`, `MBRIDGE_COMMIT`, `TMS_COMMIT`, `CUDNN_CU12_VERSION`, `FLASH_ATTN_INTERFACE_COMMIT`, `MILES_WHEELS_REPO` | `docker/Dockerfile` | extracted (Dockerfile) |
 | `MOONCAKE_VERSION` | `thirdparty/sglang/docker/Dockerfile` | extracted (Dockerfile) |
+| `MILES_SGLANG_SOURCE_VERSION` | preserved from pins.env | **sglang-sync only** |
 | `MILES_WHEELS_TAG` | **preserved** from pins.env | **sglang-sync only** |
 | `MILES_WHEELS_TORCH_VERSION`, `MILES_WHEELS_SGLANG_VERSION`, `SGLANG_ROUTER_VERSION` | `WHEELS_STACK[MILES_WHEELS_TAG]` | derived |
 | `UPSTREAM_SGLANG_IMAGE_TAG`, `UPSTREAM_WHEELS_TAG` | `docker/Dockerfile` | extracted (target) |
@@ -104,14 +105,14 @@ git diff ${MB}..HEAD -- docker/Dockerfile | grep -E '^[+-](RUN|ARG|ENV) '
 
 ## The sglang stack: ACTIVE vs UPSTREAM_TARGET (the core model)
 
-The mistake the 2026-05-29 sync surfaced: `MILES_WHEELS_TAG` was blindly mirrored from the upstream Dockerfile. But the wheels release is an **atomic bundle** — `cu129-x86_64-v0.5.12` *is* "SGLang v0.5.12 / torch 2.11.0" with flash-attn/apex compiled against torch 2.11's C++ ABI. Mirroring just the tag (while the `thirdparty/sglang` submodule stays on v0.5.10 / torch 2.9.1) produced `TORCH_VERSION=2.9.1 + MILES_WHEELS_TAG=…v0.5.12`, which a fresh `install_env.sh` would turn into an ABI-mismatched env (torch-2.11 flash-attn into torch-2.9.1 → `ImportError`/segfault), while the old CUDA-tag preflight (cu129==cu129) waved it through.
+The mistake the 2026-05-29 sync surfaced: `MILES_WHEELS_TAG` was blindly mirrored from the upstream Dockerfile. The wheels release is a **torch-ABI bundle** — `cu129-x86_64-v0.5.12` ships flash-attn/apex compiled against torch 2.11's C++ ABI. Mirroring just the tag (while the `thirdparty/sglang` submodule stays on v0.5.10 / torch 2.9.1) produced `TORCH_VERSION=2.9.1 + MILES_WHEELS_TAG=…v0.5.12`, which a fresh `install_env.sh` would turn into an ABI-mismatched env (torch-2.11 flash-attn into torch-2.9.1 → `ImportError`/segfault), while the old CUDA-tag preflight (cu129==cu129) waved it through. The bundle's SGLang label is release metadata, not a requirement that source stay on that exact version; source may advance while reusing the bundle when torch remains compatible.
 
 Fix — two views of the bundle, reconciled by sglang-sync:
 
-- **ACTIVE** = what `install_env.sh` actually installs. Tracks `thirdparty/sglang`. Held in `MILES_WHEELS_TAG`; `torch`/`sglang`/`router` are **derived** from it via the `WHEELS_STACK` mapping in `extract_pins.py`. **Only sglang-sync advances it.** miles-sync must never auto-bump it.
+- **ACTIVE** = what `install_env.sh` actually installs. `MILES_SGLANG_SOURCE_VERSION` records the `thirdparty/sglang` source line; `MILES_WHEELS_TAG` selects its torch-ABI wheel bundle, whose `torch`/release-`sglang`/`router` metadata is **derived** through `WHEELS_STACK`. The source and bundle labels may differ when torch matches. **Only sglang-sync advances these hand-owned pins.** miles-sync must never auto-bump them.
 - **UPSTREAM_TARGET** = where `docker/Dockerfile` points (`UPSTREAM_SGLANG_IMAGE_TAG` / `UPSTREAM_WHEELS_TAG`). Recorded, never auto-applied. The destination sglang-sync advances ACTIVE to.
 
-`upstream MILES_WHEELS_TAG` is therefore the source of truth for the **destination**, the submodule is the source of truth for the **current build**, and **sglang-sync is the action that drives one to the other**.
+`UPSTREAM_SGLANG_IMAGE_TAG` is therefore the source-version **destination**, `MILES_SGLANG_SOURCE_VERSION` records the current source line, and **sglang-sync is the action that drives one to the other**. `UPSTREAM_WHEELS_TAG` separately describes upstream's ABI bundle choice.
 
 ### WHEELS_STACK mapping (single source of truth for "what a tag means")
 
@@ -139,15 +140,15 @@ Not every artifact in the release is torch-ABI-bound. The fail-closed guard only
 ### Enforcement (defense in depth)
 
 - `extract_pins.py` exit-code contract (shared by `--check` and `--write`):
-  - **exit 0** = consistent, **or** only `[sglang-sync pending]` (ACTIVE behind UPSTREAM — deferrable, must NOT block CI/install/miles-sync).
+  - **exit 0** = consistent, **or** only `[sglang-sync pending]` (`MILES_SGLANG_SOURCE_VERSION` differs from `UPSTREAM_SGLANG_IMAGE_TAG` — deferrable, must NOT block CI/install/miles-sync).
   - **exit 1** = drift (committed ≠ extracted; run `--write`) or pins.env missing.
   - **exit 2** = torch-ABI inconsistency (`WHEELS_STACK[ACTIVE].torch != TORCH_VERSION`) or unknown wheels tag. `--write` **refuses** (won't materialize a bad bundle). Distinct from 1 so miles-sync / CI can stop on danger instead of blindly regenerating.
 - `install_env.sh`, independent of extract_pins (it sees real env state + runtime overrides):
   - **Re-derives** `MILES_WHEELS_TORCH_VERSION` / `MILES_WHEELS_SGLANG_VERSION` / `SGLANG_ROUTER_VERSION` from the *effective* `MILES_WHEELS_TAG` via `extract_pins.py --resolve` right after sourcing pins.env. This is the fix for the **runtime-override hole**: pins.env's baked derived fields are only a snapshot, and `MILES_WHEELS_TAG` is independently overridable (`MILES_WHEELS_TAG=… bash install_env.sh`); without re-derivation the guard would pass on stale torch while `_fetch_miles_wheel` pulls a mismatched-ABI wheel set. The tag is authoritative; WHEELS_STACK (in extract_pins.py) is the single mapping — no duplicated bash mapping.
   - Preflight torch-ABI guard: `MILES_WHEELS_TORCH_VERSION == TORCH_VERSION` (now using the re-derived value).
-  - Post-submodule-init: `git describe` base == `MILES_WHEELS_SGLANG_VERSION`, and submodule pyproject torch == `TORCH_VERSION`.
+  - Post-submodule-init: source/bundle version differences are reported as a warning, while submodule pyproject torch == `TORCH_VERSION` remains mandatory.
 
-Why not "hard lockstep" (block miles-sync until sglang-sync done)? Three reasons: sglang base bumps are frequent; the `sglang-miles` 40-patch rebase onto a new base is an **external dependency** (radixark must publish it first — we can't unilaterally do it); torch major jumps are heavyweight and deserve their own validation window. So divergence is a **loud, deferrable pending**, not a blocker. Safety is held by the install-time fail-closed guard, not by blocking.
+Why not "hard lockstep" (block miles-sync until sglang-sync done)? Three reasons: sglang base bumps are frequent; the `sglang-miles` patch-stack rebase onto a new base is an **external dependency** (radixark must publish it first — we can't unilaterally do it); torch major jumps are heavyweight and deserve their own validation window. So source/target divergence is a **loud, deferrable pending**, not a blocker. Safety is held by the install-time torch-ABI fail-closed guard, not by blocking.
 
 ---
 
@@ -204,13 +205,15 @@ sync together.
 
 ### Contract: advance ACTIVE to UPSTREAM_TARGET, in lockstep with miles
 
-sglang-sync's whole job is to make `MILES_WHEELS_TAG` == `UPSTREAM_WHEELS_TAG`
-(and the submodule + torch follow): fetch `upstream/sglang-miles`, `--ff-only`
-our mirror, push to `impossible-inc/sglang`, bump the gitlink, add the
-`WHEELS_STACK` row if the tag is new, set ACTIVE, `extract_pins.py --write`, then
-`--check` must be exit 0 with no `[sglang-sync pending]`. See the skill for the
-exact steps; the install-time guards + `--check`/`--write` ABI refusal (this doc's
-Enforcement section) backstop every step.
+sglang-sync's whole job is to make `MILES_SGLANG_SOURCE_VERSION` match
+`UPSTREAM_SGLANG_IMAGE_TAG` while selecting a torch-compatible wheels bundle:
+fetch `upstream/sglang-miles`, re-apply local mirror patches on a rebased target,
+publish the review branch, bump the gitlink and source pin, add a `WHEELS_STACK`
+row only if a new bundle is needed, then run `extract_pins.py --write`.
+`--check` must finish with no `[sglang-sync pending]`. The wheels tag need not
+equal upstream's tag when CUDA deployment differs or a same-torch bundle is
+intentionally reused. See the skill for exact mirror landing mechanics; the
+install-time guards and `--check`/`--write` ABI refusal backstop every step.
 
 ### Default: sync TOGETHER with miles-sync
 
@@ -226,7 +229,7 @@ mismatch we're trying to avoid, so together-by-default is correct.
 sglang-sync is still a **standalone** skill (sglang-only bumps, or hotfixes), and
 **deferral is the fallback**: if `sgl-project/sglang@sglang-miles` hasn't rebased
 to the version miles wants yet, or the miles-wheels release for the tag is missing,
-sglang-sync stops, ACTIVE stays put, `--check` keeps emitting `[sglang-sync pending]`,
+sglang-sync stops, ACTIVE source stays put, `--check` keeps emitting `[sglang-sync pending]`,
 and the install-time ABI guard keeps a fresh build safe until upstream is ready.
 
 ### Hard things specific to sglang

@@ -11,20 +11,24 @@ defaults — the bare-metal install therefore stays in lockstep with the
 container build without us re-typing the pins in two places.
 
 The sglang stack is special. The prebuilt wheels (flash-attn / flash-attn-3 /
-apex) are torch-ABI-bound, so (sglang version, torch version, wheels) move as
-one atomic bundle. There are TWO views of that bundle:
+apex) are torch-ABI-bound, so the torch version and wheels move as one atomic
+bundle. The sglang source may be newer than the bundle's release label when
+their torch versions match. There are TWO independently tracked views:
 
   ACTIVE          — what install_env.sh actually installs. Tracks the
-                    thirdparty/sglang submodule. Only sglang-sync advances it.
-                    Held in MILES_WHEELS_TAG; torch/sglang/router are DERIVED
-                    from it via the WHEELS_STACK mapping below.
+                    thirdparty/sglang submodule via
+                    MILES_SGLANG_SOURCE_VERSION, plus the ABI-compatible wheels
+                    selected by MILES_WHEELS_TAG. Only sglang-sync advances
+                    either hand-owned pin. Bundle torch/sglang/router metadata
+                    is DERIVED from WHEELS_STACK below.
   UPSTREAM_TARGET — where upstream docker/Dockerfile points (SGLANG_IMAGE_TAG /
                     WHEELS_TAG). The destination a future sglang-sync advances
                     ACTIVE to. Extracted, recorded, never auto-applied.
 
-`MILES_WHEELS_TAG` is therefore NOT extracted from the Dockerfile — it is
-PRESERVED from the existing pins.env. miles-sync must never auto-bump it; doing
-so without also bumping the submodule + torch is exactly the ABI-mismatch trap.
+`MILES_SGLANG_SOURCE_VERSION` and `MILES_WHEELS_TAG` are therefore NOT extracted
+from the Dockerfile — they are PRESERVED from the existing pins.env. miles-sync
+must never auto-bump them; sglang-sync advances the source and selects a
+torch-compatible wheels bundle together.
 
 Usage:
   # Print pins.env content to stdout (preview before writing):
@@ -196,6 +200,9 @@ def extract() -> dict[str, str]:
 
     # Hand-owned pins (no upstream source to extract from):
     values["TMS_COMMIT"] = read_preserved("TMS_COMMIT", TMS_COMMIT_DEFAULT)
+    values["MILES_SGLANG_SOURCE_VERSION"] = read_preserved(
+        "MILES_SGLANG_SOURCE_VERSION", values["UPSTREAM_SGLANG_IMAGE_TAG"]
+    )
 
     # ACTIVE sglang stack: preserve MILES_WHEELS_TAG, derive the rest from the map.
     active = read_active_wheels_tag(default=values["UPSTREAM_WHEELS_TAG"])
@@ -217,8 +224,8 @@ def extract() -> dict[str, str]:
 HEADER = """\
 # scripts/slurm/setup/pins.env — pinned versions/commits for install_env.sh.
 #
-# AUTO-GENERATED — do not hand-edit, EXCEPT MILES_WHEELS_TAG (the ACTIVE sglang
-# bundle), which only sglang-sync changes. Regenerate the rest with:
+# AUTO-GENERATED — do not hand-edit, EXCEPT MILES_SGLANG_SOURCE_VERSION and
+# MILES_WHEELS_TAG, which only sglang-sync changes. Regenerate the rest with:
 #   python scripts/slurm/setup/extract_pins.py --write
 #
 # Sources of truth:
@@ -231,16 +238,17 @@ HEADER = """\
 """
 
 SGLANG_STACK_COMMENT = """\
-# --- sglang stack (atomic bundle: sglang version + torch ABI + prebuilt wheels) ---
-# ACTIVE = what install_env.sh installs; tracks thirdparty/sglang. UPSTREAM_* =
-# where docker/Dockerfile points. When they differ, `extract_pins.py --check`
+# --- sglang source + torch-ABI wheels bundle ---
+# ACTIVE source tracks thirdparty/sglang independently from the wheels bundle;
+# the bundle may lag the source when torch matches. UPSTREAM_* is where
+# docker/Dockerfile points. When source and upstream target differ, --check
 # prints `[sglang-sync pending]` (exit 0 — deferrable, NOT a sync blocker), and
 # install_env.sh hard-fails on any torch-ABI inconsistency.
 #
-# MILES_WHEELS_TAG is the ONE hand/sglang-sync-owned pin. The three fields under
-# it are DERIVED from it via WHEELS_STACK in extract_pins.py — do not hand-edit;
-# run `extract_pins.py --write`. To upgrade sglang: add a WHEELS_STACK row, set
-# MILES_WHEELS_TAG, bump the submodule, then --write."""
+# MILES_SGLANG_SOURCE_VERSION and MILES_WHEELS_TAG are hand-owned by
+# sglang-sync. Bundle metadata is DERIVED from WHEELS_STACK — do not hand-edit
+# derived fields; run `extract_pins.py --write` after advancing the source and
+# selecting a torch-compatible bundle."""
 
 
 def render(values: dict[str, str]) -> str:
@@ -254,6 +262,9 @@ def render(values: dict[str, str]) -> str:
 
     out.append("")
     out.append(SGLANG_STACK_COMMENT)
+    out.append(
+        f"MILES_SGLANG_SOURCE_VERSION=${{MILES_SGLANG_SOURCE_VERSION:-{values['MILES_SGLANG_SOURCE_VERSION']}}}"
+    )
     out.append(f"MILES_WHEELS_TAG=${{MILES_WHEELS_TAG:-{values['MILES_WHEELS_TAG']}}}")
     out.append(f"MILES_WHEELS_TORCH_VERSION=${{MILES_WHEELS_TORCH_VERSION:-{values['MILES_WHEELS_TORCH_VERSION']}}}")
     out.append(
@@ -293,32 +304,20 @@ def abi_errors(values: dict[str, str]) -> list[str]:
     return errs
 
 
-def _tag_sglang_version(tag: str) -> str:
-    """The sglang-version component of a wheels tag ('cu129-x86_64-v0.5.12' ->
-    'v0.5.12'; legacy suffix-less tags -> '')."""
-    m = re.search(r"-(v[0-9][^-]*)$", tag)
-    return m.group(1) if m else ""
-
-
 def pending_notice(values: dict[str, str]) -> str | None:
-    """ACTIVE behind UPSTREAM target → a deferrable sglang-sync is due.
+    """ACTIVE source and UPSTREAM image target differ → sglang-sync is due.
 
-    Compared on the sglang-VERSION component of the tags, not the whole tag: the
-    cu prefix is a deployment property, not a version lag — upstream's Dockerfile
-    moved to cu130 wheels while bare-metal is driver-bound to the cu129 line
-    (CUDA-12.8 driver), so a cu129-vs-cu130 difference alone is not 'pending'."""
-    if not _tag_sglang_version(values["UPSTREAM_WHEELS_TAG"]):
-        # 2026-07 naming: upstream wheels tags are torch-ABI-only (cu130-x86_64,
-        # no sglang-version suffix; releases are republished only on torch bumps).
-        # There is no version component to lag behind — the real guard is the
-        # torch-ABI consistency check in abi_errors().
-        return None
-    if _tag_sglang_version(values["MILES_WHEELS_TAG"]) != _tag_sglang_version(values["UPSTREAM_WHEELS_TAG"]):
+    Wheels tags are not a source-version signal: newer upstream tags may encode
+    only their CUDA/torch ABI, while an older bundle label may legitimately
+    serve newer sglang source when torch matches. Source lag and ABI safety are
+    therefore checked independently."""
+    if values["MILES_SGLANG_SOURCE_VERSION"] != values["UPSTREAM_SGLANG_IMAGE_TAG"]:
         return (
-            f"[sglang-sync pending] ACTIVE MILES_WHEELS_TAG={values['MILES_WHEELS_TAG']} "
-            f"(sglang {values['MILES_WHEELS_SGLANG_VERSION']} / torch {values['MILES_WHEELS_TORCH_VERSION']}) "
-            f"is behind UPSTREAM_WHEELS_TAG={values['UPSTREAM_WHEELS_TAG']} "
-            f"(image {values['UPSTREAM_SGLANG_IMAGE_TAG']}). Run sglang-sync when ready to upgrade."
+            f"[sglang-sync pending] ACTIVE MILES_SGLANG_SOURCE_VERSION="
+            f"{values['MILES_SGLANG_SOURCE_VERSION']} does not match "
+            f"UPSTREAM_SGLANG_IMAGE_TAG={values['UPSTREAM_SGLANG_IMAGE_TAG']} "
+            f"(wheels {values['MILES_WHEELS_TAG']} / torch {values['MILES_WHEELS_TORCH_VERSION']}). "
+            "Run sglang-sync when ready to upgrade."
         )
     return None
 

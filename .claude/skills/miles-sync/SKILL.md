@@ -126,14 +126,15 @@ case $rc in
 esac
 ```
 
-`extract_pins.py` will **never** auto-bump the ACTIVE `MILES_WHEELS_TAG` (the sglang
-bundle), only refresh the purely-extracted pins (TE, mbridge, cudnn, mooncake, …) and
-the `UPSTREAM_*` target fields. So a normal sync that bumps upstream's sglang base
-will hit exit 1 (drift in `UPSTREAM_*`); `--write` then leaves ACTIVE untouched, moves
-`UPSTREAM_WHEELS_TAG`/`UPSTREAM_SGLANG_IMAGE_TAG` forward, and prints `[sglang-sync
-pending]`. Exit-code contract:
+`extract_pins.py` will **never** auto-bump the ACTIVE
+`MILES_SGLANG_SOURCE_VERSION` or `MILES_WHEELS_TAG`, only refresh the
+purely-extracted pins (TE, mbridge, cudnn, mooncake, …) and the `UPSTREAM_*`
+target fields. So a normal sync that bumps upstream's sglang base will hit exit
+1 (drift in `UPSTREAM_*`); `--write` then leaves ACTIVE untouched, moves
+`UPSTREAM_WHEELS_TAG`/`UPSTREAM_SGLANG_IMAGE_TAG` forward, and prints
+`[sglang-sync pending]`. Exit-code contract:
 
-- **exit 0** = consistent, **or** only `[sglang-sync pending]` (ACTIVE behind UPSTREAM — deferrable, NOT a blocker).
+- **exit 0** = consistent, **or** only `[sglang-sync pending]` (ACTIVE source differs from the UPSTREAM image target — deferrable, NOT a blocker).
 - **exit 1** = drift (run `--write`) or pins.env missing.
 - **exit 2** = torch-ABI inconsistency / unknown wheels tag (DANGER). `--write` also refuses this. On a normal miles-sync it should never happen (ACTIVE stays put); if it does, STOP and surface to the user — the submodule/tag are out of sync and need a real sglang-sync, not a regenerate.
 
@@ -152,11 +153,13 @@ This is a focusing aid — **the skill does NOT auto-edit install_env.sh**. Pres
 
 #### 5d. sglang gate — sync together (default), or defer
 
-The sglang stack is an atomic bundle (sglang version + torch ABI + prebuilt
-wheels). When upstream's target leads ACTIVE, the **default is to advance them
+The sglang source and its torch-compatible prebuilt wheels form one deployment
+unit, although the wheel release's SGLang label may lag the source when torch
+matches. When upstream's target leads ACTIVE, the **default is to advance them
 together in this same PR** — the miles code you just merged was written against
-the newer sglang, so shipping the two as one bundle avoids running new miles code
-on an old sglang. Deferring is the fallback, only when the new line isn't ready.
+the newer sglang, so shipping the two together avoids running new miles code on
+an old source line. Deferring is the fallback, only when the new line isn't
+ready.
 
 After 5b, detect the move:
 
@@ -171,8 +174,9 @@ If `PENDING=1`, tell the user what upstream now wants (`UPSTREAM_SGLANG_IMAGE_TA
 **Default — sync together:** invoke **`/sglang-sync <UPSTREAM_WHEELS_TAG>`** now.
 It runs on the same sync branch: fetches `sgl-project/sglang@sglang-miles`,
 fast-forwards our mirror, bumps the `thirdparty/sglang` gitlink, adds the
-`WHEELS_STACK` row if new, sets ACTIVE = the target tag, and `--write`s — leaving
-`extract_pins.py --check` at exit 0 with **no** pending. Its staged changes
+`WHEELS_STACK` row if needed, sets the ACTIVE source to the image target, selects
+a torch-compatible wheels bundle, and `--write`s — leaving `extract_pins.py
+--check` at exit 0 with **no** pending. Its staged changes
 (`thirdparty/sglang` + `pins.env` + `extract_pins.py`) fold into this sync's
 single "our changes" commit (Step 6). The combined PR then carries the miles
 merge + the sglang bump as one bundle. Its outward pushes (the
@@ -183,13 +187,15 @@ final approval as Step 9 — push the sglang mirror FIRST so the gitlink resolve
 miles-wheels release for the target tag is missing, or `sgl-project/sglang@sglang-miles`
 hasn't rebased to the version miles wants yet):
 
-1. Do NOT bump ACTIVE or the submodule. Leave the consistent ACTIVE bundle.
+1. Do NOT bump ACTIVE or the submodule. Leave the consistent ACTIVE source and
+   wheels bundle.
 2. `extract_pins.py --write` already refreshed `UPSTREAM_*`; commit that delta in Step 6.
 3. Add a prominent PR-body item:
 
    > ⚠️ **sglang-sync deferred** — upstream wants sglang `<UPSTREAM_SGLANG_IMAGE_TAG>`
-   > / `<UPSTREAM_WHEELS_TAG>` (torch `<new>`) but the line isn't ready yet. ACTIVE
-   > held at `<MILES_WHEELS_TAG>` (torch `<current>`); run `/sglang-sync` once
+   > / `<UPSTREAM_WHEELS_TAG>` (torch `<new>`) but the line isn't ready yet.
+   > ACTIVE source held at `<MILES_SGLANG_SOURCE_VERSION>` with wheels
+   > `<MILES_WHEELS_TAG>` (torch `<current>`); run `/sglang-sync` once
    > upstream publishes. install_env.sh fails closed on any ABI mismatch meanwhile.
 
 See `scripts/slurm/docs/sync-records/upstream-sync-design.md` for the ACTIVE vs

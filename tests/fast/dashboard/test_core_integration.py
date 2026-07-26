@@ -1,7 +1,7 @@
 """Integration of the dashboard with miles core, on a local Ray instance.
 
 Exercises the REAL activation path: tracking registry -> MilesDashboardBackend
--> init_dashboard (named collector actor + samplers) -> tracking_utils.log
+-> init_dashboard (named collector actor + samplers) -> tracking.log
 fan-out -> Timer phase sink -> finish_tracking, then loads the produced
 directory with the store and serves it. GPU samples appear only on hosts with
 NVML; everything else must work identically on a laptop and a GPU node.

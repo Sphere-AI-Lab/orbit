@@ -324,11 +324,11 @@ def _eval_samples(size: int = 4) -> list[_EvalSample]:
 
 
 def test_eval_logger_records_accuracy_ci_and_exact_step(monkeypatch) -> None:
-    from miles.utils import tracking_utils
+    from miles.utils.tracking_utils import tracking
 
     captured = {}
     monkeypatch.setattr(
-        tracking_utils,
+        tracking,
         "log",
         lambda _args, metrics, step_key: captured.update(metrics=metrics, step_key=step_key),
     )
@@ -364,9 +364,9 @@ def test_manifest_contract_rejects_duplicate_ids() -> None:
 
 
 def test_eval_logger_rejects_missing_truncation_rows(monkeypatch) -> None:
-    from miles.utils import tracking_utils
+    from miles.utils.tracking_utils import tracking
 
-    monkeypatch.setattr(tracking_utils, "log", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(tracking, "log", lambda *_args, **_kwargs: None)
     samples = _eval_samples()
     data = {
         "geo3k_fixed": {
