@@ -17,6 +17,7 @@ Major upstream content: the fault-tolerance megaseries (~50 commits: witness ids
 | `80cc75e8` | add SGLang source-pin diagnostics and stabilize fork CPU checks |
 | `c8da137a` | close post-sync API/CI gaps and migrate the retired wheels release to the byte-verified rolling tag |
 | `34335c5e` | initialize the rollout-dispose test double with the synced `data_source` lifecycle field |
+| `2d529d88` | distinguish dynamic-sampling live diagnostics from the final all-samples hook in its integration test |
 | sync-record commits | capture the upstream analysis, SGLang patch classification, cluster validation, performance comparison, and OPD spike retrospective |
 
 The initial one-code-commit preparation rule was not preserved after the PR was
@@ -56,6 +57,13 @@ A later CPU CI run exposed one more stale test-double contract, fixed in
 The repair is test-only and leaves `RolloutManager.dispose()` unchanged. The
 other red CPU shard was a Ray worker OOM at the hosted runner's 95% memory
 threshold, not an assertion or product-code failure.
+
+That rerun reached 846 passing tests before exposing a second stale assertion,
+fixed in `2d529d88`. Dynamic sampling intentionally invokes the all-samples hook
+for live diagnostics while refill is in progress and once more for the final
+batch. The integration test now selects and validates the unique non-live final
+call instead of requiring the hook's total call count to be one. Runtime
+behavior is unchanged.
 
 ## sglang: v0.5.15 line, patch-by-patch
 
@@ -111,7 +119,7 @@ is blocked by #5 and must not merge before that mirror landing completes.**
 
 ## Divergence from upstream after sync
 
-265 files, +40,767/−265 vs the merged upstream snapshot — `scripts/slurm/` launcher infra, OPD recipes/presentation, `miles_plugins/envpack_adapter/`, `.claude/skills/`, `examples/geo3k_vlm_multi_turn/` + fully-async hardening, in-place `miles/*` modifications listed above, and the `thirdparty/*` submodules. Full stat in [divergence.stat](divergence.stat).
+266 files, +40,770/−267 vs the merged upstream snapshot — `scripts/slurm/` launcher infra, OPD recipes/presentation, `miles_plugins/envpack_adapter/`, `.claude/skills/`, `examples/geo3k_vlm_multi_turn/` + fully-async hardening, in-place `miles/*` modifications listed above, and the `thirdparty/*` submodules. Full stat in [divergence.stat](divergence.stat).
 
 ## Validation
 
@@ -121,9 +129,9 @@ Static and fast validation:
 - [x] `extract_pins.py --check` exit 0 with no pending.
 - [x] `tests/fast/utils/test_extract_pins.py` 4/4.
 - [x] Repository pre-commit hooks pass across the complete PR diff.
-- [x] Post-publication fixture repair `34335c5e` passes all repository
-  pre-commit hooks. Its targeted pytest is delegated to CPU CI because the
-  local macOS test environment does not contain PyTorch.
+- [x] Post-publication test repairs `34335c5e` and `2d529d88` pass all
+  repository pre-commit hooks. Their targeted pytest coverage is delegated to
+  CPU CI because the local macOS test environment does not contain PyTorch.
 - [x] Rolling `cu129-x86_64` Apex/FA2/FA3 SHA256 values match the previously validated job-28782 cache exactly; no replacement binaries were introduced.
 
 Fresh cluster environment and end-to-end validation:

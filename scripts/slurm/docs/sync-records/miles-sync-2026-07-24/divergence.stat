@@ -247,6 +247,7 @@
  .../fast/rollout/generate_hub/test_single_turn.py  |    4 +-
  .../generate_utils/test_openai_endpoint_utils.py   |   61 +
  .../generate_utils/test_prefill_logprobs.py        |   91 ++
+ .../integration/test_sample_filter.py              |    5 +-
  .../inference_rollout/test_compatibility.py        |   64 +
  .../inference_rollout/test_live_diagnostics.py     |   69 +
  tests/fast/rollout/test_geo3k_fixed_eval.py        |  586 +++++++
@@ -263,4 +264,4 @@
  thirdparty/sglang                                  |    1 +
  train.py                                           |   19 +
  train_async.py                                     |   18 +
- 265 files changed, 40767 insertions(+), 265 deletions(-)
+ 266 files changed, 40770 insertions(+), 267 deletions(-)
