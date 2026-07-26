@@ -241,7 +241,7 @@
  tests/fast/envpack_adapter/test_generate.py        |  573 +++++++
  tests/fast/envpack_adapter/test_logging.py         |  201 +++
  tests/fast/envpack_adapter/test_renderer.py        |   51 +
- .../ray/rollout/real_ray/test_rollout_manager.py   |   19 +
+ .../ray/rollout/real_ray/test_rollout_manager.py   |   20 +
  tests/fast/ray/rollout/test_metrics.py             |  155 +-
  .../fast/ray/rollout/test_train_data_conversion.py |   55 +
  .../fast/rollout/generate_hub/test_single_turn.py  |    4 +-
@@ -263,4 +263,4 @@
  thirdparty/sglang                                  |    1 +
  train.py                                           |   19 +
  train_async.py                                     |   18 +
- 265 files changed, 40766 insertions(+), 265 deletions(-)
+ 265 files changed, 40767 insertions(+), 265 deletions(-)
