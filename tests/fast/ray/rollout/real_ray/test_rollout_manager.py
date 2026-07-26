@@ -166,6 +166,7 @@ class TestRolloutManagerDispose:
 
         manager = object.__new__(RolloutManager.__ray_actor_class__)
         manager.args = SimpleNamespace(use_opd=False)
+        manager.data_source = SimpleNamespace()
         manager.generate_rollout = object()
         manager._metric_checker = None
         manager._health_monitors = []
