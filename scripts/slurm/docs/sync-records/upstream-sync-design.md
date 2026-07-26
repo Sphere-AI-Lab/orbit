@@ -116,12 +116,19 @@ Fix — two views of the bundle, reconciled by sglang-sync:
 
 ### WHEELS_STACK mapping (single source of truth for "what a tag means")
 
-Lives in `extract_pins.py`. Maps a wheels tag → `{sglang base tag, torch ABI, sglang_router version}`, read off the miles-wheels release's own name on GitHub. `--write` resolves the derived pins.env fields from it; `install_env.sh` reads the resolved values (no bash-side mapping). Add a row here as part of every sglang-sync.
+Lives in `extract_pins.py`. Maps a wheels tag → `{validated sglang source line,
+torch ABI, sglang_router version}`. `--write` resolves the derived pins.env
+fields from it; `install_env.sh` reads the resolved values (no bash-side
+mapping).
+
+The wheels repository now publishes rolling CUDA/architecture tags. A tag name
+therefore does not prove an ABI or source version. During sglang-sync, validate
+the current assets against an upstream same-torch build, byte-identical known
+artifacts, or a clean environment smoke, then update the existing row in place.
 
 ```python
 WHEELS_STACK = {
-    "cu129-x86_64":         {"sglang": "v0.5.10", "torch": "2.9.1",  "router": "0.3.2"},
-    "cu129-x86_64-v0.5.12": {"sglang": "v0.5.12", "torch": "2.11.0", "router": "0.3.2"},
+    "cu129-x86_64": {"sglang": "v0.5.15", "torch": "2.11.0", "router": "0.3.2"},
 }
 ```
 
@@ -197,7 +204,8 @@ Submodule remotes: `origin` = `impossible-inc/sglang`, `upstream` = `sgl-project
 `impossible-inc/sglang` is private https, so non-interactive pushes use a
 token-injected URL: `https://x-access-token:$GH_TOKEN@github.com/impossible-inc/sglang.git`.
 
-Snapshot at build time: pin `v0.5.10-40-g4d795356c` (torch 2.9.1); upstream
+Snapshot when this workflow was first built (2026-06-02): pin
+`v0.5.10-40-g4d795356c` (torch 2.9.1); upstream
 `sgl-project/sglang@sglang-miles` already at `v0.5.12-23-g3102015ca` (torch
 2.11.0), +1434 commits — exactly the line miles' Dockerfile UPSTREAM target
 (`v0.5.12-cu129` / `cu129-x86_64-v0.5.12`) points at. So the bundle is ready to

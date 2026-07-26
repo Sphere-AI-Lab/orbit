@@ -1,6 +1,6 @@
 ## Summary
 
-Sync with upstream `radixark/miles` — **187 upstream commits** merged (merge-base `5e97c865`, 2026-06-29 → upstream tip `c94c2fa9`, 2026-07-23), **plus the combined sglang-sync**: `thirdparty/sglang` advances to the **v0.5.15 sglang-miles line** (`38d4bbef5` = `sgl-project/sglang@sglang-miles` `v0.5.15-31` + 4 re-applied local patches). The ACTIVE wheels bundle stays `cu129-x86_64-v0.5.12` — torch is unchanged at 2.11.0, so this is a textbook bundle-may-lag sync (upstream's own Dockerfile pairs its v0.5.15 image the same way).
+Sync with upstream `radixark/miles` — **187 upstream commits** merged (merge-base `5e97c865`, 2026-06-29 → upstream tip `c94c2fa9`, 2026-07-23), **plus the combined sglang-sync**: `thirdparty/sglang` advances to the **v0.5.15 sglang-miles line** (`38d4bbef5` = `sgl-project/sglang@sglang-miles` `v0.5.15-31` + 4 re-applied local patches). The ACTIVE wheels bundle follows upstream #1784 onto rolling `cu129-x86_64`; its Apex/FA2/FA3 files are SHA256-identical to the torch 2.11.0+cu129 set validated by clean rebuild job 28782 and both baseline runs.
 
 Major upstream content: the fault-tolerance megaseries (~50 commits: witness ids, independent-DP cells, in-memory checkpoints, heartbeat/control-server, event logging), multi-LoRA (7 parts), session-server scale-out (N instances on a port range), metric-history CI gate, miles dashboard, disk-delta weight sync, dual-clip PPO, GLM-5 LoRA RL, entropy observation, pass@k relocation, and two sglang bumps (v0.5.14, v0.5.15).
 
@@ -13,7 +13,15 @@ Major upstream content: the fault-tolerance megaseries (~50 commits: witness ids
 | `8d5726f8` | skip the unused `nvidia-resiliency-ext` package on cluster glibc older than 2.39 |
 | `1a134f6d` | put the environment cuDNN directory first for batch-shell and envpack-server scopes |
 | `3d743d4a` | apply the repository pre-commit import cleanup to the merged tree |
+| `02ff7524` | repair import and test-double regressions exposed by the merged upstream APIs |
+| `80cc75e8` | add SGLang source-pin diagnostics and stabilize fork CPU checks |
+| `c8da137a` | close post-sync API/CI gaps and migrate the retired wheels release to the byte-verified rolling tag |
 | sync-record commits | capture the upstream analysis, SGLang patch classification, cluster validation, performance comparison, and OPD spike retrospective |
+
+The initial one-code-commit preparation rule was not preserved after the PR was
+published: CI and review found real follow-up defects. Public history was left
+intact; each repair is recorded here under the review/CI repair protocol in the
+sync skill.
 
 ## Conflicts resolved (20 files — all reviewed per-file)
 
@@ -27,10 +35,18 @@ The largest conflict surface of any sync so far: upstream's FT megaseries and ou
 - **`examples/fully_async/fully_async_rollout.py`** — our prefetch design **layered on** upstream #1677: explicit `--async-max-concurrent-samples` overrides absolutely; otherwise the window is `rollout_batch_size × --fully-async-prefetch-batches` (replaces upstream's legacy one-batch fallback; degenerates to it at prefetch=1). John's `_active_tasks` fail-closed plumbing kept.
 - **`miles/ray/rollout/router_manager.py`** — took upstream's N-instance session-server scale-out (#1659/#1602) with readiness `timeout=300` (upstream's 30s re-introduces the bare-metal cold-import false-kill we fixed in 84f65a8d; 600→300 per review).
 - **`train.py` / `train_async.py`** — kept our watchdog sentinel (`set_progress`/`write_train_status`; consumed by `launch_miles.sbatch` outside ray — upstream's new FT heartbeat lives inside ray, different layer), took their `rollout_id == args.start_rollout_id` eval fix (#1579) and tracking package paths.
-- **`.github/workflows/pr-test.yml`** — upstream's `resolve-ci-policy` refactor taken verbatim; our `run-ci-h200-gpu`/`run-ci-h100-gpu` hardware-label gates re-ANDed onto all 4 GPU stages (fork has no self-hosted GPU runners).
-- **`miles/utils/arguments.py`, `tracking_utils/base.py`, `log_utils.py`, `metrics.py`, `rollout_manager.py`, `train_data_conversion.py`, `misc.py`, `broadcast.py`, 3 test files** — unions (both sides' args/validators/metrics/attrs/imports kept; redundant `is_lora` line dropped in favor of upstream's `_init_lora`).
+- **`.github/workflows/pr-test.yml`** — upstream's `resolve-ci-policy` refactor taken verbatim; our `run-ci-h200-gpu`/`run-ci-h100-gpu` hardware-label gates re-ANDed onto all 5 GPU stages (fork has no self-hosted GPU runners).
+- **`miles/utils/arguments.py`, `tracking_utils/base.py`, `log_utils.py`, `metrics.py`, `rollout_manager.py`, `train_data_conversion.py`, `misc.py`, `broadcast.py`, 2 test files** — unions (both sides' args/validators/metrics/attrs/imports kept; redundant `is_lora` line dropped in favor of upstream's `_init_lora`).
 
 Three test-double updates were needed (not regressions): fakes lacked upstream's new interface (`async_max_concurrent_samples` attr, `compute_policy_loss` 5th param `eps_clip_c` ×2, `session_id` field in an sglang test).
+
+Post-publication review found four additional compatibility gaps, fixed in
+`c8da137a`: OPD's device transfer now accepts the CPU test double returned by
+`torch.cuda.current_device()`; the rollout metric test patches the new
+`tracking` import; the Envpack adapter follows `Sample.routing_key` (including
+manual/consistent-hashing headers); and the new 8-GPU H200 CI stage has the
+fork's hardware-label gate. The same commit also keeps `check_run.sh` on the
+actual eval score rather than newly added top-level diagnostics.
 
 ## sglang: v0.5.15 line, patch-by-patch
 
@@ -54,12 +70,12 @@ is blocked by #5 and must not merge before that mirror landing completes.**
 
 ## Pin / install changes
 
-- **`pins.env`**: `UPSTREAM_*` → v0.5.15 / `cu130-x86_64` (upstream's new **torch-ABI-only wheels-tag naming** — no sglang-version suffix; releases republished only on torch bumps). ACTIVE untouched.
-- **SGLang source and wheel identity are now separate pins**:
+- **`pins.env`**: `UPSTREAM_*` → v0.5.15 / `cu130-x86_64`; ACTIVE cu12 moves from the retired versioned release to rolling `cu129-x86_64`, following upstream #1784. Server SHA256 comparison confirmed that Apex, FA2, and FA3 are byte-identical to the job-28782 torch 2.11.0+cu129 cache.
+- **SGLang source and wheel identity remain separate pins**:
   `MILES_SGLANG_SOURCE_VERSION=v0.5.15` tracks the checked-out source line,
-  while `MILES_WHEELS_SGLANG_VERSION=v0.5.12` remains metadata for the
-  torch-compatible wheel release. This makes the intentional bundle lag
-  explicit instead of overloading the wheel label as source identity.
+  while `MILES_WHEELS_SGLANG_VERSION=v0.5.15` records the source line against
+  which the current rolling assets were validated. The values happen to match
+  in this sync, but neither is inferred from the version-less release tag.
 - **`TMS_COMMIT` becomes a hand-owned pin at `6d5bce48`** — upstream unpinned torch_memory_saver (#1773); we keep determinism for bare-metal rebuilds. `extract_pins.py` gains `read_preserved()`; the dead Dockerfile pattern is gone.
 - **`extract_pins.py` pending comparator**: compares the ACTIVE source line
   directly with `UPSTREAM_SGLANG_IMAGE_TAG`, so version-less wheel tags cannot
@@ -86,7 +102,7 @@ is blocked by #5 and must not merge before that mirror landing completes.**
 
 ## Divergence from upstream after sync
 
-258 files, +40,575/−249 vs the merged upstream snapshot — `scripts/slurm/` launcher infra, OPD recipes/presentation, `miles_plugins/envpack_adapter/`, `.claude/skills/`, `examples/geo3k_vlm_multi_turn/` + fully-async hardening, in-place `miles/*` modifications listed above, and the `thirdparty/*` submodules. Full stat in [divergence.stat](divergence.stat).
+265 files, +40,766/−265 vs the merged upstream snapshot — `scripts/slurm/` launcher infra, OPD recipes/presentation, `miles_plugins/envpack_adapter/`, `.claude/skills/`, `examples/geo3k_vlm_multi_turn/` + fully-async hardening, in-place `miles/*` modifications listed above, and the `thirdparty/*` submodules. Full stat in [divergence.stat](divergence.stat).
 
 ## Validation
 
@@ -94,7 +110,9 @@ Static and fast validation:
 - [x] Fast tests on merged tree: `test_data_filter_long_prompt` 4/4, `test_on_policy_distillation` **68/68**, `test_true_on_policy_loss_metrics` 8/8.
 - [x] sglang patch unit tests on the new pin: **54 passed + 13 subtests**.
 - [x] `extract_pins.py --check` exit 0 with no pending.
+- [x] `tests/fast/utils/test_extract_pins.py` 4/4.
 - [x] Repository pre-commit hooks pass across the complete PR diff.
+- [x] Rolling `cu129-x86_64` Apex/FA2/FA3 SHA256 values match the previously validated job-28782 cache exactly; no replacement binaries were introduced.
 
 Fresh cluster environment and end-to-end validation:
 - [x] Clean `install_env.sh` rebuild completed in job 28782; `verify_env.py`

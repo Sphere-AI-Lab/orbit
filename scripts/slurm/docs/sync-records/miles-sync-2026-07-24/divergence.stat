@@ -2,17 +2,20 @@
  .claude/skills/cluster-health/fs_probe.sh          |  132 ++
  .claude/skills/cluster-health/gpu_deep_probe.sh    |   57 +
  .../skills/cluster-health/gpu_occupancy_probe.sh   |   56 +
- .claude/skills/miles-sync/SKILL.md                 |  353 ++++
+ .claude/skills/miles-sync/SKILL.md                 |  376 +++++
  .claude/skills/miles-upstream-prs/SKILL.md         |  169 ++
  .../miles-upstream-prs/scripts/scan_imports.py     |  129 ++
  .claude/skills/rl-monitor-loop/SKILL.md            |  169 ++
- .claude/skills/sglang-sync/SKILL.md                |  401 +++++
+ .claude/skills/sglang-sync/SKILL.md                |  414 +++++
  .claude/skills/slurm-launch/SKILL.md               |  210 +++
  .github/workflows/claude-review.yml                |   98 ++
- .github/workflows/pr-test.yml                      |   22 +-
+ .github/workflows/docker-build.yml                 |   13 +-
+ .github/workflows/pr-test.yml                      |   25 +-
  .gitignore                                         |   25 +
  .gitmodules                                        |   16 +
  .pre-commit-config.yaml                            |    2 +-
+ docker/build.py                                    |    2 +-
+ docs/ci/02-docker-build.md                         |    2 +-
  docs/developer/agent-workflow.md                   |   50 +
  docs/user-guide/monitoring.md                      |    2 +-
  examples/fully_async/README.md                     |   84 +-
@@ -42,7 +45,7 @@
  miles/backends/megatron_utils/model.py             |   14 +-
  miles/backends/megatron_utils/model_provider.py    |   26 +
  .../update_weight/hf_weight_iterator_bridge.py     |   11 +-
- .../update_weight_from_distributed/broadcast.py    |  111 +-
+ .../update_weight_from_distributed/broadcast.py    |  113 +-
  miles/backends/training_utils/cp_utils.py          |   36 +-
  miles/backends/training_utils/data.py              |   50 +
  miles/backends/training_utils/debug_dump.py        |    7 +
@@ -52,6 +55,7 @@
  .../backends/training_utils/loss_hub/math_utils.py |  455 ++++++
  miles/backends/training_utils/loss_hub/opd.py      |   10 +-
  .../training_utils/loss_hub/rkld_dagger.py         |  417 +++++
+ miles/dashboard/store.py                           |    2 +-
  miles/ray/rollout/metrics.py                       |  102 +-
  miles/ray/rollout/rollout_manager.py               |   17 +-
  miles/ray/rollout/router_manager.py                |    8 +-
@@ -71,7 +75,7 @@
  miles/utils/arguments.py                           |  307 +++-
  miles/utils/data.py                                |   10 +-
  miles/utils/health_monitor.py                      |   25 +-
- miles/utils/misc.py                                |   11 +-
+ miles/utils/misc.py                                |    7 +-
  miles/utils/test_wandb_utils.py                    |   18 +
  miles/utils/tracking_utils/base.py                 |   38 +-
  miles/utils/tracking_utils/wandb_utils.py          |   28 +-
@@ -84,7 +88,7 @@
  miles_plugins/envpack_adapter/config.py            |  363 +++++
  miles_plugins/envpack_adapter/data_source.py       |  473 ++++++
  miles_plugins/envpack_adapter/filters.py           |   72 +
- miles_plugins/envpack_adapter/generate.py          |  787 +++++++++
+ miles_plugins/envpack_adapter/generate.py          |  788 +++++++++
  miles_plugins/envpack_adapter/logging.py           |  369 +++++
  miles_plugins/envpack_adapter/recipes/README.md    |   47 +
  miles_plugins/envpack_adapter/recipes/common.sh    |  294 ++++
@@ -133,7 +137,7 @@
  ...urn-2trainer-4sampler-recompute-qold-200step.sh |   17 +
  scripts/experiments/OPD/multimodal/README.md       | 1368 ++++++++++++++++
  .../OPD/multimodal/SERVER_VALIDATION.md            | 1350 +++++++++++++++
- ...o3k-multimodal-multiturn-fully-async-200step.sh |  254 +++
+ ...o3k-multimodal-multiturn-fully-async-200step.sh |  256 +++
  .../OPD/multimodal/geo3k-multiturn-overlay.sh      |   38 +
  .../multimodal/production_image_scoring_smoke.py   |  363 +++++
  .../OPD/multimodal/results/04a-job-26525.json      |   73 +
@@ -198,11 +202,11 @@
  ...-main-qwen25vl3b-colocate-1node-global_bsz32.sh |   15 +
  ...vagen-sokoban-main-qwen25vl3b-colocate-1node.sh |  200 +++
  scripts/run-qwen3-4B-disagg.sh                     |  147 ++
- scripts/slurm/check_run.sh                         |  168 ++
+ scripts/slurm/check_run.sh                         |  174 ++
  scripts/slurm/docs/architecture.md                 |  112 ++
  scripts/slurm/docs/launcher.md                     |  405 +++++
  scripts/slurm/docs/watchdogs.md                    |  231 +++
- scripts/slurm/launch_miles.sbatch                  |  842 ++++++++++
+ scripts/slurm/launch_miles.sbatch                  |  856 ++++++++++
  scripts/slurm/lib/gpu_probe.py                     |   47 +
  scripts/slurm/lib/ib_probe.sh                      |   50 +
  scripts/slurm/lib/manifest.sh                      |   79 +
@@ -211,9 +215,9 @@
  scripts/slurm/lib/weka_probe.sh                    |   57 +
  scripts/slurm/setup/README.md                      |   83 +
  scripts/slurm/setup/convert_checkpoint.sh          |   52 +
- scripts/slurm/setup/extract_pins.py                |  449 +++++
- scripts/slurm/setup/install_env.sh                 |  701 ++++++++
- scripts/slurm/setup/pins.env                       |   56 +
+ scripts/slurm/setup/extract_pins.py                |  444 +++++
+ scripts/slurm/setup/install_env.sh                 |  708 ++++++++
+ scripts/slurm/setup/pins.env                       |   58 +
  scripts/slurm/setup/track_submodules.py            |  202 +++
  scripts/slurm/setup/verify_env.py                  |  330 ++++
  scripts/slurm/submit.sh                            |  129 ++
@@ -222,17 +226,19 @@
  tests/fast-gpu/test_nvfp4_quantizer.py             |    4 +-
  .../test_update_weight_from_distributed_bridge.py  |  366 +++++
  .../training_utils/loss/rkld_dagger_test_utils.py  |   89 +
+ .../training_utils/loss/test_loss_snapshot.py      |   28 +-
  .../fast/backends/training_utils/loss/test_opd.py  |   22 +-
  .../training_utils/loss/test_rkld_dagger.py        |  904 +++++++++++
  .../test_true_on_policy_data_log_dtype.py          |  245 ++-
  .../test_true_on_policy_loss_metrics.py            |  234 ++-
  .../training_utils/test_ulysses_cp_utils.py        |   11 +
+ tests/fast/dashboard/test_core_integration.py      |    2 +-
  tests/fast/envpack_adapter/test_analysis.py        |   61 +
  .../fast/envpack_adapter/test_build_env_dataset.py |  200 +++
  tests/fast/envpack_adapter/test_config.py          |  249 +++
  tests/fast/envpack_adapter/test_data_source.py     |  287 ++++
  tests/fast/envpack_adapter/test_filters.py         |   40 +
- tests/fast/envpack_adapter/test_generate.py        |  558 +++++++
+ tests/fast/envpack_adapter/test_generate.py        |  573 +++++++
  tests/fast/envpack_adapter/test_logging.py         |  201 +++
  tests/fast/envpack_adapter/test_renderer.py        |   51 +
  .../ray/rollout/real_ray/test_rollout_manager.py   |   19 +
@@ -247,6 +253,7 @@
  tests/fast/rollout/test_on_policy_distillation.py  | 1713 ++++++++++++++++++++
  tests/fast/utils/test_arguments.py                 |  287 ++++
  tests/fast/utils/test_data_filter_long_prompt.py   |   73 +
+ tests/fast/utils/test_extract_pins.py              |   79 +
  tests/fast/utils/test_summarize_03p_trace.py       |   96 ++
  tests/fast/utils/test_tracking_utils.py            |  133 ++
  tests/fast/utils/test_types.py                     |  101 +-
@@ -256,4 +263,4 @@
  thirdparty/sglang                                  |    1 +
  train.py                                           |   19 +
  train_async.py                                     |   18 +
- 258 files changed, 40575 insertions(+), 249 deletions(-)
+ 265 files changed, 40766 insertions(+), 265 deletions(-)

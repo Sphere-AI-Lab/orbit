@@ -58,8 +58,8 @@ Per-PR detail:
 
 - `sgl-project/sglang@sglang-miles` tip = **`94949da73` = `v0.5.15-31`** — REBASED line (our pin `27d5e97c3` is NOT an ancestor → sglang-sync Step 3 FORCE path: archive old tip, re-apply local patches, force-advance the mirror).
 - **torch stays `2.11.0`** — NO ABI jump. Same-torch bump ⇒ the bundle-may-lag rule applies; no fresh-env rebuild forced by ABI (still rerun install to pick up dep drift).
-- miles-wheels now publishes suffix-less releases: **`cu129-x86_64`** exists (apex, FA2 2.7.4.post1, FA3 3.0.0b1, sglang_router 0.3.2, gateway, **+ transformer_engine 2.10.0 wheel — new asset**). The old `cu129-x86_64-v0.5.12` remains for the current pin.
-- **Local mirror patches to classify/re-apply onto v0.5.15 — now FIVE** (was three at the 06-30 sync):
+- miles-wheels now publishes suffix-less releases: **`cu129-x86_64`** exists (apex, FA2 2.7.4.post1, FA3 3.0.0b1, sglang_router 0.3.2, gateway, **+ transformer_engine 2.10.0 wheel — new asset**). At report time the old `cu129-x86_64-v0.5.12` still existed; upstream #1784 subsequently retired it and moved the cu12 consumer to the rolling tag.
+- **Five local mirror patch candidates classified; four carried onto v0.5.15** (three were active at the 06-30 sync):
   1. mrope text-only gate (`rl_on_policy_target`) — geo3k VLM fix; verify content on the new base.
   2. cu12 dep flavors (mirror-only by design; cu13-linked PyPI defaults still can't load on the CUDA-12.8 driver).
   3. pause-aware `flush_cache` restore — **LIKELY SUBSUMED**: upstream's new tip commit is `[sglang-miles] Fix flush_cache() no-op after pause_generation in retract (#31962)`. Verify by CONTENT (grep `_engine_paused and self.running_batch.is_empty` semantics), then drop ours if covered.
@@ -262,7 +262,7 @@ No `thirdparty/*` gitlink conflicts this time (upstream still doesn't track them
 | #1510 | 2026-07-05 | Jiajun Li | (2/7) refactor: extract session core with direct HTTP responses (#1510) |
 | #1513 | 2026-06-30 | Jiajun Li | chore: make megatron e2e CaseConfig topology explicit instead of inferred, and tune e2e test time (#1513) |
 | #1518 | 2026-07-05 | Jiajun Li | (4/7) feat(session): multi-process session-server data plane (routing + IPC + worker + thin router) (#1518) |
-| #1518 | 2026-07-15 | Jiajun Li | (1/N) Revert "(4/7) feat(session): multi-process session-server data plane (routing + IPC + worker + thin router) (#1518)" (#1658) |
+| #1658 | 2026-07-15 | Jiajun Li | (1/N) Revert "(4/7) feat(session): multi-process session-server data plane (routing + IPC + worker + thin router) (#1518)" (#1658) |
 | #1556 | 2026-07-09 | Zhiyao Jiang | [AMD] Enable R3 CI and add the rocm700-mi35x image variant (#1556) |
 | #1563 | 2026-07-05 | Jiajun Li | (3/7) feat(session): strip R3 replay payloads from client chat responses (#1563) |
 | #1580 | 2026-07-06 | Shi-Dong | Add Shi-Dong to megatron/sglang backends and rollout/session (#1580) |
@@ -313,4 +313,3 @@ No `thirdparty/*` gitlink conflicts this time (upstream still doesn't track them
 | #1748 | 2026-07-21 | Mathew Han | [7/7][multi-lora]: driver and example - fully async driver, typer launcher, adapter configs, service smoke client (#1748) |
 | #1750 | 2026-07-22 | Zhichen Zeng | [Fix] retract-mode flush_cache no-op crash (#1750) |
 | #1751 | 2026-07-23 | Jiajun Li | refactor(tito): rename render_messages to apply_chat_template (#1751) |
-

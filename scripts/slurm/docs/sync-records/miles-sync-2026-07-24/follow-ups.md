@@ -1,3 +1,4 @@
+- [x] `yueming-yuan/miles-wheels@cu129-x86_64-v0.5.12` was deleted after validation. Followed upstream #1784 onto rolling `cu129-x86_64`; server SHA256 comparison proved its Apex/FA2/FA3 assets are byte-identical to the job-28782 torch 2.11.0+cu129 cache, so no new environment or OPD run was required.
 - [ ] launcher watchdog 改读 upstream FT 事件流后,train.py/train_async.py 的 sentinel 两行才可退役 (2026-07-24 merge 时确认保留)
 - [ ] 统一 fully-async 并发旋钮: theirs --async-max-concurrent-samples(绝对数上限) vs 我们 --fully-async-prefetch-batches(流水线深度,联动 staleness) 是不同层概念但喂同一变量; 长期二选一或显式组合; 顺手缩短 --fully-async-max-completed-queue-groups 的 help (2026-07-24)
 

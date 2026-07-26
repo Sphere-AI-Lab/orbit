@@ -3,7 +3,15 @@
 Target: `sgl-project/sglang@sglang-miles` = `94949da73` = **v0.5.15-31** (rebased line;
 old pin `27d5e97c3` on the v0.5.13 line is NOT an ancestor → FORCE path).
 New pin: **`38d4bbef5`** = target + 4 re-applied local patches.
-torch unchanged (2.11.0) → ACTIVE bundle stays `cu129-x86_64-v0.5.12` (bundle-may-lag).
+torch unchanged (2.11.0) → ACTIVE bundle uses rolling `cu129-x86_64`.
+Its Apex/FA2/FA3 SHA256 values match the job-28782 validated
+`cu129-x86_64-v0.5.12` cache byte-for-byte after upstream retired that tag.
+
+| rolling `cu129-x86_64` asset | SHA256 |
+|---|---|
+| `apex-0.1-cp312-cp312-linux_x86_64.whl` | `53b0a257f8099f7bb8472838331e5af79c9b16364ab950a18ad9b53bea66c45b` |
+| `flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl` | `939d18fcef21db5c354390b353eb6f9f8815f1d681a57139d22b0b60e474c087` |
+| `flash_attn_3-3.0.0b1-cp39-abi3-linux_x86_64.whl` | `b0f4d97418aa129522cd4b4e65ce516ddf8af64815f4ce040cb38a6d94cef971` |
 
 ## Mirror-only commit classification (TGT..MIRROR = 52 commits)
 
