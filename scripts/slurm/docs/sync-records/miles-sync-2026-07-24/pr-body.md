@@ -79,13 +79,14 @@ behavior is unchanged.
 
 Patch-shipped runtime unit tests on `38d4bbef5`: **54 passed + 13 subtests** (scoring suffix ×3 files, pretokenized IDs, io_struct). Final pin `9dd80e5f8` differs only in the E2E's CI registration metadata; `check_registered_tests.py` and all SGLang pre-commit hooks for that file pass.
 
-Mirror publication status: `sync-v0.5.15-20260724` is already published and
-resolves to the exact Miles gitlink `9dd80e5f8`. The review PR to
-`sglang-miles` is [impossible-inc/sglang#5](https://github.com/impossible-inc/sglang/pull/5).
-It is intentionally non-fast-forward because the upstream line was rebased.
-After review, landing requires archiving `sglang-miles-v0.5.13-final`, then a
-lease-guarded force-advance of the rebased line and a date tag. **This Miles PR
-is blocked by #5 and must not merge before that mirror landing completes.**
+Mirror landing completed on 2026-07-27 after
+[impossible-inc/sglang#5](https://github.com/impossible-inc/sglang/pull/5)
+was approved. The old `27d5e97c3` tip remains fetchable through
+`sglang-miles-v0.5.13-final` and `sglang-miles-v0.5.13-20260727`;
+`sglang-miles`, `sync-v0.5.15-20260724`, the Miles gitlink, and
+`sglang-miles-v0.5.15-20260727` all resolve to `9dd80e5f8`. The rebased mirror
+was landed with an exact lease guard, and #5 automatically recorded the result
+as Merged. The SGLang ordering gate for this Miles PR is therefore closed.
 
 ## Pin / install changes
 

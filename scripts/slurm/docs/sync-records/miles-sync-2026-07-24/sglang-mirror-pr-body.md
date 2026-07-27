@@ -30,17 +30,19 @@ Patch-shipped runtime unit tests on `38d4bbef5`: **54 passed + 13 subtests**
 changes only CI registration metadata; `check_registered_tests.py` and the
 file-scoped SGLang pre-commit hooks pass.
 
-## Landing mechanics (FORCE case — upstream rebased the line)
+## Landing result (FORCE case — upstream rebased the line)
 
-This PR cannot merge via the UI (non-fast-forward vs the rebased base). Landing:
+Completed on 2026-07-27 after approval:
 
-```bash
-OLD=$(git ls-remote origin sglang-miles | awk '{print $1}')   # expect 27d5e97c3
-git push origin "$OLD:refs/heads/sglang-miles-v0.5.13-final"  # archive branch
-git tag sglang-miles-v0.5.13-20260724 "$OLD" && git push origin sglang-miles-v0.5.13-20260724
-git push --force-with-lease=sglang-miles:"$OLD" origin 9dd80e5f8:refs/heads/sglang-miles
-git tag sglang-miles-v0.5.15-20260724 9dd80e5f8 && git push origin sglang-miles-v0.5.15-20260724
-```
+| ref | SHA | purpose |
+|---|---|---|
+| `sglang-miles-v0.5.13-final` | `27d5e97c3` | durable archive branch for old gitlinks |
+| `sglang-miles-v0.5.13-20260727` | `27d5e97c3` | dated retirement tag |
+| `sglang-miles` | `9dd80e5f8` | landed mirror tip |
+| `sync-v0.5.15-20260724` | `9dd80e5f8` | reviewed sync branch |
+| `sglang-miles-v0.5.15-20260727` | `9dd80e5f8` | dated landing tag |
 
-The archive keeps every SHA-pinned gitlink in old miles-imp commits resolvable.
-After the force-advance this PR auto-marks Merged.
+The old line was archived before an exact
+`--force-with-lease=sglang-miles:27d5e97c3` advance. The archive keeps old
+SHA-pinned Miles gitlinks resolvable; once base and head both reached
+`9dd80e5f8`, this PR automatically recorded the landing as Merged.

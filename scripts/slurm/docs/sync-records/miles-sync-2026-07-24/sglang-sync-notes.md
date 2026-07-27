@@ -47,35 +47,23 @@ Its Apex/FA2/FA3 SHA256 values match the job-28782 validated
   v0.5.15 CI registration metadata; `check_registered_tests.py` and the
   file-scoped SGLang pre-commit hooks pass.
 
-## Publication status and remaining landing plan
+## Publication and landing status
 
 Completed:
 
 - `sync-v0.5.15-20260724` is published on `impossible-inc/sglang`.
 - The branch tip is `9dd80e5f8fc52e87dd84a43ebc0e125cd4f4c9d8`,
   exactly matching the Miles gitlink.
-- The mirror review is open as
-  [impossible-inc/sglang#5](https://github.com/impossible-inc/sglang/pull/5).
-- The consuming Miles sync is open as draft
+- The mirror review
+  [impossible-inc/sglang#5](https://github.com/impossible-inc/sglang/pull/5)
+  was approved and recorded as Merged on 2026-07-27.
+- The old `27d5e97c3b26127d2282900823a4abd172a3b6d5` tip is retained by
+  `sglang-miles-v0.5.13-final` and `sglang-miles-v0.5.13-20260727`.
+- `sglang-miles` and `sglang-miles-v0.5.15-20260727` both resolve to
+  `9dd80e5f8fc52e87dd84a43ebc0e125cd4f4c9d8`; the branch move used
+  `--force-with-lease=sglang-miles:27d5e97c3b26127d2282900823a4abd172a3b6d5`.
+- The consuming Miles sync is
   [impossible-inc/miles-imp#41](https://github.com/impossible-inc/miles-imp/pull/41).
-
-Not yet executed:
-
-- After PR #5 review, archive the old line and lease-guarded force-advance
-  `sglang-miles`. Do not perform this landing while the PRs are only being
-  opened for review.
-
-```bash
-S=thirdparty/sglang; NEWPIN=9dd80e5f8fc52e87dd84a43ebc0e125cd4f4c9d8
-# 1. review PR sync-v0.5.15-20260724 -> sglang-miles on impossible-inc/sglang (history track,
-#    per PR #1 v0.5.12 / PR #2 v0.5.13 precedent) — BEFORE the force-advance
-# 2. after review, archive old tip, then lease-guarded force-advance + date tags
-OLD=$(git -C $S ls-remote origin sglang-miles | awk '{print $1}')   # expect 27d5e97c3
-git -C $S push origin "$OLD:refs/heads/sglang-miles-v0.5.13-final"
-git -C $S tag sglang-miles-v0.5.13-20260724 "$OLD" && git -C $S push origin sglang-miles-v0.5.13-20260724
-git -C $S push --force-with-lease=sglang-miles:"$OLD" origin "$NEWPIN:refs/heads/sglang-miles"
-git -C $S tag sglang-miles-v0.5.15-20260724 "$NEWPIN" && git -C $S push origin sglang-miles-v0.5.15-20260724
-```
 
 Note: this clone's submodule origin is ssh (`git@github.com:impossible-inc/sglang.git`)
 and this user pushed to it over ssh on 2026-07-23 — the skill's token-URL dance is for
