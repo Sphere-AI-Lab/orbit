@@ -147,6 +147,21 @@ class _FakeBundle:
 
 
 class EnvpackGenerateTest(unittest.TestCase):
+    def test_routing_headers_use_sample_routing_key(self) -> None:
+        if torch is None:
+            self.skipTest("requires torch because Miles Sample imports torch")
+
+        sample = Sample(routing_key="episode-1")
+        for policy in ("consistent_hashing", "manual"):
+            args = SimpleNamespace(sglang_router_policy=policy)
+            self.assertEqual(
+                generate_mod._routing_headers(args, sample),
+                {"X-SMG-Routing-Key": "episode-1"},
+            )
+
+        args = SimpleNamespace(sglang_router_policy="random")
+        self.assertIsNone(generate_mod._routing_headers(args, sample))
+
     def test_refillability_honors_explicit_retryable_false_before_status_code(self) -> None:
         if torch is None:
             self.skipTest("requires torch because Miles imports torch")
@@ -283,7 +298,7 @@ class EnvpackGenerateTest(unittest.TestCase):
         self.assertEqual(result.metadata["vagen"]["num_turns"], 1)
         self.assertEqual(result.metadata["vagen"]["per_turn"][0]["reward"], 1.0)
         self.assertTrue(result.metadata["vagen"]["traj_success"])
-        self.assertEqual(calls[0][2], {"X-SMG-Routing-Key": result.session_id})
+        self.assertEqual(calls[0][2], {"X-SMG-Routing-Key": result.routing_key})
         self.assertEqual(bundle.client.cancelled, [])
         self.assertEqual(bundle.client.created_requests[0].env_config["dim_room"], [6, 6])
         self.assertEqual(bundle.client.created_requests[0].env_config["sokoban_render_style"], "tiny")

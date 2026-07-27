@@ -21,9 +21,10 @@ import logging
 import uuid
 from typing import Any
 
-from miles.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME, is_lora_enabled
 from miles.rollout.base_types import GenerateFnInput, GenerateFnOutput
+from miles.rollout.generate_utils.generate_endpoint_utils import compute_routing_headers
 from miles.utils.http_utils import post
+from miles.utils.lora import LORA_ADAPTER_NAME, is_lora_enabled
 from miles.utils.processing_utils import encode_image_for_rollout_engine
 from miles.utils.types import Sample
 
@@ -79,7 +80,7 @@ async def _generate_with_refill(input: GenerateFnInput, config) -> GenerateFnOut
             failed_attempts.append(
                 {
                     "attempt_index": attempt_index,
-                    "episode_id": input.sample.session_id,
+                    "episode_id": input.sample.routing_key,
                     "error_type": type(exc).__name__,
                     "message": str(exc),
                     "retryable": retryable,
@@ -100,7 +101,7 @@ async def _generate_with_refill(input: GenerateFnInput, config) -> GenerateFnOut
                 max_attempts,
                 getattr(input.sample, "index", None),
                 getattr(input.sample, "group_index", None),
-                input.sample.session_id,
+                input.sample.routing_key,
                 exc,
                 exc_info=True,
             )
@@ -147,9 +148,9 @@ async def _generate_once(
     )
 
     episode_id = str(
-        episode_id_override or meta.get("episode_id") or sample.session_id or f"envpack-{uuid.uuid4().hex}"
+        episode_id_override or meta.get("episode_id") or sample.routing_key or f"envpack-{uuid.uuid4().hex}"
     )
-    sample.session_id = episode_id
+    sample.routing_key = episode_id
     create_request_id = f"create:{episode_id}"
     url = f"http://{args.sglang_router_ip}:{args.sglang_router_port}/generate"
 
@@ -435,7 +436,7 @@ def _episode_id_for_attempt(sample: Sample, attempt_index: int) -> str | None:
     if attempt_index == 0:
         return None
     meta = _envpack_meta(sample)
-    base = str(meta.get("episode_id") or sample.session_id or f"envpack-{sample.group_index}-{sample.index}")
+    base = str(meta.get("episode_id") or sample.routing_key or f"envpack-{sample.group_index}-{sample.index}")
     return f"{base}-refill-{attempt_index}-{uuid.uuid4().hex[:12]}"
 
 
@@ -636,8 +637,8 @@ def _turn_sampling_params(sampling_params: dict[str, Any], per_turn_cap: int, bu
 
 
 def _routing_headers(args, sample: Sample) -> dict[str, str] | None:
-    if getattr(args, "sglang_router_policy", None) == "consistent_hashing" and sample.session_id:
-        return {"X-SMG-Routing-Key": str(sample.session_id)}
+    if getattr(args, "sglang_router_policy", None) in ("consistent_hashing", "manual"):
+        return compute_routing_headers(args, sample)
     return None
 
 

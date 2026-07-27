@@ -249,21 +249,15 @@ MEGATRON_SRC="$THIRDPARTY_DIR/Megatron-LM"
 SGLANG_SRC=${SGLANG_SRC:-$THIRDPARTY_DIR/sglang}
 MEGATRON_BRIDGE_SRC="$THIRDPARTY_DIR/Megatron-Bridge"
 
-# Fail closed on submodule ↔ ACTIVE-pins mismatch (needs the actual submodule
-# HEAD, which only git can see — complements the file-derivable preflight ABI
-# guard up top). The sglang line just checked out must match the wheels bundle
-# the ACTIVE pins describe, else we'd build sglang vX but install vY's torch-ABI
-# wheels. Skipped if `git describe` finds no tag (shallow/odd clone).
+# Verify the hand-owned source pin against the checkout, then fail closed on
+# the actual torch ABI. The source may reuse an older wheels bundle when torch
+# matches; `git describe` is only diagnostic and may be unavailable in a
+# shallow clone.
 sub_sglang_base=$(git -C "$SGLANG_SRC" describe --tags --abbrev=0 2>/dev/null || echo "")
-if [[ -n "${MILES_WHEELS_SGLANG_VERSION:-}" && -n "$sub_sglang_base" \
-      && "$sub_sglang_base" != "$MILES_WHEELS_SGLANG_VERSION" ]]; then
-    # A lagging bundle is VALID when torch matches: the bundle wheels
-    # (FA2/FA3/apex/router/gateway) are torch-ABI-bound, not sglang-version-bound —
-    # upstream's own Dockerfile pairs the v0.5.13 sglang image with the v0.5.12
-    # wheels bundle, and the pairing is validated bare-metal (2026-07 sync). The
-    # torch pin check below is the real safety and stays FATAL.
-    echo "[pins] WARN: sglang source is $sub_sglang_base but the wheels bundle is $MILES_WHEELS_SGLANG_VERSION" >&2
-    echo "[pins]       (MILES_WHEELS_TAG=$MILES_WHEELS_TAG). OK while their torch matches (checked next)." >&2
+if [[ -n "${MILES_SGLANG_SOURCE_VERSION:-}" && -n "$sub_sglang_base" \
+      && "$sub_sglang_base" != "$MILES_SGLANG_SOURCE_VERSION" ]]; then
+    echo "[pins] WARN: sglang source is $sub_sglang_base but MILES_SGLANG_SOURCE_VERSION=$MILES_SGLANG_SOURCE_VERSION" >&2
+    echo "[pins]       Update the hand-owned source pin as part of sglang-sync." >&2
 fi
 # The submodule's own torch pin must equal TORCH_VERSION (catches a hand-set
 # TORCH_VERSION override that disagrees with what sglang was built against).
@@ -479,7 +473,9 @@ echo "[src] installing Megatron-Bridge editable from $MEGATRON_BRIDGE_SRC (--no-
 $UV -e "$MEGATRON_BRIDGE_SRC" --no-deps --no-build-isolation
 
 echo "[deps] torch_memory_saver @ $TMS_COMMIT (for miles/backends/megatron_utils/actor.py)"
-$UV --no-cache-dir --force-reinstall "git+https://github.com/fzyzcjy/torch_memory_saver.git@$TMS_COMMIT"
+# Newer TMS source builds need TMS_CUDA_MAJOR (upstream #1774); derive from the env's torch.
+TMS_CUDA_MAJOR=$("$CONDA_PREFIX/bin/python" -c "import torch; print(torch.version.cuda.split('.')[0])") \
+    $UV --no-cache-dir --force-reinstall "git+https://github.com/fzyzcjy/torch_memory_saver.git@$TMS_COMMIT"
 
 _install_cudnn_for_torch "before transformer_engine_torch source build"
 
@@ -671,17 +667,27 @@ fi
 # ---------- miles itself + its python-only requirements ------------------
 
 echo "[deps] requirements.txt"
-$UV -r "$MILES_REPO/requirements.txt"
+# nvidia-resiliency-ext (upstream FT stack, #1598) ships manylinux_2_39-only
+# wheels; this cluster's glibc is 2.35 and the FT features are flag-gated and
+# unused here (miles references the package only in a docstring). Filter it
+# out below that glibc rather than failing the whole install.
+glibc_minor=$(getconf GNU_LIBC_VERSION | awk '{split($2, v, "."); print v[2]}')
+if [ "${glibc_minor:-0}" -ge 39 ]; then
+    $UV -r "$MILES_REPO/requirements.txt"
+else
+    echo "[deps] glibc 2.${glibc_minor} < 2.39 — installing requirements.txt without nvidia-resiliency-ext (FT-only, manylinux_2_39 wheels)"
+    _req_filtered=$(mktemp /tmp/miles-requirements-XXXX.txt)
+    grep -v '^nvidia-resiliency-ext' "$MILES_REPO/requirements.txt" > "$_req_filtered"
+    $UV -r "$_req_filtered"
+    rm -f "$_req_filtered"
+fi
 
 echo "[deps] miles editable"
 $UV -e "$MILES_REPO" --no-deps
 
-# numpy 1.x for megatron — mirrors upstream docker/Dockerfile's late
-# `pip install "numpy<2"`. scipy must be capped WITH it: sglang's unpinned
-# `scipy` resolves to 1.18+ whose runtime requires numpy>=2 (its _sputils
-# references np.long, absent in numpy 1.26 → AttributeError breaks
-# `import sglang`/`import megatron.bridge`). scipy 1.15.x runs on numpy 1.26.
-$UV 'numpy<2' 'scipy<1.16'
+# numpy: upstream dropped its late `pip install "numpy<2"` at the sglang-v0.5.14
+# bump (#1587) — the current Megatron/sglang line runs on numpy 2.x, so the old
+# numpy<2 + scipy<1.16 pairing cap is gone with it (2026-07-24 sync decision).
 
 echo "[deps] mooncake-transfer-engine==$MOONCAKE_VERSION (sglang docker base)"
 $UV "mooncake-transfer-engine==$MOONCAKE_VERSION"

@@ -4,8 +4,8 @@ import logging
 from typing import Any
 
 from miles.rollout.inference_rollout.hook_utils import call_all_samples_process_fn
-from miles.utils import tracking_utils
 from miles.utils.misc import load_function
+from miles.utils.tracking_utils import tracking
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ def maybe_log_all_samples_live_diagnostics(
         metrics["rollout/refill/target_prompt_groups"] = target_groups
         metrics["rollout/refill/pending_prompt_groups"] = pending_groups
         metrics["rollout/refill/keep_prompt_group_frac"] = kept_groups / completed_groups
-        tracking_utils.log(args, metrics, step_key="rollout/step")
+        tracking.log(args, metrics, step_key="rollout/step")
         logger.info(
             "live rollout diagnostics %s: completed=%s kept=%s target=%s pending=%s metrics=%s",
             rollout_id,

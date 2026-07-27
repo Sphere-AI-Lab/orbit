@@ -1,15 +1,17 @@
 ---
 name: sglang-sync
-description: "Advance the thirdparty/sglang submodule to the current sgl-project/sglang@sglang-miles line, mirror it to impossible-inc/sglang, and realign the ACTIVE sglang pin bundle (MILES_WHEELS_TAG + torch). Run it TOGETHER with /miles-sync (the default — miles code and sglang move as one bundle), or standalone for an sglang-only bump. Hard rules: (1) on a version-bump rebase, re-apply local mirror patches (e.g. the geo3k VLM mrope gate) onto the new target, then advance the mirror by ARCHIVING the old sglang-miles tip (branch + date tag) and force-pushing the rebased tip (as sgl-project itself maintains the branch); STOP on any mirror-only commit you can't classify, a patch that won't re-apply, or an unconfirmed force; (2) pushes (impossible-inc/sglang + the PR) happen ONLY after explicit user approval."
+description: "Advance the thirdparty/sglang submodule to the current sgl-project/sglang@sglang-miles line, mirror it to impossible-inc/sglang, and realign the ACTIVE source pin plus torch-ABI wheels bundle. Run it TOGETHER with /miles-sync (the default — miles code and sglang move as one bundle), or standalone for an sglang-only bump. Hard rules: (1) on a version-bump rebase, re-apply local mirror patches (e.g. the geo3k VLM mrope gate) onto the new target, then advance the mirror by ARCHIVING the old sglang-miles tip (branch + date tag) and force-pushing the rebased tip (as sgl-project itself maintains the branch); STOP on any mirror-only commit you can't classify, a patch that won't re-apply, or an unconfirmed force; (2) pushes (impossible-inc/sglang + the PR) happen ONLY after explicit user approval."
 ---
 
 # sglang-sync — advance the sglang dependency bundle
 
 Bring `thirdparty/sglang` up to the current miles sglang line and realign the
-ACTIVE pin bundle (`MILES_WHEELS_TAG`, torch, router) so a fresh `install_env.sh`
+ACTIVE source pin plus wheel bundle (`MILES_SGLANG_SOURCE_VERSION`,
+`MILES_WHEELS_TAG`, torch, router) so a fresh `install_env.sh`
 builds a consistent env. Designed to run **together with `/miles-sync`** — the
-sglang version, torch ABI, and prebuilt wheels are one atomic bundle, so the
-miles code and the sglang it targets should move in the same PR.
+source line and its torch-compatible prebuilt wheels should move in the same
+PR, although the wheel release's SGLang label may lag the source when torch
+matches.
 
 ## ⚠️⚠️⚠️ HARD RULES ⚠️⚠️⚠️
 
@@ -27,13 +29,15 @@ miles code and the sglang it targets should move in the same PR.
    `impossible-inc/sglang` branch push AND the miles-imp PR. Do all local work
    (fetch, ff, gitlink bump, pin edits), show the combined diff, and wait for an
    explicit "push it".
-3. **One bundle, one commit.** The sglang gitlink bump + `pins.env` + the
-   `WHEELS_STACK` row in `extract_pins.py` go in a single commit (folded into the
-   miles-sync "our changes" commit when run together). (The sync-record folder is
-   the one exception: standalone runs commit it as its own `[docs] sglang-sync
-   record` commit — Step 7; combined runs leave it to miles-sync Step 9.)
+3. **One bundle, one commit.** The sglang gitlink bump +
+   `MILES_SGLANG_SOURCE_VERSION` + `MILES_WHEELS_TAG` + any `WHEELS_STACK` row
+   go in a single commit (folded into the miles-sync "our changes" commit when
+   run together). (The sync-record folder is the one exception: standalone
+   runs commit it as its own `[docs] sglang-sync record` commit — Step 7;
+   combined runs leave it to miles-sync Step 9.)
 4. **`extract_pins.py --check` must end at exit 0 with no `[sglang-sync pending]`**
-   — that is the definition of done: ACTIVE == UPSTREAM and torch-ABI consistent.
+   — that is the definition of done: ACTIVE source == UPSTREAM image target and
+   the wheels are torch-ABI consistent.
 
 ## Topology (validated)
 
@@ -58,7 +62,7 @@ miles code and the sglang it targets should move in the same PR.
   pin the old SHA) and the archive keeps it reachable. Within a version (v0.5.12-23 →
   v0.5.12-50) it's a plain fast-forward of `sglang-miles` itself (no archive needed).
 - `impossible-inc/sglang@sglang-miles` is **NOT a pure mirror** — it carries local
-  miles patches on top of the upstream line. Currently THREE (as of the v0.5.13 sync):
+  miles patches on top of the upstream line. Currently FOUR (as of the v0.5.15 sync):
   1. `[sglang-miles] forward_batch: gate mrope text-only path on rl_on_policy_target`
      (geo3k VLM fix, authored locally; upstream candidate).
   2. `[sglang-miles cu129] bare-metal cu12 dep flavors` (pyproject: cuda-python <13,
@@ -66,9 +70,13 @@ miles code and the sglang it targets should move in the same PR.
      sglang-kernel/sgl-deep-gemm/torchao — the PyPI default wheels of those three are
      cu13-linked). Mirror-only BY DESIGN — not an upstream candidate (upstream's
      docker line wants the cu13 flavors).
-  3. `[sglang-miles] restore pause-aware flush_cache` (the v0.5.13 rebase dropped the
-     flush disjunct of #22754/#22623; without it every fully-async weight update
-     deadlocks against its own queued rollout requests. Upstream candidate).
+  3. `[sglang-miles] exact multimodal scoring suffix` (preserves the sampled
+     response-token suffix while the teacher owns multimodal prefix processing).
+  4. `[sglang-miles] qwen-vl pretokenized input IDs` (keeps exact caller IDs on
+     Qwen-VL's legacy multimodal processor path).
+  The old pause-aware `flush_cache` patch is retired: upstream #31962 now
+  provides the required `is_fully_idle(ignore_waiting=self._engine_paused)`
+  behavior.
   On every version bump these local patches MUST be re-applied onto the rebased target
   (Step 3) — the new pin is `target + re-applied patch(es)`, not the bare target. Step 3
   surfaces the mirror-only commits and STOPs so you can tell local patches from
@@ -80,15 +88,16 @@ miles code and the sglang it targets should move in the same PR.
   each `[sglang-miles]` patch expected on the new line, grep the rebased TREE for the
   patch's key lines (e.g. `_engine_paused and self.running_batch.is_empty`,
   `rl_on_policy_target` in forward_batch_info) before trusting it survived.
-- The torch ABI + prebuilt wheels live in `yueming-yuan/miles-wheels` under the
-  tag `cu129-x86_64[-v<sglang>]`; `WHEELS_STACK` in `extract_pins.py` maps tag →
-  `{sglang, torch, router}`.
+- The torch ABI + prebuilt wheels live in `yueming-yuan/miles-wheels` under
+  rolling CUDA/architecture tags such as `cu129-x86_64`; `WHEELS_STACK` in
+  `extract_pins.py` records the source line, torch ABI, and router version most
+  recently validated for that rolling binary set.
 
 ## Usage
 
 ```
 /sglang-sync                       # discover target from sgl-project/sglang@sglang-miles base version
-/sglang-sync cu129-x86_64-v0.5.12  # explicit target wheels tag (miles-sync passes its UPSTREAM_WHEELS_TAG here)
+/sglang-sync cu129-x86_64           # explicit target wheels tag for bare-metal cu12.9
 ```
 
 ## Workflow
@@ -129,42 +138,42 @@ the miles-specific patches landing.
 ```bash
 ARG="${1:-}"
 if [[ -n "$ARG" ]]; then
-    TAG="$ARG"                       # miles-sync passes UPSTREAM_WHEELS_TAG
+    TAG="$ARG"
 else
-    # No-arg: reverse-lookup the tag for this sglang base in WHEELS_STACK — this
-    # handles the legacy suffix-less v0.5.10 tag correctly (don't string-concat known
-    # bases). For a BRAND-NEW base not yet in WHEELS_STACK, fall back to the miles-wheels
-    # release naming convention `cu129-x86_64-<base>`: the release-view below proves the
-    # tag exists, and Step 4 adds the WHEELS_STACK row for it before Step 5's --write
-    # needs it — so no-arg works for a fresh bump (no chicken-and-egg). For a non-cu129
-    # bump (e.g. a future cu130 line), pass the explicit wheels tag instead.
-    TAG=$(python3 scripts/slurm/setup/extract_pins.py --tag-for-sglang "$SGLANG_BASE" 2>/dev/null) \
-        || TAG="cu129-x86_64-${SGLANG_BASE}"
+    # Rolling tags no longer encode an sglang version. Preserve the ACTIVE
+    # CUDA/architecture release unless this sync deliberately changes that
+    # platform, in which case pass the new tag explicitly.
+    TAG=$(sed -n 's/^MILES_WHEELS_TAG=${MILES_WHEELS_TAG:-\([^}]*\)}$/\1/p' \
+        scripts/slurm/setup/pins.env)
 fi
 echo "[sglang] target wheels tag: $TAG"
 
 # The miles-wheels release for this tag MUST exist (install_env.sh fetches FA/apex/
-# sglang_router from it) and its torch MUST match the submodule's pyproject torch.
+# sglang_router from it).
 gh release view "$TAG" --repo yueming-yuan/miles-wheels --json name,assets \
     --jq '.name, ([.assets[].name] | join(", "))'
 ```
 
-Confirm the release name's torch (e.g. "SGLang v0.5.12 / torch 2.11.0") equals
-`$NEW_TORCH`. If the torch disagrees, **STOP** — the bundle isn't ready; fall back to
-recording `[sglang-sync pending]` (see "Not ready").
+Rolling release names do not prove a torch ABI. Before updating `WHEELS_STACK`,
+require one of these:
+
+1. An upstream image build using the same release and `$NEW_TORCH`.
+2. SHA256 equality with a wheel set already validated under `$NEW_TORCH`.
+3. A scratch-environment import/GPU smoke for FA2, FA3, and Apex.
+
+Record the release asset fingerprint and the evidence used. If the ABI is not
+proven, **STOP** and record `[sglang-sync pending]`.
 
 **A same-version wheels release is NOT required — the bundle may LAG the sglang source
 when torch matches.** Bundle wheels (FA2/FA3/apex/router/gateway) are torch-ABI-bound,
 not sglang-version-bound; the sglang-version-locked kernels (sglang-kernel,
 sgl-deep-gemm) come from `docs.sglang.ai/whl/cuNNN` +cuNNN builds pinned in the fork's
-pyproject (SGL_WHL_INDEX_URL), not from the bundle. Upstream's own Dockerfile pairs its
-v0.5.13 image with the v0.5.12 bundle, and the pairing is validated bare-metal
-(2026-07 sync: clean install 37/37 + 500-step 3-node async run). So when no
-`cu129-x86_64-<new base>` release exists but an existing bundle has the SAME torch,
-keep that bundle as ACTIVE and proceed — install_env.sh WARNs on the version lag and
-still fail-closes on any torch mismatch, and `[sglang-sync pending]` compares the
-version component of the wheels tags (the cu prefix is a deployment property: upstream
-docker is cu130, bare-metal is driver-bound to cu129).
+pyproject (SGL_WHL_INDEX_URL), not from the bundle. When the existing rolling
+binary set is proven compatible with the new source line's unchanged torch,
+keep that tag as ACTIVE and refresh its `WHEELS_STACK` metadata. `install_env.sh`
+still fail-closes on any torch mismatch. `[sglang-sync pending]` compares
+`MILES_SGLANG_SOURCE_VERSION` directly with `UPSTREAM_SGLANG_IMAGE_TAG`; wheels
+tags are not used as a source-version proxy.
 
 ### Step 3 — Advance the mirror (rebase-aware; uses the TRUE origin state)
 
@@ -217,24 +226,28 @@ NEWPIN=$(git -C "$S" rev-parse HEAD)       # = $TGT if there are NO local patche
 The submodule HEAD `$NEWPIN` (target + re-applied local patches) is the pin. Step 8
 archives the old tip, then force-pushes `sglang-miles` to `$NEWPIN`.
 
-### Step 4 — Add the WHEELS_STACK row if the tag is new
+### Step 4 — Refresh the WHEELS_STACK row
 
 ```bash
-python3 scripts/slurm/setup/extract_pins.py --resolve "$TAG" >/dev/null 2>&1 \
-    && echo "WHEELS_STACK already has $TAG" \
-    || echo "ADD a row for $TAG in extract_pins.py: {sglang: $SGLANG_BASE, torch: $NEW_TORCH, router: <from release>}"
+python3 scripts/slurm/setup/extract_pins.py --resolve "$TAG" || true
 ```
 
-If missing, edit `WHEELS_STACK` in `scripts/slurm/setup/extract_pins.py` — add
-`"$TAG": {"sglang": "<base>", "torch": "<pyproject torch>", "router": "<release router version>"}`.
-(`router` = version in the `sglang_router-*.whl` asset of the release.)
+Edit `WHEELS_STACK` in `scripts/slurm/setup/extract_pins.py` after Step 2's ABI
+evidence is complete. Update the existing rolling-tag row, or add one only for a
+new CUDA/architecture tag:
+
+`"$TAG": {"sglang": "$SGLANG_BASE", "torch": "$NEW_TORCH", "router": "<release router version>"}`
+
+`router` is the version in the `sglang_router-*.whl` asset.
 
 ### Step 5 — Bump the gitlink + realign ACTIVE pins
 
 ```bash
 git add thirdparty/sglang        # records the advanced submodule commit
 
-# Set ACTIVE to the target tag (the ONE hand-owned pin), then re-derive everything:
+# Record the ACTIVE source line and select the torch-compatible wheels bundle,
+# then re-derive bundle metadata:
+sed -i "s|^MILES_SGLANG_SOURCE_VERSION=.*|MILES_SGLANG_SOURCE_VERSION=\${MILES_SGLANG_SOURCE_VERSION:-$SGLANG_BASE}|" scripts/slurm/setup/pins.env
 sed -i "s|^MILES_WHEELS_TAG=.*|MILES_WHEELS_TAG=\${MILES_WHEELS_TAG:-$TAG}|" scripts/slurm/setup/pins.env
 python3 scripts/slurm/setup/extract_pins.py --write    # re-derives torch/sglang/router + refreshes UPSTREAM_*
 ```
@@ -245,10 +258,10 @@ derived fields from `WHEELS_STACK[$TAG]`; it **refuses (exit 2)** if they disagr
 
 ### Step 6 — Confirm done (match what install_env.sh fails closed on)
 
-`extract_pins.py --check` only validates torch-ABI + ACTIVE/UPSTREAM tag. But
-`install_env.sh` *also* fail-closes on (a) the submodule base tag == the bundle's
-sglang, and (b) the `sglang_router` wheel version. So "done" must verify all three,
-or you'll declare success and watch the install abort:
+`extract_pins.py --check` validates source/target alignment plus torch-ABI
+consistency. `install_env.sh` also checks the effective bundle and the
+`sglang_router` wheel version. So "done" must verify all of them, or you'll
+declare success and watch the install abort:
 
 Each check **aborts** on failure (`exit 1`) — otherwise the block ends on a
 `git diff` that returns 0 and the flow would commit/push past a failed check.
@@ -270,11 +283,11 @@ grep -qF '[sglang-sync pending]' <<<"$check_out" \
 # 2. submodule TORCH == the bundle torch (the real ABI safety; install_env.sh fails
 #    closed on this). The submodule's sglang BASE may legitimately be AHEAD of the
 #    bundle's (bundle-may-lag rule, Step 2) — report it, don't stop.
+source scripts/slurm/setup/pins.env
 eval "$(python3 scripts/slurm/setup/extract_pins.py --resolve "$TAG")"   # sets MILES_WHEELS_{SGLANG,TORCH,...}_VERSION
-sub_base=$(git -C thirdparty/sglang describe --tags --abbrev=0 HEAD)
 sub_torch=$(grep -oE '"torch==[0-9][^"]*"' thirdparty/sglang/python/pyproject.toml | head -1 | tr -d '"' | cut -d= -f3)
 [[ "$sub_torch" == "$MILES_WHEELS_TORCH_VERSION" ]] \
-    && echo "✓ submodule torch $sub_torch == bundle torch $MILES_WHEELS_TORCH_VERSION (sglang: source $sub_base / bundle $MILES_WHEELS_SGLANG_VERSION)" \
+    && echo "✓ submodule torch $sub_torch == bundle torch $MILES_WHEELS_TORCH_VERSION (sglang: source $MILES_SGLANG_SOURCE_VERSION / bundle label $MILES_WHEELS_SGLANG_VERSION)" \
     || { echo "STOP: submodule torch $sub_torch != bundle torch $MILES_WHEELS_TORCH_VERSION — ABI mismatch" >&2; exit 1; }
 
 # 3. the release ships sglang_router-$SGLANG_ROUTER_VERSION (install_env.sh fetches it by

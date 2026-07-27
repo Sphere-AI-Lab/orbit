@@ -1,8 +1,18 @@
 import asyncio
 import importlib
+import logging
 import re
 import subprocess
+from collections.abc import Sequence
 from contextlib import contextmanager
+from typing import Any
+
+import ray
+from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
+
+from miles.utils.http_utils import is_port_available
+
+logger = logging.getLogger(__name__)
 
 
 # Mainly used for test purpose where `load_function` needs to load many in-flight generated functions
@@ -50,6 +60,34 @@ def load_function(path):
     module_path, _, attr = path.rpartition(".")
     module = importlib.import_module(module_path)
     return getattr(module, attr)
+
+
+async def call_agent_abort_hook(args) -> None:
+    """Invoke the agent plugin's optional abort hook, if it defines one.
+
+    When oversampling collects enough samples, the rollout aborts SGLang, but an
+    external agent loop (driven by ``--custom-agent-function-path``) keeps running
+    and keeps issuing fresh completion requests until it hits its own limit. The
+    agent integration knows how to tell its backend to stop, so we look for a
+    sibling ``abort`` callable in the same module as the configured agent function
+    and call it. Backends that don't expose one are left to drain as before.
+    """
+    agent_function_path = getattr(args, "custom_agent_function_path", None)
+    if not agent_function_path:
+        return
+
+    module_path, _, _ = agent_function_path.rpartition(".")
+    if not module_path:
+        return
+    try:
+        abort_hook = load_function(f"{module_path}.abort")
+    except (AttributeError, ModuleNotFoundError):
+        return  # plugin doesn't expose an abort hook; nothing to tear down
+
+    try:
+        await abort_hook(args)
+    except Exception as e:
+        logger.warning(f"Agent abort hook {module_path}.abort failed: {e}")
 
 
 class SingletonMeta(type):
@@ -109,8 +147,6 @@ def exec_command_all_ray_node(
     Args:
         num_nodes: If set, only use the first `num_nodes` nodes instead of all alive nodes.
     """
-    import ray
-    from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
     ray.init(address="auto")
     try:
@@ -156,7 +192,6 @@ def exec_command_all_ray_node(
 
 
 def get_current_node_ip():
-    import ray
 
     address = ray._private.services.get_node_ip_address()
     # strip ipv6 address
@@ -165,7 +200,6 @@ def get_current_node_ip():
 
 
 def get_free_port(start_port=10000, consecutive=1):
-    from miles.utils.http_utils import is_port_available
 
     # find the port where port, port + 1, port + 2, ... port + consecutive - 1 are all available
     port = start_port
@@ -201,3 +235,11 @@ def should_run_periodic_action(
 async def as_completed_async(tasks):
     for coro in asyncio.as_completed(tasks):
         yield await coro
+
+
+def filter_keys(d: dict[str, Any], interest_keys: Sequence[str]) -> dict[str, Any]:
+    try:
+        return {k: d[k] for k in interest_keys}
+    except Exception:
+        logger.error(f"filter_keys d.keys={list(d)} {interest_keys=}", exc_info=True)
+        raise

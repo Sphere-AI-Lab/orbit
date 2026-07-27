@@ -122,6 +122,15 @@ export HF_TOKEN WANDB_API_KEY HF_HOME
 source "$CONDA_ROOT/etc/profile.d/conda.sh"
 conda activate "$MILES_ENV_NAME"
 
+# The batch shell itself launches engine processes (ENVPACK_LOCAL_SERVER_CMD
+# teacher/session servers on the head node). sglang v0.5.15+ dlopens
+# libcudnn_heuristic directly at model-runner import; without the env's cuDNN
+# dir on LD_LIBRARY_PATH the loader can resolve its libcudnn_graph dependency
+# to an older system copy (undefined-symbol crash, job 28788). Mirror
+# NODE_PREAMBLE's export in this scope too.
+PY_SITE_CTRL=$(python -c "import site; print(site.getsitepackages()[0])")
+export LD_LIBRARY_PATH="$PY_SITE_CTRL/nvidia/cudnn/lib:${LD_LIBRARY_PATH:-}"
+
 MEGATRON_SRC="$THIRDPARTY_DIR/Megatron-LM"
 if [ ! -d "$MEGATRON_SRC" ]; then
     echo "FATAL: $MEGATRON_SRC missing — run scripts/slurm/setup/install_env.sh first" >&2
@@ -489,6 +498,11 @@ ENVPACK_NODE_PREAMBLE='
     set -euo pipefail
     source '"$CONDA_ROOT"'/etc/profile.d/conda.sh
     conda activate '"$ENVPACK_SERVER_ENV_NAME"'
+    # sglang-based remote servers (e.g. teacher scoring) need the env cuDNN dir
+    # on LD_LIBRARY_PATH (see the controller-scope note above); for torch-free
+    # envs the dir simply does not exist and the prepend is harmless.
+    PY_SITE=$(python -c "import site; print(site.getsitepackages()[0])")
+    export LD_LIBRARY_PATH="$PY_SITE/nvidia/cudnn/lib:${LD_LIBRARY_PATH:-}"
     export HF_HOME='"$HF_HOME"'
     export PYTHONUNBUFFERED=1
 '

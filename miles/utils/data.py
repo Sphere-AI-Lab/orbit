@@ -8,6 +8,9 @@ import re
 import numpy as np
 import ray
 
+from miles.ray.rollout.train_data_conversion import split_train_data_by_dp_raw
+from .audit_utils.witness.allocator import WitnessInfo
+
 try:
     import pyarrow.parquet as pq
 except ImportError:
@@ -17,7 +20,6 @@ from miles.utils import chat_template_utils
 from miles.utils.processing_utils import call_processor
 from miles.utils.types import MultimodalTypes, Sample
 
-from .timer import Timer
 
 __all__ = ["Dataset"]
 
@@ -91,22 +93,31 @@ def filter_long_prompt(origin_samples: list[Sample], tokenizer, processor, max_l
         return origin_samples
 
     if processor:
-        filtered_samples = []
+        # Use processor only for samples with actual multimodal content; use batched tokenizer for text-only.
+        text_only = []
+        multimodal = []
         for sample in origin_samples:
-            from miles.utils.processing_utils import process_vision_info
-
-            # Chat-template flows already extracted vision inputs from the
-            # message list when the Sample was built; by now sample.prompt is
-            # the templated string, which qwen's extract_vision_info cannot
-            # parse (it indexes messages as dicts). Reuse the stored inputs and
-            # only re-extract for flows that never populated them.
-            multimodal_inputs = sample.multimodal_inputs
-            if multimodal_inputs is None:
-                multimodal_inputs = process_vision_info(sample.prompt, processor)
-            processor_output = call_processor(processor, sample.prompt, multimodal_inputs)
-            input_ids = processor_output["input_ids"][0]
-            if len(input_ids) <= max_length:
-                filtered_samples.append(sample)
+            if sample.multimodal_inputs and any(v is not None for v in sample.multimodal_inputs.values()):
+                multimodal.append(sample)
+            else:
+                text_only.append(sample)
+        filtered_samples = []
+        if text_only:
+            prompts = [s.prompt for s in text_only]
+            input_ids_list = tokenizer(prompts, add_special_tokens=False)["input_ids"]
+            for sample, input_ids in zip(text_only, input_ids_list, strict=True):
+                if len(input_ids) <= max_length:
+                    filtered_samples.append(sample)
+        if multimodal:
+            for sample in multimodal:
+                # sample.prompt is the templated string by now, which qwen's
+                # extract_vision_info cannot parse (it indexes messages as dicts);
+                # this branch only holds samples whose vision inputs were already
+                # extracted at Sample build time — reuse them, never re-extract.
+                processor_output = call_processor(processor, sample.prompt, sample.multimodal_inputs)
+                input_ids = processor_output["input_ids"][0]
+                if len(input_ids) <= max_length:
+                    filtered_samples.append(sample)
     else:
         prompts = [sample.prompt for sample in origin_samples]
         input_ids_list = tokenizer(prompts, add_special_tokens=False)["input_ids"]
@@ -279,15 +290,24 @@ def get_minimum_num_micro_batch_size(total_lengths, max_tokens_per_gpu):
     return len(batches)
 
 
-def process_rollout_data(args, rollout_data_ref, dp_rank, dp_size):
-    assert len(rollout_data_ref) == dp_size
-    rollout_data = ray.get(rollout_data_ref[dp_rank].inner)
+def process_rollout_data(
+    args,
+    rollout_data_ref,
+    dp_rank,
+    dp_size,
+    witness_info: WitnessInfo | None,
+):
+    from miles.ray.rollout.train_data_conversion import process_rollout_data_shard
 
-    partition = rollout_data.pop("partition")
-    total_lengths = rollout_data["total_lengths"]
+    if args.delay_split_train_data_by_dp:
+        raw = ray.get(rollout_data_ref.inner)
+        if (x := witness_info) is not None:
+            raw = {**raw, "seq_witness_ids": x.witness_ids}
+        raw = split_train_data_by_dp_raw(args, raw, dp_size=dp_size)
+        rollout_data = raw[dp_rank]
+    else:
+        assert len(rollout_data_ref) == dp_size
+        assert witness_info is None
+        rollout_data = ray.get(rollout_data_ref[dp_rank].inner)
 
-    # save the seqlen of the whole rollout batch
-    Timer().seq_lens = total_lengths
-    rollout_data["total_lengths"] = [total_lengths[i] for i in partition]
-
-    return rollout_data
+    return process_rollout_data_shard(args, rollout_data)

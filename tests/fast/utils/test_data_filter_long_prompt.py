@@ -46,22 +46,28 @@ def test_filter_reuses_stored_multimodal_inputs_for_templated_prompts(monkeypatc
     assert seen == [stored, stored]
 
 
-def test_filter_reextracts_only_when_inputs_missing(monkeypatch) -> None:
-    samples = [_sample("plain multimodal prompt", multimodal_inputs=None)]
-    extracted = {"images": ["fresh"], "videos": None}
-    calls = []
+def test_filter_uses_tokenizer_when_multimodal_inputs_missing(monkeypatch) -> None:
+    """Samples without stored vision inputs are text-only for filtering
+    purposes (upstream #1767 dichotomy): batched tokenizer, no re-extraction —
+    a templated string prompt cannot be parsed for vision info anyway."""
+    samples = [
+        _sample("kept text prompt", multimodal_inputs=None),
+        _sample("dropped because long", multimodal_inputs=None),
+    ]
 
-    def _fake_extract(prompt, processor):
-        calls.append(prompt)
-        return extracted
+    def _must_not_extract(prompt, processor):  # pragma: no cover - failure path
+        raise AssertionError("process_vision_info must not run for samples without stored inputs")
 
-    def _fake_call_processor(processor, text, multimodal_inputs):
-        assert multimodal_inputs is extracted
-        return {"input_ids": [[1, 2, 3]]}
+    def _must_not_call_processor(processor, text, multimodal_inputs):  # pragma: no cover - failure path
+        raise AssertionError("the processor path must not run for samples without stored inputs")
 
-    monkeypatch.setattr("miles.utils.processing_utils.process_vision_info", _fake_extract)
-    monkeypatch.setattr(data_module, "call_processor", _fake_call_processor)
+    class _FakeTokenizer:
+        def __call__(self, prompts, add_special_tokens):
+            assert prompts == ["kept text prompt", "dropped because long"]
+            return {"input_ids": [[1, 2, 3], list(range(100))]}
 
-    kept = filter_long_prompt(samples, tokenizer=None, processor=object(), max_length=8)
-    assert len(kept) == 1
-    assert calls == ["plain multimodal prompt"]
+    monkeypatch.setattr("miles.utils.processing_utils.process_vision_info", _must_not_extract)
+    monkeypatch.setattr(data_module, "call_processor", _must_not_call_processor)
+
+    kept = filter_long_prompt(samples, tokenizer=_FakeTokenizer(), processor=object(), max_length=8)
+    assert [s.prompt for s in kept] == ["kept text prompt"]

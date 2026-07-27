@@ -10,7 +10,7 @@
 # release for the current arch picked from TARGETARCH — WHEELS_TAG_X86 on amd64,
 # WHEELS_TAG_ARM64 on arm64 (cu12-x86 overrides WHEELS_TAG_X86).
 
-ARG SGLANG_IMAGE_TAG=v0.5.13
+ARG SGLANG_IMAGE_TAG=v0.5.15
 FROM lmsysorg/sglang:${SGLANG_IMAGE_TAG} AS sglang
 
 # ======================================== Arguments =============================================
@@ -27,8 +27,8 @@ ARG WHEELS_REPO=yueming-yuan/miles-wheels
 # Two complete wheels release tags (the wheels repo's own names). The build picks
 # one by TARGETARCH and installs it verbatim — no on-the-fly tag assembly here.
 ARG TARGETARCH
-ARG WHEELS_TAG_X86=cu130-x86_64-v0.5.12
-ARG WHEELS_TAG_ARM64=cu130-aarch64-v0.5.12
+ARG WHEELS_TAG_X86=cu130-x86_64
+ARG WHEELS_TAG_ARM64=cu130-aarch64
 
 # ======================================== Setup =============================================
 
@@ -87,10 +87,22 @@ RUN pip install tilelang==0.1.8 -f https://tile-ai.github.io/whl/nightly/cu128/
 RUN pip install --no-deps tile_kernels==1.0.0
 # FlashQLA backend for Qwen GDN linear-attention layers (requires SM90+, CUDA 12.8+, PyTorch 2.8+; built on tilelang above)
 RUN pip install -v --no-build-isolation "git+https://github.com/QwenLM/FlashQLA.git"
-RUN pip install "git+https://github.com/Dao-AILab/fast-hadamard-transform.git@e7706faf8d1c3b9f241e36860640ad1dac644ede" --no-build-isolation
+# Prefer the prebuilt wheel; fall back to a source build while the current
+# arch's wheels release doesn't carry it yet (QEMU-emulated arm64 source
+# builds are the expensive path this avoids).
+RUN if ls /tmp/wheels/fast_hadamard_transform-*.whl 2>/dev/null | grep -q .; then \
+      pip install /tmp/wheels/fast_hadamard_transform-*.whl; \
+    else \
+      pip install "git+https://github.com/Dao-AILab/fast-hadamard-transform.git@e7706faf8d1c3b9f241e36860640ad1dac644ede" --no-build-isolation; \
+    fi
 
 # Mamba kernels for nemotron_h hybrid (mamba+attention) models.
-RUN pip install causal-conv1d==1.6.1 mamba-ssm==2.3.1 --no-build-isolation
+RUN if ls /tmp/wheels/causal_conv1d-*.whl 2>/dev/null | grep -q . && \
+       ls /tmp/wheels/mamba_ssm-*.whl 2>/dev/null | grep -q .; then \
+      pip install /tmp/wheels/causal_conv1d-*.whl /tmp/wheels/mamba_ssm-*.whl; \
+    else \
+      pip install causal-conv1d==1.6.1 mamba-ssm==2.3.1 --no-build-isolation; \
+    fi
 
 # transformer_engine
 RUN if [ "${ENABLE_CUDA_13}" = "1" ]; then \
@@ -123,7 +135,14 @@ RUN git clone https://github.com/${MEGATRON_REPO}.git --recursive -b ${MEGATRON_
     cd Megatron-LM && \
     pip install -e .
 
-RUN pip install git+https://github.com/fzyzcjy/torch_memory_saver.git@d64a639 --no-cache-dir --force-reinstall
+# Muon optimizer support: megatron/core/optimizer/muon.py requires this for Newton-Schulz
+# orthogonalization; not on PyPI (only a dependency-confusion stub), so install from the
+# git source Megatron-LM itself pins in pyproject.toml.
+RUN pip install "git+https://github.com/NVIDIA-NeMo/Emerging-Optimizers.git@v0.1.0"
+
+# torch_memory_saver's source build needs TMS_CUDA_MAJOR; take it from torch.
+RUN TMS_CUDA_MAJOR=$(python3 -c "import torch; print(torch.version.cuda.split('.')[0])") \
+    pip install git+https://github.com/fzyzcjy/torch_memory_saver.git --no-cache-dir --force-reinstall
 RUN pip install "nvidia-modelopt[torch]>=0.37.0" --no-build-isolation
 RUN pip install git+https://github.com/radixark/Megatron-Bridge.git@bridge --no-deps --no-build-isolation
 RUN pip install megatron-energon --no-deps
@@ -139,8 +158,6 @@ RUN if [ "${ENABLE_CUDA_13}" = "1" ]; then \
     pip install nvidia-cudnn-cu12==9.16.0.29; \
   fi
 
-# reinstall numpy 1.x for megatron
-RUN pip install "numpy<2"
 
 RUN rm -rf /root/.cache/pip /root/flash-attention
 
@@ -201,6 +218,5 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 RUN rm -rf /tmp/wheels
 
-# cu130 sglang base ships rust at /root/.cargo/bin but not on PATH; a later CI
-# step calls `rustc` directly. Last so cached layers above stay valid.
+# The cu130 sglang base ships its baked Rust toolchain outside the default PATH.
 ENV PATH="/root/.cargo/bin:${PATH}"

@@ -434,7 +434,7 @@ def test_fully_async_worker_closes_transport_on_its_owner_loop(monkeypatch):
     from examples.fully_async import fully_async_rollout
 
     worker = object.__new__(fully_async_rollout.AsyncRolloutWorker)
-    worker.args = Namespace(rollout_batch_size=1, use_opd=True)
+    worker.args = Namespace(rollout_batch_size=1, use_opd=True, async_max_concurrent_samples=None)
     worker.data_buffer = SimpleNamespace(get_samples=lambda _count: [[object()]])
     worker.output_queue = queue.Queue()
     worker.state = SimpleNamespace(sampling_params={})

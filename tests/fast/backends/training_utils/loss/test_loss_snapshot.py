@@ -41,6 +41,17 @@ SNAPSHOT_DIR = Path(__file__).parent / "loss_snapshots"
 VOCAB_SIZE = 128
 SEED = 42
 
+# Fork-only observability metrics are covered by
+# test_true_on_policy_loss_metrics.py. Keep them out of the upstream-owned
+# binary snapshot contract so adding diagnostics does not require publishing a
+# new miles-artifacts snapshot set.
+SNAPSHOT_EXEMPT_POLICY_METRICS = frozenset(
+    {
+        "current_rollout_logprob_abs_diff",
+        "current_rollout_kl",
+    }
+)
+
 # ---------------------------------------------------------------------------
 # Test configurations: (name, args_overrides, batch_size, prompt_lens, response_lens)
 # ---------------------------------------------------------------------------
@@ -179,7 +190,10 @@ def run_loss_fn(args, parallel_state, inputs):
     ]
     loss, metrics = fn(args, batch, logits, som)
     loss.backward()
-    result = {"loss": loss.detach(), "metrics": {k: v.detach() for k, v in metrics.items()}}
+    result = {
+        "loss": loss.detach(),
+        "metrics": {k: v.detach() for k, v in metrics.items() if k not in SNAPSHOT_EXEMPT_POLICY_METRICS},
+    }
     result["logits_grad"] = logits.grad.clone()
     return result
 
@@ -191,11 +205,19 @@ def run_loss_function_dispatcher(args, parallel_state, inputs):
     logits.requires_grad_(True)
     loss, normalizer, log_dict = loss_function(args, batch, 1, logits)
     loss.backward()
+    kept_metric_indices = [
+        index for index, key in enumerate(log_dict["keys"]) if key not in SNAPSHOT_EXEMPT_POLICY_METRICS
+    ]
     result = {
         "loss": loss.detach(),
         "normalizer": normalizer.detach() if isinstance(normalizer, torch.Tensor) else normalizer,
-        "log_dict_keys": log_dict["keys"],
-        "log_dict_values": log_dict["values"].detach(),
+        "log_dict_keys": [log_dict["keys"][index] for index in kept_metric_indices],
+        "log_dict_values": torch.cat(
+            [
+                log_dict["values"][:1],
+                log_dict["values"][1:][kept_metric_indices],
+            ]
+        ).detach(),
         "logits_grad": logits.grad.clone(),
     }
     return result

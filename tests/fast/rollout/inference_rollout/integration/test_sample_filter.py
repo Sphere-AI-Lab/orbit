@@ -60,8 +60,9 @@ def test_sample_filter_and_all_samples_process(rollout_env):
     rewards = [g[0][0].reward if isinstance(g[0], list) else g[0].reward for g in filtered_data]
     assert all(r == 1 for r in rewards)
 
-    all_samples_process_mock.assert_called_once()
-    _, all_samples, data_source = all_samples_process_mock.call_args[0]
+    final_calls = [call for call in all_samples_process_mock.call_args_list if not call.kwargs.get("live", False)]
+    assert len(final_calls) == 1
+    _, all_samples, data_source = final_calls[0].args
     assert data_source is not None
 
     assert len(all_samples) > len(filtered_data), "all_samples_process should see more samples than sample_filter"

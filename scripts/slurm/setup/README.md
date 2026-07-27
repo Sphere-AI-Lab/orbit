@@ -32,7 +32,7 @@ this README intentionally does **not** duplicate the install list.
 | `THIRDPARTY_DIR` | `$MILES_REPO/thirdparty` | submodule dir |
 | `PULL_REMOTE` | `0` | set to `1` to `git submodule update --remote` after init |
 | `CUDA_HOME` | auto (`/usr/local/cuda-12.{8,9}` / `/usr/local/cuda`) | override the CUDA toolkit path used for source builds |
-| `TORCH_VERSION` | `2.9.1` | matches `thirdparty/sglang`'s pin |
+| `TORCH_VERSION` | `2.11.0` | matches `thirdparty/sglang`'s pin |
 | `TORCH_INDEX_URL` | `https://download.pytorch.org/whl/cu129` | pytorch wheel index |
 | `TE_VERSION` | `2.10.0` | Dockerfile pin |
 | `MBRIDGE_COMMIT` / `TMS_COMMIT` | (Dockerfile pins) | git commits |

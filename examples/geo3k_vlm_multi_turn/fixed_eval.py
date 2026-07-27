@@ -559,7 +559,7 @@ def _manifest_contract(samples: Sequence[Any]) -> tuple[str, int]:
 
 def log_eval_rollout_data(rollout_id: int, args: Any, data: dict[str, Any], extra_metrics: dict[str, Any]) -> bool:
     """Log task-quality metrics against exact model-update steps for Milestone 11."""
-    from miles.utils import tracking_utils
+    from miles.utils.tracking_utils import tracking
 
     model_step = evaluation_model_step(args, rollout_id)
     log_dict = dict(extra_metrics or {})
@@ -614,7 +614,7 @@ def log_eval_rollout_data(rollout_id: int, args: Any, data: dict[str, Any], extr
         )
 
     log_dict["eval/step"] = model_step
-    tracking_utils.log(args, log_dict, step_key="eval/step")
+    tracking.log(args, log_dict, step_key="eval/step")
     return True
 
 
