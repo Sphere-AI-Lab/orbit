@@ -2,7 +2,8 @@
 
 Target: `sgl-project/sglang@sglang-miles` = `94949da73` = **v0.5.15-31** (rebased line;
 old pin `27d5e97c3` on the v0.5.13 line is NOT an ancestor → FORCE path).
-New pin: **`38d4bbef5`** = target + 4 re-applied local patches.
+New pin: **`9dd80e5f8`** = target + 4 re-applied local patches + one test-only
+CI-registration review follow-up.
 torch unchanged (2.11.0) → ACTIVE bundle uses rolling `cu129-x86_64`.
 Its Apex/FA2/FA3 SHA256 values match the job-28782 validated
 `cu129-x86_64-v0.5.12` cache byte-for-byte after upstream retired that tag.
@@ -40,15 +41,18 @@ Its Apex/FA2/FA3 SHA256 values match the job-28782 validated
   TokenizedGenerateReqInput moved to kwargs style, our `scoring_suffix_len` kwarg appended.
   One shipped test needed `session_id=None` on its fake recv_req (v0.5.15's radix-native
   session route reads it).
-- Unit tests on final pin: **54 passed + 13 subtests**
-  (test_scoring_suffix{,_scheduler,_api}, test_pretokenized_input_ids, test_io_struct).
+- Runtime unit tests on `38d4bbef5`: **54 passed + 13 subtests**
+  (test_scoring_suffix{,_scheduler,_api}, test_pretokenized_input_ids,
+  test_io_struct). Final pin `9dd80e5f8` only migrates the exact-suffix E2E to
+  v0.5.15 CI registration metadata; `check_registered_tests.py` and the
+  file-scoped SGLang pre-commit hooks pass.
 
 ## Publication status and remaining landing plan
 
 Completed:
 
 - `sync-v0.5.15-20260724` is published on `impossible-inc/sglang`.
-- The branch tip is `38d4bbef599e3375f143f48a27c659910ebdd064`,
+- The branch tip is `9dd80e5f8fc52e87dd84a43ebc0e125cd4f4c9d8`,
   exactly matching the Miles gitlink.
 - The mirror review is open as
   [impossible-inc/sglang#5](https://github.com/impossible-inc/sglang/pull/5).
@@ -62,7 +66,7 @@ Not yet executed:
   opened for review.
 
 ```bash
-S=thirdparty/sglang; NEWPIN=38d4bbef599e3375f143f48a27c659910ebdd064
+S=thirdparty/sglang; NEWPIN=9dd80e5f8fc52e87dd84a43ebc0e125cd4f4c9d8
 # 1. review PR sync-v0.5.15-20260724 -> sglang-miles on impossible-inc/sglang (history track,
 #    per PR #1 v0.5.12 / PR #2 v0.5.13 precedent) — BEFORE the force-advance
 # 2. after review, archive old tip, then lease-guarded force-advance + date tags

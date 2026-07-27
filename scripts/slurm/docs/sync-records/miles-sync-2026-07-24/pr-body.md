@@ -1,6 +1,6 @@
 ## Summary
 
-Sync with upstream `radixark/miles` — **187 upstream commits** merged (merge-base `5e97c865`, 2026-06-29 → upstream tip `c94c2fa9`, 2026-07-23), **plus the combined sglang-sync**: `thirdparty/sglang` advances to the **v0.5.15 sglang-miles line** (`38d4bbef5` = `sgl-project/sglang@sglang-miles` `v0.5.15-31` + 4 re-applied local patches). The ACTIVE wheels bundle follows upstream #1784 onto rolling `cu129-x86_64`; its Apex/FA2/FA3 files are SHA256-identical to the torch 2.11.0+cu129 set validated by clean rebuild job 28782 and both baseline runs.
+Sync with upstream `radixark/miles` — **187 upstream commits** merged (merge-base `5e97c865`, 2026-06-29 → upstream tip `c94c2fa9`, 2026-07-23), **plus the combined sglang-sync**: `thirdparty/sglang` advances to the **v0.5.15 sglang-miles line** (`9dd80e5f8` = `sgl-project/sglang@sglang-miles` `v0.5.15-31` + 4 re-applied local patches + a test-only CI-registration review fix). The ACTIVE wheels bundle follows upstream #1784 onto rolling `cu129-x86_64`; its Apex/FA2/FA3 files are SHA256-identical to the torch 2.11.0+cu129 set validated by clean rebuild job 28782 and both baseline runs.
 
 Major upstream content: the fault-tolerance megaseries (~50 commits: witness ids, independent-DP cells, in-memory checkpoints, heartbeat/control-server, event logging), multi-LoRA (7 parts), session-server scale-out (N instances on a port range), metric-history CI gate, miles dashboard, disk-delta weight sync, dual-clip PPO, GLM-5 LoRA RL, entropy observation, pass@k relocation, and two sglang bumps (v0.5.14, v0.5.15).
 
@@ -18,6 +18,7 @@ Major upstream content: the fault-tolerance megaseries (~50 commits: witness ids
 | `c8da137a` | close post-sync API/CI gaps and migrate the retired wheels release to the byte-verified rolling tag |
 | `34335c5e` | initialize the rollout-dispose test double with the synced `data_source` lifecycle field |
 | `2d529d88` | distinguish dynamic-sampling live diagnostics from the final all-samples hook in its integration test |
+| `5efa633b` | advance the SGLang gitlink to the review-fixed CI-registration tip |
 | sync-record commits | capture the upstream analysis, SGLang patch classification, cluster validation, performance comparison, and OPD spike retrospective |
 
 The initial one-code-commit preparation rule was not preserved after the PR was
@@ -67,18 +68,19 @@ behavior is unchanged.
 
 ## sglang: v0.5.15 line, patch-by-patch
 
-`thirdparty/sglang` → `38d4bbef5` = `v0.5.15-31` (`94949da73`) + re-applied local patches (verified by CONTENT on the new base, not titles):
+`thirdparty/sglang` → `9dd80e5f8` = `v0.5.15-31` (`94949da73`) + re-applied local patches (verified by CONTENT on the new base, not titles) + one test-only review follow-up:
 
 1. **mrope text-only gate** (`get_rl_on_policy_target()` disjunct in forward_batch) — absent on v0.5.15, re-applied clean.
 2. **cu12 dep flavors** — re-ported onto the v0.5.15 dep set: `flashinfer_python[cu12]==0.6.12`, `sglang-kernel==0.4.4+cu129`, `sgl-deep-gemm==0.1.4+cu129`, `torchao==0.17.0+cu129`, `cuda-python<13`, plain `nvidia-cutlass-dsl` — **all +cu129 wheels verified to exist** on their indexes before committing.
 3. **exact multimodal scoring suffix** (impossible-inc/sglang #3) — absent on v0.5.15, re-applied; 4 conflict files were tail-of-parameter-list unions with upstream's new `session_id` plumbing.
 4. **qwen-vl pretokenized-IDs fix** (impossible-inc/sglang #4) — absent on v0.5.15, re-applied clean.
-5. **pause-aware `flush_cache` restore — DROPPED**: upstream fixed it officially (#31962, `is_fully_idle(ignore_waiting=self._engine_paused)`), semantics fully cover our patch. One less mirror patch to carry.
+5. **exact-suffix E2E CI registration** (`9dd80e5f8`) — review follow-up only: migrated the test from legacy `suite=` metadata to v0.5.15's `stage=` / `runner_config=` contract so `check-registered-tests` and `/rerun-test` can dispatch it.
+6. **pause-aware `flush_cache` restore — DROPPED**: upstream fixed it officially (#31962, `is_fully_idle(ignore_waiting=self._engine_paused)`), semantics fully cover our patch. One less mirror patch to carry.
 
-Patch-shipped unit tests on the new pin: **54 passed + 13 subtests** (scoring suffix ×3 files, pretokenized IDs, io_struct).
+Patch-shipped runtime unit tests on `38d4bbef5`: **54 passed + 13 subtests** (scoring suffix ×3 files, pretokenized IDs, io_struct). Final pin `9dd80e5f8` differs only in the E2E's CI registration metadata; `check_registered_tests.py` and all SGLang pre-commit hooks for that file pass.
 
 Mirror publication status: `sync-v0.5.15-20260724` is already published and
-resolves to the exact Miles gitlink `38d4bbef5`. The review PR to
+resolves to the exact Miles gitlink `9dd80e5f8`. The review PR to
 `sglang-miles` is [impossible-inc/sglang#5](https://github.com/impossible-inc/sglang/pull/5).
 It is intentionally non-fast-forward because the upstream line was rebased.
 After review, landing requires archiving `sglang-miles-v0.5.13-final`, then a
@@ -125,7 +127,7 @@ is blocked by #5 and must not merge before that mirror landing completes.**
 
 Static and fast validation:
 - [x] Fast tests on merged tree: `test_data_filter_long_prompt` 4/4, `test_on_policy_distillation` **68/68**, `test_true_on_policy_loss_metrics` 8/8.
-- [x] sglang patch unit tests on the new pin: **54 passed + 13 subtests**.
+- [x] sglang runtime patch unit tests on `38d4bbef5`: **54 passed + 13 subtests**; final pin `9dd80e5f8` adds only the E2E CI-registration fix, with the registered-test validator and file-scoped SGLang pre-commit passing.
 - [x] `extract_pins.py --check` exit 0 with no pending.
 - [x] `tests/fast/utils/test_extract_pins.py` 4/4.
 - [x] Repository pre-commit hooks pass across the complete PR diff.
