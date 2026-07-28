@@ -2858,24 +2858,24 @@ def _finalize_train_offload_args(args) -> None:
 
 def _apply_critic_args(args) -> None:
     args.use_critic = args.advantage_estimator == "ppo"
-    if getattr(args, "critic_mode", "full") == "adapter":
+    if args.critic_mode == "adapter":
         if args.advantage_estimator != "ppo":
             raise ValueError("--critic-mode adapter requires --advantage-estimator ppo.")
-        if getattr(args, "peft_method", "none") == "none":
+        if args.peft_method == "none":
             raise ValueError(
                 "--critic-mode adapter requires an enabled --peft-method: the critic is an adapter."
             )
-        if getattr(args, "train_backend", None) != "megatron":
+        if args.train_backend != "megatron":
             raise ValueError("--critic-mode adapter requires the megatron train backend.")
         for flag in ("critic_num_gpus_per_node", "critic_num_nodes"):
-            if getattr(args, flag, None):
+            if getattr(args, flag):
                 raise ValueError(
                     f"--{flag.replace('_', '-')} is meaningless with --critic-mode adapter: "
                     "the critic shares the actor workers' GPUs."
                 )
         args.critic_num_gpus_per_node = 0
         args.critic_num_nodes = 0
-        if getattr(args, "critic_lr", None) is None:
+        if args.critic_lr is None:
             args.critic_lr = args.lr
         return
     if getattr(args, "critic_num_gpus_per_node", None) is None:
