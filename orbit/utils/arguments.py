@@ -57,6 +57,16 @@ def needs_opd_teacher(args) -> bool:
     return args.advantage_estimator == "on_policy_distillation" or getattr(args, "use_opd", False)
 
 
+def uses_separate_critic(args) -> bool:
+    """True when PPO runs the legacy separate full-model critic workers."""
+    return getattr(args, "use_critic", False) and getattr(args, "critic_mode", "full") == "full"
+
+
+def uses_adapter_critic(args) -> bool:
+    """True when PPO runs the one-trunk adapter critic inside the actor workers."""
+    return getattr(args, "use_critic", False) and getattr(args, "critic_mode", "full") == "adapter"
+
+
 def add_on_policy_distillation_arguments(parser):
     """On-policy distillation (OPD) teacher config. Mirrors slime arguments.py:1084-1125."""
     parser.add_argument(
@@ -1720,6 +1730,19 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
             parser.add_argument("--critic-save", type=str, default=None, help="The checkpoint for critic model.")
             parser.add_argument("--critic-lr", type=float, default=None, help="The lr for critic model")
             parser.add_argument(
+                "--critic-mode",
+                type=str,
+                choices=["full", "adapter"],
+                default="full",
+                help=(
+                    "PPO critic topology: 'full' (default) runs the legacy separate full-model "
+                    "critic workers; 'adapter' runs a one-trunk critic (PEFT adapter + value "
+                    "head aliasing the actor's frozen trunk) inside the actor workers. "
+                    "'adapter' requires --advantage-estimator ppo, an enabled --peft-method, "
+                    "and the megatron train backend."
+                ),
+            )
+            parser.add_argument(
                 "--critic-lr-warmup-iters",
                 type=int,
                 default=0,
@@ -2835,6 +2858,26 @@ def _finalize_train_offload_args(args) -> None:
 
 def _apply_critic_args(args) -> None:
     args.use_critic = args.advantage_estimator == "ppo"
+    if getattr(args, "critic_mode", "full") == "adapter":
+        if args.advantage_estimator != "ppo":
+            raise ValueError("--critic-mode adapter requires --advantage-estimator ppo.")
+        if getattr(args, "peft_method", "none") == "none":
+            raise ValueError(
+                "--critic-mode adapter requires an enabled --peft-method: the critic is an adapter."
+            )
+        if getattr(args, "train_backend", None) != "megatron":
+            raise ValueError("--critic-mode adapter requires the megatron train backend.")
+        for flag in ("critic_num_gpus_per_node", "critic_num_nodes"):
+            if getattr(args, flag, None):
+                raise ValueError(
+                    f"--{flag.replace('_', '-')} is meaningless with --critic-mode adapter: "
+                    "the critic shares the actor workers' GPUs."
+                )
+        args.critic_num_gpus_per_node = 0
+        args.critic_num_nodes = 0
+        if getattr(args, "critic_lr", None) is None:
+            args.critic_lr = args.lr
+        return
     if getattr(args, "critic_num_gpus_per_node", None) is None:
         args.critic_num_gpus_per_node = args.actor_num_gpus_per_node
     if getattr(args, "critic_num_nodes", None) is None:
