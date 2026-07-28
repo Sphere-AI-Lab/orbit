@@ -118,3 +118,43 @@ def load_critic_checkpoint(args, critic_model, optimizer=None) -> bool:
     if optimizer is not None and payload["optimizer"] is not None:
         optimizer.load_state_dict(payload["optimizer"])
     return True
+
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def _critic_build_args(args):
+    """Temporarily rewrite the global args the way the separate critic worker does at
+    init (actor.py role=="critic" branch), except `load`: the trunk arrives via
+    aliasing and the adapters/head resume through load_critic_checkpoint, so the
+    Megatron trunk-checkpoint load is skipped entirely.
+    """
+    saved = {key: getattr(args, key) for key in ("load", "save", "lr", "lr_warmup_iters")}
+    args.load = None
+    args.save = args.critic_save
+    args.lr = args.critic_lr
+    args.lr_warmup_iters = args.critic_lr_warmup_iters
+    try:
+        yield
+    finally:
+        for key, value in saved.items():
+            setattr(args, key, value)
+
+
+def build_critic_instance(args, actor_model):
+    """Build the one-trunk critic: PEFT model + value head, trunk aliased to the actor.
+
+    Known V1 cost: the bridge build loads base weights before aliasing frees
+    them, so init transiently holds a second trunk until clear_memory().
+    """
+    from .model import clear_memory, initialize_model_and_optimizer
+
+    with _critic_build_args(args):
+        model, optimizer, opt_param_scheduler, _ = initialize_model_and_optimizer(args, role="critic")
+    aliased = alias_trunk_storage(model, actor_model)
+    clear_memory()
+    resumed = load_critic_checkpoint(args, model, optimizer=optimizer)
+    assert_trunk_aliased(model, actor_model)
+    logger.info("adapter critic ready: %d trunk params aliased, resumed=%s", aliased, resumed)
+    return model, optimizer, opt_param_scheduler

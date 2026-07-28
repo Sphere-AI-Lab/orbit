@@ -14,6 +14,7 @@ from orbit.ray.train_actor import TrainRayActor
 from orbit.utils import train_dump_utils
 from orbit.utils.adapter_swap import swap_adapter_tensors
 from orbit.utils.arguments import uses_rollout_engines
+from orbit.utils.arguments import uses_adapter_critic, uses_separate_critic
 from orbit.utils.context_utils import with_defer
 from orbit.utils.distributed_utils import get_gloo_group, init_process_group
 from orbit.utils.memory_utils import clear_memory, print_memory
@@ -34,6 +35,7 @@ from ..training_utils.log_utils import log_cpu_memory, log_perf_data, log_rollou
 from ..training_utils.loss import compute_advantages_and_returns, get_log_probs_and_entropy, get_values
 from ..training_utils.parallel import get_parallel_state
 from .checkpoint import load_checkpoint
+from .critic_adapter import build_critic_instance, save_critic_checkpoint
 from .initialize import init, is_megatron_main_rank
 from .lora_utils import is_lora_enabled
 from .model import forward_only, initialize_model_and_optimizer, save, train
@@ -198,6 +200,16 @@ class MegatronTrainRayActor(TrainRayActor):
             if self.args.offload_train:
                 self.sleep()
             return
+
+        self.critic_model = None
+        self.critic_optimizer = None
+        self.critic_opt_param_scheduler = None
+        if uses_adapter_critic(self.args):
+            (
+                self.critic_model,
+                self.critic_optimizer,
+                self.critic_opt_param_scheduler,
+            ) = build_critic_instance(self.args, self.model)
 
         start_rollout_id = loaded_rollout_id + 1
 
@@ -765,6 +777,9 @@ class MegatronTrainRayActor(TrainRayActor):
             maybe_finalize_async_save(blocking=True)
 
         save(rollout_id, self.model, self.optimizer, self.opt_param_scheduler)
+
+        if uses_adapter_critic(self.args) and self.args.critic_save:
+            save_critic_checkpoint(self.args, rollout_id, self.critic_model, optimizer=self.critic_optimizer)
 
         if force_sync and self.args.async_save:
             maybe_finalize_async_save(blocking=True)
