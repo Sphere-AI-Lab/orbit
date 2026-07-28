@@ -8,8 +8,10 @@ docs/superpowers/specs/2026-07-27-one-trunk-ppo-design.md (clthegoat docs).
 """
 
 import logging
+from pathlib import Path
 
 import torch
+import torch.distributed as dist
 
 logger = logging.getLogger(__name__)
 
@@ -57,3 +59,62 @@ def assert_trunk_aliased(critic_model, actor_model) -> None:
             continue
         if critic_param.data.data_ptr() != actor_params[name].data.data_ptr():
             raise RuntimeError(f"trunk alias broken: {name} has its own storage")
+
+
+def _trainable_named_tensors(model) -> dict[str, torch.nn.Parameter]:
+    return {name: p for name, p in _named_params(model).items() if p.requires_grad}
+
+
+def _critic_checkpoint_dir(save_root: str, iteration: int) -> Path:
+    return Path(save_root) / f"iter_{iteration:07d}"
+
+
+def _global_rank() -> int:
+    return dist.get_rank() if dist.is_initialized() else 0
+
+
+def save_critic_checkpoint(args, iteration: int, critic_model, optimizer=None) -> str:
+    """Save the adapter+value-head critic per rank (trainable tensors + optimizer state).
+
+    Files are tagged by global rank; loading requires the same world layout.
+    """
+    ckpt_dir = _critic_checkpoint_dir(args.critic_save, iteration)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "tensors": {k: v.detach().cpu() for k, v in _trainable_named_tensors(critic_model).items()},
+        "optimizer": optimizer.state_dict() if optimizer is not None else None,
+        "iteration": iteration,
+    }
+    torch.save(payload, ckpt_dir / f"critic_rank{_global_rank()}.pt")
+    if dist.is_initialized():
+        dist.barrier()
+    if _global_rank() == 0:
+        (Path(args.critic_save) / "latest_checkpointed_iteration.txt").write_text(str(iteration))
+    return str(ckpt_dir)
+
+
+def load_critic_checkpoint(args, critic_model, optimizer=None) -> bool:
+    """Restore trainable critic tensors saved by save_critic_checkpoint.
+
+    Returns False on fresh start (no checkpoint). Never touches frozen params,
+    so a load can never materialize a trunk copy.
+    """
+    save_root = getattr(args, "critic_save", None)
+    if not save_root or not (Path(save_root) / "latest_checkpointed_iteration.txt").is_file():
+        return False
+    iteration = int((Path(save_root) / "latest_checkpointed_iteration.txt").read_text().strip())
+    path = _critic_checkpoint_dir(save_root, iteration) / f"critic_rank{_global_rank()}.pt"
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    params = _trainable_named_tensors(critic_model)
+    saved = payload["tensors"]
+    if set(saved) != set(params):
+        raise RuntimeError(
+            "critic checkpoint mismatch: "
+            f"missing={sorted(set(params) - set(saved))} extra={sorted(set(saved) - set(params))}"
+        )
+    with torch.no_grad():
+        for name, param in params.items():
+            param.copy_(saved[name].to(device=param.device, dtype=param.dtype))
+    if optimizer is not None and payload["optimizer"] is not None:
+        optimizer.load_state_dict(payload["optimizer"])
+    return True
