@@ -187,7 +187,11 @@ def setup_model_and_optimizer(
             - The learning-rate/weight-decay scheduler tied to the optimizer.
     """
     assert not args.moe_use_upcycling
-    assert args.load is not None or args.pretrained_checkpoint is not None
+    # The adapter-mode critic gets trunk weights from the bridge/HF load inside the PEFT
+    # pre-wrap hook and then aliases the actor's tensors — it is the one build with no
+    # Megatron checkpoint source by design.
+    if not (role == "critic" and uses_adapter_critic(args)):
+        assert args.load is not None or args.pretrained_checkpoint is not None
 
     model = _build_model(args, role)
     # Apply parameter-level dtype overrides declared in model definitions
@@ -991,7 +995,11 @@ def initialize_model_and_optimizer(
         check_peak_gpu_memory_after_load(args)
         clear_memory()
 
-        check_model_hashes(args, model, iteration)
+        # check_model_hashes keys its expected-hash lookup on args.load (ci_utils.py's
+        # _hash_file_path does Path(args.load)); with no checkpoint (args.load is None,
+        # e.g. the adapter-mode critic build) there is nothing to validate against.
+        if args.load is not None:
+            check_model_hashes(args, model, iteration)
 
     opt_param_scheduler.step(increment=iteration * args.global_batch_size)
 
