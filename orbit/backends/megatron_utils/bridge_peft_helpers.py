@@ -264,7 +264,18 @@ def _oft_validator_variant(args: Namespace) -> str:
     return "canonical"
 
 
-def _setup_peft_model_via_bridge(args: Namespace) -> list:
+def _bridge_is_value_model(hf_config, role: str = "actor") -> bool:
+    """The adapter-mode critic reuses the value-model machinery: pre-DDP value-head
+    hook plus is_value_model-aware base-weight loading."""
+    if role == "critic":
+        return True
+    return (
+        "ForTokenClassification" in hf_config.architectures[0]
+        or "ForSequenceClassification" in hf_config.architectures[0]
+    )
+
+
+def _setup_peft_model_via_bridge(args: Namespace, role: str = "actor") -> list:
     """Build Megatron model with PEFT using Megatron-Bridge."""
     from megatron.bridge import AutoBridge
     from megatron.bridge.training.config import DistributedDataParallelConfig
@@ -296,10 +307,7 @@ def _setup_peft_model_via_bridge(args: Namespace) -> list:
             variant=_oft_validator_variant(args),
         )
 
-    is_value_model = (
-        "ForTokenClassification" in hf_config.architectures[0]
-        or "ForSequenceClassification" in hf_config.architectures[0]
-    )
+    is_value_model = _bridge_is_value_model(hf_config, role=role)
     post_peft_hooks = []
     if is_value_model:
         hidden_size = hf_config.text_config.hidden_size if hasattr(hf_config, "text_config") else hf_config.hidden_size

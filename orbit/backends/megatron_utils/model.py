@@ -27,6 +27,7 @@ try:
 except ImportError:
     from megatron.core.utils import unwrap_model
 
+from orbit.utils.arguments import uses_adapter_critic
 from orbit.utils.dumper_utils import DumperMegatronUtil, DumperPhase
 from orbit.utils.memory_utils import clear_memory
 
@@ -197,8 +198,9 @@ def setup_model_and_optimizer(
 
 
 def _build_model(args: Namespace, role: str = "actor") -> list[DDP]:
-    if is_peft_enabled(args) and role == "actor" and args.megatron_to_hf_mode == "bridge":
-        return _setup_peft_model_via_bridge(args)
+    peft_bridge = is_peft_enabled(args) and args.megatron_to_hf_mode == "bridge"
+    if peft_bridge and (role == "actor" or uses_adapter_critic(args)):
+        return _setup_peft_model_via_bridge(args, role=role)
     return get_model(get_model_provider_func(args, role), ModelType.encoder_or_decoder)
 
 
