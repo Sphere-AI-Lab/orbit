@@ -2867,6 +2867,17 @@ def _apply_critic_args(args) -> None:
             )
         if args.train_backend != "megatron":
             raise ValueError("--critic-mode adapter requires the megatron train backend.")
+        if args.keep_old_actor:
+            raise ValueError(
+                "--critic-mode adapter is incompatible with --keep-old-actor: the value "
+                "forward would run under the old-actor trunk (shared via aliasing) while "
+                "the value phase trains under the current trunk."
+            )
+        if getattr(args, "use_rollout_routing_replay", False):
+            raise ValueError(
+                "--critic-mode adapter is incompatible with --use-rollout-routing-replay: "
+                "critic forwards would hit the actor's routing-replay buffers."
+            )
         for flag in ("critic_num_gpus_per_node", "critic_num_nodes"):
             if getattr(args, flag):
                 raise ValueError(

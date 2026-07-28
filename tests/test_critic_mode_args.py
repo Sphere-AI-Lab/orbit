@@ -23,6 +23,7 @@ def _base_args(**overrides):
         lr=1e-6,
         peft_method="lora",
         train_backend="megatron",
+        keep_old_actor=False,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -81,4 +82,16 @@ def test_adapter_mode_requires_peft():
 def test_adapter_mode_requires_megatron_backend():
     args = _base_args(critic_mode="adapter", train_backend="fsdp")
     with pytest.raises(ValueError, match="megatron"):
+        _apply_critic_args(args)
+
+
+def test_adapter_mode_rejects_keep_old_actor():
+    args = _base_args(critic_mode="adapter", keep_old_actor=True)
+    with pytest.raises(ValueError, match="keep-old-actor"):
+        _apply_critic_args(args)
+
+
+def test_adapter_mode_rejects_routing_replay():
+    args = _base_args(critic_mode="adapter", use_rollout_routing_replay=True)
+    with pytest.raises(ValueError, match="routing-replay"):
         _apply_critic_args(args)
