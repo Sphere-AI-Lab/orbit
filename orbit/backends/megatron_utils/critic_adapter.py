@@ -158,3 +158,19 @@ def build_critic_instance(args, actor_model):
     assert_trunk_aliased(model, actor_model)
     logger.info("adapter critic ready: %d trunk params aliased, resumed=%s", aliased, resumed)
     return model, optimizer, opt_param_scheduler
+
+
+@contextmanager
+def value_loss_phase(args):
+    """Route train() to the value loss for the critic phase, restoring afterwards.
+
+    train() reads loss_type from the global Megatron args (model.py train() ->
+    get_args()), which is the same Namespace the actor holds, so a scoped
+    mutation is the faithful in-process equivalent of train_critic's assignment.
+    """
+    saved = args.loss_type
+    args.loss_type = "value_loss"
+    try:
+        yield
+    finally:
+        args.loss_type = saved
