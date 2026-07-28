@@ -28,6 +28,19 @@ def test_train_driver_gates_critic_calls_on_uses_separate_critic():
     )
 
 
+def test_train_async_driver_gates_critic_calls_on_uses_separate_critic():
+    train_async_py = os.path.join(os.path.dirname(__file__), "..", "train_async.py")
+    src = open(train_async_py).read()
+    assert "uses_separate_critic" in src, (
+        "train_async.py must gate critic-worker calls on uses_separate_critic, not args.use_critic"
+    )
+    forbidden = "if args.use_critic:"
+    offending_lines = [line for line in src.splitlines() if forbidden in line]
+    assert not offending_lines, (
+        f"train_async.py still gates on {forbidden!r} instead of uses_separate_critic(args): {offending_lines}"
+    )
+
+
 def test_adapter_mode_zeroes_the_gpu_offset_inputs():
     """The untouched offset arithmetic (placement_group.py:90-108, rollout.py:1035,
     sglang_engine.py:36) adds critic_num_nodes * critic_num_gpus_per_node — verify

@@ -1,7 +1,7 @@
 import asyncio
 
 from orbit.ray.placement_group import create_placement_groups, create_rollout_manager, create_training_models
-from orbit.utils.arguments import parse_args
+from orbit.utils.arguments import parse_args, uses_separate_critic
 from orbit.utils.async_utils import eager_create_task
 from orbit.utils.logging_utils import configure_logger
 from orbit.utils.misc import should_run_periodic_action
@@ -41,7 +41,7 @@ async def train(args):
         if rollout_id + 1 < args.num_rollout:
             rollout_data_next_future = rollout_manager.generate.remote(rollout_id + 1)
 
-        if args.use_critic:
+        if uses_separate_critic(args):
             critic_task = await eager_create_task(critic_model.train(rollout_id, rollout_data_curr_ref))
             if rollout_id >= args.num_critic_only_steps:
                 await actor_model.train(rollout_id, rollout_data_curr_ref)
@@ -54,7 +54,7 @@ async def train(args):
                 rollout_id,
                 force_sync=rollout_id == args.num_rollout - 1,
             )
-            if args.use_critic:
+            if uses_separate_critic(args):
                 await critic_model.save_model(
                     rollout_id,
                     force_sync=rollout_id == args.num_rollout - 1,
