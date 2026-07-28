@@ -1,4 +1,5 @@
 import argparse
+import os
 
 import pytest
 
@@ -11,6 +12,19 @@ def test_pgs_dict_has_no_critic_entry_in_adapter_mode():
     src = open(pg_mod.__file__).read()
     assert "uses_separate_critic" in src, (
         "placement_group must gate critic pg creation on uses_separate_critic"
+    )
+
+
+def test_train_driver_gates_critic_calls_on_uses_separate_critic():
+    train_py = os.path.join(os.path.dirname(__file__), "..", "train.py")
+    src = open(train_py).read()
+    assert "uses_separate_critic" in src, (
+        "train.py must gate critic-worker calls on uses_separate_critic, not args.use_critic"
+    )
+    forbidden = "if args.use_critic:"
+    offending_lines = [line for line in src.splitlines() if forbidden in line]
+    assert not offending_lines, (
+        f"train.py still gates on {forbidden!r} instead of uses_separate_critic(args): {offending_lines}"
     )
 
 
