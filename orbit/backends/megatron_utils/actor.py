@@ -209,7 +209,7 @@ class MegatronTrainRayActor(TrainRayActor):
                 self.critic_model,
                 self.critic_optimizer,
                 self.critic_opt_param_scheduler,
-            ) = build_critic_instance(self.args, self.model)
+            ) = build_critic_instance(self.args, self.model, expected_iteration=loaded_rollout_id)
 
         start_rollout_id = loaded_rollout_id + 1
 

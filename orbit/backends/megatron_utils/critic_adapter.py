@@ -8,6 +8,7 @@ docs/superpowers/specs/2026-07-27-one-trunk-ppo-design.md (clthegoat docs).
 """
 
 import logging
+from contextlib import contextmanager
 from pathlib import Path
 
 import torch
@@ -93,15 +94,15 @@ def save_critic_checkpoint(args, iteration: int, critic_model, optimizer=None) -
     return str(ckpt_dir)
 
 
-def load_critic_checkpoint(args, critic_model, optimizer=None) -> bool:
+def load_critic_checkpoint(args, critic_model, optimizer=None) -> int | None:
     """Restore trainable critic tensors saved by save_critic_checkpoint.
 
-    Returns False on fresh start (no checkpoint). Never touches frozen params,
-    so a load can never materialize a trunk copy.
+    Returns None on fresh start (no checkpoint), else the loaded iteration.
+    Never touches frozen params, so a load can never materialize a trunk copy.
     """
     save_root = getattr(args, "critic_save", None)
     if not save_root or not (Path(save_root) / "latest_checkpointed_iteration.txt").is_file():
-        return False
+        return None
     iteration = int((Path(save_root) / "latest_checkpointed_iteration.txt").read_text().strip())
     path = _critic_checkpoint_dir(save_root, iteration) / f"critic_rank{_global_rank()}.pt"
     payload = torch.load(path, map_location="cpu", weights_only=False)
@@ -117,10 +118,23 @@ def load_critic_checkpoint(args, critic_model, optimizer=None) -> bool:
             param.copy_(saved[name].to(device=param.device, dtype=param.dtype))
     if optimizer is not None and payload["optimizer"] is not None:
         optimizer.load_state_dict(payload["optimizer"])
-    return True
+    return iteration
 
 
-from contextlib import contextmanager
+def _check_resume_iteration(loaded: int | None, expected: int | None) -> None:
+    """Fail loud if the critic and actor resumed at different iterations.
+
+    No-ops when either side is unknown (fresh critic start, or the caller
+    passed no expectation). Raises when both are known and disagree, since a
+    silent divergence would train the critic against the wrong actor state.
+    """
+    if loaded is None or expected is None:
+        return
+    if loaded != expected:
+        raise RuntimeError(
+            f"critic/actor checkpoint iteration mismatch: critic resumed at iteration {loaded}, "
+            f"actor resumed at iteration {expected}"
+        )
 
 
 @contextmanager
@@ -142,11 +156,15 @@ def _critic_build_args(args):
             setattr(args, key, value)
 
 
-def build_critic_instance(args, actor_model):
+def build_critic_instance(args, actor_model, expected_iteration: int | None = None):
     """Build the one-trunk critic: PEFT model + value head, trunk aliased to the actor.
 
     Known V1 cost: the bridge build loads base weights before aliasing frees
     them, so init transiently holds a second trunk until clear_memory().
+
+    ``expected_iteration``, when given, must match the critic's resumed
+    iteration (see ``_check_resume_iteration``) so the actor and critic never
+    silently train from different points in the run.
     """
     from .model import clear_memory, initialize_model_and_optimizer
 
@@ -154,9 +172,10 @@ def build_critic_instance(args, actor_model):
         model, optimizer, opt_param_scheduler, _ = initialize_model_and_optimizer(args, role="critic")
     aliased = alias_trunk_storage(model, actor_model)
     clear_memory()
-    resumed = load_critic_checkpoint(args, model, optimizer=optimizer)
+    resumed_iteration = load_critic_checkpoint(args, model, optimizer=optimizer)
+    _check_resume_iteration(resumed_iteration, expected_iteration)
     assert_trunk_aliased(model, actor_model)
-    logger.info("adapter critic ready: %d trunk params aliased, resumed=%s", aliased, resumed)
+    logger.info("adapter critic ready: %d trunk params aliased, resumed_iteration=%s", aliased, resumed_iteration)
     return model, optimizer, opt_param_scheduler
 
 
