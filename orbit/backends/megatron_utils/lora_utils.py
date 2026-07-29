@@ -56,14 +56,14 @@ def create_lora_instance(args: Namespace):
         dim=args.lora_rank,
         alpha=args.lora_alpha,
         dropout=args.lora_dropout,
-        lora_A_init_method=getattr(args, "lora_A_init_method", "xavier"),
+        lora_A_init_method=getattr(args, "lora_a_init_method", "xavier"),
         lora_B_init_method=getattr(args, "lora_B_init_method", "zero"),
     )
 
     logger.info(
         f"Created {lora_cls.__name__}: rank={args.lora_rank}, alpha={args.lora_alpha}, "
-        f"dropout={args.lora_dropout}, target_modules={target_modules}, "
-        f"exclude_modules={exclude_modules}"
+        f"dropout={args.lora_dropout}, a_init={getattr(args, 'lora_a_init_method', 'xavier')}, "
+        f"target_modules={target_modules}, exclude_modules={exclude_modules}"
     )
     return lora
 
