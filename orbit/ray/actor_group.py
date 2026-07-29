@@ -115,6 +115,21 @@ class RayTrainGroup:
         """Do one rollout training"""
         await self._broadcast("train", rollout_id, rollout_data_ref)
 
+    async def compute_eval_nll(self, rollout_id) -> dict:
+        """Held-out NLL of the current actor weights, reduced across ranks.
+
+        Unlike :meth:`train`, this returns its result -- the number is the whole
+        point. ``_broadcast`` hands back one entry per actor across the full
+        TP x PP x DP grid, but the actors deduplicate themselves: exactly one
+        returns the DP-reduced statistics and every other returns ``None``.
+        Averaging the per-actor values instead would double-count TP/PP
+        replicas (which hold the same samples) and would mis-weight DP shards
+        (which hold different token counts).
+        """
+        from orbit.utils.eval_nll import select_eval_nll_result
+
+        return select_eval_nll_result(await self._broadcast("compute_eval_nll", rollout_id))
+
     async def save_model(self, rollout_id, force_sync=False):
         """Save actor model"""
         await self._broadcast("save_model", rollout_id, force_sync=force_sync)

@@ -124,6 +124,15 @@ class TrainRayActor(RayActor):
     def save_model(self, rollout_id, force_sync=False):
         raise NotImplementedError
 
+    def compute_eval_nll(self, rollout_id):
+        """Forward-only held-out NLL. Returns the reduced statistics on exactly
+        one rank and None on all others, so the caller can dedupe TP/PP replicas
+        without knowing the parallel layout. Optional: backends that do not
+        implement it simply do not support --eval-nll-data."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement compute_eval_nll; --eval-nll-data is unsupported."
+        )
+
     @abc.abstractmethod
     def update_weights(self):
         raise NotImplementedError

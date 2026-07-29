@@ -11,6 +11,7 @@ from orbit.utils import tracking_utils
 from orbit.ray.placement_group import create_placement_groups, create_rollout_manager, create_training_models
 from orbit.utils.arguments import parse_args, uses_rollout_engines
 from orbit.utils.async_utils import eager_create_task
+from orbit.utils.eval_nll import build_eval_nll_metrics
 from orbit.utils.logging_utils import configure_logger
 from orbit.utils.metric_utils import compute_rollout_step
 from orbit.utils.misc import should_run_periodic_action
@@ -18,6 +19,34 @@ from orbit.utils.training_eta import TrainingETA, format_duration
 from orbit.utils.tracking_utils import init_tracking
 
 logger = logging.getLogger(__name__)
+
+
+def _eval_nll_enabled(args) -> bool:
+    return bool(args.eval_nll_data) and args.eval_nll_interval > 0
+
+
+def _log_eval_nll(args, rollout_id: int, stats: dict, *, before_train: bool = False) -> None:
+    """Record one held-out NLL measurement.
+
+    ``eval/test_nll`` is the token-weighted mean the study reports.
+    ``eval/test_nll_before_train`` duplicates the pre-training measurement under
+    its own key so gate G4 (step-0 NLL of the unmodified base model) can be read
+    back unambiguously -- the loop logs both the pre-train and the post-rollout-0
+    values at ``rollout/step == 0``, exactly as the generation eval already does.
+    """
+    step = compute_rollout_step(args, rollout_id)
+    metrics = build_eval_nll_metrics(stats, step, before_train=before_train)
+    logger.info(
+        "eval/test_nll rollout_id=%d step=%d phase=%s nll=%.6f sample_mean=%.6f tokens=%d samples=%d",
+        rollout_id,
+        step,
+        "before_train" if before_train else "after_train",
+        stats["nll"],
+        stats["sample_mean_nll"],
+        stats["num_tokens"],
+        stats["num_samples"],
+    )
+    tracking_utils.log(args, metrics, step_key="rollout/step")
 
 
 @contextlib.asynccontextmanager
@@ -99,6 +128,14 @@ async def train(args):
         async with _timed_phase("startup", "eval-only"):
             await rollout_manager.eval.remote(rollout_id=0)
 
+    # Eval-only held-out NLL: --num-rollout 0 with --eval-nll-data measures the
+    # loaded checkpoint and exits. This is how gate G4 (step-0 NLL must match
+    # HF's) is run without training anything.
+    if args.num_rollout == 0 and _eval_nll_enabled(args):
+        async with _timed_phase("startup", "eval nll"):
+            nll_stats = await actor_model.compute_eval_nll(args.start_rollout_id)
+        _log_eval_nll(args, args.start_rollout_id, nll_stats, before_train=True)
+
     async def offload_train():
         if args.offload_train:
             if args.use_critic:
@@ -145,6 +182,15 @@ async def train(args):
             async with _timed_phase(prefix, "eval-before-train", timing_raw=timing_raw):
                 await rollout_manager.eval.remote(rollout_id)
 
+        # Held-out NLL of the untouched starting weights. Gate G4 compares this
+        # against HF's step-0 number, so it has to be measured before any
+        # optimizer step -- the periodic block below only ever sees post-update
+        # weights.
+        if _eval_nll_enabled(args) and rollout_id == 0 and not args.skip_eval_before_train:
+            async with _timed_phase(prefix, "eval nll before-train", timing_raw=timing_raw):
+                nll_stats = await actor_model.compute_eval_nll(rollout_id)
+            _log_eval_nll(args, rollout_id, nll_stats, before_train=True)
+
         async with _timed_phase(prefix, "generate", timing_raw=timing_raw):
             rollout_data_ref = await rollout_manager.generate.remote(rollout_id)
 
@@ -172,6 +218,24 @@ async def train(args):
         else:
             async with _timed_phase(prefix, "actor train", timing_raw=timing_raw):
                 await actor_model.train(rollout_id, rollout_data_ref)
+
+        # Must sit between `actor train` and `offload_train()`: held-out NLL is a
+        # forward pass through the TRAINING model, so unlike the generation eval
+        # further down (which goes through the SGLang rollout engine) it cannot
+        # run after the weights have left the GPU. This is also why it is placed
+        # after BOTH `actor train` call sites -- the critic branch and the plain
+        # branch -- rather than inside either: the measurement is of the actor's
+        # post-update weights regardless of which branch produced them.
+        # num_rollout is passed so the final rollout always produces a
+        # measurement -- the study's headline number per arm is the last
+        # held-out NLL, and without this an arm whose num_rollout is not a
+        # multiple of the interval would never report one.
+        if _eval_nll_enabled(args) and should_run_periodic_action(
+            rollout_id, args.eval_nll_interval, num_rollout_per_epoch, args.num_rollout
+        ):
+            async with _timed_phase(prefix, "eval nll", timing_raw=timing_raw):
+                nll_stats = await actor_model.compute_eval_nll(rollout_id)
+            _log_eval_nll(args, rollout_id, nll_stats)
 
         if should_run_periodic_action(rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout):
             async with _timed_phase(prefix, "save", timing_raw=timing_raw):
