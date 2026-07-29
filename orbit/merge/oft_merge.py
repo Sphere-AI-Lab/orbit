@@ -6,7 +6,7 @@ import math
 
 import torch
 
-from orbit.merge.strategy import MergeStrategy, StateDict, register
+from orbit.merge.strategy import MergeStrategy, StateDict, StateKey, register
 
 logger = logging.getLogger(__name__)
 
@@ -49,14 +49,29 @@ def magnitude_corrected_merge(
     return merged.to(out_dtype)
 
 
-def _is_oft_key(name: str) -> bool:
+def _local_name(key: StateKey) -> str:
+    if type(key) is str:
+        return key
+    if (
+        type(key) is tuple
+        and len(key) == 2
+        and type(key[0]) is int
+        and key[0] >= 0
+        and type(key[1]) is str
+        and key[1]
+    ):
+        return key[1]
+    raise TypeError(f"invalid adapter state key {key!r}")
+
+
+def _is_oft_key(name: StateKey) -> bool:
     # Mirrors orbit.backends.megatron_utils.oft_utils.is_oft_weight_name without
     # importing the megatron-coupled module.
-    return ".oft_" in name
+    return ".oft_" in _local_name(name)
 
 
-def _is_original_oft_key(name: str) -> bool:
-    parts = name.lower().replace("/", ".").split(".")
+def _is_original_oft_key(name: StateKey) -> bool:
+    parts = _local_name(name).lower().replace("/", ".").split(".")
     if any("classifier" in part for part in parts):
         return False
     return any(part == "oft_r" or part in _DSV4_GROUPED_MOE_OFT_PARAM_NAMES for part in parts)
@@ -151,9 +166,12 @@ class OFTLieAlgebraMerge(MergeStrategy):
         for i, ad in enumerate(adapters[1:], start=1):
             if set(ad.keys()) != key_set:
                 missing = key_set ^ set(ad.keys())
-                raise ValueError(f"adapter {i} key set differs; symmetric diff: {sorted(missing)[:5]}")
+                raise ValueError(
+                    f"adapter {i} key set differs; symmetric diff: "
+                    f"{sorted(missing, key=repr)[:5]}"
+                )
         merged: StateDict = {}
-        non_oft: list[str] = []
+        non_oft: list[StateKey] = []
         for key in keys:
             tensors = [ad[key] for ad in adapters]
             shapes = {tuple(t.shape) for t in tensors}
@@ -166,7 +184,9 @@ class OFTLieAlgebraMerge(MergeStrategy):
                 merged[key] = torch.stack([t.float() for t in tensors]).mean(0).to(tensors[0].dtype)
         if non_oft:
             logger.warning(
-                "OFT merge: %d non-oft keys plain-averaged: %s", len(non_oft), sorted(non_oft)
+                "OFT merge: %d non-oft keys plain-averaged: %s",
+                len(non_oft),
+                sorted(non_oft, key=repr),
             )
         return merged
 
@@ -189,9 +209,12 @@ class OFTOriginalFormulaMerge(MergeStrategy):
         for i, ad in enumerate(adapters[1:], start=1):
             if set(ad.keys()) != key_set:
                 missing = key_set ^ set(ad.keys())
-                raise ValueError(f"adapter {i} key set differs; symmetric diff: {sorted(missing)[:5]}")
+                raise ValueError(
+                    f"adapter {i} key set differs; symmetric diff: "
+                    f"{sorted(missing, key=repr)[:5]}"
+                )
         merged: StateDict = {}
-        non_oft: list[str] = []
+        non_oft: list[StateKey] = []
         for key in keys:
             tensors = [ad[key] for ad in adapters]
             shapes = {tuple(t.shape) for t in tensors}
@@ -206,7 +229,7 @@ class OFTOriginalFormulaMerge(MergeStrategy):
             logger.warning(
                 "OFT original merge: %d non-oft keys plain-averaged: %s",
                 len(non_oft),
-                sorted(non_oft),
+                sorted(non_oft, key=repr),
             )
         return merged
 

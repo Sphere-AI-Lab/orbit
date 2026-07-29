@@ -5,8 +5,10 @@ from abc import ABC, abstractmethod
 
 import torch
 
-# state dict: parameter name -> tensor
-StateDict = dict[str, torch.Tensor]
+# Native VPP shards use ``(chunk_index, local_name)``; HF/legacy states use
+# plain names. Merge strategies preserve whichever complete key format enters.
+type StateKey = str | tuple[int, str]
+type StateDict = dict[StateKey, torch.Tensor]
 
 
 class MergeStrategy(ABC):

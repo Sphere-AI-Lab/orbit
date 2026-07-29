@@ -5,37 +5,225 @@ jitter; 4xx responses never retry.
 """
 
 import asyncio
+from collections.abc import Mapping
+from dataclasses import dataclass
 import random
+import re
 from typing import Any
+from urllib.parse import urlsplit
 
 import aiohttp
 
+from orbit.ultra.strict_json import loads_strict
+
 SCORING_MAX_RETRIES = 1
+SCORING_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+_SCORING_MAX_JSON_DEPTH = 32
+_MAX_HEADER_COUNT = 64
+_MAX_HEADER_NAME_BYTES = 256
+_MAX_HEADER_VALUE_BYTES = 8192
+_HEADER_NAME = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+\Z")
+
+
+class ScoringProtocolError(RuntimeError):
+    """An OpenAI-compatible scoring response violated the expected schema."""
+
+
+@dataclass(frozen=True)
+class ScoringJSONResponse:
+    body: dict[str, Any]
+    retry_count: int
+
+
+class ScoringRequestError(RuntimeError):
+    def __init__(self, *, retryable: bool) -> None:
+        if type(retryable) is not bool:
+            raise TypeError("retryable must be bool")
+        self.retryable = retryable
+        super().__init__("scoring request failed")
+
+
+class _ScoringHTTPStatusError(RuntimeError):
+    def __init__(self, *, retryable: bool) -> None:
+        self.retryable = retryable
+        super().__init__("scoring service returned a terminal HTTP status")
+
+
+def _validate_max_retries(max_retries: int) -> None:
+    if type(max_retries) is not int:
+        raise TypeError("max_retries must be an exact integer")
+    if max_retries < 0:
+        raise ValueError("max_retries must be nonnegative")
 
 
 def _is_retryable_scoring_error(exc: BaseException) -> bool:
+    if isinstance(exc, (ScoringRequestError, _ScoringHTTPStatusError)):
+        return exc.retryable
+    if isinstance(exc, ScoringProtocolError):
+        return False
     if isinstance(exc, aiohttp.ClientResponseError):
-        return exc.status >= 500
+        return 500 <= exc.status < 600
     return isinstance(exc, (aiohttp.ClientError, asyncio.TimeoutError))
 
 
-async def _post_json_once(url: str, payload: dict[str, Any], timeout: aiohttp.ClientTimeout) -> dict[str, Any]:
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(url, json=payload) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+def scoring_transport_error_retryable(exc: BaseException) -> bool:
+    """Preserve terminal HTTP status semantics; other request failures retry."""
+    if isinstance(exc, (ScoringRequestError, _ScoringHTTPStatusError)):
+        return exc.retryable
+    if isinstance(exc, ScoringProtocolError):
+        return False
+    if isinstance(exc, aiohttp.ClientResponseError):
+        return 500 <= exc.status < 600
+    return True
 
 
-async def post_json(url: str, payload: dict[str, Any], timeout_secs: int | float | None = None) -> dict[str, Any]:
-    timeout = aiohttp.ClientTimeout(total=timeout_secs)
-    for attempt in range(SCORING_MAX_RETRIES + 1):
+def _validate_scoring_headers(
+    headers: Mapping[str, str] | None,
+) -> dict[str, str]:
+    if headers is None:
+        return {}
+    if not isinstance(headers, Mapping) or len(headers) > _MAX_HEADER_COUNT:
+        raise TypeError("scoring headers must be a bounded mapping")
+    copied: dict[str, str] = {}
+    for name, value in headers.items():
+        if (
+            type(name) is not str
+            or _HEADER_NAME.fullmatch(name) is None
+            or len(name.encode("ascii")) > _MAX_HEADER_NAME_BYTES
+        ):
+            raise ValueError("scoring header name is invalid")
+        if (
+            type(value) is not str
+            or any(
+                ord(character) < 0x20 or ord(character) == 0x7F
+                for character in value
+            )
+        ):
+            raise ValueError("scoring header value is invalid")
         try:
-            return await _post_json_once(url, payload, timeout)
-        except BaseException as exc:
-            if attempt >= SCORING_MAX_RETRIES or not _is_retryable_scoring_error(exc):
+            encoded = value.encode("utf-8")
+        except UnicodeEncodeError:
+            raise ValueError("scoring header value is invalid") from None
+        if len(encoded) > _MAX_HEADER_VALUE_BYTES:
+            raise ValueError("scoring header value is too large")
+        copied[name] = value
+    return copied
+
+
+async def _post_json_once(
+    url: str,
+    payload: dict[str, Any],
+    timeout: aiohttp.ClientTimeout,
+    *,
+    headers: Mapping[str, str],
+) -> dict[str, Any]:
+    request_options: dict[str, Any] = {
+        "json": payload,
+        "headers": dict(headers),
+        "allow_redirects": False,
+    }
+    if urlsplit(url).scheme.lower() == "https":
+        host_header = next(
+            (
+                value
+                for name, value in headers.items()
+                if name.lower() == "host"
+            ),
+            None,
+        )
+        if host_header is not None:
+            server_hostname = urlsplit(f"//{host_header}").hostname
+            if server_hostname is not None:
+                request_options["server_hostname"] = server_hostname
+    async with aiohttp.ClientSession(
+        timeout=timeout,
+        raise_for_status=False,
+    ) as session:
+        async with session.post(url, **request_options) as response:
+            status = response.status
+            if type(status) is not int or not 200 <= status < 300:
+                raise _ScoringHTTPStatusError(
+                    retryable=(
+                        type(status) is int and 500 <= status < 600
+                    ),
+                )
+            encoded = bytearray()
+            while True:
+                chunk = await response.content.read(
+                    min(
+                        1024 * 1024,
+                        SCORING_MAX_RESPONSE_BYTES + 1 - len(encoded),
+                    )
+                )
+                if not chunk:
+                    break
+                encoded.extend(chunk)
+                if len(encoded) > SCORING_MAX_RESPONSE_BYTES:
+                    raise ScoringProtocolError(
+                        "scoring response exceeds its byte limit"
+                    )
+    try:
+        body = loads_strict(
+            bytes(encoded),
+            max_bytes=SCORING_MAX_RESPONSE_BYTES,
+            max_depth=_SCORING_MAX_JSON_DEPTH,
+        )
+    except (TypeError, ValueError):
+        raise ScoringProtocolError(
+            "scoring service returned invalid strict JSON"
+        ) from None
+    if type(body) is not dict:
+        raise ScoringProtocolError("scoring response must be an exact object")
+    return body
+
+
+async def post_json_with_metadata(
+    url: str,
+    payload: dict[str, Any],
+    timeout_secs: int | float | None = None,
+    *,
+    max_retries: int = SCORING_MAX_RETRIES,
+    headers: Mapping[str, str] | None = None,
+) -> ScoringJSONResponse:
+    _validate_max_retries(max_retries)
+    safe_headers = _validate_scoring_headers(headers)
+    timeout = aiohttp.ClientTimeout(total=timeout_secs)
+    for attempt in range(max_retries + 1):
+        try:
+            body = await _post_json_once(
+                url,
+                payload,
+                timeout,
+                headers=safe_headers,
+            )
+            return ScoringJSONResponse(body=body, retry_count=attempt)
+        except asyncio.CancelledError:
+            raise
+        except BaseException as error:
+            if isinstance(error, ScoringProtocolError):
                 raise
-            await asyncio.sleep(min(2**attempt, 4) * (0.5 + 0.5 * random.random()))
-    raise AssertionError("unreachable")
+            retryable = _is_retryable_scoring_error(error)
+            if attempt >= max_retries or not retryable:
+                raise ScoringRequestError(retryable=retryable) from None
+            delay = min(2**attempt, 4) * (0.5 + 0.5 * random.random())
+            await asyncio.sleep(delay)
+    raise AssertionError("retry loop exhausted without returning or raising")
+
+
+async def post_json(
+    url: str,
+    payload: dict[str, Any],
+    timeout_secs: int | float | None = None,
+    *,
+    max_retries: int = SCORING_MAX_RETRIES,
+) -> dict[str, Any]:
+    response = await post_json_with_metadata(
+        url,
+        payload,
+        timeout_secs,
+        max_retries=max_retries,
+    )
+    return response.body
 
 
 async def post_chat_completions(
@@ -46,14 +234,40 @@ async def post_chat_completions(
     temperature: float = 0.0,
     max_tokens: int = 1024,
     timeout_secs: int | float | None = None,
+    max_retries: int = SCORING_MAX_RETRIES,
+    response_format: dict[str, Any] | None = None,
 ) -> str:
     """POST to an OpenAI-compatible ``/v1/chat/completions`` endpoint (e.g. an
     sglang server) and return the assistant message content."""
+    _validate_max_retries(max_retries)
+    if response_format is not None and type(response_format) is not dict:
+        raise TypeError("response_format must be an exact object")
     payload = {
         "model": model,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
-    response = await post_json(f"{base_url.rstrip('/')}/v1/chat/completions", payload, timeout_secs=timeout_secs)
-    return response["choices"][0]["message"]["content"]
+    if response_format is not None:
+        payload["response_format"] = response_format
+    response = await post_json(
+        f"{base_url.rstrip('/')}/v1/chat/completions",
+        payload,
+        timeout_secs=timeout_secs,
+        max_retries=max_retries,
+    )
+    if not isinstance(response, dict):
+        raise ScoringProtocolError("chat-completion response must be an object")
+    choices = response.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise ScoringProtocolError("chat-completion choices must be a nonempty list")
+    first_choice = choices[0]
+    if not isinstance(first_choice, dict):
+        raise ScoringProtocolError("chat-completion first choice must be an object")
+    message = first_choice.get("message")
+    if not isinstance(message, dict):
+        raise ScoringProtocolError("chat-completion message must be an object")
+    content = message.get("content")
+    if not isinstance(content, str):
+        raise ScoringProtocolError("chat-completion content must be a string")
+    return content

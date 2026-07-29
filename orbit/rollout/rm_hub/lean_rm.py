@@ -28,6 +28,8 @@ import re
 
 import httpx
 
+from orbit.rollout.grader_errors import GraderInfrastructureError, InfrastructureErrorCode
+
 logger = logging.getLogger(__name__)
 
 _LEAN_FENCE_RE = re.compile(r"```lean4?\s*\n(.*?)```", re.DOTALL)
@@ -53,15 +55,30 @@ def extract_lean_code(response: str, header: str, formal_statement: str) -> str 
 def _result_passes(result: dict) -> bool:
     if result.get("error"):
         return False
-    response = result.get("response") or {}
-    for msg in response.get("messages") or []:
-        severity = (msg.get("severity") or "").lower()
+    response = result.get("response")
+    if not isinstance(response, dict):
+        raise TypeError("Lean result response must be an object")
+    messages = response.get("messages")
+    if messages is None:
+        messages = []
+    if not isinstance(messages, list):
+        raise TypeError("Lean result messages must be a list")
+    for msg in messages:
+        if not isinstance(msg, dict):
+            raise TypeError("Lean result message must be an object")
+        severity = msg.get("severity")
+        if not isinstance(severity, str) or not severity.strip():
+            raise TypeError("Lean result message severity must be a nonblank string")
+        severity = severity.strip().lower()
         data = str(msg.get("data") or "")
         if severity == "error":
             return False
         if "sorry" in data or "admit" in data:  # "declaration uses 'sorry'"
             return False
-    if response.get("sorries"):
+    sorries = response.get("sorries")
+    if sorries is not None and not isinstance(sorries, list):
+        raise TypeError("Lean result sorries must be a list")
+    if sorries:
         return False
     return True
 
@@ -69,8 +86,13 @@ def _result_passes(result: dict) -> bool:
 async def grade_lean_proof(args, response: str, header: str, formal_statement: str) -> float:
     base_url = getattr(args, "lean_server_url", None)
     if not base_url:
-        logger.warning("lean_rm: --lean-server-url not set; reward 0.")
-        return 0.0
+        raise GraderInfrastructureError(
+            InfrastructureErrorCode.CONFIGURATION,
+            grader="lean",
+            stage="configuration",
+            retryable=False,
+            safe_detail="Lean verifier URL is not configured",
+        )
     code = extract_lean_code(response, header or "", formal_statement or "")
     if code is None:
         return 0.0
@@ -85,14 +107,60 @@ async def grade_lean_proof(args, response: str, header: str, formal_statement: s
     # allow generous connect/read time beyond the per-proof timeout.
     try:
         async with httpx.AsyncClient(timeout=timeout + 120) as client:
-            resp = await client.post(f"{base_url.rstrip('/')}/verify", json=payload)
-        resp.raise_for_status()
-        out = resp.json()
-    except Exception:
-        logger.exception("lean_rm: verify call failed; reward 0.")
-        return 0.0
-    results = out.get("results") or []
-    if not results:
-        logger.warning("lean_rm: empty results from lean server; reward 0.")
-        return 0.0
-    return 1.0 if _result_passes(results[0]) else 0.0
+            http_response = await client.post(f"{base_url.rstrip('/')}/verify", json=payload)
+        http_response.raise_for_status()
+        output = http_response.json()
+    except httpx.HTTPStatusError as exc:
+        retryable = exc.response.status_code >= 500
+        raise GraderInfrastructureError(
+            InfrastructureErrorCode.TRANSPORT_ERROR,
+            grader="lean",
+            stage="verify_request",
+            retryable=retryable,
+            safe_detail="Lean verifier returned an HTTP error",
+        ) from exc
+    except (httpx.TransportError, TimeoutError) as exc:
+        raise GraderInfrastructureError(
+            InfrastructureErrorCode.TRANSPORT_ERROR,
+            grader="lean",
+            stage="verify_request",
+            retryable=True,
+            safe_detail="Lean verifier request failed",
+        ) from exc
+    except (ValueError, TypeError) as exc:
+        raise GraderInfrastructureError(
+            InfrastructureErrorCode.PROTOCOL_ERROR,
+            grader="lean",
+            stage="verify_response",
+            retryable=False,
+            safe_detail="Lean verifier returned invalid JSON",
+        ) from exc
+
+    if not isinstance(output, dict):
+        raise GraderInfrastructureError(
+            InfrastructureErrorCode.PROTOCOL_ERROR,
+            grader="lean",
+            stage="verify_response",
+            retryable=False,
+            safe_detail="Lean verifier returned an invalid response schema",
+        )
+    results = output.get("results")
+    if not isinstance(results, list) or not results or not isinstance(results[0], dict):
+        raise GraderInfrastructureError(
+            InfrastructureErrorCode.PROTOCOL_ERROR,
+            grader="lean",
+            stage="verify_response",
+            retryable=False,
+            safe_detail="Lean verifier returned an invalid response schema",
+        )
+    try:
+        passed = _result_passes(results[0])
+    except (AttributeError, TypeError) as exc:
+        raise GraderInfrastructureError(
+            InfrastructureErrorCode.PROTOCOL_ERROR,
+            grader="lean",
+            stage="verify_response",
+            retryable=False,
+            safe_detail="Lean verifier returned an invalid response schema",
+        ) from exc
+    return 1.0 if passed else 0.0

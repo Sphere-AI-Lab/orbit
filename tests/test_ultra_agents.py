@@ -158,6 +158,15 @@ def test_instruction_following_strict_verdicts():
 
 
 @pytest.mark.skipif(not _ifeval_available(), reason="open-instruct IFEvalG unavailable")
+def test_instruction_following_ignores_terminal_qwen_control_token():
+    ids = ["startend:quotation", "last_word:last_word_answer"]
+    kwargs = [None, {"last_word": "ask"}]
+
+    assert ua.grade_instruction_following('"answer ask"<|im_end|>', ids, kwargs) == 1.0
+    assert ua.grade_instruction_following('"answer ask"<|im_end|> trailing', ids, kwargs) == 0.0
+
+
+@pytest.mark.skipif(not _ifeval_available(), reason="open-instruct IFEvalG unavailable")
 def test_instruction_following_unknown_id_and_empty():
     assert ua.grade_instruction_following("text", ["bogus:not_a_rule"], [{}]) == 0.0
     assert ua.grade_instruction_following("", ["first_word:first_word_answer"], [{"first_word": "x"}]) == 0.0

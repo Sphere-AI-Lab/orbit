@@ -33,6 +33,7 @@ class SessionServer:
         self.client = httpx.AsyncClient(
             limits=httpx.Limits(max_connections=1024),
             timeout=httpx.Timeout(timeout),
+            trust_env=False,
         )
 
         # Close the httpx connection pool when uvicorn shuts down to avoid FD leaks.

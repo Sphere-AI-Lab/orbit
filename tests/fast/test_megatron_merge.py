@@ -44,6 +44,26 @@ def test_merge_matches_core(tmp_path):
     assert torch.allclose(merged[shard][_KEY], magnitude_corrected_merge([va, vb]), atol=1e-6)
 
 
+def test_merge_preserves_vpp_chunk_aware_native_keys(tmp_path):
+    key = (1, _KEY)
+    a = _write_meg_adapter(tmp_path / "a", 1)
+    b = _write_meg_adapter(tmp_path / "b", 2)
+    shard = "adapter_megatron_tp0_pp0.pt"
+    state_a = torch.load(a / shard, weights_only=True)
+    state_b = torch.load(b / shard, weights_only=True)
+    torch.save({key: state_a[_KEY]}, a / shard)
+    torch.save({key: state_b[_KEY]}, b / shard)
+
+    merged = merge_megatron_adapters([str(a), str(b)])
+
+    assert set(merged[shard]) == {key}
+    assert torch.allclose(
+        merged[shard][key],
+        magnitude_corrected_merge([state_a[_KEY], state_b[_KEY]]),
+        atol=1e-6,
+    )
+
+
 def test_merge_rejects_shard_set_mismatch(tmp_path):
     a = _write_meg_adapter(tmp_path / "a", 1)
     b = tmp_path / "b"

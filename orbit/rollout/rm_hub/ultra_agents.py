@@ -207,13 +207,20 @@ def grade_instruction_following(
     prompt_text: str = "",
 ) -> float:
     """Strict IFEval check: 1.0 iff every instruction is followed."""
+    # Rollout decoding intentionally preserves special tokens for on-policy
+    # training.  The terminal Qwen chat delimiter is protocol framing, not
+    # visible assistant text, and otherwise breaks strict end/last-word rules.
+    response = response or ""
+    without_trailing_space = response.rstrip()
+    if without_trailing_space.endswith("<|im_end|>"):
+        response = without_trailing_space.removesuffix("<|im_end|>")
     if not instruction_id_list:
         return 0.0
-    if not (response or "").strip():
+    if not response.strip():
         return 0.0
     registry = _ifeval_registry()
     kwargs_list = kwargs_list or [{}] * len(instruction_id_list)
-    for iid, kw in zip(instruction_id_list, kwargs_list):
+    for iid, kw in zip(instruction_id_list, kwargs_list, strict=False):
         cls = registry.get(iid)
         if cls is None:
             logger.warning("ultra_agents: unknown instruction id %r; reward 0.", iid)

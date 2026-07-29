@@ -1,7 +1,8 @@
 """Merge orbit Megatron-native OFT adapter shards (adapter_megatron_tp{tp}_pp{pp}.pt).
 
-The shards are plain torch state dicts {megatron_param_name: oft_r}. We merge them
-with the same OFTLieAlgebraMerge core used for HF adapters, per (tp,pp) shard.
+The shards are torch state dicts keyed by ``(VPP chunk, Megatron param name)``;
+legacy plain-name shards remain supported. We merge them with the same
+OFTLieAlgebraMerge core used for HF adapters, per (tp,pp) shard.
 """
 from __future__ import annotations
 
@@ -11,6 +12,7 @@ from pathlib import Path
 import torch
 
 from orbit.merge import get_strategy
+from orbit.merge.strategy import StateDict
 
 _SHARD_GLOB = "adapter_megatron_tp*_pp*.pt"
 
@@ -26,7 +28,7 @@ def merge_megatron_adapters(
     adapter_dirs: list[str],
     weights: list[float] | None = None,
     method: str = "oft",
-) -> dict[str, dict[str, torch.Tensor]]:
+) -> dict[str, StateDict]:
     """Merge the Megatron-native shards of N adapters, one (tp,pp) shard at a time.
 
     All adapters must expose the identical set of shard filenames. Returns
@@ -38,7 +40,7 @@ def merge_megatron_adapters(
     if any(s != shards_per_adapter[0] for s in shards_per_adapter[1:]):
         raise ValueError(f"adapters expose different Megatron shard sets: {shards_per_adapter}")
     strategy = get_strategy(method)
-    merged: dict[str, dict[str, torch.Tensor]] = {}
+    merged: dict[str, StateDict] = {}
     for shard in shards_per_adapter[0]:
         state_dicts = [
             torch.load(Path(d) / shard, map_location="cpu", weights_only=True)
@@ -49,7 +51,7 @@ def merge_megatron_adapters(
 
 
 def write_megatron_adapter(
-    merged_shards: dict[str, dict[str, torch.Tensor]],
+    merged_shards: dict[str, StateDict],
     src_config_dir: str,
     output_dir: str,
 ) -> str:
