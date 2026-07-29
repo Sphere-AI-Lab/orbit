@@ -39,7 +39,7 @@ TEST_JSONL=${TEST_JSONL:-${DATA_DIR}/tulu3_test.jsonl}
 
 # === Paths ===
 HF_CKPT=${HF_CKPT:-/lustre/fast/fast/zqiu/hf_models/Llama-3.1-8B}
-MEGATRON_LOAD=${MEGATRON_LOAD:-${ORBIT_ROOT}/checkpoints/Llama-3.1-8B_torch_dist}
+MEGATRON_LOAD=${MEGATRON_LOAD:-/lustre/fast/fast/zqiu/orbit-infra/orbit/checkpoints/Llama-3.1-8B_torch_dist}
 SAVE_DIR=${SAVE_DIR:-${ORBIT_ROOT}/orbit_ckpts/Llama-3.1-8B_lora_sft_tulu3}
 
 # === Resources ===

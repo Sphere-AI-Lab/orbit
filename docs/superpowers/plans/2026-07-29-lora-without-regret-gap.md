@@ -310,11 +310,17 @@ properties (DP-only reduction, both all-reduces inside the wake/sleep window, ev
       `sm_80/89/90/90a/100a/103a/120a`. A bf16 matmul and a `flash_attn_func` forward both
       execute on this H100 — so sm_90 is *run*-verified; **sm_100 is cubin-verified only** and
       stays inferred until something runs on a B200.
-- [ ] **GPU, single rank:** launch the repro launcher
+- [x] **GPU, single rank:** launch the repro launcher
       (`examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh`) for a handful of steps with the
       eval-NLL flags on, and confirm the `train.py` NLL line is emitted in the format the
       sweep's parser pins (`TestLogFormatPins` asserts the format; only a real run proves the
-      line is actually reached). Ask before consuming the GPU.
+      line is actually reached). **Done 2026-07-29 after explicit approval:** one H100 ran two
+      LoRA-r256 optimizer steps. The held-out path scored all 100 rows / 17,656 tokens at every
+      measurement and emitted the pinned line before training (`nll=1.968950`), after step 0
+      (`1.943139`), and after step 1 (`1.924233`). The adapter checkpoint was written at
+      `/lustre/fast/fast/zqiu/tmp/smoke_ckpt/iter_0000001/adapter/adapter_megatron_tp0_pp0.pt`.
+      Evidence: `logs/smoke_llama31_lora_20260729_214422.log`. This closes the single-rank
+      reachability check only; it does not close the DP reduction below.
 - [ ] **GPU, still open:** the DP>1 reduction (P3) cannot be exercised on one card. Keep it
       listed as blocked rather than marking G3 GPU-verified on a single-rank run — the whole
       point of that code path is the DP-group reduction, which DP=1 makes a no-op.
@@ -332,5 +338,8 @@ absolute claim rests on it.
 **The campaign's own prerequisites are unchanged by this port** and remain open: P0 (FullFT on
 8B needs ≥4 GPUs; `i208` has one H100 80GB), P3 (the DP>1 NLL reduction has never executed —
 and cannot be, on one card; see G7), P4
-(Tulu3 / OpenThoughts3 / MATH / GSM8K prep), P5 (RL launcher). P1 is half-satisfied — the
-Llama-3.1-8B base weights and Megatron checkpoint exist, but under the old repo's path.
+(Tulu3 / OpenThoughts3 / MATH / GSM8K materialization), P5 (RL launcher). P1 is satisfied on
+this host: the Llama-3.1-8B base weights are under `/lustre/fast/fast/zqiu/hf_models/`, and the
+verified Megatron checkpoint remains under the old repo's path. P4's CPU implementation now
+exists in `tools/lora_regret/prepare_data.py`; the real datasets have not been downloaded and
+written yet.
