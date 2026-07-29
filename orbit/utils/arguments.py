@@ -25,6 +25,7 @@ _PEFT_LORA_DEFAULTS = {
     "lora_type": "lora",
     "lora_adapter_path": None,
     "lora_sync_from_tensor": False,
+    "lora_a_init_method": "xavier",
 }
 _PEFT_OFT_DEFAULTS = {
     "oft_type": "canonical_oft",
@@ -1075,6 +1076,38 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
                 ),
             )
 
+            parser.add_argument(
+                "--eval-nll-data",
+                type=str,
+                default=None,
+                help=(
+                    "JSONL of held-out examples for forward-only negative-log-likelihood eval. "
+                    "Uses the same chat schema and the same loss masking as --prompt-data under the "
+                    "SFT rollout function, so training and eval score identical tokens. Independent "
+                    "of the generation-based eval above: it needs no rollout engine and works with "
+                    "--eval-interval unset. Unset disables NLL eval (default: None)"
+                ),
+            )
+            parser.add_argument(
+                "--eval-nll-interval",
+                type=int,
+                default=0,
+                help=(
+                    "Run held-out NLL eval every N rollout steps, plus once before training and "
+                    "always on the final rollout. 0 disables (default: 0)"
+                ),
+            )
+            parser.add_argument(
+                "--eval-nll-micro-batch-size",
+                type=int,
+                default=None,
+                help=(
+                    "Rows per micro-batch during held-out NLL eval. Every row of --eval-nll-data is "
+                    "scored regardless of this value; it only controls peak eval memory. "
+                    "Defaults to --micro-batch-size."
+                ),
+            )
+
             return parser
 
         def add_algo_arguments(parser):
@@ -1340,6 +1373,18 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
                 type=float,
                 default=0.0,
                 help="LoRA dropout rate (default: 0.0)",
+            )
+            parser.add_argument(
+                "--lora-a-init-method",
+                type=str,
+                default="xavier",
+                choices=["xavier", "normal", "kaiming", "zero"],
+                help="Initialization for LoRA matrix A, forwarded to Megatron-Bridge's "
+                "ParallelLinearAdapter (the path Orbit's Megatron linears actually take). "
+                "'kaiming' is kaiming_uniform_(a=sqrt(5)), matching HF PEFT and the "
+                "LoRA-without-regret paper; 'xavier' is xavier_normal_ and is Bridge's "
+                "default. These differ by ~2.4x in std, which shifts the optimal learning "
+                "rate (default: xavier)",
             )
             parser.add_argument(
                 "--lora-type",
@@ -1829,7 +1874,7 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
                 "--loss-mask-type",
                 type=str,
                 default="qwen",
-                choices=["qwen", "qwen3", "distill_qwen"],
+                choices=["qwen", "qwen3", "distill_qwen", "llama3"],
                 help="Loss mask type",
             )
             parser.add_argument(
@@ -2369,6 +2414,21 @@ def _common_orbit_validate_args(args):
 
     if args.eval_interval is not None:
         assert args.eval_datasets, "Evaluation datasets must be configured when eval_interval is set."
+
+    # getattr, not attribute access: several unit tests call validate_args with a
+    # hand-built Namespace that only carries the fields under test.
+    eval_nll_data = getattr(args, "eval_nll_data", None)
+    if eval_nll_data is not None:
+        eval_nll_interval = getattr(args, "eval_nll_interval", 0)
+        eval_nll_micro_batch_size = getattr(args, "eval_nll_micro_batch_size", None)
+        assert os.path.exists(eval_nll_data), f"--eval-nll-data file does not exist: {eval_nll_data}"
+        assert eval_nll_interval > 0, (
+            "--eval-nll-data was given but --eval-nll-interval is "
+            f"{eval_nll_interval}; set a positive interval or drop --eval-nll-data."
+        )
+        assert eval_nll_micro_batch_size is None or eval_nll_micro_batch_size > 0, (
+            f"--eval-nll-micro-batch-size must be positive, got {eval_nll_micro_batch_size}"
+        )
 
     if args.save_interval is not None:
         assert args.save is not None, "'--save' is required when save_interval is set."

@@ -119,37 +119,107 @@ class MultiTurnLossMaskGenerator:
     def gen_multi_turn_loss_mask_qwen3(
         self, messages: list[dict], tools: list[dict] = None
     ) -> tuple[list[int], list[int]]:
-        all_loss_masks = []
-        all_token_ids = []
+        # Tokenize the WHOLE conversation exactly once. Qwen3's chat template decides
+        # whether to wrap an assistant turn in an empty "<think>\n\n</think>\n\n" block
+        # based on whether that turn is the LAST assistant response following the LAST
+        # real user turn in the WHOLE conversation. Re-tokenizing a per-message or
+        # per-prefix slice in isolation (as an earlier version of this method did, via a
+        # synthetic single-user "prefix" message) silently flips that decision: every
+        # isolated slice's own last assistant message trivially looks "final" to the
+        # template, so it gets the think-wrapper whether or not it actually is the final
+        # turn of the real conversation. Locating turn boundaries within a single,
+        # complete tokenization avoids the bug entirely.
+        all_token_ids = self.tokenizer.apply_chat_template(
+            messages, tokenize=True, return_dict=False, tools=tools
+        )
+        all_loss_masks = [0] * len(all_token_ids)
 
-        prefix_message = {"role": "user", "content": "FOR CALCULATING LOSS MASK ONLY"}
-        prefix_token_ids = self.tokenizer.apply_chat_template([prefix_message], tokenize=True, return_dict=False)
+        # "<|im_start|>assistant\n" rendered on its own: a content-independent marker for
+        # where an assistant turn's header ends and its scorable content begins. Rendered
+        # as the sole message in a length-1 list so no think-wrapper logic can apply to
+        # it (a lone assistant message is never "after" a later user turn); truncated to
+        # gen_token_length since an empty-content render also includes the message's own
+        # closing "<|im_end|>\n", which is not part of the header.
+        header_ids = self.tokenizer.apply_chat_template(
+            [{"role": "assistant", "content": ""}], tokenize=True, return_dict=False
+        )[: self.gen_token_length]
+        im_end_id = self.tokenizer.convert_tokens_to_ids("<|im_end|>")
+        trailing_newline_id = header_ids[-1]
 
-        for i, message in enumerate(messages):
-            if i == 0:
-                tailed_message_ids = self.tokenizer.apply_chat_template(
-                    [message, prefix_message], tokenize=True, return_dict=False, tools=tools
-                )
-                message_ids = tailed_message_ids[: -len(prefix_token_ids)]
-            else:
-                prefixed_message_ids = self.tokenizer.apply_chat_template(
-                    [prefix_message, message], tokenize=True, return_dict=False
-                )
-                message_ids = prefixed_message_ids[len(prefix_token_ids) :]
+        header_positions = self.find_all_sublist_indices(all_token_ids, header_ids)
+        assistant_messages = [message for message in messages if message["role"] == "assistant"]
 
-            if message["role"] != "system" and i > 0:
-                message_ids = message_ids[self.system_message_length :]
+        if len(header_positions) != len(assistant_messages):
+            raise ValueError(
+                f"Found {len(header_positions)} '<|im_start|>assistant' header(s) in the "
+                f"tokenized conversation but {len(assistant_messages)} assistant message(s) "
+                "in `messages`; cannot align loss-mask spans to messages."
+            )
 
-            if message["role"] == "assistant":
-                loss_mask = [0] * self.gen_token_length + [1] * (len(message_ids) - self.gen_token_length)
-            else:
-                loss_mask = [0] * len(message_ids)
+        for message, header_pos in zip(assistant_messages, header_positions, strict=True):
+            start = header_pos + self.gen_token_length
+            end = start
+            while end < len(all_token_ids) and all_token_ids[end] != im_end_id:
+                end += 1
+            if end < len(all_token_ids):
+                end += 1  # include <|im_end|>
+            if end < len(all_token_ids) and all_token_ids[end] == trailing_newline_id:
+                end += 1  # include the "\n" that follows <|im_end|>
 
-            if message.get("step_loss_mask", 1) != 1:
-                loss_mask = [0] * len(message_ids)
+            if message.get("step_loss_mask", 1) == 1:
+                for k in range(start, min(end, len(all_token_ids))):
+                    all_loss_masks[k] = 1
 
-            all_loss_masks.extend(loss_mask)
-            all_token_ids.extend(message_ids)
+        return all_token_ids, all_loss_masks
+
+    def gen_multi_turn_loss_mask_llama3(
+        self, messages: list[dict], tools: list[dict] = None
+    ) -> tuple[list[int], list[int]]:
+        # Same single-tokenization strategy as the qwen3 method, and for the same
+        # reason: rendering a message in isolation can change what the template
+        # emits for it. Llama-3's template has no context-sensitive reasoning
+        # wrapper (nothing analogous to Qwen3's <think> block), but it DOES inject
+        # an unconditional system block, so per-message rendering would still
+        # mis-locate every span after the first.
+        all_token_ids = self.tokenizer.apply_chat_template(
+            messages, tokenize=True, return_dict=False, tools=tools
+        )
+        all_loss_masks = [0] * len(all_token_ids)
+
+        # Content-independent marker for where an assistant turn's header ends.
+        # Tokenized from the literal string: <|start_header_id|> and
+        # <|end_header_id|> are added special tokens, so they are matched during
+        # pre-tokenization regardless of add_special_tokens (which governs only
+        # bos/eos wrapping).
+        header_ids = self.tokenizer(
+            "<|start_header_id|>assistant<|end_header_id|>\n\n", add_special_tokens=False
+        )["input_ids"]
+        eot_id = self.tokenizer.convert_tokens_to_ids("<|eot_id|>")
+
+        header_positions = self.find_all_sublist_indices(all_token_ids, header_ids)
+        assistant_messages = [m for m in messages if m["role"] == "assistant"]
+
+        if len(header_positions) != len(assistant_messages):
+            raise ValueError(
+                f"Found {len(header_positions)} assistant header(s) in the tokenized "
+                f"conversation but {len(assistant_messages)} assistant message(s) in "
+                "`messages`; cannot align loss-mask spans to messages."
+            )
+
+        for message, header_pos in zip(assistant_messages, header_positions, strict=True):
+            start = header_pos + len(header_ids)
+            end = start
+            while end < len(all_token_ids) and all_token_ids[end] != eot_id:
+                end += 1
+            if end < len(all_token_ids):
+                end += 1  # <|eot_id|> is a target: the model must learn to stop.
+            # NOTE: unlike Qwen's "<|im_end|>\n", Llama-3 emits no newline after
+            # <|eot_id|> -- the next "<|start_header_id|>" follows immediately -- so
+            # there is deliberately no trailing-newline step here.
+
+            if message.get("step_loss_mask", 1) == 1:
+                for k in range(start, min(end, len(all_token_ids))):
+                    all_loss_masks[k] = 1
 
         return all_token_ids, all_loss_masks
 
@@ -201,6 +271,8 @@ class MultiTurnLossMaskGenerator:
             return self.gen_multi_turn_loss_mask_qwen3(messages, tools)
         elif self.tokenizer_type == "distill_qwen":
             return self.gen_multi_turn_loss_mask_distill_qwen(messages, tools)
+        elif self.tokenizer_type == "llama3":
+            return self.gen_multi_turn_loss_mask_llama3(messages, tools)
         elif self.tokenizer_type == "response_only":
             return self.gen_response_only_loss_mask(messages, tools)
         else:
