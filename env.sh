@@ -18,13 +18,15 @@
 #                             empty to skip). ORBIT_NCCL_MODULE likewise (default "nccl").
 #   ORBIT_PYTHON_VERSION      Python X.Y for the site-packages path before the venv
 #                             exists (default "3.12", matching requires-python).
-#   TORCH_CUDA_ARCH_LIST      GPU arch(s). Auto-detected from nvidia-smi; fallback "10.0".
+#   TORCH_CUDA_ARCH_LIST      GPU arch(s). Default "9.0 10.0" = H100 + B200 fat binary.
+#                             NVTE_CUDA_ARCHS / FLASH_ATTN_CUDA_ARCHS / CMAKE_CUDA_ARCHITECTURES
+#                             track it for the builds that ignore it.
 #   MAX_JOBS                  ninja jobs for setup.py-style builds (default 32).
 #   CMAKE_BUILD_PARALLEL_LEVEL ninja jobs for cmake builds (sgl-kernel); RAM-bound since
 #                             cutlass files use 10-30 GB each. Auto: ~RAM/40 GB, capped by
 #                             cores; tune the per-job budget via ORBIT_SGL_KERNEL_JOB_GB.
-#   UV_CACHE_DIR              MUST be on a flock-capable fs (Lustre/NFS break uv build
-#                             locks). Default /tmp/orbit_uv_cache (local).
+#   UV_CACHE_DIR              MUST be flock-capable AND persistent. Default
+#                             $HOME/.cache/uv_cu13_orbit. Never /tmp — see below.
 set -a
 
 # --- CUDA toolkit: try env-modules (if present), then resolve CUDA_HOME ---
@@ -71,19 +73,28 @@ NVCC_THREADS="${NVCC_THREADS:-2}"
 NVTE_BUILD_THREADS_PER_JOB="${NVTE_BUILD_THREADS_PER_JOB:-2}"
 NVTE_FRAMEWORK=pytorch
 
-# --- GPU arch (auto-detect; fallback sm_100 / B200) ---
-if [ -z "${TORCH_CUDA_ARCH_LIST:-}" ]; then
-    _cc="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d '[:space:]')"
-    TORCH_CUDA_ARCH_LIST="${_cc:-10.0}"
-fi
+# --- GPU arch: build fat binaries for BOTH H100 (sm_90) and B200 (sm_100) ---
+# Do NOT auto-detect from nvidia-smi: that silently pins the env to whichever node
+# happened to run the build, and the kernels then fail to load everywhere else.
+# Override with a single arch only if you knowingly want a smaller/faster build.
+TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-9.0 10.0}"
+# Package-specific arch lists — these builds do NOT read TORCH_CUDA_ARCH_LIST.
+NVTE_CUDA_ARCHS="${NVTE_CUDA_ARCHS:-90;100}"
+FLASH_ATTN_CUDA_ARCHS="${FLASH_ATTN_CUDA_ARCHS:-90;100}"
+CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-90a;100a}"
 
 # --- force source builds instead of the wrong-ABI auto-downloaded prebuilts ---
 FLASH_ATTENTION_FORCE_BUILD=TRUE
 MAMBA_FORCE_BUILD=TRUE
 CAUSAL_CONV1D_FORCE_BUILD=TRUE
 
-# --- uv cache must be on a flock-capable fs (Lustre returns ENOSYS on flock) ---
-UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/orbit_uv_cache}"
+# --- uv cache: must be flock-capable AND persistent ---
+# Lustre (/lustre/fast) returns ENOSYS on flock, so it cannot hold the cache.
+# /tmp can, but it is node-local and cleared on exit — and under uv's default
+# symlink install mode that silently guts the venv (every package becomes a
+# dangling link, importing as an empty namespace package). Cluster-home is NFS:
+# flock-capable, persistent, and shared across nodes. Keep the default.
+UV_CACHE_DIR="${UV_CACHE_DIR:-${HOME}/.cache/uv_cu13_orbit}"
 mkdir -p "${UV_CACHE_DIR}"
 
 # --- venv + site-packages (derive python version from the venv once it exists) ---
