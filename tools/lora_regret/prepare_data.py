@@ -53,6 +53,13 @@ MATH_CONFIGS = (
 ASSISTANT_HEADER_LITERAL = "<|start_header_id|>assistant<|end_header_id|>"
 EOT_LITERAL = "<|eot_id|>"
 
+# Appended to RL prompts so `--rm-type boxed_math` has something to extract.
+# rm_hub strips \boxed{...} from the response before grading; a Llama-3.1 *base*
+# policy does not box unprompted, so without this every rollout scores 0 and
+# every E4 arm looks identical. Off by default in the library (do not mutate
+# source text silently), on by default in the CLI (which builds runnable data).
+ANSWER_INSTRUCTION = "\n\nPut your final answer in \\boxed{}."
+
 
 @dataclass(frozen=True)
 class PreparedDataset:
@@ -60,10 +67,13 @@ class PreparedDataset:
 
     name: str
     train_path: Path
-    test_path: Path
     source_rows: int
     train_rows: int
     test_rows: int
+    # None for the RL mix, which has no single held-out file: E4 evaluates the
+    # MATH and GSM8K test splits separately, so per-dataset accuracy stays
+    # visible instead of being averaged away.
+    test_path: Path | None = None
     filtered_rows: int = 0
     assistant_header_rows: int = 0
     eot_rows: int = 0
@@ -405,7 +415,13 @@ def prepare_openthoughts3(
     )
 
 
-def _math_rows(rows: Iterable[dict[str, Any]], *, dataset: str, category: str | None = None):
+def _math_rows(
+    rows: Iterable[dict[str, Any]],
+    *,
+    dataset: str,
+    category: str | None = None,
+    answer_instruction: str = "",
+):
     for row in rows:
         answer = extract_boxed(row["solution"])
         if answer is None:
@@ -413,7 +429,11 @@ def _math_rows(rows: Iterable[dict[str, Any]], *, dataset: str, category: str | 
         metadata = {"dataset": dataset}
         if category is not None:
             metadata["category"] = category
-        yield {"prompt": row["problem"], "label": answer, "metadata": metadata}
+        yield {
+            "prompt": row["problem"] + answer_instruction,
+            "label": answer,
+            "metadata": metadata,
+        }
 
 
 def prepare_math(
@@ -421,6 +441,7 @@ def prepare_math(
     *,
     expected_train_rows: int = MATH_EXPECTED_TRAIN_ROWS,
     expected_test_rows: int = MATH_EXPECTED_TEST_ROWS,
+    answer_instruction: str = "",
 ) -> PreparedDataset:
     """Convert every official MATH category and preserve its train/test split."""
     train_rows = []
@@ -431,6 +452,7 @@ def prepare_math(
                 _load_config_split(MATH_REPO, config, "train"),
                 dataset="math",
                 category=config,
+                answer_instruction=answer_instruction,
             )
         )
         test_rows.extend(
@@ -438,6 +460,7 @@ def prepare_math(
                 _load_config_split(MATH_REPO, config, "test"),
                 dataset="math",
                 category=config,
+                answer_instruction=answer_instruction,
             )
         )
 
@@ -474,10 +497,10 @@ def extract_gsm8k_answer(answer: str) -> str:
     return final_answer.strip()
 
 
-def _gsm8k_rows(rows: Iterable[dict[str, Any]]):
+def _gsm8k_rows(rows: Iterable[dict[str, Any]], *, answer_instruction: str = ""):
     for row in rows:
         yield {
-            "prompt": row["question"],
+            "prompt": row["question"] + answer_instruction,
             "label": extract_gsm8k_answer(row["answer"]),
             "metadata": {"dataset": "gsm8k"},
         }
@@ -488,10 +511,21 @@ def prepare_gsm8k(
     *,
     expected_train_rows: int = GSM8K_EXPECTED_TRAIN_ROWS,
     expected_test_rows: int = GSM8K_EXPECTED_TEST_ROWS,
+    answer_instruction: str = "",
 ) -> PreparedDataset:
     """Convert GSM8K's official main train/test splits."""
-    train_rows = list(_gsm8k_rows(_load_config_split(GSM8K_REPO, "main", "train")))
-    test_rows = list(_gsm8k_rows(_load_config_split(GSM8K_REPO, "main", "test")))
+    train_rows = list(
+        _gsm8k_rows(
+            _load_config_split(GSM8K_REPO, "main", "train"),
+            answer_instruction=answer_instruction,
+        )
+    )
+    test_rows = list(
+        _gsm8k_rows(
+            _load_config_split(GSM8K_REPO, "main", "test"),
+            answer_instruction=answer_instruction,
+        )
+    )
     if len(train_rows) != expected_train_rows:
         raise ValueError(
             f"gsm8k_train.jsonl: expected {expected_train_rows} rows, got {len(train_rows)}"
@@ -514,6 +548,40 @@ def prepare_gsm8k(
         source_rows=len(train_rows) + len(test_rows),
         train_rows=len(train_rows),
         test_rows=len(test_rows),
+    )
+
+
+def prepare_rl_mix(
+    out_dir: Path,
+    *,
+    sources: tuple[str, ...] = ("math_train.jsonl", "gsm8k_train.jsonl"),
+    train_filename: str = "math_gsm8k_train.jsonl",
+) -> PreparedDataset:
+    """Concatenate the RL training splits into the one file the launcher takes.
+
+    C5 is claimed over MATH *and* GSM8K, but `--prompt-data` accepts a single
+    path. Reads back what `prepare_math`/`prepare_gsm8k` already wrote rather
+    than re-deriving it, so the concatenation cannot disagree with the per-
+    dataset files an eval run scores against.
+
+    Missing sources raise instead of being skipped: a silently half-sized mix
+    would train on one dataset and still be reported as MATH+GSM8K.
+    """
+    out_dir = Path(out_dir)
+    rows: list[dict[str, Any]] = []
+    for source in sources:
+        path = out_dir / source
+        if not path.is_file():
+            raise FileNotFoundError(f"{path} is missing; run --dataset math and --dataset gsm8k first")
+        rows.extend(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line)
+
+    train_path = _write_jsonl_atomic(out_dir / train_filename, rows, len(rows))
+    return PreparedDataset(
+        name="math_gsm8k",
+        train_path=train_path,
+        source_rows=len(rows),
+        train_rows=len(rows),
+        test_rows=0,
     )
 
 
@@ -652,11 +720,22 @@ def main() -> None:
             "openthoughts3",
             "math",
             "gsm8k",
+            "rl_mix",
             "campaign",
         ],
         default="both",
     )
+    parser.add_argument(
+        "--no-answer-instruction",
+        action="store_true",
+        help=(
+            "Do not append the boxed-answer instruction to MATH/GSM8K prompts. "
+            "Only use this if the reward is not --rm-type boxed_math: without the "
+            "instruction a base policy never boxes, so every rollout scores 0."
+        ),
+    )
     args = parser.parse_args()
+    answer_instruction = "" if args.no_answer_instruction else ANSWER_INSTRUCTION
 
     if args.dataset in ("no_robots", "both"):
         train, test = prepare_no_robots(args.out_dir)
@@ -675,9 +754,13 @@ def main() -> None:
     if args.dataset in ("openthoughts3", "campaign"):
         summaries.append(prepare_openthoughts3(args.out_dir))
     if args.dataset in ("math", "campaign"):
-        summaries.append(prepare_math(args.out_dir))
+        summaries.append(prepare_math(args.out_dir, answer_instruction=answer_instruction))
     if args.dataset in ("gsm8k", "campaign"):
-        summaries.append(prepare_gsm8k(args.out_dir))
+        summaries.append(prepare_gsm8k(args.out_dir, answer_instruction=answer_instruction))
+    if args.dataset in ("rl_mix", "campaign"):
+        # Last, so `--dataset campaign` writes the mix from the files it just
+        # produced rather than from a stale pair.
+        summaries.append(prepare_rl_mix(args.out_dir))
     for summary in summaries:
         print(
             f"{summary.name}: train={summary.train_path} ({summary.train_rows}) "

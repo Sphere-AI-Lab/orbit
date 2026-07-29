@@ -6,6 +6,14 @@
 #   LoRA r256 all:      PEFT_METHOD=lora  LORA_RANK=256 LR=2.5e-4
 #   LoRA r256 attn:     PEFT_METHOD=lora  LORA_RANK=256 TARGET_MODULES=linear_qkv,linear_proj
 #   LoRA r256 mlp:      PEFT_METHOD=lora  LORA_RANK=256 TARGET_MODULES=linear_fc1,linear_fc2
+#   OFT matched-r256:   PEFT_METHOD=oft   OFT_BLOCK_SIZE=$(python -c 'from
+#                       orbit.utils.peft_param_match import matched_oft_block_size as m;
+#                       print(m(256, 4096, 4096))')
+#   E2 (batch study):   TRAIN_JSONL=.../openthoughts3_train.jsonl
+#                       GLOBAL_BATCH_SIZE=512 ROLLOUT_BATCH_SIZE=512
+#
+# The runbook with every experiment's exact command line is
+# docs/superpowers/plans/2026-07-30-lora-without-regret-runbook.md.
 #
 # Written fresh rather than ported: the source repo drove this from shared
 # scripts/lib/{peft,rollout,train}.sh, which do not exist here -- this repo's
@@ -217,22 +225,69 @@ if ! is_true "${SFT_GRADIENT_ACCUMULATION_FUSION:-0}"; then
     MISC_ARGS+=( --no-gradient-accumulation-fusion )
 fi
 
+# === PEFT method: lora | oft | none ===
+# One launcher serves all three arms because tools/lora_regret/arms.py drives a
+# single script by environment override. A sibling
+# run-llama3_1-8b-bf16-oft-sft-tulu3.sh is not an option: it would be captured
+# by test_llama_launchers_use_oft_and_response_only_mask's
+# `run-llama3_1-8b-bf16-oft-sft-*.sh` glob, which requires --input-key messages
+# and the response_only mask -- both wrong for this campaign.
 PEFT_METHOD=${PEFT_METHOD:-lora}
+TARGET_MODULES_DEFAULT=linear_qkv,linear_proj,linear_fc1,linear_fc2
 PEFT_ARGS=()
-if [[ "${PEFT_METHOD}" != "none" ]]; then
-    PEFT_ARGS=(
-        --peft-method "${PEFT_METHOD}"
-        --peft-variant standard
-        --lora-rank "${LORA_RANK:-256}"
-        --lora-alpha "${LORA_ALPHA:-32}"
-        --lora-dropout "${LORA_DROPOUT:-0.0}"
-        # PEFT-compatible init. Do NOT leave this at Orbit's xavier default:
-        # kaiming_uniform_(a=sqrt(5)) and xavier_normal_ differ by ~2.4x in
-        # std, which shifts the measured optimal learning rate.
-        --lora-a-init-method "${LORA_A_INIT_METHOD:-kaiming}"
-        --target-modules "${TARGET_MODULES:-linear_qkv,linear_proj,linear_fc1,linear_fc2}"
-    )
-fi
+case "${PEFT_METHOD}" in
+    none)
+        # Full fine-tuning. Adam state for 8.03B params: bf16 weights 16.1 GB +
+        # fp32 master 32.1 + moments 64.2 + bf16 grads 16.1 = 128 GB before
+        # activations. orbit/backends/megatron_utils/arguments.py forces
+        # use_distributed_optimizer=True, so master+moments shard across DP and
+        # the per-GPU cost is 32 GB + 96 GB/N: N=1 is 128 GB, N=2 is 80 GB with
+        # nothing left for activations, N=4 is 56 GB. Fail here rather than OOM
+        # twenty minutes into a reserved node.
+        if (( GPUS_PER_NODE < 4 )) && ! is_true "${ALLOW_SMALL_FULLFT:-0}"; then
+            echo "PEFT_METHOD=none (full fine-tuning) needs GPUS_PER_NODE>=4; got ${GPUS_PER_NODE}." >&2
+            echo "Per-GPU optimizer state is 32GB+96GB/N before activations. Set ALLOW_SMALL_FULLFT=1 to override." >&2
+            exit 2
+        fi
+        ;;
+    lora)
+        PEFT_ARGS=(
+            --peft-method lora
+            --peft-variant standard
+            --lora-rank "${LORA_RANK:-256}"
+            --lora-alpha "${LORA_ALPHA:-32}"
+            --lora-dropout "${LORA_DROPOUT:-0.0}"
+            # PEFT-compatible init. Do NOT leave this at Orbit's xavier default:
+            # kaiming_uniform_(a=sqrt(5)) and xavier_normal_ differ by ~2.4x in
+            # std, which shifts the measured optimal learning rate.
+            --lora-a-init-method "${LORA_A_INIT_METHOD:-kaiming}"
+            --target-modules "${TARGET_MODULES:-${TARGET_MODULES_DEFAULT}}"
+        )
+        ;;
+    oft)
+        # No LoRA flags here: orbit/utils/arguments.py cross-validates the two
+        # families (OFT flags must sit at their defaults unless --peft-method is
+        # oft), and an OFT arm carrying --lora-rank would read in the log as if
+        # rank meant something to it.
+        #
+        # OFT_BLOCK_SIZE is required, not defaulted. The block size IS the
+        # parameter budget for the matched comparison E5 exists to make, and it
+        # must come from orbit.utils.peft_param_match.matched_oft_block_size --
+        # a silent 32 here would quietly compare unmatched models.
+        PEFT_ARGS=(
+            --peft-method oft
+            --peft-variant standard
+            --oft-type canonical_oft
+            --oft-block-size "${OFT_BLOCK_SIZE:?set OFT_BLOCK_SIZE from orbit.utils.peft_param_match.matched_oft_block_size; there is no safe default}"
+            --oft-eps "${OFT_EPS:-6e-5}"
+            --target-modules "${TARGET_MODULES:-${TARGET_MODULES_DEFAULT}}"
+        )
+        ;;
+    *)
+        echo "Unsupported PEFT_METHOD=${PEFT_METHOD}; expected one of: lora oft none" >&2
+        exit 2
+        ;;
+esac
 
 DEBUG_ARGS=()
 if [[ -n "${SFT_EXTRA_ARGS:-}" ]]; then

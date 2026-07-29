@@ -16,7 +16,19 @@ from pathlib import Path
 
 import pytest
 
-from tools.lora_regret.arms import Arm, LORA_LR_GRID, FULL_LR_GRID, arm_env, sft_arms
+from tools.lora_regret.arms import (
+    ALL_MODULES,
+    ATTN_MODULES,
+    MLP_MODULES,
+    Arm,
+    LORA_LR_GRID,
+    FULL_LR_GRID,
+    arm_env,
+    e1_arms,
+    e2_arms,
+    e3_arms,
+    sft_arms,
+)
 from tools.lora_regret import sweep
 from tools.lora_regret.sweep import append_result, load_ledger, parse_final_nll, run_arm
 
@@ -147,6 +159,133 @@ class TestArmEnv:
         # arm_env must not set it, or a seed sweep would stop varying data order.
         for arm in sft_arms(H, FFN)[:5]:
             assert "ROLLOUT_SEED" not in arm_env(arm)
+
+
+class TestLauncherPath:
+    def test_the_launcher_the_sweep_shells_out_to_exists(self):
+        """The single cheapest way to lose a reserved node: sweep.LAUNCHER
+        naming a script that is not in this repo. Every arm would fail
+        identically, and the ledger would record 82 failures with no NLL."""
+        assert (REPO_ROOT / sweep.LAUNCHER).is_file()
+
+
+class TestE1Matrix:
+    """E1 decides C1 (shared learning curve, rank-dependent departure) and C2
+    (the ~10x LR rule). Its grid is 5 points at 0.3-decade spacing centred on
+    the post's own prediction, so a confirmation is a hit and not a fit."""
+
+    def test_arm_count_is_forty(self):
+        assert len(e1_arms()) == 40
+
+    def test_ranks_are_the_posts_stated_range(self):
+        ranks = {a.rank for a in e1_arms() if a.method == "lora"}
+        assert ranks == {1, 4, 16, 64, 128, 256, 512}
+
+    def test_one_full_finetune_arm_per_lr(self):
+        full = [a for a in e1_arms() if a.method == "full"]
+        assert len(full) == 5
+
+    def test_lora_centre_is_ten_times_the_full_centre(self):
+        """C2's prediction, built into the grid rather than fitted afterwards."""
+        full_lrs = sorted({a.lr for a in e1_arms() if a.method == "full"})
+        lora_lrs = sorted({a.lr for a in e1_arms() if a.method == "lora"})
+        assert lora_lrs[2] == pytest.approx(10 * full_lrs[2], rel=0.02)
+
+    def test_grid_spacing_is_zero_point_three_decades(self):
+        lrs = sorted({a.lr for a in e1_arms() if a.method == "full"})
+        ratios = [b / a for a, b in zip(lrs, lrs[1:], strict=False)]
+        assert all(r == pytest.approx(10**0.3, rel=0.02) for r in ratios)
+
+    def test_every_lora_arm_targets_all_four_projections(self):
+        assert {a.target_modules for a in e1_arms() if a.method == "lora"} == {ALL_MODULES}
+
+
+class TestE2Matrix:
+    """E2 decides C3 (LoRA tolerates large batches worse, independent of rank)."""
+
+    def test_arm_count_is_thirty_six(self):
+        assert len(e2_arms()) == 36
+
+    def test_batch_sizes_are_the_posts_three(self):
+        assert {a.global_batch_size for a in e2_arms()} == {32, 128, 512}
+
+    def test_rank_independence_needs_two_lora_ranks(self):
+        """E2-2: the post blames the parametrization, not capacity, so the gap
+        must be measured at a second rank -- if it shrinks with rank, the
+        post's mechanism is wrong and that is the finding."""
+        assert {a.rank for a in e2_arms() if a.method == "lora"} == {16, 256}
+
+    def test_four_lrs_per_cell(self):
+        cells = {}
+        for arm in e2_arms():
+            cells.setdefault((arm.method, arm.rank, arm.global_batch_size), []).append(arm.lr)
+        assert all(len(lrs) == 4 for lrs in cells.values())
+        assert len(cells) == 9
+
+    def test_lr_centre_rises_with_batch_size(self):
+        """Re-centred per batch, as the plan requires: holding the update-to-
+        weight ratio fixed as gradient noise falls scales the optimum by
+        sqrt(batch). The acceptance rule still applies -- an argmin on a grid
+        edge is re-run on a re-centred grid, never quoted."""
+        by_batch = {}
+        for arm in e2_arms():
+            if arm.method == "lora" and arm.rank == 256:
+                by_batch.setdefault(arm.global_batch_size, []).append(arm.lr)
+        centres = {batch: sorted(lrs)[1] for batch, lrs in by_batch.items()}
+        assert centres[128] > centres[32]
+        assert centres[512] > centres[128]
+
+    def test_env_carries_both_batch_knobs(self):
+        """--global-batch-size alone would leave --rollout-batch-size at 32, so
+        a "batch 512" arm would still draw 32 prompts per rollout and take 16
+        optimizer steps' worth of data per step."""
+        arm = next(a for a in e2_arms() if a.global_batch_size == 512)
+        env = arm_env(arm)
+        assert env["GLOBAL_BATCH_SIZE"] == "512"
+        assert env["ROLLOUT_BATCH_SIZE"] == "512"
+
+    def test_env_points_at_openthoughts3(self):
+        """The post's C3 setup is a 10,000-example OpenThoughts3 subset, not
+        Tulu3 -- the launcher's own default."""
+        env = arm_env(e2_arms()[0])
+        assert "openthoughts3_train.jsonl" in env["TRAIN_JSONL"]
+        assert "openthoughts3_test.jsonl" in env["TEST_JSONL"]
+
+
+class TestE3Matrix:
+    """E3 decides C4 (attention-only underperforms MLP-only at MATCHED
+    parameter count). The earlier plan compared them at equal rank, which in a
+    transformer is unequal parameters -- confounding placement with capacity."""
+
+    def test_arm_count_is_twenty(self):
+        assert len(e3_arms(H, FFN)) == 20
+
+    def test_the_matched_pair_is_attention_r256_against_mlp_r92_on_llama(self):
+        arms = e3_arms(4096, 14336)
+        attn = {a.rank for a in arms if a.target_modules == ATTN_MODULES}
+        mlp = {a.rank for a in arms if a.target_modules == MLP_MODULES}
+        assert attn == {256}
+        # 18432r attention vs 51200r MLP per layer in Orbit's fused layout.
+        assert mlp == {92, 128}
+
+    def test_the_matched_ranks_really_are_matched(self):
+        from orbit.utils.peft_param_match import lora_param_count
+
+        attn = lora_param_count(256, 4096, 6144) + lora_param_count(256, 4096, 4096)
+        mlp = lora_param_count(92, 4096, 2 * 14336) + lora_param_count(92, 14336, 4096)
+        assert mlp / attn == pytest.approx(1.0, abs=0.01)
+
+    def test_it_keeps_the_posts_own_pair_too(self):
+        """MLP r128 is the post's own comparison. Keeping it means a
+        disagreement can be attributed to parameter accounting rather than to
+        physics."""
+        arms = e3_arms(4096, 14336)
+        assert any(a.rank == 128 and a.target_modules == MLP_MODULES for a in arms)
+
+    def test_all_modules_arm_is_present_for_the_second_half_of_the_claim(self):
+        """C4 also says all-modules adds nothing on top of MLP-only."""
+        arms = e3_arms(H, FFN)
+        assert any(a.target_modules == ALL_MODULES and a.rank == 256 for a in arms)
 
 
 class TestLedger:

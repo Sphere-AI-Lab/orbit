@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from tools.lora_regret.prepare_data import (
+    ANSWER_INSTRUCTION,
     MATH_CONFIGS,
     extract_boxed,
     extract_gsm8k_answer,
@@ -18,6 +19,7 @@ from tools.lora_regret.prepare_data import (
     prepare_math,
     prepare_no_robots,
     prepare_openthoughts3,
+    prepare_rl_mix,
     prepare_tulu3,
     _write_jsonl,
 )
@@ -247,3 +249,89 @@ def test_gsm8k_preserves_official_splits_and_extracts_labels(tmp_path: Path, mon
 
     assert _read_jsonl(result.train_path) == [{"prompt": "train", "label": "72", "metadata": {"dataset": "gsm8k"}}]
     assert _read_jsonl(result.test_path)[0]["prompt"] == "test"
+
+
+# ---------------------------------------------------------------------------
+# E4's RL inputs. Two requirements that come from the reward function rather
+# than from the datasets: the prompt must ask for a boxed answer, and the two
+# training splits must arrive as one file.
+# ---------------------------------------------------------------------------
+
+
+def test_math_appends_the_answer_instruction_when_asked(tmp_path: Path, monkeypatch):
+    """`--rm-type boxed_math` strips \\boxed{...} from the response before
+    grading. A Llama-3.1 *base* policy does not box unprompted, so without this
+    every rollout scores 0 and every E4 arm looks identical."""
+
+    def _fake_load(name, config, split):
+        return [{"problem": "2+2?", "solution": r"\boxed{4}"}]
+
+    monkeypatch.setattr("tools.lora_regret.prepare_data._load_config_split", _fake_load)
+    result = prepare_math(
+        tmp_path,
+        expected_train_rows=len(MATH_CONFIGS),
+        expected_test_rows=len(MATH_CONFIGS),
+        answer_instruction=ANSWER_INSTRUCTION,
+    )
+
+    prompt = _read_jsonl(result.train_path)[0]["prompt"]
+    assert prompt.startswith("2+2?")
+    assert ANSWER_INSTRUCTION in prompt
+    # The label is the bare answer either way -- the instruction changes the
+    # prompt, never the grading target.
+    assert _read_jsonl(result.train_path)[0]["label"] == "4"
+
+
+def test_gsm8k_appends_the_answer_instruction_when_asked(tmp_path: Path, monkeypatch):
+    def _fake_load(name, config, split):
+        return [{"question": "how many?", "answer": "work\n#### 72"}]
+
+    monkeypatch.setattr("tools.lora_regret.prepare_data._load_config_split", _fake_load)
+    result = prepare_gsm8k(
+        tmp_path,
+        expected_train_rows=1,
+        expected_test_rows=1,
+        answer_instruction=ANSWER_INSTRUCTION,
+    )
+
+    row = _read_jsonl(result.train_path)[0]
+    assert row["prompt"].startswith("how many?")
+    assert ANSWER_INSTRUCTION in row["prompt"]
+    assert row["label"] == "72"
+
+
+def test_answer_instruction_is_off_by_default(tmp_path: Path, monkeypatch):
+    """The library default does not mutate the source text; the CLI turns the
+    instruction on, because that is where a runnable dataset is being built."""
+
+    def _fake_load(name, config, split):
+        return [{"question": "how many?", "answer": "work\n#### 72"}]
+
+    monkeypatch.setattr("tools.lora_regret.prepare_data._load_config_split", _fake_load)
+    result = prepare_gsm8k(tmp_path, expected_train_rows=1, expected_test_rows=1)
+    assert _read_jsonl(result.train_path)[0]["prompt"] == "how many?"
+
+
+def test_rl_mix_concatenates_math_and_gsm8k(tmp_path: Path):
+    """The RL launcher takes one --prompt-data path, and C5 is claimed over
+    MATH + GSM8K together."""
+    _write_jsonl(tmp_path / "math_train.jsonl", [{"prompt": "m", "label": "1"}])
+    _write_jsonl(
+        tmp_path / "gsm8k_train.jsonl",
+        [{"prompt": "g1", "label": "2"}, {"prompt": "g2", "label": "3"}],
+    )
+
+    result = prepare_rl_mix(tmp_path)
+
+    rows = _read_jsonl(result.train_path)
+    assert result.train_path.name == "math_gsm8k_train.jsonl"
+    assert [row["prompt"] for row in rows] == ["m", "g1", "g2"]
+    assert result.train_rows == 3
+
+
+def test_rl_mix_refuses_when_a_source_split_is_missing(tmp_path: Path):
+    """Failing here beats an RL run that silently trains on half the campaign."""
+    _write_jsonl(tmp_path / "math_train.jsonl", [{"prompt": "m", "label": "1"}])
+
+    with pytest.raises(FileNotFoundError, match="gsm8k_train.jsonl"):
+        prepare_rl_mix(tmp_path)

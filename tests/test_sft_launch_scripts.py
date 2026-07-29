@@ -184,6 +184,63 @@ def test_lora_regret_launcher_still_passes_prompt_data():
     assert "--training-mode sft" in content
 
 
+def test_lora_regret_launcher_dispatches_lora_oft_and_full_finetune():
+    """One launcher serves all three arms, because tools/lora_regret/arms.py
+    drives a single script by environment override (PEFT_METHOD=lora|oft|none).
+
+    A separate run-llama3_1-8b-bf16-oft-sft-tulu3.sh is NOT an option: it would
+    be caught by test_llama_launchers_use_oft_and_response_only_mask's
+    `run-llama3_1-8b-bf16-oft-sft-*.sh` glob, which requires
+    `--input-key messages` and the response_only mask -- both wrong for this
+    campaign, whose rows are {"prompt": [...]} scored by the llama3 mask.
+    """
+    content = _lora_regret_launcher_text()
+    assert 'case "${PEFT_METHOD}" in' in content
+    assert "--peft-method lora" in content
+    assert "--peft-method oft" in content
+    assert "--oft-type canonical_oft" in content
+
+
+def test_lora_regret_launcher_oft_arm_passes_no_lora_flags():
+    """orbit/utils/arguments.py cross-validates the two flag families: OFT flags
+    must be at their defaults unless --peft-method is oft. Keep the converse
+    true too, so an OFT arm's command line carries no LoRA rank/alpha that
+    would read as if it had one."""
+    content = _lora_regret_launcher_text()
+    oft_branch = content.split("    oft)", 1)[1].split(";;", 1)[0]
+    # Comments excluded deliberately: the branch explains this constraint in
+    # prose that necessarily names the LoRA flags it is refusing to pass.
+    code = [line for line in oft_branch.splitlines() if not line.lstrip().startswith("#")]
+    assert any("--oft-block-size" in line for line in code)
+    assert not any("--lora-rank" in line for line in code)
+    assert not any("--lora-alpha" in line for line in code)
+
+
+def test_lora_regret_launcher_requires_an_explicit_oft_block_size():
+    """A silent OFT_BLOCK_SIZE default would defeat the matched-parameter
+    comparison E5 exists to make: the block size IS the parameter budget, and
+    it must come from peft_param_match.matched_oft_block_size, not from a
+    number that happens to be in the script."""
+    content = _lora_regret_launcher_text()
+    assert "${OFT_BLOCK_SIZE:?" in content
+    assert "${OFT_BLOCK_SIZE:-" not in content
+
+
+def test_lora_regret_launcher_rejects_an_unknown_peft_method():
+    content = _lora_regret_launcher_text()
+    assert "Unsupported PEFT_METHOD" in content
+
+
+def test_lora_regret_launcher_guards_full_finetune_against_too_few_gpus():
+    """P0's arithmetic: 32 GB + 96 GB/N per GPU under the distributed optimizer
+    (forced on in orbit/backends/megatron_utils/arguments.py), so N=1 is 128 GB
+    and N=2 is 80 GB before activations. Failing at launch beats OOMing twenty
+    minutes into a reserved node."""
+    content = _lora_regret_launcher_text()
+    assert "ALLOW_SMALL_FULLFT" in content
+    assert "GPUS_PER_NODE < 4" in content
+
+
 def test_lora_regret_launcher_keeps_nan_checks_on():
     """Megatron only offers the negative spelling, and asserts it when
     full_iteration CUDA graphs are on. A silently-NaN arm would read as a bad

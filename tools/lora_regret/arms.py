@@ -1,14 +1,27 @@
-"""The LoRA-without-regret SFT experiment matrix.
+"""The LoRA-without-regret experiment matrices.
 
 Two LR grids, because the LoRA and FullFT optima sit a decade apart and one
 shared grid would spend most of its points where nothing happens.
+
+Four matrices, selected by ``sweep.py --matrix``:
+
+* ``sft82`` (:func:`sft_arms`) -- the original 82-arm LoRA/OFT matrix, on 7-point
+  grids that *bracket* the published optima. Kept byte-for-byte because the gate
+  log records its dry run; it is also the only matrix carrying OFT arms (E5).
+* ``e1`` / ``e2`` / ``e3`` -- the campaign matrices of
+  ``docs/superpowers/plans/2026-07-28-lora-without-regret-experiments.md``, on
+  5-point 0.3-decade grids *centred* on the post's own predictions. Centring is
+  the point: a confirmation is then a hit rather than a fit.
+
+The two grid styles are deliberately not unified. Bracketing answers "where is
+the optimum", centring answers "is the optimum where the post says".
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from orbit.utils.peft_param_match import matched_oft_block_size
+from orbit.utils.peft_param_match import matched_mlp_rank, matched_oft_block_size
 
 ALL_MODULES = "linear_qkv,linear_proj,linear_fc1,linear_fc2"
 ATTN_MODULES = "linear_qkv,linear_proj"
@@ -32,6 +45,34 @@ LORA_ALPHA = 32
 # the launcher's own default.
 LORA_A_INIT_METHOD = "kaiming"
 
+# Centres for the campaign grids (E1-E3). FULL_LR_CENTRE is the post's own
+# FullFT prediction; LORA_LR_CENTRE is exactly 10x it, which is C2's claim built
+# into the grid instead of fitted out of it.
+FULL_LR_CENTRE = 2.5e-5
+LORA_LR_CENTRE = 2.5e-4
+# Llama-3.1-8B's fused QKV width: (32 query + 8 key + 8 value heads) * 128 head
+# dim = 6144. Needed for the matched-parameter attention/MLP pair in E3, and not
+# derivable from hidden_size alone under GQA.
+LLAMA31_8B_QKV_OUTPUT = 6144
+# Where tools/lora_regret/prepare_data.py writes its splits.
+DATA_DIR = "/lustre/fast/fast/groups/ei-slm/data/lora_regret"
+
+
+def lr_grid(centre: float, n: int = 5, step_decades: float = 0.3) -> list[float]:
+    """`n` learning rates spaced `step_decades` apart, with `centre` inside.
+
+    For odd `n` the centre sits in the middle; for even `n` it sits at index 1,
+    so a 4-point grid still has a point below the prediction. Values are rounded
+    to three significant figures, which keeps arm names stable and readable at
+    the cost of the spacing being 0.3 decades to within ~0.3%.
+    """
+    if n < 2:
+        raise ValueError(f"n must be at least 2, got {n}")
+    low = -(n // 2) if n % 2 else -1
+    exponents = [low + i for i in range(n)]
+    grid = [centre * 10 ** (step_decades * k) for k in exponents]
+    return [float(f"{lr:.3g}") for lr in grid]
+
 
 @dataclass(frozen=True)
 class Arm:
@@ -42,11 +83,20 @@ class Arm:
     target_modules: str
     lr: float
     seed: int
+    # E2 varies the batch size; E1/E3 leave it at the launcher's own default.
+    global_batch_size: int | None = None
+    # Which prepare_data.py split pair to train on. None means "whatever the
+    # launcher defaults to" (tulu3).
+    dataset: str | None = None
 
 
-def _name(method: str, tag: str, modules: str, lr: float, seed: int) -> str:
+def _name(method: str, tag: str, modules: str, lr: float, seed: int, extra: str = "") -> str:
     short = {ALL_MODULES: "all", ATTN_MODULES: "attn", MLP_MODULES: "mlp"}.get(modules, "na")
-    return f"{method}-{tag}-{short}-lr{lr:g}-s{seed}"
+    parts = [method, tag, short]
+    if extra:
+        parts.append(extra)
+    parts += [f"lr{lr:g}", f"s{seed}"]
+    return "-".join(parts)
 
 
 def sft_arms(hidden_size: int, ffn_size: int, seed: int = 0) -> list[Arm]:
@@ -107,7 +157,119 @@ def sft_arms(hidden_size: int, ffn_size: int, seed: int = 0) -> list[Arm]:
     return arms
 
 
-def arm_env(arm: Arm) -> dict[str, str]:
+def e1_arms(seed: int = 0) -> list[Arm]:
+    """E1: capacity, rank, and the 10x LR rule -- decides C1 and C2.
+
+    8 arms x 5 LRs = 40 runs. The rank range is the post's own (1..512), chosen
+    so rank 1 *must* depart from the shared learning curve within one epoch
+    while rank 512 must not; a range that departed nowhere would not be a test.
+    """
+    arms: list[Arm] = []
+    for lr in lr_grid(FULL_LR_CENTRE):
+        arms.append(Arm(_name("full", "na", "", lr, seed), "full", None, None, "", lr, seed, dataset="tulu3"))
+    for rank in (1, 4, 16, 64, 128, 256, 512):
+        for lr in lr_grid(LORA_LR_CENTRE):
+            arms.append(
+                Arm(
+                    _name("lora", f"r{rank}", ALL_MODULES, lr, seed),
+                    "lora",
+                    rank,
+                    None,
+                    ALL_MODULES,
+                    lr,
+                    seed,
+                    dataset="tulu3",
+                )
+            )
+    return arms
+
+
+def e2_arms(seed: int = 0) -> list[Arm]:
+    """E2: batch-size sensitivity -- decides C3.
+
+    3 cells x 3 batch sizes x 4 LRs = 36 runs, on the post's own 10,000-example
+    OpenThoughts3 subset. LoRA r16 is in here for E2-2 specifically: the post
+    blames the product-of-matrices parametrization rather than capacity, so the
+    gap has to survive a change of rank. If it shrinks, the mechanism is wrong.
+
+    Each cell's grid is re-centred by sqrt(batch/32) -- with gradient noise
+    falling as 1/sqrt(batch), that is the scaling that holds the update-to-weight
+    ratio roughly fixed. It is a starting point, not a claim: the acceptance rule
+    is unchanged, and any argmin landing on a grid edge is re-run on a re-centred
+    grid before its number is quoted.
+    """
+    cells = [("full", None, FULL_LR_CENTRE), ("lora", 256, LORA_LR_CENTRE), ("lora", 16, LORA_LR_CENTRE)]
+    arms: list[Arm] = []
+    for batch in (32, 128, 512):
+        scale = (batch / 32) ** 0.5
+        for method, rank, centre in cells:
+            tag = "na" if rank is None else f"r{rank}"
+            modules = "" if method == "full" else ALL_MODULES
+            for lr in lr_grid(centre * scale, n=4):
+                arms.append(
+                    Arm(
+                        _name(method, tag, modules, lr, seed, extra=f"b{batch}"),
+                        method,
+                        rank,
+                        None,
+                        modules,
+                        lr,
+                        seed,
+                        global_batch_size=batch,
+                        dataset="openthoughts3",
+                    )
+                )
+    return arms
+
+
+def e3_arms(
+    hidden_size: int,
+    ffn_size: int,
+    seed: int = 0,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
+) -> list[Arm]:
+    """E3: layer placement at matched parameter count -- decides C4.
+
+    4 arms x 5 LRs = 20 runs. The matched MLP rank is *solved*, not assumed:
+    Orbit's fused ``linear_qkv``/``linear_fc1`` bundle projections that HF keeps
+    separate, so the post's own attention-r256/MLP-r128 pair is not matched in
+    this layout. Both pairs are run -- ours and the post's -- so a disagreement
+    can be pinned on parameter accounting rather than on physics.
+    """
+    matched_rank = matched_mlp_rank(256, hidden_size, ffn_size, qkv_output_size)
+    configs = [
+        (256, ATTN_MODULES),
+        (matched_rank, MLP_MODULES),
+        (128, MLP_MODULES),
+        (256, ALL_MODULES),
+    ]
+    arms: list[Arm] = []
+    for rank, modules in configs:
+        for lr in lr_grid(LORA_LR_CENTRE):
+            arms.append(
+                Arm(
+                    _name("lora", f"r{rank}", modules, lr, seed),
+                    "lora",
+                    rank,
+                    None,
+                    modules,
+                    lr,
+                    seed,
+                    dataset="tulu3",
+                )
+            )
+    return arms
+
+
+MATRICES = {
+    "sft82": lambda hidden, ffn, seed: sft_arms(hidden, ffn, seed=seed),
+    "e1": lambda hidden, ffn, seed: e1_arms(seed=seed),
+    "e2": lambda hidden, ffn, seed: e2_arms(seed=seed),
+    "e3": lambda hidden, ffn, seed: e3_arms(hidden, ffn, seed=seed),
+}
+
+
+def arm_env(arm: Arm, data_dir: str = DATA_DIR) -> dict[str, str]:
     """Environment overrides for one launcher invocation.
 
     Deliberately does not set ROLLOUT_SEED: the launcher ties it to SEED
@@ -116,6 +278,17 @@ def arm_env(arm: Arm) -> dict[str, str]:
     override here would silently defeat that.
     """
     env = {"LR": f"{arm.lr:g}", "SEED": str(arm.seed)}
+    if arm.dataset is not None:
+        env["TRAIN_JSONL"] = f"{data_dir}/{arm.dataset}_train.jsonl"
+        env["TEST_JSONL"] = f"{data_dir}/{arm.dataset}_test.jsonl"
+        # The launcher derives EVAL_NLL_DATA from TEST_JSONL at its own default,
+        # but only if TEST_JSONL was exported before it ran -- which it is here.
+    if arm.global_batch_size is not None:
+        # Both knobs, always together. --global-batch-size alone would leave
+        # --rollout-batch-size at 32, so a "batch 512" arm would still draw 32
+        # prompts per rollout and never assemble a 512-sample step.
+        env["GLOBAL_BATCH_SIZE"] = str(arm.global_batch_size)
+        env["ROLLOUT_BATCH_SIZE"] = str(arm.global_batch_size)
     if arm.method == "full":
         env["PEFT_METHOD"] = "none"
         return env

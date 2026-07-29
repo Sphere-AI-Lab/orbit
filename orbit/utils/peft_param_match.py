@@ -48,6 +48,33 @@ def lora_param_count(rank: int, d_in: int, d_out: int) -> int:
     return rank * (d_in + d_out)
 
 
+def matched_mlp_rank(attn_rank: int, hidden_size: int, ffn_size: int, qkv_output_size: int) -> int:
+    """MLP-only LoRA rank whose adapter parameter count matches attention-only.
+
+    Comparing attention-only against MLP-only at *equal rank* compares unequal
+    parameter counts, which confounds placement with capacity -- the MLP is the
+    larger of the two by a factor that depends only on the shapes. This solves
+    for the MLP rank that matches, per layer, using Orbit's **fused** Megatron
+    layout rather than HF's separate projections:
+
+        attention  linear_qkv  r*(hidden + qkv_output)   [q, k and v fused]
+                   linear_proj r*(hidden + hidden)
+        MLP        linear_fc1  r*(hidden + 2*ffn)        [gate and up fused]
+                   linear_fc2  r*(ffn + hidden)
+
+    For Llama-3.1-8B (hidden 4096, ffn 14336, qkv_output 6144) that is 18432r
+    against 51200r, a ratio of 2.778, so attention r=256 matches MLP r=92.
+
+    Rounds to the nearest integer, since rank is not continuous: the realized
+    ratio is therefore within one rank-step of 1.0, not exactly 1.0.
+    """
+    if min(attn_rank, hidden_size, ffn_size, qkv_output_size) <= 0:
+        raise ValueError("attn_rank, hidden_size, ffn_size and qkv_output_size must be positive")
+    attn_per_rank = lora_param_count(1, hidden_size, qkv_output_size) + lora_param_count(1, hidden_size, hidden_size)
+    mlp_per_rank = lora_param_count(1, hidden_size, 2 * ffn_size) + lora_param_count(1, ffn_size, hidden_size)
+    return max(1, round(attn_rank * attn_per_rank / mlp_per_rank))
+
+
 def oft_param_count(block_size: int, d_in: int, block_share: bool = False) -> int:
     """Trainable parameters in an OFT adapter on a linear with `d_in` inputs.
 

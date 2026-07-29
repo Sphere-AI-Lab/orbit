@@ -21,9 +21,13 @@ from pathlib import Path
 
 from orbit.utils.eval_nll import EVAL_NLL_METRIC_KEY
 from orbit.utils.peft_param_match import match_report
-from tools.lora_regret.arms import Arm, arm_env, sft_arms
+from tools.lora_regret.arms import MATRICES, Arm, arm_env, sft_arms  # noqa: F401  (sft_arms re-exported)
 
-LAUNCHER = "examples/sft/run-qwen3-4b-norobots-sft.sh"
+# The campaign re-anchored from Qwen3-4B/No-Robots to Llama-3.1-8B/Tulu3, and
+# this constant was left pointing at the old repo's launcher, which does not
+# exist here. Pinned by test_the_launcher_the_sweep_shells_out_to_exists, because
+# the failure mode is every arm failing identically for one silent reason.
+LAUNCHER = "examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh"
 
 # train.py:_log_eval_nll emits one line per held-out NLL measurement, e.g.:
 #
@@ -169,6 +173,16 @@ def main() -> None:
     parser.add_argument("--results", type=Path, default=Path("results/lora_regret_sft.jsonl"))
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
+        "--matrix",
+        choices=sorted(MATRICES),
+        default="sft82",
+        help=(
+            "Which arm matrix to run. 'e1'/'e2'/'e3' are the campaign plan's "
+            "centred grids; 'sft82' is the original bracketing matrix and the "
+            "only one with OFT arms."
+        ),
+    )
+    parser.add_argument(
         "--only",
         default=None,
         help="Regex; run only arms whose name matches (e.g. '^lora-r256' or '^oftscout').",
@@ -177,7 +191,7 @@ def main() -> None:
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[2]
-    arms = sft_arms(args.hidden_size, args.ffn_size, seed=args.seed)
+    arms = MATRICES[args.matrix](args.hidden_size, args.ffn_size, args.seed)
     if args.only:
         pattern = re.compile(args.only)
         arms = [a for a in arms if pattern.search(a.name)]
