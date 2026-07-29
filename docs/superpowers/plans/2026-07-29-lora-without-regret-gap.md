@@ -15,12 +15,15 @@ transformers 4.57.1, pytest 9.0.3 — the versions `pyproject.toml` pins), becau
 own env was still building at the time. **373 passed, 0 failed**, against 5 collection errors
 that are pre-existing and CUDA-related (verified identical with the branch stashed). No GPU ran.
 
-**The project env has since been built** — `/fast/zqiu/orbit-iclr/orbit_env`, torch 2.11.0 on
-CUDA 13.2, Python 3.12.13, orbit installed editable. Every gate below is therefore *verified in
-the proxy, not in the shipping env*; G7 re-runs them where it counts and adds the GPU steps that
-were impossible before. Nothing above is retracted — the proxy pins the same versions
-`pyproject.toml` does — but a pass under a version-matched stand-in is not a pass under the
-stack the experiments will actually run on.
+**The project env `/fast/zqiu/orbit-iclr/orbit_env` was built (2026-07-29 10:53, torch 2.11.0 /
+CUDA 13.2 / Python 3.12.13) but is currently NOT USABLE** — its uv cache was wiped and every
+package in it is a dangling symlink. See "Test environment" below for the measurement and the
+rebuild. Until that rebuild lands, the proxy venv remains the only interpreter that runs
+anything, and G7 is blocked at step 1.
+
+Every gate below is therefore *verified in the proxy, not in the shipping env*. Nothing above is
+retracted — the proxy pins the same versions `pyproject.toml` does — but a pass under a
+version-matched stand-in is not a pass under the stack the experiments will actually run on.
 
 Both knowingly-red `TestLogFormatPins` tests are now green **without being edited** —
 `git diff` on `test_lora_regret_sweep.py` is empty.
@@ -59,7 +62,8 @@ Three places where this repo's base forced a decision the plan could not have an
 
 ## Test environment
 
-The built env is the interpreter for everything from here on, CPU and GPU alike:
+`/fast/zqiu/orbit-iclr/orbit_env` is the intended interpreter for everything from here on, CPU
+and GPU alike — **once it is rebuilt.** Read the next subsection before using it.
 
 ```
 source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
@@ -79,31 +83,59 @@ source env.sh                                    # CUDA_HOME, LD_LIBRARY_PATH, z
 source examples/load_cuda13_2_orbit_env.sh       # cudnn / flashinfer runtime
 ```
 
-### Preflight: the env is only usable on the node that built it
+### The env is currently empty: every symlink is dangling
 
-**Run this before spending a GPU slot.** Verified failing on node `i208` on 2026-07-29:
+**Measured on `i208`, 2026-07-29.** The venv is a complete directory skeleton with no payload:
+**95,789 symlinks, 95,789 of them broken**, against 6,731 real files. It occupies 562 MB where a
+real torch-2.11 CUDA stack is tens of GB. Every dependency "imports" and is empty:
 
 ```
-python -c "import torch; print(torch.__version__, torch.version.cuda)"
+$ python -c "import torch; print(torch.__version__)"
+AttributeError: module 'torch' has no attribute '__version__'
+$ python -m pytest --version
+No module named pytest.__main__; 'pytest' is a package and cannot be directly executed
 ```
 
-If it raises `AttributeError: module 'torch' has no attribute '__version__'`, the env is not
-importable on this node and *nothing* below will run — not the CPU tests either.
+torch, transformers, pytest, numpy, ray, sglang and megatron all resolve with `__file__ is
+None`; `import orbit` fails outright with `ModuleNotFoundError`, because even the editable
+install's `__editable___orbit_0_2_1_finder.py` is a dangling symlink.
 
-Mechanism: `env.sh:86` defaults `UV_CACHE_DIR=/tmp/orbit_uv_cache`, deliberately node-local
+Mechanism: `env.sh:86` defaults `UV_CACHE_DIR=/tmp/orbit_uv_cache`, deliberately **node-local**
 because Lustre returns `ENOSYS` on `flock` and uv's build locks need it. uv then installs in
-**symlink mode**, so every package in site-packages is a symlink into that cache rather than a
-copy. On `i208` all 300 top-level packages are dangling (`torch/__init__.py` →
-`/tmp/orbit_uv_cache/archive-v0/G0Y7fBqUaY6VMCMrcT_Dw/torch/__init__.py`, absent), so `import
-torch` silently resolves `torch/` as an empty **namespace package** — hence the missing
-`__version__` rather than an `ImportError`. The `AttributeError` is the symptom; a wiped or
-foreign `/tmp` is the cause.
+**symlink mode**, so site-packages holds links into that cache rather than copies. `/tmp` on
+`i208` has since been cleared — it now contains one unrelated directory — so every link points
+at nothing. Python treats a directory with no loadable `__init__.py` as a **namespace package**
+rather than an error, which is why this presents as a missing attribute instead of an
+`ImportError`. That silence is the trap: the env looks importable and is not.
 
-Two ways out, in order of cost: run on the node whose `/tmp/orbit_uv_cache` is still populated
-(the build node), or rebuild with the cache on a flock-capable *shared* path
-(`UV_CACHE_DIR=<shared> source env.sh && uv sync --extra allinone`) to make the env
-node-portable. Do not `uv cache clean` — under symlink mode that guts every env pointing into
-the cache, including this one.
+**This is not repairable by re-linking — the payload is gone.** All eight other uv caches on the
+system were checked for the archive IDs the links name (`torch` →
+`archive-v0/G0Y7fBqUaY6VMCMrcT_Dw`); none has them, including `~/.cache/uv_cu13_orbit`.
+A full `uv sync` is required, and it will rebuild flash-attn, TransformerEngine, sgl-kernel and
+DeepEP from source.
+
+### Rebuild (the user runs this — hours, source builds)
+
+Put the cache on **cluster-home**, which is NFS and both persistent and flock-capable, and keep
+the env on `/fast`. Do not put the cache on `/fast` — that is Lustre, the filesystem `env.sh`
+warns about. `UV_LINK_MODE=copy` costs disk and sync time but makes the env immune to exactly
+this failure; symlink mode against a persistent shared cache would also be node-portable, at the
+cost of staying coupled to the cache forever.
+
+```
+cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
+export UV_CACHE_DIR="$HOME/.cache/uv_orbit_iclr"          # NFS: persistent + flock-capable
+export UV_PROJECT_ENVIRONMENT=/fast/zqiu/orbit-iclr/orbit_env
+export UV_LINK_MODE=copy                                   # self-contained env
+export TORCH_CUDA_ARCH_LIST="9.0"                          # add "10.0" if it must run on B200
+source env.sh
+uv sync --extra allinone
+```
+
+`TORCH_CUDA_ARCH_LIST` is called out because `env.sh` auto-detects it from `nvidia-smi` — built
+on an H100 node it silently pins sm_90 only, and the kernels then fail to load on any other
+architecture. Never `uv cache clean` afterwards: under symlink mode that guts every env pointing
+into the cache, which is how this one died.
 
 ### What the GPU here can and cannot hold
 
@@ -265,9 +297,11 @@ CUDA kernels the arms actually run on, and the eval-NLL wiring of G3, whose four
 properties (DP-only reduction, both all-reduces inside the wake/sleep window, eval before
 `offload_train()`, every held-out row scored) are **untested by anything CPU**.
 
-- [ ] Preflight the env per the section above. If `import torch` yields the namespace-package
-      `AttributeError`, stop and fix the env — do not work around it by falling back to the
-      proxy, which would leave the shipping stack unverified indefinitely.
+- [ ] **BLOCKING — rebuild the env** per "Test environment" above; as of 2026-07-29 it is an
+      empty skeleton and every step below fails at import. Confirm with
+      `python -c "import torch; print(torch.__version__, torch.version.cuda)"` printing
+      `2.11.0 13.2`, and `import orbit` succeeding. Do not route around this by falling back to
+      the proxy venv — that would leave the shipping stack unverified indefinitely.
 - [ ] Re-run the full CPU suite under the built env and compare against the proxy's
       **373 passed / 0 failed / 5 collection errors**. A different count is a finding about the
       env, not about the branch; record which side moved before touching code.
