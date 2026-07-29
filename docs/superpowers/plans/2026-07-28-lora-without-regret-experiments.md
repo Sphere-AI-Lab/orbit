@@ -59,6 +59,8 @@ never off absolute loss values.
 Tulu3 and OpenThoughts3 for SFT; MATH and GSM8K for RL.
 
 Companion documents:
+- **How to actually run all of this on reserved nodes (start here):**
+  `docs/superpowers/plans/2026-07-30-lora-without-regret-runbook.md`
 - Design and gate definitions: `docs/superpowers/specs/2026-07-27-lora-without-regret-repro-design.md`
 - Implementation plan (Tasks 1-14, Qwen3-era): `docs/superpowers/plans/2026-07-27-lora-without-regret-repro.md`
 - Gate results so far: `docs/superpowers/plans/2026-07-27-lora-without-regret-gate-log.md`
@@ -200,12 +202,20 @@ This box has exactly one H100, so FullFT needs an allocation that does not exist
   affected rows are filtered for Tulu3 and OpenThoughts3 before either split is written; the
   CLI reports both counts.
 
-- [ ] **P5: RL launcher.** Impl-plan Task 13 was never implemented. It must carry the tied
-  `ROLLOUT_SEED` line itself (the shared library default is deliberately 42/untied), and note
-  that `train_async.py` **refuses** `--eval-nll-data` by design — the async loop overlaps
-  next-rollout generation with current-rollout training, so "weights at the moment of
-  measurement" needs its own design. Either drive `train.py`, or measure validation accuracy
-  instead of NLL.
+- [x] **P5: RL launcher.** Written as
+  `examples/high_precision/run-llama3_1-8b-bf16-rl-math-gsm8k.sh`, contract-tested by
+  `tests/test_lora_regret_rl_launcher.py` (12 tests). It drives `train.py`, not
+  `train_async.py`, and measures validation accuracy rather than NLL — the async loop overlaps
+  next-rollout generation with current-rollout training, so "the policy at the moment of
+  measurement" is undefined, and an RL policy's own output distribution shifts as it trains, so
+  NLL on a fixed reference set stops being comparable across arms. It carries the tied
+  `ROLLOUT_SEED` line itself. Two choices worth knowing before reading its numbers:
+  **`--rm-type boxed_math`**, because `deepscaler` returns 0 unless the response contains
+  `</think>` or `###Response` and a Llama-3.1 *base* policy emits neither; and **KL and entropy
+  coefficients default to 0**, because both interact with the learning rate that E4 sweeps and a
+  KL penalty additionally pulls every arm toward the same reference policy — the between-arm
+  difference C5 is about. Its data prerequisite (`math_gsm8k_train.jsonl`, plus the boxed-answer
+  instruction `boxed_math` needs) is `prepare_data.py --dataset campaign`.
 
 ---
 
@@ -215,6 +225,8 @@ Llama-3.1-8B base, Tulu3, single epoch, constant LR, α=32, LoRA on all four pro
 
 **Arms:** FullFT plus LoRA at **rank ∈ {1, 4, 16, 64, 128, 256, 512}** — the post's stated
 range, and wide enough that rank-1 must depart from the shared curve while rank-512 must not.
+Enumerated by `tools.lora_regret.arms.e1_arms` and driven by
+`python -m tools.lora_regret.sweep --matrix e1`; `--dry-run | wc -l` prints 40.
 
 **LR grid:** five points at 0.3-decade spacing per arm, centered on the post's own prediction
 so a confirmation is a hit rather than a fit — LoRA arms centered at 10x the FullFT center.
@@ -299,7 +311,7 @@ ratio MLP/attention = 51200 / 18432 = 2.778   ⇒   attention r=256  ≡  MLP r=
 Llama-3.1-8B base, **MATH + GSM8K**, policy gradient with importance sampling and GRPO-like
 centering, 32 samples per problem.
 
-- [ ] **E4-1: Build the launcher (P5).**
+- [x] **E4-1: Build the launcher (P5).** Done — see P5 above and §9 of the runbook.
 - [ ] **E4-2: Run 4 arms × 4 LRs = 16 runs.** FullFT, LoRA r256, r16, **r1** — rank 1 is the
       claim's whole point, so it is not the arm to drop under budget pressure.
 - [ ] **E4-3: Report validation-accuracy curves**, and the *width* of the performant LR band

@@ -7,7 +7,20 @@ Tasks 1-14) re-scored against this repo at `feat/dev` (`8476b7f`).
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development.
 > Steps use checkbox (`- [ ]`) syntax.
 
-## Status: G1-G6 closed 2026-07-29
+## Status: G1-G7 closed except the DP>1 check; launchers and runbook landed 2026-07-30
+
+**2026-07-30.** The campaign is now runnable by hand on reserved nodes. Added: the SFT
+launcher dispatches `PEFT_METHOD=lora|oft|none` (it previously passed LoRA flags for OFT
+arms and never passed `--oft-block-size`, so every OFT arm in the 82-arm matrix would have
+failed at argument validation); `sweep.py`'s `LAUNCHER` pointed at
+`examples/sft/run-qwen3-4b-norobots-sft.sh`, which does not exist in this repo, so every arm
+would have failed identically; matrices `e1`/`e2`/`e3` (40/36/20 arms) implement the campaign
+plan's centred grids alongside the original bracketing `sft82`; P5's RL launcher exists; and
+`docs/superpowers/plans/2026-07-30-lora-without-regret-runbook.md` is the operator's guide.
+CPU verification: **439 passed, 0 failed**. The three launcher guards were verified by
+running them (FullFT below 4 GPUs, OFT without a block size, unknown method — exit 2, 1, 2).
+
+
 
 All six gates are applied on `feat/lora-without-regret` (`813def5`). CPU verification ran under
 the **proxy** venv `/lustre/fast/fast/zqiu/clthegoat-cu13/.venv` (Python 3.12.13,
