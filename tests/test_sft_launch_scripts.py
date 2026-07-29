@@ -92,3 +92,107 @@ def test_llama_wrappers_set_dataset_defaults():
         assert f'SFT_DATASET_NAME="{dataset_name}"' in content
         assert f"/{dataset_name}/train.jsonl" in content
         assert "LAUNCHER_NAME=${LAUNCHER_NAME:-run_llama31_8b_bf16_oft_sft_${SFT_DATASET_SAFE}}" in content
+
+
+# ---------------------------------------------------------------------------
+# LoRA-without-regret repro launcher (gate G4).
+#
+# This repo has no scripts/lib/{peft,rollout,train}.sh, so there is no shared
+# lib to hold the campaign's knobs and no shared default that could drift.
+# These assertions therefore pin the knobs where they actually live -- in the
+# launcher -- and pin the two that are load-bearing for the study's numbers:
+# the no-colon LABEL_KEY form and the SEED/ROLLOUT_SEED tie.
+# ---------------------------------------------------------------------------
+
+LORA_REGRET_LAUNCHER = "run-llama3_1-8b-bf16-lora-sft-tulu3.sh"
+
+
+def _lora_regret_launcher_text() -> str:
+    return (SFT_EXAMPLES / LORA_REGRET_LAUNCHER).read_text(encoding="utf-8")
+
+
+def test_lora_regret_launcher_exists_and_is_standalone():
+    assert (SFT_EXAMPLES / LORA_REGRET_LAUNCHER).is_file()
+    content = _lora_regret_launcher_text()
+    assert 'source "${ORBIT_ROOT}/scripts/lib/launcher.sh"' in content
+    assert 'source "${SCRIPT_DIR}/' not in content
+
+
+def test_lora_regret_launcher_is_llama_tulu3_not_qwen_norobots():
+    """The campaign re-anchored from Qwen3-4B/No-Robots to Llama-3.1-8B/Tulu3."""
+    content = _lora_regret_launcher_text()
+    assert "Llama-3.1-8B" in content
+    assert "tulu3" in content
+    assert "no_robots" not in content
+
+
+def test_lora_regret_launcher_pins_the_llama31_chat_template():
+    """Llama-3.1-8B *base* ships no chat_template, so apply_chat_template would
+    raise and MultiTurnLossMaskGenerator could not even be constructed."""
+    content = _lora_regret_launcher_text()
+    assert "orbit/utils/chat_template_utils/templates/llama3.1_pinned.jinja" in content
+
+
+def test_lora_regret_launcher_uses_the_llama3_loss_mask_and_raw_messages():
+    content = _lora_regret_launcher_text()
+    assert "LOSS_MASK_TYPE=${LOSS_MASK_TYPE:-llama3}" in content
+    # sft_rollout hands sample.prompt straight to the mask generator, which
+    # wants the raw messages list -- a rendered chat string would be
+    # re-tokenized as text.
+    assert "APPLY_CHAT_TEMPLATE=${APPLY_CHAT_TEMPLATE:-0}" in content
+    assert "--input-key prompt" in content
+
+
+def test_lora_regret_launcher_label_key_uses_the_no_colon_form():
+    """SFT rows are {"prompt": [...]} with no label field. ${LABEL_KEY:-...}
+    would also fire on a set-but-empty value and re-default it, pointing the
+    loader at a column that does not exist."""
+    content = _lora_regret_launcher_text()
+    assert "LABEL_KEY=${LABEL_KEY-}" in content
+    assert "LABEL_KEY=${LABEL_KEY:-" not in content
+
+
+def test_lora_regret_launcher_ties_rollout_seed_to_seed():
+    """Only here, never in a shared default: --rollout-seed also seeds SGLang
+    generation, so moving its 42 default would silently change other RL runs."""
+    content = _lora_regret_launcher_text()
+    assert "SEED=${SEED:-1234}" in content
+    assert "ROLLOUT_SEED=${ROLLOUT_SEED:-${SEED}}" in content
+    assert "--rollout-seed" in content
+
+
+def test_lora_regret_launcher_uses_kaiming_lora_init():
+    """xavier_normal_ and kaiming_uniform_(a=sqrt(5)) differ by ~2.4x in std,
+    which shifts the measured optimal learning rate."""
+    content = _lora_regret_launcher_text()
+    assert '--lora-a-init-method "${LORA_A_INIT_METHOD:-kaiming}"' in content
+
+
+def test_lora_regret_launcher_wires_the_held_out_nll_eval():
+    content = _lora_regret_launcher_text()
+    assert "--eval-nll-data" in content
+    assert "--eval-nll-interval" in content
+    assert "SGLANG_ARGS=()" in content
+
+
+def test_lora_regret_launcher_still_passes_prompt_data():
+    """train.py calls create_rollout_manager() unconditionally and
+    RolloutManager.__init__ loads the dataset, so a pure-SFT run is not exempt
+    from the loader's contract."""
+    content = _lora_regret_launcher_text()
+    assert "--prompt-data" in content
+    assert "--training-mode sft" in content
+
+
+def test_lora_regret_launcher_keeps_nan_checks_on():
+    """Megatron only offers the negative spelling, and asserts it when
+    full_iteration CUDA graphs are on. A silently-NaN arm would read as a bad
+    learning rate, so this launcher forgoes the CUDA graph instead."""
+    # Comment lines are excluded deliberately: the launcher explains this
+    # choice in prose that necessarily names both flags.
+    code = [
+        line for line in _lora_regret_launcher_text().splitlines()
+        if not line.lstrip().startswith("#")
+    ]
+    assert not any("--no-check-for-nan-in-loss-and-grad" in line for line in code)
+    assert not any("full_iteration" in line for line in code)
