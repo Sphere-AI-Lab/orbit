@@ -7,6 +7,49 @@ Tasks 1-14) re-scored against this repo at `feat/dev` (`8476b7f`).
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development.
 > Steps use checkbox (`- [ ]`) syntax.
 
+## Status: G1-G6 closed 2026-07-29
+
+All six gates are applied on `feat/lora-without-regret`. CPU verification ran under
+`/lustre/fast/fast/zqiu/clthegoat-cu13/.venv` (Python 3.12.13, transformers 4.57.1,
+pytest 9.0.3 — the versions `pyproject.toml` pins); the project's own `.venv` was still
+building. **373 passed, 0 failed**, against 5 collection errors that are pre-existing and
+CUDA-related (verified identical with the branch stashed). No GPU ran.
+
+Both knowingly-red `TestLogFormatPins` tests are now green **without being edited** —
+`git diff` on `test_lora_regret_sweep.py` is empty.
+
+Evidence recorded while applying, not asserted afterwards:
+
+- **G1** — the Qwen3 gate was ported first and *watched fail*: token ids diverged at index
+  12 (id 151667 = `<think>`, "Left contains 4 more items") and the scored-token count was
+  `orbit=16 hf=12`. Both mutation proofs were then re-run **on this repo**:
+  `start = header_pos + len(header_ids) - 1` failed the POSITION assertion at token 64
+  (`'ĊĊ'`), and `end += 1` → `pass` failed it at token 626 (`<|eot_id|>`).
+- **G2** — non-tautology of the LoRA-init gate proven by reverting the `getattr` key to the
+  capital-A spelling, yielding exactly `assert 'xavier' == 'kaiming'`.
+- **G3** — all 11 wiring tests passed on the first attempt; the stop rule (two fix rounds)
+  was never approached.
+- **G5** — measured, and the answer is *do not port*: see the entry below.
+
+Three places where this repo's base forced a decision the plan could not have anticipated:
+
+1. **G4's shared-lib knobs have no shared lib to live in.** This repo's launchers are
+   standalone by contract (`test_sft_launchers_are_standalone`), so `LOSS_TYPE`,
+   `APPLY_CHAT_TEMPLATE`, `LOSS_MASK_TYPE`, `LABEL_KEY`, `SEED` and `ROLLOUT_SEED` are
+   declared in the launcher itself. The "every existing launcher stays byte-identical"
+   requirement is then satisfied trivially rather than by careful restatement: no other
+   launcher is touched. The two knobs that carry real meaning are still pinned by tests —
+   the no-colon `${LABEL_KEY-}` form and the `ROLLOUT_SEED`→`SEED` tie.
+2. **The repro launcher forgoes `--cuda-graph-scope full_iteration`**, unlike every sibling
+   in `examples/sft/`. Megatron asserts `not check_for_nan_in_loss_and_grad` whenever
+   `cuda_graph_impl=local` and `full_iteration` are combined, and offers only the negative
+   `--no-check-for-nan-in-loss-and-grad` — there is no flag to turn the check back on. For
+   an LR sweep that trade is backwards: a silently-NaN arm reads as a bad learning rate.
+3. **`--training-mode sft` replaces the old `ORBIT_DEBUG_MODE=train`/`--debug-train-only`
+   route**, which this repo has as a first-class mode. The plan's warning still applies
+   verbatim, and was re-confirmed: `train.py` calls `create_rollout_manager()`
+   unconditionally, so the launcher still passes `--prompt-data`.
+
 ## What is already here
 
 Ported in `bea2ec8` and `161730c` — every file whose base was byte-identical upstream, or
@@ -53,14 +96,14 @@ All verified present on `feat/dev`. Two need a gap task; one is half-landed.
 Base diverged: upstream added a `response_only` type and gates `get_system_message_length()`
 on it in `__init__`. Both changes must preserve that.
 
-- [ ] Port `tests/fast/rollout/test_sft_loss_mask_parity.py` **first** and watch it fail —
+- [x] Port `tests/fast/rollout/test_sft_loss_mask_parity.py` **first** and watch it fail —
       that failure is upstream bug 1 reproducing here. Record the output.
-- [ ] Replace `gen_multi_turn_loss_mask_qwen3` with the single-tokenization version. Re-run:
+- [x] Replace `gen_multi_turn_loss_mask_qwen3` with the single-tokenization version. Re-run:
       the gate passes. Verify the other three generators are byte-identical to upstream's.
-- [ ] Add `gen_multi_turn_loss_mask_llama3` after it, plus the dispatch branch — placed so it
+- [x] Add `gen_multi_turn_loss_mask_llama3` after it, plus the dispatch branch — placed so it
       cannot shadow the `qwen` branch's nested `distill_qwen` check or the `response_only`
       branch. Bring in `tests/fast/utils/test_llama3_loss_mask.py` (10 tests).
-- [ ] Bring in `tests/fast/rollout/test_sft_loss_mask_parity_llama3.py` and **re-run both
+- [x] Bring in `tests/fast/rollout/test_sft_loss_mask_parity_llama3.py` and **re-run both
       mutation proofs here** — `start = header_pos + len(header_ids) - 1` must fail the
       POSITION assertion, `end += 1` → `pass` must fail the COUNT assertion. A gate carried
       across repos without being seen to fail is not evidence.
@@ -69,17 +112,17 @@ on it in `__init__`. Both changes must preserve that.
 
 Base diverged by 272 lines; re-derive every insertion point, do not port by line number.
 
-- [ ] `--loss-mask-type`: add `"llama3"` to choices. **Default stays `"qwen"`.** Upstream's
+- [x] `--loss-mask-type`: add `"llama3"` to choices. **Default stays `"qwen"`.** Upstream's
       dispatch already handles `response_only` but does not list it in choices — leave that
       alone; it is not ours.
-- [ ] `--lora-a-init-method`, `choices=[xavier, normal, kaiming, zero]`. **`uniform` is not
+- [x] `--lora-a-init-method`, `choices=[xavier, normal, kaiming, zero]`. **`uniform` is not
       legal** — Bridge routes Megatron parallel linears to `ParallelLinearAdapter`, whose
       `_get_init_fn` raises `NotImplementedError` otherwise; PEFT's `kaiming_uniform_(a=√5)`
       is spelled `kaiming` there and its bound is exactly `1/√d_in`, the blog's convention.
       Bring in `test_lora_a_init_method_reaches_adapter.py`; prove non-tautology by reverting
       the getattr key and watching `assert 'xavier' == 'kaiming'`.
-- [ ] The eval-NLL flags (`--eval-nll-data`, `--eval-nll-interval`, `--eval-nll-micro-batch-size`).
-- [ ] `tests/fast/utils/{test_peft_arguments,test_lora_arguments}.py` do not exist upstream —
+- [x] The eval-NLL flags (`--eval-nll-data`, `--eval-nll-interval`, `--eval-nll-micro-batch-size`).
+- [x] `tests/fast/utils/{test_peft_arguments,test_lora_arguments}.py` do not exist upstream —
       create them carrying only our assertions, not the old files wholesale.
 
 ### G3: eval-NLL wiring — the risky one
@@ -100,12 +143,12 @@ Four properties, each learned the hard way, that must survive:
 - Every held-out row is scored, asserted by count — `get_data_iterator` floor-divides, so 100
   rows at global batch 32 silently becomes 96 and the metric starts depending on batch size.
 
-- [ ] Re-derive and apply the five edits (`actor.py`, `actor_group.py`, `train_actor.py`,
+- [x] Re-derive and apply the five edits (`actor.py`, `actor_group.py`, `train_actor.py`,
       `train.py`, `train_async.py`). Keep `train_async.py`'s **refusal** — the async loop
       overlaps generation with training, so "weights at the moment of measurement" is undefined.
-- [ ] Restore `tests/fast/utils/test_eval_nll.py`; all 11 wiring tests must go green.
-- [ ] The two `TestLogFormatPins` tests must go green **without touching them**.
-- [ ] **Stop rule:** if this needs more than two fix rounds, reconsider whether the eval
+- [x] Restore `tests/fast/utils/test_eval_nll.py`; all 11 wiring tests must go green.
+- [x] The two `TestLogFormatPins` tests must go green **without touching them**.
+- [x] **Stop rule:** if this needs more than two fix rounds, reconsider whether the eval
       belongs as a standalone module invoked from the launcher rather than threaded through
       the Ray dispatch chain.
 
@@ -114,37 +157,37 @@ Four properties, each learned the hard way, that must survive:
 Upstream deleted `scripts/lib/{peft,rollout,train}.sh`. Nothing ports. Requirements, as
 requirements:
 
-- [ ] Knobs, each defaulting to an exact restatement of the current argparse default so every
+- [x] Knobs, each defaulting to an exact restatement of the current argparse default so every
       existing launcher's command line stays byte-identical: `LOSS_TYPE`,
       `APPLY_CHAT_TEMPLATE`, `LOSS_MASK_TYPE`, `LABEL_KEY`, `SEED`, `ROLLOUT_SEED`.
-- [ ] `LABEL_KEY` uses the **no-colon** form `${LABEL_KEY-label}`. SFT rows are
+- [x] `LABEL_KEY` uses the **no-colon** form `${LABEL_KEY-label}`. SFT rows are
       `{"prompt": [...]}` with no label field; the colon form re-defaults an intentionally
       empty value back to `"label"` and crashes the loader.
-- [ ] `ROLLOUT_SEED` defaults to 42 in the shared lib — a true restatement, since it also
+- [x] `ROLLOUT_SEED` defaults to 42 in the shared lib — a true restatement, since it also
       seeds SGLang generation and changing it would move other people's RL runs — and is tied
       to `SEED` **in the repro launcher only**, so a seed sweep varies data order as well as init.
-- [ ] The launcher is **Llama-3.1-8B / Tulu3**, not Qwen3/No-Robots: the campaign re-anchored.
+- [x] The launcher is **Llama-3.1-8B / Tulu3**, not Qwen3/No-Robots: the campaign re-anchored.
       It needs `--chat-template-path orbit/utils/chat_template_utils/templates/llama3.1_pinned.jinja`,
       since Llama-3.1 base ships no chat template.
-- [ ] `--debug-train-only` gives the rollout placement group 0 GPUs, but `train.py` still
+- [x] `--debug-train-only` gives the rollout placement group 0 GPUs, but `train.py` still
       constructs `RolloutManager` unconditionally and its `__init__` loads the dataset — a
       pure-SFT launcher is not exempt from the loader's contract.
-- [ ] `tests/fast/scripts/test_orbit_launcher_contract.py` does not exist upstream; if an
+- [x] `tests/fast/scripts/test_orbit_launcher_contract.py` does not exist upstream; if an
       equivalent does, extend its glob to see `examples/sft/`.
 
 ### G5: `latex2sympy` — measure before fixing
 
-- [ ] Against the built env: `python -c "import orbit.rollout.rm_hub.math_alignment"`. If it
+- [x] Against the built env: `python -c "import orbit.rollout.rm_hub.math_alignment"`. If it
       imports, the old repo's `PYTHONPATH` shim is **unnecessary and must not be ported** — it
       would shadow a properly installed package. If it fails, fix it the way upstream's
       dependency set implies. Either way, record the measurement.
 
 ### G6: docs
 
-- [ ] Port the old implementation plan and design spec (they read as modifications because
+- [x] Port the old implementation plan and design spec (they read as modifications because
       they were committed to `orbit-v0` before the branch existed).
-- [ ] Correct every path in the ported docs — they name `orbit-infra/orbit` and the old venvs.
-- [ ] Add a provenance note to the experiments plan: which repo this came from, that the
+- [x] Correct every path in the ported docs — they name `orbit-infra/orbit` and the old venvs.
+- [x] Add a provenance note to the experiments plan: which repo this came from, that the
       histories are unrelated, and which upstream bugs the port fixed on the way in.
 
 ---

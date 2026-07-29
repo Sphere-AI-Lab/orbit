@@ -1,5 +1,40 @@
 # LoRA Without Regret — Experiment Plan
 
+> **Provenance (added 2026-07-29).** This campaign was developed on a different
+> repository — `/lustre/fast/fast/zqiu/orbit-infra/orbit`, branch
+> `feat/lora-without-regret` at `6ad07e5` — and ported here onto
+> `Sphere-AI-Lab/orbit`. **The two histories are unrelated**: `git merge-base`
+> between them returns nothing, so nothing in this repo's log is an ancestor of
+> that work and no ported file can be diffed against "its" upstream by SHA. Every
+> insertion point was re-derived against this repo's source rather than applied by
+> line number; where the bases had diverged, this repo's version won. The port is
+> tracked by `docs/superpowers/plans/2026-07-29-lora-without-regret-gap.md`.
+>
+> Three bugs that were live in the source repo were fixed on the way in, so
+> measurements taken here are **not** comparable to numbers recorded there before
+> the corresponding fix:
+>
+> 1. **Qwen3 loss mask.** `gen_multi_turn_loss_mask_qwen3` rendered each message in
+>    isolation, so Qwen3's template wrapped *every* assistant turn in an empty
+>    `<think>\n\n</think>\n\n` block instead of only the final one — 4 phantom
+>    scored tokens before each non-final reply. Reproduced here before fixing
+>    (scored-token count 16 vs the oracle's 12 on the multi-turn fixture row), then
+>    fixed by tokenizing the whole conversation once.
+> 2. **`--lora-a-init-method` was unreachable.** `lora_utils.py` read the
+>    capital-A key `lora_A_init_method` off `args`, but argparse lands the flag as
+>    lowercase `lora_a_init_method`, so every run silently fell back to Bridge's
+>    `xavier`. Since `xavier_normal_` and `kaiming_uniform_(a=√5)` differ by ~2.4x
+>    in std, any optimal-LR measurement taken before this fix is biased.
+> 3. **The `latex2sympy` `PYTHONPATH` shim is not needed here** and was deliberately
+>    not ported. This repo resolves the import in-tree via
+>    `_ensure_vendored_math_eval_on_path()`; re-adding the old export would point at
+>    a directory that does not exist here and would shadow the vendored copy.
+>
+> Two measurements from the source repo **do not transfer** and are retained only as
+> history: gate G4 (step-0 NLL vs HuggingFace) and the seed-noise σ = 0.000992 were
+> both taken on Qwen3-4B / No Robots. This campaign has re-anchored to
+> Llama-3.1-8B / Tulu3, and both quantities are model- and dataset-specific.
+
 > **Anchor (corrected 2026-07-28):** the target is **the blog's own claims**
 > (`https://thinkingmachines.ai/blog/lora/`), reproduced on **the blog's own setup**.
 > michaelbzhu's GitHub repo is a third-party implementation kept only as a cross-check —

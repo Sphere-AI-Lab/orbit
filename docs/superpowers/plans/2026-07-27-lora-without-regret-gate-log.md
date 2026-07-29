@@ -9,8 +9,7 @@ Run order is cheapest-first: G3 → G4 → seed noise → G1 → G2.
 
 - Command:
   ```
-  cd /lustre/fast/fast/zqiu/orbit-infra/orbit
-  export PYTHONPATH="$PWD/examples/peft-arena/third_party/math_eval:$PWD"
+  cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
   /lustre/fast/fast/zqiu/clthegoat-cu13/.venv/bin/python -m pytest -q -p no:cacheprovider \
       tests/fast/rollout/test_sft_loss_mask_parity.py
   ```
@@ -29,8 +28,7 @@ Run order is cheapest-first: G3 → G4 → seed noise → G1 → G2.
 
 - Command:
   ```
-  cd /lustre/fast/fast/zqiu/orbit-infra/orbit
-  export PYTHONPATH="$PWD/examples/peft-arena/third_party/math_eval:$PWD"
+  cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
   /lustre/fast/fast/zqiu/clthegoat-cu13/.venv/bin/python -m pytest -q -p no:cacheprovider \
       tests/fast/rollout/test_sft_loss_mask_parity_llama3.py \
       tests/fast/rollout/test_sft_loss_mask_parity.py
@@ -113,7 +111,7 @@ Run order is cheapest-first: G3 → G4 → seed noise → G1 → G2.
      coverage plus a whole-stream round-trip instead.
   2. `<|eom_id|>` is **unreachable today**: the template only emits it for a `tool_calls`
      message when `builtin_tools` is present in the Jinja context
-     ([llama3_chat_template.py:108](/lustre/fast/fast/zqiu/orbit-infra/orbit/orbit/utils/llama3_chat_template.py#L108)),
+     ([llama3_chat_template.py:108](/lustre/fast/fast/zqiu/orbit-iclr/orbit/orbit/utils/llama3_chat_template.py#L108)),
      and nothing in `orbit/` passes `builtin_tools` (`tools=` alone still yields `<|eot_id|>`,
      verified against the real implementation). If it ever becomes reachable, this gate is
      structurally incapable of catching a mis-handled `<|eom_id|>` boundary, because the
@@ -228,3 +226,34 @@ published-style number, and G2 gains an apples-to-apples comparison.
 - Note: both sides are bf16-against-bf16 (`sft_lora.py` hardcodes `torch_dtype=bfloat16`;
   the Orbit launcher sets `PRECISION_PROFILE="bf16"`). The G4 precision offset is present on
   both the before and after measurements and largely cancels, but state it in the write-up.
+
+## G5 — `latex2sympy` import on the launcher chain (CPU, port gate)
+
+Added by the port (`docs/superpowers/plans/2026-07-29-lora-without-regret-gap.md`, G5).
+Measured before deciding, because the plan's own instruction was "measure before fixing".
+
+- Command:
+  ```
+  cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
+  /lustre/fast/fast/zqiu/clthegoat-cu13/.venv/bin/python \
+      -c "import orbit.rollout.rm_hub.math_alignment"
+  ```
+- Result: **IMPORT OK**, with no `PYTHONPATH` set.
+- Mechanism: `orbit/rollout/rm_hub/math_alignment.py` still imports `latex2sympy` at module
+  scope, but calls `_ensure_vendored_math_eval_on_path()` first, which
+  `sys.path.insert(0, ...)`s the in-tree vendored copy. The import resolves to
+  `examples/peft_arena/backend/third_party/math_eval/latex2sympy/latex2sympy2.py`.
+- **Decision: the old repo's `PYTHONPATH` shim must NOT be ported.** Two independent
+  reasons. (a) It is unnecessary — the in-tree shim is `__file__`-relative and inserted at
+  position 0, so it works regardless of cwd and wins over any installed package. (b) The
+  directory it names, `examples/peft-arena/third_party/math_eval`, **does not exist in this
+  repo** (here it is `peft_arena`, with a `backend/` level); exporting it would prepend a
+  non-existent path and mislead the next reader.
+- Secondary measurement, since the gap plan flagged it as open: `latex2sympy2-extended==1.11.0`
+  (`pyproject.toml`) does **not** provide this import path. It installs as
+  `latex2sympy2_extended`; a bare `import latex2sympy` still raises `ModuleNotFoundError`.
+  So the vendored copy is load-bearing, not redundant with the declared dependency.
+- Caveat: measured in the pinned-version proxy venv above, not the project's own `.venv`,
+  which was still building. The conclusion is env-independent — the resolution is by
+  `sys.path` order, and the only way an installed package could interfere is by claiming the
+  top-level name `latex2sympy`, which `latex2sympy2-extended` does not.

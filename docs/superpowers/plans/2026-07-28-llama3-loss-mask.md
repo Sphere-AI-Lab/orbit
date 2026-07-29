@@ -56,11 +56,11 @@ introduce that.
 ## Global Constraints
 
 - Working interpreter: `/lustre/fast/fast/zqiu/clthegoat-cu13/.venv/bin/python`
-- Tests need: `export PYTHONPATH="$PWD/examples/peft-arena/third_party/math_eval:$PWD"`
+- Tests need no `PYTHONPATH` shim: `orbit/rollout/rm_hub/math_alignment.py` calls
+  `_ensure_vendored_math_eval_on_path()` before importing `latex2sympy`.
 - Canonical test command:
   ```
-  cd /lustre/fast/fast/zqiu/orbit-infra/orbit
-  export PYTHONPATH="$PWD/examples/peft-arena/third_party/math_eval:$PWD"
+  cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
   /lustre/fast/fast/zqiu/clthegoat-cu13/.venv/bin/python -m pytest <paths> -q -p no:cacheprovider
   ```
 - **Always pass explicit test paths.** `pytest tests/fast/` silently skips
