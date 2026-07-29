@@ -1,0 +1,17 @@
+[project]
+name = "lora-without-regret-draft"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "datasets>=4.2.0",
+    "kernels>=0.10.4",
+    "numpy>=2.2.6",
+    "peft>=0.17.1",
+    "torch>=2.8.0",
+    "tqdm>=4.67.1",
+    "transformers>=4.57.1",
+    "vllm==0.10.2",
+    "wandb>=0.22.2",
+]
