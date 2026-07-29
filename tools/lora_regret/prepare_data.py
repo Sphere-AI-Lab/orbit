@@ -1,12 +1,12 @@
 """Convert the LoRA-without-regret datasets into Orbit's JSONL format.
 
-Two different schemas, because two different consumers:
+There are two output schemas because there are two consumers:
 
-* No Robots feeds the SFT path. `sft_rollout.generate_rollout` reads
-  `sample.prompt` and hands it straight to `MultiTurnLossMaskGenerator.get_loss_mask`,
-  which expects a list of `{"role", "content"}` dicts. So `prompt` stays a list and
-  the launcher must NOT pass `--apply-chat-template`.
-* competition_math feeds the RL path, which uses the standard
+* Tulu3, OpenThoughts3, and No Robots feed SFT. `sft_rollout.generate_rollout`
+  hands `sample.prompt` to `MultiTurnLossMaskGenerator`, so `prompt` stays a
+  list of `{"role", "content"}` messages and launchers must not pass
+  `--apply-chat-template`.
+* MATH, GSM8K, and competition_math feed RL. They use Orbit's standard
   `--input-key prompt --label-key label` contract with a string prompt.
 
 Also builds `tests/fast/fixtures/lora_regret/llama3_sample.jsonl`: a small,
@@ -19,12 +19,54 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 NO_ROBOTS_REPO = "HuggingFaceH4/no_robots"
 COMPETITION_MATH_REPO = "qwedsacf/competition_math"
 TULU3_REPO = "allenai/tulu-3-sft-mixture"
+OPENTHOUGHTS3_REPO = "open-thoughts/OpenThoughts3-1.2M"
+MATH_REPO = "EleutherAI/hendrycks_math"
+GSM8K_REPO = "openai/gsm8k"
+
+TULU3_EXPECTED_ROWS = 939_344
+OPENTHOUGHTS3_TRAIN_ROWS = 10_000
+OPENTHOUGHTS3_TEST_ROWS = 100
+MATH_EXPECTED_TRAIN_ROWS = 7_500
+MATH_EXPECTED_TEST_ROWS = 5_000
+GSM8K_EXPECTED_TRAIN_ROWS = 7_473
+GSM8K_EXPECTED_TEST_ROWS = 1_319
+
+MATH_CONFIGS = (
+    "algebra",
+    "counting_and_probability",
+    "geometry",
+    "intermediate_algebra",
+    "number_theory",
+    "prealgebra",
+    "precalculus",
+)
+
+ASSISTANT_HEADER_LITERAL = "<|start_header_id|>assistant<|end_header_id|>"
+EOT_LITERAL = "<|eot_id|>"
+
+
+@dataclass(frozen=True)
+class PreparedDataset:
+    """Paths and counts emitted by one preparation job."""
+
+    name: str
+    train_path: Path
+    test_path: Path
+    source_rows: int
+    train_rows: int
+    test_rows: int
+    filtered_rows: int = 0
+    assistant_header_rows: int = 0
+    eot_rows: int = 0
 
 
 def _load_split(name: str, split: str) -> list[dict[str, Any]]:
@@ -32,6 +74,20 @@ def _load_split(name: str, split: str) -> list[dict[str, Any]]:
     from datasets import load_dataset
 
     return list(load_dataset(name, split=split))
+
+
+def _load_config_split(name: str, config: str, split: str) -> list[dict[str, Any]]:
+    """Load one configured split. Split out so tests avoid network access."""
+    from datasets import load_dataset
+
+    return list(load_dataset(name, config, split=split))
+
+
+def _load_stream(name: str, split: str) -> Iterable[dict[str, Any]]:
+    """Stream a dataset split without materializing it in memory."""
+    from datasets import load_dataset
+
+    return load_dataset(name, split=split, streaming=True)
 
 
 def _load_streamed_prefix(name: str, split: str, limit: int) -> Iterable[dict[str, Any]]:
@@ -63,6 +119,152 @@ def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> Path:
         for row in rows:
             fh.write(json.dumps(row, ensure_ascii=False) + "\n")
     return path
+
+
+def _write_jsonl_atomic(path: Path, rows: Iterable[dict[str, Any]], expected_rows: int) -> Path:
+    """Atomically write exactly `expected_rows`, or leave the prior file intact."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(path.name + ".tmp")
+    count = 0
+    try:
+        with tmp_path.open("w", encoding="utf-8") as fh:
+            for row in rows:
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                count += 1
+        if count != expected_rows:
+            raise ValueError(f"{path.name}: expected {expected_rows} rows, got {count}")
+        os.replace(tmp_path, path)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    return path
+
+
+def _normalize_messages(
+    messages: Any,
+    *,
+    role_key: str = "role",
+    content_key: str = "content",
+) -> list[dict[str, str]]:
+    if not isinstance(messages, list) or not messages:
+        raise ValueError("conversation must be a non-empty list")
+
+    role_map = {
+        "human": "user",
+        "user": "user",
+        "assistant": "assistant",
+        "gpt": "assistant",
+        "system": "system",
+    }
+    normalized = []
+    for message in messages:
+        if not isinstance(message, dict):
+            raise ValueError("every conversation message must be an object")
+        raw_role = message.get(role_key)
+        content = message.get(content_key)
+        if raw_role not in role_map:
+            raise ValueError(f"unsupported conversation role {raw_role!r}")
+        if not isinstance(content, str):
+            raise ValueError(f"message content must be a string, got {type(content).__name__}")
+        normalized.append({"role": role_map[raw_role], "content": content})
+    return normalized
+
+
+def _llama_control_token_hazards(messages: list[dict[str, str]]) -> tuple[bool, bool]:
+    assistant_contents = [
+        message["content"] for message in messages if message["role"] == "assistant"
+    ]
+    has_assistant_header = any(ASSISTANT_HEADER_LITERAL in content for content in assistant_contents)
+    has_eot = any(EOT_LITERAL in content for content in assistant_contents)
+    return has_assistant_header, has_eot
+
+
+def _prepare_streamed_chat_dataset(
+    *,
+    name: str,
+    rows: Iterable[dict[str, Any]],
+    out_dir: Path,
+    train_filename: str,
+    test_filename: str,
+    convert: Callable[[dict[str, Any]], list[dict[str, str]]],
+    n_test: int,
+    n_train: int | None,
+    expected_source_rows: int | None,
+) -> PreparedDataset:
+    """Partition a chat stream with exact counts and atomic final outputs.
+
+    The first valid rows form the held-out split. This is deterministic for a
+    fixed upstream dataset order and requires only one streaming pass.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    train_path = out_dir / train_filename
+    test_path = out_dir / test_filename
+    train_tmp = train_path.with_name(train_path.name + ".tmp")
+    test_tmp = test_path.with_name(test_path.name + ".tmp")
+
+    source_count = 0
+    train_count = 0
+    test_count = 0
+    filtered_count = 0
+    assistant_header_count = 0
+    eot_count = 0
+
+    try:
+        with train_tmp.open("w", encoding="utf-8") as train_fh, test_tmp.open(
+            "w", encoding="utf-8"
+        ) as test_fh:
+            for row in rows:
+                source_count += 1
+                messages = convert(row)
+                has_assistant_header, has_eot = _llama_control_token_hazards(messages)
+                assistant_header_count += int(has_assistant_header)
+                eot_count += int(has_eot)
+                if has_assistant_header or has_eot:
+                    filtered_count += 1
+                    continue
+
+                record = {"prompt": messages}
+                if test_count < n_test:
+                    test_fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    test_count += 1
+                elif n_train is None or train_count < n_train:
+                    train_fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    train_count += 1
+
+                if n_train is not None and train_count == n_train and test_count == n_test:
+                    break
+
+        if expected_source_rows is not None and source_count != expected_source_rows:
+            raise ValueError(
+                f"{name}: expected {expected_source_rows} source rows, got {source_count}"
+            )
+        if test_count != n_test:
+            raise ValueError(f"{name}: expected {n_test} held-out rows, got {test_count}")
+        expected_train = n_train
+        if expected_train is None:
+            expected_train = source_count - filtered_count - test_count
+        if train_count != expected_train:
+            raise ValueError(f"{name}: expected {expected_train} train rows, got {train_count}")
+
+        os.replace(train_tmp, train_path)
+        os.replace(test_tmp, test_path)
+    except BaseException:
+        train_tmp.unlink(missing_ok=True)
+        test_tmp.unlink(missing_ok=True)
+        raise
+
+    return PreparedDataset(
+        name=name,
+        train_path=train_path,
+        test_path=test_path,
+        source_rows=source_count,
+        train_rows=train_count,
+        test_rows=test_count,
+        filtered_rows=filtered_count,
+        assistant_header_rows=assistant_header_count,
+        eot_rows=eot_count,
+    )
 
 
 def extract_boxed(solution: str) -> str | None:
@@ -154,6 +356,165 @@ def prepare_competition_math(
     train_path = _write_jsonl(out_dir / "competition_math_train.jsonl", _convert(raw[:n_train]))
     val_path = _write_jsonl(out_dir / "competition_math_val.jsonl", _convert(raw[val_start:val_end]))
     return train_path, val_path
+
+
+def prepare_tulu3(
+    out_dir: Path,
+    *,
+    n_test: int = 1_000,
+    expected_source_rows: int = TULU3_EXPECTED_ROWS,
+) -> PreparedDataset:
+    """Stream Tulu3 into full-train and held-out chat JSONL files.
+
+    Rows containing literal Llama control tokens in assistant content are
+    counted and removed. Such rows either raise in the loss-mask generator or
+    silently terminate an assistant span early.
+    """
+    return _prepare_streamed_chat_dataset(
+        name="tulu3",
+        rows=_load_stream(TULU3_REPO, "train"),
+        out_dir=out_dir,
+        train_filename="tulu3_train.jsonl",
+        test_filename="tulu3_test.jsonl",
+        convert=lambda row: _normalize_messages(row["messages"]),
+        n_test=n_test,
+        n_train=None,
+        expected_source_rows=expected_source_rows,
+    )
+
+
+def prepare_openthoughts3(
+    out_dir: Path,
+    *,
+    n_train: int = OPENTHOUGHTS3_TRAIN_ROWS,
+    n_test: int = OPENTHOUGHTS3_TEST_ROWS,
+) -> PreparedDataset:
+    """Stream an exact OpenThoughts3 subset into Orbit chat JSONL files."""
+    return _prepare_streamed_chat_dataset(
+        name="openthoughts3",
+        rows=_load_stream(OPENTHOUGHTS3_REPO, "train"),
+        out_dir=out_dir,
+        train_filename="openthoughts3_train.jsonl",
+        test_filename="openthoughts3_test.jsonl",
+        convert=lambda row: _normalize_messages(
+            row["conversations"], role_key="from", content_key="value"
+        ),
+        n_test=n_test,
+        n_train=n_train,
+        expected_source_rows=None,
+    )
+
+
+def _math_rows(rows: Iterable[dict[str, Any]], *, dataset: str, category: str | None = None):
+    for row in rows:
+        answer = extract_boxed(row["solution"])
+        if answer is None:
+            raise ValueError(f"{dataset}: solution has no complete \\\\boxed{{...}} answer")
+        metadata = {"dataset": dataset}
+        if category is not None:
+            metadata["category"] = category
+        yield {"prompt": row["problem"], "label": answer, "metadata": metadata}
+
+
+def prepare_math(
+    out_dir: Path,
+    *,
+    expected_train_rows: int = MATH_EXPECTED_TRAIN_ROWS,
+    expected_test_rows: int = MATH_EXPECTED_TEST_ROWS,
+) -> PreparedDataset:
+    """Convert every official MATH category and preserve its train/test split."""
+    train_rows = []
+    test_rows = []
+    for config in MATH_CONFIGS:
+        train_rows.extend(
+            _math_rows(
+                _load_config_split(MATH_REPO, config, "train"),
+                dataset="math",
+                category=config,
+            )
+        )
+        test_rows.extend(
+            _math_rows(
+                _load_config_split(MATH_REPO, config, "test"),
+                dataset="math",
+                category=config,
+            )
+        )
+
+    if len(train_rows) != expected_train_rows:
+        raise ValueError(
+            f"math_train.jsonl: expected {expected_train_rows} rows, got {len(train_rows)}"
+        )
+    if len(test_rows) != expected_test_rows:
+        raise ValueError(
+            f"math_test.jsonl: expected {expected_test_rows} rows, got {len(test_rows)}"
+        )
+    out_dir = Path(out_dir)
+    train_path = _write_jsonl_atomic(
+        out_dir / "math_train.jsonl", train_rows, expected_train_rows
+    )
+    test_path = _write_jsonl_atomic(
+        out_dir / "math_test.jsonl", test_rows, expected_test_rows
+    )
+    return PreparedDataset(
+        name="math",
+        train_path=train_path,
+        test_path=test_path,
+        source_rows=len(train_rows) + len(test_rows),
+        train_rows=len(train_rows),
+        test_rows=len(test_rows),
+    )
+
+
+def extract_gsm8k_answer(answer: str) -> str:
+    """Extract the final answer after GSM8K's `####` delimiter."""
+    _, separator, final_answer = answer.rpartition("####")
+    if not separator or not final_answer.strip():
+        raise ValueError("gsm8k: answer has no non-empty `####` final answer")
+    return final_answer.strip()
+
+
+def _gsm8k_rows(rows: Iterable[dict[str, Any]]):
+    for row in rows:
+        yield {
+            "prompt": row["question"],
+            "label": extract_gsm8k_answer(row["answer"]),
+            "metadata": {"dataset": "gsm8k"},
+        }
+
+
+def prepare_gsm8k(
+    out_dir: Path,
+    *,
+    expected_train_rows: int = GSM8K_EXPECTED_TRAIN_ROWS,
+    expected_test_rows: int = GSM8K_EXPECTED_TEST_ROWS,
+) -> PreparedDataset:
+    """Convert GSM8K's official main train/test splits."""
+    train_rows = list(_gsm8k_rows(_load_config_split(GSM8K_REPO, "main", "train")))
+    test_rows = list(_gsm8k_rows(_load_config_split(GSM8K_REPO, "main", "test")))
+    if len(train_rows) != expected_train_rows:
+        raise ValueError(
+            f"gsm8k_train.jsonl: expected {expected_train_rows} rows, got {len(train_rows)}"
+        )
+    if len(test_rows) != expected_test_rows:
+        raise ValueError(
+            f"gsm8k_test.jsonl: expected {expected_test_rows} rows, got {len(test_rows)}"
+        )
+    out_dir = Path(out_dir)
+    train_path = _write_jsonl_atomic(
+        out_dir / "gsm8k_train.jsonl", train_rows, expected_train_rows
+    )
+    test_path = _write_jsonl_atomic(
+        out_dir / "gsm8k_test.jsonl", test_rows, expected_test_rows
+    )
+    return PreparedDataset(
+        name="gsm8k",
+        train_path=train_path,
+        test_path=test_path,
+        source_rows=len(train_rows) + len(test_rows),
+        train_rows=len(train_rows),
+        test_rows=len(test_rows),
+    )
 
 
 def select_llama3_conversations(
@@ -282,7 +643,17 @@ def main() -> None:
     )
     parser.add_argument(
         "--dataset",
-        choices=["no_robots", "competition_math", "both", "llama3_sample"],
+        choices=[
+            "no_robots",
+            "competition_math",
+            "both",
+            "llama3_sample",
+            "tulu3",
+            "openthoughts3",
+            "math",
+            "gsm8k",
+            "campaign",
+        ],
         default="both",
     )
     args = parser.parse_args()
@@ -298,6 +669,22 @@ def main() -> None:
         # e.g. `--out-dir tests/fast/fixtures/lora_regret`, not a training split.
         fixture = prepare_llama3_sample(args.out_dir)
         print(f"llama3_sample: {fixture}")
+    summaries = []
+    if args.dataset in ("tulu3", "campaign"):
+        summaries.append(prepare_tulu3(args.out_dir))
+    if args.dataset in ("openthoughts3", "campaign"):
+        summaries.append(prepare_openthoughts3(args.out_dir))
+    if args.dataset in ("math", "campaign"):
+        summaries.append(prepare_math(args.out_dir))
+    if args.dataset in ("gsm8k", "campaign"):
+        summaries.append(prepare_gsm8k(args.out_dir))
+    for summary in summaries:
+        print(
+            f"{summary.name}: train={summary.train_path} ({summary.train_rows}) "
+            f"test={summary.test_path} ({summary.test_rows}) "
+            f"source={summary.source_rows} filtered={summary.filtered_rows} "
+            f"assistant_header={summary.assistant_header_rows} eot={summary.eot_rows}"
+        )
 
 
 if __name__ == "__main__":

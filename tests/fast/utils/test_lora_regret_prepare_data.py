@@ -10,9 +10,15 @@ from pathlib import Path
 import pytest
 
 from tools.lora_regret.prepare_data import (
+    MATH_CONFIGS,
     extract_boxed,
+    extract_gsm8k_answer,
     prepare_competition_math,
+    prepare_gsm8k,
+    prepare_math,
     prepare_no_robots,
+    prepare_openthoughts3,
+    prepare_tulu3,
     _write_jsonl,
 )
 
@@ -36,8 +42,8 @@ def test_no_robots_emits_messages_list(tmp_path: Path, monkeypatch):
     )
     train, test = prepare_no_robots(tmp_path, n_train=6, n_test=2)
 
-    train_rows = [json.loads(l) for l in train.read_text().splitlines()]
-    test_rows = [json.loads(l) for l in test.read_text().splitlines()]
+    train_rows = [json.loads(line) for line in train.read_text().splitlines()]
+    test_rows = [json.loads(line) for line in test.read_text().splitlines()]
 
     assert len(train_rows) == 6
     assert len(test_rows) == 2
@@ -72,8 +78,8 @@ def test_competition_math_emits_prompt_label(tmp_path: Path, monkeypatch):
     )
     train, val = prepare_competition_math(tmp_path, n_train=5, val_start=5, val_end=8)
 
-    train_rows = [json.loads(l) for l in train.read_text().splitlines()]
-    val_rows = [json.loads(l) for l in val.read_text().splitlines()]
+    train_rows = [json.loads(line) for line in train.read_text().splitlines()]
+    val_rows = [json.loads(line) for line in val.read_text().splitlines()]
 
     assert len(train_rows) == 5
     assert len(val_rows) == 3
@@ -92,7 +98,7 @@ def test_competition_math_skips_rows_without_boxed_answer(tmp_path: Path, monkey
     ]
     monkeypatch.setattr("tools.lora_regret.prepare_data._load_split", lambda name, split: fake)
     train, _ = prepare_competition_math(tmp_path, n_train=4, val_start=4, val_end=4)
-    rows = [json.loads(l) for l in train.read_text().splitlines()]
+    rows = [json.loads(line) for line in train.read_text().splitlines()]
     assert [r["prompt"] for r in rows] == ["good", "good2", "good3"]
     assert rows[2]["label"] == r"\frac{2\sqrt{35}}{35}"
 
@@ -106,3 +112,138 @@ def test_extract_boxed_handles_nested_braces():
 
 def test_extract_boxed_returns_none_when_absent():
     assert extract_boxed("no answer here") is None
+
+
+def _read_jsonl(path: Path):
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def test_tulu3_filters_llama_control_token_hazards_and_asserts_counts(tmp_path: Path, monkeypatch):
+    rows = [
+        {"messages": [{"role": "user", "content": "heldout"}, {"role": "assistant", "content": "ok"}]},
+        {
+            "messages": [
+                {"role": "user", "content": "bad header"},
+                {
+                    "role": "assistant",
+                    "content": "literal <|start_header_id|>assistant<|end_header_id|>",
+                },
+            ]
+        },
+        {
+            "messages": [
+                {"role": "user", "content": "bad eot"},
+                {"role": "assistant", "content": "literal <|eot_id|>"},
+            ]
+        },
+        {"messages": [{"role": "user", "content": "train"}, {"role": "assistant", "content": "ok"}]},
+    ]
+    monkeypatch.setattr("tools.lora_regret.prepare_data._load_stream", lambda name, split: rows)
+
+    result = prepare_tulu3(tmp_path, n_test=1, expected_source_rows=4)
+
+    assert result.source_rows == 4
+    assert result.train_rows == 1
+    assert result.test_rows == 1
+    assert result.filtered_rows == 2
+    assert result.assistant_header_rows == 1
+    assert result.eot_rows == 1
+    assert _read_jsonl(result.test_path)[0]["prompt"][0]["content"] == "heldout"
+    assert _read_jsonl(result.train_path)[0]["prompt"][0]["content"] == "train"
+
+
+def test_tulu3_row_count_drift_leaves_no_partial_outputs(tmp_path: Path, monkeypatch):
+    rows = [{"messages": [{"role": "user", "content": "q"}, {"role": "assistant", "content": "a"}]}]
+    monkeypatch.setattr("tools.lora_regret.prepare_data._load_stream", lambda name, split: rows)
+
+    with pytest.raises(ValueError, match="expected 2 source rows, got 1"):
+        prepare_tulu3(tmp_path, n_test=1, expected_source_rows=2)
+
+    assert not (tmp_path / "tulu3_train.jsonl").exists()
+    assert not (tmp_path / "tulu3_test.jsonl").exists()
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_openthoughts3_normalizes_roles_and_writes_exact_subset(tmp_path: Path, monkeypatch):
+    rows = [
+        {
+            "conversations": [
+                {"from": "human", "value": f"q{i}"},
+                {"from": "gpt", "value": f"a{i}"},
+            ]
+        }
+        for i in range(5)
+    ]
+    monkeypatch.setattr("tools.lora_regret.prepare_data._load_stream", lambda name, split: rows)
+
+    result = prepare_openthoughts3(tmp_path, n_train=3, n_test=1)
+
+    assert (result.source_rows, result.train_rows, result.test_rows) == (4, 3, 1)
+    test_messages = _read_jsonl(result.test_path)[0]["prompt"]
+    train_messages = _read_jsonl(result.train_path)[0]["prompt"]
+    assert test_messages == [
+        {"role": "user", "content": "q0"},
+        {"role": "assistant", "content": "a0"},
+    ]
+    assert train_messages[0]["content"] == "q1"
+
+
+def test_openthoughts3_rejects_unknown_roles(tmp_path: Path, monkeypatch):
+    rows = [{"conversations": [{"from": "tool", "value": "x"}]}]
+    monkeypatch.setattr("tools.lora_regret.prepare_data._load_stream", lambda name, split: rows)
+
+    with pytest.raises(ValueError, match="unsupported conversation role"):
+        prepare_openthoughts3(tmp_path, n_train=0, n_test=1)
+
+
+def test_math_combines_categories_and_preserves_official_splits(tmp_path: Path, monkeypatch):
+    def _fake_load(name, config, split):
+        suffix = "tr" if split == "train" else "te"
+        return [
+            {
+                "problem": f"{config}-{suffix}",
+                "solution": rf"work \boxed{{{len(config)}}}",
+            }
+        ]
+
+    monkeypatch.setattr("tools.lora_regret.prepare_data._load_config_split", _fake_load)
+    result = prepare_math(
+        tmp_path,
+        expected_train_rows=len(MATH_CONFIGS),
+        expected_test_rows=len(MATH_CONFIGS),
+    )
+
+    train_rows = _read_jsonl(result.train_path)
+    test_rows = _read_jsonl(result.test_path)
+    assert len(train_rows) == len(MATH_CONFIGS)
+    assert len(test_rows) == len(MATH_CONFIGS)
+    assert train_rows[0]["metadata"] == {"dataset": "math", "category": MATH_CONFIGS[0]}
+    assert train_rows[0]["prompt"].endswith("-tr")
+    assert test_rows[0]["prompt"].endswith("-te")
+
+
+def test_math_fails_closed_on_missing_boxed_answer(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(
+        "tools.lora_regret.prepare_data._load_config_split",
+        lambda name, config, split: [{"problem": "p", "solution": "no boxed answer"}],
+    )
+    with pytest.raises(ValueError, match="no complete"):
+        prepare_math(tmp_path, expected_train_rows=7, expected_test_rows=7)
+
+
+def test_extract_gsm8k_answer():
+    assert extract_gsm8k_answer("reasoning\n#### 1,234") == "1,234"
+    with pytest.raises(ValueError, match="no non-empty"):
+        extract_gsm8k_answer("reasoning only")
+
+
+def test_gsm8k_preserves_official_splits_and_extracts_labels(tmp_path: Path, monkeypatch):
+    def _fake_load(name, config, split):
+        marker = "train" if split == "train" else "test"
+        return [{"question": marker, "answer": "work\n#### 72"}]
+
+    monkeypatch.setattr("tools.lora_regret.prepare_data._load_config_split", _fake_load)
+    result = prepare_gsm8k(tmp_path, expected_train_rows=1, expected_test_rows=1)
+
+    assert _read_jsonl(result.train_path) == [{"prompt": "train", "label": "72", "metadata": {"dataset": "gsm8k"}}]
+    assert _read_jsonl(result.test_path)[0]["prompt"] == "test"

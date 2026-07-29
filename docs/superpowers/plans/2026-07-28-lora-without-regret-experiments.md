@@ -114,7 +114,7 @@ The post's hyperparameter conventions, quoted and then translated into Orbit kno
 
 ---
 
-## Prerequisites — none of E1-E4 is runnable today
+## Prerequisites — GPU allocation and data materialization still block experiments
 
 Each of these is blocking, and each is a genuine gap rather than a formality.
 
@@ -137,17 +137,14 @@ concurrent LoRA runs on one H100 is measured-safe (three Qwen3-4B runs finished 
 wall clock). So the campaign tiers: **LoRA arms one GPU each, FullFT arms ≥4 GPUs.**
 This box has exactly one H100, so FullFT needs an allocation that does not exist yet.
 
-- [ ] **P1: Llama-3.1-8B *base* is not present.** `/lustre/fast/fast/zqiu/hf_models/` holds
-  `Llama-3.1-8B-Instruct` and quantized variants only. The post uses the **base** model for
-  both the layer study and RL. Download `meta-llama/Llama-3.1-8B` (gated — the HF license
-  must be accepted on the account first) and convert to Megatron with
-  `tools/convert_checkpoints.py`. Note `scripts/conversion/convert_checkpoint.sh` is unusable
-  as shipped on this box: it hardcodes `CUDA_HOME=/is/software/nvidia/cuda-12.9` and calls
-  bare `python`. The working recipe is recorded in the SDD ledger — interpreter
-  `/lustre/fast/fast/zqiu/clthegoat-cu13/.venv/bin/python`, `CUDA_HOME=…/cuda-13.2`.
-  `orbit_plugins/model_args/llama3.1-8B-Instruct.sh` already exists and the base model shares
-  its architecture, so the model-args plugin should need only a checkpoint-path change —
-  verify the config (rope_theta, vocab size, tied embeddings) rather than assume it.
+- [x] **P1: Llama-3.1-8B base weights and Megatron checkpoint.** The base HF checkpoint is
+  present at `/lustre/fast/fast/zqiu/hf_models/Llama-3.1-8B`; the converted torch-dist
+  checkpoint is at
+  `/lustre/fast/fast/zqiu/orbit-infra/orbit/checkpoints/Llama-3.1-8B_torch_dist`.
+  The single-rank G7 smoke loaded both and completed two LoRA optimizer steps. The HF config
+  was checked against `orbit_plugins/model_args/llama3.1-8B-Instruct.sh`: hidden size 4096,
+  FFN 14336, 32 layers / 32 heads / 8 query groups, vocab 128256, rope theta 500000, and
+  untied embeddings all agree. The launcher defaults to the verified paths on this host.
 
 - [x] **P2: There is no Llama-3 loss-mask generator, and it needs its own G3.**
   `--loss-mask-type` accepts exactly `{qwen, qwen3, distill_qwen}` (`orbit/utils/arguments.py`).
@@ -181,11 +178,16 @@ This box has exactly one H100, so FullFT needs an allocation that does not exist
   single FullFT number: run one arm at DP=1 and the same arm at DP=4 and require **identical
   NLL to the printed precision and identical `tokens=`/`samples=` counts**.
 
-- [ ] **P4: Dataset preparation.** `tools/lora_regret/prepare_data.py` handles No Robots and
-  competition_math only. Needed: **Tulu3** (`allenai/tulu-3-sft-mixture`) for E1,
-  **OpenThoughts3** 10,000-example subset for E2, **MATH** and **GSM8K** for E4. Each needs
-  the same treatment No Robots got — conversion to Orbit's `{"prompt": [messages]}` JSONL, a
-  held-out split, and a row-count assertion.
+- [ ] **P4: Dataset preparation and materialization.** The CPU implementation is complete:
+  `tools/lora_regret/prepare_data.py` now streams **Tulu3**
+  (`allenai/tulu-3-sft-mixture`) for E1, streams an exact 10,000-train / 100-held-out
+  **OpenThoughts3** subset for E2, and converts the official **MATH** and **GSM8K** train/test
+  splits for E4. Outputs use Orbit's `{"prompt": [messages]}` SFT schema or
+  `{"prompt": str, "label": str}` RL schema, assert source/output row counts, and are moved
+  into place only after validation. The box remains unchecked until the real datasets are
+  materialized under `/lustre/fast/fast/groups/ei-slm/data/lora_regret`. CPU verification after
+  this implementation: **399 passed, 0 failed** across the full repository suite; the focused
+  data-prep and launcher set is **32 passed**.
   **Pre-sweep requirement carried over from the llama3-loss-mask plan's Self-Review, not yet
   executed (only the 12-row fixture has been checked, not the real Tulu3 split — it is not in
   the local cache):** before Tulu3 feeds any sweep, this prep step must scan every row for
@@ -194,7 +196,9 @@ This box has exactly one H100, so FullFT needs an allocation that does not exist
   sweep run partway through) or a literal `<|eot_id|>` (this silently truncates the scored span
   instead of raising — it would corrupt loss-mask spans without any error). Count both classes
   and filter the affected rows out before the first E1 run, not after a run fails or is
-  discovered to be silently wrong.
+  discovered to be silently wrong. **Implemented:** both literal classes are counted and
+  affected rows are filtered for Tulu3 and OpenThoughts3 before either split is written; the
+  CLI reports both counts.
 
 - [ ] **P5: RL launcher.** Impl-plan Task 13 was never implemented. It must carry the tied
   `ROLLOUT_SEED` line itself (the shared library default is deliberately 42/untied), and note
