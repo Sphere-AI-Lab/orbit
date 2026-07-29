@@ -98,7 +98,11 @@ UV_CACHE_DIR="${UV_CACHE_DIR:-${HOME}/.cache/uv_cu13_orbit}"
 mkdir -p "${UV_CACHE_DIR}"
 
 # --- venv + site-packages (derive python version from the venv once it exists) ---
-ORBIT_VENV="${ORBIT_VENV:-${UV_PROJECT_ENVIRONMENT:-$(pwd)/.venv}}"
+# $VIRTUAL_ENV comes before the ./.venv fallback: the documented runtime flow is
+# `source <venv>/bin/activate && source env.sh`, and without this the already-active
+# venv is ignored in favour of a ./.venv that may not exist — SITE_PACKAGES then
+# points at nothing and deep_ep dies with "No libnccl.so found in .../.venv/...".
+ORBIT_VENV="${ORBIT_VENV:-${UV_PROJECT_ENVIRONMENT:-${VIRTUAL_ENV:-$(pwd)/.venv}}}"
 if [ -x "${ORBIT_VENV}/bin/python" ]; then
     SITE_PACKAGES="$("${ORBIT_VENV}/bin/python" -c 'import site; print(site.getsitepackages()[0])')"
 else

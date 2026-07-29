@@ -37,9 +37,15 @@ check the build actually did what it claims.
 **The 1–2 hour figure is for a cold cache.** `$HOME/.cache/uv_cu13_orbit` already holds built
 wheels for every expensive package at the exact revisions `pyproject.toml` pins — flash-attn
 2.8.3, sgl-kernel 0.3.21, TransformerEngine 2.14.0, DeepEP, DeepGEMM, mamba-ssm,
-causal-conv1d — so a sync against it skips every source build and finishes in minutes. Keeping
-that cache is worth roughly two hours per rebuild; this is the second reason not to park it
-somewhere volatile.
+causal-conv1d — so a sync against it skips every source build. Keeping that cache is worth
+roughly two hours per rebuild; this is the second reason not to park it somewhere volatile.
+
+Measured 2026-07-29 with a warm cache: resolution 617 ms, orbit's own build 7.5 s, and
+**68 minutes wall clock** for the whole sync — 330 packages, 12 GB. Nearly all of that hour is
+`UV_LINK_MODE=copy` writing to Lustre, not compilation; the last ~17 packages alone are the
+large CUDA ones (flash-attn 934 MB, sgl-kernel `flash_ops` 852 MB, `libtransformer_engine`
+535 MB). Symlink mode would cut this to a few minutes at the cost of permanently coupling the
+venv to the cache. Budget the hour; it buys an environment that survives losing the cache.
 
 ## The three decisions that matter
 
@@ -155,20 +161,45 @@ node.
 
 ### 3. Verify
 
-Imports and versions:
+Imports and versions. **Source `env.sh` too, not just the activate script** — `deep_ep` and
+`deep_gemm` call `find_cuda_home()` at import time and assert if it returns `None`, and
+`megatron.core` imports `deep_ep` transitively, so without `CUDA_HOME` all three fail with a
+bare `AssertionError` and no message:
 
 ```bash
 source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
+cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
+export CUDA_HOME=/is/software/nvidia/cuda-13.2   # see note below
+source env.sh
 python - <<'PY'
-import torch, transformers, sglang, megatron.core, orbit
-print("torch     ", torch.__version__, "cuda", torch.version.cuda)
-print("transformers", transformers.__version__)
-print("cuda avail", torch.cuda.is_available(), torch.cuda.device_count())
+import importlib
+for m in ["torch","transformers","sglang","megatron.core","deep_ep","deep_gemm",
+          "transformer_engine","sgl_kernel","flash_attn","orbit"]:
+    mod = importlib.import_module(m)
+    assert getattr(mod, "__file__", None), f"{m} is a NAMESPACE PACKAGE — env is broken"
+    print(f"  {m:20s} {getattr(mod,'__version__','ok')}")
+import torch; print("  cuda", torch.cuda.is_available(), torch.cuda.get_device_name(0))
 PY
 ```
 
-`torch.__version__` printing at all is the real assertion here — it is precisely what a
-dangling-symlink env cannot do.
+The `__file__` assertion is the real check: a dangling-symlink env imports every one of these
+*successfully* as an empty namespace package, so `import` alone proves nothing.
+
+`CUDA_HOME` must be set explicitly in any non-interactive shell. `env.sh` tries `module load
+cuda/13.2` first, but `module` is a no-op when not interactive, and its fallback list
+(`/usr/local/cuda-13.2`, `/usr/local/cuda`, `/opt/cuda-13.2`, `/opt/cuda`) does not include this
+cluster's `/is/software/nvidia/cuda-13.2`. It warns rather than failing silently:
+`env.sh: WARNING — CUDA 13.2 toolkit not found.`
+
+Verified on 2026-07-29 (`i208`, H100 80GB):
+
+```
+  torch                2.11.0+cu130        megatron.core   0.18.0rc0
+  transformers         4.57.1              deep_ep         2.0.0
+  sglang               0.0.0.dev9873+g9c83ae8be            deep_gemm       ok
+  transformer_engine   2.14.0+71bbefbf     sgl_kernel      0.3.21
+  flash_attn           2.8.3               orbit           ok
+```
 
 No broken links, which is the check that would have caught the 2026-07-29 failure at build time:
 
@@ -190,29 +221,40 @@ Each should list **both** `sm_90` and `sm_100`. Anything showing one arch was bu
 variable the package ignored — fix that variable and rebuild just that package with
 `uv sync --extra allinone --reinstall-package <name>`.
 
-CPU test suite (always pass explicit paths — `norecursedirs` matches `tools` and `scripts` at
-any depth, so a bare `pytest tests/fast` silently skips whole directories):
+CPU test suite. Use `tests`, not `tests/fast` — the 18 top-level files under `tests/` are the
+CUDA-touching ones, and they are exactly the tests that distinguish a real environment from a
+version-matched CPU stand-in:
 
 ```bash
 cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
-python -m pytest tests/fast -q -p no:cacheprovider
+python -m pytest tests -q -p no:cacheprovider
 ```
+
+**391 passed, 0 failed, 0 collection errors in 110 s** on 2026-07-29. For comparison, the
+CPU-only proxy venv used while this env was unavailable gave 373 passed with **5 collection
+errors** — those 5 modules import cleanly here, which is where the extra 18 tests come from. A
+run that reports collection errors is a signal the CUDA layer is missing, not a pre-existing
+condition to wave through.
 
 ## Daily use
 
 ```bash
-source /fast/zqiu/orbit-iclr/orbit_env/bin/activate     # tests, linting, imports
-```
-
-Anything that touches CUDA at runtime — a launcher, a GPU smoke test — needs the runtime paths
-too:
-
-```bash
 source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
 cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
+export CUDA_HOME=/is/software/nvidia/cuda-13.2
 source env.sh                                  # CUDA_HOME, LD_LIBRARY_PATH, z3 soname path
-source examples/load_cuda13_2_orbit_env.sh     # cuDNN / flashinfer runtime
+source examples/load_cuda13_2_orbit_env.sh     # cuDNN / flashinfer runtime — launchers only
 ```
+
+`env.sh` is not optional even for "just running the tests": `megatron.core` needs it, via the
+`deep_ep` import chain described above.
+
+**Order matters — activate first, then `env.sh`.** `env.sh` resolves the target venv as
+`ORBIT_VENV` → `UV_PROJECT_ENVIRONMENT` → `VIRTUAL_ENV` → `./.venv`, so activating first lets
+`$VIRTUAL_ENV` point it at the right site-packages. Source it the other way round and it falls
+through to a `./.venv` that does not exist here, `SITE_PACKAGES` points at nothing, and
+`deep_ep` fails with `No libnccl.so found in .../.venv/lib/python3.12/site-packages/nvidia/...`
+— a path that is the tell, since the real env is `orbit_env`, not `.venv`.
 
 `env.sh` prepends the venv's cuDNN to `LD_LIBRARY_PATH` *after* the CUDA module has added the
 system one, so the venv's 9.22 wins. Load them in the other order and TransformerEngine fails at
@@ -231,3 +273,6 @@ import with an undefined symbol in `libcudnn_graph.so.9`.
 | sgl-kernel: "kineto not found" | `CMAKE_PREFIX_PATH` missing torch's cmake config | `source env.sh` before `uv sync` |
 | TE import: undefined symbol in `libcudnn_graph.so.9` | System cuDNN from the CUDA module shadows the venv's 9.22 | Source `env.sh` after loading CUDA; do not prepend system cuDNN afterwards |
 | Kernels load on H100 but not B200 (or vice versa) | Single-arch build from an ignored arch variable | Re-check all four arch variables, rebuild the affected package |
+| Bare `AssertionError` with no message from `deep_ep`, `deep_gemm` or `megatron.core` | `CUDA_HOME` unset; their `find_cuda_home()` asserts | `export CUDA_HOME=...` and `source env.sh` |
+| `No libnccl.so found in .../.venv/...` | `env.sh` sourced before the venv was activated, so it fell back to a non-existent `./.venv` | Activate first, then `source env.sh` |
+| `env.sh: WARNING — CUDA 13.2 toolkit not found` | Non-interactive shell: `module` is a no-op and the fallback list lacks `/is/software/nvidia/` | Set `CUDA_HOME` explicitly |

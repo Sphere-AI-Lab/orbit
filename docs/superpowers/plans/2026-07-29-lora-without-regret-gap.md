@@ -15,15 +15,15 @@ transformers 4.57.1, pytest 9.0.3 — the versions `pyproject.toml` pins), becau
 own env was still building at the time. **373 passed, 0 failed**, against 5 collection errors
 that are pre-existing and CUDA-related (verified identical with the branch stashed). No GPU ran.
 
-**The project env `/fast/zqiu/orbit-iclr/orbit_env` was built (2026-07-29 10:53, torch 2.11.0 /
-CUDA 13.2 / Python 3.12.13) but is currently NOT USABLE** — its uv cache was wiped and every
-package in it is a dangling symlink. See "Test environment" below for the measurement and the
-rebuild. Until that rebuild lands, the proxy venv remains the only interpreter that runs
-anything, and G7 is blocked at step 1.
+**The project env `/fast/zqiu/orbit-iclr/orbit_env` was rebuilt on 2026-07-29 and is verified
+working** — 330 packages, 0 broken symlinks, **391 tests passing with 0 collection errors**,
+H100 + B200 fat binaries. It is now the interpreter for all further work; see
+[INSTALL.md](../../../INSTALL.md). (An earlier build the same day was destroyed by `env.sh`
+defaulting its uv cache to node-local `/tmp`; that default is fixed.)
 
-Every gate below is therefore *verified in the proxy, not in the shipping env*. Nothing above is
-retracted — the proxy pins the same versions `pyproject.toml` does — but a pass under a
-version-matched stand-in is not a pass under the stack the experiments will actually run on.
+G1-G6 were originally verified in the CPU-only proxy venv. G7 below re-ran them here, and the
+count moved *up* — the proxy's 5 collection errors were CUDA-touching modules it could not
+import.
 
 Both knowingly-red `TestLogFormatPins` tests are now green **without being edited** —
 `git diff` on `test_lora_regret_sweep.py` is empty.
@@ -62,17 +62,22 @@ Three places where this repo's base forced a decision the plan could not have an
 
 ## Test environment
 
-`/fast/zqiu/orbit-iclr/orbit_env` is the intended interpreter for everything from here on, CPU
-and GPU alike — **once it is rebuilt.** Read the next subsection before using it.
+`/fast/zqiu/orbit-iclr/orbit_env` is the interpreter for everything from here on, CPU and GPU
+alike. Build and verification procedure: [INSTALL.md](../../../INSTALL.md).
 
 ```
 source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
 cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
-python -m pytest <explicit paths> -q -p no:cacheprovider
+export CUDA_HOME=/is/software/nvidia/cuda-13.2
+source env.sh
+python -m pytest tests -q -p no:cacheprovider
 ```
 
-Still pass **explicit paths**: `norecursedirs` in `pyproject.toml` matches `tools` and `scripts`
-at any depth, so a bare `pytest tests/fast` silently skips whole directories.
+`env.sh` is required even for CPU tests — `megatron.core` imports `deep_ep`, which asserts on an
+unset `CUDA_HOME`. Activate **before** sourcing it, so `$VIRTUAL_ENV` points it at the right
+site-packages. Use `tests`, not `tests/fast`: the top-level files are the CUDA-touching ones.
+Still pass explicit paths — `norecursedirs` matches `tools` and `scripts` at any depth, so a
+bare recursive run silently skips whole directories.
 
 For anything that touches CUDA at runtime — a launcher, a GPU smoke test — also source the
 runtime setup the way `examples/` launchers expect:
@@ -83,9 +88,10 @@ source env.sh                                    # CUDA_HOME, LD_LIBRARY_PATH, z
 source examples/load_cuda13_2_orbit_env.sh       # cudnn / flashinfer runtime
 ```
 
-### The env is currently empty: every symlink is dangling
+### Historical: how the first build died (fixed — kept as the failure signature)
 
-**Measured on `i208`, 2026-07-29.** The venv is a complete directory skeleton with no payload:
+**This was measured on `i208`, 2026-07-29, and is now resolved.** Recognise the symptom, because
+it presents as a working environment. The venv was a complete directory skeleton with no payload:
 **95,789 symlinks, 95,789 of them broken**, against 6,731 real files. It occupies 562 MB where a
 real torch-2.11 CUDA stack is tens of GB. Every dependency "imports" and is empty:
 
@@ -114,28 +120,13 @@ system were checked for the archive IDs the links name (`torch` →
 A full `uv sync` is required, and it will rebuild flash-attn, TransformerEngine, sgl-kernel and
 DeepEP from source.
 
-### Rebuild (the user runs this — hours, source builds)
+### Rebuild, if it is ever needed again
 
-Put the cache on **cluster-home**, which is NFS and both persistent and flock-capable, and keep
-the env on `/fast`. Do not put the cache on `/fast` — that is Lustre, the filesystem `env.sh`
-warns about. `UV_LINK_MODE=copy` costs disk and sync time but makes the env immune to exactly
-this failure; symlink mode against a persistent shared cache would also be node-portable, at the
-cost of staying coupled to the cache forever.
-
-```
-cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
-export UV_CACHE_DIR="$HOME/.cache/uv_orbit_iclr"          # NFS: persistent + flock-capable
-export UV_PROJECT_ENVIRONMENT=/fast/zqiu/orbit-iclr/orbit_env
-export UV_LINK_MODE=copy                                   # self-contained env
-export TORCH_CUDA_ARCH_LIST="9.0"                          # add "10.0" if it must run on B200
-source env.sh
-uv sync --extra allinone
-```
-
-`TORCH_CUDA_ARCH_LIST` is called out because `env.sh` auto-detects it from `nvidia-smi` — built
-on an H100 node it silently pins sm_90 only, and the kernels then fail to load on any other
-architecture. Never `uv cache clean` afterwards: under symlink mode that guts every env pointing
-into the cache, which is how this one died.
+[INSTALL.md](../../../INSTALL.md) is the single source of truth — do not keep a second copy of
+the recipe here, it will diverge. Two things `env.sh` now handles that it did not when this
+happened: the uv cache defaults to `$HOME/.cache/uv_cu13_orbit` rather than `/tmp`, and the arch
+list is a fixed `9.0 10.0` fat binary rather than auto-detected from whichever node ran the
+build. Never `uv cache clean` — under symlink mode that guts every env pointing into the cache.
 
 ### What the GPU here can and cannot hold
 
@@ -297,19 +288,28 @@ CUDA kernels the arms actually run on, and the eval-NLL wiring of G3, whose four
 properties (DP-only reduction, both all-reduces inside the wake/sleep window, eval before
 `offload_train()`, every held-out row scored) are **untested by anything CPU**.
 
-- [ ] **BLOCKING — rebuild the env** per "Test environment" above; as of 2026-07-29 it is an
-      empty skeleton and every step below fails at import. Confirm with
-      `python -c "import torch; print(torch.__version__, torch.version.cuda)"` printing
-      `2.11.0 13.2`, and `import orbit` succeeding. Do not route around this by falling back to
-      the proxy venv — that would leave the shipping stack unverified indefinitely.
-- [ ] Re-run the full CPU suite under the built env and compare against the proxy's
-      **373 passed / 0 failed / 5 collection errors**. A different count is a finding about the
-      env, not about the branch; record which side moved before touching code.
-- [ ] Re-run G5's import check here (expected: unchanged, per the note in G5).
-- [ ] Re-run the two parity gates (`test_sft_loss_mask_parity{,_llama3}.py`) under the built
-      env's `transformers`. These compare Orbit's mask against HF tokenizer output, so a
-      transformers version skew between proxy and built env is exactly the thing that would
-      move them — the reason to re-run rather than assume.
+- [x] **Rebuild the env** — done 2026-07-29, `uv sync EXIT=0`, 330 packages / 12 GB / 68 min
+      against the warm home cache. **0 broken symlinks.** Imports verified with an explicit
+      `__file__ is not None` assertion, since the failure mode being guarded against imports
+      *successfully*: torch 2.11.0+cu130, transformers 4.57.1, megatron.core 0.18.0rc0,
+      transformer_engine 2.14.0+71bbefbf, sgl_kernel 0.3.21, flash_attn 2.8.3, deep_ep 2.0.0,
+      deep_gemm, sglang, orbit. See [INSTALL.md](../../../INSTALL.md).
+- [x] Re-run the full CPU suite under the built env and compare against the proxy's
+      **373 passed / 0 failed / 5 collection errors**. Result: **391 passed, 0 failed, 0
+      collection errors** in 110 s. The count moved on the *env* side, in the expected
+      direction — the proxy's 5 collection errors were the CUDA-touching top-level `tests/`
+      modules, which import cleanly here and contribute the extra 18 tests. No branch code
+      changed.
+- [x] Re-run G5's import check here — unchanged, as predicted.
+- [x] Re-run the two parity gates (`test_sft_loss_mask_parity{,_llama3}.py`) under the built
+      env's `transformers` — both green, included in the 391. transformers is 4.57.1 in both
+      envs, so the skew that would have moved them was not present.
+- [x] Multi-arch confirmed by `cuobjdump --list-elf` on the **installed** binaries (not the
+      cached wheels): flash-attn `sm_80/90/100/120`; `libtransformer_engine`
+      `sm_75/80/89/90/90a/100/100a/103a/120`; both `sgl_kernel/sm90` and `sm100` ops
+      `sm_80/89/90/90a/100a/103a/120a`. A bf16 matmul and a `flash_attn_func` forward both
+      execute on this H100 — so sm_90 is *run*-verified; **sm_100 is cubin-verified only** and
+      stays inferred until something runs on a B200.
 - [ ] **GPU, single rank:** launch the repro launcher
       (`examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh`) for a handful of steps with the
       eval-NLL flags on, and confirm the `train.py` NLL line is emitted in the format the
