@@ -436,6 +436,13 @@ def main() -> int:
     payload["sigma"] = sigma_value
 
     flagged = edge_of_grid(records)
+    # Both views, because an E4 ledger is entirely metric="accuracy" with
+    # test_nll=null -- the NLL view of it is empty, so a guard computed only on
+    # that view has nothing to fire on and c5 would quote a peak sitting on a
+    # grid boundary. E4's grid is 4 points at half-decade spacing, so an edge
+    # peak is likely rather than exceptional, and C5's claim is precisely about
+    # the WIDTH of the performant band, which a grid edge truncates.
+    flagged.update(edge_of_grid(acc_records, metric="accuracy"))
     best = argmins(records)
     grids = lr_grids(records)
     order = lambda kv: (kv[0][0], kv[0][1] or 0, kv[0][2])  # noqa: E731

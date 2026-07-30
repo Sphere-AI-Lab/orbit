@@ -11,7 +11,7 @@ Companions:
 
 ## What is ready, and what you still have to do
 
-Ready and CPU-verified (587 tests, 0 failures, in the built env):
+Ready and CPU-verified (593 tests, 0 failures, in the built env):
 
 | Piece | Where |
 |---|---|

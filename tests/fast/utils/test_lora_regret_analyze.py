@@ -421,3 +421,84 @@ class TestJsonOutput:
         payload = json.loads(out.out)
         assert payload["sigma"] == pytest.approx(0.001, rel=1e-6)
         assert payload["n"] == 3
+
+
+class TestAccuracyEdgeOfGrid:
+    """The edge rule has to reach accuracy ledgers, or C5 is unguarded.
+
+    An E4 ledger is entirely metric="accuracy" with test_nll=null, so the NLL
+    view of it is empty and a guard computed only on that view has nothing to
+    fire on. E4's grid is 4 points at half-decade spacing -- deliberately wide
+    rather than resolved -- so a peak landing on an end is likely, and C5's
+    claim is precisely about the WIDTH of the performant band, which a grid
+    edge truncates.
+    """
+
+    def _acc_rows(self, peak_index, accuracies=None):
+        lrs = [1e-6, 1e-5, 1e-4, 1e-3]
+        scores = accuracies or [
+            0.55 if i == peak_index else 0.30 for i in range(len(lrs))
+        ]
+        return [
+            _record("lora", 1, lr, None, metric="accuracy", accuracy=acc)
+            for lr, acc in zip(lrs, scores, strict=True)
+        ]
+
+    def _run(self, monkeypatch, capsys, *argv):
+        monkeypatch.setattr(sys, "argv", ["analyze.py", *argv])
+        code = main()
+        return code, capsys.readouterr()
+
+    def test_edge_of_grid_reads_accuracy_in_the_right_direction(self, tmp_path):
+        """The peak is the MAXIMUM accuracy, not the minimum.
+
+        Scores are arranged so the two answers disagree: the max sits on the
+        grid edge and the min sits one point in. Reading the wrong direction
+        therefore returns no flag rather than the same flag by luck.
+        """
+        rows = self._acc_rows(0, accuracies=[0.55, 0.44, 0.20, 0.30])
+        records = load_records([_ledger(tmp_path, "e4.jsonl", rows)], metric="accuracy")
+        assert _key("lora", 1) in edge_of_grid(records, metric="accuracy")
+
+    def test_a_peak_on_the_lowest_lr_is_refused(self, tmp_path, monkeypatch, capsys):
+        path = _ledger(tmp_path, "e4.jsonl", self._acc_rows(0))
+        code, out = self._run(
+            monkeypatch, capsys, "c5", "--ledgers", str(path), "--sigma", "0.001"
+        )
+        assert code == 3
+        assert "lora r1 all" in out.err
+
+    def test_a_peak_on_the_highest_lr_is_refused(self, tmp_path, monkeypatch, capsys):
+        path = _ledger(tmp_path, "e4.jsonl", self._acc_rows(3))
+        code, _ = self._run(
+            monkeypatch, capsys, "c5", "--ledgers", str(path), "--sigma", "0.001"
+        )
+        assert code == 3
+
+    def test_an_interior_peak_still_reads(self, tmp_path, monkeypatch, capsys):
+        """The non-tautology case: c5 must still work when the peak is interior."""
+        path = _ledger(tmp_path, "e4.jsonl", self._acc_rows(1))
+        code, out = self._run(
+            monkeypatch, capsys, "c5", "--ledgers", str(path), "--sigma", "0.001"
+        )
+        assert code == 0
+        assert "peak=0.5500" in out.out
+
+    def test_the_override_still_lets_it_through(self, tmp_path, monkeypatch, capsys):
+        path = _ledger(tmp_path, "e4.jsonl", self._acc_rows(0))
+        code, out = self._run(
+            monkeypatch, capsys, "c5", "--ledgers", str(path), "--sigma", "0.001",
+            "--allow-edge-argmin",
+        )
+        assert code == 0
+        assert "peak=0.5500" in out.out
+
+    def test_the_flagged_accuracy_arm_reaches_the_json(self, tmp_path, monkeypatch, capsys):
+        path = _ledger(tmp_path, "e4.jsonl", self._acc_rows(0))
+        code, out = self._run(
+            monkeypatch, capsys, "c5", "--ledgers", str(path), "--sigma", "0.001", "--json"
+        )
+        assert code == 3
+        payload = json.loads(out.out)
+        assert "lora r1 all" in payload["edge_of_grid"]
+        assert "c5" not in payload
