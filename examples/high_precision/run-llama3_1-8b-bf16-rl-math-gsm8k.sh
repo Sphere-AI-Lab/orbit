@@ -219,12 +219,15 @@ TARGET_MODULES_DEFAULT=linear_qkv,linear_proj,linear_fc1,linear_fc2
 PEFT_ARGS=()
 case "${PEFT_METHOD}" in
     none)
-        # See the SFT launcher for the arithmetic: 32 GB + 96 GB/N per GPU for
-        # optimizer state alone, before activations and before the rollout
-        # engine's share.
-        if (( GPUS_PER_NODE < 4 )) && ! is_true "${ALLOW_SMALL_FULLFT:-0}"; then
-            echo "PEFT_METHOD=none (full fine-tuning) needs GPUS_PER_NODE>=4; got ${GPUS_PER_NODE}." >&2
-            echo "Per-GPU optimizer state is 32GB+96GB/N before activations. Set ALLOW_SMALL_FULLFT=1 to override." >&2
+        # See the SFT launcher for the arithmetic: 4*P + 12*P/N GB per GPU for
+        # optimizer state alone (32 GB + 96 GB/N at 8.03B), before activations
+        # and before the rollout engine's share.
+        # tools/lora_regret/models.py computes the floor per model and exports
+        # it; 4 is the Llama-3.1-8B value and stays the default.
+        MIN_GPUS_FULLFT=${MIN_GPUS_FULLFT:-4}
+        if (( GPUS_PER_NODE < MIN_GPUS_FULLFT )) && ! is_true "${ALLOW_SMALL_FULLFT:-0}"; then
+            echo "PEFT_METHOD=none (full fine-tuning) needs GPUS_PER_NODE>=${MIN_GPUS_FULLFT}; got ${GPUS_PER_NODE}." >&2
+            echo "Per-GPU optimizer state is 4*P+12*P/N GB. Set ALLOW_SMALL_FULLFT=1 to override." >&2
             exit 2
         fi
         ;;

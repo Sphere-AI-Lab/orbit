@@ -111,3 +111,35 @@ def test_rl_launcher_measures_accuracy_not_held_out_nll():
     code = _code()
     assert any("--eval-prompt-data" in line for line in code)
     assert not any("--eval-nll-data" in line for line in code)
+
+
+SFT_LAUNCHER = REPO_ROOT / "examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh"
+
+
+def _sft_text() -> str:
+    return SFT_LAUNCHER.read_text(encoding="utf-8")
+
+
+def test_both_launchers_read_the_gpu_floor_from_the_environment():
+    """The hardcoded `< 4` is right for Llama-3.1-8B and wrong for every other
+    model: Qwen3-0.6B FullFT is 9.6 GB and fits on one card. The registry
+    computes the floor; the launcher must not second-guess it."""
+    for text in (_text(), _sft_text()):
+        assert "MIN_GPUS_FULLFT:-4" in text
+        assert "GPUS_PER_NODE < 4" not in text
+        assert 'GPUS_PER_NODE < MIN_GPUS_FULLFT' in text
+
+
+def test_sft_launcher_uses_the_no_colon_form_for_the_chat_template():
+    """Empty must mean "omit the flag" (Qwen3 ships its own template), while
+    unset must mean "use the pinned Llama one". The colon form collapses those
+    two into one, which is the LABEL_KEY bug, one flag over."""
+    text = _sft_text()
+    assert "${CHAT_TEMPLATE_PATH-" in text
+    assert "${CHAT_TEMPLATE_PATH:-" not in text
+
+
+def test_sft_launcher_still_defaults_to_the_pinned_llama_template():
+    """Llama-3.1-8B base ships no chat template at all. A run with none applied
+    would train on raw concatenated text."""
+    assert "llama3.1_pinned.jinja" in _sft_text()

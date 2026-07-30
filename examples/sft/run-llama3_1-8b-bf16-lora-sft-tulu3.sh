@@ -128,11 +128,19 @@ ROLLOUT_ARGS=(
     --n-samples-per-prompt 1
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
     --rollout-seed "${ROLLOUT_SEED}"
-    # Llama-3.1-8B *base* ships no chat_template, so apply_chat_template would
-    # raise and MultiTurnLossMaskGenerator could not even be constructed. This
-    # is consumed by load_tokenizer() in the actor and in the NLL eval.
-    --chat-template-path "${ORBIT_ROOT}/orbit/utils/chat_template_utils/templates/llama3.1_pinned.jinja"
 )
+
+# Llama-3.1-8B *base* ships no chat_template, so apply_chat_template would raise
+# and MultiTurnLossMaskGenerator could not even be constructed -- hence the
+# pinned default below, consumed by load_tokenizer() in the actor and in the NLL
+# eval. Qwen3 base models ship their own template and must not be given Llama's.
+# The no-colon form distinguishes "unset" (use the pinned default) from "set to
+# empty" (the model has its own -- omit the flag); the colon form would collapse
+# both, which is the LABEL_KEY bug one flag over.
+CHAT_TEMPLATE_PATH=${CHAT_TEMPLATE_PATH-${ORBIT_ROOT}/orbit/utils/chat_template_utils/templates/llama3.1_pinned.jinja}
+if [[ -n "${CHAT_TEMPLATE_PATH}" ]]; then
+    ROLLOUT_ARGS+=( --chat-template-path "${CHAT_TEMPLATE_PATH}" )
+fi
 
 if is_true "${APPLY_CHAT_TEMPLATE}"; then
     ROLLOUT_ARGS+=( --apply-chat-template )
@@ -244,9 +252,15 @@ case "${PEFT_METHOD}" in
         # the per-GPU cost is 32 GB + 96 GB/N: N=1 is 128 GB, N=2 is 80 GB with
         # nothing left for activations, N=4 is 56 GB. Fail here rather than OOM
         # twenty minutes into a reserved node.
-        if (( GPUS_PER_NODE < 4 )) && ! is_true "${ALLOW_SMALL_FULLFT:-0}"; then
-            echo "PEFT_METHOD=none (full fine-tuning) needs GPUS_PER_NODE>=4; got ${GPUS_PER_NODE}." >&2
-            echo "Per-GPU optimizer state is 32GB+96GB/N before activations. Set ALLOW_SMALL_FULLFT=1 to override." >&2
+        #
+        # Generalised: per-GPU optimizer state is 4*P + 12*P/N GB for P billion
+        # parameters. tools/lora_regret/models.py computes the floor per model
+        # and exports it; 4 is the Llama-3.1-8B value, kept as the default so a
+        # hand-run arm behaves exactly as before.
+        MIN_GPUS_FULLFT=${MIN_GPUS_FULLFT:-4}
+        if (( GPUS_PER_NODE < MIN_GPUS_FULLFT )) && ! is_true "${ALLOW_SMALL_FULLFT:-0}"; then
+            echo "PEFT_METHOD=none (full fine-tuning) needs GPUS_PER_NODE>=${MIN_GPUS_FULLFT}; got ${GPUS_PER_NODE}." >&2
+            echo "Per-GPU optimizer state is 4*P+12*P/N GB. Set ALLOW_SMALL_FULLFT=1 to override." >&2
             exit 2
         fi
         ;;

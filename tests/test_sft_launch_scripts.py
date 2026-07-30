@@ -235,10 +235,17 @@ def test_lora_regret_launcher_guards_full_finetune_against_too_few_gpus():
     """P0's arithmetic: 32 GB + 96 GB/N per GPU under the distributed optimizer
     (forced on in orbit/backends/megatron_utils/arguments.py), so N=1 is 128 GB
     and N=2 is 80 GB before activations. Failing at launch beats OOMing twenty
-    minutes into a reserved node."""
+    minutes into a reserved node.
+
+    The threshold is now `${MIN_GPUS_FULLFT:-4}` rather than a literal 4:
+    tools/lora_regret/models.py solves 4*P + 12*P/N per model, and 4 is the
+    Llama-3.1-8B answer. What is pinned here is that the guard exists and that
+    its default is still 4 -- a missing default would silently admit an N=1
+    FullFT arm on every model."""
     content = _lora_regret_launcher_text()
     assert "ALLOW_SMALL_FULLFT" in content
-    assert "GPUS_PER_NODE < 4" in content
+    assert "GPUS_PER_NODE < MIN_GPUS_FULLFT" in content
+    assert "MIN_GPUS_FULLFT:-4" in content
 
 
 def test_lora_regret_launcher_keeps_nan_checks_on():
