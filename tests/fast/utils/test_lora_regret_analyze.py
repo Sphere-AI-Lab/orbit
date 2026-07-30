@@ -575,3 +575,136 @@ class TestSigmaDatasetGuard:
             capture_output=True, text=True, cwd=REPO_ROOT,
         )
         assert proc.returncode != 3
+
+
+class TestC8ShortRunMultiplier:
+    ALL = "linear_qkv,linear_proj,linear_fc1,linear_fc2"
+
+    @staticmethod
+    def _rows(path, entries):
+        with path.open("w", encoding="utf-8") as fh:
+            for method, rank, lr, nll in entries:
+                fh.write(json.dumps({
+                    "arm": f"{method}-r{rank}-{lr:g}", "method": method, "rank": rank,
+                    "target_modules": TestC8ShortRunMultiplier.ALL if method == "lora" else "",
+                    "lr": lr, "seed": 0, "metric": "nll", "test_nll": nll,
+                    "dataset": "tulu3", "status": "ok",
+                }) + "\n")
+        return path
+
+    def test_ratio_is_higher_at_one_hundred_steps(self, tmp_path):
+        """Long run: FullFT argmin 2.5e-5, LoRA 2.5e-4 -> 10x.
+        Short run: FullFT argmin 2.5e-5, LoRA 3.75e-4 -> 15x."""
+        from tools.lora_regret.analyze import load_records, short_run_multiplier
+
+        long_path = self._rows(tmp_path / "long.jsonl", [
+            ("full", None, 1.5e-5, 1.10), ("full", None, 2.5e-5, 1.00), ("full", None, 4.0e-5, 1.09),
+            ("lora", 256, 1.5e-4, 1.20), ("lora", 256, 2.5e-4, 1.05), ("lora", 256, 4.0e-4, 1.19),
+        ])
+        short_path = self._rows(tmp_path / "short.jsonl", [
+            ("full", None, 1.5e-5, 1.40), ("full", None, 2.5e-5, 1.30), ("full", None, 4.0e-5, 1.39),
+            ("lora", 256, 2.5e-4, 1.38), ("lora", 256, 3.75e-4, 1.32), ("lora", 256, 5.6e-4, 1.37),
+        ])
+        result = short_run_multiplier(load_records([long_path]), load_records([short_path]))
+        assert result["long_ratio"] == pytest.approx(10.0, rel=1e-6)
+        assert result["short_ratio"] == pytest.approx(15.0, rel=1e-6)
+        assert result["upholds"] is True
+
+    def test_it_does_not_uphold_when_the_short_ratio_is_not_larger(self, tmp_path):
+        from tools.lora_regret.analyze import load_records, short_run_multiplier
+
+        same = [
+            ("full", None, 1.5e-5, 1.10), ("full", None, 2.5e-5, 1.00), ("full", None, 4.0e-5, 1.09),
+            ("lora", 256, 1.5e-4, 1.20), ("lora", 256, 2.5e-4, 1.05), ("lora", 256, 4.0e-4, 1.19),
+        ]
+        long_path = self._rows(tmp_path / "long.jsonl", same)
+        short_path = self._rows(tmp_path / "short.jsonl", same)
+        result = short_run_multiplier(load_records([long_path]), load_records([short_path]))
+        assert result["upholds"] is False
+
+    def test_missing_arm_raises_rather_than_reporting_half_a_ratio(self, tmp_path):
+        from tools.lora_regret.analyze import load_records, short_run_multiplier
+
+        long_path = self._rows(tmp_path / "long.jsonl", [
+            ("full", None, 2.5e-5, 1.00), ("lora", 256, 2.5e-4, 1.05),
+        ])
+        short_path = self._rows(tmp_path / "short.jsonl", [("full", None, 2.5e-5, 1.30)])
+        with pytest.raises(ValueError, match="lora"):
+            short_run_multiplier(load_records([long_path]), load_records([short_path]))
+
+    def test_c8_requires_short_ledgers(self, tmp_path):
+        import subprocess
+        import sys
+
+        proc = subprocess.run(
+            [sys.executable, "-m", "tools.lora_regret.analyze", "c8",
+             "--ledgers", str(tmp_path / "nothing.jsonl"), "--sigma", "0.001"],
+            capture_output=True, text=True, cwd=REPO_ROOT,
+        )
+        assert proc.returncode == 2
+        assert "--short-ledgers" in proc.stderr
+
+
+class TestC4UnderAccuracy:
+    """e4place scores by accuracy, and higher is better. Reading it with the
+    NLL comparator would invert every placement verdict."""
+
+    ATTN = "linear_qkv,linear_proj"
+    MLP = "linear_fc1,linear_fc2"
+
+    @staticmethod
+    def _ledger(tmp_path, rows):
+        path = tmp_path / "e4place.jsonl"
+        with path.open("w", encoding="utf-8") as fh:
+            for modules, rank, lr, acc in rows:
+                fh.write(json.dumps({
+                    "arm": f"lora-r{rank}-{lr:g}", "method": "lora", "rank": rank,
+                    "target_modules": modules, "lr": lr, "seed": 0,
+                    "metric": "accuracy", "accuracy": acc, "test_nll": None,
+                    "dataset": "math_gsm8k", "status": "ok",
+                }) + "\n")
+        return path
+
+    def test_argmin_picks_the_highest_accuracy(self, tmp_path):
+        from tools.lora_regret.analyze import argmins, load_records
+
+        path = self._ledger(tmp_path, [
+            (self.ATTN, 256, 1e-5, 0.31), (self.ATTN, 256, 3.16e-5, 0.44),
+            (self.MLP, 92, 1e-5, 0.38), (self.MLP, 92, 3.16e-5, 0.52),
+        ])
+        records = load_records([path], metric="accuracy")
+        best = argmins(records, metric="accuracy")
+        assert best[("lora", 256, self.ATTN)]["accuracy"] == 0.44
+        assert best[("lora", 92, self.MLP)]["accuracy"] == 0.52
+
+    def test_c4_with_metric_accuracy_exits_zero_and_reports_a_delta(self, tmp_path):
+        import subprocess
+        import sys
+
+        path = self._ledger(tmp_path, [
+            (self.ATTN, 256, 1e-5, 0.31), (self.ATTN, 256, 3.16e-5, 0.44),
+            (self.ATTN, 256, 1e-4, 0.29),
+            (self.MLP, 92, 1e-5, 0.38), (self.MLP, 92, 3.16e-5, 0.52),
+            (self.MLP, 92, 1e-4, 0.35),
+        ])
+        proc = subprocess.run(
+            [sys.executable, "-m", "tools.lora_regret.analyze", "c4",
+             "--ledgers", str(path), "--sigma", "0.01", "--metric", "accuracy", "--json"],
+            capture_output=True, text=True, cwd=REPO_ROOT,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "c4" in json.loads(proc.stdout)
+
+    def test_metric_accuracy_on_an_nll_ledger_finds_no_records(self, tmp_path):
+        """load_records filters on the ledger's own `metric` field, so a
+        mismatched --metric yields nothing rather than silently mixing units."""
+        import subprocess
+        import sys
+
+        path = self._ledger(tmp_path, [(self.ATTN, 256, 1e-5, 0.31)])
+        proc = subprocess.run(
+            [sys.executable, "-m", "tools.lora_regret.analyze", "c4",
+             "--ledgers", str(path), "--sigma", "0.01"],
+            capture_output=True, text=True, cwd=REPO_ROOT,
+        )
+        assert "0 records" in (proc.stdout + proc.stderr) or proc.returncode != 0

@@ -25,6 +25,10 @@ from pathlib import Path
 # exact class of bug the seed-0 filter exists to prevent, one axis over.
 ArmKey = tuple[str, int | None, str]
 
+# The target_modules string every all-modules arm carries. Spelled once so the
+# claim readers and arms.py cannot drift apart on module ordering.
+ALL_MODULES_KEY = "linear_qkv,linear_proj,linear_fc1,linear_fc2"
+
 
 def load_records(
     paths,
@@ -155,6 +159,40 @@ def edge_of_grid(records: list[dict], metric: str = "nll") -> dict[ArmKey, str]:
     return flagged
 
 
+def short_run_multiplier(long_records: list[dict], short_records: list[dict]) -> dict:
+    """C8: the LoRA/FullFT LR ratio at ~100 steps against at the long horizon.
+
+    The post reports ~15x for runs under about 100 steps against ~10x for long
+    ones, attributing the difference to B's zero initialization acting as an
+    implicit warmup that has not finished in 100 steps.
+
+    Both ratios are computed from argmins of the *same* two arms (FullFT and
+    LoRA r256 all-modules), so a missing arm raises rather than producing half
+    a ratio: reporting the long ratio alone, labelled C8, would read as a
+    measurement of a difference that was never measured.
+    """
+    all_modules = ALL_MODULES_KEY
+
+    def ratio(records: list[dict], label: str) -> float:
+        best = argmins(records)
+        lora = best.get(("lora", 256, all_modules))
+        full = best.get(("full", None, ""))
+        missing = [n for n, v in (("lora r256", lora), ("full", full)) if v is None]
+        if missing:
+            raise ValueError(f"{label} ledger is missing {missing}; C8 needs both arms")
+        return lora["lr"] / full["lr"]
+
+    long_ratio = ratio(long_records, "long-run")
+    short_ratio = ratio(short_records, "short-run")
+    return {
+        "long_ratio": long_ratio,
+        "short_ratio": short_ratio,
+        "predicted_long": 9.8,
+        "predicted_short": 15.0,
+        "upholds": short_ratio > long_ratio,
+    }
+
+
 def departure_steps(
     traces: dict[str, list],
     sigma_value: float,
@@ -275,18 +313,27 @@ def _pairwise_deltas(
     sigma_value: float,
     left_label: str,
     right_label: str,
+    metric: str = "nll",
 ) -> dict[str, float]:
-    """Every left-against-right difference, in sigma, labelled by both ranks."""
+    """Every left-against-right difference, in sigma, labelled by both ranks.
+
+    Reads through `score`, not `record["test_nll"]`: an e4place ledger carries
+    metric="accuracy" and test_nll=None, and subtracting two Nones is a
+    TypeError rather than a wrong number -- but only because nothing else in
+    this module would have caught it.
+    """
     return {
         f"{left_label}(r{lk[1]}) - {right_label}(r{rk[1]})": (
-            lr["test_nll"] - rr["test_nll"]
+            score(lr, metric) - score(rr, metric)
         ) / sigma_value
         for lk, lr in left.items()
         for rk, rr in right.items()
     }
 
 
-def placement_deltas(records: list[dict], sigma_value: float) -> dict[str, float]:
+def placement_deltas(
+    records: list[dict], sigma_value: float, metric: str = "nll"
+) -> dict[str, float]:
     """C4: `NLL(attention) - NLL(MLP)` at matched parameters, in sigma.
 
     Pairs each attention-only arm with each MLP-only arm, labelled by both
@@ -297,17 +344,20 @@ def placement_deltas(records: list[dict], sigma_value: float) -> dict[str, float
     """
     from orbit.utils.peft_param_match import ATTENTION_MODULES, MLP_MODULES
 
-    best = argmins(records)
+    best = argmins(records, metric)
     return _pairwise_deltas(
         _targeting(best, ATTENTION_MODULES),
         _targeting(best, MLP_MODULES),
         sigma_value,
         "attn",
         "mlp",
+        metric,
     )
 
 
-def all_modules_deltas(records: list[dict], sigma_value: float) -> dict[str, float]:
+def all_modules_deltas(
+    records: list[dict], sigma_value: float, metric: str = "nll"
+) -> dict[str, float]:
     """C4's second half: `NLL(all-modules) - NLL(MLP-only)`, in sigma.
 
     The post claims two things about placement, and they are separately
@@ -324,13 +374,14 @@ def all_modules_deltas(records: list[dict], sigma_value: float) -> dict[str, flo
     """
     from orbit.utils.peft_param_match import ATTENTION_MODULES, MLP_MODULES
 
-    best = argmins(records)
+    best = argmins(records, metric)
     return _pairwise_deltas(
         _targeting(best, tuple(ATTENTION_MODULES) + tuple(MLP_MODULES)),
         _targeting(best, MLP_MODULES),
         sigma_value,
         "all",
         "mlp",
+        metric,
     )
 
 
@@ -380,9 +431,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=["sigma", "argmins", "c1", "c2", "c3", "c4", "c5", "c6", "all"],
+        choices=["sigma", "argmins", "c1", "c2", "c3", "c4", "c5", "c6", "c8", "all"],
     )
     parser.add_argument("--ledgers", nargs="+", required=True, help="paths or globs")
+    parser.add_argument(
+        "--short-ledgers", nargs="+", default=None,
+        help="e1short ledger paths or globs. Required by c8 and meaningless "
+             "elsewhere: the claim is a comparison of two horizons, and one "
+             "horizon is not a comparison.",
+    )
+    parser.add_argument(
+        "--metric", choices=("nll", "accuracy"), default="nll",
+        help="Which score the ledgers carry. e4/e4place ledgers are 'accuracy' "
+             "and are compared in the opposite direction; load_records filters on "
+             "the ledger's own metric field, so a mismatch yields no records "
+             "rather than mixing nats with fractions.",
+    )
     parser.add_argument(
         "--sigma-ledger",
         nargs="+",
@@ -414,6 +478,11 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.command == "c8" and args.short_ledgers is None:
+        parser.error("c8 requires --short-ledgers; run --matrix e1short first")
+    if args.command != "c8" and args.short_ledgers is not None:
+        parser.error(f"--short-ledgers is only meaningful for c8, not {args.command}")
+
     payload: dict = {"command": args.command}
     # Every human-readable line goes through this, so --json cannot be broken by
     # a stray print: one unparseable line makes the whole document useless, and
@@ -430,7 +499,7 @@ def main() -> int:
     # Both metrics, loaded separately. An E4 ledger carries metric="accuracy"
     # and test_nll=null, so loading only the nll view and bailing on empty would
     # make `analyze c5 --ledgers results/e4_*.jsonl` exit before it ran.
-    records = load_records(args.ledgers)
+    records = load_records(args.ledgers, metric=args.metric)
     acc_records = load_records(args.ledgers, metric="accuracy")
     if not records and not acc_records:
         print("no usable records in the given ledgers", file=sys.stderr)
@@ -477,7 +546,7 @@ def main() -> int:
             )
             return emit(3)
 
-    flagged = edge_of_grid(records)
+    flagged = edge_of_grid(records, metric=args.metric)
     # Both views, because an E4 ledger is entirely metric="accuracy" with
     # test_nll=null -- the NLL view of it is empty, so a guard computed only on
     # that view has nothing to fire on and c5 would quote a peak sitting on a
@@ -485,7 +554,7 @@ def main() -> int:
     # peak is likely rather than exceptional, and C5's claim is precisely about
     # the WIDTH of the performant band, which a grid edge truncates.
     flagged.update(edge_of_grid(acc_records, metric="accuracy"))
-    best = argmins(records)
+    best = argmins(records, metric=args.metric)
     grids = lr_grids(records)
     order = lambda kv: (kv[0][0], kv[0][1] or 0, kv[0][2])  # noqa: E731
     payload["edge_of_grid"] = {_fmt_key(key): why for key, why in flagged.items()}
@@ -498,19 +567,22 @@ def main() -> int:
                 "size": key[1],
                 "target_modules": key[2],
                 "lr": record["lr"],
-                "test_nll": record["test_nll"],
+                # Always spelled `test_nll` so the plot layer reads one key
+                # regardless of metric; under --metric accuracy it carries the
+                # accuracy, which is what the column header then says.
+                "test_nll": score(record, args.metric),
                 "adapter_params": record.get("adapter_params"),
                 "lr_grid": grids[key],
                 "edge_of_grid": key in flagged,
             }
             for key, record in sorted(best.items(), key=order)
         ]
-        say(f"{'arm':22} {'argmin_lr':<11} {'nll':<10} {'adapter_params':>15}  grid")
+        say(f"{'arm':22} {'argmin_lr':<11} {args.metric:<10} {'adapter_params':>15}  grid")
         for key, record in sorted(best.items(), key=order):
             grid = grids[key]
             params = record.get("adapter_params")
             say(
-                f"{_fmt_key(key):22} {record['lr']:<11g} {record['test_nll']:<10.6f} "
+                f"{_fmt_key(key):22} {record['lr']:<11g} {score(record, args.metric):<10.6f} "
                 f"{params if params is not None else '-':>15}  "
                 f"[{grid[0]:g} .. {grid[-1]:g}]"
                 + ("   EDGE OF GRID" if key in flagged else "")
@@ -548,6 +620,16 @@ def main() -> int:
                     "(the tighter claim is < 2x)"
                 )
 
+    if args.command == "c8":
+        result = short_run_multiplier(records, load_records(args.short_ledgers))
+        payload["c8"] = result
+        say(f"\nC8: LR multiplier at ~100 steps = {result['short_ratio']:.2f}")
+        say(f"    at the long horizon          = {result['long_ratio']:.2f}")
+        say(f"    the post predicts ~{result['predicted_short']:g} against "
+            f"~{result['predicted_long']:g}")
+        say(f"    {'UPHOLDS' if result['upholds'] else 'CONTRADICTS'}: the short-run "
+            "multiplier is " + ("larger" if result["upholds"] else "not larger"))
+
     if args.command in ("c1", "all"):
         traces, sources = _load_traces(records, args.log_dir)
         departures = departure_steps(traces, sigma_value)
@@ -583,8 +665,11 @@ def main() -> int:
                 say(f"    batch {str(batch):>4}  {_fmt_key(key):22} {delta:+8.2f} sigma")
 
     if args.command in ("c4", "all"):
-        deltas = placement_deltas(records, sigma_value)
-        extra = all_modules_deltas(records, sigma_value)
+        # The sign is NOT flipped for accuracy. The claim is still
+        # `attention - mlp`, and with accuracy a positive value still means
+        # attention-only is the worse placement, so the wording below holds.
+        deltas = placement_deltas(records, sigma_value, args.metric)
+        extra = all_modules_deltas(records, sigma_value, args.metric)
         if deltas or extra:
             payload["c4"] = {"attn_minus_mlp": deltas, "all_minus_mlp": extra}
             say(f"\nC4: placement at matched parameters (sigma = {sigma_value:.6f})")
