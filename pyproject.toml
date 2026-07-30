@@ -59,6 +59,11 @@ dependencies = [
 fsdp = [
     "torch==2.11.0",
 ]
+# Only tools/lora_regret/plot.py needs this, and it imports lazily so the
+# module stays importable without it.
+plots = [
+    "matplotlib>=3.8",
+]
 # Opt-in one-shot install: `uv sync --extra allinone` (with `source env.sh`) builds
 # the full CUDA-13 kernel + ML layer that CUDA-13-install.md otherwise installs by
 # hand, so no manual layer is needed. Default `uv sync` is unchanged by this extra.
