@@ -244,12 +244,18 @@ def run_arm(
     log_path.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(cmd, env=env, cwd=repo_root)
     nll, accuracy, per_dataset, steps = (None, None, {}, None)
+    trace_points: list = []
+    trace_ok: bool | None = None
+    trace_why: str | None = None
     if log_path.exists():
         log_text = log_path.read_text(encoding="utf-8", errors="replace")
         if metric == "accuracy":
             accuracy, steps, per_dataset = parse_final_accuracy(log_text, RL_EVAL_DATASETS)
         else:
             nll, steps = parse_final_nll(log_text)
+            trace_points = parse_trace(log_text)
+            ok, why = trace_is_consistent(trace_points)
+            trace_ok, trace_why = ok, (why or None)
     measured = accuracy if metric == "accuracy" else nll
 
     append_result(
@@ -270,6 +276,15 @@ def run_arm(
             "adapter_params": None,
             "wandb_run_id": None,
             "steps": steps,
+            # The whole curve, not only its last point: C1's departure step is
+            # unrecoverable from a scalar, and logs/ is gitignored.
+            "nll_trace": [p._asdict() for p in trace_points] or None,
+            "trace_consistent": trace_ok,
+            "trace_warning": trace_why,
+            # C3 groups by batch size; without this the batch an E2 arm ran at
+            # survives only inside its name.
+            "global_batch_size": arm.global_batch_size,
+            "dataset": arm.dataset,
             "status": "ok" if (proc.returncode == 0 and measured is not None) else "failed",
         },
     )

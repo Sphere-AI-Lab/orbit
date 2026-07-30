@@ -870,3 +870,96 @@ class TestE5CliGuards:
         )
         sweep.main()
         assert len(capsys.readouterr().out.strip().splitlines()) == 50
+
+
+class TestRunArmRecordsTheTrace:
+    """The ledger carries the whole curve, not only its last point.
+
+    C1's departure step cannot be recovered from a single final NLL, and the
+    logs it would otherwise have to be re-parsed from are gitignored and
+    routinely cleaned.
+    """
+
+    def _arm(self):
+        return Arm("lora-r16-all-lr0.00025-s0", "lora", 16, None, ALL_MODULES, 2.5e-4, 0)
+
+    def _run(self, tmp_path, monkeypatch, log_body):
+        results = tmp_path / "results.jsonl"
+
+        def fake_run(cmd, env, cwd):
+            Path(env["RUN_LOG"]).parent.mkdir(parents=True, exist_ok=True)
+            Path(env["RUN_LOG"]).write_text(log_body)
+            return subprocess.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(sweep.subprocess, "run", fake_run)
+        run_arm(self._arm(), tmp_path, results, dry_run=False)
+        return json.loads(results.read_text().splitlines()[0])
+
+    def test_the_trace_lands_in_the_record(self, tmp_path, monkeypatch):
+        body = _build_log([
+            _render(0, 0, _PHASE_BEFORE_TRAIN, 1.209810, tokens=308760, samples=1000),
+            _render(0, 0, _PHASE_AFTER_TRAIN, 1.199709, tokens=308760, samples=1000),
+            _render(1, 1, _PHASE_AFTER_TRAIN, 1.194836, tokens=308760, samples=1000),
+        ])
+        record = self._run(tmp_path, monkeypatch, body)
+        assert [p["nll"] for p in record["nll_trace"]] == [1.209810, 1.199709, 1.194836]
+        assert record["trace_consistent"] is True
+        assert record["trace_warning"] is None
+        assert record["test_nll"] == 1.194836
+
+    def test_a_floor_divided_held_out_set_is_flagged_but_still_recorded(
+        self, tmp_path, monkeypatch
+    ):
+        body = _build_log([
+            _render(0, 0, _PHASE_AFTER_TRAIN, 1.2, tokens=308760, samples=1000),
+            _render(1, 1, _PHASE_AFTER_TRAIN, 1.1, tokens=306000, samples=992),
+        ])
+        record = self._run(tmp_path, monkeypatch, body)
+        assert record["trace_consistent"] is False
+        assert "992" in record["trace_warning"]
+        # The arm still succeeded; it is analyze.py that refuses to quote it.
+        assert record["status"] == "ok"
+
+
+class TestRunArmRecordsTheArmsIdentity:
+    """C3 groups by batch size, so the batch size has to be in the record.
+
+    Arm carries global_batch_size and dataset and e2_arms sets both, but the
+    ledger dropped them -- leaving the batch an E2 arm ran at recoverable only
+    by parsing its name.
+    """
+
+    def test_batch_size_and_dataset_reach_the_ledger(self, tmp_path, monkeypatch):
+        results = tmp_path / "results.jsonl"
+
+        def fake_run(cmd, env, cwd):
+            Path(env["RUN_LOG"]).parent.mkdir(parents=True, exist_ok=True)
+            Path(env["RUN_LOG"]).write_text(
+                _build_log([_render(0, 0, _PHASE_AFTER_TRAIN, 1.5)])
+            )
+            return subprocess.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(sweep.subprocess, "run", fake_run)
+        arm = e2_arms()[0]
+        assert arm.global_batch_size is not None, "fixture assumes e2 sets a batch"
+        run_arm(arm, tmp_path, results, dry_run=False)
+        record = json.loads(results.read_text().splitlines()[0])
+        assert record["global_batch_size"] == arm.global_batch_size
+        assert record["dataset"] == arm.dataset
+
+    def test_an_arm_with_neither_records_null(self, tmp_path, monkeypatch):
+        """E1's arms leave the batch at the launcher's default; null says so."""
+        results = tmp_path / "results.jsonl"
+
+        def fake_run(cmd, env, cwd):
+            Path(env["RUN_LOG"]).parent.mkdir(parents=True, exist_ok=True)
+            Path(env["RUN_LOG"]).write_text(
+                _build_log([_render(0, 0, _PHASE_AFTER_TRAIN, 1.5)])
+            )
+            return subprocess.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(sweep.subprocess, "run", fake_run)
+        arm = Arm("lora-r16-all-lr0.00025-s0", "lora", 16, None, ALL_MODULES, 2.5e-4, 0)
+        run_arm(arm, tmp_path, results, dry_run=False)
+        record = json.loads(results.read_text().splitlines()[0])
+        assert record["global_batch_size"] is None
