@@ -2041,7 +2041,7 @@ export DATA_DIR=/lustre/fast/fast/groups/ei-slm/data/lora_regret
 python -m tools.lora_regret.preflight --stage e1ot
 ```
 Expected: exit 0, and the matrix lines now include `matrix:e1ot 40 arms`,
-`matrix:e1short 14 arms`, `matrix:e4place 12 arms`.
+`matrix:e1short 14 arms`, `matrix:e4place 8 arms`.
 
 - [ ] **Step 5: Update the runbook**
 
@@ -2181,7 +2181,7 @@ distinguished by the comparator, not the path.
 
 No GPU arm is launched. The three audit blockers (P3, the `e4` RL smoke, the
 `e5scout` OFT smoke) are operator work and are unchanged by this plan; the RL
-launcher having never run is why `e4place`'s 12 arms should not be scheduled
+launcher having never run is why `e4place`'s 8 arms should not be scheduled
 before the `e4` smoke produces a real accuracy line.
 
 Phases 2-4 (`e6` scaling law, `e7` DeepMath, `e3moe` MoE) each get their own
