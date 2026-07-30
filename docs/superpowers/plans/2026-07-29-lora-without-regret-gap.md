@@ -17,8 +17,21 @@ failed at argument validation); `sweep.py`'s `LAUNCHER` pointed at
 would have failed identically; matrices `e1`/`e2`/`e3` (40/36/20 arms) implement the campaign
 plan's centred grids alongside the original bracketing `sft82`; P5's RL launcher exists; and
 `docs/superpowers/plans/2026-07-30-lora-without-regret-runbook.md` is the operator's guide.
-CPU verification: **439 passed, 0 failed**. The three launcher guards were verified by
+CPU verification: **502 passed, 0 failed**. The three launcher guards were verified by
 running them (FullFT below 4 GPUs, OFT without a block size, unknown method — exit 2, 1, 2).
+
+**P4 is closed (2026-07-30)** — nine splits, 3.4 GB, under
+`/lustre/fast/fast/groups/ei-slm/data/lora_regret`, each re-read and checked for row count,
+schema, control-token literals and empty labels. Four defects surfaced only against real
+data: the Tulu3 row-count constant was off by one against the hub (939,344 vs 939,343, which
+fails only after streaming 2.9 GB); `extract_boxed` mishandled TeX's brace-less `\boxed 9`
+and returned `""` for an empty `\boxed{}`; and `prepare_rl_mix` read its inputs with
+`str.splitlines()`, which splits on the two U+2028 that really are in `gsm8k_train.jsonl`.
+The Tulu3 control-token scan came back **clean, 0 of 939,343**, closing a pre-sweep
+requirement that had only ever been checked against a 12-row fixture.
+
+**§3 of the runbook passes on that data (2026-07-30).** The remaining GPU gap is unchanged
+and is the DP>1 reduction below.
 
 
 
@@ -334,6 +347,16 @@ properties (DP-only reduction, both all-reduces inside the wake/sleep window, ev
       `/lustre/fast/fast/zqiu/tmp/smoke_ckpt/iter_0000001/adapter/adapter_megatron_tp0_pp0.pt`.
       Evidence: `logs/smoke_llama31_lora_20260729_214422.log`. This closes the single-rank
       reachability check only; it does not close the DP reduction below.
+      **Re-run 2026-07-30 against the real data** once P4 was materialized
+      (`logs/smoke_lora_r256_20260730_150952.log`, exit 0): the same two steps but scoring
+      the true 1,000-row Tulu3 held-out split instead of a 100-row fixture — NLL 1.209810
+      (before) → 1.199709 (step 0) → 1.194836 (step 1), with `tokens=308760 samples=1000`
+      identical at all three, so the no-floor-division coverage guarantee holds at the real
+      size. Two things unit tests could not check were checked here: `sweep.parse_final_nll`
+      returns `(1.194836, 1)` from the actual log rather than from lines synthesized off
+      `train.py`'s format string, and the written `adapter_config.json` carries
+      `r=256 alpha=32 dropout=0.0` over all seven projections — proof the launcher's LoRA
+      flags reach the adapter, which G2 could only assert in-process.
 - [ ] **GPU, still open:** the DP>1 reduction (P3) cannot be exercised on one card. Keep it
       listed as blocked rather than marking G3 GPU-verified on a single-rank run — the whole
       point of that code path is the DP-group reduction, which DP=1 makes a no-op.

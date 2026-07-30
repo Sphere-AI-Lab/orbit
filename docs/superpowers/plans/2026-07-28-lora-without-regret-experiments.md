@@ -370,10 +370,18 @@ backwards: it is worst at *small* rank (0.750 at rank 1, 1.000 at rank 512).
 | E4 | 16 | LoRA 1x, FullFT ≥4x, plus rollout GPUs |
 | **Total** | **~115** | |
 
-I am not putting hours on this. Every timing number we have is from Qwen3-4B LoRA on a
-6400-row epoch — 8.7 min per arm at three-way concurrency — and none of it survives the move
-to an 8B model, a dataset two orders of magnitude larger, multi-GPU FullFT, or RL rollouts.
-The first honest estimate comes from E1-0, which is also the first thing to run.
+**Measured on one H100 by the 2026-07-30 smoke** (Llama-3.1-8B, LoRA r256, real Tulu3):
+steady-state training **8.5 s/step** at 104.7 TFLOPs / 2,327 tok/s, a **47.4 s** first step
+(kernel autotuning — a per-arm cost, not per-step), **67.7 s** per held-out eval over the
+1,000-row split, and ~285 s of Ray startup plus model build. A 2,000-rollout LoRA arm is
+therefore ≈ **4.7 h training + 22 min eval** at `EVAL_NLL_INTERVAL=20`.
+
+Two caveats on extrapolating that. It is a **LoRA** number: FullFT arms carry optimizer
+state and gradients the LoRA arms do not, and none has ever run here. And it is a **single-arm**
+number: the Qwen3-era figure of 8.7 min per arm at three-way concurrency does not transfer,
+because Llama-3.1-8B holds 16 GB of frozen weights per process — three concurrent processes
+spend 48 GB of an 80 GB card before activations, and this smoke peaked at 50.6 GB on its own.
+Run two concurrently and watch `nvidia-smi` before assuming three fit.
 
 ## What carries over from the Qwen3 work
 

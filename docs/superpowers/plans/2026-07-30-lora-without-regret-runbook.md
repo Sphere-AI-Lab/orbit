@@ -22,14 +22,16 @@ Ready and CPU-verified (502 tests, 0 failures, in the built env):
 | Data preparation for all five datasets | `tools/lora_regret/prepare_data.py` |
 | Held-out token-weighted NLL eval | `orbit/utils/eval_nll.py`, wired in `train.py` |
 
-The data is **already materialized** (§2, done 2026-07-30). Yours to do, in this
-order: **smoke one arm** (§3), **close P3** (§4, needs DP≥2 and gates every FullFT
-number), then run experiments in the order §5 lays out.
+The data is **materialized** (§2, done 2026-07-30) and the **smoke passes on it**
+(§3, done 2026-07-30). Yours to do, in this order: **close P3** (§4, needs DP≥2 and
+gates every FullFT number), then run experiments in the order §5 lays out.
 
-Single-rank reachability is already proven on an H100 — two LoRA-r256 optimizer
-steps, all 100 held-out rows scored, the pinned NLL line emitted three times
-(`logs/smoke_llama31_lora_20260729_214422.log`). What has **never** executed is
-the DP>1 reduction and anything multi-GPU. Treat §4 as mandatory.
+Single-rank reachability is proven twice: on a 100-row fixture (2026-07-29) and on
+the **real 1,000-row Tulu3 held-out split** (2026-07-30,
+`logs/smoke_lora_r256_20260730_150952.log`) — two LoRA-r256 optimizer steps, NLL
+1.209810 → 1.199709 → 1.194836, `tokens=308760 samples=1000` identical at all three
+measurements, adapter written with `r=256 alpha=32`, exit 0. What has **never**
+executed is the DP>1 reduction and anything multi-GPU. Treat §4 as mandatory.
 
 ## 1. Environment
 
@@ -145,11 +147,43 @@ Then confirm the eval line the sweep parses actually appears:
 grep -c 'eval/test_nll' logs/smoke_lora_r256_*.log     # expect >= 2
 ```
 
-The line looks like
-`eval/test_nll rollout_id=0 step=0 phase=before_train nll=1.968950 sample_mean=... tokens=17656 samples=100`.
+**Result, 2026-07-30** (`logs/smoke_lora_r256_20260730_150952.log`, exit 0):
+
+```
+before_train  step 0   nll=1.209810  sample_mean=1.478078  tokens=308760  samples=1000
+after_train   step 0   nll=1.199709  sample_mean=1.455645  tokens=308760  samples=1000
+after_train   step 1   nll=1.194836  sample_mean=1.421378  tokens=308760  samples=1000
+progress rollout=1/1 completed=2/2 remaining=0   elapsed=00:06:47
+shutdown: dispose rollout done
+```
+
 `tokens=` and `samples=` must be **identical at every measurement** — a drifting
-`samples=` means the held-out set is being floor-divided by the batch size, which
-would make the metric depend on batch size and silently break E2.
+`samples=` means the held-out set is being floor-divided by the batch size (1,000
+rows at global batch 32 would silently become 992), which makes the metric depend
+on batch size and breaks E2 specifically. They were identical here, on the real
+1,000-row split rather than a fixture.
+
+Two further checks worth repeating after any change to the eval path or the
+launcher's PEFT block, both of which unit tests cannot make:
+
+```bash
+# the sweep's parser reads the real log, not just synthesized lines
+python -c "
+from tools.lora_regret.sweep import parse_final_nll
+print(parse_final_nll(open('logs/smoke_lora_r256_20260730_150952.log', errors='replace').read()))"
+# -> (1.194836, 1): the highest-step after_train row
+
+# the LoRA flags actually reached the adapter
+python -c "
+import json; print(json.load(open('<SAVE_DIR>/iter_0000001/adapter/adapter_config.json')))"
+# -> peft_type=LORA r=256 lora_alpha=32 lora_dropout=0.0, all seven projections
+```
+
+**A quiet log is not a stalled run.** The launcher tees into `RUN_LOG` through a
+buffer, so `grep` on it can lag the run by minutes — during this smoke the
+`before_train` line existed at 15:16:12 but was not yet greppable at 15:19. Use
+`tail -f`, or check `nvidia-smi` and the process, before concluding anything is
+wedged.
 
 ## 4. Close P3 before trusting any FullFT number (needs DP ≥ 2, ideally 4)
 
@@ -185,7 +219,7 @@ bureaucratic: each entry names what breaks if you skip it.
 | # | Stage | Runs | GPUs | Gated by | Produces |
 |---|---|---|---|---|---|
 | §2 | ~~Materialize data~~ **done** | — | none | — | the nine splits every arm reads |
-| §3 | Smoke one arm | 1 | 1 | data | proof the eval line the parser needs is reached |
+| §3 | ~~Smoke one arm~~ **done** | 1 | 1 | data | proof the eval line the parser needs is reached |
 | §4 | P3: DP=1 vs DP=4 | 2 | 1 and 4 | smoke | permission to trust any FullFT number |
 | §7 | **E1-0: σ** | 3 | 1 | data | the unit every later difference is quoted in |
 | §8 | E1-1: LR sweeps | 40 | 1 / ≥4 | σ, P3 | argmins → **C2** |
@@ -196,8 +230,8 @@ bureaucratic: each entry names what breaks if you skip it.
 | §12 | E5-1: OFT scout | 5 | 1 | σ | the OFT learning-rate decade |
 | §12 | E5-2: OFT refine | 50 | 1 | the scout's argmin | OFT-vs-LoRA at matched params → **C6** |
 
-**178 runs** (3 + 40 + 8 + 36 + 20 + 16 + 5 + 50), plus 3 preflight — one smoke and
-two for P3. One of E1-0's three seeds repeats an E1-1 arm; §7 says how to avoid
+**178 runs** (3 + 40 + 8 + 36 + 20 + 16 + 5 + 50), plus 3 preflight — one smoke
+(done) and two for P3. One of E1-0's three seeds repeats an E1-1 arm; §7 says how to avoid
 that if you care about the one run.
 
 Three orderings inside that are load-bearing rather than conventional:
@@ -242,6 +276,21 @@ and this is the recommended split:
 
 Set the eval interval to roughly 1% of the run so the NLL trace has ~100 points
 without dominating wall clock: `EVAL_NLL_INTERVAL=$((NUM_ROLLOUT / 100))`.
+
+**Measured on this H100 by the §3 smoke, so the estimate is no longer a guess:**
+
+| Quantity | Measured |
+|---|---|
+| training, steady state | **8.5 s/step** (104.7 TFLOPs, 2,327 tok/s) |
+| training, first step | 47.4 s — kernel autotuning, a per-*arm* cost, not per-step |
+| held-out eval, 1,000 Tulu3 rows | **67.7 s** |
+| model build + Ray startup | ~85 s + ~200 s |
+
+That makes a 2,000-rollout E1 arm ≈ **4.7 h of training + 22 min of eval** at
+`EVAL_NLL_INTERVAL=20`. The same arm at interval 1 would spend ~37 h evaluating —
+the smoke ran at `wait_time_ratio=0.89`, i.e. 89% of its wall clock in the eval,
+which is right for a smoke and ruinous for an arm. This is the single cheapest
+knob to get wrong.
 
 Batch sizes per dataset, for reference: OpenThoughts3's 10,000 rows are 312
 steps at batch 32 and 19 at batch 512 — E2 is cheap, E1/E3 are not.
