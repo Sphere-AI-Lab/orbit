@@ -284,3 +284,140 @@ class TestPlacementDeltas:
     def test_no_mlp_arm_yields_no_comparison(self, tmp_path):
         rows = [_record("lora", 256, 2.5e-4, 1.500, modules=ATTN)]
         assert placement_deltas(load_records([_ledger(tmp_path, "e3.jsonl", rows)]), 0.001) == {}
+
+
+import sys
+
+from tools.lora_regret.analyze import all_modules_deltas, main
+
+
+class TestAllModulesDeltas:
+    """C4's second half: all-modules must not beat MLP-only by more than 2 sigma.
+
+    The post claims attention-only underperforms MLP-only *and* that all-modules
+    adds nothing on top of MLP-only. `placement_deltas` answers the first; without
+    this the second half of E3-2 has arms in the matrix and no reader.
+    """
+
+    def test_pairs_all_modules_against_mlp(self, tmp_path):
+        rows = [
+            _record("lora", 256, 2.5e-4, 1.498, modules=ALL),
+            _record("lora", 92, 2.5e-4, 1.500, modules="linear_fc1,linear_fc2"),
+        ]
+        deltas = all_modules_deltas(load_records([_ledger(tmp_path, "e3.jsonl", rows)]), 0.001)
+        assert deltas["all(r256) - mlp(r92)"] == pytest.approx(-2.0, abs=1e-6)
+
+    def test_an_attention_only_arm_is_not_mistaken_for_all_modules(self, tmp_path):
+        """The non-tautology case: E3 runs attn r256 and all r256 in one matrix.
+
+        Keying on rank alone, or on "targets linear_qkv", would pick the
+        attention arm up here and report it as the all-modules comparison.
+        """
+        rows = [
+            _record("lora", 256, 2.5e-4, 1.400, modules=ATTN),
+            _record("lora", 92, 2.5e-4, 1.500, modules="linear_fc1,linear_fc2"),
+        ]
+        assert all_modules_deltas(load_records([_ledger(tmp_path, "e3.jsonl", rows)]), 0.001) == {}
+
+    def test_no_mlp_arm_yields_no_comparison(self, tmp_path):
+        rows = [_record("lora", 256, 2.5e-4, 1.500, modules=ALL)]
+        assert all_modules_deltas(load_records([_ledger(tmp_path, "e3.jsonl", rows)]), 0.001) == {}
+
+
+class TestJsonOutput:
+    """--json is the campaign's handoff to figures, so it must be machine-read.
+
+    One JSON document on stdout and nothing else: a single stray human-readable
+    line makes the whole output unparseable, which is a failure that only shows
+    up in the consumer.
+    """
+
+    def _interior(self, tmp_path):
+        """A ledger whose every argmin is one grid point in, so nothing is flagged."""
+        rows = [_record("lora", 256, lr, nll)
+                for lr, nll in [(1e-4, 1.60), (2.5e-4, 1.50), (6.3e-4, 1.58)]]
+        rows += [_record("full", None, lr, nll)
+                 for lr, nll in [(1e-5, 1.52), (2.5e-5, 1.47), (6.3e-5, 1.51)]]
+        return _ledger(tmp_path, "e1.jsonl", rows)
+
+    def _run(self, monkeypatch, capsys, *argv):
+        monkeypatch.setattr(sys, "argv", ["analyze.py", *argv])
+        code = main()
+        return code, capsys.readouterr()
+
+    def test_stdout_is_one_parseable_json_document(self, tmp_path, monkeypatch, capsys):
+        path = self._interior(tmp_path)
+        code, out = self._run(
+            monkeypatch, capsys, "argmins", "--ledgers", str(path), "--sigma", "0.001", "--json"
+        )
+        assert code == 0
+        payload = json.loads(out.out)  # raises if a human-readable line leaked in
+        assert payload["command"] == "argmins"
+
+    def test_the_argmins_reach_the_json(self, tmp_path, monkeypatch, capsys):
+        path = self._interior(tmp_path)
+        _, out = self._run(
+            monkeypatch, capsys, "argmins", "--ledgers", str(path), "--sigma", "0.001", "--json"
+        )
+        by_arm = {row["arm"]: row for row in json.loads(out.out)["argmins"]}
+        assert by_arm["lora r256 all"]["lr"] == 2.5e-4
+        assert by_arm["full"]["test_nll"] == 1.47
+        assert by_arm["lora r256 all"]["lr_grid"] == [1e-4, 2.5e-4, 6.3e-4]
+
+    def test_without_json_stdout_is_not_json(self, tmp_path, monkeypatch, capsys):
+        """The non-tautology case: the human tables must survive unchanged."""
+        path = self._interior(tmp_path)
+        _, out = self._run(
+            monkeypatch, capsys, "argmins", "--ledgers", str(path), "--sigma", "0.001"
+        )
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(out.out)
+        assert "argmin_lr" in out.out
+
+    def test_an_edge_of_grid_argmin_still_exits_three_and_names_the_arm(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Fail-closed does not depend on the output format.
+
+        The payload is still emitted, so a consumer sees *why* it was refused
+        rather than only a bare exit code.
+        """
+        rows = [_record("lora", 256, lr, nll)
+                for lr, nll in [(1e-4, 1.40), (2.5e-4, 1.50), (6.3e-4, 1.58)]]
+        rows += [_record("full", None, lr, nll)
+                 for lr, nll in [(1e-5, 1.52), (2.5e-5, 1.47), (6.3e-5, 1.51)]]
+        path = _ledger(tmp_path, "e1.jsonl", rows)
+        code, out = self._run(
+            monkeypatch, capsys, "c2", "--ledgers", str(path), "--sigma", "0.001", "--json"
+        )
+        assert code == 3
+        payload = json.loads(out.out)
+        assert "lora r256 all" in payload["edge_of_grid"]
+        assert "c2" not in payload  # refused, not quoted
+
+    def test_both_halves_of_c4_reach_the_json(self, tmp_path, monkeypatch, capsys):
+        rows = [
+            _record("lora", 256, 2.5e-4, 1.500, modules=ATTN),
+            _record("lora", 256, 2.5e-4, 1.498, modules=ALL),
+            _record("lora", 92, 2.5e-4, 1.503, modules="linear_fc1,linear_fc2"),
+        ]
+        path = _ledger(tmp_path, "e3.jsonl", rows)
+        _, out = self._run(
+            monkeypatch, capsys, "c4", "--ledgers", str(path), "--sigma", "0.001",
+            "--json", "--allow-edge-argmin",
+        )
+        payload = json.loads(out.out)
+        assert payload["c4"]["attn_minus_mlp"]["attn(r256) - mlp(r92)"] == pytest.approx(-3.0, abs=1e-6)
+        assert payload["c4"]["all_minus_mlp"]["all(r256) - mlp(r92)"] == pytest.approx(-5.0, abs=1e-6)
+
+    def test_the_sigma_subcommand_emits_json_too(self, tmp_path, monkeypatch, capsys):
+        path = _ledger(tmp_path, "s.jsonl", [
+            _record("lora", 256, 2.5e-4, 1.200, seed=0),
+            _record("lora", 256, 2.5e-4, 1.201, seed=1),
+            _record("lora", 256, 2.5e-4, 1.202, seed=2),
+        ])
+        code, out = self._run(monkeypatch, capsys, "sigma", "--ledgers", str(path), "--json")
+        assert code == 0
+        payload = json.loads(out.out)
+        assert payload["sigma"] == pytest.approx(0.001, rel=1e-6)
+        assert payload["n"] == 3

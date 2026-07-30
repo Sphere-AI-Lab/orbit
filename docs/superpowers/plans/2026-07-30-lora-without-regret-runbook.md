@@ -11,7 +11,7 @@ Companions:
 
 ## What is ready, and what you still have to do
 
-Ready and CPU-verified (578 tests, 0 failures, in the built env):
+Ready and CPU-verified (587 tests, 0 failures, in the built env):
 
 | Piece | Where |
 |---|---|
@@ -504,9 +504,19 @@ for attention against `51200·r` for MLP, a ratio of 2.778. The post's own pair
 disagree, the disagreement is parameter accounting rather than physics. Print
 realized adapter parameter counts next to every arm before believing either.
 
-**E3-2, reading C4:** report `NLL(attn) − NLL(mlp)` at matched parameters in units
-of σ, and separately test the claim's second half — that all-modules r256 does not
-beat MLP-only by more than 2σ.
+**E3-2, reading C4:**
+
+```bash
+python -m tools.lora_regret.analyze c4 \
+  --ledgers results/e3.jsonl --sigma-ledger results/e1_0_sigma.jsonl
+```
+
+Reports both halves: `NLL(attn) − NLL(mlp)` at matched parameters in units of σ,
+then `NLL(all-modules) − NLL(mlp)`. Mind that the two are read in opposite
+directions. The first upholds the claim when it is **positive** (attention-only
+is worse); the second upholds it when it is near zero or positive, because the
+claim is that all-modules *adds nothing* — a delta below −2σ is all-modules
+winning by more than noise, and the tool labels that row `CONTRADICTS`.
 
 **E3-3 (optional, the MoE arm)** is not wired: Qwen3-30B-A3B needs its own
 model-args plugin and ≥4 GPUs for activations alone, and the post applies LoRA per
@@ -663,6 +673,12 @@ The seed-0 filter, the edge-of-grid rule and the σ units are built in rather
 than restated per reading. `argmins` marks edge-of-grid arms and still prints;
 every *claim* subcommand exits 3 rather than quoting one, unless
 `--allow-edge-argmin` is passed.
+
+`--json` emits one JSON document on stdout and nothing else — the handoff to
+plotting, and the only form worth piping. Exit codes do not change with it: a
+refused edge-of-grid argmin still exits 3, with the reason inside the payload
+under `edge_of_grid` and the refused claim simply absent, so a consumer cannot
+plot a number the tool declined to quote.
 
 The `seed != 0` filter is not cosmetic. E1-0's replicates are the same
 configuration at seeds 1 and 2, and they are not grid points; measured on a
