@@ -311,7 +311,7 @@ ratio MLP/attention = 51200 / 18432 = 2.778   ⇒   attention r=256  ≡  MLP r=
 Llama-3.1-8B base, **MATH + GSM8K**, policy gradient with importance sampling and GRPO-like
 centering, 32 samples per problem.
 
-- [x] **E4-1: Build the launcher (P5).** Done — see P5 above and §9 of the runbook.
+- [x] **E4-1: Build the launcher (P5).** Done — see P5 above and §11 of the runbook.
 - [ ] **E4-2: Run 4 arms × 4 LRs = 16 runs.** FullFT, LoRA r256, r16, **r1** — rank 1 is the
       claim's whole point, so it is not the arm to drop under budget pressure.
 - [ ] **E4-3: Report validation-accuracy curves**, and the *width* of the performant LR band
@@ -331,7 +331,7 @@ priori — OFT parameterizes a rotation, not an additive update — so a half-de
 than the post's, and it is worth nothing if the reproduction underneath it is unresolved.
 
 - [x] **E5-0: implement the matrices.** `--matrix e5scout` (5 arms) and `--matrix e5`
-      (50 arms, requires `--oft-lr-centre`); runbook §10.
+      (50 arms, requires `--oft-lr-centre`); runbook §12.
 - [ ] **E5-1: scout the LR**, then refine.
 - [ ] **E5-2: report OFT-vs-LoRA at matched parameters** on the capacity axis (all-modules,
       3 block sizes) and the placement axis (a 2x2 of {OFT, LoRA} x {attention, MLP} at one

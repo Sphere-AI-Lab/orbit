@@ -24,7 +24,7 @@ Ready and CPU-verified (493 tests, 0 failures, in the built env):
 
 Yours to do, in this order: **materialize the data** (§2, CPU only, no GPU),
 **smoke one arm** (§3), **close P3** (§4, needs DP≥2 and gates every FullFT
-number), then run experiments (§5-§10).
+number), then run experiments in the order §5 lays out.
 
 Single-rank reachability is already proven on an H100 — two LoRA-r256 optimizer
 steps, all 100 held-out rows scored, the pinned NLL line emitted three times
@@ -144,7 +144,50 @@ grep 'eval/test_nll' logs/p3_dp1_*.log logs/p3_dp4_*.log
 double-counting or dropping a shard. If they differ, stop — every FullFT number
 downstream is wrong, and no amount of averaging fixes it.
 
-## 5. Cost arithmetic — read this before launching E1
+## 5. Execution order for E1-E5
+
+Every stage below is gated by the ones above it. The gating is real, not
+bureaucratic: each entry names what breaks if you skip it.
+
+| # | Stage | Runs | GPUs | Gated by | Produces |
+|---|---|---|---|---|---|
+| §2 | Materialize data | — | none | — | the five splits every arm reads |
+| §3 | Smoke one arm | 1 | 1 | data | proof the eval line the parser needs is reached |
+| §4 | P3: DP=1 vs DP=4 | 2 | 1 and 4 | smoke | permission to trust any FullFT number |
+| §7 | **E1-0: σ** | 3 | 1 | data | the unit every later difference is quoted in |
+| §8 | E1-1: LR sweeps | 40 | 1 / ≥4 | σ, P3 | argmins → **C2** |
+| §8 | E1-2: long curves | 8 | 1 / ≥4 | E1-1's argmins | departure steps → **C1** |
+| §9 | E2: batch sweep | 36 | 1 / ≥4 | σ, P3 | best-per-batch gaps → **C3** |
+| §10 | E3: placement | 20 | 1 | σ | matched-parameter deltas → **C4** |
+| §11 | E4: RL | 16 | 8 | data, P3 | accuracy curves + band width → **C5** |
+| §12 | E5-1: OFT scout | 5 | 1 | σ | the OFT learning-rate decade |
+| §12 | E5-2: OFT refine | 50 | 1 | the scout's argmin | OFT-vs-LoRA at matched params → **C6** |
+
+**178 runs** (3 + 40 + 8 + 36 + 20 + 16 + 5 + 50), plus 3 preflight — one smoke and
+two for P3. One of E1-0's three seeds repeats an E1-1 arm; §7 says how to avoid
+that if you care about the one run.
+
+Three orderings inside that are load-bearing rather than conventional:
+
+**σ before everything it is quoted against.** E1-0 is three seeds, and it is the
+first measurement rather than a footnote: every claim in the campaign is a
+difference stated in units of σ, and the Qwen3-era σ = 0.000992 does not transfer
+to a different model and dataset. Running the sweeps first and σ afterwards works
+arithmetically and fails in practice — you will have read the results already.
+
+**E1-1 before E1-2.** The long single-epoch runs that show C1's departure points
+are only worth doing at each rank's *own* argmin LR, which E1-1 is what finds. Run
+them at a shared LR and a rank that departs early is indistinguishable from a rank
+whose LR was simply too high.
+
+**The scout before the refinement.** `--matrix e5` refuses to start without
+`--oft-lr-centre` for this reason; see §12.
+
+E4 and E5 are independent of E1-E3 and of each other, so they can run on separate
+allocations in parallel. E2 and E3 both depend only on σ. Within a stage, the
+`--only` splits in each section are what parallelize it.
+
+## 6. Cost arithmetic — read this before launching E1
 
 One epoch of Tulu3 at the launcher's default batch is **29,323 optimizer
 steps**:
@@ -170,7 +213,42 @@ without dominating wall clock: `EVAL_NLL_INTERVAL=$((NUM_ROLLOUT / 100))`.
 Batch sizes per dataset, for reference: OpenThoughts3's 10,000 rows are 312
 steps at batch 32 and 19 at batch 512 — E2 is cheap, E1/E3 are not.
 
-## 6. E1 — capacity, rank, and the 10x LR rule (C1, C2)
+## 7. E1-0 — measure σ, before anything is quoted against it
+
+The σ = 0.000992 nats in the gate log was measured on **Qwen3-4B / No Robots**
+and does not transfer to Llama-3.1-8B / Tulu3. Everything downstream is quoted
+in units of σ, so measure it before quoting anything:
+
+Drive it through the sweep rather than by hand, so the three NLLs land in a
+ledger in the format §13 reads instead of being grepped out of three logs.
+
+```bash
+export DATA_DIR=/lustre/fast/fast/groups/ei-slm/data/lora_regret
+export NUM_ROLLOUT=2000 EVAL_NLL_INTERVAL=20 GPUS_PER_NODE=1
+
+for seed in 0 1 2; do
+  python -m tools.lora_regret.sweep --matrix e1 --seed $seed \
+    --hidden-size 4096 --ffn-size 14336 \
+    --only 'lora-r256-all-lr0.00025' --results results/e1_0_sigma.jsonl
+done
+```
+
+Each invocation selects exactly one arm (`--dry-run` first to see it). σ is the
+standard deviation of the three `test_nll` values in `results/e1_0_sigma.jsonl`.
+
+The seed-0 replicate is the same configuration as one of E1-1's 40 arms, and the
+resume ledger is **per `--results` file** — so it does get run twice across the two
+stages. If that matters, point these three at the same file as the E1-1 shard that
+covers r256 (`results/e1_lora_c.jsonl` below) and the second invocation will skip
+it; the shards are sequential with respect to E1-0, so there is no concurrent
+append. Separate files are the default here because the provenance is easier to
+read afterwards, and the cost is one run in 178.
+
+Until σ exists, treat any difference under ~0.002 as unresolved. `SEED` is tied to
+`ROLLOUT_SEED` inside the launcher, so each replicate varies data order as well
+as initialization — which is what a seed replicate should vary.
+
+## 8. E1 — capacity, rank, and the 10x LR rule (C1, C2)
 
 40 arms: FullFT plus LoRA r ∈ {1, 4, 16, 64, 128, 256, 512}, five LRs each at
 0.3-decade spacing, centred on 2.5e-5 (FullFT) and 2.5e-4 (LoRA — exactly 10x,
@@ -228,55 +306,107 @@ which costs nothing extra since both arms are already in the sweep.
 **Acceptance:** any arm whose argmin sits on a grid edge is **re-run on a
 re-centred grid** before its ratio is quoted. Extend nothing; re-centre.
 
-## 7. E1-0 — re-measure σ first, actually
+### E1-2 — the long curves that decide C1
 
-The σ = 0.000992 nats in the gate log was measured on **Qwen3-4B / No Robots**
-and does not transfer to Llama-3.1-8B / Tulu3. Everything downstream is quoted
-in units of σ, so measure it before quoting anything:
+Eight runs, one per arm, each at **that arm's own argmin LR** from E1-1 and each a
+full Tulu3 epoch (29,323 steps — `NUM_ROLLOUT` unset so the launcher derives it).
+This is the expensive stage, and it is eight runs rather than forty precisely
+because E1-1 has already located the LRs.
+
+Generate the command lines from the ledger, read them, then run them:
 
 ```bash
-for seed in 0 1 2; do
-  SEED=$seed LAUNCHER_NAME=e1_0_sigma_s$seed \
-  SAVE_DIR=/lustre/.../e1_0_s$seed NUM_ROLLOUT=2000 EVAL_NLL_INTERVAL=20 \
-  LORA_RANK=256 LR=2.5e-4 \
-  bash examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh
-done
+python - <<'PY' | tee /tmp/e1_2_cmds.sh
+import json, glob
+best = {}
+for path in glob.glob("results/e1_*.jsonl"):
+    for line in open(path):
+        r = json.loads(line)
+        if r["status"] != "ok" or r["seed"] != 0:
+            continue
+        key = (r["method"], r["rank"])
+        if key not in best or r["test_nll"] < best[key]["test_nll"]:
+            best[key] = r
+for (method, rank), r in sorted(best.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)):
+    tag = "full" if method == "full" else f"lora_r{rank}"
+    env = "PEFT_METHOD=none" if method == "full" else f"PEFT_METHOD=lora LORA_RANK={rank}"
+    gpus = 4 if method == "full" else 1
+    print(
+        f"GPUS_PER_NODE={gpus} {env} LR={r['lr']:g} EVAL_NLL_INTERVAL=293 "
+        f"LAUNCHER_NAME=e1_2_{tag} SAVE_DIR=/lustre/.../e1_2_{tag} "
+        f"bash examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh"
+    )
+PY
+# then, after reading it:  bash /tmp/e1_2_cmds.sh
 ```
 
-σ is the standard deviation of the three final `nll=` values. Until it exists,
-treat any difference under ~0.002 as unresolved. `SEED` is tied to
-`ROLLOUT_SEED` inside the launcher, so each replicate varies data order as well
-as initialization — which is what a seed replicate should vary.
+It filters on `seed == 0` because E1-0's extra replicates live in the same ledger
+directory and are not grid points — including them would let a seed replicate win
+an argmin it was never a candidate for.
 
-## 8. E2 — batch-size sensitivity (C3), and E3 — layer placement (C4)
+**E1-2, reading C1:** plot loss against log-steps per rank. Report, per rank, the
+**step at which it departs** from the FullFT/high-rank envelope — the first step
+where it exceeds the pointwise minimum across arms by more than 2σ for three
+consecutive logging intervals. The claim predicts the departure step increases
+monotonically with rank, and that high ranks do not depart at all within the
+epoch. A rank that never departs and a rank whose run was too short look identical,
+so state the step budget next to every departure point.
+
+## 9. E2 — batch-size sensitivity (C3)
+
+36 arms on the post's own setup: a 10,000-example OpenThoughts3 subset at batch
+32, 128 and 512, for FullFT, LoRA r256 and LoRA r16.
 
 ```bash
-# E2: 36 arms, OpenThoughts3, batch {32,128,512}, FullFT + LoRA r256 + LoRA r16
 python -m tools.lora_regret.sweep --matrix e2 --hidden-size 4096 --ffn-size 14336 \
-  --only '^lora' --results results/e2_lora.jsonl
+  --only '^lora' --results results/e2_lora.jsonl                       # 24 arms
 GPUS_PER_NODE=4 python -m tools.lora_regret.sweep --matrix e2 \
-  --hidden-size 4096 --ffn-size 14336 --only '^full' --results results/e2_full.jsonl
-
-# E3: 20 arms, Tulu3, matched-parameter attention vs MLP
-python -m tools.lora_regret.sweep --matrix e3 --hidden-size 4096 --ffn-size 14336 \
-  --results results/e3.jsonl
+  --hidden-size 4096 --ffn-size 14336 --only '^full' --results results/e2_full.jsonl   # 12 arms
 ```
 
 E2 sets `GLOBAL_BATCH_SIZE` **and** `ROLLOUT_BATCH_SIZE` together and points
 `TRAIN_JSONL`/`TEST_JSONL` at OpenThoughts3 automatically — nothing to export.
-Each cell's four LRs are re-centred by √(batch/32); the edge-of-grid rule from
-§6 still applies, and it will fire more often here because the batch-size
-optimum is less well predicted than the rank one.
+Each cell's four LRs are re-centred by √(batch/32); the edge-of-grid rule from §8
+still applies, and it will fire more often here because the batch-size optimum is
+less well predicted than the rank one.
 
-E3's matched pair is **attention r256 against MLP r92**, solved for Orbit's
-fused layout by `orbit.utils.peft_param_match.matched_mlp_rank` — per layer
-`18432·r` for attention against `51200·r` for MLP, a ratio of 2.778. The post's
-own pair (attention r256 / MLP r128) is also in the matrix, deliberately: if the
-two disagree, the disagreement is parameter accounting rather than physics.
-Print realized adapter parameter counts next to every arm before believing
-either.
+E2 is the cheapest of the three SFT experiments: 10,000 rows is 312 optimizer
+steps at batch 32 and 19 at batch 512, against E1's 29,323 for a Tulu3 epoch.
 
-## 9. E4 — RL parity at low rank (C5)
+**E2-3, reading C3:** report `best_LoRA(batch) − best_FullFT(batch)` at each batch
+size in units of σ. The claim is a gap that *grows* with batch — a gap that is
+absent at 32 and present at 512 is the signature; a constant offset at all three
+is not. **E2-2** is the rank-independence half: the post blames the
+parametrization rather than capacity, so the gap must survive the change from
+r256 to r16. If it shrinks with rank, the post's mechanism is wrong and that is
+the finding.
+
+## 10. E3 — layer placement at matched parameter count (C4)
+
+20 arms on Tulu3, one GPU each.
+
+```bash
+python -m tools.lora_regret.sweep --matrix e3 --hidden-size 4096 --ffn-size 14336 \
+  --results results/e3.jsonl
+```
+
+E3's matched pair is **attention r256 against MLP r92**, solved for Orbit's fused
+layout by `orbit.utils.peft_param_match.matched_mlp_rank` — per layer `18432·r`
+for attention against `51200·r` for MLP, a ratio of 2.778. The post's own pair
+(attention r256 / MLP r128) is also in the matrix, deliberately: if the two
+disagree, the disagreement is parameter accounting rather than physics. Print
+realized adapter parameter counts next to every arm before believing either.
+
+**E3-2, reading C4:** report `NLL(attn) − NLL(mlp)` at matched parameters in units
+of σ, and separately test the claim's second half — that all-modules r256 does not
+beat MLP-only by more than 2σ.
+
+**E3-3 (optional, the MoE arm)** is not wired: Qwen3-30B-A3B needs its own
+model-args plugin and ≥4 GPUs for activations alone, and the post applies LoRA per
+expert at rank = total/8. Skip it and say so, rather than substituting the dense
+result.
+
+## 11. E4 — RL parity at low rank (C5)
 
 16 runs: FullFT, LoRA r256, r16, **r1** — rank 1 is the claim's whole point and
 is not the arm to drop under budget pressure. The `e4` matrix drives them through
@@ -325,7 +455,7 @@ which is a separate checkable statement from peak parity. σ for accuracy has
 never been measured; if the curves sit close, measuring it becomes a
 prerequisite exactly as E1-0 was for NLL.
 
-## 10. E5 (optional, ours) — matched-parameter OFT
+## 12. E5 (optional, ours) — matched-parameter OFT
 
 Only after C1-C5 are settled. Two matrices, and the second **cannot run until the
 first has**, because OFT parameterizes a rotation rather than an additive update:
@@ -387,7 +517,7 @@ size from the square attention shape (so all-modules lands at ratio 0.75) and pu
 justified for OFT. Prefer `e5scout` + `e5`. `sft82` stays as-is because the gate
 log records its dry run.
 
-## 11. Reading results
+## 13. Reading results
 
 The ledger is one JSON object per arm:
 
@@ -423,7 +553,7 @@ best = {}
 for path in ("results/e1_lora_a.jsonl","results/e1_lora_b.jsonl","results/e1_lora_c.jsonl","results/e1_full.jsonl"):
     for line in open(path):
         r = json.loads(line)
-        if r["status"] != "ok": continue
+        if r["status"] != "ok" or r["seed"] != 0: continue   # see the note below
         key = (r["method"], r["rank"])
         if key not in best or r["test_nll"] < best[key]["test_nll"]:
             best[key] = r
@@ -432,12 +562,18 @@ for key, r in sorted(best.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)):
 PY
 ```
 
+The `seed != 0` filter is not cosmetic. E1-0's replicates are the same
+configuration at seeds 1 and 2, and they are not grid points; measured on a
+synthetic ledger, dropping the filter let a replicate at LR 9.95e-4 win r256's
+argmin away from the real 2.5e-4 purely because that one run happened to score
+better. Grid points are seed 0 only.
+
 Then quote every difference in units of the σ from §7, and never off absolute
 loss values — the constant Orbit-vs-HF precision offset (0.0032 nats, inside
 HF's own 0.0072-nat bf16/fp32 spread) cancels in every ratio, ordering and
 curve-shape claim this campaign makes, and cancels in nothing else.
 
-## 12. Hazards, all previously observed
+## 14. Hazards, all previously observed
 
 - **Shared `SAVE_DIR`.** The launcher default is one directory per recipe;
   concurrent runs overwrite each other, and one save took 293 s instead of 97 s
@@ -456,7 +592,7 @@ curve-shape claim this campaign makes, and cancels in nothing else.
   cache guts every env pointing into it — that is how the first build of
   `orbit_env` died. See the gap plan's failure signature.
 
-## 13. GPU tiering, at a glance
+## 15. GPU tiering, at a glance
 
 | Arm class | GPUs | Why |
 |---|---|---|
