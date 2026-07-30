@@ -286,11 +286,13 @@ without dominating wall clock: `EVAL_NLL_INTERVAL=$((NUM_ROLLOUT / 100))`.
 | held-out eval, 1,000 Tulu3 rows | **67.7 s** |
 | model build + Ray startup | ~85 s + ~200 s |
 
-That makes a 2,000-rollout E1 arm ≈ **4.7 h of training + 22 min of eval** at
-`EVAL_NLL_INTERVAL=20`. The same arm at interval 1 would spend ~37 h evaluating —
-the smoke ran at `wait_time_ratio=0.89`, i.e. 89% of its wall clock in the eval,
-which is right for a smoke and ruinous for an arm. This is the single cheapest
-knob to get wrong.
+That makes a 2,000-rollout E1 arm ≈ **4.7 h of training + 1 h 53 min of eval** at
+`EVAL_NLL_INTERVAL=20` — 2,000/20 = 100 measurements × 67.7 s = 6,770 s. The eval
+is ~29% on top of the training, not a rounding error: **6.6 h per arm, ≈265
+GPU-hours across E1-1's 40 arms.** The same arm at interval 1 would spend ~37 h
+evaluating (2,000 × 67.7 s) — the smoke ran at `wait_time_ratio=0.89`, i.e. 89% of
+its wall clock in the eval, which is right for a smoke and ruinous for an arm.
+This is the single cheapest knob to get wrong.
 
 Batch sizes per dataset, for reference: OpenThoughts3's 10,000 rows are 312
 steps at batch 32 and 19 at batch 512 — E2 is cheap, E1/E3 are not.
