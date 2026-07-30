@@ -303,6 +303,54 @@ def run_arm(
     )
 
 
+def argmins_from(patterns: list[str], allow_edge: bool) -> dict[tuple[str, int | None], float]:
+    """Each E1 arm's argmin learning rate, read from the E1-1 ledgers.
+
+    Fails closed twice, because E1-2 is ~70 GPU-hours per arm and both failures
+    are silent otherwise:
+
+    - Fewer than 8 arms recovered means a partial ledger. Running the 3 arms
+      that happen to be there would produce a stage that *looks* complete.
+    - An argmin on a grid edge means the LR is a boundary value rather than an
+      optimum. Spending 70 hours at it is the single most expensive way to act
+      on an unchecked number, so it is refused unless overridden.
+    """
+    from tools.lora_regret.analyze import argmins, edge_of_grid, load_records
+
+    records = load_records(patterns)
+    best = argmins(records)
+    # analyze keys on (method, size, target_modules); e1long keys on
+    # (method, rank), because every E1 arm is all-modules and the long curves
+    # inherit that. Project, and refuse to guess if the ledger actually holds
+    # two placements at one rank -- that is an E3 ledger, not an E1 one.
+    found: dict[tuple[str, int | None], float] = {}
+    for (method, size, modules), record in best.items():
+        key = (method, size)
+        if key in found:
+            sys.exit(
+                f"--argmins-from found more than one placement for {key} "
+                f"(latest: {modules!r}). These ledgers mix placements, so there is no "
+                "single argmin per rank; point it at the E1 ledgers only."
+            )
+        found[key] = record["lr"]
+    if len(found) < 8:
+        sys.exit(
+            f"--argmins-from recovered only {len(found)} arms from {patterns}: "
+            f"{sorted(found)}. E1-2 needs all 8 (FullFT plus ranks "
+            "1, 4, 16, 64, 128, 256, 512); finish E1-1 first."
+        )
+    flagged = edge_of_grid(records)
+    if flagged and not allow_edge:
+        lines = "\n".join(f"  {key}: {why}" for key, why in flagged.items())
+        sys.exit(
+            "--argmins-from refuses an edge-of-grid argmin:\n"
+            f"{lines}\n"
+            "Re-centre the grid and re-run those arms, or pass --allow-edge-argmin "
+            "to spend ~70 GPU-hours per arm on a boundary value anyway."
+        )
+    return found
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--hidden-size", type=int, required=True)
@@ -339,6 +387,19 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--argmins-from",
+        nargs="+",
+        default=None,
+        help="E1-1 ledger paths or globs. Required by --matrix e1long and "
+        "meaningless elsewhere: the long curves only mean anything at each "
+        "rank's own argmin learning rate, which E1-1 is what finds.",
+    )
+    parser.add_argument(
+        "--allow-edge-argmin",
+        action="store_true",
+        help="Let --argmins-from accept an argmin sitting on a grid edge.",
+    )
+    parser.add_argument(
         "--only",
         default=None,
         help="Regex; run only arms whose name matches (e.g. '^lora-r256' or '^oftscout').",
@@ -352,9 +413,21 @@ def main() -> None:
         parser.error("--matrix e5 requires --oft-lr-centre; run --matrix e5scout first and pass its argmin")
     if args.matrix != "e5" and args.oft_lr_centre is not None:
         parser.error(f"--oft-lr-centre is only meaningful for --matrix e5, not {args.matrix}")
+    if args.matrix == "e1long" and args.argmins_from is None:
+        parser.error(
+            "--matrix e1long requires --argmins-from; run --matrix e1 to completion "
+            "first and point this at its ledgers"
+        )
+    if args.matrix != "e1long" and args.argmins_from is not None:
+        parser.error(f"--argmins-from is only meaningful for --matrix e1long, not {args.matrix}")
 
     repo_root = Path(__file__).resolve().parents[2]
-    arms = MATRICES[args.matrix](args.hidden_size, args.ffn_size, args.seed, args.oft_lr_centre)
+    recovered = (
+        argmins_from(args.argmins_from, args.allow_edge_argmin) if args.argmins_from else None
+    )
+    arms = MATRICES[args.matrix](
+        args.hidden_size, args.ffn_size, args.seed, args.oft_lr_centre, recovered
+    )
     if args.only:
         pattern = re.compile(args.only)
         arms = [a for a in arms if pattern.search(a.name)]

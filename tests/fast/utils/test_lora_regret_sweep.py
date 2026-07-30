@@ -1121,3 +1121,80 @@ class TestE1LongMatrix:
 
     def test_arms_train_on_tulu3(self):
         assert all(a.dataset == "tulu3" for a in e1long_arms(E1LONG_ARGMINS))
+
+
+class TestArgminsFrom:
+    def _ledger(self, tmp_path, rows):
+        path = tmp_path / "e1.jsonl"
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        return path
+
+    def _row(self, method, rank, lr, nll, seed=0):
+        return {
+            "arm": f"{method}-r{rank}-all-lr{lr:g}-s{seed}", "method": method, "rank": rank,
+            "oft_block_size": None,
+            "target_modules": "" if method == "full" else ALL_MODULES,
+            "lr": lr, "seed": seed, "metric": "nll", "test_nll": nll, "status": "ok",
+            "trace_consistent": True, "global_batch_size": None, "dataset": None,
+        }
+
+    def _complete(self):
+        rows = []
+        for lr, nll in [(1e-5, 1.52), (2.5e-5, 1.47), (6.3e-5, 1.51)]:
+            rows.append(self._row("full", None, lr, nll))
+        for rank in (1, 4, 16, 64, 128, 256, 512):
+            for lr, nll in [(1e-4, 1.60), (2.5e-4, 1.50), (6.3e-4, 1.58)]:
+                rows.append(self._row("lora", rank, lr, nll))
+        return rows
+
+    def test_recovers_one_lr_per_arm(self, tmp_path):
+        path = self._ledger(tmp_path, self._complete())
+        found = sweep.argmins_from([str(path)], allow_edge=False)
+        assert len(found) == 8
+        assert found[("lora", 256)] == 2.5e-4
+        assert found[("full", None)] == 2.5e-5
+
+    def test_a_partial_ledger_is_refused(self, tmp_path):
+        """Three arms that look like a completed stage is the failure to avoid."""
+        rows = [r for r in self._complete() if r["rank"] in (None, 1, 4)]
+        path = self._ledger(tmp_path, rows)
+        with pytest.raises(SystemExit):
+            sweep.argmins_from([str(path)], allow_edge=False)
+
+    def test_an_edge_of_grid_argmin_is_refused(self, tmp_path):
+        rows = self._complete()
+        for row in rows:  # make r512's lowest LR win
+            if row["rank"] == 512:
+                row["test_nll"] = 1.40 if row["lr"] == 1e-4 else 1.60
+        path = self._ledger(tmp_path, rows)
+        with pytest.raises(SystemExit):
+            sweep.argmins_from([str(path)], allow_edge=False)
+
+    def test_the_edge_override_lets_it_through(self, tmp_path):
+        rows = self._complete()
+        for row in rows:
+            if row["rank"] == 512:
+                row["test_nll"] = 1.40 if row["lr"] == 1e-4 else 1.60
+        path = self._ledger(tmp_path, rows)
+        found = sweep.argmins_from([str(path)], allow_edge=True)
+        assert found[("lora", 512)] == 1e-4
+
+
+class TestE1LongCliGuards:
+    def _run(self, tmp_path, extra):
+        return subprocess.run(
+            [sys.executable, "-m", "tools.lora_regret.sweep",
+             "--hidden-size", "4096", "--ffn-size", "14336", "--num-layers", "32",
+             "--dry-run", *extra],
+            capture_output=True, text=True, cwd=REPO_ROOT,
+        )
+
+    def test_e1long_without_argmins_exits_two(self, tmp_path):
+        result = self._run(tmp_path, ["--matrix", "e1long"])
+        assert result.returncode == 2
+        assert "--argmins-from" in result.stderr
+
+    def test_argmins_from_on_another_matrix_exits_two(self, tmp_path):
+        result = self._run(tmp_path, ["--matrix", "e1", "--argmins-from", "results/x.jsonl"])
+        assert result.returncode == 2
+        assert "e1long" in result.stderr
