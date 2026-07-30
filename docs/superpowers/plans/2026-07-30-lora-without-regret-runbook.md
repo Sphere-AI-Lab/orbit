@@ -244,6 +244,28 @@ A differing `tokens` means the reduction is double-counting or dropping a shard;
 it says so, and the correct response is to stop — every FullFT number downstream
 is wrong, and no amount of averaging fixes it.
 
+## 4.5 Where the runs show up in wandb
+
+**One project per task, one group per method.** `--matrix e1ot` writes to
+`lora-regret-e1ot`, `--matrix e4place` to `lora-regret-e4place`, and inside each
+the FullFT, LoRA and OFT arms group as `full` / `lora` / `oft`. The run name is
+the arm name, so `oft-b64-all-lr0.0001-s0` is readable without opening it.
+
+The split is per *matrix* rather than per claim because the matrix is the unit
+you schedule, resume and re-run: one project is one `--results` ledger is one
+`analyze` invocation. Pooling them — which is what the launchers' single default
+project does — would put E1's rank ladder, E3's placement pair and E5's OFT arms
+in one flat namespace of 112 runs, where the run deciding C2 is indistinguishable
+in the sidebar from the one deciding C6.
+
+Every ledger row now carries `wandb_project` and `wandb_group`, so a number read
+months later can be traced back to the dashboard it came off.
+
+Hand-run arms (§3's smoke, §4's P3) do not go through the sweep and keep the
+launcher's own `WANDB_PROJECT=lora-without-regret` default. Calling `run_arm`
+directly without a matrix lands in the bare `lora-regret` project — visibly not
+a task, rather than silently inside one whose numbers you are quoting.
+
 ## 5. Execution order for E1-E5
 
 Every stage below is gated by the ones above it. The gating is real, not

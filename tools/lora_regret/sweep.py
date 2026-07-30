@@ -85,6 +85,28 @@ MATRIX_METRICS = {
 # test_the_rl_launcher_configures_exactly_the_datasets_the_parser_expects.
 RL_EVAL_DATASETS = ("math_test", "gsm8k_test")
 
+# One wandb project per task, one group per method inside it.
+#
+# The launchers default to a single project for the whole campaign, which is
+# right for a hand-run smoke and wrong for 242 swept arms: E1's rank ladder,
+# E3's placement pair and E5's OFT arms would be one flat namespace, and the run
+# that decides C2 would be indistinguishable in the sidebar from the one that
+# decides C6. The matrix is the unit an operator schedules, reads and re-runs,
+# so it is the unit the dashboard is split on.
+WANDB_PROJECT_PREFIX = "lora-regret"
+
+
+def wandb_project(matrix: str | None) -> str:
+    """The wandb project for one matrix.
+
+    `None` is not a matrix and deliberately does not invent one: `run_arm` is
+    callable directly (tests, one-off reruns), and defaulting an unrouted call
+    to some real task's name would write those runs into a dashboard whose
+    numbers are being quoted. They land in the bare campaign project instead,
+    where they are visibly not part of a task.
+    """
+    return f"{WANDB_PROJECT_PREFIX}-{matrix}" if matrix else WANDB_PROJECT_PREFIX
+
 
 def load_ledger(path: Path) -> set[str]:
     """Arm names already completed successfully. Tolerates a truncated tail."""
@@ -240,6 +262,7 @@ def run_arm(
     launcher: str = LAUNCHER,
     metric: str = "nll",
     adapter_params: int | None = None,
+    matrix: str | None = None,
 ) -> None:
     log_path = repo_root / "logs" / "lora_regret" / f"{arm.name}.log"
     # One dict, used for both the real environment and the dry-run preview --
@@ -252,11 +275,17 @@ def run_arm(
     # today, and the ordering makes the arm win if they ever overlap.
     overrides = dict(model_env(get_model(arm.model), repo_root))
     overrides.update(arm_env(arm))
+    project = wandb_project(matrix)
     overrides.update(
         {
             "LAUNCHER_NAME": arm.name,
             "RUN_LOG": str(log_path),
-            "WANDB_GROUP": f"lora-regret-{'rl' if metric == 'accuracy' else 'sft'}",
+            # Project = the task, group = the method. The old group was
+            # sft-vs-rl, which the launcher already implies and the project now
+            # states outright; grouping by method is what makes a task's
+            # FullFT, LoRA and OFT arms separable inside its own dashboard.
+            "WANDB_PROJECT": project,
+            "WANDB_GROUP": arm.method,
             "SAVE_DIR": str(repo_root / "orbit_ckpts" / "lora_regret" / arm.name),
         }
     )
@@ -302,6 +331,11 @@ def run_arm(
             "accuracy_per_dataset": per_dataset,
             "adapter_params": adapter_params,
             "wandb_run_id": None,
+            # Where this row's curves live. Without it a ledger read months
+            # later cannot be traced back to the dashboard it was read off,
+            # which is the point of splitting the projects in the first place.
+            "wandb_project": project,
+            "wandb_group": arm.method,
             "steps": steps,
             # The whole curve, not only its last point: C1's departure step is
             # unrecoverable from a scalar, and logs/ is gitignored.
@@ -476,7 +510,7 @@ def main() -> None:
         model = get_model(arm.model)
         run_arm(
             arm, repo_root, args.results, args.dry_run,
-            launcher=launcher, metric=metric,
+            launcher=launcher, metric=metric, matrix=args.matrix,
             adapter_params=adapter_param_count(
                 arm, model.hidden_size, model.ffn_size, model.num_layers,
                 qkv_output_size=model.qkv_output_size,

@@ -984,7 +984,10 @@ class TestDryRunPrintsAPasteableCommand:
         assert f"SAVE_DIR={tmp_path}/orbit_ckpts/lora_regret/{arm.name}" in line
         assert f"RUN_LOG={tmp_path}/logs/lora_regret/{arm.name}.log" in line
         assert f"LAUNCHER_NAME={arm.name}" in line
-        assert "WANDB_GROUP=lora-regret-sft" in line
+        # No matrix given, so this arm is unrouted: the bare campaign project,
+        # never a real task's. Group is the method. See TestWandbRouting.
+        assert "WANDB_PROJECT=lora-regret " in line + " "
+        assert "WANDB_GROUP=lora" in line
         # and still the arm's own knobs
         assert "LORA_RANK=16" in line
         assert line.endswith("bash examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh")
@@ -993,10 +996,13 @@ class TestDryRunPrintsAPasteableCommand:
         arm = Arm("lora-r1-all-lr1e-05-s0", "lora", 1, None, ALL_MODULES, 1e-5, 0)
         run_arm(
             arm, tmp_path, tmp_path / "r.jsonl", dry_run=True,
-            launcher=sweep.RL_LAUNCHER, metric="accuracy",
+            launcher=sweep.RL_LAUNCHER, metric="accuracy", matrix="e4",
         )
         line = capsys.readouterr().out.strip()
-        assert "WANDB_GROUP=lora-regret-rl" in line
+        # The project carries the task; the sft/rl distinction the old group
+        # spelled out is already implied by which launcher runs.
+        assert "WANDB_PROJECT=lora-regret-e4" in line
+        assert "WANDB_GROUP=lora" in line
         assert line.endswith(f"bash {sweep.RL_LAUNCHER}")
 
 
@@ -1257,3 +1263,74 @@ class TestModelRegistryWiring:
         )
         assert proc.returncode == 0
         assert len(proc.stdout.strip().splitlines()) == 40
+
+
+class TestWandbRouting:
+    """One wandb project per task, one group per method inside it.
+
+    Before this, every arm of every matrix landed in the launcher's single
+    default project and the only split was sft-vs-rl -- so E1's rank ladder,
+    E3's placement pair and E5's OFT arms were 112 runs in one flat namespace,
+    and the run that decided C2 was indistinguishable in the sidebar from the
+    one that decided C6.
+    """
+
+    def test_every_matrix_gets_its_own_project(self):
+        from tools.lora_regret.arms import MATRICES
+        from tools.lora_regret.sweep import wandb_project
+
+        projects = {name: wandb_project(name) for name in MATRICES}
+        # Distinct, or two tasks would silently share a dashboard.
+        assert len(set(projects.values())) == len(MATRICES)
+        assert projects["e1"] == "lora-regret-e1"
+        assert projects["e1ot"] == "lora-regret-e1ot"
+        assert projects["e1short"] == "lora-regret-e1short"
+        assert projects["e4place"] == "lora-regret-e4place"
+        assert projects["e5scout"] == "lora-regret-e5scout"
+
+    def test_e4_and_e4place_do_not_share_a_project(self):
+        """They run the same launcher at the same four learning rates. Pooling
+        them would put the placement panel and the rank panel on one axis."""
+        from tools.lora_regret.sweep import wandb_project
+
+        assert wandb_project("e4") != wandb_project("e4place")
+
+    def test_an_unrouted_arm_lands_in_the_campaign_project_not_a_task_one(self):
+        """`run_arm` is callable directly, and a made-up default matrix would
+        write those runs into a real task's dashboard. None means "no task"."""
+        from tools.lora_regret.sweep import WANDB_PROJECT_PREFIX, wandb_project
+
+        assert wandb_project(None) == WANDB_PROJECT_PREFIX
+        assert wandb_project(None) not in {wandb_project("e1"), wandb_project("e5")}
+
+    def test_the_dry_run_exports_the_matrixs_project(self, tmp_path, capsys):
+        arm = Arm("lora-r16-all-lr0.00025-s0", "lora", 16, None, ALL_MODULES, 2.5e-4, 0)
+        run_arm(arm, tmp_path, tmp_path / "r.jsonl", dry_run=True, matrix="e1ot")
+        assert "WANDB_PROJECT=lora-regret-e1ot" in capsys.readouterr().out
+
+    @pytest.mark.parametrize(
+        "method,rank,block,modules",
+        [("full", None, None, ""), ("lora", 16, None, ALL_MODULES), ("oft", None, 64, ALL_MODULES)],
+    )
+    def test_the_group_is_the_arms_method(self, tmp_path, capsys, method, rank, block, modules):
+        """FullFT, LoRA and OFT arms of one task group apart inside its project.
+        The old group repeated the sft/rl split, which the project now states."""
+        arm = Arm(f"{method}-probe", method, rank, block, modules, 2.5e-4, 0)
+        run_arm(arm, tmp_path, tmp_path / "r.jsonl", dry_run=True, matrix="e5")
+        assert f"WANDB_GROUP={method}" in capsys.readouterr().out
+
+    def test_the_ledger_records_where_the_run_went(self, tmp_path, monkeypatch):
+        """A ledger row that cannot name its wandb project cannot be traced back
+        to the dashboard it was read off, which is the whole point of splitting
+        them."""
+        import subprocess
+
+        monkeypatch.setattr(
+            subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0)
+        )
+        arm = Arm("lora-r16-all-lr0.00025-s0", "lora", 16, None, ALL_MODULES, 2.5e-4, 0)
+        results = tmp_path / "r.jsonl"
+        run_arm(arm, tmp_path, results, dry_run=False, matrix="e3")
+        record = json.loads(results.read_text().splitlines()[0])
+        assert record["wandb_project"] == "lora-regret-e3"
+        assert record["wandb_group"] == "lora"
