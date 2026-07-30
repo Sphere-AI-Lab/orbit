@@ -199,6 +199,10 @@ orbit_ckpts
 checkpoints
 tmp_ckpts/
 logs/
+# Committed on purpose: the lora_regret trace tests parse a real launcher log,
+# and the `*.log` rule inherited from the Python template's Django block would
+# otherwise drop the fixture from `git add` without saying so.
+!tests/fast/fixtures/**/*.log
 eval_results/
 eval_subsets/
 run_*.pid

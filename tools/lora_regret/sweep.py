@@ -19,9 +19,19 @@ import subprocess
 import sys
 from pathlib import Path
 
-from orbit.utils.eval_nll import EVAL_NLL_METRIC_KEY
 from orbit.utils.peft_param_match import match_report
 from tools.lora_regret.arms import MATRICES, Arm, arm_env, sft_arms  # noqa: F401  (sft_arms re-exported)
+
+# The eval-line regex and phase labels live in trace.py -- one definition,
+# built from EVAL_NLL_METRIC_KEY. Imported under the existing private names so
+# every call site and the TestLogFormatPins pins keep working unchanged.
+from tools.lora_regret.trace import (  # noqa: F401  (parse_trace re-exported)
+    NLL_LINE as _NLL_LINE,
+    PHASE_AFTER_TRAIN as _PHASE_AFTER_TRAIN,
+    PHASE_BEFORE_TRAIN as _PHASE_BEFORE_TRAIN,
+    parse_trace,
+    trace_is_consistent,
+)
 
 # The campaign re-anchored from Qwen3-4B/No-Robots to Llama-3.1-8B/Tulu3, and
 # this constant was left pointing at the old repo's launcher, which does not
@@ -58,27 +68,6 @@ MATRIX_METRICS = {
 # key shape; pinned against the launcher's own text by
 # test_the_rl_launcher_configures_exactly_the_datasets_the_parser_expects.
 RL_EVAL_DATASETS = ("math_test", "gsm8k_test")
-
-# train.py:_log_eval_nll emits one line per held-out NLL measurement, e.g.:
-#
-#   eval/test_nll rollout_id=12 step=12 phase=after_train nll=1.845700 \
-#       sample_mean=1.801234 tokens=4096 samples=32
-#
-# `phase` is "before_train" (the untouched base model -- gate G4's number,
-# logged once at rollout/step==0 before any optimizer step runs) or
-# "after_train" (a post-optimizer-step measurement from the periodic hook,
-# which train.py forces to fire on the final rollout regardless of
-# eval_nll_interval). The regex is built from EVAL_NLL_METRIC_KEY rather than
-# a re-spelled "eval/test_nll" literal so a rename of that constant cannot
-# silently desync the parser from the metric it is meant to track.
-_NLL_LINE = re.compile(
-    re.escape(EVAL_NLL_METRIC_KEY)
-    + r" rollout_id=(?P<rollout_id>\d+) step=(?P<step>\d+) phase=(?P<phase>\S+)"
-    r" nll=(?P<nll>[0-9.]+) sample_mean=(?P<sample_mean>[0-9.]+)"
-    r" tokens=(?P<tokens>\d+) samples=(?P<samples>\d+)"
-)
-_PHASE_BEFORE_TRAIN = "before_train"
-_PHASE_AFTER_TRAIN = "after_train"
 
 
 def load_ledger(path: Path) -> set[str]:
