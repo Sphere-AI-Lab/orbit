@@ -316,7 +316,7 @@ current test or call site changes:
 # The eval-line regex and phase labels live in trace.py -- one definition,
 # built from EVAL_NLL_METRIC_KEY. Imported under the existing private names so
 # every call site and the TestLogFormatPins pins keep working unchanged.
-from tools.lora_regret.trace import (  # noqa: E402
+from tools.lora_regret.trace import (
     NLL_LINE as _NLL_LINE,
     PHASE_AFTER_TRAIN as _PHASE_AFTER_TRAIN,
     PHASE_BEFORE_TRAIN as _PHASE_BEFORE_TRAIN,
@@ -359,7 +359,16 @@ git commit -m "feat(lora_regret): extract the held-out NLL trace from arm logs"
 **Interfaces:**
 - Consumes: `trace.parse_trace`, `trace.trace_is_consistent` (Task 1)
 - Produces: ledger records gain `nll_trace: list[dict] | None`,
-  `trace_consistent: bool | None`, `trace_warning: str | None`
+  `trace_consistent: bool | None`, `trace_warning: str | None`,
+  **`global_batch_size: int | None`** and **`dataset: str | None`**
+
+The last two are not cosmetic. `Arm` carries both and E2 sets them
+(`global_batch_size=batch, dataset="openthoughts3"`), but `run_arm`'s record
+drops them — so **C3 is currently unreadable from the ledger**: its whole claim
+is `best_LoRA(batch) − best_FullFT(batch)` at each batch size, and the batch size
+each arm ran at survives only inside the arm's *name* (`...-b512-...`). Recovering
+it by parsing names is string archaeology that breaks the first time a name
+format changes.
 
 An inconsistent trace does **not** mark the arm failed. The compute is already
 spent and the record is evidence; discarding it loses the evidence. It is
@@ -418,6 +427,50 @@ class TestRunArmRecordsTheTrace:
         assert "992" in record["trace_warning"]
         # The arm still succeeded; it is analyze.py that refuses to quote it.
         assert record["status"] == "ok"
+
+
+class TestRunArmRecordsTheArmsIdentity:
+    """C3 groups by batch size, so the batch size has to be in the record.
+
+    Arm carries global_batch_size and dataset and e2_arms sets both, but the
+    ledger dropped them -- leaving the batch an E2 arm ran at recoverable only
+    by parsing its name.
+    """
+
+    def test_batch_size_and_dataset_reach_the_ledger(self, tmp_path, monkeypatch):
+        results = tmp_path / "results.jsonl"
+
+        def fake_run(cmd, env, cwd):
+            Path(env["RUN_LOG"]).parent.mkdir(parents=True, exist_ok=True)
+            Path(env["RUN_LOG"]).write_text(
+                _build_log([_render(0, 0, _PHASE_AFTER_TRAIN, 1.5)])
+            )
+            return subprocess.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(sweep.subprocess, "run", fake_run)
+        arm = e2_arms()[0]
+        assert arm.global_batch_size is not None, "fixture assumes e2 sets a batch"
+        run_arm(arm, tmp_path, results, dry_run=False)
+        record = json.loads(results.read_text().splitlines()[0])
+        assert record["global_batch_size"] == arm.global_batch_size
+        assert record["dataset"] == arm.dataset
+
+    def test_an_arm_with_neither_records_null(self, tmp_path, monkeypatch):
+        """E1's arms leave the batch at the launcher's default; null says so."""
+        results = tmp_path / "results.jsonl"
+
+        def fake_run(cmd, env, cwd):
+            Path(env["RUN_LOG"]).parent.mkdir(parents=True, exist_ok=True)
+            Path(env["RUN_LOG"]).write_text(
+                _build_log([_render(0, 0, _PHASE_AFTER_TRAIN, 1.5)])
+            )
+            return subprocess.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(sweep.subprocess, "run", fake_run)
+        arm = Arm("lora-r16-all-lr0.00025-s0", "lora", 16, None, ALL_MODULES, 2.5e-4, 0)
+        run_arm(arm, tmp_path, results, dry_run=False)
+        record = json.loads(results.read_text().splitlines()[0])
+        assert record["global_batch_size"] is None
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -456,6 +509,10 @@ and inside the record dict, next to `"steps"`:
             "nll_trace": [p._asdict() for p in trace_points] or None,
             "trace_consistent": trace_ok,
             "trace_warning": trace_why,
+            # C3 groups by batch size; without this the batch an E2 arm ran at
+            # survives only inside its name.
+            "global_batch_size": arm.global_batch_size,
+            "dataset": arm.dataset,
 ```
 
 - [ ] **Step 4: Run the tests**
@@ -678,18 +735,18 @@ Expected: collection error — `ImportError: cannot import name 'adapter_param_c
 
 - [ ] **Step 3: Implement `adapter_param_count` in `arms.py`**
 
-Add to the imports at the top of `arms.py`:
+`arms.py` already imports `megatron_module_shapes` and
+`oft_param_count_for_modules` (lines 33–41) — **do not re-add them**. Only one
+name is missing; add it to the existing block in alphabetical position:
 
 ```python
-from orbit.utils.peft_param_match import (
     lora_param_count_for_modules,
-    megatron_module_shapes,
-    oft_param_count_for_modules,
-)
 ```
 
-(`matched_oft_block_size` and the others already imported stay.) Then, after
-`arm_env`:
+so the block reads `ATTENTION_MODULES, lora_param_count_for_modules,
+matched_mlp_rank, matched_oft_block_size, megatron_module_shapes,
+oft_block_size_matching_params, oft_lora_match_report,
+oft_param_count_for_modules`. Then, after `arm_env`:
 
 ```python
 def adapter_param_count(
@@ -1012,7 +1069,8 @@ git commit -m "feat(lora_regret): assert the DP>1 held-out NLL reduction matches
 **Interfaces:**
 - Consumes: ledger records written by `sweep.run_arm` (Tasks 2 and 4)
 - Produces: `load_records(paths, *, seed=0, require_ok=True) -> list[dict]`,
-  `sigma(records) -> float`, `ArmKey = tuple[str, int | None]`,
+  `sigma(records) -> float`, `ArmKey = tuple[str, int | None, str]`
+  (method, size, target_modules),
   `argmins(records) -> dict[ArmKey, dict]`,
   `lr_grids(records) -> dict[ArmKey, list[float]]`,
   `edge_of_grid(records) -> dict[ArmKey, str]`
@@ -1056,11 +1114,24 @@ from tools.lora_regret.analyze import (
 )
 
 
-def _record(method, rank, lr, nll, seed=0, status="ok", **extra):
+ALL = "linear_qkv,linear_proj,linear_fc1,linear_fc2"
+ATTN = "linear_qkv,linear_proj"
+FULL_KEY = ("full", None, "")
+
+
+def _key(method, size, modules=ALL):
+    """The 3-tuple ArmKey. target_modules is part of it because E3 runs
+    `lora r256 attn` and `lora r256 all` in one matrix."""
+    return (method, size, modules)
+
+
+def _record(method, rank, lr, nll, seed=0, status="ok", modules=None, **extra):
     record = {
         "arm": f"{method}-r{rank}-all-lr{lr:g}-s{seed}",
         "method": method,
         "rank": rank,
+        "oft_block_size": None,
+        "target_modules": ("" if method == "full" else ALL) if modules is None else modules,
         "lr": lr,
         "seed": seed,
         "metric": "nll",
@@ -1070,6 +1141,8 @@ def _record(method, rank, lr, nll, seed=0, status="ok", **extra):
         "trace_warning": None,
         "nll_trace": None,
         "adapter_params": None,
+        "global_batch_size": None,
+        "dataset": None,
         "steps": 2000,
     }
     record.update(extra)
@@ -1145,8 +1218,24 @@ class TestArgmins:
             _record("full", None, 2.5e-5, 1.45),
         ])
         best = argmins(load_records([path]))
-        assert best[("lora", 16)]["lr"] == 2.5e-4
-        assert best[("full", None)]["lr"] == 2.5e-5
+        assert best[_key("lora", 16)]["lr"] == 2.5e-4
+        assert best[FULL_KEY]["lr"] == 2.5e-5
+
+    def test_same_rank_different_placement_are_different_arms(self, tmp_path):
+        """E3's collision case. A (method, rank) key would report one r256.
+
+        `lora r256 attention-only` and `lora r256 all-modules` are both in the
+        e3 matrix, and C4 is precisely the comparison between placements -- so
+        collapsing them would delete the claim while appearing to answer it.
+        """
+        path = _ledger(tmp_path, "e3.jsonl", [
+            _record("lora", 256, 2.5e-4, 1.50, modules=ALL),
+            _record("lora", 256, 2.5e-4, 1.44, modules=ATTN),
+        ])
+        best = argmins(load_records([path]))
+        assert len(best) == 2
+        assert best[_key("lora", 256, ALL)]["test_nll"] == 1.50
+        assert best[_key("lora", 256, ATTN)]["test_nll"] == 1.44
 
 
 class TestEdgeOfGrid:
@@ -1160,11 +1249,11 @@ class TestEdgeOfGrid:
 
     def test_fires_on_the_lowest_grid_point(self, tmp_path):
         flagged = edge_of_grid(self._grid(tmp_path, 0))
-        assert ("lora", 16) in flagged
-        assert "re-centre" in flagged[("lora", 16)]
+        assert _key("lora", 16) in flagged
+        assert "re-centre" in flagged[_key("lora", 16)]
 
     def test_fires_on_the_highest_grid_point(self, tmp_path):
-        assert ("lora", 16) in edge_of_grid(self._grid(tmp_path, 4))
+        assert _key("lora", 16) in edge_of_grid(self._grid(tmp_path, 4))
 
     def test_silent_one_grid_point_in(self, tmp_path):
         """The non-tautology case: an interior argmin must NOT be flagged."""
@@ -1174,7 +1263,7 @@ class TestEdgeOfGrid:
     def test_a_single_point_grid_is_flagged(self, tmp_path):
         """One LR is simultaneously the lowest and highest point tried."""
         records = load_records([_ledger(tmp_path, "a.jsonl", [_record("lora", 16, 2.5e-4, 1.5)])])
-        assert ("lora", 16) in edge_of_grid(records)
+        assert _key("lora", 16) in edge_of_grid(records)
 
 
 class TestLrGrids:
@@ -1183,7 +1272,7 @@ class TestLrGrids:
             _record("lora", 16, 5.0e-4, 1.55),
             _record("lora", 16, 1.0e-4, 1.60),
         ])
-        assert lr_grids(load_records([path]))[("lora", 16)] == [1.0e-4, 5.0e-4]
+        assert lr_grids(load_records([path]))[_key("lora", 16)] == [1.0e-4, 5.0e-4]
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
@@ -1214,10 +1303,15 @@ import json
 import statistics
 from pathlib import Path
 
-# (method, rank) -- rank is None for full fine-tuning. OFT arms key on their
-# block size instead, so they carry ("oft", block_size); the two never collide
-# because the method differs.
-ArmKey = tuple[str, int | None]
+# (method, size, target_modules). `size` is the rank for LoRA, the block size
+# for OFT, and None for full fine-tuning.
+#
+# target_modules is part of the key and must NOT be dropped: E3 runs
+# `lora r256 attention-only` and `lora r256 all-modules` in the same matrix, so
+# a (method, rank) key would silently collapse two different arms into one and
+# report whichever happened to score better as "the r256 argmin". That is the
+# exact class of bug the seed-0 filter exists to prevent, one axis over.
+ArmKey = tuple[str, int | None, str]
 
 
 def load_records(
@@ -1264,9 +1358,8 @@ def load_records(
 
 
 def arm_key(record: dict) -> ArmKey:
-    if record["method"] == "oft":
-        return ("oft", record.get("oft_block_size"))
-    return (record["method"], record.get("rank"))
+    size = record.get("oft_block_size") if record["method"] == "oft" else record.get("rank")
+    return (record["method"], size, record.get("target_modules") or "")
 
 
 def score(record: dict, metric: str = "nll") -> float:
@@ -1376,7 +1469,12 @@ blank.
 Append to `tests/fast/utils/test_lora_regret_analyze.py`:
 
 ```python
-from tools.lora_regret.analyze import departure_steps, lr_band
+from tools.lora_regret.analyze import (
+    batch_gaps,
+    departure_steps,
+    lr_band,
+    placement_deltas,
+)
 from tools.lora_regret.trace import PHASE_AFTER_TRAIN, NllPoint
 
 
@@ -1435,7 +1533,47 @@ class TestLrBand:
             record["metric"] = "accuracy"
             record["accuracy"] = record.pop("test_nll")
         band = lr_band(records, 0.001, metric="accuracy")
-        assert band[("lora", 1)] == (1e-5, 1e-4)
+        assert band[_key("lora", 1)] == (1e-5, 1e-4)
+
+
+class TestBatchGaps:
+    """C3: the LoRA-minus-FullFT gap at each batch size, in sigma.
+
+    The claim is a gap that GROWS with batch. A constant offset at all three
+    batch sizes is not the signature and must be distinguishable from it, which
+    means grouping by batch -- impossible until global_batch_size reached the
+    ledger (Task 2).
+    """
+
+    def test_groups_by_batch_size(self, tmp_path):
+        rows = []
+        for batch, full_nll, lora_nll in [(32, 1.50, 1.502), (512, 1.40, 1.45)]:
+            rows.append(_record("full", None, 2.5e-5, full_nll, global_batch_size=batch))
+            rows.append(_record("lora", 256, 2.5e-4, lora_nll, global_batch_size=batch))
+        gaps = batch_gaps(load_records([_ledger(tmp_path, "e2.jsonl", rows)]), 0.001)
+        assert gaps[(32, _key("lora", 256))] == pytest.approx(2.0, abs=1e-6)
+        assert gaps[(512, _key("lora", 256))] == pytest.approx(50.0, abs=1e-6)
+
+    def test_a_batch_with_no_fullft_arm_is_skipped_not_guessed(self, tmp_path):
+        rows = [_record("lora", 256, 2.5e-4, 1.45, global_batch_size=512)]
+        gaps = batch_gaps(load_records([_ledger(tmp_path, "e2.jsonl", rows)]), 0.001)
+        assert gaps == {}
+
+
+class TestPlacementDeltas:
+    """C4: NLL(attention) - NLL(MLP) at matched parameters, in sigma."""
+
+    def test_pairs_attention_against_mlp(self, tmp_path):
+        rows = [
+            _record("lora", 256, 2.5e-4, 1.500, modules=ATTN),
+            _record("lora", 92, 2.5e-4, 1.503, modules="linear_fc1,linear_fc2"),
+        ]
+        deltas = placement_deltas(load_records([_ledger(tmp_path, "e3.jsonl", rows)]), 0.001)
+        assert deltas["attn(r256) - mlp(r92)"] == pytest.approx(-3.0, abs=1e-6)
+
+    def test_no_mlp_arm_yields_no_comparison(self, tmp_path):
+        rows = [_record("lora", 256, 2.5e-4, 1.500, modules=ATTN)]
+        assert placement_deltas(load_records([_ledger(tmp_path, "e3.jsonl", rows)]), 0.001) == {}
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
@@ -1518,6 +1656,62 @@ def lr_band(
         ]
         bands[key] = (min(within), max(within))
     return bands
+
+
+def batch_gaps(
+    records: list[dict],
+    sigma_value: float,
+) -> dict[tuple[int | None, ArmKey], float]:
+    """C3: `best_LoRA(batch) - best_FullFT(batch)` at each batch size, in sigma.
+
+    The claim is a gap that *grows* with batch -- a gap absent at 32 and present
+    at 512 is the signature, a constant offset at all three is not -- so the
+    comparison has to be made within each batch size, never pooled. A batch with
+    no FullFT arm is skipped rather than compared against another batch's
+    baseline: that would attribute a batch-size effect to a placement it never
+    had.
+    """
+    by_batch: dict[int | None, list[dict]] = {}
+    for record in records:
+        by_batch.setdefault(record.get("global_batch_size"), []).append(record)
+    gaps: dict[tuple[int | None, ArmKey], float] = {}
+    for batch, group in by_batch.items():
+        best = argmins(group)
+        baseline = next((v for k, v in best.items() if k[0] == "full"), None)
+        if baseline is None:
+            continue
+        for key, record in best.items():
+            if key[0] == "full":
+                continue
+            gaps[(batch, key)] = (record["test_nll"] - baseline["test_nll"]) / sigma_value
+    return gaps
+
+
+def placement_deltas(records: list[dict], sigma_value: float) -> dict[str, float]:
+    """C4: `NLL(attention) - NLL(MLP)` at matched parameters, in sigma.
+
+    Pairs each attention-only arm with each MLP-only arm, labelled by both
+    ranks, because the matched pair is `attention r256` against `MLP r92` and
+    the post's own pair (`r256`/`r128`) is deliberately in the same matrix -- if
+    the two disagree, the disagreement is parameter accounting rather than
+    physics, and collapsing them to one number would hide exactly that.
+    """
+    from orbit.utils.peft_param_match import ATTENTION_MODULES, MLP_MODULES
+
+    attn_set, mlp_set = set(ATTENTION_MODULES), set(MLP_MODULES)
+
+    def modules_of(key: ArmKey) -> set[str]:
+        return {name for name in key[2].split(",") if name}
+
+    best = argmins(records)
+    attn = {k: v for k, v in best.items() if modules_of(k) == attn_set}
+    mlp = {k: v for k, v in best.items() if modules_of(k) == mlp_set}
+    deltas: dict[str, float] = {}
+    for attn_key, attn_record in attn.items():
+        for mlp_key, mlp_record in mlp.items():
+            label = f"attn(r{attn_key[1]}) - mlp(r{mlp_key[1]})"
+            deltas[label] = (attn_record["test_nll"] - mlp_record["test_nll"]) / sigma_value
+    return deltas
 ```
 
 - [ ] **Step 4: Implement the CLI**
@@ -1525,12 +1719,19 @@ def lr_band(
 Append to `tools/lora_regret/analyze.py`:
 
 ```python
+_MODULE_SHORT = {
+    "linear_qkv,linear_proj,linear_fc1,linear_fc2": "all",
+    "linear_qkv,linear_proj": "attn",
+    "linear_fc1,linear_fc2": "mlp",
+}
+
+
 def _fmt_key(key: ArmKey) -> str:
-    method, size = key
+    method, size, modules = key
     if method == "full":
         return "full"
     label = "b" if method == "oft" else "r"
-    return f"{method} {label}{size}"
+    return f"{method} {label}{size} {_MODULE_SHORT.get(modules, modules)}"
 
 
 def _load_traces(records: list[dict], log_dir: Path) -> tuple[dict[str, list], dict[str, str]]:
@@ -1561,8 +1762,6 @@ def _load_traces(records: list[dict], log_dir: Path) -> tuple[dict[str, list], d
 
 
 def main() -> int:
-    import argparse
-
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
@@ -1587,8 +1786,12 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
+    # Both metrics, loaded separately. An E4 ledger carries metric="accuracy"
+    # and test_nll=null, so loading only the nll view and bailing on empty would
+    # make `analyze c5 --ledgers results/e4_*.jsonl` exit before it ran.
     records = load_records(args.ledgers)
-    if not records:
+    acc_records = load_records(args.ledgers, metric="accuracy")
+    if not records and not acc_records:
         print("no usable records in the given ledgers", file=sys.stderr)
         return 1
 
@@ -1611,14 +1814,16 @@ def main() -> int:
 
     flagged = edge_of_grid(records)
     best = argmins(records)
+    grids = lr_grids(records)
+    order = lambda kv: (kv[0][0], kv[0][1] or 0, kv[0][2])  # noqa: E731
 
     if args.command in ("argmins", "all"):
-        print(f"{'arm':14} {'argmin_lr':<11} {'nll':<10} {'adapter_params':>15}  grid")
-        for key, record in sorted(best.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)):
-            grid = lr_grids(records)[key]
+        print(f"{'arm':22} {'argmin_lr':<11} {'nll':<10} {'adapter_params':>15}  grid")
+        for key, record in sorted(best.items(), key=order):
+            grid = grids[key]
             params = record.get("adapter_params")
             print(
-                f"{_fmt_key(key):14} {record['lr']:<11g} {record['test_nll']:<10.6f} "
+                f"{_fmt_key(key):22} {record['lr']:<11g} {record['test_nll']:<10.6f} "
                 f"{params if params is not None else '-':>15}  "
                 f"[{grid[0]:g} .. {grid[-1]:g}]"
                 + ("   EDGE OF GRID" if key in flagged else "")
@@ -1627,19 +1832,19 @@ def main() -> int:
         print("\nedge-of-grid arms -- re-centre and re-run before quoting:", file=sys.stderr)
         for key, why in flagged.items():
             print(f"  {_fmt_key(key)}: {why}", file=sys.stderr)
-        if args.command not in ("argmins",):
+        if args.command != "argmins":
             return 3
 
+    all_modules = "linear_qkv,linear_proj,linear_fc1,linear_fc2"
     if args.command in ("c2", "all"):
-        lora = best.get(("lora", 256))
-        full = best.get(("full", None))
+        lora = best.get(("lora", 256, all_modules))
+        full = best.get(("full", None, ""))
         if lora and full:
-            ratio = lora["lr"] / full["lr"]
-            print(f"\nC2: argmin_LR(LoRA r256) / argmin_LR(FullFT) = {ratio:.2f}")
+            print(f"\nC2: argmin_LR(LoRA r256) / argmin_LR(FullFT) = {lora['lr'] / full['lr']:.2f}")
             print("    the post predicts 9.8, rising toward 15 for runs under ~100 steps")
-            ranks = [k[1] for k in best if k[0] == "lora" and k[1] in (4, 512)]
-            if len(ranks) == 2:
-                lrs = [best[("lora", r)]["lr"] for r in (4, 512)]
+            edges = [best.get(("lora", r, all_modules)) for r in (4, 512)]
+            if all(edges):
+                lrs = [record["lr"] for record in edges]
                 print(
                     f"    rank 4 vs 512 argmin spread = {max(lrs) / min(lrs):.2f}x "
                     "(the tighter claim is < 2x)"
@@ -1655,27 +1860,47 @@ def main() -> int:
             verdict = f"step {where}" if where is not None else f"no departure within {budget} steps"
             print(f"    {name:34} {verdict:38} [trace: {sources[name]}]")
 
-    if args.command in ("c3", "c4", "c6", "all"):
-        print(f"\n(differences below are in units of sigma = {sigma_value:.6f})")
-        for key, record in sorted(best.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)):
-            baseline = best.get(("full", None))
-            if baseline is None or key == ("full", None):
-                continue
-            delta = (record["test_nll"] - baseline["test_nll"]) / sigma_value
-            ratio = record.get("matched_ratio")
-            suffix = f"  matched_ratio={ratio:.3f}" if ratio is not None else ""
-            print(f"    {_fmt_key(key):14} nll - full = {delta:+8.2f} sigma{suffix}")
+    if args.command in ("c3", "all"):
+        gaps = batch_gaps(records, sigma_value)
+        if gaps:
+            print(f"\nC3: best_LoRA - best_FullFT per batch (sigma = {sigma_value:.6f})")
+            print("    the claim is a gap that GROWS with batch; a constant offset is not it")
+            for (batch, key), delta in sorted(gaps.items(), key=lambda kv: (kv[0][0] or 0, kv[0][1])):
+                print(f"    batch {str(batch):>4}  {_fmt_key(key):22} {delta:+8.2f} sigma")
+
+    if args.command in ("c4", "all"):
+        deltas = placement_deltas(records, sigma_value)
+        if deltas:
+            print(f"\nC4: placement at matched parameters (sigma = {sigma_value:.6f})")
+            for label, delta in sorted(deltas.items()):
+                print(f"    {label:28} {delta:+8.2f} sigma")
+
+    if args.command in ("c6", "all"):
+        oft = {k: v for k, v in best.items() if k[0] == "oft"}
+        if oft:
+            print(f"\nC6: OFT against LoRA at matched parameters (sigma = {sigma_value:.6f})")
+            for key, record in sorted(oft.items(), key=order):
+                ratio = record.get("matched_ratio")
+                params = record.get("adapter_params")
+                # Mind the direction: an OFT arm carrying slightly FEWER
+                # parameters that still keeps up strengthens the finding, while
+                # one carrying fewer and losing is confounded, not informative.
+                suffix = f"  matched_ratio={ratio:.3f}" if ratio is not None else "  matched_ratio=?"
+                print(
+                    f"    {_fmt_key(key):22} nll={record['test_nll']:.6f} "
+                    f"params={params}{suffix}"
+                )
 
     if args.command in ("c5", "all"):
-        acc = load_records(args.ledgers, metric="accuracy")
+        acc = acc_records
         if acc:
             print("\nC5: peak accuracy and performant-LR band")
             peaks = argmins(acc, metric="accuracy")
             bands = lr_band(acc, sigma_value, metric="accuracy")
-            for key in sorted(peaks, key=lambda k: (k[0], k[1] or 0)):
+            for key in sorted(peaks, key=lambda k: (k[0], k[1] or 0, k[2])):
                 low, high = bands[key]
                 print(
-                    f"    {_fmt_key(key):14} peak={peaks[key]['accuracy']:.4f} "
+                    f"    {_fmt_key(key):22} peak={peaks[key]['accuracy']:.4f} "
                     f"band=[{low:g} .. {high:g}] ({high / low:.0f}x wide)"
                 )
             print(
@@ -1690,7 +1915,8 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-Add `import sys` to the module's imports.
+Add `import argparse` and `import sys` to the module's top-level imports (Task 6
+created it with only `glob`, `json`, `statistics` and `pathlib`).
 
 - [ ] **Step 5: Run the tests**
 
@@ -1705,17 +1931,23 @@ Expected: PASS
 python - <<'PY'
 import json, pathlib
 pathlib.Path("/tmp/lr_demo").mkdir(exist_ok=True)
+ALL = "linear_qkv,linear_proj,linear_fc1,linear_fc2"
 rows = []
 for lr, nll in [(1e-4, 1.60), (1.5e-4, 1.54), (2.5e-4, 1.50), (4e-4, 1.53), (6.3e-4, 1.58)]:
     rows.append({"arm": f"lora-r256-all-lr{lr:g}-s0", "method": "lora", "rank": 256,
+                 "oft_block_size": None, "target_modules": ALL,
                  "lr": lr, "seed": 0, "metric": "nll", "test_nll": nll, "status": "ok",
-                 "trace_consistent": True, "adapter_params": 570425344, "steps": 2000})
+                 "trace_consistent": True, "adapter_params": 570425344, "steps": 2000,
+                 "global_batch_size": None, "dataset": "tulu3"})
 for lr, nll in [(1e-5, 1.52), (2.5e-5, 1.47), (6.3e-5, 1.51)]:
     rows.append({"arm": f"full-na-na-lr{lr:g}-s0", "method": "full", "rank": None,
+                 "oft_block_size": None, "target_modules": "",
                  "lr": lr, "seed": 0, "metric": "nll", "test_nll": nll, "status": "ok",
-                 "trace_consistent": True, "adapter_params": None, "steps": 2000})
+                 "trace_consistent": True, "adapter_params": None, "steps": 2000,
+                 "global_batch_size": None, "dataset": "tulu3"})
 pathlib.Path("/tmp/lr_demo/e1.jsonl").write_text("".join(json.dumps(r)+"\n" for r in rows))
 sig = [{"arm": f"lora-r256-all-lr0.00025-s{s}", "method": "lora", "rank": 256, "lr": 2.5e-4,
+        "oft_block_size": None, "target_modules": ALL,
         "seed": s, "metric": "nll", "test_nll": 1.500 + s*0.001, "status": "ok",
         "trace_consistent": True} for s in (0, 1, 2)]
 pathlib.Path("/tmp/lr_demo/sigma.jsonl").write_text("".join(json.dumps(r)+"\n" for r in sig))
@@ -1759,9 +1991,12 @@ git commit -m "feat(lora_regret): read C1-C6 off the ledgers in units of sigma"
 - Modify: `tests/fast/utils/test_lora_regret_sweep.py` (add a class)
 
 **Interfaces:**
-- Consumes: `analyze.argmins` output shape — `dict[(method, rank), record]` — but
-  takes a plain `dict[ArmKey, float]` of learning rates so it does not depend on
-  the ledger schema
+- Consumes: a plain `dict[(method, rank), float]` of learning rates — **not**
+  `analyze.ArmKey`, which is a 3-tuple including `target_modules`. E1's arms are
+  all-modules without exception, so the placement axis carries no information
+  here; Task 9's `argmins_from` does the projection and refuses it if a ledger
+  actually holds two placements at one rank. Keeping the narrower key means
+  `arms.py` does not import `analyze.py`
 - Produces: `arms.e1long_arms(argmins: dict[tuple[str, int | None], float],
   seed: int = 0) -> list[Arm]`; `Arm` gains `full_epoch: bool = False` and
   `eval_nll_interval: int | None = None`; `MATRICES["e1long"]`
@@ -1962,7 +2197,8 @@ git commit -m "feat(lora_regret): add the e1long matrix for the full-epoch curve
 **Interfaces:**
 - Consumes: `analyze.load_records`, `analyze.argmins`, `analyze.edge_of_grid`
   (Task 6); `arms.e1long_arms` (Task 8)
-- Produces: `sweep.argmins_from(patterns, allow_edge) -> dict[ArmKey, float]`;
+- Produces: `sweep.argmins_from(patterns, allow_edge) -> dict[(method, rank), float]`
+  — the 2-tuple `e1long_arms` takes, projected from `analyze`'s 3-tuple key;
   CLI gains `--argmins-from` and `--allow-edge-argmin`
 
 Two fail-closed guards. Fewer than eight recovered argmins means a partial
@@ -1985,8 +2221,10 @@ class TestArgminsFrom:
     def _row(self, method, rank, lr, nll, seed=0):
         return {
             "arm": f"{method}-r{rank}-all-lr{lr:g}-s{seed}", "method": method, "rank": rank,
+            "oft_block_size": None,
+            "target_modules": "" if method == "full" else ALL_MODULES,
             "lr": lr, "seed": seed, "metric": "nll", "test_nll": nll, "status": "ok",
-            "trace_consistent": True,
+            "trace_consistent": True, "global_batch_size": None, "dataset": None,
         }
 
     def _complete(self):
@@ -2098,7 +2336,20 @@ def argmins_from(patterns: list[str], allow_edge: bool) -> dict[tuple[str, int |
 
     records = load_records(patterns)
     best = argmins(records)
-    found = {key: record["lr"] for key, record in best.items()}
+    # analyze keys on (method, size, target_modules); e1long keys on
+    # (method, rank), because every E1 arm is all-modules and the long curves
+    # inherit that. Project, and refuse to guess if the ledger actually holds
+    # two placements at one rank -- that is an E3 ledger, not an E1 one.
+    found: dict[tuple[str, int | None], float] = {}
+    for (method, size, modules), record in best.items():
+        key = (method, size)
+        if key in found:
+            sys.exit(
+                f"--argmins-from found more than one placement for {key} "
+                f"(latest: {modules!r}). These ledgers mix placements, so there is no "
+                "single argmin per rank; point it at the E1 ledgers only."
+            )
+        found[key] = record["lr"]
     if len(found) < 8:
         sys.exit(
             f"--argmins-from recovered only {len(found)} arms from {patterns}: "
@@ -2288,13 +2539,31 @@ class TestCheckMatrices:
         assert checks["matrix:e5scout"].ok and "5" in checks["matrix:e5scout"].detail
         assert checks["matrix:e5"].ok and "50" in checks["matrix:e5"].detail
 
-    def test_a_wrong_geometry_is_caught(self):
+    def test_a_matrix_that_raises_is_reported_not_propagated(self, monkeypatch):
+        """A broken matrix must fail the preflight, not crash it.
+
+        Preflight's whole value is telling you every problem at once; an
+        uncaught exception in the third matrix hides the fourth.
+        """
+        import tools.lora_regret.preflight as preflight
+
+        def boom(*_args, **_kwargs):
+            raise ValueError("hidden_size and ffn_size must be positive")
+
+        monkeypatch.setitem(preflight.MATRICES, "e1", boom)
+        checks = {c.name: c for c in check_matrices(4096, 14336)}
+        assert not checks["matrix:e1"].ok
+        assert "ValueError" in checks["matrix:e1"].detail
+        assert checks["matrix:e2"].ok  # the rest still ran
+
+    def test_a_wrong_count_fails_even_though_the_matrix_builds(self, monkeypatch):
         """Not a tautology: the counts are pinned, not read back from the builder."""
-        checks = {c.name: c for c in check_matrices(2560, 9728)}
-        assert checks["matrix:e1"].ok  # e1 does not depend on geometry
-        # e5 solves block sizes against the shapes, so a different model is a
-        # different matrix -- it must still build, and still report its count.
-        assert checks["matrix:e5"].detail
+        import tools.lora_regret.preflight as preflight
+
+        monkeypatch.setitem(preflight.EXPECTED_ARMS, "e1", 41)
+        checks = {c.name: c for c in check_matrices(4096, 14336)}
+        assert not checks["matrix:e1"].ok
+        assert "40 arms, expected 41" in checks["matrix:e1"].detail
 
 
 class TestStageRequirements:
@@ -2688,14 +2957,45 @@ Tasks 6 and 7. Gap 5 → Task 4. Gap 6 → Tasks 1 and 2. The `e1long` matrix an
 `--argmins-from` from spec §5 → Tasks 8 and 9. The runbook rewrite that spec §5
 requires ("the §8 heredoc generator is deleted") → Task 11.
 
-**Deferred deliberately.** The spec's `analyze.py` table lists `c3` and `c4` as
-distinct subcommands; Task 7 implements them as one shared σ-normalized delta
-report because E2's and E3's readings are the same arithmetic over different
-ledgers. If the E2/E3 data turns out to want per-batch and per-placement
-grouping — it likely will — that is a follow-up commit against real data, not a
-guess made now.
+**Five defects found in a second review pass and fixed above.** Recorded because
+each was invisible from the prose and only surfaced by checking the plan against
+the code:
 
-**Naming consistency.** `ArmKey = tuple[str, int | None]` is used identically in
-`analyze.py` (Task 6), `arms.e1long_arms` (Task 8) and `sweep.argmins_from`
-(Task 9). `score(record, metric)` is the single accessor for both `test_nll` and
+1. **C3 was unreadable.** `Arm` carries `global_batch_size` and `e2_arms` sets
+   it, but `run_arm`'s record dropped it — so the batch size each E2 arm ran at
+   survived only inside the arm's name. C3 groups by batch; without the field it
+   cannot be computed at all. Task 2 now writes `global_batch_size` and
+   `dataset`, with tests.
+2. **`ArmKey` collapsed two E3 arms into one.** With a `(method, rank)` key,
+   `lora r256 attention-only` and `lora r256 all-modules` — both in the `e3`
+   matrix — share a key, so `argmins` would report whichever scored better as
+   "the r256 argmin". C4 is *precisely* the comparison between those placements,
+   so the bug would have deleted the claim while appearing to answer it. The key
+   is now `(method, size, target_modules)`, and `argmins_from` projects to
+   `(method, rank)` for E1 while refusing to guess if a ledger mixes placements.
+3. **`analyze c5` exited before running.** `main` loaded with the default
+   `metric="nll"` and bailed on an empty result; an E4 ledger is entirely
+   `metric="accuracy"`, so pointing `c5` at `results/e4_*.jsonl` — the only
+   sensible invocation — returned 1. Both views are now loaded and the guard
+   fires only if both are empty.
+4. **C3 and C4 were not implemented.** The first draft emitted a generic
+   "delta vs FullFT" table that grouped by nothing, so it could not distinguish
+   C3's *growing* gap from a constant offset, and never computed
+   attention-minus-MLP at all. Now `batch_gaps` and `placement_deltas`, each
+   with its own tests including a case it must refuse.
+5. **Task 4 would have duplicated two imports.** `arms.py` already imports
+   `megatron_module_shapes` and `oft_param_count_for_modules`; only
+   `lora_param_count_for_modules` is missing.
+
+**Naming consistency.** `ArmKey = tuple[str, int | None, str]` is used
+identically across `analyze.py` (Tasks 6 and 7), and `sweep.argmins_from`
+(Task 9) documents its projection to the 2-tuple `e1long_arms` (Task 8) takes.
+`score(record, metric)` is the single accessor for both `test_nll` and
 `accuracy`. `Check(name, ok, detail)` is the only preflight return shape.
+
+**Known limitation, stated rather than hidden.** `placement_deltas` pairs every
+attention-only arm with every MLP-only arm and labels each pair by both ranks.
+That is deliberate — E3 deliberately contains two candidate matched pairs
+(`r256`/`r92` from Orbit's fused layout and the post's own `r256`/`r128`) and
+collapsing them to one number would hide a disagreement that is itself the
+finding. It does mean the output has one row per pair rather than one row.
