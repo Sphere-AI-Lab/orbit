@@ -177,3 +177,110 @@ class TestLrGrids:
             _record("lora", 16, 1.0e-4, 1.60),
         ])
         assert lr_grids(load_records([path]))[_key("lora", 16)] == [1.0e-4, 5.0e-4]
+
+
+from tools.lora_regret.analyze import (
+    batch_gaps,
+    departure_steps,
+    lr_band,
+    placement_deltas,
+)
+from tools.lora_regret.trace import PHASE_AFTER_TRAIN, NllPoint
+
+
+def _trace(nlls, start=1):
+    return [
+        NllPoint(i, i, PHASE_AFTER_TRAIN, nll, nll, 308760, 1000)
+        for i, nll in enumerate(nlls, start=start)
+    ]
+
+
+class TestDepartureSteps:
+    SIGMA = 0.001
+
+    def test_an_arm_that_tracks_the_envelope_never_departs(self):
+        traces = {"r512": _trace([1.5, 1.4, 1.3, 1.2]), "r256": _trace([1.5, 1.4, 1.3, 1.2])}
+        assert departure_steps(traces, self.SIGMA) == {"r512": None, "r256": None}
+
+    def test_reports_the_first_step_of_three_consecutive_excursions(self):
+        # r1 exceeds the envelope by 10 sigma from step 2 onward.
+        traces = {
+            "r512": _trace([1.50, 1.40, 1.30, 1.20, 1.10]),
+            "r1": _trace([1.50, 1.41, 1.31, 1.21, 1.11]),
+        }
+        assert departure_steps(traces, self.SIGMA)["r1"] == 2
+
+    def test_does_not_fire_on_two_consecutive_excursions(self):
+        """The non-tautology case: the rule says three, so two must not count."""
+        traces = {
+            "r512": _trace([1.50, 1.40, 1.30, 1.20, 1.10]),
+            "r1": _trace([1.50, 1.41, 1.31, 1.20, 1.10]),
+        }
+        assert departure_steps(traces, self.SIGMA)["r1"] is None
+
+    def test_an_excursion_under_two_sigma_does_not_count(self):
+        traces = {
+            "r512": _trace([1.5000, 1.4000, 1.3000, 1.2000]),
+            "r16": _trace([1.5000, 1.4015, 1.3015, 1.2015]),  # 1.5 sigma
+        }
+        assert departure_steps(traces, self.SIGMA)["r16"] is None
+
+    def test_an_empty_trace_is_none_not_a_crash(self):
+        traces = {"r512": _trace([1.5, 1.4, 1.3]), "r1": []}
+        assert departure_steps(traces, self.SIGMA)["r1"] is None
+
+
+class TestLrBand:
+    def test_the_band_spans_every_lr_within_two_sigma_of_the_best(self, tmp_path):
+        path = _ledger(tmp_path, "e4.jsonl", [
+            _record("lora", 1, 1e-6, 0.30),
+            _record("lora", 1, 1e-5, 0.44),
+            _record("lora", 1, 1e-4, 0.4395),
+            _record("lora", 1, 1e-3, 0.10),
+        ])
+        records = load_records([path])
+        for record in records:  # an accuracy ledger, scored the other direction
+            record["metric"] = "accuracy"
+            record["accuracy"] = record.pop("test_nll")
+        band = lr_band(records, 0.001, metric="accuracy")
+        assert band[_key("lora", 1)] == (1e-5, 1e-4)
+
+
+class TestBatchGaps:
+    """C3: the LoRA-minus-FullFT gap at each batch size, in sigma.
+
+    The claim is a gap that GROWS with batch. A constant offset at all three
+    batch sizes is not the signature and must be distinguishable from it, which
+    means grouping by batch -- impossible until global_batch_size reached the
+    ledger (Task 2).
+    """
+
+    def test_groups_by_batch_size(self, tmp_path):
+        rows = []
+        for batch, full_nll, lora_nll in [(32, 1.50, 1.502), (512, 1.40, 1.45)]:
+            rows.append(_record("full", None, 2.5e-5, full_nll, global_batch_size=batch))
+            rows.append(_record("lora", 256, 2.5e-4, lora_nll, global_batch_size=batch))
+        gaps = batch_gaps(load_records([_ledger(tmp_path, "e2.jsonl", rows)]), 0.001)
+        assert gaps[(32, _key("lora", 256))] == pytest.approx(2.0, abs=1e-6)
+        assert gaps[(512, _key("lora", 256))] == pytest.approx(50.0, abs=1e-6)
+
+    def test_a_batch_with_no_fullft_arm_is_skipped_not_guessed(self, tmp_path):
+        rows = [_record("lora", 256, 2.5e-4, 1.45, global_batch_size=512)]
+        gaps = batch_gaps(load_records([_ledger(tmp_path, "e2.jsonl", rows)]), 0.001)
+        assert gaps == {}
+
+
+class TestPlacementDeltas:
+    """C4: NLL(attention) - NLL(MLP) at matched parameters, in sigma."""
+
+    def test_pairs_attention_against_mlp(self, tmp_path):
+        rows = [
+            _record("lora", 256, 2.5e-4, 1.500, modules=ATTN),
+            _record("lora", 92, 2.5e-4, 1.503, modules="linear_fc1,linear_fc2"),
+        ]
+        deltas = placement_deltas(load_records([_ledger(tmp_path, "e3.jsonl", rows)]), 0.001)
+        assert deltas["attn(r256) - mlp(r92)"] == pytest.approx(-3.0, abs=1e-6)
+
+    def test_no_mlp_arm_yields_no_comparison(self, tmp_path):
+        rows = [_record("lora", 256, 2.5e-4, 1.500, modules=ATTN)]
+        assert placement_deltas(load_records([_ledger(tmp_path, "e3.jsonl", rows)]), 0.001) == {}
