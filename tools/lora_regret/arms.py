@@ -32,6 +32,7 @@ from dataclasses import dataclass
 
 from orbit.utils.peft_param_match import (
     ATTENTION_MODULES,
+    lora_param_count_for_modules,
     matched_mlp_rank,
     matched_oft_block_size,
     megatron_module_shapes,
@@ -509,3 +510,40 @@ def arm_env(arm: Arm, data_dir: str = DATA_DIR) -> dict[str, str]:
     else:
         raise ValueError(f"unknown method {arm.method!r}")
     return env
+
+
+def adapter_param_count(
+    arm: Arm,
+    hidden_size: int,
+    ffn_size: int,
+    num_layers: int,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
+) -> int | None:
+    """Trainable adapter parameters for this arm, or None for full fine-tuning.
+
+    Analytic rather than read back from a written checkpoint, so it is available
+    at dry-run time -- before compute is spent -- and so E3's and E5's
+    matched-parameter claims can be checked against the arm that is *about* to
+    run. Verified exact against the real 2026-07-30 r256 adapter
+    (570,425,344 parameters); see the plan's Task 4.
+
+    `None` for `full` arms is meaningful, not missing: full fine-tuning has no
+    adapter, and recording 0 would read as "an adapter with no parameters".
+    """
+    if arm.method == "full":
+        return None
+    shapes = megatron_module_shapes(hidden_size, ffn_size, qkv_output_size)
+    wanted = [name.strip() for name in arm.target_modules.split(",") if name.strip()]
+    selected = {name: shape for name, shape in shapes.items() if name in wanted}
+    if not selected:
+        raise ValueError(
+            f"arm {arm.name!r} targets no known module: {arm.target_modules!r} "
+            f"(known: {sorted(shapes)})"
+        )
+    if arm.method == "lora":
+        per_layer = lora_param_count_for_modules(arm.rank, selected)
+    elif arm.method == "oft":
+        per_layer = oft_param_count_for_modules(arm.oft_block_size, selected)
+    else:
+        raise ValueError(f"unknown method {arm.method!r}")
+    return per_layer * num_layers

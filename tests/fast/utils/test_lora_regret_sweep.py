@@ -37,6 +37,9 @@ from tools.lora_regret import sweep
 from tools.lora_regret.sweep import append_result, load_ledger, parse_final_nll, run_arm
 
 H, FFN = 2560, 9728
+# Only feeds adapter_param_count, which scales linearly in it -- so any positive
+# value exercises the CLI path. Llama-3.1-8B's 32 keeps it recognisable.
+NUM_LAYERS = 32
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # The exact %-style template train.py:_log_eval_nll feeds to logger.info.
@@ -457,6 +460,8 @@ class TestDryRunOutput:
                 str(H),
                 "--ffn-size",
                 str(FFN),
+                "--num-layers",
+                str(NUM_LAYERS),
                 "--dry-run",
                 "--results",
                 str(tmp_path / "r.jsonl"),
@@ -703,6 +708,7 @@ class TestOftDiagnosticScope:
         monkeypatch.setattr(
             sys, "argv",
             ["sweep.py", "--matrix", matrix, "--hidden-size", str(H), "--ffn-size", str(FFN),
+             "--num-layers", str(NUM_LAYERS),
              "--dry-run", "--results", str(tmp_path / f"{matrix}.jsonl")],
         )
         sweep.main()
@@ -842,7 +848,8 @@ class TestE5Wiring:
 
 class TestE5CliGuards:
     def _argv(self, *extra):
-        return ["sweep.py", "--hidden-size", str(LLAMA_H), "--ffn-size", str(LLAMA_FFN), "--dry-run", *extra]
+        return ["sweep.py", "--hidden-size", str(LLAMA_H), "--ffn-size", str(LLAMA_FFN),
+                "--num-layers", str(NUM_LAYERS), "--dry-run", *extra]
 
     def test_e5_without_a_scouted_centre_exits_cleanly(self, monkeypatch, capsys, tmp_path):
         monkeypatch.setattr(sys, "argv", self._argv("--matrix", "e5", "--results", str(tmp_path / "r.jsonl")))
@@ -994,3 +1001,66 @@ class TestDryRunPrintsAPasteableCommand:
         line = capsys.readouterr().out.strip()
         assert "WANDB_GROUP=lora-regret-rl" in line
         assert line.endswith(f"bash {sweep.RL_LAUNCHER}")
+
+
+from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT, adapter_param_count
+
+# Counted from the real adapter written by the 2026-07-30 smoke:
+# 256 tensors, 32 layers, all bf16. Analytic and measured agree exactly, and
+# E3's and E5's matched-parameter claims rest on that agreement.
+SMOKE_R256_ALL_MODULES_PARAMS = 570_425_344
+
+
+class TestAdapterParamCount:
+    def test_matches_the_real_r256_adapter(self):
+        arm = Arm("lora-r256-all-lr0.00025-s0", "lora", 256, None, ALL_MODULES, 2.5e-4, 0)
+        assert (
+            adapter_param_count(arm, 4096, 14336, 32, LLAMA31_8B_QKV_OUTPUT)
+            == SMOKE_R256_ALL_MODULES_PARAMS
+        )
+
+    def test_attention_only_counts_only_attention_modules(self):
+        arm = Arm("lora-r256-attn-lr0.00025-s0", "lora", 256, None, ATTN_MODULES, 2.5e-4, 0)
+        # linear_qkv 256*(4096+6144) + linear_proj 256*(4096+4096), times 32.
+        assert adapter_param_count(arm, 4096, 14336, 32, LLAMA31_8B_QKV_OUTPUT) == (
+            256 * (4096 + 6144) + 256 * (4096 + 4096)
+        ) * 32
+
+    def test_full_finetuning_has_no_adapter(self):
+        arm = Arm("full-na-na-lr2.5e-05-s0", "full", None, None, "", 2.5e-5, 0)
+        assert adapter_param_count(arm, 4096, 14336, 32, LLAMA31_8B_QKV_OUTPUT) is None
+
+    def test_oft_uses_the_block_size_not_a_rank(self):
+        arm = Arm("oft-b64-all-lr0.0001-s0", "oft", None, 64, ALL_MODULES, 1e-4, 0)
+        count = adapter_param_count(arm, 4096, 14336, 32, LLAMA31_8B_QKV_OUTPUT)
+        assert count > 0
+        # OFT's count follows d_in and ignores d_out, so it must NOT equal the
+        # LoRA count for any rank that happens to share the arm's tag.
+        lora = Arm("lora-r64-all-x", "lora", 64, None, ALL_MODULES, 1e-4, 0)
+        assert count != adapter_param_count(lora, 4096, 14336, 32, LLAMA31_8B_QKV_OUTPUT)
+
+    def test_an_unknown_target_module_raises(self):
+        arm = Arm("lora-r16-na-x", "lora", 16, None, "linear_nonexistent", 1e-4, 0)
+        with pytest.raises(ValueError, match="no known module"):
+            adapter_param_count(arm, 4096, 14336, 32, LLAMA31_8B_QKV_OUTPUT)
+
+
+class TestLedgerCarriesAdapterParams:
+    def test_the_record_reports_the_count(self, tmp_path, monkeypatch):
+        results = tmp_path / "results.jsonl"
+
+        def fake_run(cmd, env, cwd):
+            Path(env["RUN_LOG"]).parent.mkdir(parents=True, exist_ok=True)
+            Path(env["RUN_LOG"]).write_text(
+                _build_log([_render(0, 0, _PHASE_AFTER_TRAIN, 1.5)])
+            )
+            return subprocess.CompletedProcess(cmd, 0)
+
+        monkeypatch.setattr(sweep.subprocess, "run", fake_run)
+        arm = Arm("lora-r256-all-lr0.00025-s0", "lora", 256, None, ALL_MODULES, 2.5e-4, 0)
+        run_arm(
+            arm, tmp_path, results, dry_run=False,
+            adapter_params=SMOKE_R256_ALL_MODULES_PARAMS,
+        )
+        record = json.loads(results.read_text().splitlines()[0])
+        assert record["adapter_params"] == SMOKE_R256_ALL_MODULES_PARAMS

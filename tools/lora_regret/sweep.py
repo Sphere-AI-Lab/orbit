@@ -20,7 +20,13 @@ import sys
 from pathlib import Path
 
 from orbit.utils.peft_param_match import match_report
-from tools.lora_regret.arms import MATRICES, Arm, arm_env, sft_arms  # noqa: F401  (sft_arms re-exported)
+from tools.lora_regret.arms import (  # noqa: F401  (sft_arms re-exported)
+    MATRICES,
+    Arm,
+    adapter_param_count,
+    arm_env,
+    sft_arms,
+)
 
 # The eval-line regex and phase labels live in trace.py -- one definition,
 # built from EVAL_NLL_METRIC_KEY. Imported under the existing private names so
@@ -223,6 +229,7 @@ def run_arm(
     dry_run: bool,
     launcher: str = LAUNCHER,
     metric: str = "nll",
+    adapter_params: int | None = None,
 ) -> None:
     log_path = repo_root / "logs" / "lora_regret" / f"{arm.name}.log"
     # One dict, used for both the real environment and the dry-run preview --
@@ -277,7 +284,7 @@ def run_arm(
             "test_nll": nll,
             "accuracy": accuracy,
             "accuracy_per_dataset": per_dataset,
-            "adapter_params": None,
+            "adapter_params": adapter_params,
             "wandb_run_id": None,
             "steps": steps,
             # The whole curve, not only its last point: C1's departure step is
@@ -298,6 +305,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--hidden-size", type=int, required=True)
     parser.add_argument("--ffn-size", type=int, required=True)
+    parser.add_argument(
+        "--num-layers",
+        type=int,
+        required=True,
+        help="Decoder layers in the model (32 for Llama-3.1-8B). Required rather "
+        "than defaulted, like --hidden-size and --ffn-size: a wrong value makes "
+        "every adapter_params in the ledger wrong by a constant factor.",
+    )
     parser.add_argument("--results", type=Path, default=Path("results/lora_regret_sft.jsonl"))
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
@@ -356,7 +371,13 @@ def main() -> None:
     print(f"launcher={launcher} metric={metric}", file=sys.stderr)
     for i, arm in enumerate(todo, 1):
         print(f"[{i}/{len(todo)}] {arm.name}", file=sys.stderr)
-        run_arm(arm, repo_root, args.results, args.dry_run, launcher=launcher, metric=metric)
+        run_arm(
+            arm, repo_root, args.results, args.dry_run,
+            launcher=launcher, metric=metric,
+            adapter_params=adapter_param_count(
+                arm, args.hidden_size, args.ffn_size, args.num_layers
+            ),
+        )
 
 
 if __name__ == "__main__":
