@@ -3,7 +3,7 @@
 What the campaign is missing against the post, and how to wire it. The existing
 campaign (`docs/superpowers/plans/2026-07-28-lora-without-regret-experiments.md`,
 178 runs across E1-E5) covers the post's core SFT and RL claims on one model. This
-design adds **130 arms in four phases** so every experiment in the post has a
+design adds **126 arms in four phases** so every experiment in the post has a
 script behind it, plus the three audit blockers that gate what already exists.
 
 Companions:
@@ -37,7 +37,7 @@ count — but coverage against the post is partial:
 | Phase | Contents | New arms | New infrastructure |
 |---|---|---|---|
 | **0** | P3 DP check; smoke one `e4` arm; smoke one `e5scout` arm | 0 | none |
-| **1** | `e1ot`, `e1short`, `e4place`, `plot.py` | 68 | none |
+| **1** | `e1ot`, `e1short`, `e4place`, `plot.py` | 64 | none |
 | **2** | `e6` scaling law | 40 | fetch + convert Qwen3-0.6B, Qwen3-8B; Qwen control-token scan |
 | **3** | `e7` DeepMath | 2 | DeepMath-103K + AIME24/25 prep; avg@16 eval; response-length parser |
 | **4** | `e3moe` MoE placement | 20 | convert Qwen3-30B-A3B; expert-module mapping; per-expert matched rank |
@@ -108,6 +108,15 @@ Contents, read from `orbit_plugins/model_args/*.sh` and the HF configs on
 | `qwen3-30b-a3b` | 2048 | 6144 | 48 | 5120 | qwen | model's own |
 
 Qwen3-30B-A3B additionally carries `MoE(num_experts=128, moe_ffn_size=768, topk=8)`.
+
+The Llama entry names **`llama3.1-8B-Instruct.sh`**, the plugin the SFT launcher
+already defaults to — not the same-shaped `llama3-8B.sh`. The two carry identical
+dimensions and differ in `--use-rope-scaling --rotary-scaling-factor 8.0`, which
+changes positional encoding and therefore every NLL. A registry that gets the
+dimensions right and the plugin wrong would silently invalidate comparison with
+the 2026-07-30 smoke, and the drift test cannot catch it — so a second test pins
+the launcher's own default. ("Instruct" names the config file, not the weights;
+the architecture is identical.)
 
 `qkv_output_size` is `(num_attention_heads + 2*num_query_groups) * kv_channels`,
 with `kv_channels = 128` for every model here. It is a field rather than a
@@ -184,10 +193,15 @@ evaluating against ~14 min training; the trace is not what this stage is for.
 
 Reuses Tulu3's sigma from E1-0 — same dataset, same 1,000-row split.
 
-### `e4place` — layer placement under RL (12 arms)
+### `e4place` — layer placement under RL (8 arms)
 
-LoRA attention-only r256, MLP-only r92, all-modules r256; four half-decade LRs
-each centred on 1e-5. Trains on `math_gsm8k_train.jsonl` and evaluates
+LoRA attention-only r256 and MLP-only r92; four half-decade LRs each centred on
+1e-5. **No all-modules cell**: `e4` already runs LoRA r256 all-modules on this
+exact grid, so including it would produce four byte-identical arm names — four
+re-run RL arms at 8 GPUs each, and a duplicate key the moment both ledgers reach
+`analyze` together, where the better of two independent runs of one configuration
+would win. Read that cell from `e4`'s ledger, the same way `e6` reads its Llama
+point from `e1`'s. Trains on `math_gsm8k_train.jsonl` and evaluates
 `math_test` + `gsm8k_test` through the RL launcher — the same data and the same
 half-decade grid as `e4`, so the placement result and the rank result are read off
 comparable arms. Scored by accuracy.
@@ -373,10 +387,11 @@ disagree with the plugin it points at is worse than none, because the wrong numb
 is then recorded twice and neither copy looks suspicious.
 
 **Matrix builds.** Each new matrix builds at its documented count: `e1ot` 40,
-`e1short` 14, `e4place` 12, `e6` 40, `e7` 2, `e3moe` 20.
+`e1short` 14, `e4place` 8, `e6` 40, `e7` 2, `e3moe` 20.
 
-**`e6` excludes Llama.** Asserted, so it cannot silently re-run `e1`'s ten arms
-and produce a second, differently-seeded copy of the same measurement.
+**`e6` excludes Llama, and `e4place` excludes all-modules.** Both asserted by a
+name-intersection test, so neither can silently re-run arms another matrix owns
+and produce a second, independently-seeded copy of the same measurement.
 
 **`e1short` spacing.** Asserted <= 0.15 decades. The spacing is a requirement of
 the claim, not a preference, and a future tidy-up that unified it with the 0.3
@@ -428,7 +443,7 @@ are not measured for any model other than Llama-3.1-8B.
 | `e1ot` + sigma | 42 | 1 | ~45 GPU-h — 312 steps and a 100-row eval make this the cheapest SFT stage |
 | `e1short` | 14 | 1 or 4 | ~8 GPU-h |
 | `e6` | 40 | 1-4 | ~280 GPU-h, dominated by the 8B FullFT arms |
-| `e4place`, `e7`, `e3moe` | 34 | 4-8 | **not estimable** |
+| `e4place`, `e7`, `e3moe` | 30 | 4-8 | **not estimable** |
 
 The last row is honest rather than lazy: **no RL arm has ever run in this repo**,
 so there is no measured per-rollout time to scale from, and 30B on this cluster
