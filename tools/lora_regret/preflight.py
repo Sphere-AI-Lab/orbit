@@ -53,6 +53,13 @@ STAGE_GPU_REQUIREMENTS = {
     "e1-full": 4,
     "e2-full": 4,
     "e4": 8,
+    # e1ot and e1short are LoRA-and-FullFT matrices, but their FullFT arms are
+    # selected with --only and run on the e1-full allocation; the stage floor
+    # here is the LoRA one, which is what an operator checks before the bulk of
+    # the arms.
+    "e1ot": 1,
+    "e1short": 1,
+    "e4place": 8,
 }
 
 

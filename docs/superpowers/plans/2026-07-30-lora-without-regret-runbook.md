@@ -11,20 +11,22 @@ Companions:
 
 ## What is ready, and what you still have to do
 
-Ready and CPU-verified (593 tests, 0 failures, in the built env):
+Ready and CPU-verified (676 tests, 0 failures, in the built env):
 
 | Piece | Where |
 |---|---|
 | SFT launcher — LoRA, OFT and FullFT in one script | `examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh` |
 | RL launcher (prerequisite P5) | `examples/high_precision/run-llama3_1-8b-bf16-rl-math-gsm8k.sh` |
-| Arm matrices `e1` / `e2` / `e3` / `e4` / `e5scout` / `e5` / `sft82` | `tools/lora_regret/arms.py` |
+| Arm matrices `e1` / `e1ot` / `e1short` / `e2` / `e3` / `e4` / `e4place` / `e5scout` / `e5` / `sft82` | `tools/lora_regret/arms.py` |
+| Base-model registry (checkpoints, dimensions, GPU floors) | `tools/lora_regret/models.py` |
 | Sweep driver with resume ledger | `tools/lora_regret/sweep.py` |
 | Data preparation for all five datasets | `tools/lora_regret/prepare_data.py` |
 | Held-out token-weighted NLL eval | `orbit/utils/eval_nll.py`, wired in `train.py` |
 | Preflight audit | `tools/lora_regret/preflight.py` |
 | P3 DP-equality check | `tools/lora_regret/p3_check.py` |
 | NLL trace extraction | `tools/lora_regret/trace.py` |
-| σ, argmins, C1-C6 readings | `tools/lora_regret/analyze.py` |
+| σ, argmins, C1-C6 and C8 readings | `tools/lora_regret/analyze.py` |
+| Figures from the analysis JSON | `tools/lora_regret/plot.py` (§19) |
 
 The data is **materialized** (§2, done 2026-07-30) and the **smoke passes on it**
 (§3, done 2026-07-30). Yours to do, in this order: **close P3** (§4, needs DP≥2 and
@@ -257,13 +259,17 @@ bureaucratic: each entry names what breaks if you skip it.
 | §8 | E1-2: long curves | 8 | 1 / ≥4 | E1-1's argmins (via --argmins-from) | departure steps → **C1** |
 | §9 | E2: batch sweep | 36 | 1 / ≥4 | σ, P3 | best-per-batch gaps → **C3** |
 | §10 | E3: placement | 20 | 1 | σ | matched-parameter deltas → **C4** |
+| §16 | E1-OT: OpenThoughts3 rank ladder | 42 | 1 / ≥4 | σ(OT3) | curves + argmins on the second dataset → **C1/C2** |
+| §17 | E1-short: 100-step multiplier | 14 | 1 / ≥4 | σ | short-vs-long LR ratio → **C8** |
+| §18 | E4-place: RL layer placement | 8 | 8 | data, P3 | attention-vs-MLP under policy gradient → **C4** |
 | §11 | E4: RL | 16 | 8 | data, P3 | accuracy curves + band width → **C5** |
 | §12 | E5-1: OFT scout | 5 | 1 | σ | the OFT learning-rate decade |
 | §12 | E5-2: OFT refine | 50 | 1 | the scout's argmin | OFT-vs-LoRA at matched params → **C6** |
 
-**178 runs** (3 + 40 + 8 + 36 + 20 + 16 + 5 + 50), plus 3 preflight — one smoke
+**242 runs** (3 + 40 + 8 + 36 + 20 + 42 + 14 + 8 + 16 + 5 + 50), plus 3 preflight — one smoke
 (done) and two for P3. One of E1-0's three seeds repeats an E1-1 arm; §7 says how to avoid
-that if you care about the one run.
+that if you care about the one run. E1-OT's 42 is 40 grid points plus the two
+extra seeds that measure OpenThoughts3's own σ (§16) — Tulu3's does not transfer.
 
 Three orderings inside that are load-bearing rather than conventional:
 
@@ -720,3 +726,97 @@ curve-shape claim this campaign makes, and cancels in nothing else.
 | RL, LoRA arms | 4-8 | policy + rollout engine share the node |
 | RL, FullFT arms | 8 | optimizer state plus rollout engine |
 | E3-3 MoE (Qwen3-30B-A3B) | ≥4 | 30B activations exceed one card; skip if unavailable and say so |
+
+## 16. E1-OT — the rank ladder on OpenThoughts3 (C1, C2 on the second dataset)
+
+**Measure this dataset's σ first.** The held-out split is **100 rows against
+Tulu3's 1,000**, so its noise floor is a different number and E1-0's σ does not
+transfer. Two extra runs:
+
+```bash
+export DATA_DIR=/lustre/fast/fast/groups/ei-slm/data/lora_regret
+for seed in 1 2; do
+  python -m tools.lora_regret.sweep --matrix e1ot --seed $seed \
+    --only 'lora-r256-all-lr0.00025' --results results/e1ot_0_sigma.jsonl
+done
+```
+
+Seed 0 of that arm is already a grid point in the sweep below; point the σ
+reading at both files. `analyze` **refuses** to quote a Tulu3 σ against these
+arms — that guard is the reason to run this first rather than last.
+
+```bash
+python -m tools.lora_regret.sweep --matrix e1ot --only '^lora-r(1|4|16)-' --results results/e1ot_a.jsonl &
+python -m tools.lora_regret.sweep --matrix e1ot --only '^lora-r(64|128)-'  --results results/e1ot_b.jsonl &
+python -m tools.lora_regret.sweep --matrix e1ot --only '^lora-r(256|512)-' --results results/e1ot_c.jsonl &
+wait
+GPUS_PER_NODE=4 python -m tools.lora_regret.sweep --matrix e1ot --only '^full-' --results results/e1ot_full.jsonl
+```
+
+One epoch is **312 optimizer steps**, so these arms run to completion and give
+both the argmins and the curves — there is no long-run counterpart to schedule.
+
+```bash
+python -m tools.lora_regret.analyze all --ledgers 'results/e1ot_*.jsonl' \
+  --sigma-ledger results/e1ot_0_sigma.jsonl
+```
+
+## 17. E1-short — the ~100-step LR multiplier (C8)
+
+14 arms, ~30 min each. The grid is **0.15-decade**, not the campaign's 0.3:
+resolving 15x from 10x means resolving 0.176 decades, and on a 0.3-decade grid
+adjacent points differ by 2x.
+
+```bash
+python -m tools.lora_regret.sweep --matrix e1short --only '^lora-' --results results/e1short_lora.jsonl
+GPUS_PER_NODE=4 python -m tools.lora_regret.sweep --matrix e1short --only '^full-' --results results/e1short_full.jsonl
+
+python -m tools.lora_regret.analyze c8 \
+  --ledgers 'results/e1_*.jsonl' \
+  --short-ledgers 'results/e1short_*.jsonl' \
+  --sigma-ledger results/e1_0_sigma.jsonl
+```
+
+`--ledgers` is E1-1's long-horizon result and `--short-ledgers` is this stage's.
+Passing one without the other exits 2: the claim is a comparison of two
+horizons, and one horizon is not a comparison.
+
+## 18. E4-place — layer placement under RL (C4 under policy gradient)
+
+8 arms on 8 GPUs, on E4's own data and grid. The MLP arm is **r92** — E3's
+solved match for attention r256 in Orbit's fused layout, not the post's r128.
+There is no all-modules cell: E4 already ran it at these four learning rates,
+so read it from `results/e4_lora.jsonl` and glob both files into `analyze`.
+
+```bash
+GPUS_PER_NODE=8 python -m tools.lora_regret.sweep --matrix e4place --results results/e4place.jsonl
+python -m tools.lora_regret.analyze c4 --ledgers results/e4place.jsonl --metric accuracy --sigma ...
+```
+
+`--metric accuracy` is not optional here. `load_records` filters on the ledger's
+own `metric` field, so omitting it reads zero records rather than reading them
+in the wrong direction — but a `--metric` that disagrees with the ledger is
+silence, not an error, so check the record count in the output.
+
+σ for accuracy has never been measured. If the arms sit close, measuring it
+becomes a prerequisite exactly as E1-0 was for NLL — say so rather than quoting
+an unresolved difference.
+
+## 19. Figures
+
+`analyze --json` writes the document `plot.py` reads, so a figure can never show
+a number the analysis declined to quote — an edge-of-grid argmin exits 3 before
+the payload is written.
+
+```bash
+python -m tools.lora_regret.analyze all --ledgers 'results/e1_*.jsonl' \
+  --sigma-ledger results/e1_0_sigma.jsonl --json > results/analysis.json
+python -m tools.lora_regret.plot --analysis results/analysis.json --out results/figures
+```
+
+One PNG per panel the payload supports, and nothing for the panels it does not:
+an empty axes reads as "measured, and flat". Each line printed names the post's
+own figure to compare against, where one exists
+(`third_party/lora-without-regret/figures/`). matplotlib is an extra —
+`uv sync --extra plots` — and is imported lazily, so `plot.py` stays importable
+without it.

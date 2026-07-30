@@ -105,3 +105,29 @@ class TestStageRequirements:
 
     def test_rl_needs_eight(self):
         assert STAGE_GPU_REQUIREMENTS["e4"] == 8
+
+
+def test_the_new_stages_carry_their_gpu_floors():
+    from tools.lora_regret.preflight import STAGE_GPU_REQUIREMENTS
+
+    assert STAGE_GPU_REQUIREMENTS["e1ot"] == 1
+    assert STAGE_GPU_REQUIREMENTS["e1short"] == 1
+    assert STAGE_GPU_REQUIREMENTS["e4place"] == 8
+
+
+def test_every_matrix_is_expected_at_its_documented_count():
+    from tools.lora_regret.arms import MATRICES
+    from tools.lora_regret.preflight import EXPECTED_ARMS
+
+    assert set(EXPECTED_ARMS) == set(MATRICES) - {"e1long"}
+    assert EXPECTED_ARMS["e1ot"] == 40
+    assert EXPECTED_ARMS["e1short"] == 14
+    assert EXPECTED_ARMS["e4place"] == 8
+
+
+def test_the_fullft_stages_agree_with_the_registrys_formula():
+    """preflight's floor and the launcher's guard must not drift apart."""
+    from tools.lora_regret.models import get
+    from tools.lora_regret.preflight import STAGE_GPU_REQUIREMENTS
+
+    assert STAGE_GPU_REQUIREMENTS["e1-full"] == get("llama3.1-8b").min_gpus_fullft()
