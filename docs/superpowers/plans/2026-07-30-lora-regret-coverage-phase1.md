@@ -87,6 +87,16 @@ def test_every_named_plugin_exists(key):
     assert (REPO_ROOT / "orbit_plugins" / "model_args" / MODELS[key].model_args_plugin).is_file()
 
 
+def test_llama_names_the_plugin_the_launcher_already_defaults_to():
+    """The dimension test above passes for llama3-8B.sh too -- both plugins carry
+    the same six numbers. They differ in --use-rope-scaling, which changes every
+    NLL, so the registry must not silently switch which one runs."""
+    launcher = (REPO_ROOT / "examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh").read_text(
+        encoding="utf-8"
+    )
+    assert f"model_args/{get('llama3.1-8b').model_args_plugin}" in launcher
+
+
 def test_llama_is_the_default_so_existing_matrices_are_unchanged():
     assert DEFAULT_MODEL == "llama3.1-8b"
     assert get(DEFAULT_MODEL).qkv_output_size == 6144
@@ -129,7 +139,7 @@ def test_model_env_carries_the_mask_type_and_the_gpu_floor():
     env = model_env(get("llama3.1-8b"), REPO_ROOT)
     assert env["LOSS_MASK_TYPE"] == "llama3"
     assert env["MIN_GPUS_FULLFT"] == "4"
-    assert env["MODEL_ARGS_FILE"].endswith("orbit_plugins/model_args/llama3-8B.sh")
+    assert env["MODEL_ARGS_FILE"].endswith("orbit_plugins/model_args/llama3.1-8B-Instruct.sh")
     assert model_env(get("qwen3-4b"), REPO_ROOT)["LOSS_MASK_TYPE"] == "qwen"
 ```
 
@@ -240,7 +250,14 @@ MODELS: dict[str, Model] = {
         key="llama3.1-8b",
         hf_checkpoint=f"{HF_MODELS_DIR}/Llama-3.1-8B",
         megatron_load=f"{MEGATRON_CKPT_DIR}/Llama-3.1-8B_torch_dist",
-        model_args_plugin="llama3-8B.sh",
+        # NOT llama3-8B.sh, which has the same six dimensions and differs in
+        # --max-position-embeddings (8192 vs 131072) and, decisively,
+        # --use-rope-scaling --rotary-scaling-factor 8.0. RoPE scaling changes
+        # positional encoding, so it changes every NLL. This is the plugin the
+        # SFT launcher has defaulted to all along; the registry records that
+        # rather than quietly switching it. The "Instruct" in the filename names
+        # the config, not the weights -- the architecture is identical.
+        model_args_plugin="llama3.1-8B-Instruct.sh",
         hidden_size=4096, ffn_size=14336, num_layers=32, qkv_output_size=6144,
         loss_mask_type="llama3", param_billions=8.03,
         chat_template=PINNED_LLAMA_TEMPLATE,
@@ -760,7 +777,8 @@ In `tools/lora_regret/arms.py`, after `e1long_arms`, add the constant near
 
 ```python
 # OpenThoughts3's 10,000-row subset is 312 optimizer steps at batch 32, and ~1%
-# of that is 3 -- about 100 trace points. The contrast with E1LONG_EVAL_INTERVAL
+# of that is 3 -- about 100 trace points. (The launcher ceilings: (10000+31)//32
+# = 313.) The contrast with E1LONG_EVAL_INTERVAL
 # (293) is the whole reason e1ot needs no separate long matrix: one epoch here
 # is affordable at all 40 arms, and one epoch on Tulu3 is not.
 E1OT_EVAL_INTERVAL = 3
@@ -986,7 +1004,7 @@ git commit -m "feat(lora_regret): add the e1short matrix for the 100-step LR mul
 
 ---
 
-### Task 6: `e4place` — layer placement under RL
+### Task 6: `e4place` — layer placement under RL (8 arms)
 
 **Files:**
 - Modify: `tools/lora_regret/arms.py` (add `e4place_arms`, `MATRICES["e4place"]`)
@@ -1003,12 +1021,21 @@ Append to `tests/fast/utils/test_lora_regret_arms_coverage.py`:
 
 ```python
 class TestE4Place:
-    def test_twelve_arms_three_placements_four_lrs(self):
+    def test_eight_arms_two_placements_four_lrs(self):
         from tools.lora_regret.arms import e4place_arms
 
         arms = e4place_arms(HIDDEN, FFN)
-        assert len(arms) == 12
-        assert {a.target_modules for a in arms} == {ALL_MODULES, ATTN_MODULES, MLP_MODULES}
+        assert len(arms) == 8
+        assert {a.target_modules for a in arms} == {ATTN_MODULES, MLP_MODULES}
+
+    def test_it_does_not_restate_any_arm_e4_already_runs(self):
+        """e4's LoRA r256 all-modules cell uses this exact grid, so an
+        all-modules cell here would be four byte-identical arm names -- four
+        re-run RL arms at 8 GPUs each, and a duplicate key if both ledgers are
+        ever globbed into analyze together."""
+        from tools.lora_regret.arms import e4_arms, e4place_arms
+
+        assert not ({a.name for a in e4_arms()} & {a.name for a in e4place_arms(HIDDEN, FFN)})
 
     def test_the_mlp_rank_is_e3s_solved_match_not_a_round_number(self):
         """Comparing attention r256 against MLP r256 would compare placement and
@@ -1037,7 +1064,7 @@ class TestE4Place:
 
         place = e4place_arms(HIDDEN, FFN)
         assert {a.dataset for a in place} == {RL_MIX_DATASET}
-        lrs = sorted({a.lr for a in place if a.target_modules == ALL_MODULES})
+        lrs = sorted({a.lr for a in place if a.target_modules == ATTN_MODULES})
         steps = [math.log10(b / a) for a, b in zip(lrs, lrs[1:])]
         assert all(abs(s - 0.5) < 0.01 for s in steps), steps
         e4_lora = sorted({a.lr for a in e4_arms() if a.method == "lora"})
@@ -1048,7 +1075,7 @@ class TestE4Place:
 
         assert MATRIX_METRICS["e4place"] == "accuracy"
         assert "rl-math-gsm8k" in MATRIX_LAUNCHERS["e4place"]
-        assert len(MATRICES["e4place"](HIDDEN, FFN, 0, None, None)) == 12
+        assert len(MATRICES["e4place"](HIDDEN, FFN, 0, None, None)) == 8
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -1069,8 +1096,16 @@ def e4place_arms(
 ) -> list[Arm]:
     """E4-place: does the attention-vs-MLP finding survive policy gradient?
 
-    3 placements x 4 LRs = 12 runs, on E4's own data and E4's own half-decade
+    2 placements x 4 LRs = 8 runs, on E4's own data and E4's own half-decade
     grid so the placement result and the rank result are comparable arm for arm.
+
+    **All-modules is deliberately absent.** E4 already runs LoRA r256
+    all-modules on this exact grid, so including it here would produce four
+    byte-identical arm names -- four re-run RL arms at 8 GPUs each, and a
+    duplicate key the moment both ledgers are globbed into `analyze` together,
+    where the better of two independent runs of one configuration would win.
+    Read the all-modules cell from E4's ledger; the same reasoning excludes
+    Llama from `e6`.
 
     The MLP rank is E3's *solved* match (r92 on Llama-3.1-8B), not the post's
     r128: Orbit fuses qkv and gate+up, so the post's pair is not matched in this
@@ -1083,7 +1118,6 @@ def e4place_arms(
     configs = [
         (256, ATTN_MODULES),
         (matched_rank, MLP_MODULES),
-        (256, ALL_MODULES),
     ]
     arms: list[Arm] = []
     for rank, modules in configs:
@@ -1096,23 +1130,23 @@ def e4place_arms(
 ```
 
 Register: `MATRICES["e4place"]` (passing `hidden`/`ffn`), `MATRIX_LAUNCHERS["e4place"] = RL_LAUNCHER`,
-`MATRIX_METRICS["e4place"] = "accuracy"`, `EXPECTED_ARMS["e4place"] = 12`.
+`MATRIX_METRICS["e4place"] = "accuracy"`, `EXPECTED_ARMS["e4place"] = 8`.
 
 - [ ] **Step 4: Run the tests**
 
 Run: `pytest tests/fast/utils/test_lora_regret_arms_coverage.py -q`
-Expected: PASS, 15 tests.
+Expected: PASS, 16 tests.
 
 - [ ] **Step 5: Verify the dry run names the RL launcher**
 
 Run: `python -m tools.lora_regret.sweep --matrix e4place --dry-run 2>&1 | head -2`
-Expected: `12 arms selected, 0 already done, 12 to run` and
+Expected: `8 arms selected, 0 already done, 8 to run` and
 `launcher=examples/high_precision/run-llama3_1-8b-bf16-rl-math-gsm8k.sh metric=accuracy`
 
 - [ ] **Step 6: Run the full suite**
 
 Run: `pytest tests -q 2>&1 | tail -3`
-Expected: **0 failed**, fifteen tests more than Task 3's total (Tasks 4-6 together).
+Expected: **0 failed**, sixteen tests more than Task 3's total (Tasks 4-6 together).
 
 - [ ] **Step 7: Commit**
 
@@ -1645,9 +1679,12 @@ def _payload():
         "command": "all",
         "sigma": 0.000992,
         "argmins": [
-            {"method": "full", "size": None, "target_modules": "", "lr": 2.5e-5, "score": 1.00},
-            {"method": "lora", "size": 256, "target_modules": ALL, "lr": 2.5e-4, "score": 1.05},
-            {"method": "lora", "size": 16, "target_modules": ALL, "lr": 2.5e-4, "score": 1.12},
+            {"arm": "full", "method": "full", "size": None, "target_modules": "",
+             "lr": 2.5e-5, "test_nll": 1.00, "lr_grid": [1.5e-5, 2.5e-5, 4e-5], "edge_of_grid": False},
+            {"arm": "lora r256", "method": "lora", "size": 256, "target_modules": ALL,
+             "lr": 2.5e-4, "test_nll": 1.05, "lr_grid": [1.5e-4, 2.5e-4, 4e-4], "edge_of_grid": False},
+            {"arm": "lora r16", "method": "lora", "size": 16, "target_modules": ALL,
+             "lr": 2.5e-4, "test_nll": 1.12, "lr_grid": [1.5e-4, 2.5e-4, 4e-4], "edge_of_grid": False},
         ],
         "c2": {"lora_r256_argmin_lr": 2.5e-4, "fullft_argmin_lr": 2.5e-5, "ratio": 10.0},
         "c8": {"long_ratio": 10.0, "short_ratio": 15.0, "upholds": True,
@@ -1657,6 +1694,15 @@ def _payload():
             {"arm": "lora-r256-all", "departure_step": None, "step_budget": 2000},
         ],
     }
+
+
+def test_the_fixture_matches_what_analyze_actually_emits():
+    """The payload keys are copied from analyze.py's `payload["argmins"]` block.
+    A fixture that invents a key lets plot.py pass its tests and KeyError on the
+    real pipeline -- which is the whole failure this file exists to prevent."""
+    row = _payload()["argmins"][0]
+    assert set(row) >= {"arm", "method", "size", "target_modules", "lr", "test_nll",
+                        "lr_grid", "edge_of_grid"}
 
 
 def test_available_panels_reports_only_what_the_payload_supports():
@@ -1776,7 +1822,7 @@ def _label(method: str, size) -> str:
 def _draw_lr_vs_loss(ax, payload: dict) -> None:
     rows = payload["argmins"]
     for row in sorted(rows, key=lambda r: (r["method"], r.get("size") or 0)):
-        ax.scatter(row["lr"], row["score"], label=_label(row["method"], row.get("size")))
+        ax.scatter(row["lr"], row["test_nll"], label=_label(row["method"], row.get("size")))
     ax.set_xscale("log")
     ax.set_xlabel("argmin learning rate")
     ax.set_ylabel("held-out NLL (nats)")
@@ -1957,7 +2003,7 @@ def test_every_matrix_is_expected_at_its_documented_count():
     assert set(EXPECTED_ARMS) == set(MATRICES) - {"e1long"}
     assert EXPECTED_ARMS["e1ot"] == 40
     assert EXPECTED_ARMS["e1short"] == 14
-    assert EXPECTED_ARMS["e4place"] == 12
+    assert EXPECTED_ARMS["e4place"] == 8
 
 
 def test_the_fullft_stages_agree_with_the_registrys_formula():
@@ -2005,7 +2051,7 @@ rows to the §5 execution-order table, after the E3 row:
 ```markdown
 | §16 | E1-OT: OpenThoughts3 rank ladder | 42 | 1 / ≥4 | σ(OT3) | curves + argmins on the second dataset → **C1/C2** |
 | §17 | E1-short: 100-step multiplier | 14 | 1 / ≥4 | σ | short-vs-long LR ratio → **C8** |
-| §18 | E4-place: RL layer placement | 12 | 8 | data, P3 | attention-vs-MLP under policy gradient → **C4** |
+| §18 | E4-place: RL layer placement | 8 | 8 | data, P3 | attention-vs-MLP under policy gradient → **C4** |
 ```
 
 and append three sections:
@@ -2067,8 +2113,10 @@ horizons, and one horizon is not a comparison.
 
 ## 18. E4-place — layer placement under RL (C4 under policy gradient)
 
-12 arms on 8 GPUs, on E4's own data and grid. The MLP arm is **r92** — E3's
+8 arms on 8 GPUs, on E4's own data and grid. The MLP arm is **r92** — E3's
 solved match for attention r256 in Orbit's fused layout, not the post's r128.
+There is no all-modules cell: E4 already ran it at these four learning rates,
+so read it from `results/e4_lora.jsonl` and glob both files into `analyze`.
 
 ```bash
 GPUS_PER_NODE=8 python -m tools.lora_regret.sweep --matrix e4place --results results/e4place.jsonl
@@ -2110,7 +2158,7 @@ python -m tools.lora_regret.preflight --stage e1ot   # exit 0, 26 checks
 for m in e1 e2 e3 e4 e5scout e1ot e1short e4place; do
   echo -n "$m "; python -m tools.lora_regret.sweep --matrix $m --dry-run 2>/dev/null | wc -l
 done
-# e1 40 / e2 36 / e3 20 / e4 16 / e5scout 5 / e1ot 40 / e1short 14 / e4place 12
+# e1 40 / e2 36 / e3 20 / e4 16 / e5scout 5 / e1ot 40 / e1short 14 / e4place 8
 ```
 
 The arm counts for `e1` through `e5scout` must be **unchanged** — that is the
