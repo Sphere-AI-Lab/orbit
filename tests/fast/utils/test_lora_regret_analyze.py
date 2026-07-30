@@ -6,6 +6,7 @@ an artifact.
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +20,7 @@ from tools.lora_regret.analyze import (
 
 
 ALL = "linear_qkv,linear_proj,linear_fc1,linear_fc2"
+REPO_ROOT = Path(__file__).resolve().parents[3]
 ATTN = "linear_qkv,linear_proj"
 FULL_KEY = ("full", None, "")
 
@@ -502,3 +504,74 @@ class TestAccuracyEdgeOfGrid:
         payload = json.loads(out.out)
         assert "lora r1 all" in payload["edge_of_grid"]
         assert "c5" not in payload
+
+
+class TestSigmaDatasetGuard:
+    """Tulu3's held-out split is 1,000 rows; OpenThoughts3's is 100. Their noise
+    floors are different numbers, and both ledgers are called *_sigma.jsonl."""
+
+    @staticmethod
+    def _ledger(tmp_path, name, dataset, values, seeds=(0, 1, 2)):
+        path = tmp_path / name
+        with path.open("w", encoding="utf-8") as fh:
+            for seed, value in zip(seeds, values):
+                fh.write(json.dumps({
+                    "arm": f"lora-r256-all-lr0.00025-s{seed}", "method": "lora", "rank": 256,
+                    "target_modules": "linear_qkv,linear_proj,linear_fc1,linear_fc2",
+                    "lr": 2.5e-4, "seed": seed, "metric": "nll", "test_nll": value,
+                    "dataset": dataset, "status": "ok",
+                }) + "\n")
+        return path
+
+    def test_sigma_dataset_reads_the_single_dataset_in_the_ledger(self, tmp_path):
+        from tools.lora_regret.analyze import load_records, sigma_dataset
+
+        path = self._ledger(tmp_path, "s.jsonl", "tulu3", [1.0, 1.001, 1.002])
+        assert sigma_dataset(load_records([path], seed=None)) == "tulu3"
+
+    def test_mixed_dataset_sigma_ledger_raises(self, tmp_path):
+        from tools.lora_regret.analyze import load_records, sigma_dataset
+
+        path = tmp_path / "s.jsonl"
+        rows = [("tulu3", 1.0, 0), ("openthoughts3", 1.1, 1), ("tulu3", 1.002, 2)]
+        with path.open("w", encoding="utf-8") as fh:
+            for dataset, value, seed in rows:
+                fh.write(json.dumps({
+                    "arm": f"a-s{seed}", "method": "lora", "rank": 256, "target_modules": "x",
+                    "lr": 2.5e-4, "seed": seed, "metric": "nll", "test_nll": value,
+                    "dataset": dataset, "status": "ok",
+                }) + "\n")
+        with pytest.raises(ValueError, match="more than one dataset"):
+            sigma_dataset(load_records([path], seed=None))
+
+    def test_claim_exits_three_when_the_sigma_dataset_differs(self, tmp_path):
+        import subprocess
+        import sys
+
+        sigma_path = self._ledger(tmp_path, "sig.jsonl", "tulu3", [1.0, 1.001, 1.002])
+        arms_path = self._ledger(
+            tmp_path, "arms.jsonl", "openthoughts3", [2.0, 2.1, 2.2], seeds=(0, 0, 0)
+        )
+        proc = subprocess.run(
+            [sys.executable, "-m", "tools.lora_regret.analyze", "argmins",
+             "--ledgers", str(arms_path), "--sigma-ledger", str(sigma_path)],
+            capture_output=True, text=True, cwd=REPO_ROOT,
+        )
+        assert proc.returncode == 3
+        assert "tulu3" in proc.stderr and "openthoughts3" in proc.stderr
+
+    def test_the_override_exists_and_is_named_for_what_it_does(self, tmp_path):
+        import subprocess
+        import sys
+
+        sigma_path = self._ledger(tmp_path, "sig.jsonl", "tulu3", [1.0, 1.001, 1.002])
+        arms_path = self._ledger(
+            tmp_path, "arms.jsonl", "openthoughts3", [2.0, 2.1, 2.2], seeds=(0, 0, 0)
+        )
+        proc = subprocess.run(
+            [sys.executable, "-m", "tools.lora_regret.analyze", "argmins",
+             "--ledgers", str(arms_path), "--sigma-ledger", str(sigma_path),
+             "--allow-sigma-dataset-mismatch"],
+            capture_output=True, text=True, cwd=REPO_ROOT,
+        )
+        assert proc.returncode != 3

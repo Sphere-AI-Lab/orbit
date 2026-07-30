@@ -93,6 +93,21 @@ def sigma(records: list[dict]) -> float:
     return statistics.stdev(values)
 
 
+def sigma_dataset(records: list[dict]) -> str | None:
+    """Which dataset a sigma ledger's replicates were measured on.
+
+    `None` means the ledger predates the `dataset` field, in which case the
+    guard cannot fire and says so rather than guessing.
+    """
+    datasets = {r.get("dataset") for r in records if r.get("dataset")}
+    if len(datasets) > 1:
+        raise ValueError(
+            f"sigma ledger holds more than one dataset ({sorted(datasets)}); "
+            "a noise floor is a property of one held-out set, not of a mixture"
+        )
+    return datasets.pop() if datasets else None
+
+
 def lr_grids(records: list[dict]) -> dict[ArmKey, list[float]]:
     """The learning rates actually run, per arm, sorted."""
     grids: dict[ArmKey, set[float]] = {}
@@ -384,6 +399,13 @@ def main() -> int:
         "default: the runbook's rule is to re-centre and re-run first.",
     )
     parser.add_argument(
+        "--allow-sigma-dataset-mismatch",
+        action="store_true",
+        help="Quote a sigma measured on a different dataset than the arms. Off by "
+             "default: Tulu3's held-out split is 1,000 rows and OpenThoughts3's is "
+             "100, so their noise floors are different numbers.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Emit one JSON document on stdout and nothing else -- the handoff to "
@@ -422,9 +444,13 @@ def main() -> int:
         say(f"sigma = {value:.6f} nats  (n={len(replicates)})")
         return emit(0)
 
+    # The records are held rather than consumed inline, so the dataset guard
+    # below can inspect the same rows the number came from.
+    sigma_records: list[dict] = []
     sigma_value = args.sigma
     if sigma_value is None and args.sigma_ledger:
-        sigma_value = sigma(load_records(args.sigma_ledger, seed=None))
+        sigma_records = load_records(args.sigma_ledger, seed=None)
+        sigma_value = sigma(sigma_records)
     if sigma_value is None and args.command != "argmins":
         print(
             "no sigma: pass --sigma-ledger results/e1_0_sigma.jsonl or --sigma VALUE. "
@@ -434,6 +460,22 @@ def main() -> int:
         )
         return 2
     payload["sigma"] = sigma_value
+
+    # A sigma measured on another dataset is not this dataset's noise floor.
+    # `--sigma` bypasses this by construction: an explicitly supplied number
+    # carries no dataset, so there is nothing to compare and nothing to refuse.
+    if sigma_value is not None and not args.allow_sigma_dataset_mismatch:
+        measured_on = sigma_dataset(sigma_records)
+        used_on = {r.get("dataset") for r in records if r.get("dataset")}
+        if measured_on is not None and used_on and measured_on not in used_on:
+            print(
+                f"sigma was measured on {measured_on!r} but these arms ran on "
+                f"{sorted(used_on)}. Held-out split sizes differ between datasets, "
+                "so the noise floor does not transfer. Measure sigma on this dataset "
+                "(runbook section 7), or pass --allow-sigma-dataset-mismatch.",
+                file=sys.stderr,
+            )
+            return emit(3)
 
     flagged = edge_of_grid(records)
     # Both views, because an E4 ledger is entirely metric="accuracy" with
