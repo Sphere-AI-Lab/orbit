@@ -36,7 +36,10 @@ EXPECTED_ROWS = {
     "math_gsm8k_train.jsonl": 14_971,
 }
 
-EXPECTED_ARMS = {"e1": 40, "e2": 36, "e3": 20, "e4": 16, "e5scout": 5, "e5": 50, "sft82": 82}
+EXPECTED_ARMS = {
+    "e1": 40, "e2": 36, "e3": 20, "e4": 16, "e5scout": 5, "e5": 50, "sft82": 82,
+    "e1ot": 40,
+}
 
 # What each stage needs before it is worth starting. P3 is 2 rather than 1
 # because DP=1 makes the reduction it tests a no-op; FullFT is 4 for the

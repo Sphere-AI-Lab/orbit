@@ -80,6 +80,12 @@ RL_LORA_LR_CENTRE = 1e-5
 # launcher's default of 10 the same arm would spend ~55 h evaluating.
 E1LONG_EVAL_INTERVAL = 293
 E1LONG_RANKS = (1, 4, 16, 64, 128, 256, 512)
+# OpenThoughts3's 10,000-row subset is 312 optimizer steps at batch 32, and ~1%
+# of that is 3 -- about 100 trace points. (The launcher ceilings: (10000+31)//32
+# = 313.) The contrast with E1LONG_EVAL_INTERVAL (293) is the whole reason e1ot
+# needs no separate long matrix: one epoch here is affordable at all 40 arms,
+# and one epoch on Tulu3 is not.
+E1OT_EVAL_INTERVAL = 3
 # Llama-3.1-8B's fused QKV width: (32 query + 8 key + 8 value heads) * 128 head
 # dim = 6144. Needed for the matched-parameter attention/MLP pair in E3, and not
 # derivable from hidden_size alone under GQA.
@@ -279,6 +285,40 @@ def e1long_arms(
                 eval_nll_interval=E1LONG_EVAL_INTERVAL,
             )
         )
+    return arms
+
+
+def e1ot_arms(seed: int = 0) -> list[Arm]:
+    """E1-OT: the rank ladder on OpenThoughts3 -- the post's second SFT dataset.
+
+    Identical in shape to :func:`e1_arms` and deliberately so: the post's claim
+    is that the rank/capacity behaviour is a property of LoRA rather than of
+    Tulu3, and a differently-shaped grid would make a difference in the result
+    indistinguishable from a difference in the design.
+
+    One epoch here is 312 optimizer steps against Tulu3's 29,323, so these arms
+    run to completion and yield the argmins *and* the learning curves. There is
+    no `e1otlong`; the E1-1/E1-2 split exists only because a Tulu3 epoch at 40
+    arms is unaffordable.
+
+    The held-out split is 100 rows against Tulu3's 1,000, so its noise floor is
+    a different number: run seeds 1 and 2 of one arm into a separate sigma
+    ledger before quoting anything against it (runbook section 7).
+    """
+    arms: list[Arm] = []
+    for lr in lr_grid(FULL_LR_CENTRE):
+        arms.append(
+            Arm(_name("full", "na", "", lr, seed), "full", None, None, "", lr, seed,
+                dataset="openthoughts3", full_epoch=True,
+                eval_nll_interval=E1OT_EVAL_INTERVAL)
+        )
+    for rank in E1LONG_RANKS:
+        for lr in lr_grid(LORA_LR_CENTRE):
+            arms.append(
+                Arm(_name("lora", f"r{rank}", ALL_MODULES, lr, seed), "lora", rank, None,
+                    ALL_MODULES, lr, seed, dataset="openthoughts3", full_epoch=True,
+                    eval_nll_interval=E1OT_EVAL_INTERVAL)
+            )
     return arms
 
 
@@ -528,6 +568,7 @@ MATRICES = {
     "sft82": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: sft_arms(hidden, ffn, seed=seed),
     "e1": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1_arms(seed=seed),
     "e1long": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1long_arms(argmins, seed=seed),
+    "e1ot": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1ot_arms(seed=seed),
     "e2": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e2_arms(seed=seed),
     "e3": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e3_arms(hidden, ffn, seed=seed),
     "e4": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e4_arms(seed=seed),
