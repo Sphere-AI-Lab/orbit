@@ -11,7 +11,7 @@ Companions:
 
 ## What is ready, and what you still have to do
 
-Ready and CPU-verified (493 tests, 0 failures, in the built env):
+Ready and CPU-verified (502 tests, 0 failures, in the built env):
 
 | Piece | Where |
 |---|---|
@@ -22,8 +22,8 @@ Ready and CPU-verified (493 tests, 0 failures, in the built env):
 | Data preparation for all five datasets | `tools/lora_regret/prepare_data.py` |
 | Held-out token-weighted NLL eval | `orbit/utils/eval_nll.py`, wired in `train.py` |
 
-Yours to do, in this order: **materialize the data** (§2, CPU only, no GPU),
-**smoke one arm** (§3), **close P3** (§4, needs DP≥2 and gates every FullFT
+The data is **already materialized** (§2, done 2026-07-30). Yours to do, in this
+order: **smoke one arm** (§3), **close P3** (§4, needs DP≥2 and gates every FullFT
 number), then run experiments in the order §5 lays out.
 
 Single-rank reachability is already proven on an H100 — two LoRA-r256 optimizer
@@ -63,16 +63,38 @@ python -m tools.lora_regret.prepare_data --dataset campaign --out-dir "$DATA_DIR
 Expected row counts, all asserted by the tool — a mismatch raises and leaves the
 previous file untouched rather than writing a short split:
 
-| Output | Rows | For |
-|---|---|---|
-| `tulu3_train.jsonl` / `tulu3_test.jsonl` | 938,344 − filtered / 1,000 | E1, E3 |
-| `openthoughts3_train.jsonl` / `_test.jsonl` | 10,000 / 100 | E2 |
-| `math_train.jsonl` / `math_test.jsonl` | 7,500 / 5,000 | E4 |
-| `gsm8k_train.jsonl` / `gsm8k_test.jsonl` | 7,473 / 1,319 | E4 |
-| `math_gsm8k_train.jsonl` | 14,973 | E4 (the launcher's `--prompt-data`) |
+**Materialized and verified on 2026-07-30** — these are measured counts, not
+expectations:
 
-The CLI prints `filtered=` / `assistant_header=` / `eot=` per dataset. Those are
-Tulu3 rows whose assistant content contains a literal
+| Output | Rows | Size | For |
+|---|---|---|---|
+| `tulu3_train.jsonl` / `tulu3_test.jsonl` | 938,343 / 1,000 | 2.95 GB | E1, E3 |
+| `openthoughts3_train.jsonl` / `_test.jsonl` | 10,000 / 100 | 0.62 GB | E2 |
+| `math_train.jsonl` / `math_test.jsonl` | 7,498 / 5,000 | 5 MB | E4 |
+| `gsm8k_train.jsonl` / `gsm8k_test.jsonl` | 7,473 / 1,319 | 3 MB | E4 |
+| `math_gsm8k_train.jsonl` | 14,971 | 8 MB | E4 (the launcher's `--prompt-data`) |
+
+Every file was re-read afterwards and checked for row count, schema
+(`{"prompt": [messages]}` for SFT, `{"prompt": str, "label": str}` for RL), absence
+of the two Llama control-token literals, and absence of empty labels. All nine
+passed.
+
+**MATH is 7,498 rather than the official 7,500.** Two `number_theory` train rows
+end `there are $\boxed{}$ primes` — a literally empty box where the answer is 0 —
+and an empty label can never be earned honestly, while `grade_answer_verl(response,
+"")` may match a model that also emits an empty box and reward it for saying
+nothing. They are dropped and reported as `filtered=2`; the *source* count 12,500
+is still asserted, so a changed dataset still fails loudly.
+
+**Tulu3's control-token scan came back clean: `filtered=0`, across all 939,343
+rows.** That closes the pre-sweep requirement carried over from the llama3
+loss-mask plan, which had only ever been checked against the 12-row fixture. No row
+carries a literal `<|start_header_id|>assistant<|end_header_id|>` (which would raise
+mid-sweep) or `<|eot_id|>` (which would silently truncate a scored span), so the E1
+denominator is the full 938,343.
+
+The CLI prints `filtered=` / `assistant_header=` / `eot=` per dataset. Those count
+rows whose assistant content contains a literal
 `<|start_header_id|>assistant<|end_header_id|>` (which makes the llama3 mask
 generator raise, killing a multi-hour run partway) or a literal `<|eot_id|>`
 (which silently truncates the scored span — no error, corrupted spans). They are
@@ -85,10 +107,21 @@ prompts. Do not pass `--no-answer-instruction` unless you also change
 response before grading, and a Llama-3.1 *base* policy does not box unprompted —
 every rollout would score 0 and every E4 arm would look identical.
 
-If Tulu3's upstream row count has moved, the assertion fires with the actual
-number. Re-run with `python -c "from tools.lora_regret.prepare_data import
-prepare_tulu3; prepare_tulu3('$DATA_DIR', expected_source_rows=<actual>)"` only
-after checking the dataset card — a changed count means a changed mixture.
+**Read the count from the hub before a long stream, not after.** Tulu3's
+assertion fires only once all 2.9 GB have been streamed, so a stale constant costs
+the whole download:
+
+```bash
+python -c "
+from datasets import load_dataset_builder
+print({k: v.num_examples for k, v in load_dataset_builder('allenai/tulu-3-sft-mixture').info.splits.items()})"
+# expect {'train': 939343} -- what TULU3_EXPECTED_ROWS is pinned to (verified 2026-07-30)
+```
+
+If it has moved, that is a question about the dataset before it is a number to
+bump: the assertion exists to notice a changed mixture. OpenThoughts3 needs no such
+check — it takes an exact 10,000/100 subset off the front of a 1.2M-row stream and
+stops there, so nothing depends on the total.
 
 ## 3. Smoke one arm (1 GPU, ~10 minutes)
 
@@ -151,7 +184,7 @@ bureaucratic: each entry names what breaks if you skip it.
 
 | # | Stage | Runs | GPUs | Gated by | Produces |
 |---|---|---|---|---|---|
-| §2 | Materialize data | — | none | — | the five splits every arm reads |
+| §2 | ~~Materialize data~~ **done** | — | none | — | the nine splits every arm reads |
 | §3 | Smoke one arm | 1 | 1 | data | proof the eval line the parser needs is reached |
 | §4 | P3: DP=1 vs DP=4 | 2 | 1 and 4 | smoke | permission to trust any FullFT number |
 | §7 | **E1-0: σ** | 3 | 1 | data | the unit every later difference is quoted in |

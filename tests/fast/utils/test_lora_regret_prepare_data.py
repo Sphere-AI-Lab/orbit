@@ -224,13 +224,27 @@ def test_math_combines_categories_and_preserves_official_splits(tmp_path: Path, 
     assert test_rows[0]["prompt"].endswith("-te")
 
 
-def test_math_fails_closed_on_missing_boxed_answer(tmp_path: Path, monkeypatch):
+def test_math_reports_rather_than_raises_on_a_missing_boxed_answer(tmp_path: Path, monkeypatch):
+    """This assertion was inverted on 2026-07-30. `prepare_math` used to raise
+    here, which meant two unusable rows in the real 12,500 (number_theory/train's
+    empty `\\boxed{}`) blocked the entire dataset. It now drops them and reports
+    the count, and fail-closed moved to the *source* count assertion — see
+    test_math_still_fails_closed_on_a_wrong_source_count. `_math_rows` still raises
+    when no caller is collecting drops, so the strict path is not lost."""
     monkeypatch.setattr(
         "tools.lora_regret.prepare_data._load_config_split",
         lambda name, config, split: [{"problem": "p", "solution": "no boxed answer"}],
     )
+    result = prepare_math(
+        tmp_path, expected_train_rows=len(MATH_CONFIGS), expected_test_rows=len(MATH_CONFIGS)
+    )
+    assert (result.train_rows, result.test_rows) == (0, 0)
+    assert result.filtered_rows == 2 * len(MATH_CONFIGS)
+
+    from tools.lora_regret.prepare_data import _math_rows
+
     with pytest.raises(ValueError, match="no complete"):
-        prepare_math(tmp_path, expected_train_rows=7, expected_test_rows=7)
+        list(_math_rows([{"problem": "p", "solution": "nope"}], dataset="math"))
 
 
 def test_extract_gsm8k_answer():
@@ -335,3 +349,114 @@ def test_rl_mix_refuses_when_a_source_split_is_missing(tmp_path: Path):
 
     with pytest.raises(FileNotFoundError, match="gsm8k_train.jsonl"):
         prepare_rl_mix(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# TeX's brace-less \boxed form. Measured on the real MATH train split
+# (2026-07-30): 2 of 12,500 rows use it -- algebra/train #888 (`$\boxed 2$`) and
+# #1011 (`$\boxed 9$`). Both contain the literal \boxed, so they are a syntax
+# variant rather than unboxed solutions, and dropping them would mean asserting
+# 7,498/5,000 instead of the official split sizes.
+# ---------------------------------------------------------------------------
+
+
+def test_extract_boxed_handles_the_brace_less_single_token_form():
+    assert extract_boxed(r"It follows that $x^2 + y^2 = \boxed 9$.") == "9"
+    assert extract_boxed(r"our answer is $\boxed 2$.") == "2"
+
+
+def test_extract_boxed_takes_the_whole_brace_less_argument_not_one_character():
+    """TeX itself would box only the first token, but every reference
+    implementation reads to the closing `$` -- and a silent "1" where the answer
+    is "12" is a wrong label, which is worse than either."""
+    assert extract_boxed(r"$x = \boxed 12$") == "12"
+    assert extract_boxed(r"$x = \boxed -3$") == "-3"
+
+
+def test_extract_boxed_prefers_the_braced_form_when_both_appear():
+    assert extract_boxed(r"first $\boxed 1$ then $\boxed{42}$") == "42"
+
+
+def test_extract_boxed_brace_less_form_without_a_terminator_still_extracts():
+    assert extract_boxed(r"the answer is \boxed 7") == "7"
+
+
+def test_extract_boxed_returns_none_when_boxed_has_no_argument():
+    assert extract_boxed(r"a bare \boxed") is None
+    assert extract_boxed(r"a bare \boxed$") is None
+
+
+def test_rl_mix_survives_unicode_line_separators_in_values(tmp_path: Path):
+    """`str.splitlines()` splits on U+2028/U+2029/VT/FF/NEL as well as \\n, and
+    `ensure_ascii=False` writes those raw inside JSON strings -- so reading back
+    with splitlines() tears a record in half and raises JSONDecodeError.
+
+    Measured on the real data (2026-07-30): gsm8k_train.jsonl carries 2 raw
+    U+2028, giving 7,475 splitlines() fragments for 7,473 actual lines. The file
+    is valid JSONL either way -- JSON permits unescaped U+2028 inside a string,
+    and pyarrow (which Orbit's loader uses) splits on \\n only -- so the writer is
+    right and the reader has to iterate lines, not splitlines() a blob.
+    """
+    _write_jsonl(
+        tmp_path / "math_train.jsonl",
+        [{"prompt": "what is 2+2? show your work", "label": "4"}],
+    )
+    _write_jsonl(tmp_path / "gsm8k_train.jsonl", [{"prompt": "g", "label": "7"}])
+
+    result = prepare_rl_mix(tmp_path)
+
+    rows = _read_jsonl_strict(result.train_path)
+    assert result.train_rows == 2
+    assert rows[0]["prompt"] == "what is 2+2? show your work"
+    assert rows[0]["label"] == "4"
+
+
+def _read_jsonl_strict(path: Path):
+    """Iterate lines rather than splitlines(), for the reason above."""
+    with path.open(encoding="utf-8") as fh:
+        return [json.loads(line) for line in fh if line.strip()]
+
+
+def test_extract_boxed_treats_an_empty_box_as_no_answer():
+    r"""hendrycks_math number_theory/train has two rows whose solution ends
+    `there are $\boxed{}$ primes` -- a literally empty box where the intended
+    answer is 0. Returning "" there is worse than returning None: an empty label
+    can never be earned honestly, and `grade_answer_verl(response, "")` may match a
+    model that also emits an empty box, which rewards saying nothing."""
+    assert extract_boxed(r"there are $\boxed{}$ primes") is None
+    assert extract_boxed(r"$\boxed{ }$") is None
+    assert extract_boxed(r"$\boxed{0}$") == "0"
+
+
+def test_math_drops_unusable_rows_and_counts_them(tmp_path: Path, monkeypatch):
+    """Dropping beats raising: two bad source rows should not block all of MATH.
+    The *source* counts stay asserted, so upstream drift is still caught, and the
+    drop shows up as filtered_rows rather than as a silently smaller file."""
+
+    def _fake_load(name, config, split):
+        good = {"problem": f"{config}-{split}-good", "solution": r"\boxed{7}"}
+        empty = {"problem": f"{config}-{split}-empty", "solution": r"answer is $\boxed{}$"}
+        return [good, empty]
+
+    monkeypatch.setattr("tools.lora_regret.prepare_data._load_config_split", _fake_load)
+    result = prepare_math(
+        tmp_path,
+        expected_train_rows=2 * len(MATH_CONFIGS),
+        expected_test_rows=2 * len(MATH_CONFIGS),
+    )
+
+    assert result.source_rows == 4 * len(MATH_CONFIGS)
+    assert result.filtered_rows == 2 * len(MATH_CONFIGS)
+    assert result.train_rows == len(MATH_CONFIGS)
+    assert result.test_rows == len(MATH_CONFIGS)
+    assert all(row["label"] == "7" for row in _read_jsonl(result.train_path))
+
+
+def test_math_still_fails_closed_on_a_wrong_source_count(tmp_path: Path, monkeypatch):
+    def _fake_load(name, config, split):
+        return [{"problem": "p", "solution": r"\boxed{7}"}]
+
+    monkeypatch.setattr("tools.lora_regret.prepare_data._load_config_split", _fake_load)
+    with pytest.raises(ValueError, match="expected"):
+        prepare_math(tmp_path, expected_train_rows=99, expected_test_rows=99)
+    assert not list(tmp_path.glob("*.jsonl"))

@@ -32,7 +32,13 @@ OPENTHOUGHTS3_REPO = "open-thoughts/OpenThoughts3-1.2M"
 MATH_REPO = "EleutherAI/hendrycks_math"
 GSM8K_REPO = "openai/gsm8k"
 
-TULU3_EXPECTED_ROWS = 939_344
+# Verified against the hub's own split metadata on 2026-07-30 via
+# `load_dataset_builder(TULU3_REPO).info.splits` -- 939,343 rows / 2.91 GB. The
+# previous value here was 939,344, off by one, which would have failed the
+# assertion only after streaming the whole 2.9 GB mixture. Check the metadata
+# before changing this again: the point of the assertion is to notice a changed
+# mixture, so a mismatch is a question about the dataset, not a number to bump.
+TULU3_EXPECTED_ROWS = 939_343
 OPENTHOUGHTS3_TRAIN_ROWS = 10_000
 OPENTHOUGHTS3_TEST_ROWS = 100
 MATH_EXPECTED_TRAIN_ROWS = 7_500
@@ -285,7 +291,7 @@ def extract_boxed(solution: str) -> str | None:
     ``\\boxed{\\frac{2\\sqrt{35}}{35}}``), which a single-level regex silently
     mis-drops as "no boxed answer".
 
-    This mirrors ``last_boxed_only_string`` / ``remove_boxed`` in
+    This follows ``last_boxed_only_string`` / ``remove_boxed`` in
     `orbit/rollout/rm_hub/math_utils.py` (the same extraction the RL reward path
     uses to grade rollouts, so ground-truth extraction here stays consistent with
     how answers are later graded) rather than importing them: importing that
@@ -293,10 +299,32 @@ def extract_boxed(solution: str) -> str | None:
     imports torch and ray (~2400 extra modules, ~9s just to import) — heavy
     runtime deps this CPU-only, dependency-light dataset-prep script has no
     other reason to need.
+
+    **One deliberate divergence:** this handles TeX's brace-less ``\\boxed 9``
+    and the grader does not (``remove_boxed`` requires a literal ``\\boxed{``, and
+    ``last_boxed_only_string`` returns None with no brace to count). Diverging is
+    right for a *label*: it recovers two correct ground truths that would
+    otherwise be discarded. It does mean a model that answers ``\\boxed 9``
+    scores 0 in E4 even when correct — a real quirk of the reward path, recorded
+    here because the prompt asks for ``\\boxed{}`` and so it should stay rare.
     """
     idx = solution.rfind("\\boxed")
     if idx < 0:
         return None
+
+    # TeX's brace-less form: `\boxed 9` is legal and takes a single token. Two of
+    # MATH's 12,500 rows use it (algebra/train #888 `$\boxed 2$` and #1011
+    # `$\boxed 9$`), and without this they read as "no boxed answer" -- which
+    # would mean either raising on real data or asserting 7,498 rows instead of
+    # the official 7,500.
+    #
+    # Read to the closing `$` rather than taking literally one token, following
+    # the reference implementations: TeX would box only the "1" of `\boxed 12`,
+    # and a label of "1" where the answer is 12 is silently wrong, which is worse
+    # than either alternative.
+    after_command = solution[idx + len("\\boxed") :].lstrip()
+    if not after_command.startswith("{"):
+        return after_command.split("$")[0].strip() or None
 
     i = idx
     depth = 0
@@ -318,7 +346,12 @@ def extract_boxed(solution: str) -> str | None:
     left = "\\boxed{"
     if boxed[: len(left)] != left or boxed[-1] != "}":
         return None
-    return boxed[len(left) : -1].strip()
+    # `or None` for the empty box: two number_theory rows end "there are
+    # $\boxed{}$ primes", an empty ground truth for an answer of 0. An empty label
+    # can never be earned honestly, and grade_answer_verl(response, "") may match a
+    # model that also emits an empty box -- rewarding it for saying nothing. Treat
+    # it as no answer, the same as the brace-less branch above.
+    return boxed[len(left) : -1].strip() or None
 
 
 def prepare_no_robots(out_dir: Path, n_train: int = 6400, n_test: int = 100) -> tuple[Path, Path]:
@@ -421,11 +454,23 @@ def _math_rows(
     dataset: str,
     category: str | None = None,
     answer_instruction: str = "",
+    dropped: list[dict[str, Any]] | None = None,
 ):
+    """Convert MATH-shaped rows, setting aside any without a usable answer.
+
+    Skips rather than raises, and the caller counts what was skipped: two of the
+    12,500 real rows carry a literally empty `\\boxed{}` (number_theory/train),
+    and two bad source rows should not block the other 12,498. The *source* counts
+    stay asserted by the caller, so upstream drift is still caught -- what changes
+    is only that an unusable row becomes a reported drop instead of a crash.
+    """
     for row in rows:
         answer = extract_boxed(row["solution"])
         if answer is None:
-            raise ValueError(f"{dataset}: solution has no complete \\\\boxed{{...}} answer")
+            if dropped is None:
+                raise ValueError(f"{dataset}: solution has no complete \\\\boxed{{...}} answer")
+            dropped.append(row)
+            continue
         metadata = {"dataset": dataset}
         if category is not None:
             metadata["category"] = category
@@ -443,49 +488,60 @@ def prepare_math(
     expected_test_rows: int = MATH_EXPECTED_TEST_ROWS,
     answer_instruction: str = "",
 ) -> PreparedDataset:
-    """Convert every official MATH category and preserve its train/test split."""
+    """Convert every official MATH category and preserve its train/test split.
+
+    `expected_train_rows`/`expected_test_rows` are asserted against the **source**
+    split sizes, not the output: rows with no usable answer are dropped and
+    reported as `filtered_rows`, so the assertion keeps catching a changed dataset
+    while two unusable rows do not block the other 12,498.
+    """
     train_rows = []
     test_rows = []
+    dropped: list[dict[str, Any]] = []
+    source_train = source_test = 0
     for config in MATH_CONFIGS:
+        raw_train = _load_config_split(MATH_REPO, config, "train")
+        raw_test = _load_config_split(MATH_REPO, config, "test")
+        source_train += len(raw_train)
+        source_test += len(raw_test)
         train_rows.extend(
             _math_rows(
-                _load_config_split(MATH_REPO, config, "train"),
+                raw_train,
                 dataset="math",
                 category=config,
                 answer_instruction=answer_instruction,
+                dropped=dropped,
             )
         )
         test_rows.extend(
             _math_rows(
-                _load_config_split(MATH_REPO, config, "test"),
+                raw_test,
                 dataset="math",
                 category=config,
                 answer_instruction=answer_instruction,
+                dropped=dropped,
             )
         )
 
-    if len(train_rows) != expected_train_rows:
+    if source_train != expected_train_rows:
         raise ValueError(
-            f"math_train.jsonl: expected {expected_train_rows} rows, got {len(train_rows)}"
+            f"math train split: expected {expected_train_rows} source rows, got {source_train}"
         )
-    if len(test_rows) != expected_test_rows:
+    if source_test != expected_test_rows:
         raise ValueError(
-            f"math_test.jsonl: expected {expected_test_rows} rows, got {len(test_rows)}"
+            f"math test split: expected {expected_test_rows} source rows, got {source_test}"
         )
     out_dir = Path(out_dir)
-    train_path = _write_jsonl_atomic(
-        out_dir / "math_train.jsonl", train_rows, expected_train_rows
-    )
-    test_path = _write_jsonl_atomic(
-        out_dir / "math_test.jsonl", test_rows, expected_test_rows
-    )
+    train_path = _write_jsonl_atomic(out_dir / "math_train.jsonl", train_rows, len(train_rows))
+    test_path = _write_jsonl_atomic(out_dir / "math_test.jsonl", test_rows, len(test_rows))
     return PreparedDataset(
         name="math",
         train_path=train_path,
         test_path=test_path,
-        source_rows=len(train_rows) + len(test_rows),
+        source_rows=source_train + source_test,
         train_rows=len(train_rows),
         test_rows=len(test_rows),
+        filtered_rows=len(dropped),
     )
 
 
@@ -573,7 +629,15 @@ def prepare_rl_mix(
         path = out_dir / source
         if not path.is_file():
             raise FileNotFoundError(f"{path} is missing; run --dataset math and --dataset gsm8k first")
-        rows.extend(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line)
+        # Iterate the file rather than `read_text().splitlines()`. splitlines()
+        # also breaks on U+2028/U+2029/VT/FF/NEL, and `ensure_ascii=False` writes
+        # those raw inside JSON strings -- gsm8k_train.jsonl really does carry two
+        # U+2028 (measured 2026-07-30: 7,475 splitlines() fragments for 7,473
+        # lines), so splitlines() tears two records in half. The file is valid
+        # JSONL regardless: JSON allows an unescaped U+2028 in a string, and
+        # pyarrow -- what Orbit's loader goes through -- splits on "\n" only.
+        with path.open(encoding="utf-8") as fh:
+            rows.extend(json.loads(line) for line in fh if line.strip())
 
     train_path = _write_jsonl_atomic(out_dir / train_filename, rows, len(rows))
     return PreparedDataset(

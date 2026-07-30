@@ -180,14 +180,23 @@ This box has exactly one H100, so FullFT needs an allocation that does not exist
   single FullFT number: run one arm at DP=1 and the same arm at DP=4 and require **identical
   NLL to the printed precision and identical `tokens=`/`samples=` counts**.
 
-- [ ] **P4: Dataset preparation and materialization.** The CPU implementation is complete:
+- [x] **P4: Dataset preparation and materialization.** The CPU implementation is complete:
   `tools/lora_regret/prepare_data.py` now streams **Tulu3**
   (`allenai/tulu-3-sft-mixture`) for E1, streams an exact 10,000-train / 100-held-out
   **OpenThoughts3** subset for E2, and converts the official **MATH** and **GSM8K** train/test
   splits for E4. Outputs use Orbit's `{"prompt": [messages]}` SFT schema or
   `{"prompt": str, "label": str}` RL schema, assert source/output row counts, and are moved
-  into place only after validation. The box remains unchecked until the real datasets are
-  materialized under `/lustre/fast/fast/groups/ei-slm/data/lora_regret`. CPU verification after
+  into place only after validation. **Materialized and verified 2026-07-30** under
+  `/lustre/fast/fast/groups/ei-slm/data/lora_regret`: Tulu3 938,343/1,000,
+  OpenThoughts3 10,000/100, MATH 7,498/5,000, GSM8K 7,473/1,319, RL mix 14,971 —
+  every file re-read and checked for count, schema, control-token literals and empty
+  labels. Four defects surfaced only against the real data and are fixed: the Tulu3
+  row-count constant was off by one (939,344 vs the hub's 939,343, which would have
+  failed only after streaming all 2.9 GB); `extract_boxed` did not handle TeX's
+  brace-less `\boxed 9` (2 of 12,500 MATH rows) and returned `""` for an empty
+  `\boxed{}` (2 more, now dropped with a reported count); and `prepare_rl_mix` read
+  its inputs with `str.splitlines()`, which splits on U+2028 — two of which really
+  are in `gsm8k_train.jsonl`, tearing two records in half. CPU verification after
   this implementation: **399 passed, 0 failed** across the full repository suite; the focused
   data-prep and launcher set is **32 passed**.
   **Pre-sweep requirement carried over from the llama3-loss-mask plan's Self-Review, not yet
@@ -198,9 +207,10 @@ This box has exactly one H100, so FullFT needs an allocation that does not exist
   sweep run partway through) or a literal `<|eot_id|>` (this silently truncates the scored span
   instead of raising — it would corrupt loss-mask spans without any error). Count both classes
   and filter the affected rows out before the first E1 run, not after a run fails or is
-  discovered to be silently wrong. **Implemented:** both literal classes are counted and
-  affected rows are filtered for Tulu3 and OpenThoughts3 before either split is written; the
-  CLI reports both counts.
+  discovered to be silently wrong. **Implemented and now measured:** both literal classes are
+  counted and affected rows filtered before either split is written, and the real Tulu3 scan
+  came back **clean — 0 rows of 939,343 affected**, so the hazard does not materialize in this
+  mixture and the E1 denominator is the full 938,343.
 
 - [x] **P5: RL launcher.** Written as
   `examples/high_precision/run-llama3_1-8b-bf16-rl-math-gsm8k.sh`, contract-tested by
