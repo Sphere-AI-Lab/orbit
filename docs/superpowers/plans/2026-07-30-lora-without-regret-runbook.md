@@ -130,7 +130,7 @@ stops there, so nothing depends on the total.
 ```bash
 NUM_ROLLOUT=2 TRAIN_ROWS=64 \
 LAUNCHER_NAME=smoke_lora_r256 \
-SAVE_DIR=/lustre/fast/fast/zqiu/tmp/smoke_ckpt \
+SAVE_DIR=/lustre/fast/fast/zqiu/tmp/smoke_ckpt_20260730 \
 EVAL_NLL_INTERVAL=1 \
 bash examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh
 ```
@@ -177,6 +177,21 @@ print(parse_final_nll(open('logs/smoke_lora_r256_20260730_150952.log', errors='r
 python -c "
 import json; print(json.load(open('<SAVE_DIR>/iter_0000001/adapter/adapter_config.json')))"
 # -> peft_type=LORA r=256 lora_alpha=32 lora_dropout=0.0, all seven projections
+# (the 07-30 run's SAVE_DIR was /lustre/fast/fast/zqiu/tmp/smoke_ckpt_20260730)
+```
+
+**Check the save is whole, not just present.** The 2026-07-29 fixture smoke left a
+**truncated** adapter under `.../tmp/smoke_ckpt/` — 32 of 256 data records, 142 MB
+where r256 all-modules is 1.14 GB — which `ls` cannot tell from a good one. The
+cheap discriminator is a load, and it doubles as the parameter-count check E3 and
+E5 depend on:
+
+```bash
+python -c "
+import torch
+sd = torch.load('<SAVE_DIR>/iter_0000001/adapter/adapter_megatron_tp0_pp0.pt', map_location='cpu')
+print(len(sd), sum(v.numel() for v in sd.values()))"
+# -> 256 570425344   for LoRA r256 all-modules on Llama-3.1-8B (32 layers)
 ```
 
 **A quiet log is not a stalled run.** The launcher tees into `RUN_LOG` through a

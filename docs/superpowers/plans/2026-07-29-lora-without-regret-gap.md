@@ -343,8 +343,12 @@ properties (DP-only reduction, both all-reduces inside the wake/sleep window, ev
       line is actually reached). **Done 2026-07-29 after explicit approval:** one H100 ran two
       LoRA-r256 optimizer steps. The held-out path scored all 100 rows / 17,656 tokens at every
       measurement and emitted the pinned line before training (`nll=1.968950`), after step 0
-      (`1.943139`), and after step 1 (`1.924233`). The adapter checkpoint was written at
-      `/lustre/fast/fast/zqiu/tmp/smoke_ckpt/iter_0000001/adapter/adapter_megatron_tp0_pp0.pt`.
+      (`1.943139`), and after step 1 (`1.924233`). A save was *attempted* at
+      `/lustre/fast/fast/zqiu/tmp/smoke_ckpt/iter_0000001/adapter/` — do not cite that file as
+      evidence: re-checked 2026-07-30, it is **truncated** (32 of 256 data records, 142 MB
+      against the 1.14 GB an r256 all-modules adapter takes) and `torch.load` rejects it with
+      `failed locating file data/32 ... checkpoint file is corrupted`. The run's own log is the
+      evidence, and the intact adapter is the 07-30 one recorded below.
       Evidence: `logs/smoke_llama31_lora_20260729_214422.log`. This closes the single-rank
       reachability check only; it does not close the DP reduction below.
       **Re-run 2026-07-30 against the real data** once P4 was materialized
