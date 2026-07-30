@@ -41,8 +41,18 @@ MATRIX_LAUNCHERS = {
     "e2": LAUNCHER,
     "e3": LAUNCHER,
     "e4": RL_LAUNCHER,
+    "e5scout": LAUNCHER,
+    "e5": LAUNCHER,
 }
-MATRIX_METRICS = {"sft82": "nll", "e1": "nll", "e2": "nll", "e3": "nll", "e4": "accuracy"}
+MATRIX_METRICS = {
+    "sft82": "nll",
+    "e1": "nll",
+    "e2": "nll",
+    "e3": "nll",
+    "e4": "accuracy",
+    "e5scout": "nll",
+    "e5": "nll",
+}
 # The eval dataset names the RL launcher passes to --eval-prompt-data. Given
 # explicitly so parse_final_accuracy matches them exactly instead of guessing the
 # key shape; pinned against the launcher's own text by
@@ -263,6 +273,7 @@ def run_arm(
             "target_modules": arm.target_modules,
             "lr": arm.lr,
             "seed": arm.seed,
+            "matched_ratio": arm.matched_ratio,
             "metric": metric,
             "test_nll": nll,
             "accuracy": accuracy,
@@ -292,6 +303,17 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--oft-lr-centre",
+        type=float,
+        default=None,
+        help=(
+            "Learning rate the e5scout matrix found. Required by --matrix e5 and "
+            "meaningless elsewhere: OFT parameterizes a rotation, so no LoRA "
+            "learning rate transfers to it and the refinement grid has nothing to "
+            "centre on until the scout has run."
+        ),
+    )
+    parser.add_argument(
         "--only",
         default=None,
         help="Regex; run only arms whose name matches (e.g. '^lora-r256' or '^oftscout').",
@@ -299,8 +321,15 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Print commands, run nothing.")
     args = parser.parse_args()
 
+    if args.matrix == "e5" and args.oft_lr_centre is None:
+        # A clean exit rather than a traceback: this is the one argument an
+        # operator following the runbook can only supply after another run.
+        parser.error("--matrix e5 requires --oft-lr-centre; run --matrix e5scout first and pass its argmin")
+    if args.matrix != "e5" and args.oft_lr_centre is not None:
+        parser.error(f"--oft-lr-centre is only meaningful for --matrix e5, not {args.matrix}")
+
     repo_root = Path(__file__).resolve().parents[2]
-    arms = MATRICES[args.matrix](args.hidden_size, args.ffn_size, args.seed)
+    arms = MATRICES[args.matrix](args.hidden_size, args.ffn_size, args.seed, args.oft_lr_centre)
     if args.only:
         pattern = re.compile(args.only)
         arms = [a for a in arms if pattern.search(a.name)]

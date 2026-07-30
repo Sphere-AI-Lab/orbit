@@ -3,15 +3,24 @@
 Two LR grids, because the LoRA and FullFT optima sit a decade apart and one
 shared grid would spend most of its points where nothing happens.
 
-Four matrices, selected by ``sweep.py --matrix``:
+Six matrices, selected by ``sweep.py --matrix``:
 
 * ``sft82`` (:func:`sft_arms`) -- the original 82-arm LoRA/OFT matrix, on 7-point
   grids that *bracket* the published optima. Kept byte-for-byte because the gate
-  log records its dry run; it is also the only matrix carrying OFT arms (E5).
+  log records its dry run. Its OFT arms are superseded by ``e5``: they solve the
+  block size from the square attention shape (all-modules lands at parameter ratio
+  0.75) and put 35 of 40 on LoRA's LR grid, which the plan says is not justified
+  for a rotation parameterization.
 * ``e1`` / ``e2`` / ``e3`` -- the campaign matrices of
   ``docs/superpowers/plans/2026-07-28-lora-without-regret-experiments.md``, on
   5-point 0.3-decade grids *centred* on the post's own predictions. Centring is
   the point: a confirmation is then a hit rather than a fit.
+* ``e4`` -- RL (C5). Scored by accuracy, not NLL, and driven through the RL
+  launcher; half-decade spacing because the post gives no LR multiplier for policy
+  gradient and C5's second half is about the *width* of the performant band.
+* ``e5scout`` / ``e5`` -- matched-parameter OFT. The scout comes first and the
+  refinement grid is centred on its argmin; see :func:`e5_arms` for why the match
+  is solved by inverting to a LoRA rank rather than by choosing a block size.
 
 The two grid styles are deliberately not unified. Bracketing answers "where is
 the optimum", centring answers "is the optimum where the post says".
@@ -21,7 +30,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from orbit.utils.peft_param_match import matched_mlp_rank, matched_oft_block_size
+from orbit.utils.peft_param_match import (
+    ATTENTION_MODULES,
+    matched_mlp_rank,
+    matched_oft_block_size,
+    megatron_module_shapes,
+    oft_block_size_matching_params,
+    oft_lora_match_report,
+    oft_param_count_for_modules,
+)
+from orbit.utils.peft_param_match import MLP_MODULES as PEFT_MLP_MODULES
 
 ALL_MODULES = "linear_qkv,linear_proj,linear_fc1,linear_fc2"
 ATTN_MODULES = "linear_qkv,linear_proj"
@@ -96,6 +114,10 @@ class Arm:
     seed: int
     # E2 varies the batch size; E1/E3 leave it at the launcher's own default.
     global_batch_size: int | None = None
+    # Realized OFT-to-LoRA parameter ratio for a matched pair (E5 only). Carried
+    # on the arm so the ledger records how well the "matched" claim actually held
+    # for the arm that ran, rather than for the arm that was intended.
+    matched_ratio: float | None = None
     # Which prepare_data.py split pair to train on. None means "whatever the
     # launcher defaults to" (tulu3).
     dataset: str | None = None
@@ -309,12 +331,144 @@ def e4_arms(seed: int = 0) -> list[Arm]:
     return arms
 
 
+# The OFT capacity ladder for E5, on all four projections. Block sizes rather
+# than ranks, because the block size is what Megatron takes -- and these three
+# are where inverting the match works: b=8 lands on LoRA rank 1, where the rank
+# lattice is too coarse to match (ratio 1.34), so it is left out.
+E5_BLOCK_LADDER = (32, 64, 256)
+# Which of those the scout uses. Scouting at a block size the refinement never
+# runs would locate the learning rate for a model that is not then measured.
+E5_SCOUT_BLOCK = 64
+
+
+def _e5_shapes(hidden_size: int, ffn_size: int, qkv_output_size: int) -> dict[str, tuple[int, int]]:
+    return megatron_module_shapes(hidden_size, ffn_size, qkv_output_size)
+
+
+def e5_scout_arms(
+    hidden_size: int,
+    ffn_size: int,
+    seed: int = 0,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
+) -> list[Arm]:
+    """E5's LR scout: 5 arms, half a decade apart, one block size.
+
+    OFT parameterizes a *rotation* rather than an additive update, so nothing
+    about LoRA's optimal LR transfers to it -- not the value, not even the decade.
+    Hence a wide scout before any refinement grid, exactly as the campaign plan
+    requires.
+    """
+    shapes = _e5_shapes(hidden_size, ffn_size, qkv_output_size)
+    report = oft_lora_match_report(E5_SCOUT_BLOCK, shapes)
+    return [
+        Arm(
+            _name("oftscout", f"b{E5_SCOUT_BLOCK}", ALL_MODULES, lr, seed),
+            "oft",
+            None,
+            E5_SCOUT_BLOCK,
+            ALL_MODULES,
+            lr,
+            seed,
+            dataset="tulu3",
+            matched_ratio=report["ratio"],
+        )
+        for lr in OFT_SCOUT_GRID
+    ]
+
+
+def e5_arms(
+    hidden_size: int,
+    ffn_size: int,
+    seed: int = 0,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
+    oft_lr_centre: float | None = None,
+) -> list[Arm]:
+    """E5: does matched-parameter OFT behave like LoRA on C1/C2/C4?
+
+    50 arms in two axes, every OFT arm paired with a LoRA arm at the **same
+    realized parameter count**:
+
+    * capacity (C1/C2) -- all four projections at OFT block sizes 32/64/256,
+      against LoRA at the ranks those block sizes match (6/12/49 on Llama-3.1-8B).
+    * placement (C4) -- a 2x2 of {OFT, LoRA} x {attention-only, MLP-only}, all
+      four at one capacity. The MLP block size is *solved* to match attention's
+      realized count instead of being reused, because OFT's parameter count
+      follows `d_in` and the MLP's `d_in` sum is larger: the same rank-vs-
+      parameters confound E3 exists to avoid, one method over.
+
+    The pairing runs this direction -- fix the block size, solve for the rank --
+    because a single global block size provably cannot match LoRA across mixed
+    shapes (see `orbit.utils.peft_param_match`'s module docstring: the best
+    all-modules ratio is 0.764). Rank is the finer lattice, so inverting gets
+    within a few percent, and each arm carries the realized ratio it achieved.
+
+    `oft_lr_centre` is required and comes from `e5_scout_arms`' argmin. There is
+    deliberately no default: a made-up centre would be an invented answer to the
+    question the scout exists to ask.
+    """
+    if oft_lr_centre is None:
+        raise ValueError("oft_lr_centre is required; run the e5scout matrix first and pass its argmin")
+
+    shapes = _e5_shapes(hidden_size, ffn_size, qkv_output_size)
+    attn_shapes = {name: shapes[name] for name in ATTENTION_MODULES}
+    mlp_shapes = {name: shapes[name] for name in PEFT_MLP_MODULES}
+    oft_grid = lr_grid(oft_lr_centre)
+    lora_grid = lr_grid(LORA_LR_CENTRE)
+    arms: list[Arm] = []
+
+    def _add_pair(block_size: int, modules: str, module_shapes: dict[str, tuple[int, int]]) -> None:
+        report = oft_lora_match_report(block_size, module_shapes)
+        for lr in oft_grid:
+            arms.append(
+                Arm(
+                    _name("oft", f"b{block_size}", modules, lr, seed),
+                    "oft",
+                    None,
+                    block_size,
+                    modules,
+                    lr,
+                    seed,
+                    dataset="tulu3",
+                    matched_ratio=report["ratio"],
+                )
+            )
+        for lr in lora_grid:
+            arms.append(
+                Arm(
+                    _name("lora", f"r{report['lora_rank']}", modules, lr, seed),
+                    "lora",
+                    report["lora_rank"],
+                    None,
+                    modules,
+                    lr,
+                    seed,
+                    dataset="tulu3",
+                    matched_ratio=report["ratio"],
+                )
+            )
+
+    for block_size in E5_BLOCK_LADDER:
+        _add_pair(block_size, ALL_MODULES, shapes)
+
+    # Placement axis, all four cells at attention's realized capacity.
+    attn_block = E5_SCOUT_BLOCK
+    attn_params = oft_param_count_for_modules(attn_block, attn_shapes)
+    mlp_block = oft_block_size_matching_params(attn_params, mlp_shapes)
+    _add_pair(attn_block, ATTN_MODULES, attn_shapes)
+    _add_pair(mlp_block, MLP_MODULES, mlp_shapes)
+    return arms
+
+
 MATRICES = {
-    "sft82": lambda hidden, ffn, seed: sft_arms(hidden, ffn, seed=seed),
-    "e1": lambda hidden, ffn, seed: e1_arms(seed=seed),
-    "e2": lambda hidden, ffn, seed: e2_arms(seed=seed),
-    "e3": lambda hidden, ffn, seed: e3_arms(hidden, ffn, seed=seed),
-    "e4": lambda hidden, ffn, seed: e4_arms(seed=seed),
+    "sft82": lambda hidden, ffn, seed, oft_lr_centre=None: sft_arms(hidden, ffn, seed=seed),
+    "e1": lambda hidden, ffn, seed, oft_lr_centre=None: e1_arms(seed=seed),
+    "e2": lambda hidden, ffn, seed, oft_lr_centre=None: e2_arms(seed=seed),
+    "e3": lambda hidden, ffn, seed, oft_lr_centre=None: e3_arms(hidden, ffn, seed=seed),
+    "e4": lambda hidden, ffn, seed, oft_lr_centre=None: e4_arms(seed=seed),
+    "e5scout": lambda hidden, ffn, seed, oft_lr_centre=None: e5_scout_arms(hidden, ffn, seed=seed),
+    "e5": lambda hidden, ffn, seed, oft_lr_centre=None: e5_arms(
+        hidden, ffn, seed=seed, oft_lr_centre=oft_lr_centre
+    ),
 }
 
 

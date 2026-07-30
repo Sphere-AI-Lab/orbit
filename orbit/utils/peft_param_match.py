@@ -32,10 +32,34 @@ lines 417-423 and 465-473). ``nearest_divisor`` below mirrors that method
 byte-for-byte in behaviour, including its tie-breaking rule (a strict ``<``
 comparison, so among equidistant candidates whichever is visited first in
 the ``i = 1..isqrt(n)`` scan — pairing ``(i, n // i)`` at each step — wins).
-Because the snap can move the realized parameter count away from the ideal
-(a lot, at large rank), ``match_report`` exposes the *realized* ratio so no
-OFT arm is described as "matched" to its LoRA counterpart in prose when the
-snap actually left it far off.
+Because the snap can move the realized parameter count away from the ideal,
+``match_report`` exposes the *realized* ratio so no OFT arm is described as
+"matched" to its LoRA counterpart in prose when the snap actually left it far
+off. **The snap hurts most at SMALL rank**, not large: the ideal block size is
+``1 + 4·rank`` for a square weight, so the absolute gap to the nearest divisor
+stays ~O(1) while the relative gap goes as ``1/(1 + 4·rank)``. Measured on
+Llama-3.1-8B's square attention shape (d_in = d_out = 4096, whose divisors are
+powers of two), the realized ratio is 0.750 at rank 1, 0.938 at rank 4, 0.984 at
+rank 16 and 1.000 at rank 512.
+
+**A single global block size cannot match LoRA across mixed shapes**, which is
+the constraint that shapes any matched-parameter OFT experiment. OFT's count is
+``d_in·(b−1)/2`` and does not depend on ``d_out`` at all, while LoRA's is
+``rank·(d_in + d_out)``. So the per-module ratio scales as
+``(b−1) / (2·rank·(1 + d_out/d_in))``, and one shared ``b`` therefore starves
+modules with large ``d_out/d_in`` while overfeeding the rest. On Llama-3.1-8B at
+``b = 64`` the realized per-module ratios are 0.787 (``linear_qkv``), 0.984
+(``linear_proj``), **0.246** (``linear_fc1``, whose fused gate+up makes
+``d_out = 7·d_in``) and **1.531** (``linear_fc2``). Searching every divisor of
+4096 and 14336 cannot fix it: the best achievable all-modules ratio converges to
+0.764 for rank >= 4. Megatron's ``--oft-block-size`` is one integer, so per-module
+block sizes are not expressible through the CLI either.
+
+The way out is to invert the match: fix the block size and solve for the **LoRA
+rank** with the same parameter count (``oft_matched_lora_rank``). Rank is a much
+finer lattice than the divisors of ``d_in``, so this lands within a few percent
+for ``b >= 32`` -- 0.988 to 1.004 on all-modules -- and it is what lets an OFT arm
+and a LoRA arm be compared at genuinely equal capacity.
 """
 
 from __future__ import annotations
@@ -154,3 +178,105 @@ def match_report(rank: int, d_in: int, d_out: int) -> dict:
         "oft_params": oft_params,
         "ratio": oft_params / lora_params,
     }
+
+
+# Orbit's fused Megatron layout for a Llama-style decoder layer. Fused, so these
+# are NOT HF's separate q/k/v/gate/up projections: `linear_qkv` bundles q, k and
+# v, and `linear_fc1` bundles gate and up. Adapter accounting has to use these
+# shapes, not HF's, or every parameter count is wrong.
+ATTENTION_MODULES = ("linear_qkv", "linear_proj")
+MLP_MODULES = ("linear_fc1", "linear_fc2")
+
+
+def megatron_module_shapes(
+    hidden_size: int,
+    ffn_size: int,
+    qkv_output_size: int,
+) -> dict[str, tuple[int, int]]:
+    """`{module_name: (d_in, d_out)}` for one fused decoder layer.
+
+    `qkv_output_size` is passed rather than derived because under GQA it is
+    `hidden + 2·num_query_groups·head_dim`, which `hidden_size` alone does not
+    determine (6144 for Llama-3.1-8B, not 3·4096).
+    """
+    if min(hidden_size, ffn_size, qkv_output_size) <= 0:
+        raise ValueError("hidden_size, ffn_size and qkv_output_size must be positive")
+    return {
+        "linear_qkv": (hidden_size, qkv_output_size),
+        "linear_proj": (hidden_size, hidden_size),
+        # gate and up are fused, so d_out is 2*ffn_size.
+        "linear_fc1": (hidden_size, 2 * ffn_size),
+        "linear_fc2": (ffn_size, hidden_size),
+    }
+
+
+def oft_param_count_for_modules(block_size: int, shapes: dict[str, tuple[int, int]]) -> int:
+    """Realized OFT parameters over a set of modules, after per-layer snapping.
+
+    Bridge snaps `block_size` to a divisor of each module's own `d_in`
+    independently, so a module whose `d_in` does not admit the requested block
+    gets a different one -- and the caller never hears about it. That snap is
+    applied here rather than assumed away.
+    """
+    return sum(oft_param_count(nearest_divisor(d_in, block_size), d_in) for d_in, _ in shapes.values())
+
+
+def lora_param_count_for_modules(rank: int, shapes: dict[str, tuple[int, int]]) -> int:
+    """LoRA parameters over a set of modules."""
+    return sum(lora_param_count(rank, d_in, d_out) for d_in, d_out in shapes.values())
+
+
+def oft_matched_lora_rank(block_size: int, shapes: dict[str, tuple[int, int]]) -> int:
+    """LoRA rank whose parameter count matches this OFT block size.
+
+    The inverse of `matched_oft_block_size`, and the direction that actually
+    works: rank is a finer lattice than the divisors of `d_in`, so rounding to an
+    integer rank costs a few percent where snapping a block size costs 24% (see
+    the module docstring). Never returns 0 -- rank 0 is not an adapter.
+    """
+    per_rank = lora_param_count_for_modules(1, shapes)
+    return max(1, round(oft_param_count_for_modules(block_size, shapes) / per_rank))
+
+
+def oft_lora_match_report(block_size: int, shapes: dict[str, tuple[int, int]]) -> dict:
+    """Everything needed to say honestly whether an OFT/LoRA pair is matched.
+
+    `ratio` is realized OFT parameters over realized LoRA parameters at the
+    returned rank. Quote it: a pair at 0.93 is not "matched", and which way it
+    misses decides how a result may be read -- an OFT arm carrying *fewer*
+    parameters that still keeps up strengthens the claim, while one carrying
+    fewer and losing is confounded rather than informative.
+    """
+    oft_params = oft_param_count_for_modules(block_size, shapes)
+    rank = oft_matched_lora_rank(block_size, shapes)
+    lora_params = lora_param_count_for_modules(rank, shapes)
+    return {
+        "block_size": block_size,
+        "oft_params": oft_params,
+        "lora_rank": rank,
+        "lora_params": lora_params,
+        "ratio": oft_params / lora_params,
+        "snapped_block_sizes": {
+            name: nearest_divisor(d_in, block_size) for name, (d_in, _) in shapes.items()
+        },
+    }
+
+
+def oft_block_size_matching_params(target_params: int, shapes: dict[str, tuple[int, int]]) -> int:
+    """Block size whose realized OFT parameter count is closest to `target_params`.
+
+    Needed to compare OFT *against itself* across placements at equal capacity --
+    attention-only and MLP-only at the same block size are not equal-capacity,
+    because OFT's count scales with `d_in` and the MLP's `d_in` sum is larger. It
+    is the same error E3 was written to avoid for LoRA, one method over.
+
+    Searches the divisors of every `d_in` involved, plus every integer up to the
+    largest of them that any module could snap to, and scores candidates by the
+    *realized* count after per-module snapping -- so the returned value is honest
+    about what Bridge will actually build, not about what was requested.
+    """
+    if target_params <= 0:
+        raise ValueError("target_params must be positive")
+    d_ins = {d_in for d_in, _ in shapes.values()}
+    candidates = sorted({d for d_in in d_ins for d in range(1, d_in + 1) if d_in % d == 0})
+    return min(candidates, key=lambda b: abs(oft_param_count_for_modules(b, shapes) - target_params))

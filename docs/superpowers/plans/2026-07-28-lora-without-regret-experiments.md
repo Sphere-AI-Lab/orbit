@@ -324,12 +324,29 @@ centering, 32 samples per problem.
 ### E5 (optional, ours): matched-parameter OFT
 
 Carried over from the Qwen3-era plan and unchanged in spirit: does a rotation-parameterized
-adapter at matched parameter count behave like LoRA on C1/C2/C4?
-`orbit.utils.peft_param_match.matched_oft_block_size` already solves the block size, and its
-LR scale is unknown a priori — it parameterizes a rotation, not an additive update — so it
-needs a half-decade scout `{1e-5, 3e-5, 1e-4, 3e-4, 1e-3}` before any refinement grid.
+adapter at matched parameter count behave like LoRA on C1/C2/C4? The LR scale is unknown a
+priori — OFT parameterizes a rotation, not an additive update — so a half-decade scout
+`{1e-5, 3e-5, 1e-4, 3e-4, 1e-3}` runs first and the refinement grid is centred on its argmin.
 **Run only after C1-C5 are settled.** This is the part of the campaign that is ours rather
 than the post's, and it is worth nothing if the reproduction underneath it is unresolved.
+
+- [x] **E5-0: implement the matrices.** `--matrix e5scout` (5 arms) and `--matrix e5`
+      (50 arms, requires `--oft-lr-centre`); runbook §10.
+- [ ] **E5-1: scout the LR**, then refine.
+- [ ] **E5-2: report OFT-vs-LoRA at matched parameters** on the capacity axis (all-modules,
+      3 block sizes) and the placement axis (a 2x2 of {OFT, LoRA} x {attention, MLP} at one
+      capacity), in units of the σ from E1-0.
+
+**What matching actually required, and it is not what the earlier plan assumed.** A single
+global `--oft-block-size` cannot match LoRA's parameter count across mixed shapes: OFT's count
+is `d_in·(b−1)/2` and ignores `d_out`, while LoRA's is `rank·(d_in + d_out)`. At `b = 64` on
+Llama-3.1-8B the realized per-module ratios are 0.787 (`linear_qkv`), 0.984 (`linear_proj`),
+0.246 (`linear_fc1`, fused gate+up makes `d_out = 7·d_in`) and 1.531 (`linear_fc2`); no divisor
+of 4096 or 14336 fixes it, the best all-modules ratio being 0.764 for rank ≥ 4. So the match is
+inverted — fix the block size, solve for the LoRA rank — which lands every pair within a few
+percent. `matched_oft_block_size` is kept for the `sft82` matrix but is the wrong direction for
+this comparison, and the earlier claim that its snap error is worst "at large rank" was
+backwards: it is worst at *small* rank (0.750 at rank 1, 1.000 at rank 512).
 
 ---
 

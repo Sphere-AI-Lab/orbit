@@ -28,6 +28,9 @@ from tools.lora_regret.arms import (
     e2_arms,
     e3_arms,
     e4_arms,
+    e5_arms,
+    e5_scout_arms,
+    OFT_SCOUT_GRID,
     sft_arms,
 )
 from tools.lora_regret import sweep
@@ -713,3 +716,157 @@ class TestOftDiagnosticScope:
         as a property of the arms about to execute."""
         for matrix in ("e1", "e4"):
             assert "oft match rank=" not in self._run(matrix, capsys, monkeypatch, tmp_path)
+
+
+LLAMA_H, LLAMA_FFN = 4096, 14336
+
+
+class TestE5ScoutMatrix:
+    """E5 asks whether matched-parameter OFT behaves like LoRA on C1/C2/C4. Its
+    LR scale is unknown a priori -- OFT parameterizes a rotation, not an additive
+    update -- so the scout comes first and the refinement grid is centred on what
+    the scout finds."""
+
+    def test_scout_is_five_arms_on_the_half_decade_grid(self):
+        arms = e5_scout_arms(LLAMA_H, LLAMA_FFN)
+        assert len(arms) == 5
+        assert sorted(a.lr for a in arms) == sorted(OFT_SCOUT_GRID)
+
+    def test_scout_is_oft_only(self):
+        assert {a.method for a in e5_scout_arms(LLAMA_H, LLAMA_FFN)} == {"oft"}
+
+    def test_scout_block_size_is_one_of_the_refinement_ladder(self):
+        """Scouting at a block size the refinement never uses would locate the LR
+        for a model that is not then measured."""
+        scout_blocks = {a.oft_block_size for a in e5_scout_arms(LLAMA_H, LLAMA_FFN)}
+        refine_blocks = {a.oft_block_size for a in e5_arms(LLAMA_H, LLAMA_FFN, oft_lr_centre=1e-4)}
+        assert scout_blocks <= refine_blocks
+
+
+class TestE5Matrix:
+    def _arms(self, centre=1e-4):
+        return e5_arms(LLAMA_H, LLAMA_FFN, oft_lr_centre=centre)
+
+    def test_arm_count_is_fifty(self):
+        assert len(self._arms()) == 50
+
+    def test_every_oft_arm_has_a_lora_partner_at_matched_parameters(self):
+        """The point of the whole experiment. An unmatched pair would compare
+        capacity, not parametrization."""
+        arms = self._arms()
+        oft = [a for a in arms if a.method == "oft"]
+        lora = [a for a in arms if a.method == "lora"]
+        assert len(oft) == len(lora) == 25
+        for arm in oft:
+            partners = [b for b in lora if b.target_modules == arm.target_modules]
+            assert partners, f"no LoRA partner for {arm.name}"
+
+    def test_realized_match_ratio_is_recorded_on_every_arm(self):
+        """Recorded, not assumed: a pair at 0.93 must not be described as matched,
+        and the direction of the miss decides how a result may be read."""
+        for arm in self._arms():
+            assert arm.matched_ratio is not None
+            assert 0.9 < arm.matched_ratio < 1.1, arm
+
+    def test_oft_grid_is_centred_on_the_scout_result(self):
+        centre = 3e-4
+        oft_lrs = sorted({a.lr for a in self._arms(centre) if a.method == "oft"})
+        assert len(oft_lrs) == 5
+        assert oft_lrs[2] == pytest.approx(centre, rel=0.02)
+
+    def test_lora_partners_use_the_known_lora_scale_not_the_oft_one(self):
+        """LoRA's optimal LR is already known from E1; re-scouting it would spend
+        arms to rediscover a number this campaign has measured."""
+        lora_lrs = sorted({a.lr for a in self._arms(1e-3) if a.method == "lora"})
+        assert lora_lrs[2] == pytest.approx(2.5e-4, rel=0.02)
+
+    def test_capacity_axis_spans_three_block_sizes_on_all_modules(self):
+        all_module_oft = [
+            a for a in self._arms() if a.method == "oft" and a.target_modules == ALL_MODULES
+        ]
+        assert {a.oft_block_size for a in all_module_oft} == {32, 64, 256}
+
+    def test_placement_axis_is_a_two_by_two_at_one_capacity(self):
+        """C4 for OFT. attention-only and MLP-only at the *same* block size are
+        not equal-capacity, so the MLP block size is solved to match attention's
+        realized parameter count -- E3's lesson, one method over."""
+        # Aliased: peft_param_match exports MLP_MODULES as a *tuple* of module
+        # names, while this module's MLP_MODULES is the comma-joined string the
+        # launcher takes. Importing it unaliased here shadows the string and every
+        # `target_modules ==` comparison silently becomes string-vs-tuple, i.e.
+        # always False.
+        from orbit.utils.peft_param_match import ATTENTION_MODULES as ATTN_NAMES
+        from orbit.utils.peft_param_match import MLP_MODULES as MLP_NAMES
+        from orbit.utils.peft_param_match import megatron_module_shapes, oft_param_count_for_modules
+
+        arms = self._arms()
+        shapes = megatron_module_shapes(LLAMA_H, LLAMA_FFN, 6144)
+        attn = {n: shapes[n] for n in ATTN_NAMES}
+        mlp = {n: shapes[n] for n in MLP_NAMES}
+
+        attn_blocks = {a.oft_block_size for a in arms if a.method == "oft" and a.target_modules == ATTN_MODULES}
+        mlp_blocks = {a.oft_block_size for a in arms if a.method == "oft" and a.target_modules == MLP_MODULES}
+        assert len(attn_blocks) == len(mlp_blocks) == 1
+        assert attn_blocks != mlp_blocks, "same block size would mean unequal capacity"
+
+        attn_params = oft_param_count_for_modules(attn_blocks.pop(), attn)
+        mlp_params = oft_param_count_for_modules(mlp_blocks.pop(), mlp)
+        assert mlp_params / attn_params == pytest.approx(1.0, abs=0.02)
+
+    def test_arm_names_are_unique(self):
+        names = [a.name for a in self._arms()]
+        assert len(names) == len(set(names))
+
+    def test_oft_arms_carry_a_block_size_and_lora_arms_do_not(self):
+        for arm in self._arms():
+            if arm.method == "oft":
+                assert arm.oft_block_size and arm.rank is None
+                assert arm_env(arm)["OFT_BLOCK_SIZE"] == str(arm.oft_block_size)
+            else:
+                assert arm.rank and arm.oft_block_size is None
+                assert "OFT_BLOCK_SIZE" not in arm_env(arm)
+
+
+class TestE5Wiring:
+    def test_refining_without_a_scouted_centre_is_refused(self):
+        """You cannot refine before you scout. A default centre here would be an
+        invented answer to the question the scout exists to ask."""
+        with pytest.raises(ValueError, match="oft_lr_centre"):
+            e5_arms(LLAMA_H, LLAMA_FFN, oft_lr_centre=None)
+
+    def test_both_e5_matrices_are_registered_with_the_sft_launcher_and_nll(self):
+        for matrix in ("e5scout", "e5"):
+            assert sweep.MATRIX_LAUNCHERS[matrix] == sweep.LAUNCHER
+            assert sweep.MATRIX_METRICS[matrix] == "nll"
+
+
+class TestE5CliGuards:
+    def _argv(self, *extra):
+        return ["sweep.py", "--hidden-size", str(LLAMA_H), "--ffn-size", str(LLAMA_FFN), "--dry-run", *extra]
+
+    def test_e5_without_a_scouted_centre_exits_cleanly(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(sys, "argv", self._argv("--matrix", "e5", "--results", str(tmp_path / "r.jsonl")))
+        with pytest.raises(SystemExit) as excinfo:
+            sweep.main()
+        assert excinfo.value.code == 2
+        assert "e5scout" in capsys.readouterr().err
+
+    def test_a_scouted_centre_on_another_matrix_is_refused(self, monkeypatch, capsys, tmp_path):
+        """Silently ignoring it would let someone believe an E1 sweep had been
+        re-centred when it had not."""
+        monkeypatch.setattr(
+            sys, "argv",
+            self._argv("--matrix", "e1", "--oft-lr-centre", "1e-4", "--results", str(tmp_path / "r.jsonl")),
+        )
+        with pytest.raises(SystemExit) as excinfo:
+            sweep.main()
+        assert excinfo.value.code == 2
+        assert "only meaningful" in capsys.readouterr().err
+
+    def test_e5_with_a_centre_runs(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(
+            sys, "argv",
+            self._argv("--matrix", "e5", "--oft-lr-centre", "1e-4", "--results", str(tmp_path / "r.jsonl")),
+        )
+        sweep.main()
+        assert len(capsys.readouterr().out.strip().splitlines()) == 50

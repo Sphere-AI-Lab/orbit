@@ -11,13 +11,13 @@ Companions:
 
 ## What is ready, and what you still have to do
 
-Ready and CPU-verified (468 tests, 0 failures, in the built env):
+Ready and CPU-verified (493 tests, 0 failures, in the built env):
 
 | Piece | Where |
 |---|---|
 | SFT launcher — LoRA, OFT and FullFT in one script | `examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh` |
 | RL launcher (prerequisite P5) | `examples/high_precision/run-llama3_1-8b-bf16-rl-math-gsm8k.sh` |
-| Arm matrices `e1` / `e2` / `e3` / `e4` / `sft82` | `tools/lora_regret/arms.py` |
+| Arm matrices `e1` / `e2` / `e3` / `e4` / `e5scout` / `e5` / `sft82` | `tools/lora_regret/arms.py` |
 | Sweep driver with resume ledger | `tools/lora_regret/sweep.py` |
 | Data preparation for all five datasets | `tools/lora_regret/prepare_data.py` |
 | Held-out token-weighted NLL eval | `orbit/utils/eval_nll.py`, wired in `train.py` |
@@ -327,21 +327,65 @@ prerequisite exactly as E1-0 was for NLL.
 
 ## 10. E5 (optional, ours) — matched-parameter OFT
 
-Only after C1-C5 are settled. The `sft82` matrix is the only one carrying OFT
-arms, and it includes a deliberate half-decade scout, because OFT parameterizes
-a rotation rather than an additive update and its LR scale is unknown a priori:
+Only after C1-C5 are settled. Two matrices, and the second **cannot run until the
+first has**, because OFT parameterizes a rotation rather than an additive update:
+no LoRA learning rate transfers to it, not even the decade.
 
 ```bash
-python -m tools.lora_regret.sweep --matrix sft82 --hidden-size 4096 --ffn-size 14336 \
-  --only '^oftscout' --results results/e5_scout.jsonl
+# Scout: 5 arms, half a decade apart, one block size (64).
+python -m tools.lora_regret.sweep --matrix e5scout --hidden-size 4096 --ffn-size 14336 \
+  --results results/e5_scout.jsonl
+
+# Refine: 50 arms, centred on the scout's argmin. Substitute the real number.
+python -m tools.lora_regret.sweep --matrix e5 --hidden-size 4096 --ffn-size 14336 \
+  --oft-lr-centre 1e-4 --results results/e5.jsonl
 ```
 
-The dry run prints the realized parameter ratio per rank. Check it: the block
-size snaps to a divisor of `d_in`, which at large rank can move the ratio well
-away from 1.0 — and an unmatched "matched" comparison is worse than none.
-`OFT_BLOCK_SIZE` has **no default** in either launcher; it must come from
-`matched_oft_block_size`, so a missing value fails at launch instead of quietly
-comparing unmatched models.
+Omitting `--oft-lr-centre` exits 2 and tells you to scout first; passing it to any
+other matrix also exits 2, so it cannot silently look as though E1 were re-centred.
+
+**How the matching works, and why not the obvious way.** A single global
+`--oft-block-size` *cannot* match LoRA's parameter count across mixed shapes, and
+this is arithmetic rather than tuning: OFT's count is `d_in·(b−1)/2` and ignores
+`d_out` entirely, while LoRA's is `rank·(d_in + d_out)`. On Llama-3.1-8B at
+`b = 64` the realized per-module ratios are 0.787 (`linear_qkv`), 0.984
+(`linear_proj`), **0.246** (`linear_fc1`, whose fused gate+up makes
+`d_out = 7·d_in`) and **1.531** (`linear_fc2`). Searching every divisor of 4096
+and 14336 does not fix it — the best achievable all-modules ratio converges to
+**0.764** for rank ≥ 4 — and Megatron takes one integer, so per-module block sizes
+are not expressible either.
+
+So E5 inverts the match: fix the block size, then solve for the **LoRA rank** with
+the same parameter count. Rank is a much finer lattice than the divisors of `d_in`,
+which brings every pair within a few percent:
+
+| Axis | OFT arm | LoRA partner | realized ratio |
+|---|---|---|---|
+| capacity | all-modules b=32 | all-modules r6 | 0.988 |
+| capacity | all-modules b=64 | all-modules r12 | 1.004 |
+| capacity | all-modules b=256 | all-modules r49 | 0.995 |
+| placement | attention-only b=64 | attention-only r14 | 1.000 |
+| placement | MLP-only b=28 | MLP-only r5 | 1.004 |
+
+The placement rows are a 2×2 of {OFT, LoRA} × {attention, MLP} **all at one
+capacity**: the MLP block size is solved to match attention's realized count
+(28, not 64) rather than reused, because OFT's count follows `d_in` and the MLP's
+`d_in` sum is larger. Reusing 64 there would compare placement *and* capacity at
+once — E3's mistake, one method over.
+
+Every arm carries its `matched_ratio` into the ledger. Quote it, and mind the
+direction: an OFT arm carrying slightly *fewer* parameters that still keeps up
+strengthens the finding, while one carrying fewer and losing is confounded rather
+than informative.
+
+`OFT_BLOCK_SIZE` has **no default** in either launcher — a missing value fails at
+launch instead of quietly comparing unmatched models.
+
+Note that `sft82`'s own 40 OFT arms are **not** this design: they solve the block
+size from the square attention shape (so all-modules lands at ratio 0.75) and put
+35 of the 40 on LoRA's LR grid, which the campaign plan explicitly says is not
+justified for OFT. Prefer `e5scout` + `e5`. `sft82` stays as-is because the gate
+log records its dry run.
 
 ## 11. Reading results
 

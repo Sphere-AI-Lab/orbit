@@ -149,3 +149,108 @@ class TestAgreesWithBridgeFindNearestDivisor:
         # See test_tie_prefers_first_found_like_bridge: n=2560, target=52 is
         # equidistant from divisors 40 and 64.
         assert bridge_find_nearest_divisor(2560, 52) == nearest_divisor(2560, 52)
+
+
+# ---------------------------------------------------------------------------
+# Matched-parameter OFT (E5). The premise of that experiment is equal capacity,
+# so these pin the accounting that decides whether "matched" is true.
+# ---------------------------------------------------------------------------
+
+from orbit.utils.peft_param_match import (  # noqa: E402
+    ATTENTION_MODULES,
+    MLP_MODULES,
+    lora_param_count_for_modules,
+    megatron_module_shapes,
+    oft_block_size_matching_params,
+    oft_lora_match_report,
+    oft_matched_lora_rank,
+    oft_param_count_for_modules,
+)
+
+LLAMA31_8B = dict(hidden_size=4096, ffn_size=14336, qkv_output_size=6144)
+
+
+def _subset(shapes, names):
+    return {name: shapes[name] for name in names}
+
+
+def test_megatron_shapes_are_fused_not_hf_separate():
+    """linear_qkv bundles q/k/v and linear_fc1 bundles gate/up. Using HF's
+    separate projections here would make every parameter count wrong."""
+    shapes = megatron_module_shapes(**LLAMA31_8B)
+    assert shapes["linear_qkv"] == (4096, 6144)
+    assert shapes["linear_fc1"] == (4096, 2 * 14336)
+    assert shapes["linear_fc2"] == (14336, 4096)
+    # Same per-rank totals the E3 arithmetic is stated with.
+    assert lora_param_count_for_modules(1, _subset(shapes, ATTENTION_MODULES)) == 18432
+    assert lora_param_count_for_modules(1, _subset(shapes, MLP_MODULES)) == 51200
+
+
+def test_block_size_snap_error_is_worst_at_small_rank():
+    """The module docstring's claim, pinned as behaviour: the ideal block is
+    1+4*rank, so the absolute gap to a divisor stays O(1) while the relative gap
+    goes as 1/(1+4*rank)."""
+    from orbit.utils.peft_param_match import match_report
+
+    ratios = [match_report(rank, 4096, 4096)["ratio"] for rank in (1, 4, 16, 64, 256)]
+    assert ratios[0] < 0.8
+    assert ratios[-1] > 0.99
+    assert ratios == sorted(ratios), "error must shrink monotonically as rank grows"
+
+
+def test_one_global_block_size_cannot_match_across_mixed_shapes():
+    """The constraint that forces E5's design. OFT's count ignores d_out, so a
+    shared block size starves linear_fc1 (d_out = 7*d_in) and overfeeds
+    linear_fc2 -- and no divisor fixes both."""
+    shapes = megatron_module_shapes(**LLAMA31_8B)
+    per_module = {
+        name: oft_param_count_for_modules(64, {name: shape})
+        / lora_param_count_for_modules(16, {name: shape})
+        for name, shape in shapes.items()
+    }
+    assert per_module["linear_fc1"] < 0.3
+    assert per_module["linear_fc2"] > 1.5
+    whole = oft_param_count_for_modules(64, shapes) / lora_param_count_for_modules(16, shapes)
+    assert 0.70 < whole < 0.80, "all-modules lands ~0.76, not 1.0"
+
+
+def test_inverting_the_match_lands_within_a_few_percent():
+    """Rank is a finer lattice than the divisors of d_in, which is the whole
+    reason E5 fixes the block size and solves for the rank."""
+    shapes = megatron_module_shapes(**LLAMA31_8B)
+    for block_size in (32, 64, 256, 1024):
+        report = oft_lora_match_report(block_size, shapes)
+        assert abs(report["ratio"] - 1.0) < 0.05, report
+
+
+def test_small_block_sizes_cannot_be_matched_and_say_so():
+    """b=8 matches to rank 1, where the rank lattice is too coarse -- the report
+    must expose that rather than round it away."""
+    shapes = megatron_module_shapes(**LLAMA31_8B)
+    report = oft_lora_match_report(8, shapes)
+    assert report["lora_rank"] == 1
+    assert report["ratio"] > 1.3
+
+
+def test_matched_lora_rank_is_never_zero():
+    shapes = megatron_module_shapes(**LLAMA31_8B)
+    assert oft_matched_lora_rank(2, shapes) >= 1
+
+
+def test_oft_placements_are_matched_to_each_other_by_block_size():
+    """attention-only and MLP-only at the SAME block size are not equal-capacity,
+    because OFT's count follows d_in. E5's 2x2 needs them matched."""
+    shapes = megatron_module_shapes(**LLAMA31_8B)
+    attn, mlp = _subset(shapes, ATTENTION_MODULES), _subset(shapes, MLP_MODULES)
+    attn_params = oft_param_count_for_modules(64, attn)
+    assert oft_param_count_for_modules(64, mlp) / attn_params > 2.0, "same block size, unequal capacity"
+
+    mlp_block = oft_block_size_matching_params(attn_params, mlp)
+    ratio = oft_param_count_for_modules(mlp_block, mlp) / attn_params
+    assert abs(ratio - 1.0) < 0.02, (mlp_block, ratio)
+
+
+def test_block_size_matching_params_rejects_nonpositive_targets():
+    shapes = megatron_module_shapes(**LLAMA31_8B)
+    with pytest.raises(ValueError, match="target_params must be positive"):
+        oft_block_size_matching_params(0, shapes)
