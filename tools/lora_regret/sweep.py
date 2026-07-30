@@ -62,6 +62,7 @@ MATRIX_LAUNCHERS = {
     "e2": LAUNCHER,
     "e3": LAUNCHER,
     "e4": RL_LAUNCHER,
+    "e4place": RL_LAUNCHER,
     "e5scout": LAUNCHER,
     "e5": LAUNCHER,
 }
@@ -74,6 +75,7 @@ MATRIX_METRICS = {
     "e2": "nll",
     "e3": "nll",
     "e4": "accuracy",
+    "e4place": "accuracy",
     "e5scout": "nll",
     "e5": "nll",
 }

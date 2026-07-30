@@ -481,6 +481,47 @@ def e4_arms(seed: int = 0) -> list[Arm]:
     return arms
 
 
+def e4place_arms(
+    hidden_size: int,
+    ffn_size: int,
+    seed: int = 0,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
+) -> list[Arm]:
+    """E4-place: does the attention-vs-MLP finding survive policy gradient?
+
+    2 placements x 4 LRs = 8 runs, on E4's own data and E4's own half-decade
+    grid so the placement result and the rank result are comparable arm for arm.
+
+    **All-modules is deliberately absent.** E4 already runs LoRA r256
+    all-modules on this exact grid, so including it here would produce four
+    byte-identical arm names -- four re-run RL arms at 8 GPUs each, and a
+    duplicate key the moment both ledgers are globbed into `analyze` together,
+    where the better of two independent runs of one configuration would win.
+    Read the all-modules cell from E4's ledger; the same reasoning excludes
+    Llama from `e6`.
+
+    The MLP rank is E3's *solved* match (r92 on Llama-3.1-8B), not the post's
+    r128: Orbit fuses qkv and gate+up, so the post's pair is not matched in this
+    layout, and an unmatched pair compares placement and capacity at once.
+
+    No FullFT arm. The post's RL placement panel is a comparison within LoRA,
+    and a FullFT arm here would cost 8 GPUs to answer a question E4 already asks.
+    """
+    matched_rank = matched_mlp_rank(256, hidden_size, ffn_size, qkv_output_size)
+    configs = [
+        (256, ATTN_MODULES),
+        (matched_rank, MLP_MODULES),
+    ]
+    arms: list[Arm] = []
+    for rank, modules in configs:
+        for lr in lr_grid(RL_LORA_LR_CENTRE, n=4, step_decades=0.5):
+            arms.append(
+                Arm(_name("lora", f"r{rank}", modules, lr, seed), "lora", rank, None,
+                    modules, lr, seed, dataset=RL_MIX_DATASET)
+            )
+    return arms
+
+
 # The OFT capacity ladder for E5, on all four projections. Block sizes rather
 # than ranks, because the block size is what Megatron takes -- and these three
 # are where inverting the match works: b=8 lands on LoRA rank 1, where the rank
@@ -618,6 +659,9 @@ MATRICES = {
     "e2": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e2_arms(seed=seed),
     "e3": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e3_arms(hidden, ffn, seed=seed),
     "e4": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e4_arms(seed=seed),
+    "e4place": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e4place_arms(
+        hidden, ffn, seed=seed
+    ),
     "e5scout": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e5_scout_arms(hidden, ffn, seed=seed),
     "e5": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e5_arms(
         hidden, ffn, seed=seed, oft_lr_centre=oft_lr_centre

@@ -84,3 +84,61 @@ class TestE1Short:
         from tools.lora_regret.arms import e1short_arms
 
         assert {a.dataset for a in e1short_arms()} == {"tulu3"}
+
+
+class TestE4Place:
+    def test_eight_arms_two_placements_four_lrs(self):
+        from tools.lora_regret.arms import e4place_arms
+
+        arms = e4place_arms(HIDDEN, FFN)
+        assert len(arms) == 8
+        assert {a.target_modules for a in arms} == {ATTN_MODULES, MLP_MODULES}
+
+    def test_it_does_not_restate_any_arm_e4_already_runs(self):
+        """e4's LoRA r256 all-modules cell uses this exact grid, so an
+        all-modules cell here would be four byte-identical arm names -- four
+        re-run RL arms at 8 GPUs each, and a duplicate key if both ledgers are
+        ever globbed into analyze together."""
+        from tools.lora_regret.arms import e4_arms, e4place_arms
+
+        assert not ({a.name for a in e4_arms()} & {a.name for a in e4place_arms(HIDDEN, FFN)})
+
+    def test_the_mlp_rank_is_e3s_solved_match_not_a_round_number(self):
+        """Comparing attention r256 against MLP r256 would compare placement and
+        capacity at once. Orbit fuses qkv and gate+up, so the post's own
+        attention-256/MLP-128 pair is not matched in this layout either."""
+        from orbit.utils.peft_param_match import matched_mlp_rank
+        from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT, e4place_arms
+
+        expected = matched_mlp_rank(256, HIDDEN, FFN, LLAMA31_8B_QKV_OUTPUT)
+        mlp = {a.rank for a in e4place_arms(HIDDEN, FFN) if a.target_modules == MLP_MODULES}
+        assert mlp == {expected}
+        assert expected != 256 and expected != 128
+
+    def test_no_fullft_arm(self):
+        """The post's RL placement panel is a comparison within LoRA."""
+        from tools.lora_regret.arms import e4place_arms
+
+        assert all(a.method == "lora" for a in e4place_arms(HIDDEN, FFN))
+
+    def test_it_shares_e4s_data_and_half_decade_grid(self):
+        """So the placement result and the rank result are read off comparable
+        arms rather than off two differently-shaped grids."""
+        import math
+
+        from tools.lora_regret.arms import RL_MIX_DATASET, e4_arms, e4place_arms
+
+        place = e4place_arms(HIDDEN, FFN)
+        assert {a.dataset for a in place} == {RL_MIX_DATASET}
+        lrs = sorted({a.lr for a in place if a.target_modules == ATTN_MODULES})
+        steps = [math.log10(b / a) for a, b in zip(lrs, lrs[1:])]
+        assert all(abs(s - 0.5) < 0.01 for s in steps), steps
+        e4_lora = sorted({a.lr for a in e4_arms() if a.method == "lora"})
+        assert lrs == e4_lora
+
+    def test_it_is_registered_and_scored_by_accuracy(self):
+        from tools.lora_regret.sweep import MATRIX_LAUNCHERS, MATRIX_METRICS
+
+        assert MATRIX_METRICS["e4place"] == "accuracy"
+        assert "rl-math-gsm8k" in MATRIX_LAUNCHERS["e4place"]
+        assert len(MATRICES["e4place"](HIDDEN, FFN, 0, None, None)) == 8
