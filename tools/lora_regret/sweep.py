@@ -54,6 +54,7 @@ RL_LAUNCHER = "examples/high_precision/run-llama3_1-8b-bf16-rl-math-gsm8k.sh"
 MATRIX_LAUNCHERS = {
     "sft82": LAUNCHER,
     "e1": LAUNCHER,
+    "e1long": LAUNCHER,
     "e2": LAUNCHER,
     "e3": LAUNCHER,
     "e4": RL_LAUNCHER,
@@ -63,6 +64,7 @@ MATRIX_LAUNCHERS = {
 MATRIX_METRICS = {
     "sft82": "nll",
     "e1": "nll",
+    "e1long": "nll",
     "e2": "nll",
     "e3": "nll",
     "e4": "accuracy",

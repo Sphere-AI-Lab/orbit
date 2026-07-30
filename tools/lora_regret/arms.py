@@ -74,6 +74,12 @@ LORA_LR_CENTRE = 2.5e-4
 # used as scout centres rather than as predictions.
 RL_FULL_LR_CENTRE = 1e-6
 RL_LORA_LR_CENTRE = 1e-5
+# One Tulu3 epoch is (939,343 - 1,000 held out) / 32 = 29,323 optimizer steps,
+# and ~1% of that is 293 -- about 100 trace points, which is what C1's departure
+# detector needs, for ~1.9 h of eval against ~70 h of training. At the
+# launcher's default of 10 the same arm would spend ~55 h evaluating.
+E1LONG_EVAL_INTERVAL = 293
+E1LONG_RANKS = (1, 4, 16, 64, 128, 256, 512)
 # Llama-3.1-8B's fused QKV width: (32 query + 8 key + 8 value heads) * 128 head
 # dim = 6144. Needed for the matched-parameter attention/MLP pair in E3, and not
 # derivable from hidden_size alone under GQA.
@@ -122,6 +128,12 @@ class Arm:
     # Which prepare_data.py split pair to train on. None means "whatever the
     # launcher defaults to" (tulu3).
     dataset: str | None = None
+    # E1-2 only. The long curves must run a full Tulu3 epoch, and the launcher
+    # derives that itself -- but only if NUM_ROLLOUT is unset or empty.
+    full_epoch: bool = False
+    # Explicit so the long curves get ~100 trace points instead of the
+    # launcher's default of 10, which would cost 37 h of eval per arm.
+    eval_nll_interval: int | None = None
 
 
 def _name(method: str, tag: str, modules: str, lr: float, seed: int, extra: str = "") -> str:
@@ -215,6 +227,50 @@ def e1_arms(seed: int = 0) -> list[Arm]:
                     dataset="tulu3",
                 )
             )
+    return arms
+
+
+def e1long_arms(
+    argmins: dict[tuple[str, int | None], float],
+    seed: int = 0,
+) -> list[Arm]:
+    """E1-2: the long learning curves that decide C1.
+
+    Eight runs -- one per E1 arm, each at *that arm's own* argmin LR from E1-1,
+    each a full Tulu3 epoch. Eight rather than forty precisely because E1-1 has
+    already located the learning rates: run at a shared LR instead and a rank
+    that departs early is indistinguishable from a rank whose LR was too high.
+
+    `argmins` maps `(method, rank)` to a learning rate. A missing key raises
+    rather than being skipped: eight arms silently becoming five would look like
+    a completed stage.
+    """
+    wanted: list[tuple[str, int | None]] = [("full", None)] + [("lora", r) for r in E1LONG_RANKS]
+    missing = [key for key in wanted if key not in argmins]
+    if missing:
+        raise ValueError(
+            f"e1long is missing an argmin for {missing}; run E1-1 to completion first "
+            "(runbook section 8)"
+        )
+    arms: list[Arm] = []
+    for method, rank in wanted:
+        lr = argmins[(method, rank)]
+        modules = "" if method == "full" else ALL_MODULES
+        tag = "na" if method == "full" else f"r{rank}"
+        arms.append(
+            Arm(
+                _name(method, tag, modules, lr, seed, extra="long"),
+                method,
+                rank,
+                None,
+                modules,
+                lr,
+                seed,
+                dataset="tulu3",
+                full_epoch=True,
+                eval_nll_interval=E1LONG_EVAL_INTERVAL,
+            )
+        )
     return arms
 
 
@@ -461,13 +517,14 @@ def e5_arms(
 
 
 MATRICES = {
-    "sft82": lambda hidden, ffn, seed, oft_lr_centre=None: sft_arms(hidden, ffn, seed=seed),
-    "e1": lambda hidden, ffn, seed, oft_lr_centre=None: e1_arms(seed=seed),
-    "e2": lambda hidden, ffn, seed, oft_lr_centre=None: e2_arms(seed=seed),
-    "e3": lambda hidden, ffn, seed, oft_lr_centre=None: e3_arms(hidden, ffn, seed=seed),
-    "e4": lambda hidden, ffn, seed, oft_lr_centre=None: e4_arms(seed=seed),
-    "e5scout": lambda hidden, ffn, seed, oft_lr_centre=None: e5_scout_arms(hidden, ffn, seed=seed),
-    "e5": lambda hidden, ffn, seed, oft_lr_centre=None: e5_arms(
+    "sft82": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: sft_arms(hidden, ffn, seed=seed),
+    "e1": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1_arms(seed=seed),
+    "e1long": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1long_arms(argmins, seed=seed),
+    "e2": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e2_arms(seed=seed),
+    "e3": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e3_arms(hidden, ffn, seed=seed),
+    "e4": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e4_arms(seed=seed),
+    "e5scout": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e5_scout_arms(hidden, ffn, seed=seed),
+    "e5": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e5_arms(
         hidden, ffn, seed=seed, oft_lr_centre=oft_lr_centre
     ),
 }
@@ -482,6 +539,14 @@ def arm_env(arm: Arm, data_dir: str = DATA_DIR) -> dict[str, str]:
     override here would silently defeat that.
     """
     env = {"LR": f"{arm.lr:g}", "SEED": str(arm.seed)}
+    if arm.full_epoch:
+        # The EMPTY STRING, not an omitted key. The launcher spells it
+        # ${NUM_ROLLOUT:-$((...))} -- the colon form re-derives on an empty
+        # value, so this both requests the full epoch and immunises the arm
+        # against a NUM_ROLLOUT=2000 left exported in the shell from E1-1.
+        env["NUM_ROLLOUT"] = ""
+    if arm.eval_nll_interval is not None:
+        env["EVAL_NLL_INTERVAL"] = str(arm.eval_nll_interval)
     if arm.dataset is not None:
         env["TRAIN_JSONL"] = f"{data_dir}/{arm.dataset}_train.jsonl"
         if arm.dataset not in DATASETS_WITHOUT_TEST_SPLIT:

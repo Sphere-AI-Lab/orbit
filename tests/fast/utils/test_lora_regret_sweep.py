@@ -1064,3 +1064,60 @@ class TestLedgerCarriesAdapterParams:
         )
         record = json.loads(results.read_text().splitlines()[0])
         assert record["adapter_params"] == SMOKE_R256_ALL_MODULES_PARAMS
+
+
+from tools.lora_regret.arms import E1LONG_EVAL_INTERVAL, e1long_arms
+
+E1LONG_ARGMINS = {
+    ("full", None): 2.5e-5,
+    ("lora", 1): 5.0e-4,
+    ("lora", 4): 4.0e-4,
+    ("lora", 16): 2.5e-4,
+    ("lora", 64): 2.5e-4,
+    ("lora", 128): 2.5e-4,
+    ("lora", 256): 2.5e-4,
+    ("lora", 512): 1.5e-4,
+}
+
+
+class TestE1LongMatrix:
+    def test_one_arm_per_rank_at_its_own_argmin(self):
+        arms = e1long_arms(E1LONG_ARGMINS)
+        assert len(arms) == 8
+        by_key = {(a.method, a.rank): a for a in arms}
+        assert set(by_key) == set(E1LONG_ARGMINS)
+        assert by_key[("lora", 512)].lr == 1.5e-4
+        assert by_key[("full", None)].lr == 2.5e-5
+
+    def test_every_arm_runs_a_full_epoch(self):
+        assert all(a.full_epoch for a in e1long_arms(E1LONG_ARGMINS))
+
+    def test_num_rollout_is_emptied_not_omitted(self):
+        """A NUM_ROLLOUT=2000 left exported from E1-1 must not shorten the curve.
+
+        The launcher spells it ${NUM_ROLLOUT:-$((...))} -- the colon form -- so an
+        empty value re-derives the full epoch, while omitting the key would let
+        the stale export through and turn a 29,323-step curve into a 2,000-step
+        one. Every rank would then look like it never departs.
+        """
+        env = arm_env(e1long_arms(E1LONG_ARGMINS)[0])
+        assert env["NUM_ROLLOUT"] == ""
+
+    def test_the_eval_interval_is_about_one_percent_of_the_epoch(self):
+        env = arm_env(e1long_arms(E1LONG_ARGMINS)[0])
+        assert env["EVAL_NLL_INTERVAL"] == str(E1LONG_EVAL_INTERVAL)
+        assert 250 <= E1LONG_EVAL_INTERVAL <= 350
+
+    def test_ordinary_arms_set_neither_knob(self):
+        """The non-tautology case: e1's arms must be unchanged by this."""
+        env = arm_env(e1_arms()[0])
+        assert "NUM_ROLLOUT" not in env
+        assert "EVAL_NLL_INTERVAL" not in env
+
+    def test_a_missing_rank_is_refused(self):
+        partial = {k: v for k, v in E1LONG_ARGMINS.items() if k != ("lora", 512)}
+        with pytest.raises(ValueError, match="missing"):
+            e1long_arms(partial)
+
+    def test_arms_train_on_tulu3(self):
+        assert all(a.dataset == "tulu3" for a in e1long_arms(E1LONG_ARGMINS))
