@@ -9,7 +9,7 @@ from tqdm.auto import tqdm
 
 from orbit.utils import tracking_utils
 from orbit.ray.placement_group import create_placement_groups, create_rollout_manager, create_training_models
-from orbit.utils.arguments import parse_args, uses_rollout_engines
+from orbit.utils.arguments import parse_args, uses_rollout_engines, uses_separate_critic
 from orbit.utils.async_utils import eager_create_task
 from orbit.utils.logging_utils import configure_logger
 from orbit.utils.metric_utils import compute_rollout_step
@@ -101,7 +101,7 @@ async def train(args):
 
     async def offload_train():
         if args.offload_train:
-            if args.use_critic:
+            if uses_separate_critic(args):
                 await critic_model.offload()
                 if rollout_id >= args.num_critic_only_steps:
                     await actor_model.offload()
@@ -111,12 +111,12 @@ async def train(args):
             await actor_model.clear_memory()
 
     async def save(rollout_id):
-        if (not args.use_critic) or (rollout_id >= args.num_critic_only_steps):
+        if (not uses_separate_critic(args)) or (rollout_id >= args.num_critic_only_steps):
             await actor_model.save_model(
                 rollout_id,
                 force_sync=rollout_id == args.num_rollout - 1,
             )
-        if args.use_critic:
+        if uses_separate_critic(args):
             await critic_model.save_model(
                 rollout_id,
                 force_sync=rollout_id == args.num_rollout - 1,
@@ -163,7 +163,7 @@ async def train(args):
             async with _timed_phase(prefix, "prefetch train state", timing_raw=timing_raw):
                 await actor_model.prefetch_train_state(rollout_id)
 
-        if args.use_critic:
+        if uses_separate_critic(args):
             critic_task = await eager_create_task(critic_model.train(rollout_id, rollout_data_ref))
             if rollout_id >= args.num_critic_only_steps:
                 async with _timed_phase(prefix, "actor train", timing_raw=timing_raw):

@@ -27,6 +27,7 @@ try:
 except ImportError:
     from megatron.core.utils import unwrap_model
 
+from orbit.utils.arguments import uses_adapter_critic
 from orbit.utils.dumper_utils import DumperMegatronUtil, DumperPhase
 from orbit.utils.memory_utils import clear_memory
 
@@ -186,7 +187,11 @@ def setup_model_and_optimizer(
             - The learning-rate/weight-decay scheduler tied to the optimizer.
     """
     assert not args.moe_use_upcycling
-    assert args.load is not None or args.pretrained_checkpoint is not None
+    # The adapter-mode critic gets trunk weights from the bridge/HF load inside the PEFT
+    # pre-wrap hook and then aliases the actor's tensors — it is the one build with no
+    # Megatron checkpoint source by design.
+    if not (role == "critic" and uses_adapter_critic(args)):
+        assert args.load is not None or args.pretrained_checkpoint is not None
 
     model = _build_model(args, role)
     # Apply parameter-level dtype overrides declared in model definitions
@@ -197,8 +202,9 @@ def setup_model_and_optimizer(
 
 
 def _build_model(args: Namespace, role: str = "actor") -> list[DDP]:
-    if is_peft_enabled(args) and role == "actor" and args.megatron_to_hf_mode == "bridge":
-        return _setup_peft_model_via_bridge(args)
+    peft_bridge = is_peft_enabled(args) and args.megatron_to_hf_mode == "bridge"
+    if peft_bridge and (role == "actor" or (role == "critic" and uses_adapter_critic(args))):
+        return _setup_peft_model_via_bridge(args, role=role)
     return get_model(get_model_provider_func(args, role), ModelType.encoder_or_decoder)
 
 
@@ -947,14 +953,17 @@ def initialize_model_and_optimizer(
         model[0].role = role
         reinit_critic_output_layer = _critic_output_layer_needs_reinit(args, model, role)
         clear_memory()
-        iteration, _ = load_checkpoint(
-            model,
-            None,
-            None,
-            checkpointing_context={},
-            skip_load_to_model_and_opt=False,
-            is_value_model=reinit_critic_output_layer,
-        )
+        if args.load is not None:
+            iteration, _ = load_checkpoint(
+                model,
+                None,
+                None,
+                checkpointing_context={},
+                skip_load_to_model_and_opt=False,
+                is_value_model=reinit_critic_output_layer,
+            )
+        else:
+            iteration = 0
         if reinit_critic_output_layer:
             _reinitialize_critic_output_layer(model)
         check_peak_gpu_memory_after_load(args)
@@ -968,14 +977,17 @@ def initialize_model_and_optimizer(
         model[0].role = role
         reinit_critic_output_layer = _critic_output_layer_needs_reinit(args, model, role)
         clear_memory()
-        iteration, _ = load_checkpoint(
-            model,
-            optimizer,
-            opt_param_scheduler,
-            checkpointing_context={},
-            skip_load_to_model_and_opt=False,
-            is_value_model=reinit_critic_output_layer,
-        )
+        if args.load is not None:
+            iteration, _ = load_checkpoint(
+                model,
+                optimizer,
+                opt_param_scheduler,
+                checkpointing_context={},
+                skip_load_to_model_and_opt=False,
+                is_value_model=reinit_critic_output_layer,
+            )
+        else:
+            iteration = 0
         if reinit_critic_output_layer:
             _reinitialize_critic_output_layer(model)
             if (args.fp16 or args.bf16) and optimizer is not None:
@@ -983,7 +995,11 @@ def initialize_model_and_optimizer(
         check_peak_gpu_memory_after_load(args)
         clear_memory()
 
-        check_model_hashes(args, model, iteration)
+        # check_model_hashes keys its expected-hash lookup on args.load (ci_utils.py's
+        # _hash_file_path does Path(args.load)); with no checkpoint (args.load is None,
+        # e.g. the adapter-mode critic build) there is nothing to validate against.
+        if args.load is not None:
+            check_model_hashes(args, model, iteration)
 
     opt_param_scheduler.step(increment=iteration * args.global_batch_size)
 

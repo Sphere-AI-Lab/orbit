@@ -14,6 +14,7 @@ from orbit.ray.train_actor import TrainRayActor
 from orbit.utils import train_dump_utils
 from orbit.utils.adapter_swap import swap_adapter_tensors
 from orbit.utils.arguments import uses_rollout_engines
+from orbit.utils.arguments import uses_adapter_critic, uses_separate_critic
 from orbit.utils.context_utils import with_defer
 from orbit.utils.distributed_utils import get_gloo_group, init_process_group
 from orbit.utils.memory_utils import clear_memory, print_memory
@@ -34,6 +35,7 @@ from ..training_utils.log_utils import log_cpu_memory, log_perf_data, log_rollou
 from ..training_utils.loss import compute_advantages_and_returns, get_log_probs_and_entropy, get_values
 from ..training_utils.parallel import get_parallel_state
 from .checkpoint import load_checkpoint
+from .critic_adapter import build_critic_instance, save_critic_checkpoint, value_loss_phase
 from .initialize import init, is_megatron_main_rank
 from .lora_utils import is_lora_enabled
 from .model import forward_only, initialize_model_and_optimizer, save, train
@@ -198,6 +200,16 @@ class MegatronTrainRayActor(TrainRayActor):
             if self.args.offload_train:
                 self.sleep()
             return
+
+        self.critic_model = None
+        self.critic_optimizer = None
+        self.critic_opt_param_scheduler = None
+        if uses_adapter_critic(self.args):
+            (
+                self.critic_model,
+                self.critic_optimizer,
+                self.critic_opt_param_scheduler,
+            ) = build_critic_instance(self.args, self.model, expected_iteration=loaded_rollout_id)
 
         start_rollout_id = loaded_rollout_id + 1
 
@@ -647,6 +659,8 @@ class MegatronTrainRayActor(TrainRayActor):
         return getattr(self.args, f"use_rollout_{m.name}_replay")
 
     def train_actor(self, rollout_id: int, rollout_data: RolloutBatch) -> None:
+        critic_data_iterator = None
+        critic_num_microbatches = None
         # Create data iterator for log_probs and train.
         data_iterator, num_microbatches = get_data_iterator(self.args, self.model, rollout_data)
 
@@ -689,11 +703,24 @@ class MegatronTrainRayActor(TrainRayActor):
                         if self._use_rollout_replay(m):
                             m.clear_all_forward()
 
-                if self.args.use_critic:
+                if uses_separate_critic(self.args):
                     sync_actor_critic_data(
                         self.args,
                         rollout_data,
                         self._actor_critic_groups,
+                    )
+                elif uses_adapter_critic(self.args):
+                    critic_data_iterator, critic_num_microbatches = get_data_iterator(
+                        self.args, self.critic_model, rollout_data
+                    )
+                    rollout_data.update(
+                        forward_only(
+                            get_values,
+                            self.args,
+                            self.critic_model,
+                            critic_data_iterator,
+                            critic_num_microbatches,
+                        )
                     )
                 if self._active_model_tag != "actor":
                     self._switch_model("actor")
@@ -709,21 +736,36 @@ class MegatronTrainRayActor(TrainRayActor):
 
             # Train
             self._set_replay_stage("replay_backward")
+            run_policy_phase = (
+                not uses_adapter_critic(self.args) or rollout_id >= self.args.num_critic_only_steps
+            )
             with timer("actor_train"):
-                train(
-                    rollout_id,
-                    self.model,
-                    self.optimizer,
-                    self.opt_param_scheduler,
-                    data_iterator,
-                    num_microbatches,
-                )
+                if run_policy_phase:
+                    train(
+                        rollout_id,
+                        self.model,
+                        self.optimizer,
+                        self.opt_param_scheduler,
+                        data_iterator,
+                        num_microbatches,
+                    )
                 if self._self_teacher is not None:
                     self._self_teacher.update(self._adapter_named_params())
                     if should_promote_teacher(
                         self._opd_teacher_spec.source, self.args.opd_promote_interval, rollout_id
                     ):
                         self._promote_self_teacher()
+
+            if uses_adapter_critic(self.args) and critic_data_iterator is not None:
+                with timer("critic_train"), value_loss_phase(self.args):
+                    train(
+                        rollout_id,
+                        self.critic_model,
+                        self.critic_optimizer,
+                        self.critic_opt_param_scheduler,
+                        critic_data_iterator,
+                        critic_num_microbatches,
+                    )
 
             self.prof.step(rollout_id=rollout_id)
 
@@ -765,6 +807,9 @@ class MegatronTrainRayActor(TrainRayActor):
             maybe_finalize_async_save(blocking=True)
 
         save(rollout_id, self.model, self.optimizer, self.opt_param_scheduler)
+
+        if uses_adapter_critic(self.args) and self.args.critic_save:
+            save_critic_checkpoint(self.args, rollout_id, self.critic_model, optimizer=self.critic_optimizer)
 
         if force_sync and self.args.async_save:
             maybe_finalize_async_save(blocking=True)

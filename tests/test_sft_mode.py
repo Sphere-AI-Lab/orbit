@@ -122,6 +122,7 @@ def test_ppo_applies_critic_defaults():
         advantage_estimator="ppo",
         actor_num_gpus_per_node=2,
         actor_num_nodes=1,
+        critic_mode="full",
         critic_num_gpus_per_node=None,
         critic_num_nodes=None,
         critic_load=None,
