@@ -451,17 +451,14 @@ class TestRunArm:
 
 class TestDryRunOutput:
     def test_dry_run_prints_exactly_82_lines_matching_the_matrix(self, capsys, monkeypatch, tmp_path):
+        # No dimension flags: they are derived from the arm's model now, and
+        # this module's H/FFN are Qwen3-4B's, which the CLI would (correctly)
+        # refuse as contradicting the arm's llama3.1-8b default.
         monkeypatch.setattr(
             sys,
             "argv",
             [
                 "sweep.py",
-                "--hidden-size",
-                str(H),
-                "--ffn-size",
-                str(FFN),
-                "--num-layers",
-                str(NUM_LAYERS),
                 "--dry-run",
                 "--results",
                 str(tmp_path / "r.jsonl"),
@@ -705,10 +702,10 @@ class TestRlEvalDatasetNames:
 
 class TestOftDiagnosticScope:
     def _run(self, matrix: str, capsys, monkeypatch, tmp_path) -> str:
+        # Dimensions derived from the arm's model -- see TestDryRunOutput.
         monkeypatch.setattr(
             sys, "argv",
-            ["sweep.py", "--matrix", matrix, "--hidden-size", str(H), "--ffn-size", str(FFN),
-             "--num-layers", str(NUM_LAYERS),
+            ["sweep.py", "--matrix", matrix,
              "--dry-run", "--results", str(tmp_path / f"{matrix}.jsonl")],
         )
         sweep.main()
@@ -1198,3 +1195,65 @@ class TestE1LongCliGuards:
         result = self._run(tmp_path, ["--matrix", "e1", "--argmins-from", "results/x.jsonl"])
         assert result.returncode == 2
         assert "e1long" in result.stderr
+
+
+class TestModelRegistryWiring:
+    """The three dimension flags are derived, and a contradicting value is a
+    hard error rather than a silent preference for one of two sources."""
+
+    def test_every_existing_arm_defaults_to_llama(self):
+        from tools.lora_regret.arms import MATRICES
+
+        for name in ("e1", "e2", "e3", "e4", "e5scout", "sft82"):
+            built = MATRICES[name](4096, 14336, 0, 1e-4 if name == "e5" else None, None)
+            assert {arm.model for arm in built} == {"llama3.1-8b"}, name
+
+    def test_dry_run_exports_the_models_checkpoint_and_mask_type(self, tmp_path, capsys):
+        from tools.lora_regret.arms import ALL_MODULES, Arm
+        from tools.lora_regret.sweep import run_arm
+
+        arm = Arm("probe", "lora", 16, None, ALL_MODULES, 2.5e-4, 0, dataset="tulu3")
+        run_arm(arm, tmp_path, tmp_path / "r.jsonl", dry_run=True)
+        printed = capsys.readouterr().out
+        assert "LOSS_MASK_TYPE=llama3" in printed
+        assert "MIN_GPUS_FULLFT=4" in printed
+        assert "Llama-3.1-8B_torch_dist" in printed
+
+    def test_num_rollout_reaches_the_launcher_environment(self):
+        from tools.lora_regret.arms import ALL_MODULES, Arm, arm_env
+
+        arm = Arm("probe", "lora", 256, None, ALL_MODULES, 2.5e-4, 0, num_rollout=100)
+        assert arm_env(arm)["NUM_ROLLOUT"] == "100"
+
+    def test_full_epoch_still_wins_over_num_rollout(self):
+        """`full_epoch` sets NUM_ROLLOUT to the empty string so the launcher
+        re-derives the epoch. A stale num_rollout must not resurrect a cap."""
+        from tools.lora_regret.arms import ALL_MODULES, Arm, arm_env
+
+        arm = Arm("probe", "lora", 256, None, ALL_MODULES, 2.5e-4, 0,
+                  num_rollout=100, full_epoch=True)
+        assert arm_env(arm)["NUM_ROLLOUT"] == ""
+
+    def test_contradicting_hidden_size_exits_two(self, tmp_path):
+        import subprocess
+        import sys
+
+        proc = subprocess.run(
+            [sys.executable, "-m", "tools.lora_regret.sweep", "--matrix", "e1",
+             "--hidden-size", "9999", "--dry-run", "--results", str(tmp_path / "r.jsonl")],
+            capture_output=True, text=True, cwd=REPO_ROOT,
+        )
+        assert proc.returncode == 2
+        assert "9999" in proc.stderr and "llama3.1-8b" in proc.stderr
+
+    def test_dimension_flags_are_now_optional(self, tmp_path):
+        import subprocess
+        import sys
+
+        proc = subprocess.run(
+            [sys.executable, "-m", "tools.lora_regret.sweep", "--matrix", "e1",
+             "--dry-run", "--results", str(tmp_path / "r.jsonl")],
+            capture_output=True, text=True, cwd=REPO_ROOT,
+        )
+        assert proc.returncode == 0
+        assert len(proc.stdout.strip().splitlines()) == 40

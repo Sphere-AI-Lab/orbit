@@ -27,6 +27,8 @@ from tools.lora_regret.arms import (  # noqa: F401  (sft_arms re-exported)
     arm_env,
     sft_arms,
 )
+from tools.lora_regret.models import DEFAULT_MODEL, model_env
+from tools.lora_regret.models import get as get_model
 
 # The eval-line regex and phase labels live in trace.py -- one definition,
 # built from EVAL_NLL_METRIC_KEY. Imported under the existing private names so
@@ -237,7 +239,13 @@ def run_arm(
     # One dict, used for both the real environment and the dry-run preview --
     # so a previewed line cannot omit the per-arm SAVE_DIR that keeps
     # concurrent arms from overwriting each other.
-    overrides = dict(arm_env(arm))
+    #
+    # The model's environment goes down FIRST and the arm's own settings on top:
+    # the model contributes checkpoint, plugin, mask type and GPU floor, while
+    # the arm contributes LR, seed and PEFT knobs. The two sets are disjoint
+    # today, and the ordering makes the arm win if they ever overlap.
+    overrides = dict(model_env(get_model(arm.model), repo_root))
+    overrides.update(arm_env(arm))
     overrides.update(
         {
             "LAUNCHER_NAME": arm.name,
@@ -353,16 +361,12 @@ def argmins_from(patterns: list[str], allow_edge: bool) -> dict[tuple[str, int |
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--hidden-size", type=int, required=True)
-    parser.add_argument("--ffn-size", type=int, required=True)
-    parser.add_argument(
-        "--num-layers",
-        type=int,
-        required=True,
-        help="Decoder layers in the model (32 for Llama-3.1-8B). Required rather "
-        "than defaulted, like --hidden-size and --ffn-size: a wrong value makes "
-        "every adapter_params in the ledger wrong by a constant factor.",
-    )
+    parser.add_argument("--hidden-size", type=int, default=None,
+                        help="Deprecated: derived from the arm's model. Kept so the "
+                             "runbook's existing commands still work; a value that "
+                             "contradicts the model is an error, not a preference.")
+    parser.add_argument("--ffn-size", type=int, default=None, help="Deprecated; see --hidden-size.")
+    parser.add_argument("--num-layers", type=int, default=None, help="Deprecated; see --hidden-size.")
     parser.add_argument("--results", type=Path, default=Path("results/lora_regret_sft.jsonl"))
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
@@ -421,12 +425,29 @@ def main() -> None:
     if args.matrix != "e1long" and args.argmins_from is not None:
         parser.error(f"--argmins-from is only meaningful for --matrix e1long, not {args.matrix}")
 
+    # The dimensions come from the registry now. A supplied flag is accepted
+    # only when it agrees, because silently preferring one of two sources is how
+    # a ledger ends up with every adapter_params wrong by a constant factor and
+    # nothing in the output looking suspicious.
+    default_model = get_model(DEFAULT_MODEL)
+    for flag, given, derived in (
+        ("--hidden-size", args.hidden_size, default_model.hidden_size),
+        ("--ffn-size", args.ffn_size, default_model.ffn_size),
+        ("--num-layers", args.num_layers, default_model.num_layers),
+    ):
+        if given is not None and given != derived:
+            parser.error(
+                f"{flag}={given} contradicts model {default_model.key!r}, which has "
+                f"{derived}. These are derived from the arm's model now; drop the flag."
+            )
+
     repo_root = Path(__file__).resolve().parents[2]
     recovered = (
         argmins_from(args.argmins_from, args.allow_edge_argmin) if args.argmins_from else None
     )
     arms = MATRICES[args.matrix](
-        args.hidden_size, args.ffn_size, args.seed, args.oft_lr_centre, recovered
+        default_model.hidden_size, default_model.ffn_size,
+        args.seed, args.oft_lr_centre, recovered,
     )
     if args.only:
         pattern = re.compile(args.only)
@@ -439,18 +460,20 @@ def main() -> None:
     # block sizes, and printing it for a LoRA-only matrix invites reading it as a
     # property of arms that are about to run.
     if any(arm.method == "oft" for arm in arms):
-        print(_oft_match_summary(args.hidden_size), file=sys.stderr)
+        print(_oft_match_summary(default_model.hidden_size), file=sys.stderr)
 
     launcher = MATRIX_LAUNCHERS[args.matrix]
     metric = MATRIX_METRICS[args.matrix]
     print(f"launcher={launcher} metric={metric}", file=sys.stderr)
     for i, arm in enumerate(todo, 1):
         print(f"[{i}/{len(todo)}] {arm.name}", file=sys.stderr)
+        model = get_model(arm.model)
         run_arm(
             arm, repo_root, args.results, args.dry_run,
             launcher=launcher, metric=metric,
             adapter_params=adapter_param_count(
-                arm, args.hidden_size, args.ffn_size, args.num_layers
+                arm, model.hidden_size, model.ffn_size, model.num_layers,
+                qkv_output_size=model.qkv_output_size,
             ),
         )
 

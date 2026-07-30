@@ -134,6 +134,14 @@ class Arm:
     # Explicit so the long curves get ~100 trace points instead of the
     # launcher's default of 10, which would cost 37 h of eval per arm.
     eval_nll_interval: int | None = None
+    # Which base model this arm runs on. Defaults to the campaign's original
+    # anchor so every pre-registry matrix serializes byte-identically and every
+    # ledger written before the registry existed stays valid.
+    model: str = "llama3.1-8b"
+    # An explicit rollout cap. `full_epoch` is the opposite request and wins if
+    # both are set: E1-2's arms must re-derive the epoch even if a stale
+    # NUM_ROLLOUT is exported in the operator's shell.
+    num_rollout: int | None = None
 
 
 def _name(method: str, tag: str, modules: str, lr: float, seed: int, extra: str = "") -> str:
@@ -545,6 +553,8 @@ def arm_env(arm: Arm, data_dir: str = DATA_DIR) -> dict[str, str]:
         # value, so this both requests the full epoch and immunises the arm
         # against a NUM_ROLLOUT=2000 left exported in the shell from E1-1.
         env["NUM_ROLLOUT"] = ""
+    elif arm.num_rollout is not None:
+        env["NUM_ROLLOUT"] = str(arm.num_rollout)
     if arm.eval_nll_interval is not None:
         env["EVAL_NLL_INTERVAL"] = str(arm.eval_nll_interval)
     if arm.dataset is not None:
