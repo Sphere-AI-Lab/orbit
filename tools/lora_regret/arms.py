@@ -50,12 +50,23 @@ LORA_A_INIT_METHOD = "kaiming"
 # into the grid instead of fitted out of it.
 FULL_LR_CENTRE = 2.5e-5
 LORA_LR_CENTRE = 2.5e-4
+# RL runs an order of magnitude lower than SFT, and the post gives no multiplier
+# for policy gradient -- these are the RL launcher's own documented defaults,
+# used as scout centres rather than as predictions.
+RL_FULL_LR_CENTRE = 1e-6
+RL_LORA_LR_CENTRE = 1e-5
 # Llama-3.1-8B's fused QKV width: (32 query + 8 key + 8 value heads) * 128 head
 # dim = 6144. Needed for the matched-parameter attention/MLP pair in E3, and not
 # derivable from hidden_size alone under GQA.
 LLAMA31_8B_QKV_OUTPUT = 6144
 # Where tools/lora_regret/prepare_data.py writes its splits.
 DATA_DIR = "/lustre/fast/fast/groups/ei-slm/data/lora_regret"
+# E4's training file is the MATH+GSM8K concatenation (`--dataset rl_mix`), which
+# has no matching single test split: the RL launcher evaluates math_test and
+# gsm8k_test separately so per-dataset accuracy stays visible instead of being
+# averaged away. So `arm_env` must not export a TEST_JSONL for it.
+RL_MIX_DATASET = "math_gsm8k"
+DATASETS_WITHOUT_TEST_SPLIT = frozenset({RL_MIX_DATASET})
 
 
 def lr_grid(centre: float, n: int = 5, step_decades: float = 0.3) -> list[float]:
@@ -261,11 +272,49 @@ def e3_arms(
     return arms
 
 
+def e4_arms(seed: int = 0) -> list[Arm]:
+    """E4: RL parity at low rank -- decides C5.
+
+    4 arms x 4 LRs = 16 runs on MATH + GSM8K. Rank 1 is in here because it is
+    the claim ("LoRA matches FullFT under policy gradient **even at rank 1**"),
+    not because it is cheap; it is the last arm to drop, not the first.
+
+    The grid is half-decade rather than E1's 0.3-decade, and that is deliberate.
+    C5's second half is about the *width* of the performant LR band, which needs
+    coverage across a wide range more than resolution near one point -- and the
+    RL optimum is less well predicted to begin with, since the post gives a
+    multiplier for SFT and not for policy gradient. LoRA is still centred a
+    decade above FullFT, which is C2's rule carried over as a prior; if the
+    argmins say otherwise for RL, that is a finding rather than a grid error.
+    """
+    arms: list[Arm] = []
+    for lr in lr_grid(RL_FULL_LR_CENTRE, n=4, step_decades=0.5):
+        arms.append(
+            Arm(_name("full", "na", "", lr, seed), "full", None, None, "", lr, seed, dataset=RL_MIX_DATASET)
+        )
+    for rank in (1, 16, 256):
+        for lr in lr_grid(RL_LORA_LR_CENTRE, n=4, step_decades=0.5):
+            arms.append(
+                Arm(
+                    _name("lora", f"r{rank}", ALL_MODULES, lr, seed),
+                    "lora",
+                    rank,
+                    None,
+                    ALL_MODULES,
+                    lr,
+                    seed,
+                    dataset=RL_MIX_DATASET,
+                )
+            )
+    return arms
+
+
 MATRICES = {
     "sft82": lambda hidden, ffn, seed: sft_arms(hidden, ffn, seed=seed),
     "e1": lambda hidden, ffn, seed: e1_arms(seed=seed),
     "e2": lambda hidden, ffn, seed: e2_arms(seed=seed),
     "e3": lambda hidden, ffn, seed: e3_arms(hidden, ffn, seed=seed),
+    "e4": lambda hidden, ffn, seed: e4_arms(seed=seed),
 }
 
 
@@ -280,9 +329,11 @@ def arm_env(arm: Arm, data_dir: str = DATA_DIR) -> dict[str, str]:
     env = {"LR": f"{arm.lr:g}", "SEED": str(arm.seed)}
     if arm.dataset is not None:
         env["TRAIN_JSONL"] = f"{data_dir}/{arm.dataset}_train.jsonl"
-        env["TEST_JSONL"] = f"{data_dir}/{arm.dataset}_test.jsonl"
-        # The launcher derives EVAL_NLL_DATA from TEST_JSONL at its own default,
-        # but only if TEST_JSONL was exported before it ran -- which it is here.
+        if arm.dataset not in DATASETS_WITHOUT_TEST_SPLIT:
+            # The launcher derives EVAL_NLL_DATA from TEST_JSONL at its own
+            # default, but only if TEST_JSONL was exported before it ran --
+            # which it is here.
+            env["TEST_JSONL"] = f"{data_dir}/{arm.dataset}_test.jsonl"
     if arm.global_batch_size is not None:
         # Both knobs, always together. --global-batch-size alone would leave
         # --rollout-batch-size at 32, so a "batch 512" arm would still draw 32

@@ -11,20 +11,20 @@ Companions:
 
 ## What is ready, and what you still have to do
 
-Ready and CPU-verified (439 tests, 0 failures, in the built env):
+Ready and CPU-verified (468 tests, 0 failures, in the built env):
 
 | Piece | Where |
 |---|---|
 | SFT launcher — LoRA, OFT and FullFT in one script | `examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh` |
 | RL launcher (prerequisite P5) | `examples/high_precision/run-llama3_1-8b-bf16-rl-math-gsm8k.sh` |
-| Arm matrices `e1` / `e2` / `e3` / `sft82` | `tools/lora_regret/arms.py` |
+| Arm matrices `e1` / `e2` / `e3` / `e4` / `sft82` | `tools/lora_regret/arms.py` |
 | Sweep driver with resume ledger | `tools/lora_regret/sweep.py` |
 | Data preparation for all five datasets | `tools/lora_regret/prepare_data.py` |
 | Held-out token-weighted NLL eval | `orbit/utils/eval_nll.py`, wired in `train.py` |
 
 Yours to do, in this order: **materialize the data** (§2, CPU only, no GPU),
 **smoke one arm** (§3), **close P3** (§4, needs DP≥2 and gates every FullFT
-number), then run experiments (§5-§9).
+number), then run experiments (§5-§10).
 
 Single-rank reachability is already proven on an H100 — two LoRA-r256 optimizer
 steps, all 100 held-out rows scored, the pinned NLL line emitted three times
@@ -279,29 +279,37 @@ either.
 ## 9. E4 — RL parity at low rank (C5)
 
 16 runs: FullFT, LoRA r256, r16, **r1** — rank 1 is the claim's whole point and
-is not the arm to drop under budget pressure. There is no sweep matrix for E4;
-run the arms directly, because each is expensive enough to want individual
-attention.
+is not the arm to drop under budget pressure. The `e4` matrix drives them through
+the same sweep driver, which knows to shell out to the RL launcher and to score
+arms by **accuracy instead of NLL**:
 
 ```bash
 export DATA_DIR=/lustre/fast/fast/groups/ei-slm/data/lora_regret
-for rank in 1 16 256; do
-  for lr in 3.3e-6 1e-5 3.3e-5 1e-4; do
-    PEFT_METHOD=lora LORA_RANK=$rank LR=$lr \
-    LAUNCHER_NAME=e4_lora_r${rank}_lr${lr} \
-    SAVE_DIR=/lustre/.../e4_lora_r${rank}_lr${lr} \
-    GPUS_PER_NODE=8 \
-    bash examples/high_precision/run-llama3_1-8b-bf16-rl-math-gsm8k.sh
-  done
-done
 
-# FullFT arms, one decade down
-for lr in 3.3e-7 1e-6 3.3e-6 1e-5; do
-  PEFT_METHOD=none LR=$lr LAUNCHER_NAME=e4_full_lr${lr} \
-  SAVE_DIR=/lustre/.../e4_full_lr${lr} GPUS_PER_NODE=8 \
-  bash examples/high_precision/run-llama3_1-8b-bf16-rl-math-gsm8k.sh
-done
+# Look first. The header line names the launcher and the metric.
+python -m tools.lora_regret.sweep --matrix e4 --hidden-size 4096 --ffn-size 14336 --dry-run | wc -l   # 16
+
+# LoRA arms
+GPUS_PER_NODE=8 python -m tools.lora_regret.sweep --matrix e4 \
+  --hidden-size 4096 --ffn-size 14336 --only '^lora' --results results/e4_lora.jsonl
+
+# FullFT arms
+GPUS_PER_NODE=8 python -m tools.lora_regret.sweep --matrix e4 \
+  --hidden-size 4096 --ffn-size 14336 --only '^full' --results results/e4_full.jsonl
 ```
+
+The grid is **half-decade** here, not E1's 0.3: the post gives a LR multiplier
+for SFT and none for policy gradient, and C5's second half is about the *width*
+of the performant band, which needs coverage more than resolution. LoRA is still
+centred a decade above FullFT (1e-5 against 1e-6) as a prior carried over from
+C2 — if the RL argmins disagree, that is a finding, not a grid error.
+
+`accuracy` in the ledger is the mean of the per-dataset scores at the highest
+rollout id, with `accuracy_per_dataset` alongside it. With `--rm-type boxed_math`
+the reward is exactly 1 or 0, so a per-dataset score *is* accuracy on that split.
+An eval where only one of the two datasets reported is **skipped, not averaged** —
+a mean over a different set of splits than every other arm's is not comparable,
+so it is not a number.
 
 Defaults worth knowing: 32 samples per problem (the post's setting, and what
 makes the GRPO baseline a per-problem mean rather than noise), constant LR, zero
@@ -347,7 +355,20 @@ The ledger is one JSON object per arm:
 `test_nll` is the **last `phase=after_train` measurement**, chosen by highest
 `step` rather than by file position, so an interleaved multi-rank log cannot make
 a `before_train` row win. `status: "failed"` means either a non-zero exit or no
-parseable NLL line — check the arm's log under `logs/lora_regret/<arm>.log`.
+parseable metric — check the arm's log under `logs/lora_regret/<arm>.log`.
+
+E4 arms carry `"metric": "accuracy"` instead, with `test_nll: null`:
+
+```json
+{"arm": "lora-r1-all-lr1e-05-s0", "method": "lora", "rank": 1, "lr": 1e-05,
+ "metric": "accuracy", "accuracy": 0.44,
+ "accuracy_per_dataset": {"math_test": 0.33, "gsm8k_test": 0.55},
+ "steps": 100, "status": "ok"}
+```
+
+`steps` is the rollout id of that eval, not an optimizer step count — the RL eval
+line does not carry a step, because `rollout.py` assigns `eval/step` *after* the
+log call.
 
 Argmins per arm:
 

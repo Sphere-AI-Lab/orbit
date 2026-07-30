@@ -28,6 +28,26 @@ from tools.lora_regret.arms import MATRICES, Arm, arm_env, sft_arms  # noqa: F40
 # exist here. Pinned by test_the_launcher_the_sweep_shells_out_to_exists, because
 # the failure mode is every arm failing identically for one silent reason.
 LAUNCHER = "examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh"
+RL_LAUNCHER = "examples/high_precision/run-llama3_1-8b-bf16-rl-math-gsm8k.sh"
+
+# Which script each matrix shells out to, and which metric its arms are scored
+# by. E4 is RL: there is no held-out NLL to read, because an RL policy's own
+# output distribution shifts as it trains, so NLL against a fixed reference set
+# stops being comparable across arms. Accuracy is the metric, and it comes from a
+# different log line produced by different code.
+MATRIX_LAUNCHERS = {
+    "sft82": LAUNCHER,
+    "e1": LAUNCHER,
+    "e2": LAUNCHER,
+    "e3": LAUNCHER,
+    "e4": RL_LAUNCHER,
+}
+MATRIX_METRICS = {"sft82": "nll", "e1": "nll", "e2": "nll", "e3": "nll", "e4": "accuracy"}
+# The eval dataset names the RL launcher passes to --eval-prompt-data. Given
+# explicitly so parse_final_accuracy matches them exactly instead of guessing the
+# key shape; pinned against the launcher's own text by
+# test_the_rl_launcher_configures_exactly_the_datasets_the_parser_expects.
+RL_EVAL_DATASETS = ("math_test", "gsm8k_test")
 
 # train.py:_log_eval_nll emits one line per held-out NLL measurement, e.g.:
 #
@@ -104,6 +124,80 @@ def parse_final_nll(log_text: str) -> tuple[float | None, int | None]:
     return nll, step
 
 
+# The RL eval logs a Python dict repr rather than a formatted metric line:
+# orbit/ray/rollout.py's `logger.info(f"eval {rollout_id}: {log_dict}")`. So this
+# matches the prefix for ordering, then picks dataset scores out of the repr.
+#
+# `eval/<name>` is a dataset score; `eval/<name>/<metric>` and
+# `eval/<name>-truncated_ratio` are sub-metrics of the same dataset and must NOT
+# be counted -- averaging a response length in with two accuracies would produce
+# a number that looks like an accuracy and is not one. Hence the closing quote in
+# the key pattern: it makes the key terminal.
+_EVAL_LINE = re.compile(r"eval (?P<rollout_id>\d+): \{(?P<body>.*)\}")
+# Permissive on the name (anything but a "/" or the closing quote) so an explicit
+# dataset list can match a hyphenated name exactly. Sub-metric keys are then
+# excluded by name membership, not by the regex.
+_EVAL_SCORE = re.compile(r"'eval/(?P<name>[^'/]+)': (?P<score>[0-9.eE+-]+)")
+_EVAL_AVG_NAME = "avg"
+
+
+def parse_final_accuracy(
+    log_text: str,
+    datasets: tuple[str, ...] | None = None,
+) -> tuple[float | None, int | None, dict[str, float]]:
+    """The arm's accuracy: the mean over datasets at the highest rollout id.
+
+    With `--rm-type boxed_math` the reward is exactly 1 or 0, so rollout.py's
+    `sum(rewards) / len(rewards)` per-dataset score *is* accuracy on that split.
+
+    Returns `(mean_score, rollout_id, per_dataset_scores)`. The mean is recomputed
+    from the per-dataset scores rather than read off `eval/avg`, because
+    rollout.py only emits `eval/avg` when more than one dataset is configured --
+    a single-dataset run would otherwise parse as None and read as a failed arm.
+
+    The highest `rollout_id` wins, not the last line in the file: multi-rank log
+    interleaving can place an earlier eval physically last.
+
+    `datasets` should name the eval datasets the launcher configured, and the
+    caller should pass it whenever it knows them. Then only exact `eval/<name>`
+    keys are read, and a line missing any of them is skipped rather than averaged
+    over what did report -- fail closed, because a half-reported eval quoted as
+    the arm's accuracy is worse than no number.
+
+    Without `datasets` the shape of the key has to be guessed, and both possible
+    guesses are lossy: rollout.py emits sub-metrics as `eval/<name>/<metric>`
+    *and* `eval/<name>-<metric>` (pass@k when `--log-passrate` and
+    `n_samples_per_eval_prompt > 1`, plus `-truncated_ratio`). Banning `-` in the
+    name keeps sub-metrics out of the mean but silently drops any dataset whose
+    own name contains a hyphen. That trade is why the explicit form exists.
+    """
+    best: tuple[int, dict[str, float]] | None = None
+    for match in _EVAL_LINE.finditer(log_text):
+        rollout_id = int(match["rollout_id"])
+        found = {
+            score_match["name"]: float(score_match["score"])
+            for score_match in _EVAL_SCORE.finditer(match["body"])
+            if score_match["name"] != _EVAL_AVG_NAME
+        }
+        if datasets is None:
+            # Lossy guess -- see the docstring. "-" separates a sub-metric from
+            # its dataset in rollout.py's flat key space, so a name containing
+            # one cannot be told apart from `eval/<dataset>-<metric>`.
+            found = {name: score for name, score in found.items() if "-" not in name}
+        else:
+            if not set(datasets) <= set(found):
+                continue
+            found = {name: found[name] for name in datasets}
+        if not found:
+            continue
+        if best is None or rollout_id > best[0]:
+            best = (rollout_id, found)
+    if best is None:
+        return None, None, {}
+    rollout_id, scores = best
+    return sum(scores.values()) / len(scores), rollout_id, scores
+
+
 def _oft_match_summary(hidden_size: int) -> str:
     """One line per matched-parameter LoRA rank, for the dry-run diagnostic.
 
@@ -123,7 +217,14 @@ def _oft_match_summary(hidden_size: int) -> str:
     return "\n".join(lines)
 
 
-def run_arm(arm: Arm, repo_root: Path, results_path: Path, dry_run: bool) -> None:
+def run_arm(
+    arm: Arm,
+    repo_root: Path,
+    results_path: Path,
+    dry_run: bool,
+    launcher: str = LAUNCHER,
+    metric: str = "nll",
+) -> None:
     log_path = repo_root / "logs" / "lora_regret" / f"{arm.name}.log"
     env = dict(os.environ)
     env.update(arm_env(arm))
@@ -131,21 +232,26 @@ def run_arm(arm: Arm, repo_root: Path, results_path: Path, dry_run: bool) -> Non
         {
             "LAUNCHER_NAME": arm.name,
             "RUN_LOG": str(log_path),
-            "WANDB_GROUP": "lora-regret-sft",
+            "WANDB_GROUP": f"lora-regret-{'rl' if metric == 'accuracy' else 'sft'}",
             "SAVE_DIR": str(repo_root / "orbit_ckpts" / "lora_regret" / arm.name),
         }
     )
-    cmd = ["bash", str(repo_root / LAUNCHER)]
+    cmd = ["bash", str(repo_root / launcher)]
     if dry_run:
         overrides = " ".join(f"{k}={v}" for k, v in sorted(arm_env(arm).items()))
-        print(f"{overrides} bash {LAUNCHER}")
+        print(f"{overrides} bash {launcher}")
         return
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     proc = subprocess.run(cmd, env=env, cwd=repo_root)
-    nll, steps = (None, None)
+    nll, accuracy, per_dataset, steps = (None, None, {}, None)
     if log_path.exists():
-        nll, steps = parse_final_nll(log_path.read_text(encoding="utf-8", errors="replace"))
+        log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        if metric == "accuracy":
+            accuracy, steps, per_dataset = parse_final_accuracy(log_text, RL_EVAL_DATASETS)
+        else:
+            nll, steps = parse_final_nll(log_text)
+    measured = accuracy if metric == "accuracy" else nll
 
     append_result(
         results_path,
@@ -157,11 +263,14 @@ def run_arm(arm: Arm, repo_root: Path, results_path: Path, dry_run: bool) -> Non
             "target_modules": arm.target_modules,
             "lr": arm.lr,
             "seed": arm.seed,
+            "metric": metric,
             "test_nll": nll,
+            "accuracy": accuracy,
+            "accuracy_per_dataset": per_dataset,
             "adapter_params": None,
             "wandb_run_id": None,
             "steps": steps,
-            "status": "ok" if (proc.returncode == 0 and nll is not None) else "failed",
+            "status": "ok" if (proc.returncode == 0 and measured is not None) else "failed",
         },
     )
 
@@ -199,11 +308,18 @@ def main() -> None:
     done = load_ledger(args.results)
     todo = [a for a in arms if a.name not in done]
     print(f"{len(arms)} arms selected, {len(done)} already done, {len(todo)} to run", file=sys.stderr)
-    print(_oft_match_summary(args.hidden_size), file=sys.stderr)
+    # Only where it means something: the realized-ratio diagnostic is about OFT
+    # block sizes, and printing it for a LoRA-only matrix invites reading it as a
+    # property of arms that are about to run.
+    if any(arm.method == "oft" for arm in arms):
+        print(_oft_match_summary(args.hidden_size), file=sys.stderr)
 
+    launcher = MATRIX_LAUNCHERS[args.matrix]
+    metric = MATRIX_METRICS[args.matrix]
+    print(f"launcher={launcher} metric={metric}", file=sys.stderr)
     for i, arm in enumerate(todo, 1):
         print(f"[{i}/{len(todo)}] {arm.name}", file=sys.stderr)
-        run_arm(arm, repo_root, args.results, args.dry_run)
+        run_arm(arm, repo_root, args.results, args.dry_run, launcher=launcher, metric=metric)
 
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@ from tools.lora_regret.arms import (
     e1_arms,
     e2_arms,
     e3_arms,
+    e4_arms,
     sft_arms,
 )
 from tools.lora_regret import sweep
@@ -471,3 +472,244 @@ class TestDryRunOutput:
         oft_lines = [line for line in lines if "PEFT_METHOD=oft" in line]
         assert len(oft_lines) == 40
         assert all("OFT_BLOCK_SIZE=" in line for line in oft_lines)
+
+
+class TestE4Matrix:
+    """E4 decides C5 (LoRA matches FullFT under policy gradient even at rank 1,
+    with a wider band of performant LRs)."""
+
+    def test_arm_count_is_sixteen(self):
+        assert len(e4_arms()) == 16
+
+    def test_rank_one_is_present(self):
+        """C5's whole point. Not the arm to drop under budget pressure."""
+        assert {a.rank for a in e4_arms() if a.method == "lora"} == {1, 16, 256}
+
+    def test_four_lrs_per_arm(self):
+        cells = {}
+        for arm in e4_arms():
+            cells.setdefault((arm.method, arm.rank), []).append(arm.lr)
+        assert len(cells) == 4
+        assert all(len(lrs) == 4 for lrs in cells.values())
+
+    def test_lora_centre_is_ten_times_the_full_centre(self):
+        full = sorted({a.lr for a in e4_arms() if a.method == "full"})
+        lora = sorted({a.lr for a in e4_arms() if a.method == "lora"})
+        assert lora[1] == pytest.approx(10 * full[1], rel=0.02)
+
+    def test_grid_is_wider_than_the_sft_grids(self):
+        """Half-decade steps, not E1's 0.3: the RL optimum is less well
+        predicted than the SFT one, and C5's claim is about the *width* of the
+        performant band, which needs coverage more than resolution."""
+        lrs = sorted({a.lr for a in e4_arms() if a.method == "full"})
+        ratios = [b / a for a, b in zip(lrs, lrs[1:], strict=False)]
+        assert all(r == pytest.approx(10**0.5, rel=0.02) for r in ratios)
+
+    def test_env_points_at_the_combined_rl_training_file(self):
+        env = arm_env(e4_arms()[0])
+        assert env["TRAIN_JSONL"].endswith("math_gsm8k_train.jsonl")
+
+    def test_env_sets_no_test_jsonl(self):
+        """There is no math_gsm8k_test.jsonl: E4 evaluates the MATH and GSM8K
+        test splits separately so per-dataset accuracy stays visible. Exporting
+        a TEST_JSONL the launcher never reads would just mislead whoever reads
+        the dry run."""
+        assert "TEST_JSONL" not in arm_env(e4_arms()[0])
+
+
+class TestMatrixLaunchers:
+    def test_every_matrix_has_a_launcher_that_exists(self):
+        assert set(sweep.MATRIX_LAUNCHERS) == set(sweep.MATRICES)
+        for matrix, launcher in sweep.MATRIX_LAUNCHERS.items():
+            assert (REPO_ROOT / launcher).is_file(), f"{matrix} -> {launcher}"
+
+    def test_e4_uses_the_rl_launcher_and_the_sft_matrices_do_not(self):
+        assert "rl-math-gsm8k" in sweep.MATRIX_LAUNCHERS["e4"]
+        for matrix in ("sft82", "e1", "e2", "e3"):
+            assert "rl-math-gsm8k" not in sweep.MATRIX_LAUNCHERS[matrix]
+
+    def test_every_matrix_has_a_metric(self):
+        assert set(sweep.MATRIX_METRICS) == set(sweep.MATRICES)
+        assert sweep.MATRIX_METRICS["e4"] == "accuracy"
+        assert sweep.MATRIX_METRICS["e1"] == "nll"
+
+
+class TestEvalAccuracyFormatPins:
+    """The RL eval emits a Python dict repr, not a formatted metric line, so the
+    parser is pinned to the source that produces it -- the same discipline the
+    NLL pins use, and for the same reason: a parser that silently matches
+    nothing turns a whole sweep into uniform 'failed'."""
+
+    def _rollout_py(self) -> str:
+        return (REPO_ROOT / "orbit" / "ray" / "rollout.py").read_text(encoding="utf-8")
+
+    def test_log_line_template_matches_rollout_py_source(self):
+        assert 'logger.info(f"eval {rollout_id}: {log_dict}")' in self._rollout_py()
+
+    def test_per_dataset_score_key_matches_rollout_py_source(self):
+        assert 'log_dict[f"eval/{key}"] = score' in self._rollout_py()
+
+    def test_cross_dataset_average_key_matches_rollout_py_source(self):
+        assert 'log_dict["eval/avg"] = sum(per_dataset_scores) / len(per_dataset_scores)' in self._rollout_py()
+
+    def test_step_is_added_after_the_log_call(self):
+        """eval/step is assigned *after* logger.info, so it is not in the line.
+        The rollout id in the prefix is the only ordering key available."""
+        source = self._rollout_py()
+        assert source.index('logger.info(f"eval {rollout_id}: {log_dict}")') < source.index(
+            'log_dict["eval/step"] = step'
+        )
+
+
+def _render_eval(rollout_id: int, scores: dict, prefixed: bool = True) -> str:
+    """One eval log line, built the way rollout.py builds it: a dict repr."""
+    log_dict = {f"eval/{name}": score for name, score in scores.items()}
+    if len(scores) > 1:
+        log_dict["eval/avg"] = sum(scores.values()) / len(scores)
+    message = f"eval {rollout_id}: {log_dict}"
+    if not prefixed:
+        return message
+    return f"[2026-07-30 09:59:00] rollout.py:1227 - {message}"
+
+
+class TestParseFinalAccuracy:
+    def test_parses_per_dataset_scores_and_the_average(self):
+        line = _render_eval(25, {"math_test": 0.31, "gsm8k_test": 0.43})
+        score, rollout_id, per_dataset = sweep.parse_final_accuracy(line)
+        assert rollout_id == 25
+        assert per_dataset == {"math_test": pytest.approx(0.31), "gsm8k_test": pytest.approx(0.43)}
+        assert score == pytest.approx(0.37)
+
+    def test_picks_the_highest_rollout_id_not_the_last_line(self):
+        text = "\n".join([
+            _render_eval(50, {"math_test": 0.5, "gsm8k_test": 0.5}),
+            _render_eval(25, {"math_test": 0.1, "gsm8k_test": 0.1}),
+        ])
+        score, rollout_id, _ = sweep.parse_final_accuracy(text)
+        assert (rollout_id, score) == (50, pytest.approx(0.5))
+
+    def test_single_dataset_run_has_no_avg_key_and_still_parses(self):
+        """rollout.py only emits eval/avg when more than one dataset is
+        configured, so the parser cannot depend on it."""
+        line = _render_eval(3, {"math_test": 0.25})
+        score, rollout_id, per_dataset = sweep.parse_final_accuracy(line)
+        assert (rollout_id, score) == (3, pytest.approx(0.25))
+        assert per_dataset == {"math_test": pytest.approx(0.25)}
+
+    def test_ignores_sub_metric_keys(self):
+        """eval/<name>/<metric> and eval/<name>-truncated_ratio are sub-metrics,
+        not dataset scores -- counting them would corrupt the average."""
+        message = (
+            "eval 7: {'eval/math_test': 0.4, 'eval/math_test/response_length': 812.5, "
+            "'eval/math_test-truncated_ratio': 0.02}"
+        )
+        score, _, per_dataset = sweep.parse_final_accuracy(message)
+        assert per_dataset == {"math_test": pytest.approx(0.4)}
+        assert score == pytest.approx(0.4)
+
+    def test_no_eval_lines_at_all_returns_none(self):
+        assert sweep.parse_final_accuracy("nothing here") == (None, None, {})
+
+    def test_works_without_the_logging_prefix(self):
+        line = _render_eval(9, {"math_test": 0.6}, prefixed=False)
+        assert sweep.parse_final_accuracy(line)[1] == 9
+
+
+class TestRunArmAccuracyMetric:
+    def test_accuracy_arm_records_accuracy_and_no_nll(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(
+            sweep.subprocess, "run", lambda cmd, env, cwd: subprocess.CompletedProcess(cmd, 0)
+        )
+        arm = e4_arms()[0]
+        results_path = tmp_path / "results.jsonl"
+        log_path = tmp_path / "logs" / "lora_regret" / f"{arm.name}.log"
+        log_path.parent.mkdir(parents=True)
+        log_path.write_text(_render_eval(100, {"math_test": 0.33, "gsm8k_test": 0.55}) + "\n")
+
+        run_arm(arm, tmp_path, results_path, dry_run=False, metric="accuracy")
+
+        record = json.loads(results_path.read_text().splitlines()[0])
+        assert record["status"] == "ok"
+        assert record["accuracy"] == pytest.approx(0.44)
+        assert record["accuracy_per_dataset"]["gsm8k_test"] == pytest.approx(0.55)
+        assert record["test_nll"] is None
+
+    def test_accuracy_arm_with_no_eval_line_is_failed(self, tmp_path: Path, monkeypatch):
+        monkeypatch.setattr(
+            sweep.subprocess, "run", lambda cmd, env, cwd: subprocess.CompletedProcess(cmd, 0)
+        )
+        arm = e4_arms()[0]
+        results_path = tmp_path / "results.jsonl"
+        log_path = tmp_path / "logs" / "lora_regret" / f"{arm.name}.log"
+        log_path.parent.mkdir(parents=True)
+        log_path.write_text("startup: placement groups done\n")
+
+        run_arm(arm, tmp_path, results_path, dry_run=False, metric="accuracy")
+
+        record = json.loads(results_path.read_text().splitlines()[0])
+        assert record["status"] == "failed"
+        assert record["accuracy"] is None
+
+    def test_e4_dry_run_shells_out_to_the_rl_launcher(self, capsys, tmp_path):
+        run_arm(e4_arms()[0], tmp_path, tmp_path / "r.jsonl", dry_run=True, launcher=sweep.RL_LAUNCHER)
+        assert "rl-math-gsm8k" in capsys.readouterr().out
+
+
+class TestRlEvalDatasetNames:
+    def test_the_rl_launcher_configures_exactly_the_datasets_the_parser_expects(self):
+        """Cross-file pin. The parser reads `eval/<name>` keys by exact name, so a
+        rename in the launcher's --eval-prompt-data would make it match nothing
+        and every E4 arm would be recorded as failed for one silent reason."""
+        launcher = (REPO_ROOT / sweep.RL_LAUNCHER).read_text(encoding="utf-8")
+        eval_line = next(line for line in launcher.splitlines() if "--eval-prompt-data" in line)
+        for name in sweep.RL_EVAL_DATASETS:
+            assert f" {name} " in eval_line, f"{name} not configured in the launcher"
+
+    def test_explicit_names_exclude_passrate_and_truncation_submetrics(self):
+        """With --log-passrate and n_samples_per_eval_prompt > 1, rollout.py emits
+        `eval/<name>-pass@k` beside the dataset score. Those must not enter the
+        mean; exact-name matching is what keeps them out."""
+        message = (
+            "eval 40: {'eval/math_test': 0.4, 'eval/math_test-pass@1': 0.4, "
+            "'eval/math_test-pass@2': 0.6, 'eval/gsm8k_test': 0.6, "
+            "'eval/gsm8k_test-truncated_ratio': 0.01, 'eval/avg': 0.5}"
+        )
+        score, rollout_id, per_dataset = sweep.parse_final_accuracy(message, sweep.RL_EVAL_DATASETS)
+        assert (rollout_id, score) == (40, pytest.approx(0.5))
+        assert per_dataset == {"math_test": pytest.approx(0.4), "gsm8k_test": pytest.approx(0.6)}
+
+    def test_a_half_reported_eval_is_skipped_rather_than_averaged(self):
+        """One dataset missing means the mean would be over a different set of
+        splits than every other arm's -- not comparable, so not a number."""
+        text = "\n".join([
+            "eval 40: {'eval/math_test': 0.4, 'eval/gsm8k_test': 0.6}",
+            "eval 60: {'eval/math_test': 0.9}",
+        ])
+        score, rollout_id, _ = sweep.parse_final_accuracy(text, sweep.RL_EVAL_DATASETS)
+        assert (rollout_id, score) == (40, pytest.approx(0.5))
+
+    def test_a_hyphenated_dataset_name_works_when_named_explicitly(self):
+        """The heuristic fallback cannot see this one; the explicit form can."""
+        message = "eval 5: {'eval/math-500': 0.42}"
+        assert sweep.parse_final_accuracy(message, ("math-500",))[0] == pytest.approx(0.42)
+        assert sweep.parse_final_accuracy(message)[0] is None
+
+
+class TestOftDiagnosticScope:
+    def _run(self, matrix: str, capsys, monkeypatch, tmp_path) -> str:
+        monkeypatch.setattr(
+            sys, "argv",
+            ["sweep.py", "--matrix", matrix, "--hidden-size", str(H), "--ffn-size", str(FFN),
+             "--dry-run", "--results", str(tmp_path / f"{matrix}.jsonl")],
+        )
+        sweep.main()
+        return capsys.readouterr().err
+
+    def test_oft_match_report_is_printed_for_the_matrix_with_oft_arms(self, capsys, monkeypatch, tmp_path):
+        assert "oft match rank=" in self._run("sft82", capsys, monkeypatch, tmp_path)
+
+    def test_oft_match_report_is_absent_for_lora_only_matrices(self, capsys, monkeypatch, tmp_path):
+        """Printing a block-size ratio next to a LoRA-only run invites reading it
+        as a property of the arms about to execute."""
+        for matrix in ("e1", "e4"):
+            assert "oft match rank=" not in self._run(matrix, capsys, monkeypatch, tmp_path)
