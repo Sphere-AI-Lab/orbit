@@ -225,9 +225,11 @@ def run_arm(
     metric: str = "nll",
 ) -> None:
     log_path = repo_root / "logs" / "lora_regret" / f"{arm.name}.log"
-    env = dict(os.environ)
-    env.update(arm_env(arm))
-    env.update(
+    # One dict, used for both the real environment and the dry-run preview --
+    # so a previewed line cannot omit the per-arm SAVE_DIR that keeps
+    # concurrent arms from overwriting each other.
+    overrides = dict(arm_env(arm))
+    overrides.update(
         {
             "LAUNCHER_NAME": arm.name,
             "RUN_LOG": str(log_path),
@@ -235,10 +237,12 @@ def run_arm(
             "SAVE_DIR": str(repo_root / "orbit_ckpts" / "lora_regret" / arm.name),
         }
     )
+    env = dict(os.environ)
+    env.update(overrides)
     cmd = ["bash", str(repo_root / launcher)]
     if dry_run:
-        overrides = " ".join(f"{k}={v}" for k, v in sorted(arm_env(arm).items()))
-        print(f"{overrides} bash {launcher}")
+        printed = " ".join(f"{k}={v}" for k, v in sorted(overrides.items()))
+        print(f"{printed} bash {launcher}")
         return
 
     log_path.parent.mkdir(parents=True, exist_ok=True)

@@ -963,3 +963,34 @@ class TestRunArmRecordsTheArmsIdentity:
         run_arm(arm, tmp_path, results, dry_run=False)
         record = json.loads(results.read_text().splitlines()[0])
         assert record["global_batch_size"] is None
+
+
+class TestDryRunPrintsAPasteableCommand:
+    """A previewed command must be the command, including its isolation.
+
+    The launcher's default SAVE_DIR is one directory per recipe, so two arms
+    pasted from a dry run would overwrite each other's checkpoints -- the
+    runbook's hazard #1, arriving via the preview tool.
+    """
+
+    def test_the_sweep_set_variables_are_in_the_printed_line(self, tmp_path, capsys):
+        arm = Arm("lora-r16-all-lr0.00025-s0", "lora", 16, None, ALL_MODULES, 2.5e-4, 0)
+        run_arm(arm, tmp_path, tmp_path / "r.jsonl", dry_run=True)
+        line = capsys.readouterr().out.strip()
+        assert f"SAVE_DIR={tmp_path}/orbit_ckpts/lora_regret/{arm.name}" in line
+        assert f"RUN_LOG={tmp_path}/logs/lora_regret/{arm.name}.log" in line
+        assert f"LAUNCHER_NAME={arm.name}" in line
+        assert "WANDB_GROUP=lora-regret-sft" in line
+        # and still the arm's own knobs
+        assert "LORA_RANK=16" in line
+        assert line.endswith("bash examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh")
+
+    def test_rl_arms_are_previewed_against_the_rl_launcher_and_group(self, tmp_path, capsys):
+        arm = Arm("lora-r1-all-lr1e-05-s0", "lora", 1, None, ALL_MODULES, 1e-5, 0)
+        run_arm(
+            arm, tmp_path, tmp_path / "r.jsonl", dry_run=True,
+            launcher=sweep.RL_LAUNCHER, metric="accuracy",
+        )
+        line = capsys.readouterr().out.strip()
+        assert "WANDB_GROUP=lora-regret-rl" in line
+        assert line.endswith(f"bash {sweep.RL_LAUNCHER}")
