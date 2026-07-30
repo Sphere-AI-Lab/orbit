@@ -322,6 +322,51 @@ def e1ot_arms(seed: int = 0) -> list[Arm]:
     return arms
 
 
+# The post: short runs (~100 steps) want a ~15x multiplier where long runs
+# converge to ~10x, because B's zero initialization acts as an implicit warmup
+# that has not finished in 100 steps.
+E1SHORT_ROLLOUTS = 100
+# 0.15 rather than the campaign's 0.3. Resolving 15x from 10x means resolving a
+# factor of 1.5, which is log10(1.5) = 0.176 decades; on a 0.3-decade grid the
+# adjacent points differ by 2x and the effect cannot appear. This is a
+# requirement of the claim -- do not unify it with lr_grid's default.
+E1SHORT_STEP_DECADES = 0.15
+E1SHORT_POINTS = 7
+# 100/10 = 10 measurements, ~11 min of eval against ~14 min of training. At the
+# campaign's usual 1% the arm would spend 8x longer evaluating than training.
+E1SHORT_EVAL_INTERVAL = 10
+
+
+def e1short_arms(seed: int = 0) -> list[Arm]:
+    """E1-short: the ~100-step learning-rate multiplier (the second half of C2).
+
+    FullFT and LoRA r256 only. The claim is about the *ratio* of two argmins at
+    a short horizon, so the rank ladder adds nothing and every extra rank would
+    dilute the resolution budget that the 0.15-decade grid is spending.
+
+    Centred on the same 2.5e-5 / 2.5e-4 as `e1`, so the short-run and long-run
+    ratios are read off grids that agree at their midpoints and any difference
+    between them is a difference in the optimum rather than in the grid.
+    """
+    grid = lambda centre: lr_grid(  # noqa: E731 -- local alias, three uses
+        centre, n=E1SHORT_POINTS, step_decades=E1SHORT_STEP_DECADES
+    )
+    arms: list[Arm] = []
+    for lr in grid(FULL_LR_CENTRE):
+        arms.append(
+            Arm(_name("full", "na", "", lr, seed, extra="short"), "full", None, None, "",
+                lr, seed, dataset="tulu3", num_rollout=E1SHORT_ROLLOUTS,
+                eval_nll_interval=E1SHORT_EVAL_INTERVAL)
+        )
+    for lr in grid(LORA_LR_CENTRE):
+        arms.append(
+            Arm(_name("lora", "r256", ALL_MODULES, lr, seed, extra="short"), "lora", 256,
+                None, ALL_MODULES, lr, seed, dataset="tulu3",
+                num_rollout=E1SHORT_ROLLOUTS, eval_nll_interval=E1SHORT_EVAL_INTERVAL)
+        )
+    return arms
+
+
 def e2_arms(seed: int = 0) -> list[Arm]:
     """E2: batch-size sensitivity -- decides C3.
 
@@ -569,6 +614,7 @@ MATRICES = {
     "e1": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1_arms(seed=seed),
     "e1long": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1long_arms(argmins, seed=seed),
     "e1ot": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1ot_arms(seed=seed),
+    "e1short": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1short_arms(seed=seed),
     "e2": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e2_arms(seed=seed),
     "e3": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e3_arms(hidden, ffn, seed=seed),
     "e4": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e4_arms(seed=seed),
