@@ -11,7 +11,7 @@ Companions:
 
 ## What is ready, and what you still have to do
 
-Ready and CPU-verified (502 tests, 0 failures, in the built env):
+Ready and CPU-verified (578 tests, 0 failures, in the built env):
 
 | Piece | Where |
 |---|---|
@@ -21,6 +21,10 @@ Ready and CPU-verified (502 tests, 0 failures, in the built env):
 | Sweep driver with resume ledger | `tools/lora_regret/sweep.py` |
 | Data preparation for all five datasets | `tools/lora_regret/prepare_data.py` |
 | Held-out token-weighted NLL eval | `orbit/utils/eval_nll.py`, wired in `train.py` |
+| Preflight audit | `tools/lora_regret/preflight.py` |
+| P3 DP-equality check | `tools/lora_regret/p3_check.py` |
+| NLL trace extraction | `tools/lora_regret/trace.py` |
+| σ, argmins, C1-C6 readings | `tools/lora_regret/analyze.py` |
 
 The data is **materialized** (§2, done 2026-07-30) and the **smoke passes on it**
 (§3, done 2026-07-30). Yours to do, in this order: **close P3** (§4, needs DP≥2 and
@@ -54,6 +58,17 @@ imports *successfully* — see the gap plan's failure signature):
 python -c "import torch, transformers, megatron.core as m; assert torch.__file__; print(torch.__version__, transformers.__version__, m.__version__)"
 # expect: 2.11.0+cu130 4.57.1 0.18.0rc0
 ```
+
+## 1.5 Preflight — run this first, every time
+
+```bash
+python -m tools.lora_regret.preflight --stage e1-lora
+```
+
+Checks the four imports have real files behind them (the dangling-symlink venv
+imports *successfully*), the GPU count against the stage, both checkpoints, all
+nine splits **at their row counts**, and that every matrix builds. Exits 1 with
+the specific failure. Pass `--skip-gpu` to run it from a login node.
 
 ## 2. Materialize the datasets (CPU, no GPU, network required)
 
@@ -218,13 +233,14 @@ GPUS_PER_NODE=4 LAUNCHER_NAME=p3_dp4 SAVE_DIR=/lustre/.../p3_dp4 \
   NUM_ROLLOUT=3 EVAL_NLL_INTERVAL=1 \
   bash examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh
 
-grep 'eval/test_nll' logs/p3_dp1_*.log logs/p3_dp4_*.log
+python -m tools.lora_regret.p3_check logs/p3_dp1_*.log logs/p3_dp4_*.log
 ```
 
-**Acceptance: identical `nll=` to the printed six decimals, and identical
-`tokens=` and `samples=`.** A differing `tokens=` means the reduction is
-double-counting or dropping a shard. If they differ, stop — every FullFT number
-downstream is wrong, and no amount of averaging fixes it.
+**Acceptance is the exit code.** It pairs measurements by `(phase, step)` and
+asserts `nll` equal to six decimals with `tokens` and `samples` exactly equal.
+A differing `tokens` means the reduction is double-counting or dropping a shard;
+it says so, and the correct response is to stop — every FullFT number downstream
+is wrong, and no amount of averaging fixes it.
 
 ## 5. Execution order for E1-E5
 
@@ -238,7 +254,7 @@ bureaucratic: each entry names what breaks if you skip it.
 | §4 | P3: DP=1 vs DP=4 | 2 | 1 and 4 | smoke | permission to trust any FullFT number |
 | §7 | **E1-0: σ** | 3 | 1 | data | the unit every later difference is quoted in |
 | §8 | E1-1: LR sweeps | 40 | 1 / ≥4 | σ, P3 | argmins → **C2** |
-| §8 | E1-2: long curves | 8 | 1 / ≥4 | E1-1's argmins | departure steps → **C1** |
+| §8 | E1-2: long curves | 8 | 1 / ≥4 | E1-1's argmins (via --argmins-from) | departure steps → **C1** |
 | §9 | E2: batch sweep | 36 | 1 / ≥4 | σ, P3 | best-per-batch gaps → **C3** |
 | §10 | E3: placement | 20 | 1 | σ | matched-parameter deltas → **C4** |
 | §11 | E4: RL | 16 | 8 | data, P3 | accuracy curves + band width → **C5** |
@@ -327,7 +343,7 @@ export NUM_ROLLOUT=2000 EVAL_NLL_INTERVAL=20 GPUS_PER_NODE=1
 
 for seed in 0 1 2; do
   python -m tools.lora_regret.sweep --matrix e1 --seed $seed \
-    --hidden-size 4096 --ffn-size 14336 \
+    --hidden-size 4096 --ffn-size 14336 --num-layers 32 \
     --only 'lora-r256-all-lr0.00025' --results results/e1_0_sigma.jsonl
 done
 ```
@@ -356,8 +372,8 @@ which is C2's prediction built into the grid rather than fitted out of it).
 Inspect before spending anything:
 
 ```bash
-python -m tools.lora_regret.sweep --matrix e1 --hidden-size 4096 --ffn-size 14336 --dry-run | wc -l   # 40
-python -m tools.lora_regret.sweep --matrix e1 --hidden-size 4096 --ffn-size 14336 --dry-run | head -3
+python -m tools.lora_regret.sweep --matrix e1 --hidden-size 4096 --ffn-size 14336 --num-layers 32 --dry-run | wc -l   # 40
+python -m tools.lora_regret.sweep --matrix e1 --hidden-size 4096 --ffn-size 14336 --num-layers 32 --dry-run | head -3
 ```
 
 **LoRA arms — one GPU each.** Three-way concurrency on one card is measured
@@ -372,11 +388,11 @@ never append to the same ledger:
 export DATA_DIR=/lustre/fast/fast/groups/ei-slm/data/lora_regret
 export NUM_ROLLOUT=2000 EVAL_NLL_INTERVAL=20 GPUS_PER_NODE=1
 
-python -m tools.lora_regret.sweep --matrix e1 --hidden-size 4096 --ffn-size 14336 \
+python -m tools.lora_regret.sweep --matrix e1 --hidden-size 4096 --ffn-size 14336 --num-layers 32 \
   --only '^lora-r(1|4)-'   --results results/e1_lora_a.jsonl &
-python -m tools.lora_regret.sweep --matrix e1 --hidden-size 4096 --ffn-size 14336 \
+python -m tools.lora_regret.sweep --matrix e1 --hidden-size 4096 --ffn-size 14336 --num-layers 32 \
   --only '^lora-r(16|64)-' --results results/e1_lora_b.jsonl &
-python -m tools.lora_regret.sweep --matrix e1 --hidden-size 4096 --ffn-size 14336 \
+python -m tools.lora_regret.sweep --matrix e1 --hidden-size 4096 --ffn-size 14336 --num-layers 32 \
   --only '^lora-r(128|256|512)-' --results results/e1_lora_c.jsonl &
 wait
 ```
@@ -385,7 +401,7 @@ wait
 
 ```bash
 GPUS_PER_NODE=4 python -m tools.lora_regret.sweep --matrix e1 \
-  --hidden-size 4096 --ffn-size 14336 --only '^full-' --results results/e1_full.jsonl
+  --hidden-size 4096 --ffn-size 14336 --num-layers 32 --only '^full-' --results results/e1_full.jsonl
 ```
 
 The launcher **refuses** `PEFT_METHOD=none` below 4 GPUs and prints the
@@ -412,36 +428,28 @@ full Tulu3 epoch (29,323 steps — `NUM_ROLLOUT` unset so the launcher derives i
 This is the expensive stage, and it is eight runs rather than forty precisely
 because E1-1 has already located the LRs.
 
-Generate the command lines from the ledger, read them, then run them:
-
 ```bash
-python - <<'PY' | tee /tmp/e1_2_cmds.sh
-import json, glob
-best = {}
-for path in glob.glob("results/e1_*.jsonl"):
-    for line in open(path):
-        r = json.loads(line)
-        if r["status"] != "ok" or r["seed"] != 0:
-            continue
-        key = (r["method"], r["rank"])
-        if key not in best or r["test_nll"] < best[key]["test_nll"]:
-            best[key] = r
-for (method, rank), r in sorted(best.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)):
-    tag = "full" if method == "full" else f"lora_r{rank}"
-    env = "PEFT_METHOD=none" if method == "full" else f"PEFT_METHOD=lora LORA_RANK={rank}"
-    gpus = 4 if method == "full" else 1
-    print(
-        f"GPUS_PER_NODE={gpus} {env} LR={r['lr']:g} EVAL_NLL_INTERVAL=293 "
-        f"LAUNCHER_NAME=e1_2_{tag} SAVE_DIR=/lustre/.../e1_2_{tag} "
-        f"bash examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh"
-    )
-PY
-# then, after reading it:  bash /tmp/e1_2_cmds.sh
+python -m tools.lora_regret.sweep --matrix e1long \
+  --hidden-size 4096 --ffn-size 14336 --num-layers 32 \
+  --argmins-from 'results/e1_*.jsonl' \
+  --results results/e1_2.jsonl
 ```
 
-It filters on `seed == 0` because E1-0's extra replicates live in the same ledger
-directory and are not grid points — including them would let a seed replicate win
-an argmin it was never a candidate for.
+E1-2 goes through the same driver as every other stage, so it gets the per-arm
+`SAVE_DIR`, the resume ledger and uniform result records — which matter most
+here, on 70-hour arms.
+
+`--argmins-from` fails closed twice. Fewer than 8 arms recovered means a partial
+E1-1 ledger, and running the 3 that happen to be there would look like a
+completed stage. An argmin on a grid edge means the LR is a boundary value
+rather than an optimum, and E1-2 is the most expensive place in the campaign to
+act on an unchecked number — `--allow-edge-argmin` overrides it if you have
+decided otherwise.
+
+`NUM_ROLLOUT` is set to the **empty string** by these arms, not omitted: the
+launcher's `${NUM_ROLLOUT:-...}` re-derives the full epoch on an empty value,
+which also immunises the stage against a `NUM_ROLLOUT=2000` left exported in
+your shell from E1-1. `EVAL_NLL_INTERVAL` is 293, ~1% of the epoch.
 
 **E1-2, reading C1:** plot loss against log-steps per rank. Report, per rank, the
 **step at which it departs** from the FullFT/high-rank envelope — the first step
@@ -457,10 +465,10 @@ so state the step budget next to every departure point.
 32, 128 and 512, for FullFT, LoRA r256 and LoRA r16.
 
 ```bash
-python -m tools.lora_regret.sweep --matrix e2 --hidden-size 4096 --ffn-size 14336 \
+python -m tools.lora_regret.sweep --matrix e2 --hidden-size 4096 --ffn-size 14336 --num-layers 32 \
   --only '^lora' --results results/e2_lora.jsonl                       # 24 arms
 GPUS_PER_NODE=4 python -m tools.lora_regret.sweep --matrix e2 \
-  --hidden-size 4096 --ffn-size 14336 --only '^full' --results results/e2_full.jsonl   # 12 arms
+  --hidden-size 4096 --ffn-size 14336 --num-layers 32 --only '^full' --results results/e2_full.jsonl   # 12 arms
 ```
 
 E2 sets `GLOBAL_BATCH_SIZE` **and** `ROLLOUT_BATCH_SIZE` together and points
@@ -485,7 +493,7 @@ the finding.
 20 arms on Tulu3, one GPU each.
 
 ```bash
-python -m tools.lora_regret.sweep --matrix e3 --hidden-size 4096 --ffn-size 14336 \
+python -m tools.lora_regret.sweep --matrix e3 --hidden-size 4096 --ffn-size 14336 --num-layers 32 \
   --results results/e3.jsonl
 ```
 
@@ -516,15 +524,15 @@ arms by **accuracy instead of NLL**:
 export DATA_DIR=/lustre/fast/fast/groups/ei-slm/data/lora_regret
 
 # Look first. The header line names the launcher and the metric.
-python -m tools.lora_regret.sweep --matrix e4 --hidden-size 4096 --ffn-size 14336 --dry-run | wc -l   # 16
+python -m tools.lora_regret.sweep --matrix e4 --hidden-size 4096 --ffn-size 14336 --num-layers 32 --dry-run | wc -l   # 16
 
 # LoRA arms
 GPUS_PER_NODE=8 python -m tools.lora_regret.sweep --matrix e4 \
-  --hidden-size 4096 --ffn-size 14336 --only '^lora' --results results/e4_lora.jsonl
+  --hidden-size 4096 --ffn-size 14336 --num-layers 32 --only '^lora' --results results/e4_lora.jsonl
 
 # FullFT arms
 GPUS_PER_NODE=8 python -m tools.lora_regret.sweep --matrix e4 \
-  --hidden-size 4096 --ffn-size 14336 --only '^full' --results results/e4_full.jsonl
+  --hidden-size 4096 --ffn-size 14336 --num-layers 32 --only '^full' --results results/e4_full.jsonl
 ```
 
 The grid is **half-decade** here, not E1's 0.3: the post gives a LR multiplier
@@ -562,11 +570,11 @@ no LoRA learning rate transfers to it, not even the decade.
 
 ```bash
 # Scout: 5 arms, half a decade apart, one block size (64).
-python -m tools.lora_regret.sweep --matrix e5scout --hidden-size 4096 --ffn-size 14336 \
+python -m tools.lora_regret.sweep --matrix e5scout --hidden-size 4096 --ffn-size 14336 --num-layers 32 \
   --results results/e5_scout.jsonl
 
 # Refine: 50 arms, centred on the scout's argmin. Substitute the real number.
-python -m tools.lora_regret.sweep --matrix e5 --hidden-size 4096 --ffn-size 14336 \
+python -m tools.lora_regret.sweep --matrix e5 --hidden-size 4096 --ffn-size 14336 --num-layers 32 \
   --oft-lr-centre 1e-4 --results results/e5.jsonl
 ```
 
@@ -646,20 +654,15 @@ log call.
 Argmins per arm:
 
 ```bash
-python - <<'PY'
-import json, collections
-best = {}
-for path in ("results/e1_lora_a.jsonl","results/e1_lora_b.jsonl","results/e1_lora_c.jsonl","results/e1_full.jsonl"):
-    for line in open(path):
-        r = json.loads(line)
-        if r["status"] != "ok" or r["seed"] != 0: continue   # see the note below
-        key = (r["method"], r["rank"])
-        if key not in best or r["test_nll"] < best[key]["test_nll"]:
-            best[key] = r
-for key, r in sorted(best.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)):
-    print(f"{key[0]:5} r={str(key[1]):4} argmin_lr={r['lr']:<9g} nll={r['test_nll']:.6f}")
-PY
+python -m tools.lora_regret.analyze argmins --ledgers 'results/e1_*.jsonl'
+python -m tools.lora_regret.analyze all \
+  --ledgers 'results/e1_*.jsonl' --sigma-ledger results/e1_0_sigma.jsonl
 ```
+
+The seed-0 filter, the edge-of-grid rule and the σ units are built in rather
+than restated per reading. `argmins` marks edge-of-grid arms and still prints;
+every *claim* subcommand exits 3 rather than quoting one, unless
+`--allow-edge-argmin` is passed.
 
 The `seed != 0` filter is not cosmetic. E1-0's replicates are the same
 configuration at seeds 1 and 2, and they are not grid points; measured on a
