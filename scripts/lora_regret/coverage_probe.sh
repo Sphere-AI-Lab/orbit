@@ -1,26 +1,25 @@
 #!/usr/bin/env bash
 #
-# One run per distinct configuration on a single 8xH100 node.
+# One run per (task, method) on a single 8xH100 node.
 #
 #   bash scripts/lora_regret/coverage_probe.sh
 #
 # Answers two questions and refuses to answer a third:
 #
-#   1. Does every configuration actually run?  Each of the 61 distinct
-#      configurations is launched once for PROBE_ROLLOUTS rollouts. A
-#      configuration that cannot start, cannot wrap the model, OOMs, or never
-#      reaches the eval line the parser needs fails here in minutes instead of
-#      on the 40th arm of a reserved node.
+#   1. Does every method actually run?  Each of the 24 (task, method) pairs is
+#      launched once for PROBE_ROLLOUTS rollouts. Anything that cannot start,
+#      cannot wrap the model, or never reaches the eval line the parser needs
+#      fails here in minutes instead of on the 40th arm of a reserved node.
 #
-#      A "configuration" is everything except the learning rate -- rank, OFT
-#      block size, target modules, batch size. The LR is collapsed because it is
-#      a scalar multiply: it changes neither step time nor memory. Nothing else
-#      is, because e2 at rollout batch 512 is 16x the batch of anything else in
-#      the campaign and is the single most likely OOM in it.
+#      Rank, OFT block size, target modules and batch size are NOT probed
+#      separately: they exercise the same code -- same wrap, same launcher path,
+#      same optimizer -- at different tensor shapes, so r512 after r256 re-runs a
+#      path that already passed. The axes carrying distinct code are the method
+#      (which adapter, or none) and the task (which launcher, dataset, metric).
 #
-#      PROBE_LEVEL=method gives the cheap 24-run version, one per (task,
-#      method). It covers 26 of the 61 and never launches e2 batch 512, e1
-#      rank 512 or e5 block 256.
+#      PROBE_LEVEL=config launches all 61 distinct configurations instead. Reach
+#      for it when hunting a shape-dependent failure -- an OOM at a batch size
+#      nothing has run at -- not a code-path one.
 #
 #   2. How long is the real thing?  train.py logs `progress ... last=` per
 #      rollout, so each probe yields a measured per-rollout time. The report
@@ -52,7 +51,7 @@
 #   export CUDA_HOME=/is/software/nvidia/cuda-13.2 && source env.sh
 #
 # Knobs:
-#   PROBE_LEVEL=config      config (61 runs) | method (24 runs)
+#   PROBE_LEVEL=method      method (24 runs) | config (61 runs)
 #   PROBE_ROLLOUTS=3        rollouts per probe run
 #   PROBE_DIR=results/probe where the per-run ledgers go
 #   SKIP_PREFLIGHT=0        set 1 to skip the pre-run audit
@@ -64,7 +63,7 @@ set -uo pipefail
 ORBIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "${ORBIT_ROOT}"
 
-PROBE_LEVEL=${PROBE_LEVEL:-config}
+PROBE_LEVEL=${PROBE_LEVEL:-method}
 PROBE_ROLLOUTS=${PROBE_ROLLOUTS:-3}
 PROBE_DIR=${PROBE_DIR:-results/probe}
 SKIP_PREFLIGHT=${SKIP_PREFLIGHT:-0}

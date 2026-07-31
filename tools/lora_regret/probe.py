@@ -83,14 +83,21 @@ FULL_RUN_ROLLOUTS = {
 }
 
 
-# What counts as one probe. `config` is the default and the honest unit: it
-# collapses ONLY the learning rate, which is a scalar multiply and so changes
-# neither step time nor memory. Every other axis -- rank, OFT block size, target
-# modules, batch size -- changes both, and collapsing them is how a probe misses
-# the arm that OOMs. `method` is the cheap version: one run per (task, method),
-# which covers 26 of the 61 configurations and leaves e2's batch 512, e1's rank
-# 512 and e5's block 256 unlaunched.
-PROBE_LEVELS = ("config", "method")
+# What counts as one probe.
+#
+# `method` is the default: one run per (task, method). Rank, OFT block size,
+# target modules and batch size are collapsed because they exercise the SAME
+# code -- the same wrap, the same launcher path, the same optimizer -- at
+# different tensor shapes. Launching r512 after r256 re-runs a path that already
+# passed; the axes that carry distinct code are the method (which adapter, or
+# none) and the task (which launcher, dataset and metric), and those are what
+# this level enumerates.
+#
+# `config` collapses only the learning rate, so every rank, block size,
+# placement and batch size is launched once -- 61 runs against 24. Worth it only
+# when you suspect a shape-dependent failure (an OOM at a batch size nothing has
+# run at) rather than a code-path failure.
+PROBE_LEVELS = ("method", "config")
 
 
 @dataclass(frozen=True)
@@ -164,8 +171,8 @@ def _gpus(method: str, metric: str) -> int:
     return 1
 
 
-def probe_plan(level: str = "config") -> list[ProbeRun]:
-    """One run per distinct configuration (default) or per (task, method)."""
+def probe_plan(level: str = "method") -> list[ProbeRun]:
+    """One run per (task, method) by default, or per distinct configuration."""
     if level not in PROBE_LEVELS:
         raise ValueError(f"unknown probe level {level!r}; known: {PROBE_LEVELS}")
     runs: list[ProbeRun] = []
@@ -224,7 +231,7 @@ def _hms(seconds: float) -> str:
     return f"{total // 3600:d}h{(total % 3600) // 60:02d}m"
 
 
-def format_report(records: list[dict], level: str = "config") -> str:
+def format_report(records: list[dict], level: str = "method") -> str:
     """The probe's answer to both questions, one row per planned run.
 
     Keyed on the arm name, not on (task, method): at `config` level a task has
@@ -285,9 +292,16 @@ def format_report(records: list[dict], level: str = "config") -> str:
         )
     lines.append(
         "Rows are 3-rollout probes. `one arm` = startup + steady x that arm's own "
-        "rollout count; `all arms` multiplies by the arms sharing that "
-        "configuration (its LR grid). Concurrency is not modelled: run 8 one-GPU "
-        "arms at once and the wall clock divides, but each arm's own time does not."
+        "rollout count; `all arms` multiplies by the arms this row stands for. "
+        "Concurrency is not modelled: run 8 one-GPU arms at once and the wall "
+        "clock divides, but each arm's own time does not."
+        + (
+            "\nAt method level one row stands for every rank, block size, "
+            "placement and batch size in its task. Rank and placement barely move "
+            "step time; BATCH SIZE does -- e2 runs 32/128/512, so its estimate is "
+            "low by roughly the batch ratio for two thirds of its arms."
+            if level == "method" else ""
+        )
     )
     return "\n".join(lines)
 
@@ -298,15 +312,15 @@ def main(argv: list[str] | None = None) -> int:
     plan = sub.add_parser("plan", help="one TSV line per planned run, for the shell driver")
     plan.add_argument("--gpus", type=int, default=None, help="only runs needing this many GPUs")
     plan.add_argument(
-        "--level", choices=PROBE_LEVELS, default="config",
-        help="config (default): one run per distinct configuration, collapsing "
-             "only the learning rate. method: one per (task, method) -- cheaper, "
-             "and it never launches e2's batch 512, e1's rank 512 or e5's block "
-             "256, which are the three most likely to OOM.",
+        "--level", choices=PROBE_LEVELS, default="method",
+        help="method (default): one run per (task, method), 24 runs. Rank, block "
+             "size, placement and batch size exercise the same code at different "
+             "shapes, so they add no coverage. config: one run per distinct "
+             "configuration, 61 runs -- for hunting a shape-dependent OOM.",
     )
     report = sub.add_parser("report", help="read probe ledgers and estimate the campaign")
     report.add_argument(
-        "--level", choices=PROBE_LEVELS, default="config",
+        "--level", choices=PROBE_LEVELS, default="method",
         help="must match the level the probe ran at",
     )
     report.add_argument(

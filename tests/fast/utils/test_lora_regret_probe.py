@@ -20,10 +20,15 @@ from tools.lora_regret.probe import (
 
 
 class TestPlan:
+    def test_the_default_level_is_one_run_per_task_per_method(self):
+        """Rank, block size, placement and batch size exercise the same code at
+        different shapes, so probing them separately re-runs a path that already
+        passed. 24 runs, not 61."""
+        assert len(probe_plan()) == len(probe_plan("method")) == 24
+
     def test_config_level_launches_every_distinct_configuration_once(self):
-        """The default level. A configuration is everything but the learning
-        rate; two arms with different keys can differ by 16x in rollout batch or
-        2x in adapter size, and the one that OOMs is always the one nobody ran."""
+        """The opt-in level, for hunting a shape-dependent failure rather than a
+        code-path one. A configuration is everything but the learning rate."""
         from tools.lora_regret.arms import MATRICES
         from tools.lora_regret.probe import config_key
 
@@ -52,17 +57,17 @@ class TestPlan:
         with pytest.raises(ValueError, match="unknown probe level"):
             probe_plan("everything")
 
-    def test_the_riskiest_configurations_are_in_the_default_plan(self):
-        """The three the method level silently omits: e2's rollout batch 512
-        (16x anything else in the campaign), e1's rank 512 (the largest adapter)
-        and e5's block 256 (the largest rotation)."""
+    def test_the_largest_shapes_are_reachable_at_config_level(self):
+        """Not in the default plan, and deliberately: they are the same code as
+        the shapes that are. This pins that `--level config` can still reach
+        them when a shape-dependent failure is what you are hunting."""
         labels = {(r.matrix, r.label) for r in probe_plan("config")}
         assert ("e2", "lora/r256/all/batch512") in labels
         assert ("e1", "lora/r512/all") in labels
         assert ("e5", "oft/b256/all") in labels
 
     def test_one_run_per_task_per_method(self):
-        seen = [(run.matrix, run.method) for run in probe_plan("method")]
+        seen = [(run.matrix, run.method) for run in probe_plan()]
         assert len(seen) == len(set(seen)), "a (task, method) pair is probed twice"
         by_matrix = {}
         for matrix, method in seen:
@@ -81,7 +86,7 @@ class TestPlan:
         from tools.lora_regret.arms import MATRICES
 
         planned = {}
-        for run in probe_plan('method'):
+        for run in probe_plan():
             planned.setdefault(run.matrix, set()).add(run.method)
         for matrix, methods in planned.items():
             centre = 1e-4 if matrix in ("e5",) else None
@@ -181,7 +186,7 @@ class TestReport:
         """Uses a real planned arm name -- the report keys on it, because at
         config level one (task, method) has several rows."""
         arm = next(
-            r.arm for r in probe_plan("config")
+            r.arm for r in probe_plan()
             if r.matrix == matrix and r.method == method
         )
         return {
