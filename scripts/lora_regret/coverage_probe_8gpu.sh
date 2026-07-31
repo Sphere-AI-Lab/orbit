@@ -25,4 +25,15 @@
 # Writes into the same results/probe ledger directory as its 1- and 4-GPU
 # siblings, so the final report fills in as each finishes, in any order.
 
-exec env ONLY_GPUS=8 bash "$(dirname "${BASH_SOURCE[0]}")/coverage_probe.sh" "$@"
+# RL FullFT is skipped, deliberately, and its failure is already characterised:
+# with `--no-offload-train` the 8B policy weights plus distributed-optimizer
+# state stay resident on all eight cards, so colocated SGLang cannot `resume`
+# the KV-cache arena it paused -- torch_memory_saver reports cudaError 2 at
+# `func=resume`, ~7 minutes into every attempt, right after update_weights.
+# That is a missing train-offload path, not a configuration to retry, and each
+# retry costs the node 7 minutes plus a slow Ray teardown before the OFT arms
+# (the ones the tiled kernel just unblocked) get to run at all.
+#
+# DELETE THIS LINE to cover it again once RL FullFT has an offload path.
+SKIP=full
+exec env ONLY_GPUS=8 SKIP_METHODS="${SKIP:-}" bash "$(dirname "${BASH_SOURCE[0]}")/coverage_probe.sh" "$@"

@@ -53,6 +53,10 @@
 #   ONLY_GPUS=              set to 1, 4 or 8 to run only the runs of that size.
 #                           The three coverage_probe_<n>gpu.sh wrappers set it,
 #                           so each can be booked on a differently sized node.
+#   SKIP_METHODS=           comma-separated methods (full,lora,oft) to leave out.
+#                           For a path whose failure is already understood, so
+#                           the node is not spent re-deriving it. Skipped rows
+#                           read "not run" in the report -- never "ok".
 #   SKIP_PREFLIGHT=0        set 1 to skip the pre-run audit
 #   DRY_RUN=0               set 1 to print the schedule and run nothing
 #
@@ -68,6 +72,7 @@ PROBE_LEVEL=${PROBE_LEVEL:-path}
 PROBE_ROLLOUTS=${PROBE_ROLLOUTS:-3}
 PROBE_DIR=${PROBE_DIR:-results/probe}
 ONLY_GPUS=${ONLY_GPUS:-}
+SKIP_METHODS=${SKIP_METHODS:-}
 SKIP_PREFLIGHT=${SKIP_PREFLIGHT:-0}
 DRY_RUN=${DRY_RUN:-0}
 : "${DATA_DIR:=/lustre/fast/fast/groups/ei-slm/data/lora_regret}"
@@ -148,9 +153,20 @@ echo "level=${PROBE_LEVEL}  runs=${#PLAN[@]}  rollouts each=${PROBE_ROLLOUTS}  s
 say "running ${#PLAN[@]} probes sequentially"
 index=0
 failed=0
+skipped=0
 for line in "${PLAN[@]}"; do
     IFS=$'\t' read -r matrix method arm only gpus metric full label <<< "${line}"
     index=$(( index + 1 ))
+
+    # Filtered here rather than out of the plan, so the printed schedule still
+    # shows every path and the skip is visible as a line of output. A path
+    # silently absent from the plan would read as coverage it never had.
+    if [[ -n "${SKIP_METHODS}" ]] && [[ ",${SKIP_METHODS}," == *",${method},"* ]]; then
+        printf '\n[%d/%d] %s  SKIPPED (SKIP_METHODS=%s)\n' \
+            "${index}" "${#PLAN[@]}" "${label}" "${SKIP_METHODS}"
+        skipped=$(( skipped + 1 ))
+        continue
+    fi
 
     # Devices 0..N-1. Nothing else is running, so which cards these are does not
     # matter -- what matters is that the count matches what the real sweep gives
@@ -198,6 +214,10 @@ echo
 if (( failed > 0 )); then
     echo "${failed} probe(s) failed. Their rows read FAILED above and the campaign"
     echo "estimate is a LOWER BOUND -- it omits them rather than guessing."
+fi
+if (( skipped > 0 )); then
+    echo "${skipped} probe(s) skipped via SKIP_METHODS=${SKIP_METHODS}. Their rows are"
+    echo "unmeasured, not passing. Unset it to cover them."
 fi
 if [[ -n "${ONLY_GPUS}" ]]; then
     echo "This was the ${ONLY_GPUS}-GPU subset. Rows reading 'not run' belong to the"
