@@ -881,6 +881,10 @@ bash scripts/lora_regret/coverage_probe_4gpu.sh   #  2 runs — four cards
 bash scripts/lora_regret/coverage_probe_1gpu.sh   #  8 runs — one card
 ```
 
+The probe scripts source `env.sh` themselves, so §1's environment reduces to
+activating the venv — a forgotten `export CUDA_HOME` no longer surfaces as a
+bare `AssertionError` from `deep_ep` several screens into preflight.
+
 Run them in any order, on any node, days apart. All three write into the same
 `results/probe` ledger directory, so the report fills in as each finishes; rows
 belonging to a script that has not run yet read `not run` and the campaign total

@@ -76,6 +76,37 @@ export DATA_DIR
 mkdir -p "${PROBE_DIR}" logs/lora_regret
 say() { printf '\n=== %s ===\n' "$*"; }
 
+# --- environment ------------------------------------------------------------
+# The venv cannot be entered for you -- activating it inside a script would not
+# survive back to your shell -- but everything after it can be, and is.
+if [[ -z "${VIRTUAL_ENV:-}" ]]; then
+    echo "No virtualenv active. Run:" >&2
+    echo "  source /fast/zqiu/orbit-iclr/orbit_env/bin/activate" >&2
+    echo "  cd ${ORBIT_ROOT} && bash \$0" >&2
+    exit 2
+fi
+
+# env.sh sets CUDA_HOME (if unset), LD_LIBRARY_PATH and the z3 soname. Sourced
+# here rather than left to the operator because forgetting it does not fail
+# fast: megatron.core imports deep_ep, whose find_cuda_home() is a bare
+# `assert cuda_home is not None`, so an unset CUDA_HOME surfaces as an
+# AssertionError with NO message several screens into preflight -- and the
+# LD_LIBRARY_PATH half fails later still, mid-run, on a missing .so.
+#
+# Sourcing affects this script and the runs it spawns, never your shell.
+if [[ -f "${ORBIT_ROOT}/env.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${ORBIT_ROOT}/env.sh" >/dev/null 2>&1 || true
+fi
+
+if ! python -c "import megatron.core" >/dev/null 2>&1; then
+    echo "megatron.core will not import even after sourcing env.sh." >&2
+    echo "CUDA_HOME=${CUDA_HOME:-unset}" >&2
+    echo >&2
+    python -c "import megatron.core" 2>&1 | tail -6 >&2
+    exit 2
+fi
+
 # --- preflight -------------------------------------------------------------
 # Cheap, and it catches the two failures that would otherwise waste the node: a
 # venv of dangling symlinks (which imports *successfully*) and a truncated split.
