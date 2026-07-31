@@ -799,6 +799,37 @@ E5_BLOCK_LADDER = (32, 64, 256)
 # runs would locate the learning rate for a model that is not then measured.
 E5_SCOUT_BLOCK = 64
 
+# E5-RL's capacity ladder. Three rungs a factor of 4 apart -- a 16x span in
+# trainable parameters (0.41M / 1.69M / 6.80M all-modules on Llama-3.1-8B).
+#
+# Why these three and not E5's (32, 64, 256):
+#   * they must each launch inside SGLang, so every rung is <= the kernel's
+#     block ceiling. E5's ladder satisfies that too, but its rungs are 32/64/256
+#     -- a 8x span concentrated at the bottom, chosen for an SFT run where the
+#     interesting regime was small adapters.
+#   * spreading to 32/128/512 costs nothing extra (the arm count is the same)
+#     and widens the lever arm, which is what a "does OFT track LoRA as capacity
+#     grows" claim is actually resting on.
+#   * the bottom rung stops at 32 rather than going lower because the rank
+#     lattice cannot follow below 16: block 8 matches rank 1 at ratio 1.34, and
+#     a 34% capacity mismatch would confound exactly what this matrix isolates.
+#
+# Realized match against the solved LoRA ranks: 0.988 (b32, r6), 1.012 (b128,
+# r24), 0.997 (b512, r98). Every arm carries its own ratio into the ledger.
+E5RL_BLOCK_LADDER = (32, 128, 512)
+
+# Matrices whose arms cannot be built without a measured OFT learning-rate
+# centre, because OFT parameterizes a rotation and no LoRA learning rate
+# transfers to it. Declared once here rather than tested for by name at each
+# call site: `probe.py` used to special-case `matrix == "e5"`, and that literal
+# silently excluded the second such matrix the moment one existed -- the plan
+# simply raised instead of skipping.
+#
+# Where each one's centre comes from:
+#   e5    -- the e5scout matrix's argmin
+#   e5rl  -- E4's `oftscout` arms, which exist for exactly this purpose
+MATRICES_REQUIRING_OFT_CENTRE = frozenset({"e5", "e5rl"})
+
 
 def _e5_shapes(hidden_size: int, ffn_size: int, qkv_output_size: int) -> dict[str, tuple[int, int]]:
     return megatron_module_shapes(hidden_size, ffn_size, qkv_output_size)
@@ -833,6 +864,88 @@ def e5_scout_arms(
         )
         for lr in OFT_SCOUT_GRID
     ]
+
+
+def e5rl_arms(
+    hidden_size: int,
+    ffn_size: int,
+    seed: int = 0,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
+    oft_lr_centre: float | None = None,
+) -> list[Arm]:
+    """E5-RL: does matched-parameter OFT track LoRA under policy gradient?
+
+    24 arms -- three matched capacities x {OFT, LoRA} x 4 learning rates -- on
+    E4's data, E4's half-decade grid and E4's accuracy metric, so its cells are
+    comparable arm for arm with the rank ladder E4 measures.
+
+    **This is the only place OFT and LoRA meet across a range of matched
+    capacities.** E4 has an OFT cell and E4-place has two, but each is a single
+    block size: one point per placement. A single point can show that OFT works;
+    it cannot show that OFT *tracks* LoRA as capacity varies, which is the
+    claim this matrix exists to test.
+
+    The pairing fixes the block size and solves for the rank, the same direction
+    E5 uses and for the same reason: LoRA's rank is a fine lattice while an OFT
+    block must divide the input dimension, so inverting gets within ~1% where
+    the forward direction lands 24-53% off. Each arm carries its realized ratio.
+
+    **Capacity only -- no placement axis.** E4-place already runs OFT against
+    LoRA at attention-only and MLP-only on this grid; repeating it would be
+    eight more 8-GPU arms answering a question already asked, and duplicate arm
+    names the moment both ledgers are globbed into `analyze`. That is the same
+    rule that keeps all-modules out of E4-place.
+
+    `oft_lr_centre` is required and comes from E4's `oftscout` argmin -- E4's
+    OFT cell is built from RL_OFT_SCOUT_SPAN precisely so this matrix does not
+    need a scout of its own. No default: a made-up centre would be an invented
+    answer to the question those arms exist to ask, and it would be invisible,
+    since the arms would still run and still report accuracies.
+    """
+    if oft_lr_centre is None:
+        raise ValueError(
+            "oft_lr_centre is required; take it from E4's oftscout argmin "
+            "(--argmins-from results/e4*.jsonl, or --oft-lr-centre)"
+        )
+
+    shapes = _e5_shapes(hidden_size, ffn_size, qkv_output_size)
+    oft_grid = lr_grid(oft_lr_centre, n=4, step_decades=0.5)
+    lora_grid = lr_grid(RL_LORA_LR_CENTRE, n=4, step_decades=0.5)
+    arms: list[Arm] = []
+
+    for block_size in E5RL_BLOCK_LADDER:
+        report = oft_lora_match_report(block_size, shapes)
+        rank = report["lora_rank"]
+        ratio = report["ratio"]
+        for lr in oft_grid:
+            arms.append(
+                Arm(
+                    _name("oft", f"b{block_size}", ALL_MODULES, lr, seed),
+                    "oft",
+                    None,
+                    block_size,
+                    ALL_MODULES,
+                    lr,
+                    seed,
+                    dataset=RL_MIX_DATASET,
+                    matched_ratio=ratio,
+                )
+            )
+        for lr in lora_grid:
+            arms.append(
+                Arm(
+                    _name("lora", f"r{rank}", ALL_MODULES, lr, seed),
+                    "lora",
+                    rank,
+                    None,
+                    ALL_MODULES,
+                    lr,
+                    seed,
+                    dataset=RL_MIX_DATASET,
+                    matched_ratio=ratio,
+                )
+            )
+    return arms
 
 
 def e5_arms(
@@ -940,6 +1053,9 @@ MATRICES = {
         seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre
     ),
     "e4place": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e4place_arms(
+        hidden, ffn, seed=seed, oft_lr_centre=oft_lr_centre
+    ),
+    "e5rl": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e5rl_arms(
         hidden, ffn, seed=seed, oft_lr_centre=oft_lr_centre
     ),
     "e5scout": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e5_scout_arms(hidden, ffn, seed=seed),

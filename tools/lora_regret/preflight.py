@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-from tools.lora_regret.arms import DATA_DIR, MATRICES
+from tools.lora_regret.arms import DATA_DIR, MATRICES, MATRICES_REQUIRING_OFT_CENTRE
 
 HF_CKPT = "/lustre/fast/fast/zqiu/hf_models/Llama-3.1-8B"
 # Note: still under the *old* repo's path. Verified present (15 GB) on
@@ -42,7 +42,7 @@ EXPECTED_ROWS = {
 # only its learning rates move from the scout span onto a centred grid.
 EXPECTED_ARMS = {
     "e1": 45, "e2": 48, "e3": 35, "e4": 20, "e5scout": 5, "e5": 50, "sft82": 82,
-    "e1ot": 45, "e1short": 21, "e4place": 20,
+    "e1ot": 45, "e1short": 21, "e4place": 20, "e5rl": 24,
 }
 
 # What each stage needs before it is worth starting. P3 is 2 rather than 1
@@ -163,7 +163,7 @@ def check_matrices(hidden_size: int, ffn_size: int) -> list[Check]:
     checks = []
     for name, expected in EXPECTED_ARMS.items():
         try:
-            centre = 1e-4 if name == "e5" else None
+            centre = 1e-4 if name in MATRICES_REQUIRING_OFT_CENTRE else None
             built = MATRICES[name](hidden_size, ffn_size, 0, centre, None)
             checks.append(
                 Check(f"matrix:{name}", len(built) == expected,

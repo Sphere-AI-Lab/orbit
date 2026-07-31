@@ -23,6 +23,7 @@ from pathlib import Path
 from orbit.utils.peft_param_match import match_report
 from tools.lora_regret.arms import (  # noqa: F401  (sft_arms re-exported)
     MATRICES,
+    MATRICES_REQUIRING_OFT_CENTRE,
     Arm,
     adapter_param_count,
     arm_env,
@@ -65,6 +66,7 @@ MATRIX_LAUNCHERS = {
     "e3": LAUNCHER,
     "e4": RL_LAUNCHER,
     "e4place": RL_LAUNCHER,
+    "e5rl": RL_LAUNCHER,
     "e5scout": LAUNCHER,
     "e5": LAUNCHER,
 }
@@ -78,6 +80,7 @@ MATRIX_METRICS = {
     "e3": "nll",
     "e4": "accuracy",
     "e4place": "accuracy",
+    "e5rl": "accuracy",
     "e5scout": "nll",
     "e5": "nll",
 }
@@ -111,6 +114,7 @@ MATRIX_PROJECTS = {
     "e3": "tulu3-sft-placement",
     "e4": "math-gsm8k-rl-rank",
     "e4place": "math-gsm8k-rl-placement",
+    "e5rl": "math-gsm8k-rl-oft-match",
     "e5scout": "tulu3-sft-oft-scout",
     "e5": "tulu3-sft-oft-match",
     "sft82": "tulu3-sft-bracket",
@@ -528,10 +532,16 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Print commands, run nothing.")
     args = parser.parse_args()
 
-    if args.matrix == "e5" and args.oft_lr_centre is None:
+    if args.matrix in MATRICES_REQUIRING_OFT_CENTRE and args.oft_lr_centre is None:
         # A clean exit rather than a traceback: this is the one argument an
         # operator following the runbook can only supply after another run.
-        parser.error("--matrix e5 requires --oft-lr-centre; run --matrix e5scout first and pass its argmin")
+        # Where it comes from differs per matrix, so name the source rather than
+        # printing one matrix's instructions for another's failure.
+        source = {
+            "e5": "run --matrix e5scout first and pass its argmin",
+            "e5rl": "take it from E4's oftscout argmin (--argmins-from results/e4*.jsonl)",
+        }[args.matrix]
+        parser.error(f"--matrix {args.matrix} requires --oft-lr-centre; {source}")
     # No inverse guard. Every matrix now carries an OFT cell, so a centre is
     # meaningful everywhere; e5 is only special in having nothing to fall back
     # on. `e1long` is the one matrix with no OFT arms -- its arms come from an

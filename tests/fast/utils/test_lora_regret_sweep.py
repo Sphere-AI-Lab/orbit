@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from tools.lora_regret.arms import (
+    MATRICES_REQUIRING_OFT_CENTRE,
     ALL_MODULES,
     ATTN_MODULES,
     MLP_MODULES,
@@ -1259,7 +1260,7 @@ class TestModelRegistryWiring:
         from tools.lora_regret.arms import MATRICES
 
         for name in ("e1", "e2", "e3", "e4", "e5scout", "sft82"):
-            built = MATRICES[name](4096, 14336, 0, 1e-4 if name == "e5" else None, None)
+            built = MATRICES[name](4096, 14336, 0, 1e-4 if name in MATRICES_REQUIRING_OFT_CENTRE else None, None)
             assert {arm.model for arm in built} == {"llama3.1-8b"}, name
 
     def test_dry_run_exports_the_models_checkpoint_and_mask_type(self, tmp_path, capsys):
@@ -1352,7 +1353,7 @@ class TestWandbRouting:
         from tools.lora_regret.arms import MATRICES
         from tools.lora_regret.sweep import MATRIX_METRICS, wandb_project
 
-        arms = MATRICES[matrix](4096, 14336, 0, 1e-4 if matrix == "e5" else None, None)
+        arms = MATRICES[matrix](4096, 14336, 0, 1e-4 if matrix in MATRICES_REQUIRING_OFT_CENTRE else None, None)
         # `None` means the arm takes the launcher's default, which is tulu3.
         datasets = {(a.dataset or "tulu3") for a in arms}
         assert len(datasets) == 1, f"{matrix} mixes datasets: {sorted(datasets)}"

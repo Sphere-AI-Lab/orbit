@@ -23,13 +23,18 @@ class TestPlan:
     def test_the_method_level_is_one_run_per_task_per_method(self):
         """Rank, block size, placement and batch size exercise the same code at
         different shapes, so probing them separately re-runs a path that already
-        passed. 24 runs, not 61 -- and `path` collapses further still."""
-        assert len(probe_plan("method")) == 24
+        passed. 26 runs, not 67 -- and `path` collapses further still.
+
+        26 rather than 24 since e5rl: it adds an OFT and a LoRA method row on
+        math_gsm8k. `path` is unchanged at 17, because e5rl runs the same
+        (launcher, dataset, method, target) combinations E4 already covers --
+        which is the point of the level."""
+        assert len(probe_plan("method")) == 26
 
     def test_config_level_launches_every_distinct_configuration_once(self):
         """The opt-in level, for hunting a shape-dependent failure rather than a
         code-path one. A configuration is everything but the learning rate."""
-        from tools.lora_regret.arms import MATRICES
+        from tools.lora_regret.arms import MATRICES, MATRICES_REQUIRING_OFT_CENTRE
         from tools.lora_regret.probe import config_key
 
         runs = probe_plan("config")
@@ -37,7 +42,7 @@ class TestPlan:
         for matrix in MATRICES:
             if matrix in EXCLUDED_MATRICES:
                 continue
-            centre = 1e-4 if matrix == "e5" else None
+            centre = 1e-4 if matrix in MATRICES_REQUIRING_OFT_CENTRE else None
             arms = MATRICES[matrix](4096, 14336, 0, centre, None)
             wanted = {config_key(a) for a in arms}
             probed = {
@@ -72,7 +77,7 @@ class TestPlan:
         by_matrix = {}
         for matrix, method in seen:
             by_matrix.setdefault(matrix, set()).add(method)
-        from tools.lora_regret.arms import MATRICES
+        from tools.lora_regret.arms import MATRICES, MATRICES_REQUIRING_OFT_CENTRE
 
         for matrix in MATRICES:
             if matrix in EXCLUDED_MATRICES:
@@ -83,13 +88,13 @@ class TestPlan:
         """Not a fixed {full, lora, oft}: e5scout is OFT-only and e5 has no
         FullFT arm, so demanding three from them would be demanding a run that
         does not exist."""
-        from tools.lora_regret.arms import MATRICES
+        from tools.lora_regret.arms import MATRICES, MATRICES_REQUIRING_OFT_CENTRE
 
         planned = {}
         for run in probe_plan("method"):
             planned.setdefault(run.matrix, set()).add(run.method)
         for matrix, methods in planned.items():
-            centre = 1e-4 if matrix in ("e5",) else None
+            centre = 1e-4 if matrix in MATRICES_REQUIRING_OFT_CENTRE else None
             built = MATRICES[matrix](4096, 14336, 0, centre, None)
             assert methods == {a.method for a in built}, matrix
 
@@ -98,10 +103,10 @@ class TestPlan:
         assert all(reason for reason in EXCLUDED_MATRICES.values())
 
     def test_each_run_names_a_real_arm_of_that_matrix(self):
-        from tools.lora_regret.arms import MATRICES
+        from tools.lora_regret.arms import MATRICES, MATRICES_REQUIRING_OFT_CENTRE
 
         for run in probe_plan('config'):
-            centre = 1e-4 if run.matrix == "e5" else None
+            centre = 1e-4 if run.matrix in MATRICES_REQUIRING_OFT_CENTRE else None
             names = {a.name for a in MATRICES[run.matrix](4096, 14336, 0, centre, None)}
             assert run.arm in names, (run.matrix, run.arm)
 
@@ -111,10 +116,10 @@ class TestPlan:
         would silently probe two arms and bill the second to the first."""
         import re
 
-        from tools.lora_regret.arms import MATRICES
+        from tools.lora_regret.arms import MATRICES, MATRICES_REQUIRING_OFT_CENTRE
 
         for run in probe_plan('config'):
-            centre = 1e-4 if run.matrix == "e5" else None
+            centre = 1e-4 if run.matrix in MATRICES_REQUIRING_OFT_CENTRE else None
             arms = MATRICES[run.matrix](4096, 14336, 0, centre, None)
             pattern = re.compile(run.only)
             matched = [a.name for a in arms if pattern.search(a.name)]

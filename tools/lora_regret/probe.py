@@ -27,7 +27,7 @@ import statistics
 from dataclasses import dataclass
 from pathlib import Path
 
-from tools.lora_regret.arms import MATRICES
+from tools.lora_regret.arms import MATRICES, MATRICES_REQUIRING_OFT_CENTRE
 from tools.lora_regret.models import DEFAULT_MODEL
 from tools.lora_regret.models import get as get_model
 from tools.lora_regret.probe_log import parse_rollout_seconds  # noqa: F401  (re-exported)
@@ -52,10 +52,13 @@ EXCLUDED_MATRICES = {
     ),
 }
 
-# E5's OFT cell has no centre until e5scout runs. Any value produces a valid
-# *plumbing* probe -- the learning rate does not change how long a step takes --
-# so the probe supplies the midpoint of the scout span and says so. It must
-# never leak into a real sweep, which is why e5 still requires the flag there.
+# Some matrices' OFT cells have no centre until a scout has run. Any value
+# produces a valid *plumbing* probe -- the learning rate does not change how
+# long a step takes -- so the probe supplies the midpoint of the scout span and
+# says so. It must never leak into a real sweep, which is why those matrices
+# still require the flag there. Which matrices they are is declared in `arms`,
+# not tested for by name here: this line used to read `matrix == "e5"`, and that
+# literal made the plan RAISE rather than skip when a second one was added.
 PROBE_OFT_CENTRE = 1e-4
 
 # Rollouts the REAL arm runs, per matrix. Three different sources, which is
@@ -80,6 +83,7 @@ FULL_RUN_ROLLOUTS = {
     "e4place": RL_LAUNCHER_ROLLOUTS,
     "e5scout": SFT_SWEEP_ROLLOUTS,
     "e5": SFT_SWEEP_ROLLOUTS,
+    "e5rl": RL_LAUNCHER_ROLLOUTS,
 }
 
 
@@ -131,7 +135,7 @@ class ProbeRun:
 
 
 def _build(matrix: str):
-    centre = PROBE_OFT_CENTRE if matrix == "e5" else None
+    centre = PROBE_OFT_CENTRE if matrix in MATRICES_REQUIRING_OFT_CENTRE else None
     model = get_model(DEFAULT_MODEL)
     return MATRICES[matrix](model.hidden_size, model.ffn_size, 0, centre, None)
 
