@@ -145,34 +145,39 @@ def test_sft_launcher_still_defaults_to_the_pinned_llama_template():
     assert "llama3.1_pinned.jinja" in _sft_text()
 
 
-def test_fullft_disables_train_offload():
-    """`--offload-train` is asserted out for full fine-tuning:
+def test_fullft_keeps_train_offload():
+    """The contract inverted on 2026-07-31, and this test with it.
 
-        AssertionError: Megatron --offload-train currently requires
-        --peft-method lora or oft; full-model train offload needs a dedicated
-        implementation.
+    It previously asserted the opposite -- that the `none)` branch passes
+    `--no-offload-train` -- because orbit refused `--offload-train` for full
+    fine-tuning outright, so every FullFT arm died in argument finalisation
+    before a single rollout.
 
-    Found by the coverage probe on 2026-07-31 -- every FullFT RL arm died in
-    argument finalisation, before a single rollout. The repo's own
-    run-qwen2_5-7b-bf16-openr1-full.sh already pairs `--peft-method none` with
-    `--no-offload-train`; this launcher never did because it had only ever been
-    run with LoRA.
+    That refusal is gone: full fine-tuning now offloads gradients and optimizer
+    state (parameters stay resident, since `update_weights` pushes them to the
+    rollout engine every rollout). With the refusal removed, disabling the
+    offload is what breaks the arm rather than what saves it -- in colocate mode
+    SGLang cannot resume its paused KV cache, measured at 12.48 GB free against
+    16.00 GB of K+V:
+
+        [torch_memory_saver.cpp] cudaError error: 2 (out of memory)
+        file=csrc/core.cpp func=resume line=182
+
+    So the flag must be ABSENT from the `none)` branch now.
     """
-    text = _text()
-    assert "--no-offload-train" in text
-    assert "--no-offload-train-async" in text
-    # Only for FullFT: the PEFT arms rely on train offload to share the node
-    # with the rollout engine, and disabling it for them would change what E4
-    # measures and probably OOM.
-    code = _code()
-    guarded = [line for line in code if "no-offload-train" in line]
-    assert guarded, "the flags must be added conditionally, not unconditionally"
+    none_block = _text().split("    none)", 1)[1].split(";;", 1)[0]
+    assert "--no-offload-train" not in none_block, (
+        "the none) branch must not disable train offload; full fine-tuning "
+        "needs it to share the node with the rollout engine"
+    )
 
 
 def test_the_peft_arms_keep_train_offload():
-    """PEFT_METHOD=lora/oft must NOT get --no-offload-train: colocate mode
+    """PEFT_METHOD=lora/oft must not disable train offload either: colocate mode
     shares the GPUs with SGLang, and holding training weights resident is what
-    the offload exists to avoid."""
+    the offload exists to avoid. Every arm now keeps it, by different means --
+    PEFT offloads the frozen base, FullFT the gradients and optimizer state."""
     text = _text()
-    none_block = text.split("    none)", 1)[1].split(";;", 1)[0]
-    assert "no-offload-train" in none_block, "the flags belong in the none) branch"
+    assert "--no-offload-train" not in text, (
+        "no branch of this launcher should disable train offload"
+    )

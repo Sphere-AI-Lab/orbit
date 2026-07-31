@@ -79,6 +79,22 @@ def _get_weight_updater_kwargs(args: Namespace, update_weight_cls: type) -> dict
     return {"is_lora": is_lora_enabled(args)}
 
 
+def _should_offload_frozen_base(args: Namespace) -> bool:
+    """Is there a frozen base to offload at all?
+
+    Only under PEFT. `offload_megatron_frozen_base_to_cpu` selects parameters
+    with `requires_grad == False`; full fine-tuning has none, so calling it
+    plans empty flat groups, allocates nothing, and frees nothing. Skipping it
+    there loses no memory and avoids a misleading "after offload frozen_base"
+    line in the log claiming an offload that did not happen.
+
+    Full fine-tuning frees its train state through `offload_train_grad_buffers`
+    and `offload_train_optimizer` instead, which argument finalisation forces on
+    whenever `--offload-train` is set without PEFT.
+    """
+    return getattr(args, "peft_method", "none") != "none"
+
+
 def _validate_train_offload_role(args: Namespace, role: str) -> None:
     if role == "critic" and getattr(args, "offload_train", False):
         raise NotImplementedError(
@@ -266,8 +282,9 @@ class MegatronTrainRayActor(TrainRayActor):
         if self.args.offload_train_optimizer:
             offload_megatron_optimizer(self.optimizer)
             print_memory("after offload optimizer")
-        offload_megatron_frozen_base_to_cpu(self.model)
-        print_memory("after offload frozen_base")
+        if _should_offload_frozen_base(self.args):
+            offload_megatron_frozen_base_to_cpu(self.model)
+            print_memory("after offload frozen_base")
 
         print_memory("after offload model")
         # Read by compute_eval_nll: it must know whether the training state is
@@ -290,6 +307,12 @@ class MegatronTrainRayActor(TrainRayActor):
             return
         if self._wake_up_stream is None:
             return
+        if not _should_offload_frozen_base(self.args):
+            # Nothing was offloaded, so there is nothing to prefetch. Recording
+            # no event leaves wake_up() on its synchronous branch, which is also
+            # a no-op here -- rather than waiting on an event for a copy that
+            # never ran.
+            return
         load_megatron_frozen_base_to_gpu(self.model, stream=self._wake_up_stream)
         if self.args.offload_train_adapter:
             load_megatron_adapter_to_gpu(self.model, stream=self._wake_up_stream)
@@ -307,7 +330,7 @@ class MegatronTrainRayActor(TrainRayActor):
             torch.cuda.current_stream().wait_event(wake_up_event)
             self._wake_up_event = None
             print_memory("after wake_up train_state_prefetch")
-        else:
+        elif _should_offload_frozen_base(self.args):
             load_megatron_frozen_base_to_gpu(self.model)
             print_memory("after wake_up frozen_base")
             if self.args.offload_train_adapter:

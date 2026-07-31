@@ -230,26 +230,22 @@ case "${PEFT_METHOD}" in
             echo "Per-GPU optimizer state is 4*P+12*P/N GB. Set ALLOW_SMALL_FULLFT=1 to override." >&2
             exit 2
         fi
-        # Train offload is a PEFT-only capability. orbit/utils/arguments.py
-        # refuses it outright for full fine-tuning:
+        # Train offload stays ON here, as it does for the PEFT arms. It used to
+        # be disabled, because orbit refused --offload-train for full
+        # fine-tuning outright; with that refusal removed, disabling it is what
+        # breaks the arm rather than what saves it.
         #
-        #   AssertionError: Megatron --offload-train currently requires
-        #   --peft-method lora or oft; full-model train offload needs a
-        #   dedicated implementation.
+        # In colocate mode SGLang shares these GPUs and pauses its KV cache
+        # while the actor trains. With no train offload the 8B model's gradients
+        # and optimizer state stay resident, and the resume fails:
         #
-        # It is on by default and the failure lands in argument finalisation,
-        # before a single rollout -- so every FullFT arm died instantly until
-        # this was added. run-qwen2_5-7b-bf16-openr1-full.sh already pairs
-        # `--peft-method none` with these two flags; this launcher had only
-        # ever been run with LoRA, so the pairing was never needed here.
+        #   [torch_memory_saver.cpp] cudaError error: 2 (out of memory)
+        #   file=csrc/core.cpp func=resume line=182
         #
-        # PEFT arms deliberately keep the offload: colocate mode shares the
-        # GPUs with SGLang, and holding the training weights resident is what
-        # the offload exists to avoid.
-        PEFT_ARGS+=(
-            --no-offload-train
-            --no-offload-train-async
-        )
+        # measured at 12.48 GB free against 16.00 GB of paused K+V. Argument
+        # finalisation forces --offload-train-grad-buffers and
+        # --offload-train-optimizer on for this path; parameters stay resident
+        # because update_weights pushes them to the engine every rollout.
         ;;
     lora)
         PEFT_ARGS=(

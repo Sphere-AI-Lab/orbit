@@ -2240,6 +2240,41 @@ def _finalize_train_offload_args(args) -> None:
         )
     if args.offload_train is None:
         args.offload_train = False
+
+    # Full fine-tuning frees train memory by a different route than PEFT, and
+    # the difference is not a preference -- it is the only route that works.
+    #
+    # PEFT's saving comes from `offload_megatron_frozen_base_to_cpu`, whose
+    # selector skips any parameter with `requires_grad`. Under full fine-tuning
+    # that is every parameter, so the frozen-base path plans empty groups, logs
+    # "after offload model", and frees zero bytes. Enabling --offload-train
+    # without these two flags would therefore be a silent no-op that reads as a
+    # success -- which is why this used to raise outright rather than allow it.
+    #
+    # Gradients and optimizer state are what full fine-tuning actually has to
+    # give back. Measured on 8xH100 with Llama-3.1-8B: the FullFT arm sat at
+    # 66.69 GB used / 12.48 GB free against 16.00 GB of paused SGLang K+V, and
+    # died in `torch_memory_saver ... func=resume`; the LoRA arms sat at 43.88 /
+    # 35.30 and resumed. The ~22.8 GB between them is exactly this state.
+    #
+    # Parameters stay resident on purpose. `update_weights` pushes Megatron
+    # weights into the rollout engine every rollout and does not wake the train
+    # state, so a zero-sized `param_data` would surface as corrupt rollouts
+    # rather than an error. Megatron's own `offload_grad_buffers` passes
+    # `move_params=False` for the same reason.
+    #
+    # Scoped to megatron because these two flags drive megatron-specific
+    # primitives; other backends were never refused and are left alone.
+    if args.train_backend == "megatron" and args.offload_train and not _is_peft_enabled(args):
+        for _flag in ("offload_train_grad_buffers", "offload_train_optimizer"):
+            if getattr(args, _flag, None) is False:
+                raise ValueError(
+                    f"--{_flag.replace('_', '-')} cannot be disabled for full fine-tuning "
+                    "with --offload-train: the frozen-base path has nothing to offload when "
+                    "every parameter is trainable, so the offload would free nothing."
+                )
+            setattr(args, _flag, True)
+
     if args.offload_train_grad_buffers is None:
         args.offload_train_grad_buffers = False
     if args.offload_train_optimizer is None:
@@ -2276,8 +2311,11 @@ def _finalize_train_offload_args(args) -> None:
         )
         args.offload_train_adapter = False
 
-    if args.train_backend == "megatron" and args.offload_train and args.peft_method == "none":
-        raise AssertionError(_MEGATRON_FULL_MODEL_OFFLOAD_ERROR)
+    # Full-model train offload used to raise here. It is now supported, by
+    # offloading gradients and optimizer state while parameters stay resident --
+    # see the block above `offload_train_grad_buffers` for why that split is the
+    # only one that works. `_MEGATRON_FULL_MODEL_OFFLOAD_ERROR` is kept as the
+    # record of what the old failure said, since operators will find it in logs.
 
 
 def _apply_critic_args(args) -> None:

@@ -96,7 +96,21 @@ class TestInstall:
 
         assert imported is has_modelopt_state
 
-    def test_it_reports_whether_it_installed_anything(self):
+    def test_it_reports_whether_it_installed_anything(self, monkeypatch):
+        """The install-then-no-op transition, from a known-clean start.
+
+        `install_if_missing` is a process-wide one-shot, so the first call only
+        returns True if nothing has already triggered it. Importing anything
+        under `orbit.backends.megatron_utils` does trigger it -- `model.py`
+        installs the shim at import -- so whether this test saw a clean slate
+        used to depend on which other tests pytest happened to run first. It
+        passed for as long as no earlier test in collection order imported that
+        package, and broke the moment one did.
+
+        Clearing the registration first makes the transition the test's own
+        precondition rather than a property of the session."""
+        for name in ("megatron.post_training.checkpointing", "megatron.post_training"):
+            monkeypatch.delitem(sys.modules, name, raising=False)
         assert install_if_missing() is True
         # Second call: already present, nothing to do.
         assert install_if_missing() is False
