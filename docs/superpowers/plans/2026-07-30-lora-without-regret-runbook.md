@@ -11,7 +11,7 @@ Companions:
 
 ## What is ready, and what you still have to do
 
-Ready and CPU-verified (786 tests, 0 failures, in the built env):
+Ready and CPU-verified (795 tests, 0 failures, in the built env):
 
 | Piece | Where |
 |---|---|
@@ -27,7 +27,7 @@ Ready and CPU-verified (786 tests, 0 failures, in the built env):
 | NLL trace extraction | `tools/lora_regret/trace.py` |
 | σ, argmins, C1-C6 and C8 readings | `tools/lora_regret/analyze.py` |
 | Figures from the analysis JSON | `tools/lora_regret/plot.py` (§19) |
-| Coverage probe: one run per code path | `scripts/lora_regret/coverage_probe.sh` (§20) |
+| Coverage probe: one run per code path | `scripts/lora_regret/coverage_probe_{1,4,8}gpu.sh` (§20) |
 
 The data is **materialized** (§2, done 2026-07-30) and the **smoke passes on it**
 (§3, done 2026-07-30). Yours to do, in this order: **close P3** (§4, needs DP≥2 and
@@ -872,11 +872,30 @@ without it.
 
 ## 20. Coverage probe — one short run per code path (before anything long)
 
+**Split into three scripts by GPU size, so each is booked on the node it needs
+and nothing pays for cards it will not use:**
+
 ```bash
-bash scripts/lora_regret/coverage_probe.sh
+bash scripts/lora_regret/coverage_probe_8gpu.sh   #  7 runs — whole node
+bash scripts/lora_regret/coverage_probe_4gpu.sh   #  2 runs — four cards
+bash scripts/lora_regret/coverage_probe_1gpu.sh   #  8 runs — one card
 ```
 
-**17 runs, three rollouts each, strictly sequential**, on a single 8×H100 node.
+Run them in any order, on any node, days apart. All three write into the same
+`results/probe` ledger directory, so the report fills in as each finishes; rows
+belonging to a script that has not run yet read `not run` and the campaign total
+says explicitly that it is a lower bound.
+
+`bash scripts/lora_regret/coverage_probe.sh` still runs all 17 on one 8×H100
+node if you have it.
+
+**Run the 8-GPU one first if you can only afford one.** Every path in it has
+never executed: the RL launcher has never produced a real accuracy line, OFT
+under policy gradient has never run in any form, and `e4place`'s MLP placement
+was not even in the earlier per-method plan. The SFT paths the other two cover
+already have a passing smoke behind them.
+
+**17 runs, three rollouts each, strictly sequential.**
 
 One run per distinct **code path** — `(launcher, dataset, method, target
 modules)`. Rank, OFT block size and batch size are collapsed: they exercise the
@@ -924,10 +943,14 @@ deliberately.
 Resumable: each run writes its own ledger and the sweep skips an arm already
 recorded `ok`, so re-running after an interruption picks up where it stopped.
 
-Knobs: `PROBE_LEVEL` (`path` 17 | `method` 24 | `config` 61), `PROBE_ROLLOUTS`
-(3), `PROBE_DIR` (`results/probe`), `ONLY_GPUS` (1, 4 or 8), `DRY_RUN=1`,
-`SKIP_PREFLIGHT=1`. `ONLY_GPUS=8` runs just the seven RL probes, which are the
-only paths that have never executed in any form.
+Preflight adapts to the script: stage `e1-lora` for the 1-GPU one, `e1-full`
+for the 4-GPU one, `e4` for the 8-GPU one — so a one-card reservation is not
+failed by an audit demanding eight cards it was never going to use.
+
+Knobs (all three wrappers pass them through): `PROBE_LEVEL` (`path` 17 |
+`method` 24 | `config` 61), `PROBE_ROLLOUTS` (3), `PROBE_DIR`
+(`results/probe`), `ONLY_GPUS` (set by the wrappers), `DRY_RUN=1`,
+`SKIP_PREFLIGHT=1`.
 
 `e1long` and `sft82` are not probed and the plan says why: `e1long`'s arms come
 from an E1-1 ledger that does not exist yet, and `sft82` is the frozen legacy

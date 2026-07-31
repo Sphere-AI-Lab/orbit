@@ -351,3 +351,66 @@ def _build_arms(matrix):
     from tools.lora_regret.probe import _build
 
     return _build(matrix)
+
+
+class TestTheGpuSplit:
+    """Three scripts, one per GPU size, so each can be booked on a differently
+    sized node. The split must partition the plan: an overlap bills a run twice
+    and a gap means a path nobody runs."""
+
+    SIZES = (1, 4, 8)
+
+    def test_the_three_sizes_partition_the_plan(self):
+        runs = probe_plan("path")
+        by_size = {n: [r for r in runs if r.gpus == n] for n in self.SIZES}
+        assert sum(len(v) for v in by_size.values()) == len(runs)
+        assert {r.gpus for r in runs} == set(self.SIZES)
+
+    def test_each_size_is_non_empty_so_no_script_is_a_no_op(self):
+        for size in self.SIZES:
+            assert [r for r in probe_plan("path") if r.gpus == size], size
+
+    def test_the_eight_gpu_script_is_exactly_the_rl_paths(self):
+        """The subset worth running first: every path in it has never executed
+        in any form, while the SFT paths have a passing smoke behind them."""
+        eight = [r for r in probe_plan("path") if r.gpus == 8]
+        assert {r.metric for r in eight} == {"accuracy"}
+        assert len(eight) == 7
+
+    def test_the_four_gpu_script_is_exactly_the_sft_fullft_paths(self):
+        four = [r for r in probe_plan("path") if r.gpus == 4]
+        assert {r.method for r in four} == {"full"}
+        assert {r.metric for r in four} == {"nll"}
+
+    def test_the_one_gpu_script_is_every_peft_sft_path(self):
+        one = [r for r in probe_plan("path") if r.gpus == 1]
+        assert {r.method for r in one} == {"lora", "oft"}
+        assert {r.metric for r in one} == {"nll"}
+
+    @pytest.mark.parametrize("size", SIZES)
+    def test_a_wrapper_exists_for_each_size_and_pins_only_that_size(self, size):
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parents[3]
+        script = repo_root / f"scripts/lora_regret/coverage_probe_{size}gpu.sh"
+        assert script.is_file(), script
+        text = script.read_text(encoding="utf-8")
+        assert f"ONLY_GPUS={size}" in text
+        # Delegates rather than duplicating: three copies of the run loop would
+        # drift, and the drift would be invisible until a node was booked.
+        assert "coverage_probe.sh" in text
+
+    def test_the_preflight_stage_of_each_wrapper_fits_its_node(self):
+        """A 1-GPU reservation must not fail an audit demanding 8 cards it was
+        never going to use."""
+        from pathlib import Path
+
+        from tools.lora_regret.preflight import STAGE_GPU_REQUIREMENTS
+
+        repo_root = Path(__file__).resolve().parents[3]
+        common = (repo_root / "scripts/lora_regret/coverage_probe.sh").read_text(
+            encoding="utf-8"
+        )
+        for size, stage in ((1, "e1-lora"), (4, "e1-full"), (8, "e4")):
+            assert f"{size}) PREFLIGHT_STAGE={stage}" in common or stage == "e4", size
+            assert STAGE_GPU_REQUIREMENTS[stage] <= size, (stage, size)

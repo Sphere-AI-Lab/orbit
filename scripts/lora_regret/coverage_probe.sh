@@ -50,7 +50,9 @@
 #   PROBE_LEVEL=path        path (17) | method (24) | config (61)
 #   PROBE_ROLLOUTS=3        rollouts per probe run
 #   PROBE_DIR=results/probe where the per-run ledgers go
-#   ONLY_GPUS=              set to 1, 4 or 8 to run only the runs of that size
+#   ONLY_GPUS=              set to 1, 4 or 8 to run only the runs of that size.
+#                           The three coverage_probe_<n>gpu.sh wrappers set it,
+#                           so each can be booked on a differently sized node.
 #   SKIP_PREFLIGHT=0        set 1 to skip the pre-run audit
 #   DRY_RUN=0               set 1 to print the schedule and run nothing
 #
@@ -77,9 +79,17 @@ say() { printf '\n=== %s ===\n' "$*"; }
 # --- preflight -------------------------------------------------------------
 # Cheap, and it catches the two failures that would otherwise waste the node: a
 # venv of dangling symlinks (which imports *successfully*) and a truncated split.
+# The stage tracks ONLY_GPUS: preflight asserts the node has enough cards for
+# the stage it is given, so checking `e4` (needs 8) on a one-GPU reservation
+# would fail the audit for a run that was never going to use eight.
+case "${ONLY_GPUS}" in
+    1) PREFLIGHT_STAGE=e1-lora ;;
+    4) PREFLIGHT_STAGE=e1-full ;;
+    *) PREFLIGHT_STAGE=e4 ;;
+esac
 if [[ "${SKIP_PREFLIGHT}" != "1" ]]; then
-    say "preflight"
-    if ! python -m tools.lora_regret.preflight --stage e4; then
+    say "preflight (stage ${PREFLIGHT_STAGE})"
+    if ! python -m tools.lora_regret.preflight --stage "${PREFLIGHT_STAGE}"; then
         echo "preflight failed -- fix it before spending the node." >&2
         exit 1
     fi
@@ -90,13 +100,18 @@ fi
 # targets come from the matrices themselves rather than from a list in a shell
 # script that drifts the moment a matrix changes.
 say "plan"
-mapfile -t PLAN < <(python -m tools.lora_regret.probe plan --level "${PROBE_LEVEL}")
+PLAN_ARGS=(plan --level "${PROBE_LEVEL}")
+# Filtered by probe.py rather than in the loop below, so the plan that is
+# printed is exactly the plan that runs.
+[[ -n "${ONLY_GPUS}" ]] && PLAN_ARGS+=(--gpus "${ONLY_GPUS}")
+mapfile -t PLAN < <(python -m tools.lora_regret.probe "${PLAN_ARGS[@]}")
 if (( ${#PLAN[@]} == 0 )); then
     echo "empty plan -- probe.py produced no runs." >&2
     exit 1
 fi
 printf '%s\n' "${PLAN[@]}" | column -t
 echo "level=${PROBE_LEVEL}  runs=${#PLAN[@]}  rollouts each=${PROBE_ROLLOUTS}  sequential"
+[[ -n "${ONLY_GPUS}" ]] && echo "restricted to ${ONLY_GPUS}-GPU runs; the other sizes are separate scripts"
 
 # --- run, one at a time ----------------------------------------------------
 say "running ${#PLAN[@]} probes sequentially"
@@ -104,9 +119,6 @@ index=0
 failed=0
 for line in "${PLAN[@]}"; do
     IFS=$'\t' read -r matrix method arm only gpus metric full label <<< "${line}"
-    if [[ -n "${ONLY_GPUS}" && "${ONLY_GPUS}" != "${gpus}" ]]; then
-        continue
-    fi
     index=$(( index + 1 ))
 
     # Devices 0..N-1. Nothing else is running, so which cards these are does not
@@ -155,6 +167,11 @@ echo
 if (( failed > 0 )); then
     echo "${failed} probe(s) failed. Their rows read FAILED above and the campaign"
     echo "estimate is a LOWER BOUND -- it omits them rather than guessing."
+fi
+if [[ -n "${ONLY_GPUS}" ]]; then
+    echo "This was the ${ONLY_GPUS}-GPU subset. Rows reading 'not run' belong to the"
+    echo "other two scripts; the report reads every ledger in ${PROBE_DIR}, so it"
+    echo "fills in as each one finishes -- in any order, on any node."
 fi
 echo "Per-run stdout: logs/lora_regret/probe-<task>-<arm>.out"
 echo "Per-arm launcher logs: logs/lora_regret/<arm>.log"
