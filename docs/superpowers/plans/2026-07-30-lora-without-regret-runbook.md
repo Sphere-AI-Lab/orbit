@@ -11,7 +11,7 @@ Companions:
 
 ## What is ready, and what you still have to do
 
-Ready and CPU-verified (770 tests, 0 failures, in the built env):
+Ready and CPU-verified (778 tests, 0 failures, in the built env):
 
 | Piece | Where |
 |---|---|
@@ -27,7 +27,7 @@ Ready and CPU-verified (770 tests, 0 failures, in the built env):
 | NLL trace extraction | `tools/lora_regret/trace.py` |
 | σ, argmins, C1-C6 and C8 readings | `tools/lora_regret/analyze.py` |
 | Figures from the analysis JSON | `tools/lora_regret/plot.py` (§19) |
-| Coverage probe: one run per task per method | `scripts/lora_regret/coverage_probe.sh` (§20) |
+| Coverage probe: one run per configuration | `scripts/lora_regret/coverage_probe.sh` (§20) |
 
 The data is **materialized** (§2, done 2026-07-30) and the **smoke passes on it**
 (§3, done 2026-07-30). Yours to do, in this order: **close P3** (§4, needs DP≥2 and
@@ -870,19 +870,34 @@ own figure to compare against, where one exists
 `uv sync --extra plots` — and is imported lazily, so `plot.py` stays importable
 without it.
 
-## 20. Coverage probe — one run per task per method (before anything long)
+## 20. Coverage probe — one run per configuration (before anything long)
 
 ```bash
 bash scripts/lora_regret/coverage_probe.sh
 ```
 
-24 runs, one per (task, method), three rollouts each, on a single 8×H100 node.
+61 runs, one per distinct **configuration**, three rollouts each, on a single
+8×H100 node. A configuration is everything except the learning rate — rank, OFT
+block size, target modules, batch size. The LR is the only axis collapsed,
+because it is a scalar multiply: it changes neither step time nor memory.
+Nothing else is, because `e2` at rollout batch 512 is 16× the batch of anything
+else in the campaign and is the single most likely OOM in it.
+
+`PROBE_LEVEL=method` gives a 24-run version, one per (task, method). It covers
+26 of the 61 and never launches `e2` batch 512, `e1` rank 512 or `e5` block 256
+— the three largest memory footprints in the campaign. Use it only when the node
+is short.
+
+Phases: 44 runs at 1 GPU (6 waves of 8), 7 at 4 GPUs (4 waves of 2), 10 at
+8 GPUs (sequential). Phase 3 dominates wall clock.
+
 It answers exactly two questions:
 
-1. **Does every method run?** A method that cannot start, cannot wrap the model,
-   or never reaches the eval line the parser needs fails here in minutes rather
-   than on the 40th arm of a reserved node. OFT under policy gradient (§18) has
-   never executed at all; this is where that is found out.
+1. **Does every configuration run?** Anything that cannot start, cannot wrap the
+   model, OOMs, or never reaches the eval line the parser needs fails here in
+   minutes rather than on the 40th arm of a reserved node. OFT under policy
+   gradient (§18) has never executed at all, and neither has any arm at rollout
+   batch 512; this is where both are found out.
 2. **How long is the real thing?** `train.py` logs `progress … last=` per
    rollout, so each probe yields a *measured* per-rollout time. The report
    multiplies it by that arm's own rollout count and by the number of arms of
@@ -892,6 +907,11 @@ It deliberately cannot answer a third. Three-rollout rows carry
 `probe_rollouts`, and `analyze` **exits 4** on any ledger containing one — a
 90-second run produces a real-looking `test_nll`, and a globbed ledger would let
 it win an argmin.
+
+Every probe run goes to the **`lora-regret-smoke`** wandb project, never a
+task's, with `group=<task>-<method>`. That routing is keyed off the rollout
+count rather than a flag, so a probe cannot reach a real dashboard even
+deliberately.
 
 GPU sizing mirrors the real sweep, because a timing measured on the wrong number
 of GPUs estimates nothing:
@@ -908,8 +928,8 @@ estimates. Do not average the two. If you want clean 1-GPU numbers, re-run just
 that phase alone: `ONLY_PHASE=1 PROBE_DIR=results/probe_solo bash …` with the
 loop's barrier reached one run at a time.
 
-Knobs: `PROBE_ROLLOUTS` (3), `PROBE_DIR` (`results/probe`), `ONLY_PHASE`
-(1, 4 or 8), `DRY_RUN=1`, `SKIP_PREFLIGHT=1`.
+Knobs: `PROBE_LEVEL` (`config` | `method`), `PROBE_ROLLOUTS` (3), `PROBE_DIR`
+(`results/probe`), `ONLY_PHASE` (1, 4 or 8), `DRY_RUN=1`, `SKIP_PREFLIGHT=1`.
 
 `e1long` and `sft82` are not probed and the plan says why: `e1long`'s arms come
 from an E1-1 ledger that does not exist yet, and `sft82` is the frozen legacy

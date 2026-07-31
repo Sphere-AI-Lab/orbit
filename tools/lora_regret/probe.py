@@ -83,6 +83,16 @@ FULL_RUN_ROLLOUTS = {
 }
 
 
+# What counts as one probe. `config` is the default and the honest unit: it
+# collapses ONLY the learning rate, which is a scalar multiply and so changes
+# neither step time nor memory. Every other axis -- rank, OFT block size, target
+# modules, batch size -- changes both, and collapsing them is how a probe misses
+# the arm that OOMs. `method` is the cheap version: one run per (task, method),
+# which covers 26 of the 61 configurations and leaves e2's batch 512, e1's rank
+# 512 and e5's block 256 unlaunched.
+PROBE_LEVELS = ("config", "method")
+
+
 @dataclass(frozen=True)
 class ProbeRun:
     matrix: str
@@ -94,6 +104,8 @@ class ProbeRun:
     full_rollouts: int
     arms_of_method: int
     project: str
+    label: str          # task/method/capacity/placement, for the report
+    arms_in_config: int  # arms sharing this configuration -- the LR grid width
 
 
 def _build(matrix: str):
@@ -102,15 +114,41 @@ def _build(matrix: str):
     return MATRICES[matrix](model.hidden_size, model.ffn_size, 0, centre, None)
 
 
-def _representative(arms: list, method: str):
-    """The middle learning rate of that method's cell.
+_MODULE_SHORT = {
+    "linear_qkv,linear_proj,linear_fc1,linear_fc2": "all",
+    "linear_qkv,linear_proj": "attn",
+    "linear_fc1,linear_fc2": "mlp",
+    "": "-",
+}
 
-    Which arm is probed does not change the timing -- a learning rate is a
-    multiply -- so the choice is made for determinism and readability rather
-    than for physics. The middle of the grid is the arm an operator recognises.
+
+def config_key(arm) -> tuple:
+    """Everything about an arm except its learning rate.
+
+    This is the unit that has to be launched at least once: two arms with the
+    same key differ only by a multiply, two arms with different keys can differ
+    by 16x in rollout batch or 2x in adapter size.
     """
-    candidates = sorted((a for a in arms if a.method == method), key=lambda a: (a.lr, a.name))
-    return candidates[len(candidates) // 2]
+    return (arm.method, arm.rank, arm.oft_block_size, arm.target_modules,
+            arm.global_batch_size)
+
+
+def config_label(key: tuple) -> str:
+    method, rank, block, modules, batch = key
+    capacity = f"r{rank}" if method == "lora" else (f"b{block}" if method == "oft" else "-")
+    label = f"{method}/{capacity}/{_MODULE_SHORT.get(modules, modules)}"
+    return label + (f"/batch{batch}" if batch else "")
+
+
+def _representative(arms: list):
+    """The middle learning rate of a cell.
+
+    Which LR is probed does not change the timing, so the choice is made for
+    determinism and readability. The middle of the grid is the arm an operator
+    recognises from the runbook.
+    """
+    ordered = sorted(arms, key=lambda a: (a.lr, a.name))
+    return ordered[len(ordered) // 2]
 
 
 def _gpus(method: str, metric: str) -> int:
@@ -126,16 +164,26 @@ def _gpus(method: str, metric: str) -> int:
     return 1
 
 
-def probe_plan() -> list[ProbeRun]:
-    """One run per (matrix, method) the campaign actually contains."""
+def probe_plan(level: str = "config") -> list[ProbeRun]:
+    """One run per distinct configuration (default) or per (task, method)."""
+    if level not in PROBE_LEVELS:
+        raise ValueError(f"unknown probe level {level!r}; known: {PROBE_LEVELS}")
     runs: list[ProbeRun] = []
     for matrix in MATRICES:
         if matrix in EXCLUDED_MATRICES:
             continue
         arms = _build(matrix)
         metric = MATRIX_METRICS[matrix]
-        for method in sorted({a.method for a in arms}):
-            arm = _representative(arms, method)
+        cells: dict[tuple, list] = {}
+        for arm in arms:
+            key = config_key(arm) if level == "config" else (arm.method,)
+            cells.setdefault(key, []).append(arm)
+        for cell in cells.values():
+            arm = _representative(cell)
+            method = arm.method
+            label = (
+                config_label(config_key(arm)) if level == "config" else f"{method}/*/*"
+            )
             runs.append(
                 ProbeRun(
                     matrix=matrix,
@@ -153,6 +201,8 @@ def probe_plan() -> list[ProbeRun]:
                     # FullFT plus 35 LoRA plus 5 OFT with very different costs.
                     arms_of_method=sum(1 for a in arms if a.method == method),
                     project=wandb_project(matrix),
+                    label=label,
+                    arms_in_config=len(cell),
                 )
             )
     return runs
@@ -174,22 +224,28 @@ def _hms(seconds: float) -> str:
     return f"{total // 3600:d}h{(total % 3600) // 60:02d}m"
 
 
-def format_report(records: list[dict]) -> str:
-    """The probe's answer to both questions, one row per planned run."""
-    by_key = {(r.get("matrix"), r.get("method")): r for r in records}
+def format_report(records: list[dict], level: str = "config") -> str:
+    """The probe's answer to both questions, one row per planned run.
+
+    Keyed on the arm name, not on (task, method): at `config` level a task has
+    several rows per method, and a (task, method) key would collapse e2's batch
+    32 onto its batch 512 -- which is precisely the pair whose difference the
+    config level exists to measure.
+    """
+    by_key = {(r.get("matrix"), r.get("arm")): r for r in records}
     lines = [
-        f"{'task':10} {'method':7} {'gpu':>3} {'status':8} {'steady/rollout':>15} "
-        f"{'x rollouts':>11} {'one arm':>9} {'arms':>5} {'all arms':>10}",
-        "-" * 92,
+        f"{'task':9} {'configuration':22} {'gpu':>3} {'status':8} {'steady/roll':>12} "
+        f"{'x rolls':>8} {'one arm':>8} {'arms':>5} {'all arms':>10}",
+        "-" * 96,
     ]
     campaign = 0.0
     unknown = 0
-    for run in probe_plan():
-        record = by_key.get((run.matrix, run.method))
+    for run in probe_plan(level):
+        record = by_key.get((run.matrix, run.arm))
         if record is None:
             lines.append(
-                f"{run.matrix:10} {run.method:7} {run.gpus:>3} {'not run':8} "
-                f"{'-':>15} {run.full_rollouts:>11} {'-':>9} {run.arms_of_method:>5} {'-':>10}"
+                f"{run.matrix:9} {run.label:22} {run.gpus:>3} {'not run':8} "
+                f"{'-':>12} {run.full_rollouts:>8} {'-':>8} {run.arms_in_config:>5} {'-':>10}"
             )
             unknown += 1
             continue
@@ -197,8 +253,8 @@ def format_report(records: list[dict]) -> str:
         steady = steady_seconds(record.get("rollout_seconds") or [])
         if steady is None:
             lines.append(
-                f"{run.matrix:10} {run.method:7} {run.gpus:>3} {status:8} "
-                f"{'?':>15} {run.full_rollouts:>11} {'?':>9} {run.arms_of_method:>5} {'?':>10}"
+                f"{run.matrix:9} {run.label:22} {run.gpus:>3} {status:8} "
+                f"{'?':>12} {run.full_rollouts:>8} {'?':>8} {run.arms_in_config:>5} {'?':>10}"
             )
             unknown += 1
             continue
@@ -206,14 +262,18 @@ def format_report(records: list[dict]) -> str:
         # real arm pays it once too -- so it is added once, not amortised away.
         overhead = max(0.0, float(record.get("seconds") or 0.0) - steady * len(record["rollout_seconds"]))
         one_arm = overhead + steady * run.full_rollouts
-        all_arms = one_arm * run.arms_of_method
+        # Arms sharing this configuration -- its LR grid width. At `config`
+        # level that is what this row stands for; summing them reconstructs the
+        # matrix exactly, with no arm counted twice and none omitted.
+        multiplier = run.arms_in_config if level == "config" else run.arms_of_method
+        all_arms = one_arm * multiplier
         campaign += all_arms
         lines.append(
             f"{run.matrix:10} {run.method:7} {run.gpus:>3} {status:8} "
-            f"{steady:>13.1f}s {run.full_rollouts:>11} {_hms(one_arm):>9} "
-            f"{run.arms_of_method:>5} {_hms(all_arms):>10}"
+            f"{steady:>11.1f}s {run.full_rollouts:>8} {_hms(one_arm):>8} "
+            f"{multiplier:>5} {_hms(all_arms):>10}"
         )
-    lines.append("-" * 92)
+    lines.append("-" * 96)
     lines.append(
         "campaign estimate, serial wall clock summed over every arm: "
         + (_hms(campaign) if campaign else "-- nothing measured yet")
@@ -225,9 +285,9 @@ def format_report(records: list[dict]) -> str:
         )
     lines.append(
         "Rows are 3-rollout probes. `one arm` = startup + steady x that arm's own "
-        "rollout count; `all arms` multiplies by the arms of that method in that "
-        "task. Concurrency is not modelled: run 8 one-GPU arms at once and the "
-        "wall clock divides, but each arm's own time does not."
+        "rollout count; `all arms` multiplies by the arms sharing that "
+        "configuration (its LR grid). Concurrency is not modelled: run 8 one-GPU "
+        "arms at once and the wall clock divides, but each arm's own time does not."
     )
     return "\n".join(lines)
 
@@ -237,7 +297,18 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     plan = sub.add_parser("plan", help="one TSV line per planned run, for the shell driver")
     plan.add_argument("--gpus", type=int, default=None, help="only runs needing this many GPUs")
+    plan.add_argument(
+        "--level", choices=PROBE_LEVELS, default="config",
+        help="config (default): one run per distinct configuration, collapsing "
+             "only the learning rate. method: one per (task, method) -- cheaper, "
+             "and it never launches e2's batch 512, e1's rank 512 or e5's block "
+             "256, which are the three most likely to OOM.",
+    )
     report = sub.add_parser("report", help="read probe ledgers and estimate the campaign")
+    report.add_argument(
+        "--level", choices=PROBE_LEVELS, default="config",
+        help="must match the level the probe ran at",
+    )
     report.add_argument(
         "--ledger", nargs="+", required=True,
         help="paths or globs. Concurrent probe runs each write their own file, "
@@ -246,13 +317,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "plan":
-        for run in probe_plan():
+        for run in probe_plan(args.level):
             if args.gpus is not None and run.gpus != args.gpus:
                 continue
             print(
                 "\t".join(
                     [run.matrix, run.method, run.arm, run.only, str(run.gpus),
-                     run.metric, str(run.full_rollouts), run.project]
+                     run.metric, str(run.full_rollouts), run.label]
                 )
             )
         return 0
@@ -263,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
     if not paths:
         # Still print the table: every row reads "not run", which is the honest
         # state of a probe that has not started and is more useful than an error.
-        print(format_report([]))
+        print(format_report([], args.level))
         return 1
     records = []
     for path in paths:
@@ -272,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
                 records.append(json.loads(line))
             except json.JSONDecodeError:
                 continue  # truncated final line from an interrupted write
-    print(format_report(records))
+    print(format_report(records, args.level))
     return 0
 
 

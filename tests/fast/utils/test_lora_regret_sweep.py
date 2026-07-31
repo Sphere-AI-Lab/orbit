@@ -1417,3 +1417,41 @@ class TestWandbRouting:
         record = json.loads(results.read_text().splitlines()[0])
         assert record["wandb_project"] == "tulu3-sft-placement"
         assert record["wandb_group"] == "lora"
+
+
+class TestSmokeRunsAreQuarantined:
+    """A probe writes a real-looking loss curve after three rollouts. In a task
+    project it would sit beside the arms deciding C2, indistinguishable in the
+    sidebar -- so every probe goes to one smoke project instead, and the task
+    moves into the group so the runs stay separable."""
+
+    def test_a_probe_run_never_lands_in_a_task_project(self, tmp_path, capsys):
+        from tools.lora_regret.arms import MATRICES
+        from tools.lora_regret.sweep import MATRIX_PROJECTS, SMOKE_WANDB_PROJECT
+
+        arm = Arm("lora-r16-all-lr0.00025-s0", "lora", 16, None, ALL_MODULES, 2.5e-4, 0)
+        for matrix in MATRICES:
+            run_arm(arm, tmp_path, tmp_path / "r.jsonl", dry_run=True,
+                    matrix=matrix, probe_rollouts=3)
+            printed = capsys.readouterr().out
+            assert f"WANDB_PROJECT={SMOKE_WANDB_PROJECT}" in printed, matrix
+            assert f"WANDB_PROJECT={MATRIX_PROJECTS[matrix]}" not in printed, matrix
+
+    def test_the_group_still_separates_task_and_method(self, tmp_path, capsys):
+        arm = Arm("oftscout-b1024-attn-lr2.15e-05-s0", "oft", None, 1024,
+                  ATTN_MODULES, 2.15e-5, 0)
+        run_arm(arm, tmp_path, tmp_path / "r.jsonl", dry_run=True,
+                matrix="e4place", probe_rollouts=3)
+        assert "WANDB_GROUP=e4place-oft" in capsys.readouterr().out
+
+    def test_a_real_run_is_unaffected(self, tmp_path, capsys):
+        arm = Arm("lora-r16-all-lr0.00025-s0", "lora", 16, None, ALL_MODULES, 2.5e-4, 0)
+        run_arm(arm, tmp_path, tmp_path / "r.jsonl", dry_run=True, matrix="e1")
+        printed = capsys.readouterr().out
+        assert "WANDB_PROJECT=tulu3-sft-rank" in printed
+        assert "WANDB_GROUP=lora" in printed
+
+    def test_the_smoke_project_is_not_a_task_project(self):
+        from tools.lora_regret.sweep import MATRIX_PROJECTS, SMOKE_WANDB_PROJECT
+
+        assert SMOKE_WANDB_PROJECT not in set(MATRIX_PROJECTS.values())

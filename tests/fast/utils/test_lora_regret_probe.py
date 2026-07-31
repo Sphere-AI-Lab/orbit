@@ -20,8 +20,49 @@ from tools.lora_regret.probe import (
 
 
 class TestPlan:
+    def test_config_level_launches_every_distinct_configuration_once(self):
+        """The default level. A configuration is everything but the learning
+        rate; two arms with different keys can differ by 16x in rollout batch or
+        2x in adapter size, and the one that OOMs is always the one nobody ran."""
+        from tools.lora_regret.arms import MATRICES
+        from tools.lora_regret.probe import config_key
+
+        runs = probe_plan("config")
+        assert len({(r.matrix, r.arm) for r in runs}) == len(runs)
+        for matrix in MATRICES:
+            if matrix in EXCLUDED_MATRICES:
+                continue
+            centre = 1e-4 if matrix == "e5" else None
+            arms = MATRICES[matrix](4096, 14336, 0, centre, None)
+            wanted = {config_key(a) for a in arms}
+            probed = {
+                config_key(next(a for a in arms if a.name == r.arm))
+                for r in runs if r.matrix == matrix
+            }
+            assert probed == wanted, matrix
+
+    def test_method_level_is_the_cheap_subset_and_covers_less(self):
+        cheap, full = probe_plan("method"), probe_plan("config")
+        assert len(cheap) < len(full)
+        assert {(r.matrix, r.method) for r in cheap} == {
+            (r.matrix, r.method) for r in full
+        }
+
+    def test_an_unknown_level_is_refused(self):
+        with pytest.raises(ValueError, match="unknown probe level"):
+            probe_plan("everything")
+
+    def test_the_riskiest_configurations_are_in_the_default_plan(self):
+        """The three the method level silently omits: e2's rollout batch 512
+        (16x anything else in the campaign), e1's rank 512 (the largest adapter)
+        and e5's block 256 (the largest rotation)."""
+        labels = {(r.matrix, r.label) for r in probe_plan("config")}
+        assert ("e2", "lora/r256/all/batch512") in labels
+        assert ("e1", "lora/r512/all") in labels
+        assert ("e5", "oft/b256/all") in labels
+
     def test_one_run_per_task_per_method(self):
-        seen = [(run.matrix, run.method) for run in probe_plan()]
+        seen = [(run.matrix, run.method) for run in probe_plan("method")]
         assert len(seen) == len(set(seen)), "a (task, method) pair is probed twice"
         by_matrix = {}
         for matrix, method in seen:
@@ -40,7 +81,7 @@ class TestPlan:
         from tools.lora_regret.arms import MATRICES
 
         planned = {}
-        for run in probe_plan():
+        for run in probe_plan('method'):
             planned.setdefault(run.matrix, set()).add(run.method)
         for matrix, methods in planned.items():
             centre = 1e-4 if matrix in ("e5",) else None
@@ -54,7 +95,7 @@ class TestPlan:
     def test_each_run_names_a_real_arm_of_that_matrix(self):
         from tools.lora_regret.arms import MATRICES
 
-        for run in probe_plan():
+        for run in probe_plan('config'):
             centre = 1e-4 if run.matrix == "e5" else None
             names = {a.name for a in MATRICES[run.matrix](4096, 14336, 0, centre, None)}
             assert run.arm in names, (run.matrix, run.arm)
@@ -67,7 +108,7 @@ class TestPlan:
 
         from tools.lora_regret.arms import MATRICES
 
-        for run in probe_plan():
+        for run in probe_plan('config'):
             centre = 1e-4 if run.matrix == "e5" else None
             arms = MATRICES[run.matrix](4096, 14336, 0, centre, None)
             pattern = re.compile(run.only)
@@ -81,7 +122,7 @@ class TestPlan:
         from tools.lora_regret.models import get
 
         floor = get("llama3.1-8b").min_gpus_fullft()
-        for run in probe_plan():
+        for run in probe_plan('config'):
             if run.metric == "accuracy":
                 assert run.gpus == 8, run.arm
             elif run.method == "full":
@@ -92,7 +133,7 @@ class TestPlan:
     def test_every_run_carries_the_real_arms_rollout_count(self):
         """Without it the probe measures a per-step time and cannot turn it into
         an estimate of anything."""
-        for run in probe_plan():
+        for run in probe_plan('config'):
             assert run.full_rollouts >= PROBE_ROLLOUTS, run.arm
 
     def test_the_short_horizon_matrix_extrapolates_to_its_own_cap(self):
@@ -137,8 +178,14 @@ class TestRolloutSeconds:
 class TestReport:
     @staticmethod
     def _record(matrix, method, status="ok", seconds=600.0, rollout_seconds=None):
+        """Uses a real planned arm name -- the report keys on it, because at
+        config level one (task, method) has several rows."""
+        arm = next(
+            r.arm for r in probe_plan("config")
+            if r.matrix == matrix and r.method == method
+        )
         return {
-            "arm": f"{method}-probe", "method": method, "matrix": matrix,
+            "arm": arm, "method": method, "matrix": matrix,
             "status": status, "seconds": seconds, "probe_rollouts": 3,
             "rollout_seconds": rollout_seconds if rollout_seconds is not None else [200.0, 90.0, 92.0],
             "full_rollouts": 2000, "gpus": 1, "wandb_project": f"{matrix}-proj",

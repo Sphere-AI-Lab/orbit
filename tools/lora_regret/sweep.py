@@ -123,6 +123,14 @@ MATRIX_PROJECTS = {
 # exactly where a hand-run one does.
 UNROUTED_WANDB_PROJECT = "lora-without-regret"
 
+# Every probe run, whatever task it names. Smoke runs are three rollouts with a
+# real-looking loss curve; mixed into `tulu3-sft-rank` they would sit beside the
+# arms that decide C2 and be indistinguishable from them in the sidebar. One bin
+# for all of them, with the task and method in the group instead -- and it is
+# keyed off `probe_rollouts` rather than a flag, so a probe cannot be pointed at
+# a real project even deliberately.
+SMOKE_WANDB_PROJECT = "lora-regret-smoke"
+
 
 def wandb_project(matrix: str | None) -> str:
     """The wandb project for one matrix, or the campaign default for none."""
@@ -305,7 +313,13 @@ def run_arm(
     # today, and the ordering makes the arm win if they ever overlap.
     overrides = dict(model_env(get_model(arm.model), repo_root))
     overrides.update(arm_env(arm))
-    project = wandb_project(matrix)
+    if probe_rollouts is None:
+        project, group = wandb_project(matrix), arm.method
+    else:
+        # The task moves into the group so one smoke project still separates
+        # e4place/oft from e1/lora, without either polluting a real dashboard.
+        project = SMOKE_WANDB_PROJECT
+        group = f"{matrix or 'unrouted'}-{arm.method}"
     overrides.update(
         {
             "LAUNCHER_NAME": arm.name,
@@ -315,7 +329,7 @@ def run_arm(
             # states outright; grouping by method is what makes a task's
             # FullFT, LoRA and OFT arms separable inside its own dashboard.
             "WANDB_PROJECT": project,
-            "WANDB_GROUP": arm.method,
+            "WANDB_GROUP": group,
             "SAVE_DIR": str(repo_root / "orbit_ckpts" / "lora_regret" / arm.name),
         }
     )
@@ -379,7 +393,7 @@ def run_arm(
             # later cannot be traced back to the dashboard it was read off,
             # which is the point of splitting the projects in the first place.
             "wandb_project": project,
-            "wandb_group": arm.method,
+            "wandb_group": group,
             "steps": steps,
             # The whole curve, not only its last point: C1's departure step is
             # unrecoverable from a scalar, and logs/ is gitignored.
