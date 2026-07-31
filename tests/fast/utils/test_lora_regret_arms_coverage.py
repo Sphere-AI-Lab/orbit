@@ -14,10 +14,13 @@ HIDDEN, FFN = 4096, 14336
 
 
 class TestE1Ot:
-    def test_forty_arms_matching_e1s_shape(self):
+    def test_the_rank_ladder_matches_e1s_shape(self):
+        """40 LoRA/FullFT arms as E1 has, plus the r256-anchored OFT cell that
+        gives this task's dashboard all three methods."""
         arms = e1ot_arms()
-        assert len(arms) == 40
+        assert len(arms) == 45
         assert sum(1 for a in arms if a.method == "full") == 5
+        assert sum(1 for a in arms if a.method == "oft") == 5
         assert {a.rank for a in arms if a.method == "lora"} == {1, 4, 16, 64, 128, 256, 512}
 
     def test_every_arm_reads_openthoughts3(self):
@@ -35,7 +38,7 @@ class TestE1Ot:
         assert {a.eval_nll_interval for a in e1ot_arms()} == {3}
 
     def test_it_is_registered(self):
-        assert len(MATRICES["e1ot"](HIDDEN, FFN, 0, None, None)) == 40
+        assert len(MATRICES["e1ot"](HIDDEN, FFN, 0, None, None)) == 45
 
 
 class TestE1Short:
@@ -43,8 +46,9 @@ class TestE1Short:
         from tools.lora_regret.arms import e1short_arms
 
         arms = e1short_arms()
-        assert len(arms) == 14
+        assert len(arms) == 21
         assert sum(1 for a in arms if a.method == "full") == 7
+        assert sum(1 for a in arms if a.method == "oft") == 7
         assert {a.rank for a in arms if a.method == "lora"} == {256}
 
     def test_the_grid_resolves_fifteen_from_ten(self):
@@ -91,8 +95,10 @@ class TestE4Place:
         from tools.lora_regret.arms import e4place_arms
 
         arms = e4place_arms(HIDDEN, FFN)
-        assert len(arms) == 8
-        assert {a.target_modules for a in arms} == {ATTN_MODULES, MLP_MODULES}
+        assert len(arms) == 20
+        peft = [a for a in arms if a.method != "full"]
+        assert {a.target_modules for a in peft} == {ATTN_MODULES, MLP_MODULES}
+        assert len([a for a in peft if a.method == "lora"]) == 8
 
     def test_it_does_not_restate_any_arm_e4_already_runs(self):
         """e4's LoRA r256 all-modules cell uses this exact grid, so an
@@ -111,15 +117,22 @@ class TestE4Place:
         from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT, e4place_arms
 
         expected = matched_mlp_rank(256, HIDDEN, FFN, LLAMA31_8B_QKV_OUTPUT)
-        mlp = {a.rank for a in e4place_arms(HIDDEN, FFN) if a.target_modules == MLP_MODULES}
+        mlp = {a.rank for a in e4place_arms(HIDDEN, FFN)
+               if a.method == "lora" and a.target_modules == MLP_MODULES}
         assert mlp == {expected}
         assert expected != 256 and expected != 128
 
-    def test_no_fullft_arm(self):
-        """The post's RL placement panel is a comparison within LoRA."""
+    def test_the_fullft_arms_are_a_reference_line_not_a_placement_cell(self):
+        """The post's RL placement panel is a comparison within PEFT: FullFT has
+        no adapter to place. Its arms are here as the baseline the placement
+        cells are read against inside this task's own dashboard, so they target
+        no modules and duplicate E4's grid under a distinguishing tag."""
         from tools.lora_regret.arms import e4place_arms
 
-        assert all(a.method == "lora" for a in e4place_arms(HIDDEN, FFN))
+        full = [a for a in e4place_arms(HIDDEN, FFN) if a.method == "full"]
+        assert len(full) == 4
+        assert {a.target_modules for a in full} == {""}
+        assert all("place" in a.name for a in full)
 
     def test_it_shares_e4s_data_and_half_decade_grid(self):
         """So the placement result and the rank result are read off comparable
@@ -130,7 +143,8 @@ class TestE4Place:
 
         place = e4place_arms(HIDDEN, FFN)
         assert {a.dataset for a in place} == {RL_MIX_DATASET}
-        lrs = sorted({a.lr for a in place if a.target_modules == ATTN_MODULES})
+        lrs = sorted({a.lr for a in place
+                      if a.method == "lora" and a.target_modules == ATTN_MODULES})
         steps = [math.log10(b / a) for a, b in zip(lrs, lrs[1:])]
         assert all(abs(s - 0.5) < 0.01 for s in steps), steps
         e4_lora = sorted({a.lr for a in e4_arms() if a.method == "lora"})
@@ -141,4 +155,181 @@ class TestE4Place:
 
         assert MATRIX_METRICS["e4place"] == "accuracy"
         assert "rl-math-gsm8k" in MATRIX_LAUNCHERS["e4place"]
-        assert len(MATRICES["e4place"](HIDDEN, FFN, 0, None, None)) == 8
+        assert len(MATRICES["e4place"](HIDDEN, FFN, 0, None, None)) == 20
+
+
+class TestMethodCoverage:
+    """Every grid matrix carries FullFT, LoRA and OFT, so each task's wandb
+    project shows all three.
+
+    The hazard this class exists for is the OFT learning rate. OFT parameterizes
+    a *rotation*, not an additive update, so nothing about LoRA's optimal LR
+    transfers to it -- not the value, not the decade. `sft82` put 35 of its 40
+    OFT arms on LoRA's grid and the module docstring calls that unjustified. The
+    arms added here must therefore be a labelled *scout* until a centre has been
+    measured, never a centred measurement wearing a scout's uncertainty.
+    """
+
+    GRID_MATRICES = ("e1", "e1short", "e1ot", "e2", "e3", "e4", "e4place")
+
+    @pytest.mark.parametrize("matrix", GRID_MATRICES)
+    def test_all_three_methods_are_present(self, matrix):
+        assert {a.method for a in MATRICES[matrix](HIDDEN, FFN, 0, None, None)} == {
+            "full", "lora", "oft"
+        }
+
+    @pytest.mark.parametrize("matrix", GRID_MATRICES)
+    def test_without_a_scouted_centre_the_oft_arms_say_so_in_their_name(self, matrix):
+        """`oftscout-...` in the ledger and the dashboard. An arm named `oft-`
+        on an unscouted grid would be quoted as a measurement of OFT's optimum
+        when it is a search for it."""
+        arms = MATRICES[matrix](HIDDEN, FFN, 0, None, None)
+        oft = [a for a in arms if a.method == "oft"]
+        assert oft
+        assert all(a.name.startswith("oftscout-") for a in oft), [a.name for a in oft]
+
+    @pytest.mark.parametrize("matrix", GRID_MATRICES)
+    def test_with_a_centre_they_become_measurements_on_a_centred_grid(self, matrix):
+        arms = MATRICES[matrix](HIDDEN, FFN, 0, 1e-4, None)
+        oft = [a for a in arms if a.method == "oft"]
+        assert oft
+        assert all(a.name.startswith("oft-") for a in oft), [a.name for a in oft]
+
+    @pytest.mark.parametrize("matrix", GRID_MATRICES)
+    def test_the_oft_grid_is_never_loras_grid(self, matrix):
+        """The specific mistake sft82 made -- 35 of its 40 OFT arms sat on
+        LoRA's own point set.
+
+        Overlap is not the same failure and is not banned: a scout that spans
+        the plausible region necessarily crosses the LoRA grid, and refusing to
+        would push the scout off the answer. What is banned is *being* that
+        grid, and being too narrow to find anything a decade away.
+        """
+        import math
+
+        arms = MATRICES[matrix](HIDDEN, FFN, 0, None, None)
+        oft_lrs = sorted({a.lr for a in arms if a.method == "oft"})
+        lora_lrs = sorted({a.lr for a in arms if a.method == "lora"})
+        assert set(oft_lrs) != set(lora_lrs)
+        span = math.log10(max(oft_lrs) / min(oft_lrs))
+        assert span >= 1.0, f"{matrix} OFT scout spans only {span:.2f} decades"
+        lora_span = math.log10(max(lora_lrs) / min(lora_lrs))
+        assert span >= lora_span, (
+            f"{matrix} OFT scout ({span:.2f} decades) is narrower than the LoRA "
+            f"grid ({lora_span:.2f}), so it is a measurement, not a search"
+        )
+
+    @pytest.mark.parametrize("matrix", GRID_MATRICES)
+    def test_the_oft_cell_mirrors_the_width_of_the_lora_cell_it_sits_beside(self, matrix):
+        """Same number of learning rates per cell, so an OFT cell cannot be
+        quietly cheaper or finer than the LoRA cell it is compared against."""
+        arms = MATRICES[matrix](HIDDEN, FFN, 0, None, None)
+        oft_cells = {}
+        lora_cells = {}
+        for arm in arms:
+            if arm.method == "oft":
+                oft_cells.setdefault((arm.oft_block_size, arm.target_modules,
+                                      arm.global_batch_size), set()).add(arm.lr)
+            elif arm.method == "lora":
+                lora_cells.setdefault((arm.rank, arm.target_modules,
+                                       arm.global_batch_size), set()).add(arm.lr)
+        widths_oft = {len(v) for v in oft_cells.values()}
+        widths_lora = {len(v) for v in lora_cells.values()}
+        assert widths_oft == widths_lora, (matrix, widths_oft, widths_lora)
+
+    @pytest.mark.parametrize("matrix", GRID_MATRICES)
+    def test_every_oft_arm_records_the_match_it_actually_achieved(self, matrix):
+        """`matched_ratio` is the block against its own implied LoRA rank, and
+        must be near 1 -- that is the pairing the arm really runs.
+
+        It is NOT the ratio against the anchor rank, and cannot be: on
+        Llama-3.1-8B all-modules, block 1024 carries 0.764 of r256's parameters
+        and the next block up carries 1.529, so no block matches r256 at all.
+        Asking for one and taking the nearest would ship a 24%-undersized
+        adapter labelled 'matched'. The next test pins the neighbourhood instead.
+        """
+        from orbit.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
+        from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT
+
+        shapes = megatron_module_shapes(HIDDEN, FFN, LLAMA31_8B_QKV_OUTPUT)
+        arms = MATRICES[matrix](HIDDEN, FFN, 0, None, None)
+        oft = [a for a in arms if a.method == "oft"]
+        assert oft
+        for arm in oft:
+            selected = {n: s for n, s in shapes.items()
+                        if n in arm.target_modules.split(",")}
+            report = oft_lora_match_report(arm.oft_block_size, selected)
+            assert arm.matched_ratio == pytest.approx(report["ratio"]), arm.name
+            assert 0.85 <= arm.matched_ratio <= 1.15, (matrix, arm.name, arm.matched_ratio)
+
+    @pytest.mark.parametrize("matrix", GRID_MATRICES)
+    def test_the_oft_capacity_is_in_the_neighbourhood_of_a_lora_arm_it_sits_beside(
+        self, matrix
+    ):
+        """The block's implied rank is within a factor of 2 of some LoRA rank
+        run on the same modules in the same matrix. Wider than that and the OFT
+        arm would be comparing method and capacity at once."""
+        from orbit.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
+        from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT
+
+        shapes = megatron_module_shapes(HIDDEN, FFN, LLAMA31_8B_QKV_OUTPUT)
+        arms = MATRICES[matrix](HIDDEN, FFN, 0, None, None)
+        ranks_for: dict[str, set] = {}
+        for arm in arms:
+            if arm.method == "lora":
+                ranks_for.setdefault(arm.target_modules, set()).add(arm.rank)
+        for arm in (a for a in arms if a.method == "oft"):
+            selected = {n: s for n, s in shapes.items()
+                        if n in arm.target_modules.split(",")}
+            implied = oft_lora_match_report(arm.oft_block_size, selected)["lora_rank"]
+            neighbours = ranks_for[arm.target_modules]
+            assert any(0.5 <= implied / rank <= 2.0 for rank in neighbours), (
+                matrix, arm.name, implied, sorted(neighbours)
+            )
+
+    def test_the_frozen_legacy_matrix_is_untouched(self):
+        """sft82's dry run is recorded in the gate log; it must stay 82 arms."""
+        assert len(MATRICES["sft82"](HIDDEN, FFN, 0, None, None)) == 82
+
+    def test_the_oft_scout_stage_is_not_turned_into_a_sweep(self):
+        """e5scout exists to find OFT's learning rate. Adding FullFT and LoRA
+        arms to it would make the scout a sweep and delay every OFT number."""
+        arms = MATRICES["e5scout"](HIDDEN, FFN, 0, None, None)
+        assert len(arms) == 5
+        assert {a.method for a in arms} == {"oft"}
+
+    def test_the_added_fullft_arms_do_not_collide_with_e1s_or_e4s(self):
+        """E1 and E4 already run FullFT on the grids E3 and E4-place now borrow.
+        Untagged, all of those names would be byte-identical -- a re-run at 8
+        GPUs for E4-place, and a duplicate key the moment two ledgers are
+        globbed into `analyze`, where the better of two runs of one
+        configuration wins. Hence the `place` tag on both."""
+        from tools.lora_regret.arms import e1_arms, e3_arms, e4_arms, e4place_arms
+
+        def full_names(arms):
+            return {a.name for a in arms if a.method == "full"}
+
+        assert not (full_names(e1_arms()) & full_names(e3_arms(HIDDEN, FFN)))
+        assert not (full_names(e4_arms()) & full_names(e4place_arms(HIDDEN, FFN)))
+
+    def test_the_only_cross_matrix_duplicate_is_the_one_e3_always_had(self):
+        """E3's all-modules cell IS E1's r256 rung -- same five names, same five
+        runs -- and predates this change. It is recorded here rather than fixed:
+        E3 needs that cell for C4's second half (all-modules against MLP-only),
+        and renaming it would orphan any E1 ledger already carrying it.
+
+        The value of pinning it is that the set cannot grow unnoticed.
+        """
+        from tools.lora_regret.arms import e1_arms, e3_arms
+
+        shared = {a.name for a in e1_arms()} & {a.name for a in e3_arms(HIDDEN, FFN)}
+        assert shared == {
+            f"lora-r256-all-lr{lr:g}-s0"
+            for lr in (6.28e-05, 0.000125, 0.00025, 0.000499, 0.000995)
+        }
+
+    def test_the_new_counts(self):
+        expected = {"e1": 45, "e1short": 21, "e1ot": 45, "e2": 48,
+                    "e3": 35, "e4": 20, "e4place": 20}
+        actual = {m: len(MATRICES[m](HIDDEN, FFN, 0, None, None)) for m in expected}
+        assert actual == expected

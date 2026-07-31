@@ -181,8 +181,11 @@ class TestE1Matrix:
     (the ~10x LR rule). Its grid is 5 points at 0.3-decade spacing centred on
     the post's own prediction, so a confirmation is a hit and not a fit."""
 
-    def test_arm_count_is_forty(self):
-        assert len(e1_arms()) == 40
+    def test_arm_count_is_forty_five(self):
+        """40 LoRA/FullFT arms as before, plus the r256-anchored OFT cell."""
+        arms = e1_arms()
+        assert len(arms) == 45
+        assert sum(1 for a in arms if a.method != "oft") == 40
 
     def test_ranks_are_the_posts_stated_range(self):
         ranks = {a.rank for a in e1_arms() if a.method == "lora"}
@@ -210,8 +213,11 @@ class TestE1Matrix:
 class TestE2Matrix:
     """E2 decides C3 (LoRA tolerates large batches worse, independent of rank)."""
 
-    def test_arm_count_is_thirty_six(self):
-        assert len(e2_arms()) == 36
+    def test_arm_count_is_forty_eight(self):
+        """36 LoRA/FullFT arms as before, plus one OFT cell per batch size."""
+        arms = e2_arms()
+        assert len(arms) == 48
+        assert sum(1 for a in arms if a.method != "oft") == 36
 
     def test_batch_sizes_are_the_posts_three(self):
         assert {a.global_batch_size for a in e2_arms()} == {32, 128, 512}
@@ -223,11 +229,15 @@ class TestE2Matrix:
         assert {a.rank for a in e2_arms() if a.method == "lora"} == {16, 256}
 
     def test_four_lrs_per_cell(self):
+        """12 cells now: the original 9 plus one OFT cell per batch size. Every
+        cell is still 4 LRs wide, OFT included -- an OFT cell with fewer points
+        would get a worse argmin than the LoRA cell it is compared against."""
         cells = {}
         for arm in e2_arms():
-            cells.setdefault((arm.method, arm.rank, arm.global_batch_size), []).append(arm.lr)
+            key = (arm.method, arm.rank, arm.oft_block_size, arm.global_batch_size)
+            cells.setdefault(key, []).append(arm.lr)
         assert all(len(lrs) == 4 for lrs in cells.values())
-        assert len(cells) == 9
+        assert len(cells) == 12
 
     def test_lr_centre_rises_with_batch_size(self):
         """Re-centred per batch, as the plan requires: holding the update-to-
@@ -264,11 +274,15 @@ class TestE3Matrix:
     parameter count). The earlier plan compared them at equal rank, which in a
     transformer is unequal parameters -- confounding placement with capacity."""
 
-    def test_arm_count_is_twenty(self):
-        assert len(e3_arms(H, FFN)) == 20
+    def test_arm_count_is_thirty_five(self):
+        """20 LoRA placement arms as before, plus a FullFT reference line (5)
+        and an OFT cell at each placement (10)."""
+        arms = e3_arms(H, FFN)
+        assert len(arms) == 35
+        assert sum(1 for a in arms if a.method == "lora") == 20
 
     def test_the_matched_pair_is_attention_r256_against_mlp_r92_on_llama(self):
-        arms = e3_arms(4096, 14336)
+        arms = [a for a in e3_arms(4096, 14336) if a.method == "lora"]
         attn = {a.rank for a in arms if a.target_modules == ATTN_MODULES}
         mlp = {a.rank for a in arms if a.target_modules == MLP_MODULES}
         assert attn == {256}
@@ -483,18 +497,23 @@ class TestE4Matrix:
     """E4 decides C5 (LoRA matches FullFT under policy gradient even at rank 1,
     with a wider band of performant LRs)."""
 
-    def test_arm_count_is_sixteen(self):
-        assert len(e4_arms()) == 16
+    def test_arm_count_is_twenty(self):
+        """16 LoRA/FullFT arms as before, plus the RL OFT scout cell."""
+        arms = e4_arms()
+        assert len(arms) == 20
+        assert sum(1 for a in arms if a.method != "oft") == 16
 
     def test_rank_one_is_present(self):
         """C5's whole point. Not the arm to drop under budget pressure."""
         assert {a.rank for a in e4_arms() if a.method == "lora"} == {1, 16, 256}
 
     def test_four_lrs_per_arm(self):
+        """5 cells now: FullFT, LoRA r1/r16/r256, and the RL OFT scout. All four
+        LRs wide -- the OFT cell mirrors the width it is compared against."""
         cells = {}
         for arm in e4_arms():
-            cells.setdefault((arm.method, arm.rank), []).append(arm.lr)
-        assert len(cells) == 4
+            cells.setdefault((arm.method, arm.rank, arm.oft_block_size), []).append(arm.lr)
+        assert len(cells) == 5
         assert all(len(lrs) == 4 for lrs in cells.values())
 
     def test_lora_centre_is_ten_times_the_full_centre(self):
@@ -714,11 +733,24 @@ class TestOftDiagnosticScope:
     def test_oft_match_report_is_printed_for_the_matrix_with_oft_arms(self, capsys, monkeypatch, tmp_path):
         assert "oft match rank=" in self._run("sft82", capsys, monkeypatch, tmp_path)
 
-    def test_oft_match_report_is_absent_for_lora_only_matrices(self, capsys, monkeypatch, tmp_path):
-        """Printing a block-size ratio next to a LoRA-only run invites reading it
-        as a property of the arms about to execute."""
+    def test_oft_match_report_is_absent_when_no_oft_arm_is_selected(
+        self, capsys, monkeypatch, tmp_path
+    ):
+        """Printing a block-size ratio next to a run with no OFT arm invites
+        reading it as a property of the arms about to execute.
+
+        Every matrix now carries an OFT cell, so the case that exercises the
+        guard is `--only`: selecting just the LoRA arms of a matrix must not
+        print a diagnostic about the OFT arms it filtered out.
+        """
         for matrix in ("e1", "e4"):
-            assert "oft match rank=" not in self._run(matrix, capsys, monkeypatch, tmp_path)
+            monkeypatch.setattr(
+                sys, "argv",
+                ["sweep.py", "--matrix", matrix, "--only", "^lora-",
+                 "--dry-run", "--results", str(tmp_path / f"{matrix}.jsonl")],
+            )
+            sweep.main()
+            assert "oft match rank=" not in capsys.readouterr().err
 
 
 LLAMA_H, LLAMA_FFN = 4096, 14336
@@ -855,17 +887,33 @@ class TestE5CliGuards:
         assert excinfo.value.code == 2
         assert "e5scout" in capsys.readouterr().err
 
-    def test_a_scouted_centre_on_another_matrix_is_refused(self, monkeypatch, capsys, tmp_path):
-        """Silently ignoring it would let someone believe an E1 sweep had been
-        re-centred when it had not."""
+    def test_a_scouted_centre_re_centres_another_matrixs_oft_cell(
+        self, monkeypatch, capsys, tmp_path
+    ):
+        """This used to be refused, because e5 was the only matrix with OFT
+        arms. Every matrix carries one now, so the centre is honoured rather
+        than rejected -- and honouring it is visible in the arm names, which go
+        from `oftscout-` (a search) to `oft-` (a measurement)."""
         monkeypatch.setattr(
             sys, "argv",
-            self._argv("--matrix", "e1", "--oft-lr-centre", "1e-4", "--results", str(tmp_path / "r.jsonl")),
+            self._argv("--matrix", "e1", "--oft-lr-centre", "1e-4",
+                       "--results", str(tmp_path / "r.jsonl")),
         )
-        with pytest.raises(SystemExit) as excinfo:
-            sweep.main()
-        assert excinfo.value.code == 2
-        assert "only meaningful" in capsys.readouterr().err
+        sweep.main()
+        printed = capsys.readouterr().out
+        assert "LAUNCHER_NAME=oft-b" in printed
+        assert "LAUNCHER_NAME=oftscout-" not in printed
+
+    def test_without_a_centre_that_same_cell_is_a_labelled_scout(
+        self, monkeypatch, capsys, tmp_path
+    ):
+        monkeypatch.setattr(
+            sys, "argv",
+            self._argv("--matrix", "e1", "--results", str(tmp_path / "r.jsonl")),
+        )
+        sweep.main()
+        printed = capsys.readouterr().out
+        assert "LAUNCHER_NAME=oftscout-b" in printed
 
     def test_e5_with_a_centre_runs(self, monkeypatch, capsys, tmp_path):
         monkeypatch.setattr(
@@ -1262,7 +1310,7 @@ class TestModelRegistryWiring:
             capture_output=True, text=True, cwd=REPO_ROOT,
         )
         assert proc.returncode == 0
-        assert len(proc.stdout.strip().splitlines()) == 40
+        assert len(proc.stdout.strip().splitlines()) == 45
 
 
 class TestWandbRouting:

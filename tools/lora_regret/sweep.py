@@ -451,10 +451,12 @@ def main() -> None:
         type=float,
         default=None,
         help=(
-            "Learning rate the e5scout matrix found. Required by --matrix e5 and "
-            "meaningless elsewhere: OFT parameterizes a rotation, so no LoRA "
-            "learning rate transfers to it and the refinement grid has nothing to "
-            "centre on until the scout has run."
+            "Learning rate the e5scout matrix found. REQUIRED by --matrix e5, "
+            "which has nothing else to centre on. Optional for every other "
+            "matrix: each carries an OFT cell that runs a wide `oftscout` grid "
+            "without this and a centred `oft` grid with it. OFT parameterizes a "
+            "rotation, so no LoRA learning rate transfers to it -- there is no "
+            "default that would not be an invented answer."
         ),
     )
     parser.add_argument(
@@ -482,8 +484,10 @@ def main() -> None:
         # A clean exit rather than a traceback: this is the one argument an
         # operator following the runbook can only supply after another run.
         parser.error("--matrix e5 requires --oft-lr-centre; run --matrix e5scout first and pass its argmin")
-    if args.matrix != "e5" and args.oft_lr_centre is not None:
-        parser.error(f"--oft-lr-centre is only meaningful for --matrix e5, not {args.matrix}")
+    # No inverse guard. Every matrix now carries an OFT cell, so a centre is
+    # meaningful everywhere; e5 is only special in having nothing to fall back
+    # on. `e1long` is the one matrix with no OFT arms -- its arms come from an
+    # E1-1 ledger -- and passing a centre there is inert rather than wrong.
     if args.matrix == "e1long" and args.argmins_from is None:
         parser.error(
             "--matrix e1long requires --argmins-from; run --matrix e1 to completion "

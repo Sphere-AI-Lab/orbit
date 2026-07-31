@@ -36,9 +36,13 @@ EXPECTED_ROWS = {
     "math_gsm8k_train.jsonl": 14_971,
 }
 
+# Counts with no `--oft-lr-centre`, which is what `check_matrices` builds and
+# what an operator sees before the scout has run. Supplying a centre does not
+# change any count -- every OFT cell keeps the width of the LoRA cell it mirrors,
+# only its learning rates move from the scout span onto a centred grid.
 EXPECTED_ARMS = {
-    "e1": 40, "e2": 36, "e3": 20, "e4": 16, "e5scout": 5, "e5": 50, "sft82": 82,
-    "e1ot": 40, "e1short": 14, "e4place": 8,
+    "e1": 45, "e2": 48, "e3": 35, "e4": 20, "e5scout": 5, "e5": 50, "sft82": 82,
+    "e1ot": 45, "e1short": 21, "e4place": 20,
 }
 
 # What each stage needs before it is worth starting. P3 is 2 rather than 1

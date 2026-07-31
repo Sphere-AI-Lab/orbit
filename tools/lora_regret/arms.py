@@ -28,6 +28,7 @@ the optimum", centring answers "is the optimum where the post says".
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from orbit.utils.peft_param_match import (
@@ -90,6 +91,13 @@ E1OT_EVAL_INTERVAL = 3
 # dim = 6144. Needed for the matched-parameter attention/MLP pair in E3, and not
 # derivable from hidden_size alone under GQA.
 LLAMA31_8B_QKV_OUTPUT = 6144
+# Defaults for the builders that now need shapes to solve an OFT block size.
+# Every matrix in this module is single-model; `sweep.py` passes the registry's
+# values explicitly, and these keep the builders callable bare from tests and
+# from a REPL. Pinned against tools/lora_regret/models.py by
+# test_the_arms_module_defaults_match_the_registry.
+LLAMA31_8B_HIDDEN = 4096
+LLAMA31_8B_FFN = 14336
 # Where tools/lora_regret/prepare_data.py writes its splits.
 DATA_DIR = "/lustre/fast/fast/groups/ei-slm/data/lora_regret"
 # E4's training file is the MATH+GSM8K concatenation (`--dataset rl_mix`), which
@@ -98,6 +106,21 @@ DATA_DIR = "/lustre/fast/fast/groups/ei-slm/data/lora_regret"
 # averaged away. So `arm_env` must not export a TEST_JSONL for it.
 RL_MIX_DATASET = "math_gsm8k"
 DATASETS_WITHOUT_TEST_SPLIT = frozenset({RL_MIX_DATASET})
+
+
+# Where an unscouted OFT cell looks for its optimum. OFT parameterizes a
+# rotation rather than an additive update, so nothing about LoRA's optimal LR
+# transfers to it -- not the value, not the decade. Until `e5scout` has run,
+# every OFT cell in every matrix is a *scout* across these two decades and its
+# arms are named `oftscout` so no reader can mistake one for a measurement.
+# `sft82` put 35 of its 40 OFT arms on LoRA's own grid; the module docstring
+# above calls that unjustified, and this is what replaces it.
+OFT_SCOUT_SPAN = (1e-5, 1e-3)
+# RL runs about a decade below SFT for both FullFT and LoRA, and OFT has never
+# been scouted in either regime -- so the RL scout is the SFT span shifted by
+# that decade. That shift is an assumption, which is exactly why these arms are
+# named `oftscout` and not `oft`.
+RL_OFT_SCOUT_SPAN = (1e-6, 1e-4)
 
 
 def lr_grid(centre: float, n: int = 5, step_decades: float = 0.3) -> list[float]:
@@ -148,6 +171,118 @@ class Arm:
     # both are set: E1-2's arms must re-derive the epoch even if a stale
     # NUM_ROLLOUT is exported in the operator's shell.
     num_rollout: int | None = None
+
+
+def oft_lr_values(
+    centre: float | None,
+    n: int,
+    step_decades: float = 0.3,
+    scale: float = 1.0,
+    span: tuple[float, float] = OFT_SCOUT_SPAN,
+) -> tuple[list[float], bool]:
+    """An OFT cell's learning rates, and whether they are a scout.
+
+    With a centre from `e5scout`, this mirrors the LoRA cell it sits beside --
+    same width, same spacing -- so the two are compared on equal grids. Without
+    one it is `n` log-spaced points across `span`, which is a search rather than
+    a measurement; the caller names those arms `oftscout`.
+
+    `n` always mirrors the LoRA cell so an OFT cell cannot be quietly cheaper
+    (fewer points, so a worse argmin) or finer than what it is compared against.
+    """
+    if centre is not None:
+        return [lr * scale for lr in lr_grid(centre, n=n, step_decades=step_decades)], False
+    low, high = span
+    step = (math.log10(high) - math.log10(low)) / (n - 1)
+    return [float(f"{low * 10 ** (step * i) * scale:.3g}") for i in range(n)], True
+
+
+# Block sizes an OFT cell may use. Powers of two because Megatron-Bridge's
+# `OFTRotationModule` snaps whatever it is given to a divisor of each layer's own
+# `d_in`, and every shape here is a power of two times a small factor.
+OFT_BLOCK_CANDIDATES = tuple(2**k for k in range(3, 14))  # 8 .. 8192
+
+
+def matched_oft_block(
+    rank: int,
+    modules: str,
+    hidden_size: int,
+    ffn_size: int,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
+) -> tuple[int, dict]:
+    """The OFT block nearest LoRA `rank` here, and the match it actually achieves.
+
+    Solved in E5's direction -- **fix the block, solve for the rank** -- and not
+    the other way round, because the block lattice is provably too coarse to
+    invert: on Llama-3.1-8B all-modules, block 1024 carries 0.764 of LoRA r256's
+    parameters and the next block up carries 1.529. There is no block that
+    matches r256, so asking for one and taking the nearest silently produces a
+    24%-undersized adapter and calls it matched.
+
+    So this picks the block whose *implied* LoRA rank is closest to `rank` in log
+    space, and hands back `oft_lora_match_report`'s own accounting. The report's
+    `ratio` is near 1 by construction (block against its own implied rank); the
+    caller stores it on the arm, so the ledger records the pairing that actually
+    ran rather than the one that was intended.
+
+    Solved against *this cell's own module shapes*, not the square attention
+    shape: OFT's parameter count follows `d_in`, and the MLP's `d_in` sum is
+    larger -- reusing attention's block would compare method and capacity at
+    once, the confound E3 exists to avoid, one method over.
+    """
+    shapes = megatron_module_shapes(hidden_size, ffn_size, qkv_output_size)
+    selected = {name: shape for name, shape in shapes.items()
+                if name in [m.strip() for m in modules.split(",") if m.strip()]}
+    if not selected:
+        raise ValueError(f"no known module in {modules!r} (known: {sorted(shapes)})")
+    best: tuple[float, int, dict] | None = None
+    for block in OFT_BLOCK_CANDIDATES:
+        report = oft_lora_match_report(block, selected)
+        implied = report["lora_rank"]
+        if implied < 1:
+            continue
+        error = abs(math.log(implied / rank))
+        if best is None or error < best[0]:
+            best = (error, block, report)
+    if best is None:
+        raise ValueError(
+            f"no OFT block size reaches LoRA rank {rank} on {modules!r}; "
+            f"tried {OFT_BLOCK_CANDIDATES}"
+        )
+    return best[1], best[2]
+
+
+def _oft_cell(
+    rank: int,
+    modules: str,
+    hidden_size: int,
+    ffn_size: int,
+    seed: int,
+    dataset: str,
+    centre: float | None,
+    n: int,
+    *,
+    step_decades: float = 0.3,
+    scale: float = 1.0,
+    span: tuple[float, float] = OFT_SCOUT_SPAN,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
+    extra: str = "",
+    **arm_kwargs,
+) -> list[Arm]:
+    """One OFT cell near `rank` on `modules`, at this matrix's cell width.
+
+    Every arm carries the realized `matched_ratio`, so a reader can see how well
+    the pairing held for the arm that ran rather than for the one intended.
+    """
+    block, report = matched_oft_block(rank, modules, hidden_size, ffn_size, qkv_output_size)
+    lrs, scouting = oft_lr_values(centre, n, step_decades=step_decades, scale=scale, span=span)
+    label = "oftscout" if scouting else "oft"
+    return [
+        Arm(_name(label, f"b{block}", modules, lr, seed, extra=extra),
+            "oft", None, block, modules, lr, seed, dataset=dataset,
+            matched_ratio=report["ratio"], **arm_kwargs)
+        for lr in lrs
+    ]
 
 
 def _name(method: str, tag: str, modules: str, lr: float, seed: int, extra: str = "") -> str:
@@ -217,12 +352,18 @@ def sft_arms(hidden_size: int, ffn_size: int, seed: int = 0) -> list[Arm]:
     return arms
 
 
-def e1_arms(seed: int = 0) -> list[Arm]:
+def e1_arms(
+    seed: int = 0,
+    hidden_size: int = LLAMA31_8B_HIDDEN,
+    ffn_size: int = LLAMA31_8B_FFN,
+    oft_lr_centre: float | None = None,
+) -> list[Arm]:
     """E1: capacity, rank, and the 10x LR rule -- decides C1 and C2.
 
-    8 arms x 5 LRs = 40 runs. The rank range is the post's own (1..512), chosen
-    so rank 1 *must* depart from the shared learning curve within one epoch
-    while rank 512 must not; a range that departed nowhere would not be a test.
+    8 arms x 5 LRs = 40 runs, plus one OFT cell matched to the r256 anchor
+    (45 total). C1 and C2 are LoRA-vs-FullFT claims and the OFT cell decides
+    neither; it is here so the task's dashboard carries all three methods and
+    so E5's OFT result has a same-grid companion on the rank ladder.
     """
     arms: list[Arm] = []
     for lr in lr_grid(FULL_LR_CENTRE):
@@ -241,6 +382,8 @@ def e1_arms(seed: int = 0) -> list[Arm]:
                     dataset="tulu3",
                 )
             )
+    arms += _oft_cell(256, ALL_MODULES, hidden_size, ffn_size, seed, "tulu3",
+                      oft_lr_centre, n=5)
     return arms
 
 
@@ -288,7 +431,12 @@ def e1long_arms(
     return arms
 
 
-def e1ot_arms(seed: int = 0) -> list[Arm]:
+def e1ot_arms(
+    seed: int = 0,
+    hidden_size: int = LLAMA31_8B_HIDDEN,
+    ffn_size: int = LLAMA31_8B_FFN,
+    oft_lr_centre: float | None = None,
+) -> list[Arm]:
     """E1-OT: the rank ladder on OpenThoughts3 -- the post's second SFT dataset.
 
     Identical in shape to :func:`e1_arms` and deliberately so: the post's claim
@@ -319,6 +467,9 @@ def e1ot_arms(seed: int = 0) -> list[Arm]:
                     ALL_MODULES, lr, seed, dataset="openthoughts3", full_epoch=True,
                     eval_nll_interval=E1OT_EVAL_INTERVAL)
             )
+    arms += _oft_cell(256, ALL_MODULES, hidden_size, ffn_size, seed, "openthoughts3",
+                      oft_lr_centre, n=5, full_epoch=True,
+                      eval_nll_interval=E1OT_EVAL_INTERVAL)
     return arms
 
 
@@ -337,7 +488,12 @@ E1SHORT_POINTS = 7
 E1SHORT_EVAL_INTERVAL = 10
 
 
-def e1short_arms(seed: int = 0) -> list[Arm]:
+def e1short_arms(
+    seed: int = 0,
+    hidden_size: int = LLAMA31_8B_HIDDEN,
+    ffn_size: int = LLAMA31_8B_FFN,
+    oft_lr_centre: float | None = None,
+) -> list[Arm]:
     """E1-short: the ~100-step learning-rate multiplier (the second half of C2).
 
     FullFT and LoRA r256 only. The claim is about the *ratio* of two argmins at
@@ -364,10 +520,23 @@ def e1short_arms(seed: int = 0) -> list[Arm]:
                 None, ALL_MODULES, lr, seed, dataset="tulu3",
                 num_rollout=E1SHORT_ROLLOUTS, eval_nll_interval=E1SHORT_EVAL_INTERVAL)
         )
+    # C8 is a LoRA/FullFT ratio, so the OFT cell decides nothing here -- but it
+    # inherits the 0.15-decade spacing anyway, because an OFT cell read against
+    # these two on a coarser grid would be a different measurement.
+    arms += _oft_cell(256, ALL_MODULES, hidden_size, ffn_size, seed, "tulu3",
+                      oft_lr_centre, n=E1SHORT_POINTS,
+                      step_decades=E1SHORT_STEP_DECADES, extra="short",
+                      num_rollout=E1SHORT_ROLLOUTS,
+                      eval_nll_interval=E1SHORT_EVAL_INTERVAL)
     return arms
 
 
-def e2_arms(seed: int = 0) -> list[Arm]:
+def e2_arms(
+    seed: int = 0,
+    hidden_size: int = LLAMA31_8B_HIDDEN,
+    ffn_size: int = LLAMA31_8B_FFN,
+    oft_lr_centre: float | None = None,
+) -> list[Arm]:
     """E2: batch-size sensitivity -- decides C3.
 
     3 cells x 3 batch sizes x 4 LRs = 36 runs, on the post's own 10,000-example
@@ -402,6 +571,14 @@ def e2_arms(seed: int = 0) -> list[Arm]:
                         dataset="openthoughts3",
                     )
                 )
+        # One OFT cell per batch, never one pooled across batches: C3 compares
+        # within a batch size, and an OFT arm measured at 32 could not be
+        # differenced against a FullFT arm at 512. The same sqrt(batch/32)
+        # re-centring applies -- gradient noise falls the same way whatever
+        # parameterizes the update.
+        arms += _oft_cell(256, ALL_MODULES, hidden_size, ffn_size, seed,
+                          "openthoughts3", oft_lr_centre, n=4, scale=scale,
+                          extra=f"b{batch}", global_batch_size=batch)
     return arms
 
 
@@ -410,10 +587,17 @@ def e3_arms(
     ffn_size: int,
     seed: int = 0,
     qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
+    oft_lr_centre: float | None = None,
 ) -> list[Arm]:
     """E3: layer placement at matched parameter count -- decides C4.
 
-    4 arms x 5 LRs = 20 runs. The matched MLP rank is *solved*, not assumed:
+    4 arms x 5 LRs = 20 runs, plus a FullFT baseline (5) and an OFT cell at each
+    placement (10) -- 35 total. The FullFT arms decide nothing about placement
+    (there is no adapter to place) and are a reference line; the OFT cells ask
+    whether the placement finding is a property of low-rank updates or of PEFT
+    in general, which is C6's question restricted to one axis.
+
+    The matched MLP rank is *solved*, not assumed:
     Orbit's fused ``linear_qkv``/``linear_fc1`` bundle projections that HF keeps
     separate, so the post's own attention-r256/MLP-r128 pair is not matched in
     this layout. Both pairs are run -- ours and the post's -- so a disagreement
@@ -441,10 +625,25 @@ def e3_arms(
                     dataset="tulu3",
                 )
             )
+    # Tagged `place` for the same reason E4-place's are: E1 runs FullFT on this
+    # exact Tulu3 grid, and an untagged name here would collide with it.
+    for lr in lr_grid(FULL_LR_CENTRE):
+        arms.append(
+            Arm(_name("full", "na", "", lr, seed, extra="place"), "full", None, None,
+                "", lr, seed, dataset="tulu3")
+        )
+    for rank, modules in ((256, ATTN_MODULES), (matched_rank, MLP_MODULES)):
+        arms += _oft_cell(rank, modules, hidden_size, ffn_size, seed, "tulu3",
+                          oft_lr_centre, n=5, qkv_output_size=qkv_output_size)
     return arms
 
 
-def e4_arms(seed: int = 0) -> list[Arm]:
+def e4_arms(
+    seed: int = 0,
+    hidden_size: int = LLAMA31_8B_HIDDEN,
+    ffn_size: int = LLAMA31_8B_FFN,
+    oft_lr_centre: float | None = None,
+) -> list[Arm]:
     """E4: RL parity at low rank -- decides C5.
 
     4 arms x 4 LRs = 16 runs on MATH + GSM8K. Rank 1 is in here because it is
@@ -478,6 +677,12 @@ def e4_arms(seed: int = 0) -> list[Arm]:
                     dataset=RL_MIX_DATASET,
                 )
             )
+    # RL's own OFT scout: the SFT span shifted down a decade, matching how RL's
+    # FullFT and LoRA centres sit a decade below their SFT counterparts. Nothing
+    # has ever measured OFT under policy gradient, so these are `oftscout` arms
+    # until one of them wins.
+    arms += _oft_cell(256, ALL_MODULES, hidden_size, ffn_size, seed, RL_MIX_DATASET,
+                      oft_lr_centre, n=4, step_decades=0.5, span=RL_OFT_SCOUT_SPAN)
     return arms
 
 
@@ -486,11 +691,14 @@ def e4place_arms(
     ffn_size: int,
     seed: int = 0,
     qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
+    oft_lr_centre: float | None = None,
 ) -> list[Arm]:
     """E4-place: does the attention-vs-MLP finding survive policy gradient?
 
-    2 placements x 4 LRs = 8 runs, on E4's own data and E4's own half-decade
-    grid so the placement result and the rank result are comparable arm for arm.
+    2 placements x 4 LRs = 8 LoRA runs, plus a FullFT reference (4) and an OFT
+    cell at each placement (8) -- 20 total, all on E4's own data and E4's own
+    half-decade grid so the placement result and the rank result are comparable
+    arm for arm.
 
     **All-modules is deliberately absent.** E4 already runs LoRA r256
     all-modules on this exact grid, so including it here would produce four
@@ -504,8 +712,11 @@ def e4place_arms(
     r128: Orbit fuses qkv and gate+up, so the post's pair is not matched in this
     layout, and an unmatched pair compares placement and capacity at once.
 
-    No FullFT arm. The post's RL placement panel is a comparison within LoRA,
-    and a FullFT arm here would cost 8 GPUs to answer a question E4 already asks.
+    The FullFT arms answer no placement question -- there is no adapter to
+    place -- and duplicate what E4 measures on the same grid. They are here as
+    the reference line the placement cells are read against inside this task's
+    own dashboard, at 4 runs on 8 GPUs; drop them first under budget pressure
+    and read E4's instead.
     """
     matched_rank = matched_mlp_rank(256, hidden_size, ffn_size, qkv_output_size)
     configs = [
@@ -519,6 +730,19 @@ def e4place_arms(
                 Arm(_name("lora", f"r{rank}", modules, lr, seed), "lora", rank, None,
                     modules, lr, seed, dataset=RL_MIX_DATASET)
             )
+    # Tagged `place`, because E4 runs FullFT on this exact grid: untagged, all
+    # four names would be byte-identical to E4's, which is a duplicate key the
+    # moment both ledgers are globbed into `analyze` together -- the same hazard
+    # the missing all-modules cell above avoids.
+    for lr in lr_grid(RL_FULL_LR_CENTRE, n=4, step_decades=0.5):
+        arms.append(
+            Arm(_name("full", "na", "", lr, seed, extra="place"), "full", None, None,
+                "", lr, seed, dataset=RL_MIX_DATASET)
+        )
+    for rank, modules in configs:
+        arms += _oft_cell(rank, modules, hidden_size, ffn_size, seed, RL_MIX_DATASET,
+                          oft_lr_centre, n=4, step_decades=0.5,
+                          span=RL_OFT_SCOUT_SPAN, qkv_output_size=qkv_output_size)
     return arms
 
 
@@ -652,15 +876,27 @@ def e5_arms(
 
 MATRICES = {
     "sft82": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: sft_arms(hidden, ffn, seed=seed),
-    "e1": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1_arms(seed=seed),
+    "e1": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1_arms(
+        seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre
+    ),
     "e1long": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1long_arms(argmins, seed=seed),
-    "e1ot": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1ot_arms(seed=seed),
-    "e1short": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1short_arms(seed=seed),
-    "e2": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e2_arms(seed=seed),
-    "e3": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e3_arms(hidden, ffn, seed=seed),
-    "e4": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e4_arms(seed=seed),
+    "e1ot": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1ot_arms(
+        seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre
+    ),
+    "e1short": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1short_arms(
+        seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre
+    ),
+    "e2": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e2_arms(
+        seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre
+    ),
+    "e3": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e3_arms(
+        hidden, ffn, seed=seed, oft_lr_centre=oft_lr_centre
+    ),
+    "e4": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e4_arms(
+        seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre
+    ),
     "e4place": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e4place_arms(
-        hidden, ffn, seed=seed
+        hidden, ffn, seed=seed, oft_lr_centre=oft_lr_centre
     ),
     "e5scout": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e5_scout_arms(hidden, ffn, seed=seed),
     "e5": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e5_arms(

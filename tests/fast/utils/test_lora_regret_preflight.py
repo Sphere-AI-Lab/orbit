@@ -61,10 +61,10 @@ class TestCheckCheckpoints:
 class TestCheckMatrices:
     def test_every_matrix_builds_at_its_documented_count(self):
         checks = {c.name: c for c in check_matrices(4096, 14336)}
-        assert checks["matrix:e1"].ok and "40" in checks["matrix:e1"].detail
-        assert checks["matrix:e2"].ok and "36" in checks["matrix:e2"].detail
-        assert checks["matrix:e3"].ok and "20" in checks["matrix:e3"].detail
-        assert checks["matrix:e4"].ok and "16" in checks["matrix:e4"].detail
+        assert checks["matrix:e1"].ok and "45" in checks["matrix:e1"].detail
+        assert checks["matrix:e2"].ok and "48" in checks["matrix:e2"].detail
+        assert checks["matrix:e3"].ok and "35" in checks["matrix:e3"].detail
+        assert checks["matrix:e4"].ok and "20" in checks["matrix:e4"].detail
         assert checks["matrix:e5scout"].ok and "5" in checks["matrix:e5scout"].detail
         assert checks["matrix:e5"].ok and "50" in checks["matrix:e5"].detail
 
@@ -89,10 +89,10 @@ class TestCheckMatrices:
         """Not a tautology: the counts are pinned, not read back from the builder."""
         import tools.lora_regret.preflight as preflight
 
-        monkeypatch.setitem(preflight.EXPECTED_ARMS, "e1", 41)
+        monkeypatch.setitem(preflight.EXPECTED_ARMS, "e1", 46)
         checks = {c.name: c for c in check_matrices(4096, 14336)}
         assert not checks["matrix:e1"].ok
-        assert "40 arms, expected 41" in checks["matrix:e1"].detail
+        assert "45 arms, expected 46" in checks["matrix:e1"].detail
 
 
 class TestStageRequirements:
@@ -120,9 +120,9 @@ def test_every_matrix_is_expected_at_its_documented_count():
     from tools.lora_regret.preflight import EXPECTED_ARMS
 
     assert set(EXPECTED_ARMS) == set(MATRICES) - {"e1long"}
-    assert EXPECTED_ARMS["e1ot"] == 40
-    assert EXPECTED_ARMS["e1short"] == 14
-    assert EXPECTED_ARMS["e4place"] == 8
+    assert EXPECTED_ARMS["e1ot"] == 45
+    assert EXPECTED_ARMS["e1short"] == 21
+    assert EXPECTED_ARMS["e4place"] == 20
 
 
 def test_the_fullft_stages_agree_with_the_registrys_formula():

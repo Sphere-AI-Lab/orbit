@@ -11,7 +11,7 @@ Companions:
 
 ## What is ready, and what you still have to do
 
-Ready and CPU-verified (676 tests, 0 failures, in the built env):
+Ready and CPU-verified (750 tests, 0 failures, in the built env):
 
 | Piece | Where |
 |---|---|
@@ -296,21 +296,28 @@ bureaucratic: each entry names what breaks if you skip it.
 | §3 | ~~Smoke one arm~~ **done** | 1 | 1 | data | proof the eval line the parser needs is reached |
 | §4 | P3: DP=1 vs DP=4 | 2 | 1 and 4 | smoke | permission to trust any FullFT number |
 | §7 | **E1-0: σ** | 3 | 1 | data | the unit every later difference is quoted in |
-| §8 | E1-1: LR sweeps | 40 | 1 / ≥4 | σ, P3 | argmins → **C2** |
+| §8 | E1-1: LR sweeps | 45 | 1 / ≥4 | σ, P3 | argmins → **C2** |
 | §8 | E1-2: long curves | 8 | 1 / ≥4 | E1-1's argmins (via --argmins-from) | departure steps → **C1** |
-| §9 | E2: batch sweep | 36 | 1 / ≥4 | σ, P3 | best-per-batch gaps → **C3** |
-| §10 | E3: placement | 20 | 1 | σ | matched-parameter deltas → **C4** |
-| §16 | E1-OT: OpenThoughts3 rank ladder | 42 | 1 / ≥4 | σ(OT3) | curves + argmins on the second dataset → **C1/C2** |
-| §17 | E1-short: 100-step multiplier | 14 | 1 / ≥4 | σ | short-vs-long LR ratio → **C8** |
-| §18 | E4-place: RL layer placement | 8 | 8 | data, P3 | attention-vs-MLP under policy gradient → **C4** |
-| §11 | E4: RL | 16 | 8 | data, P3 | accuracy curves + band width → **C5** |
+| §9 | E2: batch sweep | 48 | 1 / ≥4 | σ, P3 | best-per-batch gaps → **C3** |
+| §10 | E3: placement | 35 | 1 | σ | matched-parameter deltas → **C4** |
+| §16 | E1-OT: OpenThoughts3 rank ladder | 47 | 1 / ≥4 | σ(OT3) | curves + argmins on the second dataset → **C1/C2** |
+| §17 | E1-short: 100-step multiplier | 21 | 1 / ≥4 | σ | short-vs-long LR ratio → **C8** |
+| §18 | E4-place: RL layer placement | 20 | 8 | data, P3 | attention-vs-MLP under policy gradient → **C4** |
+| §11 | E4: RL | 20 | 8 | data, P3 | accuracy curves + band width → **C5** |
 | §12 | E5-1: OFT scout | 5 | 1 | σ | the OFT learning-rate decade |
 | §12 | E5-2: OFT refine | 50 | 1 | the scout's argmin | OFT-vs-LoRA at matched params → **C6** |
 
-**242 runs** (3 + 40 + 8 + 36 + 20 + 42 + 14 + 8 + 16 + 5 + 50), plus 3 preflight — one smoke
+**302 runs** (3 + 45 + 8 + 48 + 35 + 47 + 21 + 20 + 20 + 5 + 50), plus 3 preflight — one smoke
 (done) and two for P3. One of E1-0's three seeds repeats an E1-1 arm; §7 says how to avoid
-that if you care about the one run. E1-OT's 42 is 40 grid points plus the two
+that if you care about the one run. E1-OT's 47 is 45 grid points plus the two
 extra seeds that measure OpenThoughts3's own σ (§16) — Tulu3's does not transfer.
+
+**60 of those 302 are the method-coverage arms** added so every task carries
+FullFT, LoRA and OFT (§4.5). They decide no claim on their own: the FullFT arms
+in E3 and E4-place are reference lines duplicating grids E1 and E4 already run,
+and every OFT cell is an `oftscout` search until §12's scout produces a centre.
+Drop them first under budget pressure — the claims survive; only the dashboards
+get thinner.
 
 Three orderings inside that are load-bearing rather than conventional:
 
