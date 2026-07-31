@@ -270,15 +270,10 @@ class TestMethodCoverage:
         run on the same modules in the same matrix. Wider than that and the OFT
         arm would be comparing method and capacity at once.
 
-        `e4place` is exempt and that exemption is a finding, not a waiver: its
-        LoRA cells are r256 (attention) and r92 (MLP), but SGLang's kernel caps
-        the block at 128, which reaches only r28 and r23. The capacity match is
-        unreachable under RL at those placements -- see
-        TestOftBlockCeilingUnderRl.test_the_rl_placement_cells_are_not_capacity_matched,
-        which pins the gap so it cannot widen unnoticed.
+        `e4place` was exempt while SGLang's kernel capped the block at 128,
+        which reached only r28 against its r256 attention cell. The kernel fix
+        removed that cap, so it is checked like every other matrix again.
         """
-        if matrix == "e4place":
-            pytest.skip("capacity match unreachable under the SGLang block cap")
         from orbit.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
         from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT
 
@@ -346,7 +341,7 @@ class TestMethodCoverage:
 
 
 class TestOftBlockCeilingUnderRl:
-    """SGLang's fused OFT kernel cannot launch above block size 128.
+    """SGLang's fused OFT kernel used to be unable to launch above block 128.
 
     `sglang/srt/oft/triton_ops/fused_rotate_project.py::fused_rotate_project_qkv`
     stages the BS x BS rotation block in shared memory. Measured on an H100
@@ -379,9 +374,12 @@ class TestOftBlockCeilingUnderRl:
         assert max(blocks) <= OFT_MAX_BLOCK_SGLANG, (matrix, sorted(blocks))
 
     def test_the_ceiling_is_the_measured_one(self):
+        """Raised from 128 once Sphere-AI-Lab/sglang 893f329a2 made the kernel's
+        shared-memory footprint independent of the block size. Verified through
+        the installed package: all of 16/32/64/128/256/512/1024 launch."""
         from tools.lora_regret.arms import OFT_MAX_BLOCK_SGLANG
 
-        assert OFT_MAX_BLOCK_SGLANG == 128
+        assert OFT_MAX_BLOCK_SGLANG == 1024
 
     def test_the_ceiling_matches_every_working_example_launcher(self):
         """Pinned against the launchers rather than retyped: if someone ships
@@ -400,39 +398,17 @@ class TestOftBlockCeilingUnderRl:
         assert seen, "no example pins an OFT block size"
         assert max(seen) <= OFT_MAX_BLOCK_SGLANG, sorted(seen)
 
-    def test_sft_oft_is_not_capped(self):
-        """It never reaches the kernel, and its large-block arms are measured."""
+    def test_sft_and_rl_now_reach_the_same_block(self):
+        """Before the kernel fix, SFT ran b1024 while RL was capped at 128, so
+        an OFT arm meant something different in each. They agree again."""
         from tools.lora_regret.arms import OFT_MAX_BLOCK_SGLANG
 
-        arms = MATRICES["e1"](HIDDEN, FFN, 0, None, None)
-        blocks = {a.oft_block_size for a in arms if a.method == "oft"}
-        assert max(blocks) > OFT_MAX_BLOCK_SGLANG, sorted(blocks)
-
-    def test_the_rl_placement_cells_are_not_capacity_matched(self):
-        """The cost of the cap, recorded rather than hidden.
-
-        e4place compares attention against MLP at matched parameters for LoRA
-        (r256 vs r92). Its OFT cells cannot join that comparison: block 128 is
-        the largest SGLang can launch and it reaches r28 / r23. So the OFT arms
-        answer "does OFT run under policy gradient at this placement", not "does
-        OFT match LoRA at this placement". Reading them as the latter would
-        confound method with capacity -- the exact confound E3 exists to avoid.
-        """
-        from orbit.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
-        from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT
-
-        shapes = megatron_module_shapes(HIDDEN, FFN, LLAMA31_8B_QKV_OUTPUT)
-        arms = MATRICES["e4place"](HIDDEN, FFN, 0, None, None)
-        lora = {a.target_modules: a.rank for a in arms if a.method == "lora"}
-        gaps = {}
-        for arm in (a for a in arms if a.method == "oft"):
-            sel = {n: s for n, s in shapes.items() if n in arm.target_modules.split(",")}
-            implied = oft_lora_match_report(arm.oft_block_size, sel)["lora_rank"]
-            gaps[arm.target_modules] = (implied, lora[arm.target_modules])
-        assert gaps == {
-            ATTN_MODULES: (28, 256),
-            MLP_MODULES: (23, 92),
-        }, gaps
+        sft = {a.oft_block_size for a in MATRICES["e1"](HIDDEN, FFN, 0, None, None)
+               if a.method == "oft"}
+        rl = {a.oft_block_size for a in MATRICES["e4"](HIDDEN, FFN, 0, None, None)
+              if a.method == "oft"}
+        assert sft == rl == {1024}
+        assert max(sft | rl) <= OFT_MAX_BLOCK_SGLANG
 
     def test_the_capped_cell_is_still_matched_to_a_lora_arm(self):
         """Capping changes which LoRA rank the OFT arm is comparable to -- it

@@ -204,24 +204,21 @@ OFT_BLOCK_CANDIDATES = tuple(2**k for k in range(3, 14))  # 8 .. 8192
 
 # The largest OFT block SGLang's fused rotate-project kernel can launch.
 #
-# `sglang/srt/oft/triton_ops/fused_rotate_project.py` stages the BS x BS
-# rotation block in shared memory. Measured on an H100 (232,448 B limit) with
-# Llama-3.1-8B's fused QKV shape:
+# Was 128. The kernel staged the whole BS x BS rotation block in shared memory,
+# costing 6*BS*(BS+128) bytes against sm_90's 232,448 B limit, so 256 needed
+# 589,824 and 1024 needed 7,077,888 -- it could not launch at all, which is how
+# every RL OFT arm died in the 2026-07-31 coverage probe.
 #
-#     BS 16/32/64/128 -> launches, numerically exact
-#     BS 256          -> needs   589,824 B
-#     BS 512          -> needs 1,966,080 B
-#     BS 1024         -> needs 7,077,888 B
+# Since Sphere-AI-Lab/sglang 893f329a2 the rotation is walked in sub-tiles and
+# the footprint no longer depends on BS. Verified on an H100 through the
+# installed package: BS 16/32/64/128/256/512/1024 all launch, parity 1.2e-04
+# against a 2e-3 bar.
 #
-# Every OFT RL example in examples/high_precision ships 32, 64 or 128, and the
-# kernel's own `_pick_qkv_tiles` mitigation is tuned for 128. Nothing rejects a
-# larger block -- it fails inside Triton as an opaque `OutOfResources`, after
-# the SGLang server has already started, which is how e4/e4place's b1024 cells
-# died in the 2026-07-31 coverage probe.
-#
-# SFT is NOT capped by this: it runs no rollout engine, never reaches the
-# kernel, and its b1024 arms completed normally in the same probe.
-OFT_MAX_BLOCK_SGLANG = 128
+# 1024 rather than "unbounded": that is the largest block the campaign's
+# matched-parameter arithmetic ever asks for (LoRA r256 all-modules on
+# Llama-3.1-8B), and a cap that has been measured is worth more than one that
+# has not.
+OFT_MAX_BLOCK_SGLANG = 1024
 
 
 def matched_oft_block(

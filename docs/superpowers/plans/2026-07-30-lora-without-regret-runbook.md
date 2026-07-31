@@ -11,7 +11,7 @@ Companions:
 
 ## What is ready, and what you still have to do
 
-Ready and CPU-verified (795 tests, 0 failures, in the built env):
+Ready and CPU-verified (814 tests, 0 failures, in the built env):
 
 | Piece | Where |
 |---|---|
@@ -967,3 +967,42 @@ Re-read the report at any time without re-running anything:
 ```bash
 python -m tools.lora_regret.probe report --ledger 'results/probe/*.jsonl'
 ```
+
+
+## 21. The OFT kernel patch in orbit_env (2026-07-31)
+
+`orbit_env`'s copy of **one file** is ahead of the pinned sglang build:
+
+```
+site-packages/sglang/srt/oft/triton_ops/fused_rotate_project.py
+  pinned build 9c83ae8be  ->  Sphere-AI-Lab/sglang orbit-main @ 893f329a2
+  backup of the original: same directory, .9c83ae8be.bak
+```
+
+**Why the file and not the pin.** The change is pure Python -- `sglang/` ships no
+`.so` -- and `pyproject.toml` pins `sglang` and `sgl-kernel` to the same commit,
+so bumping the pin would drag a source rebuild of `sgl-kernel`'s five compiled
+extensions for a change that does not touch them. Copying the one file leaves
+every installed version string untouched (verified: sglang, sgl-kernel, torch,
+megatron-core all unchanged).
+
+**What it buys.** OFT block sizes above 128 could not launch at all -- the kernel
+staged the whole BS x BS rotation in shared memory, needing 7,077,888 B at
+BS=1024 against a 232,448 B limit. Every RL OFT arm died on it in the coverage
+probe. The rotation is now walked in sub-tiles, so 16/32/64/128/256/512/1024 all
+run, BS=32 is ~11% faster than before, and `OFT_MAX_BLOCK_SGLANG` is 1024 --
+which is what restores `e4place`'s OFT arms to matched parameters against its
+r256/r92 LoRA cells.
+
+**It is not durable.** Any `uv sync` reinstalls sglang from the pin and reverts
+it. If that happens, re-copy from `/fast/zqiu/orbit-iclr/sglang` (branch
+`orbit-main`, already pushed) or bump the pin properly:
+
+```bash
+cp /fast/zqiu/orbit-iclr/sglang/python/sglang/srt/oft/triton_ops/fused_rotate_project.py \
+   /fast/zqiu/orbit-iclr/orbit_env/lib/python3.12/site-packages/sglang/srt/oft/triton_ops/
+python /fast/zqiu/orbit-iclr/sglang/test/srt/oft/repro_shared_memory_ceiling.py   # 7/7 OK
+```
+
+The permanent fix is `rev = "893f329a2..."` on both sglang lines of
+`pyproject.toml` plus a `uv sync`, when a `sgl-kernel` rebuild is acceptable.
