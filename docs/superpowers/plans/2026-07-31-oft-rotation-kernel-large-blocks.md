@@ -10,8 +10,8 @@
 
 ## Global Constraints
 
-- **Repository:** the kernels live in the **SGLang fork**, not in orbit. Clone/worktree of `https://github.com/Neckarium/sglang.git`; the local clone is `/lustre/fast/fast/zqiu/NeckariumAI/clthegoat/env_for_cc/sglang`.
-- **The installed build is commit `9c83ae8be`**, which that clone does **not** yet contain — `git fetch` before branching. Byte-identical source is cached at `/lustre/home/zqiu/.cache/uv_cu13_orbit/git-v0/checkouts/6d53cf772bb1c77f/9c83ae8be/python/build/lib/sglang/srt/oft/triton_ops/fused_rotate_project.py`; use it as the reference if the fetch cannot reach the remote.
+- **Repository:** the kernels live in **`https://github.com/Sphere-AI-Lab/sglang`**, not in orbit and *not* in the Neckarium fork. The local clone is `/fast/zqiu/software/proj/spherelab/sglang-spherelab`, branch `orbit-main`, and its **HEAD is already commit `9c83ae8be` — exactly the installed build**, with the kernel file byte-identical to what runs. Branch from there; no fetch is required.
+- **Do not use `/lustre/fast/fast/zqiu/NeckariumAI/clthegoat/env_for_cc/sglang`.** It is a different fork (Neckarium), does not contain `9c83ae8be`, and its OFT history diverged — see "Prior art" below for the one thing worth reading there.
 - **File under change:** `python/sglang/srt/oft/triton_ops/fused_rotate_project.py`. Three public entry points: `fused_rotate_project_qkv`, `fused_rotate_project_gate_up`, `fused_rotate_gate_up_inputs`.
 - **Hardware limit is 232,448 B** of shared memory per block on H100 (sm_90). Measured, not assumed — see Task 2.
 - **Numerical tolerance is `max_abs <= 2e-3`**, the tolerance the file's own parity harness already uses. Do not loosen it.
@@ -39,14 +39,26 @@ The `BS·BS` term dominates and grows quadratically while the budget is fixed, s
 
 ## Prior art — read before starting
 
-The fork already contains one attempt at this and a revert:
+A **different** fork — `Neckarium/sglang`, clone at
+`/lustre/fast/fast/zqiu/NeckariumAI/clthegoat/env_for_cc/sglang` — contains one
+attempt at accelerating this kernel and a revert:
 
 ```
 4476ead90  feat(oft): re-use sgemm kernel to accelerate QKV OFT
 d9da13a81  roll back to golden QKV baseline      (also deleted tests/bench_oft_shared_r.py)
 ```
 
-Read `git show 4476ead90` and `git show d9da13a81` first. If the rollback was for a correctness or perf reason this plan would repeat, stop and report before writing code.
+Neither commit is in `Sphere-AI-Lab/sglang`, and that fork's OFT tree predates
+`fused_rotate_project.py` entirely — so this is background, not a merge base.
+Read both diffs anyway:
+
+```bash
+cd /lustre/fast/fast/zqiu/NeckariumAI/clthegoat/env_for_cc/sglang
+git show 4476ead90 --stat && git show d9da13a81
+```
+
+If the rollback was for a correctness or perf reason this plan would repeat,
+stop and report before writing code.
 
 ## File Structure
 
@@ -68,22 +80,17 @@ Read `git show 4476ead90` and `git show d9da13a81` first. If the rollback was fo
 - Consumes: nothing.
 - Produces: a branch in the SGLang fork whose `fused_rotate_project.py` is byte-identical to the installed build, and a one-command reproduction of the failure.
 
-- [ ] **Step 1: Get the source at the installed commit**
+- [ ] **Step 1: Branch from the installed commit**
+
+The clone's HEAD already *is* the installed build, so this is a one-liner:
 
 ```bash
-cd /lustre/fast/fast/zqiu/NeckariumAI/clthegoat/env_for_cc/sglang
-git fetch origin
-git cat-file -t 9c83ae8be   # must print "commit"
+cd /fast/zqiu/software/proj/spherelab/sglang-spherelab
+git log --oneline -1        # expect: 9c83ae8be Sphere AI Lab modifications on top of SGLang v0.5.9
 git worktree add /lustre/home/zqiu/.config/superpowers/worktrees/sglang/oft-large-blocks -b zqiu/oft-large-blocks 9c83ae8be
 ```
 
-If `git cat-file` still fails after the fetch, the commit is not on the remote. Fall back to branching from `HEAD` and overwriting the one file from the uv cache:
-
-```bash
-git worktree add /lustre/home/zqiu/.config/superpowers/worktrees/sglang/oft-large-blocks -b zqiu/oft-large-blocks
-cp /lustre/home/zqiu/.cache/uv_cu13_orbit/git-v0/checkouts/6d53cf772bb1c77f/9c83ae8be/python/build/lib/sglang/srt/oft/triton_ops/fused_rotate_project.py \
-   /lustre/home/zqiu/.config/superpowers/worktrees/sglang/oft-large-blocks/python/sglang/srt/oft/triton_ops/fused_rotate_project.py
-```
+If HEAD has moved on since this plan was written, branch from `9c83ae8be` explicitly anyway — Step 2 is what decides whether the working copy is the right one, not the branch name.
 
 - [ ] **Step 2: Prove the working copy matches what is installed**
 
@@ -92,17 +99,15 @@ diff -q /lustre/home/zqiu/.config/superpowers/worktrees/sglang/oft-large-blocks/
         /fast/zqiu/orbit-iclr/orbit_env/lib/python3.12/site-packages/sglang/srt/oft/triton_ops/fused_rotate_project.py
 ```
 
-Expected: no output. If they differ, every measurement below is against the wrong code — stop and resolve.
+Expected: no output. Verified true for `9c83ae8be` on 2026-07-31. If they differ, every measurement below is against the wrong code — stop and resolve.
+
+A byte-identical copy of the installed file is also cached at
+`/lustre/home/zqiu/.cache/uv_cu13_orbit/git-v0/checkouts/6d53cf772bb1c77f/9c83ae8be/python/build/lib/sglang/srt/oft/triton_ops/fused_rotate_project.py`
+if you ever need a reference without the repo.
 
 - [ ] **Step 3: Read the prior attempt**
 
-```bash
-cd /lustre/fast/fast/zqiu/NeckariumAI/clthegoat/env_for_cc/sglang
-git show 4476ead90 --stat
-git show d9da13a81
-```
-
-Write two sentences in the commit message of Step 5 saying what the rollback undid and why this plan does not repeat it. If it *does* repeat it, stop and report.
+See "Prior art" above for the commands. Write two sentences in the commit message of Step 5 saying what the rollback undid and why this plan does not repeat it. If it *does* repeat it, stop and report.
 
 - [ ] **Step 4: Reproduce the failure standalone**
 
