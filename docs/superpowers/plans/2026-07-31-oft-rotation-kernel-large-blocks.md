@@ -6,7 +6,7 @@
 
 **Architecture:** The kernels stage the entire `BS x BS` rotation block in shared memory, so their footprint is `6·BS·(BS+128)` bytes and blows the 232,448 B per-SM limit above `BS=128`. This plan adds a *tiled* inner loop that walks the rotation block in `BK x BK` sub-tiles, making shared memory O(BK²) and independent of `BS`, at identical FLOPs. The existing single-shot path is kept and selected by a `tl.constexpr` switch so `BS <= 128` compiles to exactly the code it does today — the new path is additive, never a replacement.
 
-**Tech Stack:** Triton (bundled with torch 2.11 / CUDA 13), PyTorch, SGLang (Neckarium fork), pytest.
+**Tech Stack:** Triton (bundled with torch 2.11 / CUDA 13), PyTorch, SGLang (Sphere-AI-Lab fork), pytest.
 
 ## Global Constraints
 
