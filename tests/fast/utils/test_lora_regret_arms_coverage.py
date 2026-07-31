@@ -374,9 +374,13 @@ class TestOftBlockCeilingUnderRl:
         assert max(blocks) <= OFT_MAX_BLOCK_SGLANG, (matrix, sorted(blocks))
 
     def test_the_ceiling_is_the_measured_one(self):
-        """Raised from 128 once Sphere-AI-Lab/sglang 893f329a2 made the kernel's
-        shared-memory footprint independent of the block size. Verified through
-        the installed package: all of 16/32/64/128/256/512/1024 launch."""
+        """Raised from 128 once Sphere-AI-Lab/sglang made every rotation
+        kernel's shared-memory footprint independent of the block size --
+        893f329a2 for the fused QKV/gate_up kernel, 166041d28 for the un-fused
+        gemm_oft_r/sgemm_oft_r pair that o_proj and down_proj take. The first
+        alone was NOT enough: a --target all arm still died at
+        `Required: 2228224`. Verified through the installed package: all of
+        16/32/64/128/256/512/1024 launch."""
         from tools.lora_regret.arms import OFT_MAX_BLOCK_SGLANG
 
         assert OFT_MAX_BLOCK_SGLANG == 1024

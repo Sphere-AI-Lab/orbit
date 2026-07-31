@@ -971,16 +971,33 @@ python -m tools.lora_regret.probe report --ledger 'results/probe/*.jsonl'
 
 ## 21. The OFT kernel in orbit_env (2026-07-31)
 
-`orbit_env` runs **sglang 0.0.0.dev9881+g893f329a2** — a proper install from
+`orbit_env` runs **sglang 0.0.0.dev9882+g166041d28** — a proper install from
 `Sphere-AI-Lab/sglang` `orbit-main`, not a patched file.
 
 ```
-sglang     893f329a2   the tiled OFT rotate-project kernel
+sglang     166041d28   ALL FOUR OFT rotation kernels tiled
 sgl-kernel 9c83ae8be   deliberately NOT bumped
 ```
 
-**Why the two revs differ.** The change touches one pure-Python file and nothing
-under `sgl-kernel/`, whose tree hash is byte-identical at both commits. uv keys
+**Two commits, and the first alone is not enough.** `893f329a2` tiled the fused
+QKV/gate_up kernel (`fused_rotate_project`). With only that installed, an OFT
+arm with `--target all` still died — on `gemm_oft_r`, the un-fused kernel that
+`o_proj` and `down_proj` take because they have no sibling projection to fuse
+into, at `Required: 2228224, Hardware limit: 232448`, roughly four minutes into
+a rollout. `166041d28` tiles that kernel and its segmented twin `sgemm_oft_r`
+(used whenever more than two adapters are live).
+
+If you see `OutOfResources` from anything under `srt/oft/triton_ops/`, check the
+installed rev before anything else: reverting to `893f329a2` silently reinstates
+this failure, and it surfaces minutes into a run rather than at startup.
+
+The un-fused pair is **bit-identical** to the untiled original on all 40
+configurations the original could launch (`max_abs_diff = 0.00e+00`, tokens
+1–1024 × BS 16–256), costing 1–8% at BS ≤ 128 — ≤ 0.0015 ms on a ~0.017 ms
+launch-bound kernel — and making BS 512/1024 possible at all.
+
+**Why the two revs differ.** The change touches pure-Python files and nothing
+under `sgl-kernel/`, whose tree hash is byte-identical at all of them. uv keys
 its build cache by rev, so bumping `sgl-kernel` would rebuild ~965 MB of CUDA
 extensions (`flash_ops.abi3.so` alone is 852 MB) to produce the same output. If
 a future sglang commit ever touches that subdirectory, bump both — check with
@@ -991,7 +1008,7 @@ a future sglang commit ever touches that subdirectory, bump both — check with
 ```bash
 uv pip uninstall sglang
 uv pip install --no-deps \
-  "sglang @ git+https://github.com/Sphere-AI-Lab/sglang.git@893f329a221475481ffc9c491c2a157b94522dc8#subdirectory=python"
+  "sglang @ git+https://github.com/Sphere-AI-Lab/sglang.git@166041d287685e4c5043095a4d54a51d04d48179#subdirectory=python"
 ```
 
 `--no-deps` is the load-bearing flag: it stops the resolver touching anything

@@ -159,12 +159,18 @@ deep-ep = { git = "https://github.com/deepseek-ai/DeepEP.git", rev = "d4f41e4e93
 megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "85c84cbc26d4c983a3d6e46c804f02e2a99af5a2" }
 megatron-core = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git", rev = "00eb75b0c803b0fc8e5413d736529d9d3b82b6bd" }
 nvidia-resiliency-ext = { git = "https://github.com/NVIDIA/nvidia-resiliency-ext.git", rev = "63154570cea17f8805a7fd15cc3b8cc2919ba575" }
-# Ahead of sgl-kernel below, deliberately. 893f329a2 tiles the fused OFT
-# rotate-project kernel so block sizes above 128 can launch at all; it changes
-# ONE pure-Python file and nothing under sgl-kernel/, whose tree hash is
-# identical at both commits. Keeping sgl-kernel pinned to the older rev means
-# a sync reinstalls only sglang and leaves the compiled extension cached.
-sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "893f329a221475481ffc9c491c2a157b94522dc8", subdirectory = "python" }
+# Ahead of sgl-kernel below, deliberately. This range tiles the OFT rotation
+# kernels so block sizes above 128 can launch at all -- 893f329a2 did the fused
+# QKV/gate_up kernel, 166041d28 the un-fused `gemm_oft_r`/`sgemm_oft_r` pair
+# that `o_proj` and `down_proj` take. Both change pure-Python files only;
+# nothing under sgl-kernel/, whose tree hash is identical across all of them.
+# Keeping sgl-kernel pinned to the older rev means a sync reinstalls only
+# sglang and leaves the 852 MB compiled extension cached.
+#
+# Do not drop back to 893f329a2: the fused kernel alone is not enough. An OFT
+# arm with --target all reaches gemm_oft_r on every layer and dies there with
+# `OutOfResources ... Required: 2228224` several minutes into a rollout.
+sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "166041d287685e4c5043095a4d54a51d04d48179", subdirectory = "python" }
 # TransformerEngine built from source (verified end-to-end). The orbit-build-wheels
 # prebuilt is cu13/torch-2.11-correct too, but swapping it in perturbed libcudart load
 # order and exposed a flaky tilelang<->flashinfer find_loaded_library("libcudart")
@@ -201,7 +207,7 @@ tested-ref = "85c84cbc26d4c983a3d6e46c804f02e2a99af5a2"
 [tool.orbit.release.backend-pins.sglang]
 source = "https://github.com/Sphere-AI-Lab/sglang.git"
 subdirectory = "python"
-tested-ref = "893f329a221475481ffc9c491c2a157b94522dc8"
+tested-ref = "166041d287685e4c5043095a4d54a51d04d48179"
 
 [tool.isort]
 profile = "black"  # black-compatible

@@ -202,16 +202,23 @@ def oft_lr_values(
 # `d_in`, and every shape here is a power of two times a small factor.
 OFT_BLOCK_CANDIDATES = tuple(2**k for k in range(3, 14))  # 8 .. 8192
 
-# The largest OFT block SGLang's fused rotate-project kernel can launch.
+# The largest OFT block SGLang's rotation kernels can launch.
 #
-# Was 128. The kernel staged the whole BS x BS rotation block in shared memory,
-# costing 6*BS*(BS+128) bytes against sm_90's 232,448 B limit, so 256 needed
-# 589,824 and 1024 needed 7,077,888 -- it could not launch at all, which is how
-# every RL OFT arm died in the 2026-07-31 coverage probe.
+# Was 128. Every rotation kernel staged the whole BS x BS block in shared
+# memory, against sm_90's 232,448 B limit, so it could not launch at all above
+# 128 -- which is how every RL OFT arm died in the 2026-07-31 coverage probe.
 #
-# Since Sphere-AI-Lab/sglang 893f329a2 the rotation is walked in sub-tiles and
-# the footprint no longer depends on BS. Verified on an H100 through the
-# installed package: BS 16/32/64/128/256/512/1024 all launch, parity 1.2e-04
+# It took TWO commits, and the first one alone is not enough:
+#   893f329a2  the fused QKV / gate_up kernel (fused_rotate_project)
+#   166041d28  the un-fused pair (gemm_oft_r, sgemm_oft_r), which o_proj and
+#              down_proj take because they have nothing to fuse into
+# After the first, a --target all arm still died on every layer at
+# `Required: 2228224`. Raising this constant is only valid against a package
+# containing both.
+#
+# Verified on an H100 through the installed package: BS 16..1024 all launch.
+# The un-fused pair is BIT-IDENTICAL to the untiled original on all 40
+# configurations the original could run; the fused kernel matches to 1.2e-04
 # against a 2e-3 bar.
 #
 # 1024 rather than "unbounded": that is the largest block the campaign's
