@@ -230,6 +230,26 @@ case "${PEFT_METHOD}" in
             echo "Per-GPU optimizer state is 4*P+12*P/N GB. Set ALLOW_SMALL_FULLFT=1 to override." >&2
             exit 2
         fi
+        # Train offload is a PEFT-only capability. orbit/utils/arguments.py
+        # refuses it outright for full fine-tuning:
+        #
+        #   AssertionError: Megatron --offload-train currently requires
+        #   --peft-method lora or oft; full-model train offload needs a
+        #   dedicated implementation.
+        #
+        # It is on by default and the failure lands in argument finalisation,
+        # before a single rollout -- so every FullFT arm died instantly until
+        # this was added. run-qwen2_5-7b-bf16-openr1-full.sh already pairs
+        # `--peft-method none` with these two flags; this launcher had only
+        # ever been run with LoRA, so the pairing was never needed here.
+        #
+        # PEFT arms deliberately keep the offload: colocate mode shares the
+        # GPUs with SGLang, and holding the training weights resident is what
+        # the offload exists to avoid.
+        PEFT_ARGS+=(
+            --no-offload-train
+            --no-offload-train-async
+        )
         ;;
     lora)
         PEFT_ARGS=(

@@ -22,6 +22,16 @@ from megatron.core.utils import get_model_config
 from megatron.training.global_vars import get_args
 from megatron.training.training import get_model
 
+from .modelopt_state_shim import install_if_missing as _install_modelopt_shim
+
+# Megatron's `get_model()` imports `megatron.post_training.checkpointing` at
+# call time, and this environment ships megatron.{bridge,core,training} only --
+# so every full fine-tuning run died with ModuleNotFoundError while every PEFT
+# run passed, because `_build_model` routes PEFT around `get_model()` entirely.
+# Installed here, at import of the module that owns the only call site, so it is
+# in place inside a Ray actor no matter which entry point reached it.
+_MODELOPT_SHIM_INSTALLED = _install_modelopt_shim()
+
 try:
     from megatron.core.pipeline_parallel.utils import unwrap_model
 except ImportError:
