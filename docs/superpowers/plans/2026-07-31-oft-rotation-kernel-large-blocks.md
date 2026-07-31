@@ -155,14 +155,18 @@ python test/srt/oft/repro_shared_memory_ceiling.py
 Expected, exactly:
 
 ```
-BS=   16  OK    max|out-ref|=0.00e+00
-BS=   32  OK    max|out-ref|=0.00e+00
-BS=   64  OK    max|out-ref|=0.00e+00
-BS=  128  OK    max|out-ref|=0.00e+00
+BS=   16  OK    max|out-ref|=1.22e-04
+BS=   32  OK    max|out-ref|=1.22e-04
+BS=   64  OK    max|out-ref|=1.22e-04
+BS=  128  OK    max|out-ref|=1.22e-04
 BS=  256  FAIL  OutOfResources: out of resource: shared memory, Required: 589824, ...
 BS=  512  FAIL  ... Required: 1966080 ...
 BS= 1024  FAIL  ... Required: 7077888 ...
 ```
+
+The `max|out-ref|` is ~1.2e-04 rather than zero because the reference is fp32
+while the kernel accumulates in fp32 and casts to bf16 — that is rounding, not
+error, and the parity bar is 2e-3.
 
 If the `Required:` numbers differ, the GPU is not sm_90 — record the actual limit and adjust Task 2's expectations rather than the code.
 
