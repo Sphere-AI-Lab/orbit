@@ -994,8 +994,15 @@ run, BS=32 is ~11% faster than before, and `OFT_MAX_BLOCK_SGLANG` is 1024 --
 which is what restores `e4place`'s OFT arms to matched parameters against its
 r256/r92 LoRA cells.
 
-**It is not durable.** Any `uv sync` reinstalls sglang from the pin and reverts
-it. If that happens, re-copy from `/fast/zqiu/orbit-iclr/sglang` (branch
+**The pin now agrees with the patch.** `pyproject.toml`'s `sglang` source was
+bumped to `893f329a2`; `sgl-kernel` is deliberately left at `9c83ae8be` because
+its subdirectory tree hash is *identical* at both commits, so a sync reinstalls
+only the pure-Python sglang and leaves the compiled extension cached. Nothing
+was installed -- editing the pin changes no files until someone runs `uv sync`.
+
+**The patch is still not durable on its own.** If a sync runs before the pin
+change is in effect, or the pin is reverted, sglang reinstalls from the old
+commit. If that happens, re-copy from `/fast/zqiu/orbit-iclr/sglang` (branch
 `orbit-main`, already pushed) or bump the pin properly:
 
 ```bash
