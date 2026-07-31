@@ -969,47 +969,44 @@ python -m tools.lora_regret.probe report --ledger 'results/probe/*.jsonl'
 ```
 
 
-## 21. The OFT kernel patch in orbit_env (2026-07-31)
+## 21. The OFT kernel in orbit_env (2026-07-31)
 
-`orbit_env`'s copy of **one file** is ahead of the pinned sglang build:
+`orbit_env` runs **sglang 0.0.0.dev9881+g893f329a2** — a proper install from
+`Sphere-AI-Lab/sglang` `orbit-main`, not a patched file.
 
 ```
-site-packages/sglang/srt/oft/triton_ops/fused_rotate_project.py
-  pinned build 9c83ae8be  ->  Sphere-AI-Lab/sglang orbit-main @ 893f329a2
-  backup of the original: same directory, .9c83ae8be.bak
+sglang     893f329a2   the tiled OFT rotate-project kernel
+sgl-kernel 9c83ae8be   deliberately NOT bumped
 ```
 
-**Why the file and not the pin.** The change is pure Python -- `sglang/` ships no
-`.so` -- and `pyproject.toml` pins `sglang` and `sgl-kernel` to the same commit,
-so bumping the pin would drag a source rebuild of `sgl-kernel`'s five compiled
-extensions for a change that does not touch them. Copying the one file leaves
-every installed version string untouched (verified: sglang, sgl-kernel, torch,
-megatron-core all unchanged).
+**Why the two revs differ.** The change touches one pure-Python file and nothing
+under `sgl-kernel/`, whose tree hash is byte-identical at both commits. uv keys
+its build cache by rev, so bumping `sgl-kernel` would rebuild ~965 MB of CUDA
+extensions (`flash_ops.abi3.so` alone is 852 MB) to produce the same output. If
+a future sglang commit ever touches that subdirectory, bump both — check with
+`git rev-parse <rev>:sgl-kernel` on each.
 
-**What it buys.** OFT block sizes above 128 could not launch at all -- the kernel
-staged the whole BS x BS rotation in shared memory, needing 7,077,888 B at
-BS=1024 against a 232,448 B limit. Every RL OFT arm died on it in the coverage
-probe. The rotation is now walked in sub-tiles, so 16/32/64/128/256/512/1024 all
-run, BS=32 is ~11% faster than before, and `OFT_MAX_BLOCK_SGLANG` is 1024 --
-which is what restores `e4place`'s OFT arms to matched parameters against its
-r256/r92 LoRA cells.
-
-**The pin now agrees with the patch.** `pyproject.toml`'s `sglang` source was
-bumped to `893f329a2`; `sgl-kernel` is deliberately left at `9c83ae8be` because
-its subdirectory tree hash is *identical* at both commits, so a sync reinstalls
-only the pure-Python sglang and leaves the compiled extension cached. Nothing
-was installed -- editing the pin changes no files until someone runs `uv sync`.
-
-**The patch is still not durable on its own.** If a sync runs before the pin
-change is in effect, or the pin is reverted, sglang reinstalls from the old
-commit. If that happens, re-copy from `/fast/zqiu/orbit-iclr/sglang` (branch
-`orbit-main`, already pushed) or bump the pin properly:
+**How it was installed**, without disturbing the other 329 packages:
 
 ```bash
-cp /fast/zqiu/orbit-iclr/sglang/python/sglang/srt/oft/triton_ops/fused_rotate_project.py \
-   /fast/zqiu/orbit-iclr/orbit_env/lib/python3.12/site-packages/sglang/srt/oft/triton_ops/
-python /fast/zqiu/orbit-iclr/sglang/test/srt/oft/repro_shared_memory_ceiling.py   # 7/7 OK
+uv pip uninstall sglang
+uv pip install --no-deps \
+  "sglang @ git+https://github.com/Sphere-AI-Lab/sglang.git@893f329a221475481ffc9c491c2a157b94522dc8#subdirectory=python"
 ```
 
-The permanent fix is `rev = "893f329a2..."` on both sglang lines of
-`pyproject.toml` plus a `uv sync`, when a `sgl-kernel` rebuild is acceptable.
+`--no-deps` is the load-bearing flag: it stops the resolver touching anything
+else. Verified by diffing `uv pip freeze` before and after — exactly one line of
+330 changed. Note `pip` is not installed in this venv; use `uv pip freeze`.
+**Never `uv cache clean`** here: installs are symlink-mode and it would gut every
+env pointing into the cache.
+
+**What it buys.** OFT block sizes above 128 could not launch at all — the kernel
+staged the whole BS x BS rotation in shared memory, needing 7,077,888 B at
+BS=1024 against a 232,448 B limit, which is how every RL OFT arm died in the
+coverage probe. Now 16/32/64/128/256/512/1024 all run, BS=32 is ~11% faster than
+before, and `OFT_MAX_BLOCK_SGLANG` is 1024 — restoring `e4place`'s OFT arms to
+matched parameters against its r256/r92 LoRA cells.
+
+A full copy of the pre-change package is at
+`/fast/zqiu/orbit-iclr/sglang_env_backup_20260731/` with the before/after
+`uv pip freeze` output, if a rollback is ever needed.
