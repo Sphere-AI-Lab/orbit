@@ -202,6 +202,27 @@ def oft_lr_values(
 # `d_in`, and every shape here is a power of two times a small factor.
 OFT_BLOCK_CANDIDATES = tuple(2**k for k in range(3, 14))  # 8 .. 8192
 
+# The largest OFT block SGLang's fused rotate-project kernel can launch.
+#
+# `sglang/srt/oft/triton_ops/fused_rotate_project.py` stages the BS x BS
+# rotation block in shared memory. Measured on an H100 (232,448 B limit) with
+# Llama-3.1-8B's fused QKV shape:
+#
+#     BS 16/32/64/128 -> launches, numerically exact
+#     BS 256          -> needs   589,824 B
+#     BS 512          -> needs 1,966,080 B
+#     BS 1024         -> needs 7,077,888 B
+#
+# Every OFT RL example in examples/high_precision ships 32, 64 or 128, and the
+# kernel's own `_pick_qkv_tiles` mitigation is tuned for 128. Nothing rejects a
+# larger block -- it fails inside Triton as an opaque `OutOfResources`, after
+# the SGLang server has already started, which is how e4/e4place's b1024 cells
+# died in the 2026-07-31 coverage probe.
+#
+# SFT is NOT capped by this: it runs no rollout engine, never reaches the
+# kernel, and its b1024 arms completed normally in the same probe.
+OFT_MAX_BLOCK_SGLANG = 128
+
 
 def matched_oft_block(
     rank: int,
@@ -209,6 +230,7 @@ def matched_oft_block(
     hidden_size: int,
     ffn_size: int,
     qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
+    max_block: int | None = None,
 ) -> tuple[int, dict]:
     """The OFT block nearest LoRA `rank` here, and the match it actually achieves.
 
@@ -235,8 +257,16 @@ def matched_oft_block(
                 if name in [m.strip() for m in modules.split(",") if m.strip()]}
     if not selected:
         raise ValueError(f"no known module in {modules!r} (known: {sorted(shapes)})")
+    candidates = OFT_BLOCK_CANDIDATES
+    if max_block is not None:
+        candidates = tuple(b for b in candidates if b <= max_block)
+        if not candidates:
+            raise ValueError(
+                f"no OFT block size at or below {max_block}; "
+                f"candidates are {OFT_BLOCK_CANDIDATES}"
+            )
     best: tuple[float, int, dict] | None = None
-    for block in OFT_BLOCK_CANDIDATES:
+    for block in candidates:
         report = oft_lora_match_report(block, selected)
         implied = report["lora_rank"]
         if implied < 1:
@@ -247,7 +277,7 @@ def matched_oft_block(
     if best is None:
         raise ValueError(
             f"no OFT block size reaches LoRA rank {rank} on {modules!r}; "
-            f"tried {OFT_BLOCK_CANDIDATES}"
+            f"tried {candidates}"
         )
     return best[1], best[2]
 
@@ -267,6 +297,7 @@ def _oft_cell(
     span: tuple[float, float] = OFT_SCOUT_SPAN,
     qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
     extra: str = "",
+    max_block: int | None = None,
     **arm_kwargs,
 ) -> list[Arm]:
     """One OFT cell near `rank` on `modules`, at this matrix's cell width.
@@ -274,7 +305,9 @@ def _oft_cell(
     Every arm carries the realized `matched_ratio`, so a reader can see how well
     the pairing held for the arm that ran rather than for the one intended.
     """
-    block, report = matched_oft_block(rank, modules, hidden_size, ffn_size, qkv_output_size)
+    block, report = matched_oft_block(
+        rank, modules, hidden_size, ffn_size, qkv_output_size, max_block=max_block
+    )
     lrs, scouting = oft_lr_values(centre, n, step_decades=step_decades, scale=scale, span=span)
     label = "oftscout" if scouting else "oft"
     return [
@@ -681,8 +714,13 @@ def e4_arms(
     # FullFT and LoRA centres sit a decade below their SFT counterparts. Nothing
     # has ever measured OFT under policy gradient, so these are `oftscout` arms
     # until one of them wins.
+    # Capped: an RL arm's rotation runs inside SGLang, which cannot launch a
+    # block above OFT_MAX_BLOCK_SGLANG. b128 matches LoRA r24 all-modules, which
+    # sits beside this matrix's own r16 arm rather than the r256 the SFT cells
+    # match -- a smaller adapter, but one that runs.
     arms += _oft_cell(256, ALL_MODULES, hidden_size, ffn_size, seed, RL_MIX_DATASET,
-                      oft_lr_centre, n=4, step_decades=0.5, span=RL_OFT_SCOUT_SPAN)
+                      oft_lr_centre, n=4, step_decades=0.5, span=RL_OFT_SCOUT_SPAN,
+                      max_block=OFT_MAX_BLOCK_SGLANG)
     return arms
 
 
@@ -740,9 +778,11 @@ def e4place_arms(
                 "", lr, seed, dataset=RL_MIX_DATASET)
         )
     for rank, modules in configs:
+        # Capped for SGLang -- see OFT_MAX_BLOCK_SGLANG.
         arms += _oft_cell(rank, modules, hidden_size, ffn_size, seed, RL_MIX_DATASET,
                           oft_lr_centre, n=4, step_decades=0.5,
-                          span=RL_OFT_SCOUT_SPAN, qkv_output_size=qkv_output_size)
+                          span=RL_OFT_SCOUT_SPAN, qkv_output_size=qkv_output_size,
+                          max_block=OFT_MAX_BLOCK_SGLANG)
     return arms
 
 

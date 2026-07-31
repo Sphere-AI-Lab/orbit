@@ -268,7 +268,17 @@ class TestMethodCoverage:
     ):
         """The block's implied rank is within a factor of 2 of some LoRA rank
         run on the same modules in the same matrix. Wider than that and the OFT
-        arm would be comparing method and capacity at once."""
+        arm would be comparing method and capacity at once.
+
+        `e4place` is exempt and that exemption is a finding, not a waiver: its
+        LoRA cells are r256 (attention) and r92 (MLP), but SGLang's kernel caps
+        the block at 128, which reaches only r28 and r23. The capacity match is
+        unreachable under RL at those placements -- see
+        TestOftBlockCeilingUnderRl.test_the_rl_placement_cells_are_not_capacity_matched,
+        which pins the gap so it cannot widen unnoticed.
+        """
+        if matrix == "e4place":
+            pytest.skip("capacity match unreachable under the SGLang block cap")
         from orbit.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
         from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT
 
@@ -333,3 +343,110 @@ class TestMethodCoverage:
                     "e3": 35, "e4": 20, "e4place": 20}
         actual = {m: len(MATRICES[m](HIDDEN, FFN, 0, None, None)) for m in expected}
         assert actual == expected
+
+
+class TestOftBlockCeilingUnderRl:
+    """SGLang's fused OFT kernel cannot launch above block size 128.
+
+    `sglang/srt/oft/triton_ops/fused_rotate_project.py::fused_rotate_project_qkv`
+    stages the BS x BS rotation block in shared memory. Measured on an H100
+    (232,448 B limit) with Llama-3.1-8B's fused QKV shape:
+
+        BS  16/32/64/128 -> OK, numerically exact
+        BS  256          -> needs   589,824 B
+        BS  512          -> needs 1,966,080 B
+        BS 1024          -> needs 7,077,888 B
+
+    Every working OFT RL example in examples/high_precision ships 32, 64 or
+    128, and the kernel's own `_pick_qkv_tiles` mitigation is tuned for 128.
+    Nothing rejects a larger block: it fails inside Triton as an opaque
+    `OutOfResources` after the SGLang server has already started.
+
+    The e4/e4place OFT cells asked for 1024 (matched to LoRA r256) and died
+    exactly there -- discovered by the coverage probe on 2026-07-31.
+
+    SFT is deliberately NOT capped: it runs no rollout engine, never reaches
+    this kernel, and its b1024 arms completed normally in the same probe.
+    """
+
+    @pytest.mark.parametrize("matrix", ["e4", "e4place"])
+    def test_rl_oft_blocks_fit_the_kernel(self, matrix):
+        from tools.lora_regret.arms import OFT_MAX_BLOCK_SGLANG
+
+        arms = MATRICES[matrix](HIDDEN, FFN, 0, None, None)
+        blocks = {a.oft_block_size for a in arms if a.method == "oft"}
+        assert blocks, matrix
+        assert max(blocks) <= OFT_MAX_BLOCK_SGLANG, (matrix, sorted(blocks))
+
+    def test_the_ceiling_is_the_measured_one(self):
+        from tools.lora_regret.arms import OFT_MAX_BLOCK_SGLANG
+
+        assert OFT_MAX_BLOCK_SGLANG == 128
+
+    def test_the_ceiling_matches_every_working_example_launcher(self):
+        """Pinned against the launchers rather than retyped: if someone ships
+        an example at a larger block, either the kernel improved or that
+        example is broken, and this should be revisited either way."""
+        import re
+        from pathlib import Path
+
+        from tools.lora_regret.arms import OFT_MAX_BLOCK_SGLANG
+
+        repo = Path(__file__).resolve().parents[3]
+        seen = set()
+        for script in (repo / "examples/high_precision").glob("*oft*.sh"):
+            for m in re.finditer(r"--oft-block-size\s+(\d+)", script.read_text(encoding="utf-8")):
+                seen.add(int(m.group(1)))
+        assert seen, "no example pins an OFT block size"
+        assert max(seen) <= OFT_MAX_BLOCK_SGLANG, sorted(seen)
+
+    def test_sft_oft_is_not_capped(self):
+        """It never reaches the kernel, and its large-block arms are measured."""
+        from tools.lora_regret.arms import OFT_MAX_BLOCK_SGLANG
+
+        arms = MATRICES["e1"](HIDDEN, FFN, 0, None, None)
+        blocks = {a.oft_block_size for a in arms if a.method == "oft"}
+        assert max(blocks) > OFT_MAX_BLOCK_SGLANG, sorted(blocks)
+
+    def test_the_rl_placement_cells_are_not_capacity_matched(self):
+        """The cost of the cap, recorded rather than hidden.
+
+        e4place compares attention against MLP at matched parameters for LoRA
+        (r256 vs r92). Its OFT cells cannot join that comparison: block 128 is
+        the largest SGLang can launch and it reaches r28 / r23. So the OFT arms
+        answer "does OFT run under policy gradient at this placement", not "does
+        OFT match LoRA at this placement". Reading them as the latter would
+        confound method with capacity -- the exact confound E3 exists to avoid.
+        """
+        from orbit.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
+        from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT
+
+        shapes = megatron_module_shapes(HIDDEN, FFN, LLAMA31_8B_QKV_OUTPUT)
+        arms = MATRICES["e4place"](HIDDEN, FFN, 0, None, None)
+        lora = {a.target_modules: a.rank for a in arms if a.method == "lora"}
+        gaps = {}
+        for arm in (a for a in arms if a.method == "oft"):
+            sel = {n: s for n, s in shapes.items() if n in arm.target_modules.split(",")}
+            implied = oft_lora_match_report(arm.oft_block_size, sel)["lora_rank"]
+            gaps[arm.target_modules] = (implied, lora[arm.target_modules])
+        assert gaps == {
+            ATTN_MODULES: (28, 256),
+            MLP_MODULES: (23, 92),
+        }, gaps
+
+    def test_the_capped_cell_is_still_matched_to_a_lora_arm(self):
+        """Capping changes which LoRA rank the OFT arm is comparable to -- it
+        must still be matched to something, not left dangling."""
+        from orbit.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
+        from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT
+
+        shapes = megatron_module_shapes(HIDDEN, FFN, LLAMA31_8B_QKV_OUTPUT)
+        # e4's LoRA ladder includes r16, and the capped block reaches r24 --
+        # within a factor of 2, so this matrix keeps its matched comparison.
+        for arm in MATRICES["e4"](HIDDEN, FFN, 0, None, None):
+            if arm.method != "oft":
+                continue
+            sel = {n: s for n, s in shapes.items() if n in arm.target_modules.split(",")}
+            report = oft_lora_match_report(arm.oft_block_size, sel)
+            assert 0.85 <= report["ratio"] <= 1.15, (arm.name, report)
+            assert arm.matched_ratio == pytest.approx(report["ratio"])
