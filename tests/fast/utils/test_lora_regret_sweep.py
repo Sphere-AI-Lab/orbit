@@ -986,7 +986,7 @@ class TestDryRunPrintsAPasteableCommand:
         assert f"LAUNCHER_NAME={arm.name}" in line
         # No matrix given, so this arm is unrouted: the bare campaign project,
         # never a real task's. Group is the method. See TestWandbRouting.
-        assert "WANDB_PROJECT=lora-regret " in line + " "
+        assert "WANDB_PROJECT=lora-without-regret " in line + " "
         assert "WANDB_GROUP=lora" in line
         # and still the arm's own knobs
         assert "LORA_RANK=16" in line
@@ -1001,7 +1001,7 @@ class TestDryRunPrintsAPasteableCommand:
         line = capsys.readouterr().out.strip()
         # The project carries the task; the sft/rl distinction the old group
         # spelled out is already implied by which launcher runs.
-        assert "WANDB_PROJECT=lora-regret-e4" in line
+        assert "WANDB_PROJECT=math-gsm8k-rl-rank" in line
         assert "WANDB_GROUP=lora" in line
         assert line.endswith(f"bash {sweep.RL_LAUNCHER}")
 
@@ -1277,16 +1277,40 @@ class TestWandbRouting:
 
     def test_every_matrix_gets_its_own_project(self):
         from tools.lora_regret.arms import MATRICES
-        from tools.lora_regret.sweep import wandb_project
+        from tools.lora_regret.sweep import MATRIX_PROJECTS, wandb_project
 
+        assert set(MATRIX_PROJECTS) == set(MATRICES)
         projects = {name: wandb_project(name) for name in MATRICES}
         # Distinct, or two tasks would silently share a dashboard.
         assert len(set(projects.values())) == len(MATRICES)
-        assert projects["e1"] == "lora-regret-e1"
-        assert projects["e1ot"] == "lora-regret-e1ot"
-        assert projects["e1short"] == "lora-regret-e1short"
-        assert projects["e4place"] == "lora-regret-e4place"
-        assert projects["e5scout"] == "lora-regret-e5scout"
+        assert projects["e1"] == "tulu3-sft-rank"
+        assert projects["e1ot"] == "openthoughts3-sft-rank"
+        assert projects["e1short"] == "tulu3-sft-lr-horizon"
+        assert projects["e4place"] == "math-gsm8k-rl-placement"
+        assert projects["e5scout"] == "tulu3-sft-oft-scout"
+
+    @pytest.mark.parametrize(
+        "matrix", sorted(set(sweep.MATRIX_PROJECTS) - {"e1long"})
+    )
+    def test_the_project_name_describes_the_arms_it_routes(self, matrix):
+        """The `<dataset>-<sft|rl>` head is checked against what the matrix
+        actually builds. A name is a claim about the runs inside it, and a
+        project called `tulu3-sft-...` holding OpenThoughts3 RL arms is a worse
+        lie than an opaque code would have been.
+
+        `e1long` is excluded because it cannot be built without a real E1-1
+        ledger; its dataset is pinned by the e1long tests instead.
+        """
+        from tools.lora_regret.arms import MATRICES
+        from tools.lora_regret.sweep import MATRIX_METRICS, wandb_project
+
+        arms = MATRICES[matrix](4096, 14336, 0, 1e-4 if matrix == "e5" else None, None)
+        # `None` means the arm takes the launcher's default, which is tulu3.
+        datasets = {(a.dataset or "tulu3") for a in arms}
+        assert len(datasets) == 1, f"{matrix} mixes datasets: {sorted(datasets)}"
+        dataset = datasets.pop().replace("_", "-")
+        mode = "rl" if MATRIX_METRICS[matrix] == "accuracy" else "sft"
+        assert wandb_project(matrix).startswith(f"{dataset}-{mode}-")
 
     def test_e4_and_e4place_do_not_share_a_project(self):
         """They run the same launcher at the same four learning rates. Pooling
@@ -1295,18 +1319,29 @@ class TestWandbRouting:
 
         assert wandb_project("e4") != wandb_project("e4place")
 
-    def test_an_unrouted_arm_lands_in_the_campaign_project_not_a_task_one(self):
+    def test_an_unrouted_arm_lands_where_a_hand_run_one_does(self):
         """`run_arm` is callable directly, and a made-up default matrix would
-        write those runs into a real task's dashboard. None means "no task"."""
-        from tools.lora_regret.sweep import WANDB_PROJECT_PREFIX, wandb_project
+        write those runs into a real task's dashboard. None means "no task", so
+        it gets the launchers' own campaign-wide default."""
+        from tools.lora_regret.arms import MATRICES
+        from tools.lora_regret.sweep import UNROUTED_WANDB_PROJECT, wandb_project
 
-        assert wandb_project(None) == WANDB_PROJECT_PREFIX
-        assert wandb_project(None) not in {wandb_project("e1"), wandb_project("e5")}
+        assert wandb_project(None) == UNROUTED_WANDB_PROJECT
+        assert wandb_project(None) not in {wandb_project(m) for m in MATRICES}
+        launcher = (REPO_ROOT / sweep.LAUNCHER).read_text(encoding="utf-8")
+        assert f"WANDB_PROJECT:-{UNROUTED_WANDB_PROJECT}" in launcher
+
+    def test_an_unknown_matrix_names_the_valid_ones(self):
+        """Adding a matrix without a project would otherwise route it silently."""
+        from tools.lora_regret.sweep import wandb_project
+
+        with pytest.raises(KeyError, match="e4place"):
+            wandb_project("e9")
 
     def test_the_dry_run_exports_the_matrixs_project(self, tmp_path, capsys):
         arm = Arm("lora-r16-all-lr0.00025-s0", "lora", 16, None, ALL_MODULES, 2.5e-4, 0)
         run_arm(arm, tmp_path, tmp_path / "r.jsonl", dry_run=True, matrix="e1ot")
-        assert "WANDB_PROJECT=lora-regret-e1ot" in capsys.readouterr().out
+        assert "WANDB_PROJECT=openthoughts3-sft-rank" in capsys.readouterr().out
 
     @pytest.mark.parametrize(
         "method,rank,block,modules",
@@ -1332,5 +1367,5 @@ class TestWandbRouting:
         results = tmp_path / "r.jsonl"
         run_arm(arm, tmp_path, results, dry_run=False, matrix="e3")
         record = json.loads(results.read_text().splitlines()[0])
-        assert record["wandb_project"] == "lora-regret-e3"
+        assert record["wandb_project"] == "tulu3-sft-placement"
         assert record["wandb_group"] == "lora"

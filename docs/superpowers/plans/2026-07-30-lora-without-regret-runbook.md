@@ -246,10 +246,29 @@ is wrong, and no amount of averaging fixes it.
 
 ## 4.5 Where the runs show up in wandb
 
-**One project per task, one group per method.** `--matrix e1ot` writes to
-`lora-regret-e1ot`, `--matrix e4place` to `lora-regret-e4place`, and inside each
-the FullFT, LoRA and OFT arms group as `full` / `lora` / `oft`. The run name is
-the arm name, so `oft-b64-all-lr0.0001-s0` is readable without opening it.
+**One project per task, one group per method.** The project name spells out
+`<dataset>-<sft|rl>-<what is tested>`, so the sidebar is readable without the
+plan in hand:
+
+| `--matrix` | wandb project | groups inside it |
+|---|---|---|
+| `e1` | `tulu3-sft-rank` | full, lora |
+| `e1long` | `tulu3-sft-curves` | full, lora |
+| `e1short` | `tulu3-sft-lr-horizon` | full, lora |
+| `e1ot` | `openthoughts3-sft-rank` | full, lora |
+| `e2` | `openthoughts3-sft-batch` | full, lora |
+| `e3` | `tulu3-sft-placement` | lora |
+| `e4` | `math-gsm8k-rl-rank` | full, lora |
+| `e4place` | `math-gsm8k-rl-placement` | lora |
+| `e5scout` | `tulu3-sft-oft-scout` | oft |
+| `e5` | `tulu3-sft-oft-match` | lora, oft |
+| `sft82` | `tulu3-sft-bracket` | full, lora, oft |
+
+The run name is the arm name, so `oft-b64-all-lr0.0001-s0` is readable without
+opening it. The `<dataset>-<sft|rl>` head is asserted against each matrix's own
+arms by `test_the_project_name_describes_the_arms_it_routes` — a name is a claim
+about the runs inside it, and a project called `tulu3-sft-*` holding
+OpenThoughts3 RL arms would be a worse lie than an opaque code.
 
 The split is per *matrix* rather than per claim because the matrix is the unit
 you schedule, resume and re-run: one project is one `--results` ledger is one
@@ -263,8 +282,8 @@ months later can be traced back to the dashboard it came off.
 
 Hand-run arms (§3's smoke, §4's P3) do not go through the sweep and keep the
 launcher's own `WANDB_PROJECT=lora-without-regret` default. Calling `run_arm`
-directly without a matrix lands in the bare `lora-regret` project — visibly not
-a task, rather than silently inside one whose numbers you are quoting.
+directly without a matrix lands there too — where a hand-run arm lands, rather
+than silently inside a task whose numbers you are quoting.
 
 ## 5. Execution order for E1-E5
 

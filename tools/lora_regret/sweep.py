@@ -93,19 +93,46 @@ RL_EVAL_DATASETS = ("math_test", "gsm8k_test")
 # that decides C2 would be indistinguishable in the sidebar from the one that
 # decides C6. The matrix is the unit an operator schedules, reads and re-runs,
 # so it is the unit the dashboard is split on.
-WANDB_PROJECT_PREFIX = "lora-regret"
+#
+# The name spells out `<dataset>-<sft|rl>-<what is tested>` rather than the
+# matrix code, because "e4place" is only meaningful to someone holding the plan
+# and "math-gsm8k-rl-placement" is meaningful to anyone opening the sidebar. The
+# first two components are not decoration: they are checked against each
+# matrix's own arms by test_the_project_name_describes_the_arms_it_routes, so a
+# project cannot end up claiming a dataset or a training mode it does not run.
+MATRIX_PROJECTS = {
+    "e1": "tulu3-sft-rank",
+    "e1long": "tulu3-sft-curves",
+    "e1short": "tulu3-sft-lr-horizon",
+    "e1ot": "openthoughts3-sft-rank",
+    "e2": "openthoughts3-sft-batch",
+    "e3": "tulu3-sft-placement",
+    "e4": "math-gsm8k-rl-rank",
+    "e4place": "math-gsm8k-rl-placement",
+    "e5scout": "tulu3-sft-oft-scout",
+    "e5": "tulu3-sft-oft-match",
+    "sft82": "tulu3-sft-bracket",
+}
+
+# Where an arm goes when no matrix routed it. Deliberately the launchers' own
+# default rather than any task's name: `run_arm` is callable directly (tests,
+# one-off reruns), and inventing a plausible task would write those runs into a
+# dashboard whose numbers are being quoted. This way an unrouted arm lands
+# exactly where a hand-run one does.
+UNROUTED_WANDB_PROJECT = "lora-without-regret"
 
 
 def wandb_project(matrix: str | None) -> str:
-    """The wandb project for one matrix.
-
-    `None` is not a matrix and deliberately does not invent one: `run_arm` is
-    callable directly (tests, one-off reruns), and defaulting an unrouted call
-    to some real task's name would write those runs into a dashboard whose
-    numbers are being quoted. They land in the bare campaign project instead,
-    where they are visibly not part of a task.
-    """
-    return f"{WANDB_PROJECT_PREFIX}-{matrix}" if matrix else WANDB_PROJECT_PREFIX
+    """The wandb project for one matrix, or the campaign default for none."""
+    if matrix is None:
+        return UNROUTED_WANDB_PROJECT
+    try:
+        return MATRIX_PROJECTS[matrix]
+    except KeyError:
+        raise KeyError(
+            f"no wandb project for matrix {matrix!r}; add one to MATRIX_PROJECTS "
+            f"(known: {sorted(MATRIX_PROJECTS)})"
+        ) from None
 
 
 def load_ledger(path: Path) -> set[str]:
