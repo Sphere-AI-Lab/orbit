@@ -505,6 +505,25 @@ def main() -> int:
         print("no usable records in the given ledgers", file=sys.stderr)
         return 1
 
+    # A probe row is a three-rollout run with a real-looking score. There is no
+    # flag to override this and there should not be: a probe cannot be made into
+    # a measurement by asserting that it is one, and the cost of the mistake is
+    # an argmin chosen by a learning rate that trained for ninety seconds.
+    probes = sorted(
+        {r["arm"] for r in records + acc_records if r.get("probe_rollouts") is not None}
+    )
+    if probes:
+        print(
+            f"refusing to read {len(probes)} probe row(s) as measurements "
+            f"(e.g. {probes[0]!r}, {probes[0] and records[0].get('probe_rollouts')} "
+            "rollouts). Probe ledgers answer 'does it run' and 'how fast', never "
+            "'which learning rate won'. Point --ledgers at the sweep's own "
+            "results, and read the probe with `python -m tools.lora_regret.probe "
+            "report`.",
+            file=sys.stderr,
+        )
+        return 4
+
     if args.command == "sigma":
         replicates = load_records(args.ledgers, seed=None)
         value = sigma(replicates)

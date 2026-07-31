@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from orbit.utils.peft_param_match import match_report
@@ -33,6 +34,7 @@ from tools.lora_regret.models import get as get_model
 # The eval-line regex and phase labels live in trace.py -- one definition,
 # built from EVAL_NLL_METRIC_KEY. Imported under the existing private names so
 # every call site and the TestLogFormatPins pins keep working unchanged.
+from tools.lora_regret.probe_log import parse_rollout_seconds
 from tools.lora_regret.trace import (  # noqa: F401  (parse_trace re-exported)
     NLL_LINE as _NLL_LINE,
     PHASE_AFTER_TRAIN as _PHASE_AFTER_TRAIN,
@@ -290,6 +292,7 @@ def run_arm(
     metric: str = "nll",
     adapter_params: int | None = None,
     matrix: str | None = None,
+    probe_rollouts: int | None = None,
 ) -> None:
     log_path = repo_root / "logs" / "lora_regret" / f"{arm.name}.log"
     # One dict, used for both the real environment and the dry-run preview --
@@ -316,6 +319,13 @@ def run_arm(
             "SAVE_DIR": str(repo_root / "orbit_ckpts" / "lora_regret" / arm.name),
         }
     )
+    if probe_rollouts is not None:
+        # Applied AFTER arm_env, which is the whole point: an e1ot arm sets
+        # NUM_ROLLOUT="" to request a full epoch and an e1short arm sets 100,
+        # so a probe that merely exported the variable would be overridden by
+        # exactly the two matrices whose length it most needs to cut.
+        overrides["NUM_ROLLOUT"] = str(probe_rollouts)
+        overrides["EVAL_NLL_INTERVAL"] = "1"
     env = dict(os.environ)
     env.update(overrides)
     cmd = ["bash", str(repo_root / launcher)]
@@ -325,13 +335,20 @@ def run_arm(
         return
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
     proc = subprocess.run(cmd, env=env, cwd=repo_root)
+    elapsed = time.monotonic() - started
     nll, accuracy, per_dataset, steps = (None, None, {}, None)
     trace_points: list = []
     trace_ok: bool | None = None
     trace_why: str | None = None
+    rollout_seconds: list[float] = []
     if log_path.exists():
         log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        # Measured per rollout by train.py's own ETA tracker, for SFT and RL
+        # alike. Recorded on every row, not only probes: it is the only place a
+        # completed arm's pace survives, and logs/ is gitignored.
+        rollout_seconds = parse_rollout_seconds(log_text)
         if metric == "accuracy":
             accuracy, steps, per_dataset = parse_final_accuracy(log_text, RL_EVAL_DATASETS)
         else:
@@ -373,6 +390,15 @@ def run_arm(
             # survives only inside its name.
             "global_batch_size": arm.global_batch_size,
             "dataset": arm.dataset,
+            "seconds": elapsed,
+            "rollout_seconds": rollout_seconds,
+            "matrix": matrix,
+            "gpus": int(os.environ.get("GPUS_PER_NODE", 0)) or None,
+            # Present ONLY on probe rows, and `analyze` refuses any ledger that
+            # has it. Three rollouts produce a real-looking test_nll; without
+            # this a globbed ledger could decide an argmin from a learning rate
+            # that trained for ninety seconds.
+            "probe_rollouts": probe_rollouts,
             "status": "ok" if (proc.returncode == 0 and measured is not None) else "failed",
         },
     )
@@ -477,6 +503,14 @@ def main() -> None:
         default=None,
         help="Regex; run only arms whose name matches (e.g. '^lora-r256' or '^oftscout').",
     )
+    parser.add_argument(
+        "--probe-rollouts", type=int, default=None,
+        help="Cut every arm to this many rollouts and evaluate each one. For the "
+             "coverage probe (scripts/lora_regret/coverage_probe.sh): proves a "
+             "method runs and measures its per-rollout pace. Rows written under "
+             "this flag carry `probe_rollouts` and `analyze` refuses any ledger "
+             "containing one -- they are not measurements.",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print commands, run nothing.")
     args = parser.parse_args()
 
@@ -542,6 +576,7 @@ def main() -> None:
         run_arm(
             arm, repo_root, args.results, args.dry_run,
             launcher=launcher, metric=metric, matrix=args.matrix,
+            probe_rollouts=args.probe_rollouts,
             adapter_params=adapter_param_count(
                 arm, model.hidden_size, model.ffn_size, model.num_layers,
                 qkv_output_size=model.qkv_output_size,

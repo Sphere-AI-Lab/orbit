@@ -11,7 +11,7 @@ Companions:
 
 ## What is ready, and what you still have to do
 
-Ready and CPU-verified (750 tests, 0 failures, in the built env):
+Ready and CPU-verified (770 tests, 0 failures, in the built env):
 
 | Piece | Where |
 |---|---|
@@ -27,6 +27,7 @@ Ready and CPU-verified (750 tests, 0 failures, in the built env):
 | NLL trace extraction | `tools/lora_regret/trace.py` |
 | σ, argmins, C1-C6 and C8 readings | `tools/lora_regret/analyze.py` |
 | Figures from the analysis JSON | `tools/lora_regret/plot.py` (§19) |
+| Coverage probe: one run per task per method | `scripts/lora_regret/coverage_probe.sh` (§20) |
 
 The data is **materialized** (§2, done 2026-07-30) and the **smoke passes on it**
 (§3, done 2026-07-30). Yours to do, in this order: **close P3** (§4, needs DP≥2 and
@@ -868,3 +869,56 @@ own figure to compare against, where one exists
 (`third_party/lora-without-regret/figures/`). matplotlib is an extra —
 `uv sync --extra plots` — and is imported lazily, so `plot.py` stays importable
 without it.
+
+## 20. Coverage probe — one run per task per method (before anything long)
+
+```bash
+bash scripts/lora_regret/coverage_probe.sh
+```
+
+24 runs, one per (task, method), three rollouts each, on a single 8×H100 node.
+It answers exactly two questions:
+
+1. **Does every method run?** A method that cannot start, cannot wrap the model,
+   or never reaches the eval line the parser needs fails here in minutes rather
+   than on the 40th arm of a reserved node. OFT under policy gradient (§18) has
+   never executed at all; this is where that is found out.
+2. **How long is the real thing?** `train.py` logs `progress … last=` per
+   rollout, so each probe yields a *measured* per-rollout time. The report
+   multiplies it by that arm's own rollout count and by the number of arms of
+   that method in that task.
+
+It deliberately cannot answer a third. Three-rollout rows carry
+`probe_rollouts`, and `analyze` **exits 4** on any ledger containing one — a
+90-second run produces a real-looking `test_nll`, and a globbed ledger would let
+it win an argmin.
+
+GPU sizing mirrors the real sweep, because a timing measured on the wrong number
+of GPUs estimates nothing:
+
+| phase | arms | GPUs each | concurrency |
+|---|---|---|---|
+| 1 | SFT LoRA / OFT | 1 | 8 at a time, one per device |
+| 2 | SFT FullFT | 4 | 2 at a time |
+| 3 | RL, all methods | 8 | sequential |
+
+**Phase 1's numbers are upper bounds, not estimates.** Eight arms share NVLink,
+host RAM and the filesystem; phases 2 and 3 are uncontended and their numbers are
+estimates. Do not average the two. If you want clean 1-GPU numbers, re-run just
+that phase alone: `ONLY_PHASE=1 PROBE_DIR=results/probe_solo bash …` with the
+loop's barrier reached one run at a time.
+
+Knobs: `PROBE_ROLLOUTS` (3), `PROBE_DIR` (`results/probe`), `ONLY_PHASE`
+(1, 4 or 8), `DRY_RUN=1`, `SKIP_PREFLIGHT=1`.
+
+`e1long` and `sft82` are not probed and the plan says why: `e1long`'s arms come
+from an E1-1 ledger that does not exist yet, and `sft82` is the frozen legacy
+matrix whose methods are E1's and E5's. `e5`'s OFT cell has no scouted centre, so
+the probe supplies 1e-4 — valid for plumbing and timing, and the real sweep still
+refuses `--matrix e5` without the measured value.
+
+Re-read the report at any time without re-running anything:
+
+```bash
+python -m tools.lora_regret.probe report --ledger 'results/probe/*.jsonl'
+```
