@@ -83,21 +83,36 @@ FULL_RUN_ROLLOUTS = {
 }
 
 
-# What counts as one probe.
+# What counts as one probe. Three levels, coarsest first.
 #
-# `method` is the default: one run per (task, method). Rank, OFT block size,
-# target modules and batch size are collapsed because they exercise the SAME
-# code -- the same wrap, the same launcher path, the same optimizer -- at
-# different tensor shapes. Launching r512 after r256 re-runs a path that already
-# passed; the axes that carry distinct code are the method (which adapter, or
-# none) and the task (which launcher, dataset and metric), and those are what
-# this level enumerates.
+# `path` is the default: one run per distinct **code path**, which is
+# (launcher, dataset, method, target modules). 13 runs against `method`'s 24.
+#
+#   Carried on the axis, so it is probed:
+#     launcher       -- SFT and RL are different scripts and different parsers
+#     method         -- which adapter is wrapped, or none
+#     target modules -- WHICH layers get wrapped. `linear_fc1` is Orbit's fused
+#                       gate+up; wrapping it is not the same code as wrapping
+#                       `linear_qkv`, so attn/mlp/all stay separate.
+#     dataset        -- not a code difference but a shape one: OpenThoughts3
+#                       rows are ~62 KB against Tulu3's ~3 KB, a 20x sequence
+#                       length that moves both memory and step time.
+#
+#   Collapsed, because they are the same code at a different tensor shape:
+#     rank, OFT block size, batch size. `e4/full` and `e4place/full` are the
+#     same run twice; so are `e1/lora`, `e1short/lora` and `e5/lora`.
+#
+# The report still prints all 24 (task, method) rows -- each one reads the pace
+# measured on ITS code path -- so nothing is lost from the estimate.
+#
+# `method` is the previous default: one run per (task, method), 24 runs. Use it
+# if you want each task independently confirmed rather than inferred.
 #
 # `config` collapses only the learning rate, so every rank, block size,
-# placement and batch size is launched once -- 61 runs against 24. Worth it only
-# when you suspect a shape-dependent failure (an OOM at a batch size nothing has
-# run at) rather than a code-path failure.
-PROBE_LEVELS = ("method", "config")
+# placement and batch size is launched once -- 61 runs. Worth it only when
+# hunting a shape-dependent failure (an OOM at a batch size nothing has run at)
+# rather than a code-path one.
+PROBE_LEVELS = ("path", "method", "config")
 
 
 @dataclass(frozen=True)
@@ -127,6 +142,17 @@ _MODULE_SHORT = {
     "linear_fc1,linear_fc2": "mlp",
     "": "-",
 }
+
+
+def path_key(matrix: str, arm) -> tuple:
+    """The distinct code path an arm exercises.
+
+    Two arms with this key equal run the same script over the same data through
+    the same wrapping code; only their tensor shapes differ. Probing both proves
+    nothing the first did not.
+    """
+    launcher = "rl" if MATRIX_METRICS[matrix] == "accuracy" else "sft"
+    return (launcher, arm.dataset or "tulu3", arm.method, arm.target_modules or "")
 
 
 def config_key(arm) -> tuple:
@@ -171,47 +197,69 @@ def _gpus(method: str, metric: str) -> int:
     return 1
 
 
-def probe_plan(level: str = "method") -> list[ProbeRun]:
-    """One run per (task, method) by default, or per distinct configuration."""
+def _probe_run(matrix: str, arm, label: str, multiplier: int) -> ProbeRun:
+    metric = MATRIX_METRICS[matrix]
+    return ProbeRun(
+        matrix=matrix,
+        method=arm.method,
+        arm=arm.name,
+        # Anchored at both ends: an unanchored name is a prefix of any longer
+        # one, and `--only` takes a regex, so a bare name could select two arms
+        # and bill the second to the first.
+        only=f"^{re.escape(arm.name)}$",
+        gpus=_gpus(arm.method, metric),
+        metric=metric,
+        full_rollouts=FULL_RUN_ROLLOUTS[matrix],
+        arms_of_method=sum(
+            1 for a in _build(matrix) if a.method == arm.method
+        ),
+        project=wandb_project(matrix),
+        label=label,
+        arms_in_config=multiplier,
+    )
+
+
+def probe_plan(level: str = "path") -> list[ProbeRun]:
+    """One run per distinct code path by default; see PROBE_LEVELS."""
     if level not in PROBE_LEVELS:
         raise ValueError(f"unknown probe level {level!r}; known: {PROBE_LEVELS}")
-    runs: list[ProbeRun] = []
+
+    if level == "path":
+        # Grouped ACROSS matrices, which is the whole point: `e4/full` and
+        # `e4place/full` are the same script over the same data wrapping the
+        # same (empty) module set, so running both proves nothing the first did
+        # not. Grouping within a matrix would keep every duplicate.
+        cells: dict[tuple, list[tuple[str, object]]] = {}
+        for matrix in MATRICES:
+            if matrix in EXCLUDED_MATRICES:
+                continue
+            for arm in _build(matrix):
+                cells.setdefault(path_key(matrix, arm), []).append((matrix, arm))
+        runs = []
+        for key, members in cells.items():
+            # Cheapest representative: the task with the fewest rollouts still
+            # exercises the identical code, and there is no reason to probe on
+            # the expensive one.
+            matrix, arm = min(members, key=lambda m: (FULL_RUN_ROLLOUTS[m[0]], m[0]))
+            launcher, dataset, method, modules = key
+            label = f"{launcher}/{dataset}/{method}/{_MODULE_SHORT.get(modules, modules)}"
+            runs.append(_probe_run(matrix, arm, label, len(members)))
+        return sorted(runs, key=lambda r: (-r.gpus, r.label))
+
+    runs = []
     for matrix in MATRICES:
         if matrix in EXCLUDED_MATRICES:
             continue
-        arms = _build(matrix)
-        metric = MATRIX_METRICS[matrix]
-        cells: dict[tuple, list] = {}
-        for arm in arms:
+        cells = {}
+        for arm in _build(matrix):
             key = config_key(arm) if level == "config" else (arm.method,)
             cells.setdefault(key, []).append(arm)
         for cell in cells.values():
             arm = _representative(cell)
-            method = arm.method
             label = (
-                config_label(config_key(arm)) if level == "config" else f"{method}/*/*"
+                config_label(config_key(arm)) if level == "config" else arm.method
             )
-            runs.append(
-                ProbeRun(
-                    matrix=matrix,
-                    method=method,
-                    arm=arm.name,
-                    # Anchored at both ends: an unanchored name is a prefix of
-                    # any longer one, and `--only` takes a regex, so a bare name
-                    # could select two arms and bill the second to the first.
-                    only=f"^{re.escape(arm.name)}$",
-                    gpus=_gpus(method, metric),
-                    metric=metric,
-                    full_rollouts=FULL_RUN_ROLLOUTS[matrix],
-                    # Arms of THIS method in this matrix, not the matrix total:
-                    # the estimate is multiplied by it, and e1's 45 arms are 5
-                    # FullFT plus 35 LoRA plus 5 OFT with very different costs.
-                    arms_of_method=sum(1 for a in arms if a.method == method),
-                    project=wandb_project(matrix),
-                    label=label,
-                    arms_in_config=len(cell),
-                )
-            )
+            runs.append(_probe_run(matrix, arm, label, len(cell)))
     return runs
 
 
@@ -239,7 +287,27 @@ def format_report(records: list[dict], level: str = "method") -> str:
     32 onto its batch 512 -- which is precisely the pair whose difference the
     config level exists to measure.
     """
-    by_key = {(r.get("matrix"), r.get("arm")): r for r in records}
+    if level == "path":
+        # Rows are still the 24 (task, method) pairs -- that is the deliverable.
+        # Each reads the pace measured on ITS code path, which is what makes 13
+        # runs answer 24 questions.
+        by_path = {}
+        for r in records:
+            matrix = r.get("matrix")
+            if matrix not in MATRIX_METRICS:
+                continue
+            launcher = "rl" if MATRIX_METRICS[matrix] == "accuracy" else "sft"
+            by_path[(launcher, r.get("dataset") or "tulu3", r.get("method"),
+                     r.get("target_modules") or "")] = r
+        by_key = {}
+        for run in probe_plan("method"):
+            arm = next(a for a in _build(run.matrix) if a.name == run.arm)
+            record = by_path.get(path_key(run.matrix, arm))
+            if record is not None:
+                by_key[(run.matrix, run.arm)] = record
+        level = "method"  # the rows below are per (task, method) from here on
+    else:
+        by_key = {(r.get("matrix"), r.get("arm")): r for r in records}
     lines = [
         f"{'task':9} {'configuration':22} {'gpu':>3} {'status':8} {'steady/roll':>12} "
         f"{'x rolls':>8} {'one arm':>8} {'arms':>5} {'all arms':>10}",
@@ -276,7 +344,7 @@ def format_report(records: list[dict], level: str = "method") -> str:
         all_arms = one_arm * multiplier
         campaign += all_arms
         lines.append(
-            f"{run.matrix:10} {run.method:7} {run.gpus:>3} {status:8} "
+            f"{run.matrix:9} {run.label:22} {run.gpus:>3} {status:8} "
             f"{steady:>11.1f}s {run.full_rollouts:>8} {_hms(one_arm):>8} "
             f"{multiplier:>5} {_hms(all_arms):>10}"
         )

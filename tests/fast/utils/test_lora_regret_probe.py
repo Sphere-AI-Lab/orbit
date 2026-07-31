@@ -20,11 +20,11 @@ from tools.lora_regret.probe import (
 
 
 class TestPlan:
-    def test_the_default_level_is_one_run_per_task_per_method(self):
+    def test_the_method_level_is_one_run_per_task_per_method(self):
         """Rank, block size, placement and batch size exercise the same code at
         different shapes, so probing them separately re-runs a path that already
-        passed. 24 runs, not 61."""
-        assert len(probe_plan()) == len(probe_plan("method")) == 24
+        passed. 24 runs, not 61 -- and `path` collapses further still."""
+        assert len(probe_plan("method")) == 24
 
     def test_config_level_launches_every_distinct_configuration_once(self):
         """The opt-in level, for hunting a shape-dependent failure rather than a
@@ -67,7 +67,7 @@ class TestPlan:
         assert ("e5", "oft/b256/all") in labels
 
     def test_one_run_per_task_per_method(self):
-        seen = [(run.matrix, run.method) for run in probe_plan()]
+        seen = [(run.matrix, run.method) for run in probe_plan("method")]
         assert len(seen) == len(set(seen)), "a (task, method) pair is probed twice"
         by_matrix = {}
         for matrix, method in seen:
@@ -86,7 +86,7 @@ class TestPlan:
         from tools.lora_regret.arms import MATRICES
 
         planned = {}
-        for run in probe_plan():
+        for run in probe_plan("method"):
             planned.setdefault(run.matrix, set()).add(run.method)
         for matrix, methods in planned.items():
             centre = 1e-4 if matrix in ("e5",) else None
@@ -186,7 +186,7 @@ class TestReport:
         """Uses a real planned arm name -- the report keys on it, because at
         config level one (task, method) has several rows."""
         arm = next(
-            r.arm for r in probe_plan()
+            r.arm for r in probe_plan("method")
             if r.matrix == matrix and r.method == method
         )
         return {
@@ -270,3 +270,84 @@ def test_probe_rollouts_is_short_enough_to_be_cheap_and_long_enough_to_average()
     """Two steady rollouts after dropping the first. One would give a per-step
     time with no spread; the report prints a median, which needs at least two."""
     assert PROBE_ROLLOUTS == 3
+
+
+class TestPathLevel:
+    """The default. One run per distinct code path, deduplicated ACROSS tasks."""
+
+    def test_it_is_the_default_and_smaller_than_one_per_task_per_method(self):
+        assert probe_plan() == probe_plan("path")
+        assert len(probe_plan("path")) < len(probe_plan("method"))
+
+    def test_two_tasks_running_identical_code_are_probed_once(self):
+        """e4/full and e4place/full are the same script over the same data
+        wrapping the same (empty) module set. Probing both proves nothing the
+        first did not, at 8 GPUs a time."""
+        from tools.lora_regret.probe import path_key
+
+        runs = probe_plan("path")
+        rl_full = [r for r in runs if r.metric == "accuracy" and r.method == "full"]
+        assert len(rl_full) == 1, [r.arm for r in rl_full]
+        # ...and the pair it stands for really is one path.
+        from tools.lora_regret.arms import e4_arms, e4place_arms
+
+        a = next(x for x in e4_arms() if x.method == "full")
+        b = next(x for x in e4place_arms(4096, 14336) if x.method == "full")
+        assert path_key("e4", a) == path_key("e4place", b)
+
+    def test_target_modules_are_not_collapsed(self):
+        """`linear_fc1` is Orbit's fused gate+up. Wrapping it is not the same
+        code as wrapping `linear_qkv`, so attn/mlp/all stay separate paths --
+        this is the axis that must NOT be deduplicated away."""
+        labels = {r.label for r in probe_plan("path")}
+        for modules in ("attn", "mlp", "all"):
+            assert any(label.endswith(f"/{modules}") for label in labels), modules
+
+    def test_it_covers_a_path_the_method_level_never_launched(self):
+        """e4place's MLP placement under RL: absent from the 24, present here.
+        Fewer runs AND more coverage, which is the whole point."""
+        assert "rl/math_gsm8k/lora/mlp" in {r.label for r in probe_plan("path")}
+        method_arms = {(r.matrix, r.arm) for r in probe_plan("method")}
+        mlp = next(r for r in probe_plan("path") if r.label == "rl/math_gsm8k/lora/mlp")
+        assert (mlp.matrix, mlp.arm) not in method_arms
+
+    def test_datasets_stay_separate_even_though_the_code_is_shared(self):
+        """Not a code difference but a shape one: OpenThoughts3 rows are ~62 KB
+        against Tulu3's ~3 KB, a 20x sequence length that moves both memory and
+        step time. Collapsing them would make the estimate meaningless."""
+        labels = {r.label for r in probe_plan("path")}
+        assert "sft/tulu3/lora/all" in labels
+        assert "sft/openthoughts3/lora/all" in labels
+
+    def test_the_cheapest_task_is_chosen_as_the_representative(self):
+        """Same code either way, so probe it where the arm is shortest."""
+        from tools.lora_regret.probe import FULL_RUN_ROLLOUTS
+
+        run = next(r for r in probe_plan("path") if r.label == "sft/tulu3/lora/all")
+        # e1short (100 rollouts) beats e1 and e5 (2000) for the same path.
+        assert run.matrix == "e1short"
+        assert FULL_RUN_ROLLOUTS[run.matrix] == 100
+
+    def test_the_report_still_prints_every_task_and_method(self):
+        """17 measurements, 24 rows. If a task row could not find its path's
+        measurement it would read `not run`, which is the failure this guards."""
+        records = []
+        for run in probe_plan("path"):
+            arm = next(a for a in _build_arms(run.matrix) if a.name == run.arm)
+            records.append({
+                "arm": run.arm, "method": run.method, "matrix": run.matrix,
+                "status": "ok", "seconds": 500.0, "probe_rollouts": 3,
+                "rollout_seconds": [200.0, 60.0, 61.0], "metric": run.metric,
+                "dataset": arm.dataset, "target_modules": arm.target_modules,
+            })
+        text = format_report(records, "path")
+        assert "not run" not in text
+        for matrix in ("e1", "e1ot", "e1short", "e2", "e3", "e4", "e4place",
+                       "e5scout", "e5"):
+            assert matrix in text, matrix
+
+
+def _build_arms(matrix):
+    from tools.lora_regret.probe import _build
+
+    return _build(matrix)

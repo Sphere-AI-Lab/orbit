@@ -11,7 +11,7 @@ Companions:
 
 ## What is ready, and what you still have to do
 
-Ready and CPU-verified (779 tests, 0 failures, in the built env):
+Ready and CPU-verified (786 tests, 0 failures, in the built env):
 
 | Piece | Where |
 |---|---|
@@ -27,7 +27,7 @@ Ready and CPU-verified (779 tests, 0 failures, in the built env):
 | NLL trace extraction | `tools/lora_regret/trace.py` |
 | σ, argmins, C1-C6 and C8 readings | `tools/lora_regret/analyze.py` |
 | Figures from the analysis JSON | `tools/lora_regret/plot.py` (§19) |
-| Coverage probe: one run per task per method | `scripts/lora_regret/coverage_probe.sh` (§20) |
+| Coverage probe: one run per code path | `scripts/lora_regret/coverage_probe.sh` (§20) |
 
 The data is **materialized** (§2, done 2026-07-30) and the **smoke passes on it**
 (§3, done 2026-07-30). Yours to do, in this order: **close P3** (§4, needs DP≥2 and
@@ -870,44 +870,46 @@ own figure to compare against, where one exists
 `uv sync --extra plots` — and is imported lazily, so `plot.py` stays importable
 without it.
 
-## 20. Coverage probe — one run per task per method (before anything long)
+## 20. Coverage probe — one short run per code path (before anything long)
 
 ```bash
 bash scripts/lora_regret/coverage_probe.sh
 ```
 
-24 runs, one per (task, method), three rollouts each, on a single 8×H100 node.
+**17 runs, three rollouts each, strictly sequential**, on a single 8×H100 node.
 
-Rank, OFT block size, target modules and batch size are **not** probed
-separately. They exercise the same code — the same wrap, the same launcher path,
-the same optimizer — at different tensor shapes, so launching r512 after r256
-re-runs a path that already passed. The axes carrying distinct code are the
-method (which adapter, or none) and the task (which launcher, dataset, metric),
-and those are what the 24 enumerate.
+One run per distinct **code path** — `(launcher, dataset, method, target
+modules)`. Rank, OFT block size and batch size are collapsed: they exercise the
+same wrap, the same launcher path and the same optimizer at a different tensor
+shape, so launching r512 after r256 re-runs a path that already passed. Target
+modules are **not** collapsed — `linear_fc1` is Orbit's fused gate+up, and
+wrapping it is not the same code as wrapping `linear_qkv`. Dataset is not
+collapsed either, for a different reason: OpenThoughts3 rows are ~62 KB against
+Tulu3's ~3 KB, a 20× sequence length that moves both memory and step time.
 
-`PROBE_LEVEL=config` launches all 61 distinct configurations instead, collapsing
-only the learning rate. Reach for it when hunting a *shape*-dependent failure —
-an OOM at a batch size nothing has run at — rather than a code-path one.
+That is fewer runs than one-per-(task,method) **and more coverage** — the 24-run
+version never probed `e4place`'s MLP placement under RL.
 
-Phases: 13 runs at 1 GPU (2 waves of 8), 5 at 4 GPUs (3 waves of 2), 6 at 8 GPUs
-(sequential). Phase 3 dominates wall clock.
+Sequential on purpose. Three-rollout runs, so packing them concurrently would
+save a fraction of an already short session while buying a GPU allocator to get
+wrong, contended per-rollout times that are upper bounds rather than estimates,
+and interleaved failures that are harder to attribute. This way every number is
+measured on an idle node and every failure has exactly one candidate cause.
+
+GPU count per run still mirrors the real sweep — 1 for SFT LoRA/OFT, 4 for SFT
+FullFT, 8 for RL — because a timing measured on the wrong number of GPUs
+estimates nothing. The 7 RL runs dominate wall clock.
 
 It answers exactly two questions:
 
-1. **Does every method run?** Anything that cannot start, cannot wrap the model,
-   or never reaches the eval line the parser needs fails here in minutes rather
-   than on the 40th arm of a reserved node. OFT under policy gradient (§18) has
-   never executed at all; this is where that is found out.
+1. **Does every code path run?** Anything that cannot start, cannot wrap the
+   model, or never reaches the eval line the parser needs fails here in minutes
+   rather than on the 40th arm of a reserved node. OFT under policy gradient
+   (§18) has never executed at all; this is where that is found out.
 2. **How long is the real thing?** `train.py` logs `progress … last=` per
-   rollout, so each probe yields a *measured* per-rollout time. The report
-   multiplies it by that arm's own rollout count and by the number of arms of
-   that method in that task.
-
-   One caveat the report also prints: at method level a row stands for every
-   rank, block size, placement **and batch size** in its task. Rank and placement
-   barely move step time; batch size does, and E2 runs 32/128/512 — so E2's
-   estimate is low by roughly the batch ratio for two thirds of its arms. Run
-   `PROBE_LEVEL=config ONLY_PHASE=1` if you want that number tightened.
+   rollout, so each probe yields a *measured* per-rollout time. The report still
+   prints all 24 (task, method) rows — each reads the pace measured on its own
+   code path, which is what lets 17 runs answer 24 questions.
 
 It deliberately cannot answer a third. Three-rollout rows carry
 `probe_rollouts`, and `analyze` **exits 4** on any ledger containing one — a
@@ -919,23 +921,13 @@ task's, with `group=<task>-<method>`. That routing is keyed off the rollout
 count rather than a flag, so a probe cannot reach a real dashboard even
 deliberately.
 
-GPU sizing mirrors the real sweep, because a timing measured on the wrong number
-of GPUs estimates nothing:
+Resumable: each run writes its own ledger and the sweep skips an arm already
+recorded `ok`, so re-running after an interruption picks up where it stopped.
 
-| phase | arms | GPUs each | concurrency |
-|---|---|---|---|
-| 1 | SFT LoRA / OFT | 1 | 8 at a time, one per device |
-| 2 | SFT FullFT | 4 | 2 at a time |
-| 3 | RL, all methods | 8 | sequential |
-
-**Phase 1's numbers are upper bounds, not estimates.** Eight arms share NVLink,
-host RAM and the filesystem; phases 2 and 3 are uncontended and their numbers are
-estimates. Do not average the two. If you want clean 1-GPU numbers, re-run just
-that phase alone: `ONLY_PHASE=1 PROBE_DIR=results/probe_solo bash …` with the
-loop's barrier reached one run at a time.
-
-Knobs: `PROBE_LEVEL` (`method` | `config`), `PROBE_ROLLOUTS` (3), `PROBE_DIR`
-(`results/probe`), `ONLY_PHASE` (1, 4 or 8), `DRY_RUN=1`, `SKIP_PREFLIGHT=1`.
+Knobs: `PROBE_LEVEL` (`path` 17 | `method` 24 | `config` 61), `PROBE_ROLLOUTS`
+(3), `PROBE_DIR` (`results/probe`), `ONLY_GPUS` (1, 4 or 8), `DRY_RUN=1`,
+`SKIP_PREFLIGHT=1`. `ONLY_GPUS=8` runs just the seven RL probes, which are the
+only paths that have never executed in any form.
 
 `e1long` and `sft82` are not probed and the plan says why: `e1long`'s arms come
 from an E1-1 ledger that does not exist yet, and `sft82` is the frozen legacy
