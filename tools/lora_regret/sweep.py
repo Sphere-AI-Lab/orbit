@@ -35,7 +35,7 @@ from tools.lora_regret.models import get as get_model
 # The eval-line regex and phase labels live in trace.py -- one definition,
 # built from EVAL_NLL_METRIC_KEY. Imported under the existing private names so
 # every call site and the TestLogFormatPins pins keep working unchanged.
-from tools.lora_regret.probe_log import parse_rollout_seconds
+from tools.lora_regret.probe_log import parse_rollout_seconds, parse_save_seconds
 from tools.lora_regret.trace import (  # noqa: F401  (parse_trace re-exported)
     NLL_LINE as _NLL_LINE,
     PHASE_AFTER_TRAIN as _PHASE_AFTER_TRAIN,
@@ -361,12 +361,17 @@ def run_arm(
     trace_ok: bool | None = None
     trace_why: str | None = None
     rollout_seconds: list[float] = []
+    save_seconds: list[float] = []
     if log_path.exists():
         log_text = log_path.read_text(encoding="utf-8", errors="replace")
         # Measured per rollout by train.py's own ETA tracker, for SFT and RL
         # alike. Recorded on every row, not only probes: it is the only place a
         # completed arm's pace survives, and logs/ is gitignored.
         rollout_seconds = parse_rollout_seconds(log_text)
+        # Priced separately from the rollout it lands inside: a FullFT
+        # checkpoint is ~10 minutes, and averaging it into a per-rollout
+        # figure doubled the campaign estimate.
+        save_seconds = parse_save_seconds(log_text)
         if metric == "accuracy":
             accuracy, steps, per_dataset = parse_final_accuracy(log_text, RL_EVAL_DATASETS)
         else:
@@ -410,6 +415,7 @@ def run_arm(
             "dataset": arm.dataset,
             "seconds": elapsed,
             "rollout_seconds": rollout_seconds,
+            "save_seconds": save_seconds,
             "matrix": matrix,
             "gpus": int(os.environ.get("GPUS_PER_NODE", 0)) or None,
             # Present ONLY on probe rows, and `analyze` refuses any ledger that

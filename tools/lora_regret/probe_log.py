@@ -39,3 +39,23 @@ def parse_rollout_seconds(log_text: str) -> list[float]:
             )
         )
     return out
+
+
+# (MegatronTrainRayActor pid=...) [ts] timer.py:32 - Timer save_model end (elapsed: 616.5s)
+#
+# The actor's own timer, for the same reason the rollout durations come from
+# train.py's progress line rather than from wall clocks: it measures the save
+# and nothing around it.
+SAVE_TIMER_LINE = re.compile(r"Timer save_model end \(elapsed: (?P<sec>[0-9.]+)s\)")
+
+
+def parse_save_seconds(log_text: str) -> list[float]:
+    """Each checkpoint write's duration, in order.
+
+    Priced separately from the rollouts it happens to land inside. A FullFT arm
+    writes ~15 GB of weights plus distributed-optimizer state and took 616.5s on
+    Lustre; folded into a per-rollout average it doubled the campaign estimate.
+    LoRA and OFT write adapters only, so theirs are small -- but they are the
+    same measurement and are read the same way.
+    """
+    return [float(m["sec"]) for m in SAVE_TIMER_LINE.finditer(log_text)]

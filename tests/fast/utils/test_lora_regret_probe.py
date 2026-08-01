@@ -204,9 +204,15 @@ class TestReport:
 
     def test_the_steady_step_drops_the_first_rollout(self):
         """Rollout 1 carries compile, weight load and the first allocator
-        growth. Averaging it in inflates a 2000-rollout estimate by hours."""
+        growth. Averaging it in inflates a 2000-rollout estimate by hours.
+
+        90, not 91: the estimator moved from median to minimum on 2026-08-01,
+        because on a 3-rollout probe a median over the remaining two IS their
+        mean, and the probe's final rollout carries the checkpoint write --
+        616.5s on the FullFT arm, which doubled the campaign estimate. See
+        test_probe_steady_state.py."""
         text = format_report([self._record("e1", "lora")])
-        assert "91" in text  # median of 90 and 92, not of 200/90/92
+        assert "90" in text  # min of 90 and 92, not the mean of 200/90/92
 
     def test_a_failed_probe_is_reported_as_failed_not_as_a_zero(self):
         text = format_report([self._record("e1", "full", status="failed",

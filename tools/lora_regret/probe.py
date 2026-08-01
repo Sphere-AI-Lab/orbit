@@ -268,14 +268,58 @@ def probe_plan(level: str = "path") -> list[ProbeRun]:
 
 
 def steady_seconds(rollout_seconds: list[float]) -> float | None:
-    """Median rollout time after dropping the first.
+    """Cheapest rollout time after dropping the first.
 
-    Rollout 1 carries compilation, weight load and the first allocator growth.
-    On a 2000-rollout arm, averaging it in moves the estimate by hours, and in
-    the wrong direction -- it always overstates.
+    Rollout 1 carries compilation, weight load and the first allocator growth,
+    so it is excluded outright. Of what remains, the MINIMUM is taken rather
+    than the median.
+
+    The median was wrong, and measurably so. A probe runs three rollouts, so
+    dropping the first leaves two -- and on two samples a median IS the mean.
+    The last rollout of a probe also writes the run's checkpoint, so that cost
+    landed squarely in the per-rollout figure. Measured on the FullFT RL arm on
+    2026-08-01, `[308.0, 59.0, 677.0]`: the 677 is 59s of rollout plus a 616.5s
+    write of 15 GB to Lustre, and `median(59, 677) = 368` put the campaign
+    estimate at 931 h against a true ~453 h. Every OFT row was distorted the
+    same way; LoRA all-modules escaped only because its adapter checkpoint is
+    negligible.
+
+    A rollout's duration is a fixed steady cost plus whatever one-off happened
+    to land in it -- compile, eval, allocator growth, checkpoint. The minimum is
+    the sample least contaminated by those, which is the same reasoning the
+    kernel benchmark's `_time_ms` uses. It is not the fastest-possible rollout
+    being passed off as typical: nothing here makes a rollout cheaper than
+    steady state, only more expensive.
+
+    Checkpoints are not thereby ignored -- they are priced explicitly, see
+    `extra_saves`.
     """
     steady = rollout_seconds[1:]
-    return statistics.median(steady) if steady else None
+    return min(steady) if steady else None
+
+
+# The launcher's own cadence (`--save-interval "${SAVE_INTERVAL:-50}"`), pinned
+# by test_the_launcher_save_interval_is_the_one_the_estimate_uses so a change
+# there cannot leave this estimate silently wrong.
+SAVE_INTERVAL = 50
+
+
+def extra_saves(full_rollouts: int, probe_rollouts: int) -> int:
+    """Checkpoints a real arm writes beyond the one the probe already paid for.
+
+    A probe run writes its checkpoint once, at the end, and that cost is already
+    inside its measured wall clock -- so it lands in `overhead`, which the
+    estimate adds once. Only the ADDITIONAL writes a longer arm performs are
+    charged on top; counting all of them would bill the first one twice.
+
+    At SAVE_INTERVAL=50 a 500-rollout arm writes 10 and the probe wrote 1, so 9
+    are added. For FullFT at ~616s each that is ~1.5h per arm -- small against
+    the 8.2h of rollouts, but not nothing, and it is the entire reason the
+    checkpoint is removed from `steady` rather than left to inflate it.
+    """
+    real = full_rollouts // SAVE_INTERVAL
+    already_paid = 1 if probe_rollouts else 0
+    return max(0, real - already_paid)
 
 
 def _hms(seconds: float) -> str:
@@ -339,8 +383,21 @@ def format_report(records: list[dict], level: str = "method") -> str:
             continue
         # Startup is whatever the probe spent outside its rollouts, and every
         # real arm pays it once too -- so it is added once, not amortised away.
+        # It also contains the probe's single checkpoint write, which is why
+        # `extra_saves` charges only the additional ones.
         overhead = max(0.0, float(record.get("seconds") or 0.0) - steady * len(record["rollout_seconds"]))
-        one_arm = overhead + steady * run.full_rollouts
+        # Checkpoints, priced explicitly rather than smeared into `steady`.
+        # A ledger written before save timings were recorded has no
+        # `save_seconds`; those rows keep the old behaviour -- one save, already
+        # inside `overhead` -- so the estimate is low rather than missing.
+        saves = record.get("save_seconds") or []
+        save_cost = (
+            statistics.mean(saves)
+            * extra_saves(run.full_rollouts, len(record.get("rollout_seconds") or []))
+            if saves
+            else 0.0
+        )
+        one_arm = overhead + steady * run.full_rollouts + save_cost
         # Arms sharing this configuration -- its LR grid width. At `config`
         # level that is what this row stands for; summing them reconstructs the
         # matrix exactly, with no arm counted twice and none omitted.
