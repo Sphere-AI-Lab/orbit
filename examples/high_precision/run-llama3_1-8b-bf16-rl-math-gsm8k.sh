@@ -158,6 +158,41 @@ WANDB_ARGS=(
     --disable-wandb-random-suffix
 )
 
+# Full fine-tuning needs tensor parallelism to fit; PEFT does not.
+#
+# At TP=1 every GPU carries the whole 8B model, and the standing cost per GPU is
+# (2+4)*P/TP + 12*P/N -- bf16 parameters, fp32 main_grad, DP-sharded optimizer:
+#
+#   TP=1   48 + 12 = 60 GB      TP=4   12 + 12 = 24 GB
+#   TP=2   24 + 12 = 36 GB      TP=8    6 + 12 = 18 GB
+#
+# 60 GB left ~19 GB for the step, which wanted ~20: measured on 8xH100, the arm
+# died in the fp32 cross-entropy logits, 694 MiB short with 660 MiB free
+# (`empty_strided_cuda((s10, 1, 128256), ..., torch.float32)`; 128256 is the
+# vocabulary). Recompute was already full/uniform, so activations were not the
+# slack -- the unsharded logits were. `--sequence-parallel` below is what makes
+# TP shard them.
+#
+# Half the GPUs, not all of them. TP=8 fits too, but forces DP=1 -- the
+# distributed optimizer then has nothing to shard across and the gradient
+# reduction becomes a no-op, the degenerate case orbit's own preflight refuses
+# to test on -- and pays a per-layer all-reduce across 32 layers for headroom
+# that is not needed. Rounded down to a power of two because TP must divide 32
+# attention heads and 8 GQA query groups; capped at 8 for the same reason.
+#
+# PEFT stays at 1: LoRA and OFT carry no fp32 main_grad for the base and no full
+# optimizer state, and six RL PEFT arms were measured at TP=1 on 2026-07-31.
+PEFT_METHOD=${PEFT_METHOD:-lora}
+if [[ "${PEFT_METHOD}" == "none" && -z "${TENSOR_MODEL_PARALLEL_SIZE:-}" ]]; then
+    _fullft_tp=1
+    while (( _fullft_tp * 2 <= GPUS_PER_NODE / 2 && _fullft_tp * 2 <= 8 )); do
+        _fullft_tp=$(( _fullft_tp * 2 ))
+    done
+    TENSOR_MODEL_PARALLEL_SIZE=${_fullft_tp}
+    echo "PEFT_METHOD=none: defaulting TENSOR_MODEL_PARALLEL_SIZE=${TENSOR_MODEL_PARALLEL_SIZE}" \
+         "(GPUS_PER_NODE=${GPUS_PER_NODE}, DP=$(( GPUS_PER_NODE / TENSOR_MODEL_PARALLEL_SIZE )))" >&2
+fi
+
 PERF_ARGS=(
     --tensor-model-parallel-size "${TENSOR_MODEL_PARALLEL_SIZE:-1}"
     --pipeline-model-parallel-size "${PIPELINE_MODEL_PARALLEL_SIZE:-1}"
@@ -214,7 +249,7 @@ DEBUG_ARGS=(
 )
 
 # === PEFT method: lora | oft | none ===
-PEFT_METHOD=${PEFT_METHOD:-lora}
+# Already resolved above, where the FullFT tensor-parallel default needs it.
 TARGET_MODULES_DEFAULT=linear_qkv,linear_proj,linear_fc1,linear_fc2
 PEFT_ARGS=()
 case "${PEFT_METHOD}" in
