@@ -136,6 +136,17 @@ fi
 # targets come from the matrices themselves rather than from a list in a shell
 # script that drifts the moment a matrix changes.
 say "plan"
+# Matrices whose arms cannot be built without an OFT learning-rate centre, read
+# from arms.py rather than listed here so a new one cannot be missed. Resolved
+# once: the run loop below consults it per arm.
+CENTRE_MATRICES=$(python -c \
+    'from tools.lora_regret.arms import MATRICES_REQUIRING_OFT_CENTRE as m; print(" ".join(sorted(m)))')
+if [[ -z "${CENTRE_MATRICES}" ]]; then
+    echo "could not read MATRICES_REQUIRING_OFT_CENTRE from tools.lora_regret.arms" >&2
+    exit 1
+fi
+echo "matrices needing an OFT LR centre: ${CENTRE_MATRICES}"
+
 PLAN_ARGS=(plan --level "${PROBE_LEVEL}")
 # Filtered by probe.py rather than in the loop below, so the plan that is
 # printed is exactly the plan that runs.
@@ -174,10 +185,18 @@ for line in "${PLAN[@]}"; do
     devices="$(seq -s, 0 $(( gpus - 1 )))"
     ledger="${PROBE_DIR}/${matrix}-${arm}.jsonl"
     extra=()
-    # e5's OFT cell has no scouted centre yet. Any value is a valid *plumbing*
-    # probe -- a learning rate does not change how long a step takes -- and the
-    # real sweep still refuses to run e5 without the measured one.
-    [[ "${matrix}" == "e5" ]] && extra+=(--oft-lr-centre 1e-4)
+    # Some matrices' OFT cells have no scouted centre yet. Any value is a valid
+    # *plumbing* probe -- a learning rate does not change how long a step takes
+    # -- and the real sweep still refuses to run them without the measured one.
+    #
+    # Which matrices those are comes from arms.py, resolved once above into
+    # CENTRE_MATRICES. This line used to read `[[ "${matrix}" == "e5" ]]`, and
+    # that literal is exactly why all three e5rl arms died in two seconds on
+    # 2026-08-01 with `--matrix e5rl requires --oft-lr-centre`: the Python side
+    # had been taught about the second such matrix and this one had not.
+    if [[ " ${CENTRE_MATRICES} " == *" ${matrix} "* ]]; then
+        extra+=(--oft-lr-centre 1e-4)
+    fi
 
     if [[ "${DRY_RUN}" == "1" ]]; then
         printf '[dry] %2d/%d  %s GPU(s) %-16s %s\n' \

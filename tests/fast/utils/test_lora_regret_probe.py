@@ -425,3 +425,60 @@ class TestTheGpuSplit:
         for size, stage in ((1, "e1-lora"), (4, "e1-full"), (8, "e4")):
             assert f"{size}) PREFLIGHT_STAGE={stage}" in common or stage == "e4", size
             assert STAGE_GPU_REQUIREMENTS[stage] <= size, (stage, size)
+
+
+class TestTheCentreFlagReachesEveryMatrixThatNeedsIt:
+    """The failure this pins cost a 2-hour node booking on 2026-08-01.
+
+    `coverage_probe.sh` decided whether to pass `--oft-lr-centre` by testing
+    `[[ "${matrix}" == "e5" ]]`. When `e5rl` was added -- a second matrix that
+    refuses to build arms without a measured centre -- the Python side was
+    taught about it via MATRICES_REQUIRING_OFT_CENTRE and the shell was not. All
+    three e5rl arms died in two seconds each:
+
+        sweep.py: error: --matrix e5rl requires --oft-lr-centre
+
+    The probe reported them FAILED, which was true but reads as a broken code
+    path rather than a missing flag.
+    """
+
+    def test_the_script_does_not_name_a_matrix(self):
+        """A hardcoded matrix name here is the bug itself. The set must come
+        from arms.py, which is the one place that knows."""
+        from pathlib import Path
+
+        script = (
+            Path(__file__).resolve().parents[3] / "scripts/lora_regret/coverage_probe.sh"
+        ).read_text(encoding="utf-8")
+        code = [l for l in script.splitlines() if not l.lstrip().startswith("#")]
+        for line in code:
+            assert '"${matrix}" == "e5"' not in line, line
+        assert "MATRICES_REQUIRING_OFT_CENTRE" in script
+
+    def test_the_extraction_yields_every_such_matrix(self):
+        """Runs the script's own one-liner, so a change to it that stops
+        producing names fails here rather than at 3am on a booked node."""
+        import subprocess
+        from pathlib import Path
+
+        from tools.lora_regret.arms import MATRICES_REQUIRING_OFT_CENTRE
+
+        repo = Path(__file__).resolve().parents[3]
+        out = subprocess.run(
+            ["python", "-c",
+             'from tools.lora_regret.arms import MATRICES_REQUIRING_OFT_CENTRE as m; '
+             'print(" ".join(sorted(m)))'],
+            cwd=repo, check=True, text=True, capture_output=True,
+        ).stdout.split()
+        assert set(out) == set(MATRICES_REQUIRING_OFT_CENTRE)
+        assert out, "empty set would silently restore the old failure"
+
+    def test_every_centre_requiring_matrix_is_actually_probed(self):
+        """If one were excluded from the plan, the flag would be moot and the
+        matrix would go unprobed -- the other way this can silently fail."""
+        from tools.lora_regret.arms import MATRICES_REQUIRING_OFT_CENTRE
+        from tools.lora_regret.probe import EXCLUDED_MATRICES, probe_plan
+
+        planned = {r.matrix for r in probe_plan("config")}
+        for matrix in MATRICES_REQUIRING_OFT_CENTRE:
+            assert matrix in planned or matrix in EXCLUDED_MATRICES, matrix
