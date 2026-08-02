@@ -223,18 +223,21 @@ def test_the_sweep_syncs_wandb_after_every_arm():
     assert 'os.environ.get("WANDB_AUTOSYNC", "1")' in text, "must be defeatable"
 
 
-def test_the_sweep_also_syncs_wandb_during_arms():
-    """An arm is ~90 minutes, so an after-arm-only sync is a dashboard that
-    runs a full arm behind -- and shows nothing at all during the first one.
-    A watcher thread re-syncs on an interval while arms train; `wandb sync`
-    replays an offline directory up to its current tail and the next pass
-    refreshes it, so a mid-flight upload is safe (sync_wandb.sh documents the
-    same property for the manual path)."""
+def test_the_sweep_can_sync_wandb_during_arms_but_does_not_by_default():
+    """An after-arm-only sync replays nothing but quiescent, complete
+    directories -- the most stable sync there is, and what an unattended
+    overnight column should run. But it also means a dashboard a full
+    ~90-minute arm behind, so a watcher thread exists for the nights someone
+    is actually watching: `wandb sync` replays a live offline directory up to
+    its current tail and the next pass refreshes it (sync_wandb.sh documents
+    the same property for the manual path). Opt-in via WANDB_SYNC_INTERVAL
+    because the live replay's warts are cosmetic but real: the run shows as
+    "finished" between passes."""
     text = (PROTOCOL.parent.parent.parent / "tools" / "lora_regret" / "sweep.py").read_text(
         encoding="utf-8"
     )
     assert "def start_wandb_sync_watcher" in text
     assert "start_wandb_sync_watcher(repo_root)" in text
-    assert 'os.environ.get("WANDB_SYNC_INTERVAL"' in text, "the cadence must be a knob"
+    assert 'os.environ.get("WANDB_SYNC_INTERVAL", "0")' in text, "off unless asked for"
     assert "_WANDB_SYNC_LOCK" in text, "watcher and after-arm sync must not overlap"
     assert "daemon=True" in text, "the watcher must never keep a finished sweep alive"

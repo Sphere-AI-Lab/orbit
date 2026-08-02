@@ -271,16 +271,19 @@ def start_wandb_sync_watcher(repo_root: Path) -> threading.Event:
     one cosmetic wart is that a mid-flight run shows as "finished" between
     passes.
 
-    `WANDB_SYNC_INTERVAL` seconds between passes; 0 disables the watcher and
-    leaves only the after-arm sync. 300 by default: the point is a near-live
-    view, and an upload of a few MB every five minutes costs the arm nothing.
+    `WANDB_SYNC_INTERVAL` seconds between passes; 0 -- the default -- disables
+    the watcher and leaves only the after-arm sync, which replays nothing but
+    quiescent, complete directories. Live replay is documented-safe but has
+    cosmetic warts (the run flips to "finished" between passes), so it is
+    opt-in: set e.g. WANDB_SYNC_INTERVAL=300 when watching a curve matters
+    more than a tidy run page.
 
     The thread is a daemon and is never joined -- if it is mid-upload when the
     sweep exits, the after-arm sync has already covered everything that
     matters, and the login-node watcher covers even that.
     """
     stop = threading.Event()
-    interval = float(os.environ.get("WANDB_SYNC_INTERVAL", "300"))
+    interval = float(os.environ.get("WANDB_SYNC_INTERVAL", "0"))
     if interval <= 0 or os.environ.get("WANDB_AUTOSYNC", "1") != "1":
         stop.set()
         return stop
