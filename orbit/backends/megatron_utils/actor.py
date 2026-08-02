@@ -296,6 +296,7 @@ class MegatronTrainRayActor(TrainRayActor):
         # Set True after the engine's orbit_teacher slot has been filled once
         # (startup promotion in update_weights); scoring an empty slot 404s.
         self._teacher_slot_startup_promoted = False
+        self._restore_checkpoint_teacher_state()
 
         if self.args.keep_old_actor:
             # Load old_actor checkpoint
@@ -555,6 +556,27 @@ class MegatronTrainRayActor(TrainRayActor):
         self._set_replay_stage("fallthrough")
         self._switch_model("ref")
         return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="ref_")
+
+    def _restore_checkpoint_teacher_state(self) -> None:
+        """Resume the EMA/lag self-teacher from its checkpoint sidecar, if present.
+
+        The sidecar is written next to the PEFT adapter checkpoint (model.save);
+        without it a resumed run silently re-seeds the self-teacher from the
+        resumed student, losing the teacher's lag. Absence is legal (checkpoints
+        predating sidecars); corruption is not.
+        """
+        adapter_dir = getattr(self.args, "_peft_resume_adapter_dir", None)
+        if adapter_dir is None or self._self_teacher is None:
+            return
+        from orbit.utils.self_teacher_checkpoint import has_self_teacher_sidecar, load_self_teacher_sidecar
+
+        rank = dist.get_rank() if dist.is_initialized() else 0
+        world_size = dist.get_world_size() if dist.is_initialized() else 1
+        if not has_self_teacher_sidecar(adapter_dir, rank=rank):
+            logger.info(f"No self-teacher sidecar at {adapter_dir}; keeping freshly seeded teacher state.")
+            return
+        load_self_teacher_sidecar(adapter_dir, self._self_teacher, rank=rank, world_size=world_size)
+        logger.info(f"Restored self-teacher state from checkpoint sidecar at {adapter_dir}")
 
     def _adapter_named_params(self) -> dict[AdapterTensorKey, torch.nn.Parameter]:
         # (vp_stage, name) keys: plain names collide across virtual-pipeline chunks,
@@ -823,7 +845,7 @@ class MegatronTrainRayActor(TrainRayActor):
 
             maybe_finalize_async_save(blocking=True)
 
-        save(rollout_id, self.model, self.optimizer, self.opt_param_scheduler)
+        save(rollout_id, self.model, self.optimizer, self.opt_param_scheduler, self_teacher=self._self_teacher)
 
         if uses_adapter_critic(self.args) and self.args.critic_save:
             save_critic_checkpoint(self.args, rollout_id, self.critic_model, optimizer=self.critic_optimizer)

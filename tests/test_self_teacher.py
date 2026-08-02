@@ -296,3 +296,38 @@ def test_update_shape_mismatch_is_rejected_before_mutation():
     assert buf._step == 0
     for key in before:
         torch.testing.assert_close(buf.tensors[key], before[key])
+
+
+# Sidecar tests: extracted module lives at orbit.utils.self_teacher_checkpoint
+# (the ultra program keeps the pool-binding parts).
+from orbit.utils.self_teacher_checkpoint import (
+    TeacherCheckpointError,
+    has_self_teacher_sidecar,
+    load_self_teacher_sidecar,
+    save_self_teacher_sidecar,
+)
+
+
+def test_checkpoint_sidecar_restores_exact_next_update(tmp_path):
+    uninterrupted = SelfTeacherBuffer(_params(0.5), mode="ema", decay=0.9)
+    uninterrupted.update(_params(1.0))
+    uninterrupted.update(_params(2.0))
+    save_self_teacher_sidecar(tmp_path, uninterrupted, rank=0, world_size=1)
+
+    resumed = SelfTeacherBuffer(_params(9.0), mode="ema", decay=0.9)
+    load_self_teacher_sidecar(tmp_path, resumed, rank=0, world_size=1)
+    next_live = _params(3.0)
+    uninterrupted.update(next_live)
+    resumed.update(next_live)
+
+    assert resumed._step == uninterrupted._step == 3
+    for key in uninterrupted.tensors:
+        torch.testing.assert_close(resumed.tensors[key], uninterrupted.tensors[key])
+
+
+def test_sidecar_absence_is_detectable(tmp_path):
+    assert not has_self_teacher_sidecar(tmp_path, rank=0)
+    buf = SelfTeacherBuffer(_params(2.0), mode="ema")
+    save_self_teacher_sidecar(tmp_path, buf, rank=0, world_size=1)
+    assert has_self_teacher_sidecar(tmp_path, rank=0)
+    assert not has_self_teacher_sidecar(tmp_path, rank=1)

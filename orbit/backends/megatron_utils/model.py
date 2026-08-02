@@ -9,6 +9,7 @@ from functools import partial
 from pathlib import Path
 
 import torch
+import torch.distributed as dist
 from megatron.core import mpu
 from megatron.core.distributed import DistributedDataParallel as DDP
 from megatron.core.distributed import finalize_model_grads
@@ -830,7 +831,12 @@ def train(
 
 
 def save(
-    iteration: int, model: Sequence[DDP], optimizer: MegatronOptimizer, opt_param_scheduler: OptimizerParamScheduler
+    iteration: int,
+    model: Sequence[DDP],
+    optimizer: MegatronOptimizer,
+    opt_param_scheduler: OptimizerParamScheduler,
+    *,
+    self_teacher=None,
 ) -> None:
     """Persist a training checkpoint safely with forward hooks disabled.
 
@@ -917,6 +923,15 @@ def save_hf_model(args, rollout_id: int, model: Sequence[DDP]) -> None:
             if should_log:
                 logger.info(f"Saving PEFT adapter checkpoint to {adapter_path}")
             save_peft_checkpoint(model, args, str(adapter_path))
+            if self_teacher is not None:
+                from orbit.utils.self_teacher_checkpoint import save_self_teacher_sidecar
+
+                save_self_teacher_sidecar(
+                    adapter_path,
+                    self_teacher,
+                    rank=dist.get_rank() if dist.is_initialized() else 0,
+                    world_size=dist.get_world_size() if dist.is_initialized() else 1,
+                )
             if should_log:
                 logger.info(f"Successfully saved PEFT adapter to {adapter_path}")
         except Exception as e:
