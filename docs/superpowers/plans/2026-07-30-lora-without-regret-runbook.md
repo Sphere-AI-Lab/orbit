@@ -9,15 +9,21 @@ Companions:
 - Port status and what is verified: `docs/superpowers/plans/2026-07-29-lora-without-regret-gap.md`
 - Environment build: `INSTALL.md`
 
+> **Read §22 first.** The campaign was cut to RL-only on 2026-08-01. Sections
+> 5-12 and 16-17 describe the SFT half, which is **no longer planned** — they are
+> kept because the launchers, matrices and analysis still work and the decision
+> is reversible, but following §5's execution order today would run ~21,600 GPU-
+> hours of experiments nobody asked for. §22 is what is actually being run.
+
 ## What is ready, and what you still have to do
 
-Ready and CPU-verified (814 tests, 0 failures, in the built env):
+Ready and CPU-verified (866 tests, 0 failures, in the built env):
 
 | Piece | Where |
 |---|---|
 | SFT launcher — LoRA, OFT and FullFT in one script | `examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh` |
 | RL launcher (prerequisite P5) | `examples/high_precision/run-llama3_1-8b-bf16-rl-math-gsm8k.sh` |
-| Arm matrices `e1` / `e1ot` / `e1short` / `e2` / `e3` / `e4` / `e4place` / `e5scout` / `e5` / `sft82` | `tools/lora_regret/arms.py` |
+| Arm matrices `e4` / `e4place` / `e5rl` (planned, §22) plus the nine SFT matrices (no longer planned) | `tools/lora_regret/arms.py` |
 | Base-model registry (checkpoints, dimensions, GPU floors) | `tools/lora_regret/models.py` |
 | Sweep driver with resume ledger | `tools/lora_regret/sweep.py` |
 | Data preparation for all five datasets | `tools/lora_regret/prepare_data.py` |
@@ -1027,3 +1033,163 @@ matched parameters against its r256/r92 LoRA cells.
 A full copy of the pre-change package is at
 `/fast/zqiu/orbit-iclr/sglang_env_backup_20260731/` with the before/after
 `uv pip freeze` output, if a rollback is ever needed.
+
+---
+
+## 22. The campaign as planned now (2026-08-02) — RL only
+
+**The decision.** On 2026-08-01 the SFT half was cut: "no need for it, the
+project is about RL". That removes nine matrices — `sft82`, `e1`, `e1long`,
+`e1ot`, `e1short`, `e2`, `e3`, `e5scout`, `e5` — and with them claims C1, C2, C3
+and C8, which are SFT claims. It also removed the only "ours" matrix, so `e5rl`
+was added to carry the matched-parameter OFT contribution under policy gradient.
+
+Three matrices remain. **64 arms, ~807 GPU-hours**, against 22,124 h for the
+original design.
+
+| matrix | what it decides | arms | cost |
+|---|---|---|---|
+| `e4` | C5 — RL parity at low rank. **This is the blog post's RL experiment.** FullFT + LoRA r1/r16/r256, plus an OFT cell | 20 | ~241 h |
+| `e4place` | C4 under policy gradient — attention-only vs MLP-only at matched parameters | 20 | ~246 h |
+| `e5rl` | ours — does matched-parameter OFT *track* LoRA as capacity varies | 24 | ~319 h |
+
+`e4` alone reproduces the post's RL result. `e4place` and `e5rl` go beyond it:
+the post studies placement for SFT only, and never studies OFT.
+
+### Measured, not estimated
+
+Every one of these numbers came off an 8xH100 node between 2026-07-31 and
+2026-08-02, three rollouts per configuration. `steady` is the cheapest rollout
+after the first (see §22.3); where a configuration was probed at two learning
+rates, the lower of the two is quoted and the spread is shown below.
+
+| method | placement | capacity | steady | note |
+|---|---|---|---|---|
+| full | — | — | **59s** | fastest per rollout, see below |
+| lora | all | r1/r16/r256 | 89s | |
+| lora | attn | r256 | 86s | |
+| lora | mlp | r92 | 86s | |
+| oft | all | b32 | 92s | ratio 0.988 vs LoRA r6 |
+| oft | all | b128 | 83s | ratio 1.012 vs LoRA r24 |
+| oft | all | b512 | 97s | ratio 0.997 vs LoRA r98 |
+| oft | all | b1024 | 114s | |
+| oft | attn | b1024 | 96s | |
+| oft | mlp | b512 | 83s | |
+
+**Every code path in this campaign has executed.** Three methods x three
+placements x four block sizes, FullFT included. Nothing is inferred from a
+neighbouring configuration.
+
+Two findings worth carrying into the analysis:
+
+*FullFT is the fastest per rollout, not the slowest.* Generation dominates a
+rollout, and FullFT's rollout is plain inference — no adapter maths in the
+engine, no OFT rotation per layer — while TP=4 shards its training step. Its
+train step is 21-23s against the PEFT arms' implicit 30-60s.
+
+*The OFT block ladder is U-shaped, not monotonic.* b128 (83s) is faster than
+b32 (92s): at hidden 4096, b32 means 128 rotation blocks per module against
+b128's 32, and per-block launch overhead dominates at small sizes before the
+O(BS^2) rotation arithmetic takes over at b1024 (115s). A capacity effect and a
+throughput effect therefore run in **opposite directions** across `e5rl`'s
+ladder — do not read a timing difference as a capacity difference. (b1024 at
+114s is the same effect at the other end.)
+
+The pace is learning-rate independent, checked deliberately by probing three
+OFT configurations at two learning rates 20x apart:
+
+```
+oftscout-b1024-all    lr=1.0e-06  115s  |  lr=2.2e-05  114s
+oftscout-b1024-attn   lr=1.0e-06   96s  |  lr=2.2e-05  100s
+oftscout-b512-mlp     lr=1.0e-06   89s  |  lr=2.2e-05   83s
+```
+
+### 22.1 Order of execution — the dependency is enforced in code
+
+```
+phase 1   e4 + e4place    40 arms   ~488 h    (independent of each other)
+             |
+             |  e4's `oftscout` arms ARE the RL OFT scout: they are built from
+             |  RL_OFT_SCOUT_SPAN for exactly this purpose. Recover the argmin.
+             v
+phase 2   e5rl            24 arms   ~319 h
+```
+
+`e5rl_arms` **raises** without an `oft_lr_centre` rather than defaulting, and
+`sweep.py` refuses the matrix at the CLI with the same message. A made-up centre
+would be an invented answer to the question e4's scout arms exist to ask, and it
+would be invisible — the arms would still run and still report accuracies.
+
+```bash
+source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
+cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
+export CUDA_HOME=/is/software/nvidia/cuda-13.2 && source env.sh
+export DATA_DIR=/lustre/fast/fast/groups/ei-slm/data/lora_regret
+
+# phase 1
+GPUS_PER_NODE=8 python -m tools.lora_regret.sweep --matrix e4 \
+  --results results/e4.jsonl
+GPUS_PER_NODE=8 python -m tools.lora_regret.sweep --matrix e4place \
+  --results results/e4place.jsonl
+
+# phase 2 -- only after e4 has a ledger to recover the centre from
+GPUS_PER_NODE=8 python -m tools.lora_regret.sweep --matrix e5rl \
+  --argmins-from results/e4.jsonl --results results/e5rl.jsonl
+```
+
+### 22.2 Configuration asymmetries to disclose
+
+**FullFT runs at TP=4 / DP=2; LoRA and OFT run at TP=1 / DP=8.** It is the only
+configuration in which FullFT fits: at TP=1 the standing cost is
+`(2+4)*P/TP + 12*P/N` = 60 GB per GPU, leaving ~19 GB against a step that wants
+~20, and the arm died in the fp32 cross-entropy logits 694 MiB short. TP is a
+sharding choice and does not change the mathematics, but the two arms of a
+parity claim did not run under identical parallelism, and a reviewer may ask.
+The launcher derives it (`GPUS/2`, rounded down to a power of two, capped at 8)
+and prints it at launch.
+
+**FullFT needs train offload, which it did not have.** `--offload-train` was
+refused outright for `--peft-method none` until 2026-08-01. It now offloads
+gradients and optimizer state while parameters stay resident — the parameters
+are pushed to the rollout engine every rollout by `update_weights`, which does
+not wake the train state. Freed 33.9 GB against a 3.52 GB deficit.
+
+### 22.3 How to read `steady`, and why it changed
+
+`probe.py` reports the **minimum** rollout after the first, not the median. On a
+three-rollout probe, dropping the first leaves two — and a median over two IS
+their mean. The probe's last rollout also writes the run's checkpoint, so that
+cost landed in the per-rollout figure: the FullFT arm's `[308, 59, 677]` gave
+`median(59, 677) = 368`, and the campaign estimate came out at 931 h against a
+true ~453 h. Every OFT row was distorted the same way.
+
+Checkpoints are not thereby ignored. They are priced explicitly: `SAVE_INTERVAL`
+is 50, so a 500-rollout arm writes 10 while the probe wrote 1, and the extra 9
+are added at the measured rate (616.5s for FullFT's 15 GB, negligible for
+adapters).
+
+### 22.4 What is still unverified
+
+Everything above was measured at **3 rollouts, not 500**. Untested by
+construction:
+
+- periodic checkpointing at `SAVE_INTERVAL=50` rather than one write at the end;
+- LR-schedule effects over a full arm;
+- slow memory growth. FullFT has ~55 GB of headroom at TP=4, which is the main
+  thing that would have worried me, but that is an argument and not an
+  observation.
+
+**41 unexplained HTTP 502s** from the sglang-router appeared during `oft/all`'s
+eval — `Server error '502 Bad Gateway' for url .../generate` — against zero in
+any LoRA arm. All retried successfully and eval completed. Cause unknown; the
+retry budget is 60, and nobody has seen how that behaves at 500 rollouts.
+
+### 22.5 If the SFT half is ever restored
+
+Nothing was deleted. The nine SFT matrices, their launchers, `analyze.py`'s C1/
+C2/C3/C8 readings and §§5-12 and 16-17 all still work and are still under test.
+The 1- and 4-GPU coverage probes (§20) were never completed, and two blockers
+were open when the cut was made: **SFT FullFT OOMs at DP=4** (72.75 GB used,
+8.79 GB short — `models.py`'s `HEADROOM_GB = 20.0` is too optimistic for
+Llama-3.1-8B), and `e5scout` costs 683 h to locate one learning-rate decade
+because its five arms run at full length.
