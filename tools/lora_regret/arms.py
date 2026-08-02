@@ -70,42 +70,43 @@ LORA_A_INIT_METHOD = "kaiming"
 # into the grid instead of fitted out of it.
 FULL_LR_CENTRE = 2.5e-5
 LORA_LR_CENTRE = 2.5e-4
-# **One shared RL grid for both methods**, 1e-06 .. 1e-03, so the LoRA/FullFT
-# ratio is read off the result instead of built into it.
+# **Two RL grids, one decade apart**, on the post's own 1-2-5 lattice:
 #
-# The post disagrees with itself here, which is why nothing is assumed. Its prose
-# says the optimum is "consistently 10x ... for both supervised learning and
-# reinforcement learning"; its own RL figure has FullFT peaking at 2e-05 and LoRA
-# at 4e-05 - 8e-05, which is **2-4x**; reading the published SVG's x-positions
-# gives FullFT 6.25e-06 and LoRA 4e-05, which is **6.4x**. Three numbers, one
-# paper. Baking in any of them picks a side of that contradiction before
-# measuring. A shared grid picks none, and the ratio falls out of two argmins on
-# the same points.
+#   FullFT   5e-07  1e-06  2e-06  5e-06  1e-05  2e-05  5e-05
+#   LoRA            5e-06  1e-05  2e-05  5e-05  1e-04  2e-04  5e-04
+#                          `------- 4 shared points -------'
 #
-# The centre is the geometric middle of the span the endpoints demand, not a
-# prediction of where the peak is: 10**-4.5 is the midpoint of 1e-06 .. 1e-03,
-# and seven half-decade points around it land on
+# The post publishes two grids too, and offsets them by 32x at the centre --
+# even though the optima it then measures differ by only ~6.4x. The offset here
+# is 10x, its own prose claim, and the windows overlap on four points, so any
+# ratio from 1x to 100x is measurable. What that assumes is only that LoRA's
+# optimum is not BELOW FullFT's; nothing in the post or in the norm-matching
+# argument suggests it could be.
 #
-#   1e-06  3e-06  1e-05  3e-05  1e-04  3e-04  1e-03
+# Where each point earns its place. Candidate optima are marked *:
 #
-# Written 3.16e-05 and not 3e-05 on purpose. `lr_grid` rounds the points it
-# generates, never the centre it generates them from, so a 3e-05 centre puts the
-# ends at 9e-07 and 9e-04 -- the same span to within 5%, but it reads as a fitted
-# value rather than a grid point, which is what the round-numbers pass fixed.
+#   FullFT   5e-07  1e-06   baseline anchors. Two, not one, because MATH's peak
+#                           reads as low as 3e-06 and an argmin on the bottom
+#                           edge is one `analyze` refuses to quote.
+#            2e-06  5e-06   *3e-06 (MATH low end) sits between them
+#            1e-05          *6.25e-06 (SVG) sits between 5e-06 and 1e-05
+#            2e-05          *the RL figure's own reading, exactly
+#            5e-05          past "FullFT collapses by ~3e-05"
 #
-# The span brackets:
-#
-#   every candidate optimum   6.25e-06 (SVG) .. 1e-04 (GSM r256), with at least
-#                             two points on each side of each one
-#   FullFT's collapse         "by ~3e-05" (plan section 14), seen at 3e-05/1e-04
-#   LoRA's useful ceiling     "up to ~2e-04", bracketed by 1e-04 and 3e-04
-#   LoRA's collapse           "all ranks fail by 1e-03", the top point
-#
-# It also fixes a live hazard the earlier 1e-6 FullFT centre had: that grid
-# topped out at 1e-05, *below* the 2e-05 the post's figure shows, so its argmin
-# would have landed on the top edge and `analyze` would have refused to quote it.
-RL_FULL_LR_CENTRE = 3.16e-5
-RL_LORA_LR_CENTRE = 3.16e-5
+#   LoRA     5e-06  1e-05   the rising edge, "LoRA becomes strong around 1e-05"
+#            2e-05          *MATH r256, exactly
+#            5e-05          *4e-05 (GSM r1/r16) sits between 2e-05 and 5e-05
+#            1e-04          *GSM r256, exactly
+#            2e-04          *"remains useful up to ~2e-04", exactly
+#            5e-04          past that ceiling, so the band's upper edge is
+#                           bracketed. NOT 1e-03: the smallest point was moved
+#                           down a step to buy the FullFT baseline anchors, and
+#                           the top went with it at fixed width. The band edge
+#                           (2e-04 -> 5e-04) is what the width claim needs; the
+#                           fully-collapsed floor at 1e-03 is confirmation the
+#                           seven points do not stretch to.
+RL_FULL_LR_CENTRE = 5e-6
+RL_LORA_LR_CENTRE = 5e-5
 # One Tulu3 epoch is (939,343 - 1,000 held out) / 32 = 29,323 optimizer steps,
 # and ~1% of that is 293 -- about 100 trace points, which is what C1's departure
 # detector needs, for ~1.9 h of eval against ~70 h of training. At the
@@ -194,24 +195,23 @@ def lr_grid(
 # which needs span more than resolution; one significant figure so the points
 # are 1e-06 / 3e-06 / ... rather than 9.5e-07 / 3.0e-06 / ... -- see `lr_grid`.
 #
-# Seven, not four: four half-decade points span 1.5 decades, and the candidate
-# optima alone (6.25e-06 .. 1e-04) span 1.2 of those, leaving no room for either
-# collapse edge. Seven spans 3.0 decades and holds every candidate optimum with
-# at least two points on each side, plus both collapse boundaries.
+# Seven, not four: four points span 1.0 decade at this spacing, and the
+# candidate optima alone (3e-06 .. 2e-04) span 1.8 decades.
 #
-# Half a decade locates an argmin to about x1.8, so the *ratio* of two argmins
-# carries roughly x3 of uncertainty -- enough to tell 10x from 2x, not 6x from
-# 10x. If the ratio is wanted as a number rather than an order of magnitude,
-# refine with +/-0.25-decade points around each argmin after the first pass;
-# resolution everywhere would double the arm count to buy precision in the
-# regions that turn out to be flat.
+# A THIRD of a decade, the post's own step, not the half-decade the SFT matrices
+# use. At fixed budget the choice is span against resolution, and per-method
+# windows make span cheap -- each grid only has to cover its own method's live
+# range, so the points buy resolution instead. A third-decade step locates an
+# argmin to ~x1.5 and the ratio of two argmins to ~x1.7, against ~x1.8 and ~x2.3
+# at half-decade width. Sharing a lattice does NOT buy ratio precision: the
+# ratio is two argmins divided, and each one's error is its own step size.
 RL_GRID_POINTS = 7
-RL_STEP_DECADES = 0.5
+RL_STEP_DECADES = 1 / 3
 RL_SIG_FIGS = 1
 
 
 def rl_lr_grid(centre: float) -> list[float]:
-    """The seven-point half-decade RL grid around `centre`, on round numbers."""
+    """The seven-point third-decade RL grid around `centre`, on round numbers."""
     return lr_grid(
         centre, n=RL_GRID_POINTS, step_decades=RL_STEP_DECADES, sig_figs=RL_SIG_FIGS
     )

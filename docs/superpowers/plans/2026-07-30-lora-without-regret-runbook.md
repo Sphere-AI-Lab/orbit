@@ -1380,47 +1380,60 @@ the frame is doing the task's work and the RL gain will not resemble Figure 6;
 a `solvable_groups` near 0 means there is still no gradient and the sweep must
 not start.
 
-### 23.4 The RL learning-rate grid is seven shared points (2026-08-02)
+### 23.4 The RL learning-rate grids: seven points each, one decade apart (2026-08-02)
 
 ```
-1e-06   3e-06   1e-05   3e-05   1e-04   3e-04   1e-03
+FullFT   5e-07  1e-06  2e-06  5e-06  1e-05  2e-05  5e-05
+LoRA            5e-06  1e-05  2e-05  5e-05  1e-04  2e-04  5e-04
+                       `------- 4 shared points -------'
 ```
 
-**Both methods run all seven.** The post contradicts itself on the LoRA/FullFT
-multiplier — prose says "consistently 10x ... for both supervised learning and
-reinforcement learning", its own RL figure reads 2-4x, and the published SVG's
-x-positions read 6.4x — so offsetting the two grids by any of those would settle
-the question in the design rather than measure it. Identical points make the
-ratio two argmins on one lattice, and a disagreement with the post becomes a
-finding instead of an artefact of where the grids were centred.
+Two grids, as the post has, on its own 1-2-5 lattice and its own third-decade
+step. The post offsets its two grids by **32x** at the centre and then measures
+optima only ~6.4x apart, so copying its placement would spend three FullFT arms
+below 1e-06 where §14 says the curve is flat at baseline. The offset here is
+**10x** — the post's own prose claim — and the four shared points keep every
+ratio from 1x to 100x measurable. The one assumption left is that LoRA's optimum
+is not *below* FullFT's; nothing in the post or in the norm-matching argument
+suggests it could be.
 
-Four points were not enough. Four half-decade points span 1.5 decades; the
-candidate optima alone (6.25e-06 from the SVG, 2e-05 from the RL figure, 4e-05
-for LoRA, 1e-04 for GSM8K r256) span 1.2 of those, leaving no room for either
-collapse edge. Seven spans 3.0 decades and brackets every candidate with at
-least two points on each side, plus FullFT's collapse ("by ~3e-05"), LoRA's
-useful ceiling ("up to ~2e-04") and LoRA's collapse ("all ranks by 1e-03").
+Why seven points at a third of a decade rather than at a half. At fixed budget
+the choice is span against resolution, and per-method windows make span cheap —
+each grid only has to cover its own method's live range, so the points buy
+resolution instead. A third-decade step locates an argmin to ~x1.5 and a ratio
+of two argmins to ~x1.7, against ~x1.8 and ~x2.3 at half-decade width. **Sharing
+a lattice does not buy ratio precision**: the ratio is two argmins divided, and
+each one's error is its own step size. A shared lattice only guarantees the two
+curves are sampled at identical x-values, which matters for plotting them
+together, not for the number.
 
-`RL_FULL_LR_CENTRE = RL_LORA_LR_CENTRE = 3.16e-5`, which is 10**-4.5, the
-geometric middle of the span — not a prediction of where the peak is. Written
-3.16e-5 and not 3e-5 because `lr_grid` rounds the points it generates and never
-the centre it generates them from: a 3e-5 centre puts the ends at 9e-07 and
-9e-04, the same span to within 5% but reading as fitted values rather than grid
-points.
+Where each point earns its place — candidate optima marked `*`:
 
-**Resolution, and what it cannot tell you.** Half a decade locates an argmin to
-about ×1.8, so a *ratio* of two argmins carries roughly ×3 of uncertainty —
-enough to distinguish 10x from 2x, not 6x from 10x. If the multiplier is wanted
-as a number, refine with ±0.25-decade points around each argmin after the first
-pass (~4 arms per panel); buying that resolution everywhere would double the arm
-count to gain precision in the regions that turn out to be flat.
+| grid | point | why |
+|---|---|---|
+| FullFT | 5e-07, 1e-06 | baseline anchors. Two, because MATH's peak reads as low as 3e-06 and an argmin on the bottom edge is one `analyze` refuses |
+| | 2e-06, 5e-06 | `*`3e-06, MATH's low-end reading, sits between them |
+| | 1e-05 | `*`6.25e-06, the SVG reading, sits between 5e-06 and 1e-05 |
+| | 2e-05 | `*`the RL figure's own reading, exactly |
+| | 5e-05 | past "FullFT collapses by ~3e-05" |
+| LoRA | 5e-06, 1e-05 | the rising edge, "LoRA becomes strong around 1e-05" |
+| | 2e-05 | `*`MATH r256, exactly |
+| | 5e-05 | `*`4e-05, GSM8K r1/r16, sits between 2e-05 and 5e-05 |
+| | 1e-04 | `*`GSM8K r256, exactly |
+| | 2e-04 | `*`"remains useful up to ~2e-04", exactly |
+| | 5e-04 | past that ceiling, so the band's upper edge is bracketed |
 
-**Knock-on changes.** `RL_OFT_SCOUT_SPAN` widened from (1e-6, 1e-4) to
-(3e-7, 3e-4) — same centre, same seven points, half a decade further out on each
-side, so no extra arms. A scout narrower than the grid it will be compared
-against cannot find an optimum the comparison would care about;
-`test_the_oft_grid_is_never_loras_grid` enforces that and caught it. Arm counts
-moved to e4 35, e4place 35, e5rl 42, and the `EXPECT_ARMS` guards in all four
-`run_e4*_8gpu.sh` wrappers moved with them — a wrapper whose guard disagrees
-with the matrix refuses to start rather than running a different experiment
-silently.
+**What the seven points do not reach: LoRA's fully-collapsed floor at 1e-03.**
+The smallest point was set to 5e-07 / 5e-06 deliberately, to buy the two FullFT
+baseline anchors, and at fixed width the top moved down with it. The width claim
+needs the band's upper *edge*, which the 2e-04 -> 5e-04 transition brackets;
+"all ranks collapse by 1e-03" (§14, GSM8K signature 8 and MATH signature 7) is
+confirmation this sweep will not have. Add an eighth LoRA point at 1e-03 if that
+confirmation is wanted — three arms per panel, one constant.
+
+**Knock-on changes.** `RL_OFT_SCOUT_SPAN` is (3e-7, 3e-4), three decades against
+the LoRA grid's two, so the "a scout must be at least as wide as the grid it
+feeds" invariant still holds. Arm counts are e4 35, e4place 35, e5rl 42, and the
+`EXPECT_ARMS` guards in all four `run_e4*_8gpu.sh` wrappers match — a wrapper
+whose guard disagrees with the matrix refuses to start rather than silently
+running a different experiment.

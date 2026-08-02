@@ -125,17 +125,17 @@ class TestItIsAnRlMatrix:
         assert "e5rl" in MATRIX_PROJECTS
         assert wandb_project("e5rl") != wandb_project("e4")
 
-    def test_it_uses_the_rl_half_decade_grid(self):
+    def test_it_uses_the_rl_third_decade_grid(self):
         """E4's grid, not E1's. Comparable arm-for-arm with the matrix whose
         argmin supplies this one's centre."""
         arms = _arms()
         lrs = sorted({a.lr for a in arms if a.method == "oft"})
         assert len(lrs) == 7
-        # ~half a decade each; the points are rounded to one significant figure
-        # (3e-06, not 3.16e-06), so the steps alternate 3.33x / 3.0x.
+        # ~a third of a decade each; the points are rounded to one significant
+        # figure (the 1-2-5 series), so the steps alternate 2.0x / 2.5x.
         ratios = [lrs[i + 1] / lrs[i] for i in range(len(lrs) - 1)]
         for r in ratios:
-            assert abs(r - 10 ** 0.5) < 0.2, ratios
+            assert abs(r - 10 ** (1 / 3)) < 0.4, ratios
 
     def test_it_is_registered(self):
         assert "e5rl" in MATRICES
