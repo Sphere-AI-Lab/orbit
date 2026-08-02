@@ -97,6 +97,12 @@ RL_ARGS=(
     --lambd 1.0
 )
 
+# Optional extra RL args (space-separated), e.g. EXTRA_RL_ARGS="--force-on-policy-ratio".
+if [[ -n "${EXTRA_RL_ARGS:-}" ]]; then
+    read -r -a _extra_rl_args <<< "${EXTRA_RL_ARGS}"
+    RL_ARGS+=( "${_extra_rl_args[@]}" )
+fi
+
 LOSS_ARGS=(
     --calculate-per-token-loss
 )
