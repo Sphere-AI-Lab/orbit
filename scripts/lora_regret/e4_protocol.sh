@@ -37,6 +37,31 @@
 : "${EPS_CLIP=1e9}"
 : "${EPS_CLIP_HIGH=1e9}"
 
+# --- where the metrics go ------------------------------------------------------
+#
+# OFFLINE, and synced afterwards from a node that has egress. Not a preference:
+# on 2026-08-02 seven arms ran for 90 minutes writing 4-7 MB .wandb files each
+# and NOTHING reached the server -- `wandb.Api()` could not find the project at
+# all. No retry, no error, no warning in any training log; the uploader simply
+# never ran. The compute node had already said why, in Ray's own startup line:
+#
+#   Failed to determine local IP via external connectivity to: 8.8.8.8:53
+#
+# The same `mode="shared", x_primary=True` init that logged nothing there logs
+# fine from the login node (5/5 history rows, measured both ways), so the
+# configuration was never the problem -- the egress was.
+#
+# What makes offline the answer rather than a workaround: `wandb sync` REPLAYS
+# an offline directory into a real run, name and history intact (verified: 5/5
+# rows, correct run name). It does NOT do that for a shared-mode directory --
+# those replay into a run with config and summary and **zero history rows**,
+# which is an empty dashboard, which is exactly what tonight's first attempt
+# produced. Offline is the only local format that can be recovered.
+#
+# Sync with `bash scripts/lora_regret/sync_wandb.sh` from the login node, during
+# the run for a near-live view and once more at the end.
+: "${WANDB_MODE=offline}"
+
 # --- schedule ----------------------------------------------------------------
 #
 # 150 rollouts is 4,800 problem-group exposures against the post's ~7,500, so
@@ -84,4 +109,4 @@
 # argued. Mean response is only ~250-280 tokens, so the cost of the headroom is
 # small and the cost of clipping the tail is a reward of zero.
 
-export RL_EXTRA_ARGS EPS_CLIP EPS_CLIP_HIGH NUM_ROLLOUT SAVE_INTERVAL EVAL_INTERVAL
+export RL_EXTRA_ARGS EPS_CLIP EPS_CLIP_HIGH NUM_ROLLOUT SAVE_INTERVAL EVAL_INTERVAL WANDB_MODE

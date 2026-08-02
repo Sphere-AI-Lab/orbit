@@ -161,3 +161,22 @@ def test_every_protocol_value_is_a_default_not_a_lock():
     for var in ("RL_EXTRA_ARGS", "EPS_CLIP", "NUM_ROLLOUT", "SAVE_INTERVAL", "EVAL_INTERVAL"):
         assert f': "${{{var}=' in text, var
         assert f"\nexport {var}=" not in text, var
+
+
+def test_the_protocol_logs_wandb_offline():
+    """The compute nodes have no egress. On 2026-08-02 seven arms ran 90
+    minutes in the launcher's online path and nothing reached the server -- no
+    project, no retry, no warning. Offline is also the only local format
+    `wandb sync` can replay: a shared-mode directory comes back with config and
+    summary and zero history rows, which is an empty dashboard."""
+    assert ': "${WANDB_MODE=offline}"' in PROTOCOL.read_text(encoding="utf-8")
+
+
+def test_the_sync_script_exists_and_refuses_to_run_offline():
+    """`wandb sync` inheriting WANDB_MODE=offline from the shell would write
+    the uploads straight back to disk."""
+    script = PROTOCOL.parent / "sync_wandb.sh"
+    assert script.is_file()
+    text = script.read_text(encoding="utf-8")
+    assert "unset WANDB_MODE" in text
+    assert "--sync-all" in text
