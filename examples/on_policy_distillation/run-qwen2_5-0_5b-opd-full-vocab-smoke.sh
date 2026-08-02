@@ -58,7 +58,10 @@ payload = {
     "return_hidden_states": True,
 }
 req = urllib.request.Request(url, json.dumps(payload).encode(), {"Content-Type": "application/json"})
-body = json.loads(urllib.request.urlopen(req, timeout=60).read())
+# Bypass ambient http_proxy/https_proxy: cluster proxies intercept localhost URLs
+# (orbit's own scoring client is immune via aiohttp trust_env=False).
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+body = json.loads(opener.open(req, timeout=60).read())
 hidden = body.get("meta_info", {}).get("hidden_states") or []
 assert len(hidden) == 1, (
     f"teacher preflight: expected 1 hidden_states batch entry, got {len(hidden)} -- "
