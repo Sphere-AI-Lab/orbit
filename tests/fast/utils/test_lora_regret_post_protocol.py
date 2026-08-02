@@ -292,3 +292,70 @@ class TestTheModelIsVisibleInTheResults:
         build = lambda m: MATRICES["e4"](m.hidden_size, m.ffn_size, m.qkv_output_size, 0, None, None)[0]
         assert build(QWEN).name == build(LLAMA).name
         assert sweep.wandb_project("e4", "qwen3-1.7b") != sweep.wandb_project("e4", "llama3.1-8b")
+
+
+class TestTheRlGridsAreCentredOnThePostsOwnMeasurement:
+    """Re-centred 2026-08-02. Each assertion pins a number the post measured.
+
+    The previous FullFT centre (1e-6) put the post-scaled optimum on the top
+    grid edge, where `analyze` refuses to quote an argmin -- so the most likely
+    outcome of running it was a refusal and a re-run of all four arms.
+    """
+
+    @staticmethod
+    def _grid(centre):
+        from tools.lora_regret.arms import lr_grid
+        return [float(f"{lr:g}") for lr in lr_grid(centre, n=4, step_decades=0.5)]
+
+    def test_the_fullft_grid_brackets_both_predictions(self):
+        """~1e-5 from scaling the post's 2e-5 by width, ~1e-6 from 8B practice.
+        A grid that contains only one of two live hypotheses is not a sweep."""
+        from tools.lora_regret.arms import RL_FULL_LR_CENTRE
+
+        grid = self._grid(RL_FULL_LR_CENTRE)
+        assert grid == [1e-06, 3.16e-06, 1e-05, 3.16e-05]
+        assert min(grid) <= 1e-6 and max(grid) > 1e-5
+
+    def test_the_post_scaled_optimum_is_no_longer_on_the_edge(self):
+        """The whole reason for the change: an argmin on a boundary is a
+        boundary value, not an optimum, and `analyze` exits 3 rather than quote
+        one."""
+        from tools.lora_regret.arms import RL_FULL_LR_CENTRE
+
+        grid = self._grid(RL_FULL_LR_CENTRE)
+        assert grid.index(1e-05) not in (0, len(grid) - 1)
+        assert self._grid(1e-6).index(1e-05) == len(grid) - 1  # what it used to be
+
+    def test_the_lora_grid_already_contained_its_prediction_so_it_did_not_move(self):
+        """The post's LoRA optima are 6e-5 / 9e-5 / 7e-5; halved for width that
+        is ~3.5e-5, with grid points either side. Moving it would have been
+        change for its own sake."""
+        from tools.lora_regret.arms import RL_LORA_LR_CENTRE
+
+        grid = self._grid(RL_LORA_LR_CENTRE)
+        assert min(grid) < 3.5e-5 < max(grid)
+
+    def test_the_ratio_between_the_centres_is_the_posts_rl_ratio_not_its_sft_one(self):
+        """C2's 10x is measured on SFT. The post's own RL runs give 3.0x (r1),
+        4.5x (r16) and 3.5x (r256), so 3.16x is the prior with evidence behind
+        it -- and it is now a consequence of where the two centres sit, not a
+        separate constant that could drift from them."""
+        from tools.lora_regret.arms import RL_FULL_LR_CENTRE, RL_LORA_LR_CENTRE
+
+        assert 3.0 <= RL_LORA_LR_CENTRE / RL_FULL_LR_CENTRE <= 4.5
+
+    def test_both_cells_keep_the_same_number_of_points(self):
+        """C5 is a comparison. An argmin found on 5 points and one found on 4
+        are not comparable, so neither cell may be quietly finer."""
+        from tools.lora_regret.arms import RL_FULL_LR_CENTRE, RL_LORA_LR_CENTRE
+
+        assert len(self._grid(RL_FULL_LR_CENTRE)) == len(self._grid(RL_LORA_LR_CENTRE))
+
+    def test_the_arm_count_is_unchanged_so_the_launch_scripts_still_hold(self):
+        """`scripts/lora_regret/run_*_8gpu.sh` assert EXPECT_ARMS and refuse to
+        start on a mismatch. Re-centring must move learning rates, not counts."""
+        for matrix, expected in (("e4", 20), ("e4place", 20)):
+            arms = MATRICES[matrix](LLAMA.hidden_size, LLAMA.ffn_size, LLAMA.qkv_output_size,
+                                    0, None, None)
+            assert len(arms) == expected
+            assert len([a for a in arms if a.method == "full"]) == 4

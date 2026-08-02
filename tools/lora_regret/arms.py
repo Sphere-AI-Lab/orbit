@@ -70,10 +70,37 @@ LORA_A_INIT_METHOD = "kaiming"
 # into the grid instead of fitted out of it.
 FULL_LR_CENTRE = 2.5e-5
 LORA_LR_CENTRE = 2.5e-4
-# RL runs an order of magnitude lower than SFT, and the post gives no multiplier
-# for policy gradient -- these are the RL launcher's own documented defaults,
-# used as scout centres rather than as predictions.
-RL_FULL_LR_CENTRE = 1e-6
+# RL's own centres. Re-centred 2026-08-02 against the post's measured RL sweep
+# (`third_party/lora-without-regret/results/wandb_rl_export.db`, 68 runs), which
+# is evidence the earlier values did not have -- they were the RL launcher's
+# defaults, used as scout centres because nothing better existed.
+#
+# **FullFT moved half a decade up, from 1e-6.** Two predictions disagree and the
+# grid now spans both instead of sitting under one of them:
+#
+#   post-scaled  the post measures 2e-5 on Qwen3-1.7B (band 9e-6 - 2.5e-5,
+#                0.44 decades). Hidden 2048 -> 4096 at LR ~ 1/width puts
+#                Llama-3.1-8B near **1e-5**. Batch no longer enters: since the
+#                schedule defaults became 32 prompts x 8 samples, the campaign
+#                and the post train on the same 256 samples per step.
+#   practice     8B policy-gradient recipes commonly run **1e-6 - 5e-6**.
+#
+# 10**-5.5 = 3.16e-6 is their geometric mean, and `lr_grid(n=4, 0.5)` around it
+# is [1e-6, 3.16e-6, 1e-5, 3.16e-5] -- a point on each prediction and one above.
+# The old centre gave [3.16e-7, 1e-6, 3.16e-6, 1e-5], where the post-scaled
+# optimum sat on the **top grid edge**; `analyze` refuses an edge argmin, so that
+# grid's most likely outcome was a refusal and a re-run.
+RL_FULL_LR_CENTRE = 10**-5.5
+# **LoRA does not move**, and that is a finding rather than an omission. The
+# post's LoRA optima are 6e-5 (r1), 9e-5 (r16) and 7e-5 (r256); halving for width
+# puts Llama near 3.5e-5, which already sits inside [3.16e-6, 1e-5, 3.16e-5,
+# 1e-4] with points either side.
+#
+# The consequence is that the ratio built into the grids falls from 10x to
+# sqrt(10) = 3.16x -- and the post's own RL runs measure **3.0x (r1), 4.5x (r16),
+# 3.5x (r256)**. C2's 10x is an *SFT* rule; carrying it into policy gradient was
+# always a prior, and the post's data says it is the wrong one. If the measured
+# RL argmins disagree with 3.16x too, that is still a finding, not a grid error.
 RL_LORA_LR_CENTRE = 1e-5
 # One Tulu3 epoch is (939,343 - 1,000 held out) / 32 = 29,323 optimizer steps,
 # and ~1% of that is 293 -- about 100 trace points, which is what C1's departure
@@ -697,11 +724,14 @@ def e4_arms(
 
     The grid is half-decade rather than E1's 0.3-decade, and that is deliberate.
     C5's second half is about the *width* of the performant LR band, which needs
-    coverage across a wide range more than resolution near one point -- and the
-    RL optimum is less well predicted to begin with, since the post gives a
-    multiplier for SFT and not for policy gradient. LoRA is still centred a
-    decade above FullFT, which is C2's rule carried over as a prior; if the
-    argmins say otherwise for RL, that is a finding rather than a grid error.
+    coverage across a wide range more than resolution near one point.
+
+    Both cells are centred on the post's own RL sweep rather than on C2's SFT
+    rule -- see `RL_FULL_LR_CENTRE`. FullFT spans [1e-6, 3.16e-5] and LoRA
+    [3.16e-6, 1e-4], so the ratio between the centres is sqrt(10) = 3.16x, which
+    is what the post measures for policy gradient (3.0-4.5x across ranks) rather
+    than the 10x it measures for SFT. If the argmins disagree with that too, it
+    is a finding rather than a grid error.
     """
     arms: list[Arm] = []
     for lr in lr_grid(RL_FULL_LR_CENTRE, n=4, step_decades=0.5):

@@ -517,10 +517,22 @@ class TestE4Matrix:
         assert len(cells) == 5
         assert all(len(lrs) == 4 for lrs in cells.values())
 
-    def test_lora_centre_is_ten_times_the_full_centre(self):
+    def test_lora_centre_is_the_posts_measured_rl_ratio_not_its_sft_one(self):
+        """This asserted 10x until 2026-08-02, and 10x is an **SFT** number.
+
+        C2 measures it on next-token prediction; the post's own RL sweep
+        measures 3.0x (r1), 4.5x (r16) and 3.5x (r256) under policy gradient.
+        Carrying the SFT rule across was a prior with nothing behind it, and it
+        put the FullFT grid half a decade below where the post's own FullFT
+        optimum scales to. sqrt(10) = 3.16x is the prior with evidence.
+        """
         full = sorted({a.lr for a in e4_arms() if a.method == "full"})
         lora = sorted({a.lr for a in e4_arms() if a.method == "lora"})
-        assert lora[1] == pytest.approx(10 * full[1], rel=0.02)
+        assert lora[1] / full[1] == pytest.approx(10**0.5, rel=0.02)
+        # Still a whole grid step apart, so the two cells do not collapse onto
+        # each other: a shared grid would spend most of its points where nothing
+        # happens for one of the methods.
+        assert lora[1] > full[1]
 
     def test_grid_is_wider_than_the_sft_grids(self):
         """Half-decade steps, not E1's 0.3: the RL optimum is less well

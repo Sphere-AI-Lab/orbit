@@ -618,11 +618,34 @@ GPUS_PER_NODE=8 python -m tools.lora_regret.sweep --matrix e4 \
   --hidden-size 4096 --ffn-size 14336 --num-layers 32 --only '^full' --results results/e4_full.jsonl
 ```
 
-The grid is **half-decade** here, not E1's 0.3: the post gives a LR multiplier
-for SFT and none for policy gradient, and C5's second half is about the *width*
-of the performant band, which needs coverage more than resolution. LoRA is still
-centred a decade above FullFT (1e-5 against 1e-6) as a prior carried over from
-C2 — if the RL argmins disagree, that is a finding, not a grid error.
+The grid is **half-decade** here, not E1's 0.3: C5's second half is about the
+*width* of the performant band, which needs coverage more than resolution.
+
+**Both cells were re-centred on 2026-08-02** against the post's own RL sweep,
+which its wandb export records and nothing in the campaign had read:
+
+```
+FullFT   1e-6, 3.16e-6, 1e-5, 3.16e-5      (centre moved up half a decade)
+LoRA     3.16e-6, 1e-5, 3.16e-5, 1e-4      (unchanged)
+```
+
+The post measures a FullFT optimum of **2e-5** on Qwen3-1.7B. Scaling by width
+(hidden 2048 → 4096, LR ~ 1/width) puts Llama-3.1-8B near **1e-5**, while 8B
+policy-gradient practice sits at **1e-6 – 5e-6**; the new centre 10^−5.5 is their
+geometric mean and the grid holds a point on each. The old grid
+(3.16e-7 … 1e-5) put the post-scaled optimum on its **top edge**, and `analyze`
+exits 3 on an edge argmin — so its most likely outcome was a refusal and a re-run
+of all four arms. Batch size no longer enters the comparison: since §22.7 the
+campaign and the post both train on 32 prompts × 8 samples = 256 per step.
+
+LoRA did not move because it did not need to: the post's optima are 6e-5 (r1),
+9e-5 (r16) and 7e-5 (r256), so ~3.5e-5 for Llama, which already sits inside its
+grid with points either side. The consequence is that the ratio built into the
+two centres falls from 10x to **√10 = 3.16x** — and the post's own RL runs
+measure 3.0x, 4.5x and 3.5x. **C2's 10x is an SFT rule**; carrying it into policy
+gradient was always a prior, and the post's data says it was the wrong one. If
+the measured RL argmins disagree with 3.16x as well, that is a finding, not a
+grid error.
 
 `accuracy` in the ledger is the mean of the per-dataset scores at the highest
 rollout id, with `accuracy_per_dataset` alongside it. With `--rm-type boxed_math`
