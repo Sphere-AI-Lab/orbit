@@ -114,13 +114,29 @@ say "selection: ${MATRIX} ${METHOD_RE} on ${MODEL}"
 # Importing the sweep pulls in megatron.core, which costs ~10s -- doing it three
 # times to answer three questions about the same list is a minute of the node
 # spent before anything launches.
-PLAN=$(python -m tools.lora_regret.sweep "${SWEEP_ARGS[@]}" --dry-run 2>/dev/null) || {
+SWEEP_ERR=$(mktemp)
+trap 'rm -f "${SWEEP_ERR}"' EXIT
+PLAN=$(python -m tools.lora_regret.sweep "${SWEEP_ARGS[@]}" --dry-run 2>"${SWEEP_ERR}") || {
     echo "the sweep refused to build this selection:" >&2
-    python -m tools.lora_regret.sweep "${SWEEP_ARGS[@]}" --dry-run >/dev/null
+    cat "${SWEEP_ERR}" >&2
     exit 1
 }
-SELECTED=$(printf '%s' "${PLAN}" | grep -c . )
-echo "${SELECTED} arms selected -> ${RESULTS}"
+# TWO different counts, and conflating them broke resume.
+#
+# stdout carries only the arms still TO RUN -- the sweep skips whatever the
+# ledger already records as ok. stderr carries the line the guard actually
+# wants: "N arms selected, M already done, K to run", where N is the size of
+# the SELECTION.
+#
+# The guard used to compare EXPECT_ARMS against the stdout count, so a column
+# that finished 1 of its 4 arms and was re-run saw 3 and refused to start --
+# with a message blaming a renamed arm. Resume was advertised and did not work.
+# EXPECT_ARMS is a claim about which arms the script COVERS, which does not
+# shrink as they complete.
+SELECTED=$(sed -n 's/^\([0-9][0-9]*\) arms selected.*/\1/p' "${SWEEP_ERR}" | tail -1)
+TODO=$(printf '%s' "${PLAN}" | grep -c . )
+: "${SELECTED:=${TODO}}"   # older sweep without the stderr line: fail open to the old behaviour
+echo "${SELECTED} arms selected, ${TODO} to run -> ${RESULTS}"
 
 # A regex is a claim about which arms run. If it drifts -- a renamed method, a
 # matrix that grew a cell, a `place` tag that moved -- the sweep runs a
@@ -131,6 +147,11 @@ if [[ -n "${EXPECT_ARMS}" && "${SELECTED}" != "${EXPECT_ARMS}" ]]; then
     echo "The matrix or the arm names changed. Check with:" >&2
     echo "  python -m tools.lora_regret.sweep --model ${MODEL} --matrix ${MATRIX} --only '${METHOD_RE}' --dry-run" >&2
     exit 1
+fi
+
+if [[ "${TODO}" -eq 0 ]]; then
+    echo "every arm in this selection is already recorded ok in ${RESULTS}; nothing to do."
+    exit 0
 fi
 
 # No OFT arm may reach a FullFT/LoRA ledger: `analyze` reads a ledger as one

@@ -180,3 +180,17 @@ def test_the_sync_script_exists_and_refuses_to_run_offline():
     text = script.read_text(encoding="utf-8")
     assert "unset WANDB_MODE" in text
     assert "--sync-all" in text
+
+
+def test_the_arm_count_guard_survives_a_partial_ledger():
+    """Resume was advertised and did not work. `campaign.sh` compared
+    EXPECT_ARMS against the sweep's STDOUT, which lists only the arms still to
+    run -- so a column that finished 1 of its 4 arms and was re-run saw 3,
+    refused to start, and blamed a renamed arm. EXPECT_ARMS is a claim about
+    which arms the script COVERS, and that does not shrink as they complete, so
+    the count now comes from the sweep's "N arms selected" line on stderr."""
+    campaign = PROTOCOL.parent / "campaign.sh"
+    text = campaign.read_text(encoding="utf-8")
+    assert "arms selected" in text and "SWEEP_ERR" in text
+    assert 'SELECTED=$(printf' not in text, "the guard must not count the to-run list"
+    assert '"${TODO}" -eq 0' in text, "a fully-done selection should exit cleanly, not run nothing"
