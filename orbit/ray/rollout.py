@@ -1062,6 +1062,32 @@ def _compute_megatron_num_gpus(args) -> int:
 OPD_TEACHER_MODEL_NAME = "opd_teacher"
 
 
+def _opd_teacher_pool(args):
+    """Parsed --opd-teacher-pool manifest, or None. Cached on args: the pool is
+    read by placement sizing, engine injection, and validation."""
+    path = getattr(args, "opd_teacher_pool", None)
+    if path is None:
+        return None
+    cached = getattr(args, "_opd_teacher_pool_parsed", None)
+    if cached is None:
+        from orbit.utils.opd_teacher_pool import parse_teacher_pool
+
+        cached = parse_teacher_pool(path)
+        args._opd_teacher_pool_parsed = cached
+    return cached
+
+
+def _teacher_server_overrides(mem_fraction: float | None) -> dict:
+    overrides = {
+        "enable_return_hidden_states": True,
+        "disable_radix_cache": True,
+        "chunked_prefill_size": -1,
+    }
+    if mem_fraction is not None:
+        overrides["mem_fraction_static"] = mem_fraction
+    return overrides
+
+
 def _opd_teacher_model_config(args) -> "ModelConfig | None":
     """ModelConfig for the managed frozen OPD teacher (--opd-serve-teacher), or None.
 
@@ -1074,22 +1100,42 @@ def _opd_teacher_model_config(args) -> "ModelConfig | None":
     """
     if not getattr(args, "opd_serve_teacher", False):
         return None
-    overrides = {
-        "enable_return_hidden_states": True,
-        "disable_radix_cache": True,
-        "chunked_prefill_size": -1,
-    }
-    if args.opd_teacher_mem_fraction is not None:
-        overrides["mem_fraction_static"] = args.opd_teacher_mem_fraction
     return ModelConfig(
         name=OPD_TEACHER_MODEL_NAME,
         model_path=args.teacher_hf_checkpoint,
         update_weights=False,
         num_gpus_per_engine=args.opd_teacher_num_gpus,
         server_groups=[
-            ServerGroupConfig(worker_type="regular", num_gpus=args.opd_teacher_num_gpus, overrides=overrides)
+            ServerGroupConfig(
+                worker_type="regular",
+                num_gpus=args.opd_teacher_num_gpus,
+                overrides=_teacher_server_overrides(args.opd_teacher_mem_fraction),
+            )
         ],
     )
+
+
+def _opd_teacher_pool_model_configs(args) -> "list[ModelConfig]":
+    """One sglang model entry per served pool teacher (--opd-teacher-pool)."""
+    pool = _opd_teacher_pool(args)
+    if pool is None:
+        return []
+    return [
+        ModelConfig(
+            name=entry.served_model_name,
+            model_path=entry.model_path,
+            update_weights=False,
+            num_gpus_per_engine=entry.num_gpus_per_engine or entry.num_gpus,
+            server_groups=[
+                ServerGroupConfig(
+                    worker_type="regular",
+                    num_gpus=entry.num_gpus,
+                    overrides=_teacher_server_overrides(entry.mem_fraction),
+                )
+            ],
+        )
+        for entry in pool.served
+    ]
 
 
 def start_rollout_servers(args, pg) -> dict[str, RolloutServer]:
@@ -1107,6 +1153,9 @@ def start_rollout_servers(args, pg) -> dict[str, RolloutServer]:
     teacher_cfg = _opd_teacher_model_config(args)
     if teacher_cfg is not None:
         models.append(teacher_cfg)
+    pool_cfgs = _opd_teacher_pool_model_configs(args)
+    models.extend(pool_cfgs)
+    pool_model_names = {cfg.name for cfg in pool_cfgs}
 
     servers: dict[str, RolloutServer] = {}
     gpu_offset = 0
@@ -1118,7 +1167,7 @@ def start_rollout_servers(args, pg) -> dict[str, RolloutServer]:
     for model_idx, model_cfg in enumerate(models):
         model_cfg.resolve(args)
 
-        if model_cfg.name == OPD_TEACHER_MODEL_NAME and args.colocate:
+        if (model_cfg.name == OPD_TEACHER_MODEL_NAME or model_cfg.name in pool_model_names) and args.colocate:
             # In --colocate mode the teacher shares the actor/rollout GPUs (bundle 0
             # onward, relying on the shared offload/onload dance) instead of extending
             # the bucket -- mirrors how rollout itself colocates. Safe to reset the
@@ -1190,6 +1239,16 @@ def start_rollout_servers(args, pg) -> dict[str, RolloutServer]:
         teacher_srv = servers[OPD_TEACHER_MODEL_NAME]
         args.opd_teacher_url = f"http://{teacher_srv.router_ip}:{teacher_srv.router_port}/generate"
         logger.info(f"Managed OPD teacher serving at {args.opd_teacher_url}")
+
+    pool = _opd_teacher_pool(args)
+    if pool is not None:
+        served_urls = {
+            name: f"http://{srv.router_ip}:{srv.router_port}/generate"
+            for name, srv in servers.items()
+            if name in pool_model_names
+        }
+        args.opd_teacher_urls = pool.routing_specs(served_urls)
+        logger.info(f"Managed OPD teacher pool routing: {args.opd_teacher_urls}")
 
     return servers
 
