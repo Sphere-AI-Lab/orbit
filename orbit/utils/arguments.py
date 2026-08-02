@@ -195,6 +195,34 @@ def add_on_policy_distillation_arguments(parser):
         ),
     )
     parser.add_argument(
+        "--opd-serve-teacher",
+        action="store_true",
+        default=False,
+        help=(
+            "Serve the frozen OPD teacher inside this job: --teacher-hf-checkpoint is "
+            "launched as an extra sglang model entry (own router, update_weights=False, "
+            "scoring-safe server flags baked in) and its endpoint is published as "
+            "--opd-teacher-url automatically. Under --colocate the teacher time-shares "
+            "the actor/rollout GPUs; otherwise it gets --opd-teacher-num-gpus extra GPUs "
+            "after the rollout bucket. Mutually exclusive with --opd-teacher-url(s)."
+        ),
+    )
+    parser.add_argument(
+        "--opd-teacher-num-gpus",
+        type=int,
+        default=1,
+        help="GPUs for the managed OPD teacher (--opd-serve-teacher); one engine with TP across them.",
+    )
+    parser.add_argument(
+        "--opd-teacher-mem-fraction",
+        type=float,
+        default=None,
+        help=(
+            "mem_fraction_static override for the managed OPD teacher's engine; set a small "
+            "value (e.g. 0.25) under --colocate so the teacher fits beside the student engine."
+        ),
+    )
+    parser.add_argument(
         "--teacher-score-mode",
         type=str,
         choices=["sampled_token", "full_vocab"],
@@ -542,6 +570,24 @@ def _validate_opd_args(args) -> None:
             "KL onto a reward-based estimator. Pick one."
         )
 
+    # Managed teacher serving: the job launches the frozen teacher itself and publishes
+    # its endpoint as opd_teacher_url once the engines are up (start_rollout_servers).
+    if getattr(args, "opd_serve_teacher", False):
+        if getattr(args, "opd_type", None) != "sglang":
+            raise ValueError("--opd-serve-teacher requires --opd-type sglang.")
+        if getattr(args, "opd_teacher_url", None) or getattr(args, "opd_teacher_urls", None):
+            raise ValueError(
+                "--opd-serve-teacher and --opd-teacher-url(s) are mutually exclusive: the managed "
+                "teacher publishes its own endpoint after its engines start."
+            )
+        if not getattr(args, "teacher_hf_checkpoint", None):
+            raise ValueError(
+                "--opd-serve-teacher serves --teacher-hf-checkpoint; set it to the frozen teacher's "
+                "HF checkpoint directory."
+            )
+        if args.opd_teacher_num_gpus < 1:
+            raise ValueError("--opd-teacher-num-gpus must be >= 1.")
+
     # Full-vocab OPD: --loss-type opd_jsd_loss and --teacher-score-mode full_vocab come as a
     # pair, on the external single-URL sglang teacher transport.
     score_mode = getattr(args, "teacher_score_mode", "sampled_token") or "sampled_token"
@@ -553,9 +599,10 @@ def _validate_opd_args(args) -> None:
     if score_mode == "full_vocab":
         if getattr(args, "opd_type", None) != "sglang":
             raise ValueError("--teacher-score-mode full_vocab requires --opd-type sglang.")
-        if not getattr(args, "opd_teacher_url", None):
+        if not getattr(args, "opd_teacher_url", None) and not getattr(args, "opd_serve_teacher", False):
             raise ValueError(
-                "--teacher-score-mode full_vocab requires --opd-teacher-url (a single external teacher)."
+                "--teacher-score-mode full_vocab requires --opd-teacher-url (a single external "
+                "teacher) or --opd-serve-teacher (managed in-job serving)."
             )
         if getattr(args, "opd_teacher_urls", None):
             raise ValueError(
@@ -575,8 +622,22 @@ def _validate_opd_args(args) -> None:
                 "advantage machinery, so --use-opd / --advantage-estimator on_policy_distillation "
                 "must be off."
             )
+        # full_vocab bypasses needs_opd_teacher() (no OPD advantage), so the legacy hook
+        # check below never runs for it -- enforce the scoring transport here.
+        expected_rm = "orbit.rollout.opd_sglang.reward_func"
+        expected_post = "orbit.rollout.opd_sglang.post_process"
+        if (
+            getattr(args, "custom_rm_path", None) != expected_rm
+            or getattr(args, "custom_reward_post_process_path", None) != expected_post
+        ):
+            raise ValueError(
+                "--teacher-score-mode full_vocab scores samples through the OPD custom-reward "
+                f"hooks; set --custom-rm-path {expected_rm} and "
+                f"--custom-reward-post-process-path {expected_post}."
+            )
         # Pure distillation: no PPO advantage/returns pipeline.
         args.compute_advantages_and_returns = False
+
 
     # sglang-teacher OPD blend is only safe when the teacher scores through the
     # local rollout-engine adapter slot (same-base): the external-URL teacher's
@@ -585,7 +646,11 @@ def _validate_opd_args(args) -> None:
     # KL-only signal with ~0 base advantage.
     if getattr(args, "use_opd", False) and args.opd_type == "sglang":
         spec_for_blend = parse_teacher_spec(getattr(args, "opd_teacher", None), args.opd_teacher_load)
-        external = getattr(args, "opd_teacher_url", None) or getattr(args, "opd_teacher_urls", None)
+        external = (
+            getattr(args, "opd_teacher_url", None)
+            or getattr(args, "opd_teacher_urls", None)
+            or getattr(args, "opd_serve_teacher", False)
+        )
         if external or not is_same_base(spec_for_blend):
             raise ValueError(
                 "--use-opd (blend) with --opd-type sglang requires a same-base teacher scored by "
@@ -676,7 +741,11 @@ def _validate_opd_args(args) -> None:
                 "--opd-type sglang scores via the rollout engine or an external SGLang server; "
                 "--opd-teacher load:<ckpt> (in-process second model) requires --opd-type megatron."
             )
-        external = args.opd_teacher_url or getattr(args, "opd_teacher_urls", None)
+        external = (
+            args.opd_teacher_url
+            or getattr(args, "opd_teacher_urls", None)
+            or getattr(args, "opd_serve_teacher", False)
+        )
         if external:
             # Legacy external-teacher path: unchanged hook requirements.
             expected_rm = "orbit.rollout.opd_sglang.reward_func"

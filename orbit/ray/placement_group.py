@@ -80,6 +80,17 @@ def _create_placement_group(num_gpus):
     return pg, pg_reordered_bundle_indices, pg_reordered_gpu_ids
 
 
+def _opd_teacher_extra_gpus(args) -> int:
+    """Extra PG bundles for a managed OPD teacher (--opd-serve-teacher) on its own GPUs.
+
+    Zero under --colocate: the teacher shares the actor/rollout GPUs there (see
+    start_rollout_servers' bundle-cursor reset), matching how rollout itself colocates.
+    """
+    if not getattr(args, "opd_serve_teacher", False) or args.colocate:
+        return 0
+    return args.opd_teacher_num_gpus
+
+
 def create_placement_groups(args):
     """Create placement groups for actor and rollout engines."""
 
@@ -91,7 +102,7 @@ def create_placement_groups(args):
             num_gpus += args.critic_num_nodes * args.critic_num_gpus_per_node
             critic_offset = args.actor_num_nodes * args.actor_num_gpus_per_node
     elif args.debug_rollout_only:
-        num_gpus = args.rollout_num_gpus
+        num_gpus = args.rollout_num_gpus + _opd_teacher_extra_gpus(args)
         rollout_offset = 0
     elif args.colocate:
         num_gpus = args.actor_num_nodes * args.actor_num_gpus_per_node
@@ -100,7 +111,11 @@ def create_placement_groups(args):
             num_gpus += args.critic_num_nodes * args.critic_num_gpus_per_node
             critic_offset = args.actor_num_nodes * args.actor_num_gpus_per_node
     else:
-        num_gpus = args.actor_num_nodes * args.actor_num_gpus_per_node + args.rollout_num_gpus
+        num_gpus = (
+            args.actor_num_nodes * args.actor_num_gpus_per_node
+            + args.rollout_num_gpus
+            + _opd_teacher_extra_gpus(args)
+        )
         rollout_offset = args.actor_num_nodes * args.actor_num_gpus_per_node
         if args.use_critic:
             num_gpus += args.critic_num_nodes * args.critic_num_gpus_per_node

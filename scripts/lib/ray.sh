@@ -186,6 +186,26 @@ _prepare_megatron_pythonpath() {
     fi
 }
 
+_ray_opd_teacher_num_gpus() {
+    # Extra GPUs for a managed OPD teacher (--opd-serve-teacher). Zero when the flag is
+    # absent or when colocated (the teacher shares the actor/rollout GPUs there) --
+    # mirrors placement_group.py::_opd_teacher_extra_gpus.
+    local array_name arg
+    for array_name in RL_ARGS ROLLOUT_ARGS MISC_ARGS; do
+        if declare -p "${array_name}" >/dev/null 2>&1; then
+            local -n _teacher_args_ref="${array_name}"
+            for arg in "${_teacher_args_ref[@]}"; do
+                if [[ "${arg}" == "--opd-serve-teacher" ]]; then
+                    _ray_array_value_after_any --opd-teacher-num-gpus RL_ARGS ROLLOUT_ARGS MISC_ARGS && return 0
+                    printf '1\n'
+                    return 0
+                fi
+            done
+        fi
+    done
+    printf '0\n'
+}
+
 apply_ray_defaults() {
     RAY_NUM_CPUS=${RAY_NUM_CPUS:-64}
     if [[ -z "${RAY_NUM_GPUS:-}" ]]; then
@@ -195,9 +215,10 @@ apply_ray_defaults() {
         if _ray_launcher_is_colocated; then
             RAY_NUM_GPUS=$((actor_gpus + critic_gpus))
         else
-            local rollout_gpus
+            local rollout_gpus teacher_gpus
             rollout_gpus="$(_ray_rollout_num_gpus)"
-            RAY_NUM_GPUS=$((actor_gpus + critic_gpus + rollout_gpus))
+            teacher_gpus="$(_ray_opd_teacher_num_gpus)"
+            RAY_NUM_GPUS=$((actor_gpus + critic_gpus + rollout_gpus + teacher_gpus))
         fi
     fi
 }

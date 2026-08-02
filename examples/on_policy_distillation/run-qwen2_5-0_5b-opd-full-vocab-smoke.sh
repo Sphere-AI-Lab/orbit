@@ -32,9 +32,15 @@ RUN_LOG="${ORBIT_ROOT}/logs/${LAUNCHER_NAME}_$(date +%Y%m%d_%H%M%S).log"
 # === Paths ===
 : "${HF_CKPT:?set HF_CKPT to the student Hugging Face checkpoint path}"
 : "${MEGATRON_LOAD:?set MEGATRON_LOAD to the student Megatron torch_dist checkpoint path}"
-: "${OPD_TEACHER_URL:?set OPD_TEACHER_URL to the teacher sglang /generate endpoint}"
-# Frozen teacher HF checkpoint: the SAME checkpoint the teacher server serves.
-# The trainer loads its LM head (embed_tokens when tied) for logit reconstruction.
+# OPD_SERVE_TEACHER=1: the job serves the teacher itself (--opd-serve-teacher) on
+# OPD_TEACHER_NUM_GPUS extra GPUs -- no OPD_TEACHER_URL and no external server needed.
+OPD_SERVE_TEACHER="${OPD_SERVE_TEACHER:-0}"
+if ! is_true "${OPD_SERVE_TEACHER}"; then
+    : "${OPD_TEACHER_URL:?set OPD_TEACHER_URL to the teacher sglang /generate endpoint, or set OPD_SERVE_TEACHER=1}"
+fi
+# Frozen teacher HF checkpoint. In managed mode this is the model the job serves; in
+# external mode it must be the SAME checkpoint the teacher server serves. The trainer
+# loads its LM head (embed_tokens when tied) for logit reconstruction.
 : "${OPD_TEACHER_HF_CKPT:?set OPD_TEACHER_HF_CKPT to the teacher Hugging Face checkpoint path}"
 OPD_JSD_BETA="${OPD_JSD_BETA:-0.5}"
 SAVE_DIR="${ORBIT_ROOT}/orbit_ckpts/Qwen2.5-0.5B-Instruct_opd_full_vocab_smoke"
@@ -45,7 +51,7 @@ TEST_JSONL=${TEST_JSONL:-}
 # A tiny scoring request that fails fast if the server is missing any of the
 # three required flags (a radix-cache or chunked-prefill misconfig would
 # otherwise only surface mid-rollout, after Megatron init).
-if ! is_true "${ORBIT_DRY_RUN_ARGV:-0}" && ! is_true "${SKIP_TEACHER_PREFLIGHT:-0}"; then
+if ! is_true "${ORBIT_DRY_RUN_ARGV:-0}" && ! is_true "${SKIP_TEACHER_PREFLIGHT:-0}" && ! is_true "${OPD_SERVE_TEACHER}"; then
     OPD_TEACHER_URL="${OPD_TEACHER_URL}" python3 - <<'PY'
 import json
 import os
@@ -94,7 +100,13 @@ TRAIN_ROWS=${TRAIN_ROWS:-$(wc -l < "${TRAIN_JSONL}")}
 NUM_ROLLOUT=${NUM_ROLLOUT:-$(( (TRAIN_ROWS * TOTAL_EPOCHS + ROLLOUT_BATCH_SIZE - 1) / ROLLOUT_BATCH_SIZE ))}
 
 # === ARGS arrays ===
+# COLOCATE=1: actor training, student rollout, and (with OPD_SERVE_TEACHER=1) the
+# teacher time-share the same GPUs via the offload/onload dance. Size the engines
+# accordingly, e.g. SGLANG_MEM_FRACTION_STATIC=0.5 OPD_TEACHER_MEM_FRACTION=0.25.
 COLOCATE_ARGS=()
+if is_true "${COLOCATE:-0}"; then
+    COLOCATE_ARGS=( --colocate )
+fi
 
 CKPT_ARGS=(
     --hf-checkpoint "${HF_CKPT}"
@@ -139,7 +151,6 @@ RL_ARGS=(
     --teacher-score-mode full_vocab
     --teacher-hf-checkpoint "${OPD_TEACHER_HF_CKPT}"
     --opd-type sglang
-    --opd-teacher-url "${OPD_TEACHER_URL}"
     --opd-jsd-beta "${OPD_JSD_BETA}"
     --opd-log-topk-overlap
     --kl-loss-coef 0.0
@@ -147,6 +158,14 @@ RL_ARGS=(
     --kl-coef 0.0
     --entropy-coef 0.0
 )
+if is_true "${OPD_SERVE_TEACHER}"; then
+    RL_ARGS+=( --opd-serve-teacher --opd-teacher-num-gpus "${OPD_TEACHER_NUM_GPUS:-1}" )
+    if [[ -n "${OPD_TEACHER_MEM_FRACTION:-}" ]]; then
+        RL_ARGS+=( --opd-teacher-mem-fraction "${OPD_TEACHER_MEM_FRACTION}" )
+    fi
+else
+    RL_ARGS+=( --opd-teacher-url "${OPD_TEACHER_URL}" )
+fi
 if [[ -n "${OPD_JSD_POINTWISE_CLIP:-}" ]]; then
     RL_ARGS+=( --opd-jsd-pointwise-clip "${OPD_JSD_POINTWISE_CLIP}" )
 fi
@@ -205,12 +224,16 @@ MISC_ARGS=(
     --no-gradient-accumulation-fusion
     --no-offload-train
     --no-offload-train-async
-    --no-offload-rollout
     --cuda-graph-impl local
     --cuda-graph-scope full_iteration
     --te-rng-tracker
     --no-check-for-nan-in-loss-and-grad
 )
+if is_true "${COLOCATE:-0}"; then
+    MISC_ARGS+=( --offload-rollout )
+else
+    MISC_ARGS+=( --no-offload-rollout )
+fi
 
 DEBUG_ARGS=(
     --log-passrate
