@@ -121,3 +121,43 @@ def test_each_script_writes_its_own_ledger():
 def test_each_script_asserts_its_own_arm_count():
     for path in SCRIPTS:
         assert "EXPECT_ARMS=4" in path.read_text(encoding="utf-8"), path.name
+
+
+PROTOCOL = SCRIPTS[0].parent / "e4_protocol.sh" if SCRIPTS else None
+
+
+def test_every_column_sources_the_shared_protocol():
+    """Fourteen node bookings, one protocol. A sweep is only a sweep if every
+    arm differs in the learning rate and nothing else, so the knobs that shape
+    the update live in one file rather than in fourteen copies where a drift
+    between two of them would be indistinguishable from a real effect."""
+    for path in SCRIPTS:
+        assert 'source "${HERE}/e4_protocol.sh"' in path.read_text(encoding="utf-8"), path.name
+
+
+def test_the_protocol_sets_the_knobs_that_change_the_update():
+    """Each of these alters the mathematics of the step, not just its cost, and
+    each defaults the wrong way for this experiment in orbit or the launcher."""
+    text = PROTOCOL.read_text(encoding="utf-8")
+    assert ': "${RL_EXTRA_ARGS=--disable-grpo-std-normalization}"' in text
+    assert ': "${EPS_CLIP=1e9}"' in text
+    assert ': "${EPS_CLIP_HIGH=1e9}"' in text
+
+
+def test_the_protocol_disables_checkpointing_with_an_empty_value():
+    """`SAVE_INTERVAL=999999` would still write one checkpoint: orbit's
+    `should_run_periodic_action` short-circuits on `interval is None` and only
+    then checks the final rollout. Only the empty value drops the flag."""
+    text = PROTOCOL.read_text(encoding="utf-8")
+    assert ': "${SAVE_INTERVAL=}"' in text
+    assert ': "${SAVE_INTERVAL=0' not in text
+
+
+def test_every_protocol_value_is_a_default_not_a_lock():
+    """`: "${VAR=x}"` assigns only when unset, so an operator can re-run one
+    column at a different rollout count without editing the file. A bare
+    `export VAR=x` would silently ignore the environment."""
+    text = PROTOCOL.read_text(encoding="utf-8")
+    for var in ("RL_EXTRA_ARGS", "EPS_CLIP", "NUM_ROLLOUT", "SAVE_INTERVAL", "EVAL_INTERVAL"):
+        assert f': "${{{var}=' in text, var
+        assert f"\nexport {var}=" not in text, var

@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+#
+# The E4 protocol, in one file, sourced by every `run_e4_*_lr*_8gpu.sh`.
+#
+# Fourteen columns run on fourteen separate node bookings, and a learning-rate
+# sweep is only a sweep if every arm differs in the learning rate and nothing
+# else. Copying these lines into fourteen scripts would make a silent drift
+# between two of them indistinguishable, in the results, from a real effect.
+#
+# Every value is a DEFAULT, not a lock: `NUM_ROLLOUT=234 bash
+# scripts/lora_regret/run_e4_gsm8k_lr3_8gpu.sh` works, because `: "${VAR=x}"`
+# assigns only when the variable is unset. Whatever you override, override it
+# for all fourteen -- the campaign is one comparison.
+
+# --- the update, as the post describes it -----------------------------------
+#
+# Plain policy gradient with importance sampling and GRPO-style centring: the
+# advantage is the reward minus the group mean, and nothing else.
+#
+# `--disable-grpo-std-normalization` is not a detail. Orbit divides the centred
+# reward by the group's standard deviation by default, which for binary rewards
+# with group mean p is a factor of 1/sqrt(p(1-p)): about 4x at the measured
+# starting reward of 0.02-0.03, falling to 2x as p approaches 0.5. That is a
+# schedule on the effective step size, driven by how hard the current problems
+# are, laid on top of the constant learning rate that is Figure 6's x-axis.
+: "${RL_EXTRA_ARGS=--disable-grpo-std-normalization}"
+
+# Clipping off. With GLOBAL_BATCH_SIZE=256 against 1,024 rollouts the learner
+# takes four updates per rollout, so minibatches 2-4 are off-policy and the
+# ratio does real work. At small learning rates the drift is tiny and a 0.2 clip
+# never binds; at large ones it binds hard -- truncating exactly the updates
+# that are supposed to blow the run up, and widening the apparent stable band
+# for whichever method takes bigger steps. That band is the claim under test.
+#
+# 1e9 disables it exactly: the loss is max(-rho*A, -clamp(rho,1-eps,1+eps)*A),
+# and a clamp that wide makes the second term identical to the first.
+: "${EPS_CLIP=1e9}"
+: "${EPS_CLIP_HIGH=1e9}"
+
+# --- schedule ----------------------------------------------------------------
+#
+# 150 rollouts is 4,800 problem-group exposures against the post's ~7,500, so
+# the peaks will land below its 0.75 and the absolute numbers are not comparable
+# to the published figure. What survives a shortened budget is the SHAPE --
+# matched peaks across ranks, a wider LoRA band -- and that is the claim.
+#
+# It is also the least-measured number in the campaign. One column at
+# NUM_ROLLOUT=234 (one full epoch of either dataset, since gsm8k has 7,473
+# training problems and math 7,498) would show where the reward curve flattens
+# and let the rest be cut with evidence instead of a guess.
+: "${NUM_ROLLOUT=150}"
+
+# No checkpoints. `SAVE_INTERVAL=` EMPTY, not a large number: orbit's
+# `should_run_periodic_action` short-circuits on `interval is None` and only
+# then checks the final rollout, so any non-None interval still writes one
+# checkpoint -- 616 s and 15 GB for a FullFT arm, measured. Only the absent flag
+# writes none, and the launcher drops the flag when this is empty.
+#
+# What that costs: nothing downstream reads checkpoints (`analyze` reads
+# ledgers, `e5rl` recovers its OFT centre from ledger argmins) and resume does
+# not depend on them either, since `--load` points at the base checkpoint and
+# `campaign.sh` resumes per arm. The one real loss is re-evaluating a trained
+# policy later -- a different grader, pass@k on a held-out set. Set
+# SAVE_INTERVAL=999999 for a single end-of-run save if that matters; the LoRA
+# adapters cost almost nothing to write (4.5 MB at rank 1) and only FullFT's
+# 15 GB is expensive.
+: "${SAVE_INTERVAL=}"
+
+# One eval, at the end. The same final-rollout branch fires for any non-None
+# interval, so a large number means exactly one pass rather than none -- and one
+# is required, because `MATRIX_METRICS["e4"]` is `accuracy` and `sweep.py`
+# parses it out of the eval output into the ledger. Zero evals would leave every
+# ledger row with `accuracy: null` and `analyze` with nothing to read.
+#
+# Worth more than the checkpoint saving: at the launcher's default of 25 an arm
+# evaluates seven times over 6,319 held-out prompts, ~12% of the campaign, and
+# nothing in the analysis reads the intermediate values.
+: "${EVAL_INTERVAL=100000}"
+
+# Response length is deliberately NOT overridden here: the launcher's 2,048
+# stands. The 2026-08-02 probe measured 7.1% (gsm8k) and 10.6% (math) truncation
+# at 1,024 under this exact rendering, against the plan's 2% gate -- and a
+# truncated response has lost its \boxed{...}, so it grades 0 however well it
+# argued. Mean response is only ~250-280 tokens, so the cost of the headroom is
+# small and the cost of clipping the tail is a reward of zero.
+
+export RL_EXTRA_ARGS EPS_CLIP EPS_CLIP_HIGH NUM_ROLLOUT SAVE_INTERVAL EVAL_INTERVAL

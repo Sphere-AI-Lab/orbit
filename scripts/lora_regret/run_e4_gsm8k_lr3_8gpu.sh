@@ -3,7 +3,15 @@
 # E4, gsm8k panel, learning-rate column 3 of 7: FullFT at 3e-06 and LoRA
 # r1/r16/r256 at 3e-05.  Book a WHOLE node.
 #
+#   source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
+#   cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
 #   bash scripts/lora_regret/run_e4_gsm8k_lr3_8gpu.sh
+#
+# Nothing to export first: `e4_protocol.sh` below carries the whole protocol --
+# advantage centring without std normalisation, clipping off, rollout count,
+# checkpoints off, one eval at the end -- and `campaign.sh` sources env.sh and
+# defaults DATA_DIR. Any of it can still be overridden on the command line, but
+# override it for all fourteen columns: the campaign is one comparison.
 #
 # 4 arms -- one point on each of C5's four curves, for one of Figure 6's two
 # panels. The fourteen `run_e4_<dataset>_lr*_8gpu.sh` scripts partition e4's
@@ -16,7 +24,7 @@
 # answers at rollout 0 have a single-character label, against 23% on gsm8k -- so
 # running gsm8k first and deciding on math afterwards is a real option. A column
 # on its own still cannot give an argmin: every claim in C5 is about the shape
-# ACROSS columns.
+# ACROSS columns, so a partial run is a partial curve, not a partial answer.
 #
 # FullFT and LoRA sit on separate grids an order of magnitude apart (runbook
 # section 23.4), so column 3 pairs the 3th point of each: 3e-06 against 3e-05.
@@ -28,7 +36,8 @@
 #
 # **Resumable.** The ledger gets `status: "ok"` per finished arm and the sweep
 # skips those next time, so an interrupted node picks up where it stopped: just
-# re-run the same script. Do not point two nodes at one RESULTS file.
+# re-run the same script. One writer per RESULTS file -- two nodes on one
+# ledger would interleave rows.
 #
 # `analyze` takes globs, and each panel reassembles across its seven columns:
 #
@@ -37,5 +46,9 @@
 # **Every RL arm is an 8-GPU arm.** FullFT has no choice -- TP=4/DP=2 is the
 # only configuration it fits in (section 22.2) -- and the LoRA arms were
 # measured at eight.
+set -uo pipefail
+HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "${HERE}/e4_protocol.sh"
+
 exec env MATRIX=e4 METHOD_RE='^(full-na-na-gsm8k-lr3e\-06|lora-r(1|16|256)-all-gsm8k-lr3e\-05)-s' RESULTS=results/e4_gsm8k_lr3.jsonl EXPECT_ARMS=4 \
-    bash "$(dirname "${BASH_SOURCE[0]}")/campaign.sh" "$@"
+    bash "${HERE}/campaign.sh" "$@"
