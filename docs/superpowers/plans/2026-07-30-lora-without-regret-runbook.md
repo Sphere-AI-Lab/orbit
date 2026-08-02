@@ -1044,23 +1044,33 @@ project is about RL". That removes nine matrices — `sft82`, `e1`, `e1long`,
 and C8, which are SFT claims. It also removed the only "ours" matrix, so `e5rl`
 was added to carry the matched-parameter OFT contribution under policy gradient.
 
-Three matrices remain. **64 arms, ~807 GPU-hours**, against 22,124 h for the
+Three matrices remain. **64 arms, ~94 GPU-hours**, against 22,124 h for the
 original design.
 
-| matrix | what it decides | arms | cost |
-|---|---|---|---|
-| `e4` | C5 — RL parity at low rank. **This is the blog post's RL experiment.** FullFT + LoRA r1/r16/r256, plus an OFT cell | 20 | ~241 h |
-| `e4place` | C4 under policy gradient — attention-only vs MLP-only at matched parameters | 20 | ~246 h |
-| `e5rl` | ours — does matched-parameter OFT *track* LoRA as capacity varies | 24 | ~319 h |
+| matrix | what it decides | arms | cost | was (500 rollouts) |
+|---|---|---|---|---|
+| `e4` | C5 — RL parity at low rank. **This is the blog post's RL experiment.** FullFT + LoRA r1/r16/r256, plus an OFT cell | 20 | **~30 h** | ~241 h |
+| `e4place` | C4 under policy gradient — attention-only vs MLP-only at matched parameters | 20 | **~28 h** | ~246 h |
+| `e5rl` | ours — does matched-parameter OFT *track* LoRA as capacity varies | 24 | **~36 h** | ~319 h |
 
 `e4` alone reproduces the post's RL result. `e4place` and `e5rl` go beyond it:
 the post studies placement for SFT only, and never studies OFT.
 
-> **The RL launcher's schedule defaults changed on 2026-08-02** to the post's
-> own protocol — `NUM_ROLLOUT` 500 → **50**, `N_SAMPLES_PER_PROMPT` 32 → **8**,
-> `ROLLOUT_BATCH_SIZE` unchanged at 32. The cost figures in the table above and
-> the `steady` times below were measured under the old values and are now
-> **upper bounds**; see §22.7.
+**Where the new numbers come from, and why they are upper bounds.** The RL
+launcher's schedule defaults became the post's own on 2026-08-02 —
+`NUM_ROLLOUT` 500 → **50**, `N_SAMPLES_PER_PROMPT` 32 → **8** (§22.7). The costs
+above are the same probe measurements through the same estimator
+(`overhead + steady × rollouts + extra saves`, `probe.py`), re-evaluated at 50
+rollouts; run at 500 the identical arithmetic reproduces the previous 807 h to
+within 2%, which is the check that these are a re-costing rather than a new
+guess.
+
+Two things keep them **conservative**. Every `steady` was measured at 32 samples
+per prompt against the new default of 8, so each rollout now generates a quarter
+as many sequences — the true numbers should come in under these. And 8 of the 64
+arms have no probe of their own (`e4place`'s FullFT cell, `e5rl`'s 12 LoRA
+partners) and borrow `e4`'s measurement of the same method; that substitution
+was already in the 807 h figure. Per arm this is ~1.5 h, against ~12.6 h before.
 
 ### Measured, not estimated
 
@@ -1118,12 +1128,12 @@ oftscout-b512-mlp     lr=1.0e-06   89s  |  lr=2.2e-05   83s
 ### 22.1 Order of execution — the dependency is enforced in code
 
 ```
-phase 1   e4 + e4place    40 arms   ~488 h    (independent of each other)
+phase 1   e4 + e4place    40 arms    ~58 h    (independent of each other)
              |
              |  e4's `oftscout` arms ARE the RL OFT scout: they are built from
              |  RL_OFT_SCOUT_SPAN for exactly this purpose. Recover the argmin.
              v
-phase 2   e5rl            24 arms   ~319 h
+phase 2   e5rl            24 arms    ~36 h
 ```
 
 `e5rl_arms` **raises** without an `oft_lr_centre` rather than defaulting, and
@@ -1172,19 +1182,28 @@ three-rollout probe, dropping the first leaves two — and a median over two IS
 their mean. The probe's last rollout also writes the run's checkpoint, so that
 cost landed in the per-rollout figure: the FullFT arm's `[308, 59, 677]` gave
 `median(59, 677) = 368`, and the campaign estimate came out at 931 h against a
-true ~453 h. Every OFT row was distorted the same way.
+true ~453 h. Every OFT row was distorted the same way. (Both of those are
+500-rollout numbers, from before §22.7 — the bug is what they illustrate, not
+the cost. Today's figures are in §22's table.)
 
-Checkpoints are not thereby ignored. They are priced explicitly: `SAVE_INTERVAL`
-is 50, so a 500-rollout arm writes 10 while the probe wrote 1, and the extra 9
-are added at the measured rate (616.5s for FullFT's 15 GB, negligible for
-adapters).
+Checkpoints are not thereby ignored. They are priced explicitly, and at the
+current defaults they price to **nothing**: `SAVE_INTERVAL` is 50 and an RL arm
+is now 50 rollouts, so it writes exactly one checkpoint — the one the probe
+already paid for inside `overhead`. `extra_saves` is 0. It was 9 additional
+writes when the RL default was 500, worth ~1.5 h per FullFT arm at the measured
+616.5s for its 15 GB. The SFT stages still run thousands of rollouts and still
+pay, which is why this stayed a computation rather than becoming a constant.
 
 ### 22.4 What is still unverified
 
-Everything above was measured at **3 rollouts, not 500**. Untested by
+Everything above was measured at **3 rollouts, and at 32 samples per prompt**.
+An arm is now 50 rollouts at 8 samples, so the gap is much smaller than it was
+against 500 — but it is a gap in both directions: the probe never ran a full arm,
+and it ran the rollouts it did run 4x heavier than they now are. Untested by
 construction:
 
-- periodic checkpointing at `SAVE_INTERVAL=50` rather than one write at the end;
+- periodic checkpointing at `SAVE_INTERVAL=50` rather than one write at the end
+  (now moot for RL, which writes exactly one either way);
 - LR-schedule effects over a full arm;
 - slow memory growth. FullFT has ~55 GB of headroom at TP=4, which is the main
   thing that would have worried me, but that is an argument and not an
@@ -1286,13 +1305,19 @@ algorithm runs. `test_the_rl_default_is_exactly_one_optimizer_update_per_rollout
 pins it.
 
 **Cost.** `probe.py`'s `RL_LAUNCHER_ROLLOUTS` follows to 50, so the estimator no
-longer bills every RL arm 10x. On the existing probe ledger the campaign estimate
-drops from **322 h to 37 h** — 8.7x rather than 10x, because per-arm startup does
-not scale with the rollout count. That figure is still a lower bound over the
-measured subset *and* still built from `steady` times measured at 32 samples per
-prompt, so a re-probe should land under it. Checkpointing also falls out: at
-`SAVE_INTERVAL=50` a 50-rollout arm writes exactly one checkpoint, which the
-probe already paid for, so `extra_saves` is now 0 for RL (it was 9).
+longer bills every RL arm 10x. The campaign goes from **~807 h to ~94 h** over
+all 64 arms (§22's table); the reduction is 8.6x rather than 10x because per-arm
+startup does not scale with the rollout count. Checkpointing falls out entirely:
+at `SAVE_INTERVAL=50` a 50-rollout arm writes exactly one checkpoint, which the
+probe already paid for, so `extra_saves` is 0 for RL where it was 9.
+
+**Two totals, and they are not the same total.** `probe report` prints **37 h**
+on the current ledger (down from 322 h) while §22's table says ~94 h. The report
+sums only rows it can match to a probe and says so — 23 of them read `not run`,
+including `e4place/full` and `e5rl/lora` — so it is a lower bound over a subset.
+§22's table covers all 64 arms, substituting `e4`'s measurement of the same
+method for the 8 arms that were never probed. Quote 94 h for planning; the
+report's number is for checking which paths have actually been exercised.
 
 **This changes the Llama campaign too**, not only the Qwen3-1.7B reproduction —
 `e4`, `e4place` and `e5rl` all read these defaults. An arm that should run
