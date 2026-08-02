@@ -80,15 +80,34 @@ ROLLOUT_SEED=${ROLLOUT_SEED:-${SEED}}
 # === ARGS arrays ===
 COLOCATE_ARGS=( --colocate )
 
+# `SAVE_INTERVAL=` (explicitly EMPTY) turns checkpointing off entirely.
+#
+# Not SAVE_INTERVAL=999999. `should_run_periodic_action` short-circuits on
+# `interval is None` and only then checks the final rollout, so any non-None
+# interval still writes one checkpoint at the end -- 616 s and 15 GB for a
+# FullFT arm, measured. Only omitting `--save-interval` reaches the None branch,
+# and a flag cannot be omitted by giving it a value.
+#
+# `${SAVE_INTERVAL-50}` uses `-`, not `:-`, so an explicit empty value survives
+# instead of falling back to 50.
+SAVE_INTERVAL=${SAVE_INTERVAL-50}
 CKPT_ARGS=(
     --hf-checkpoint "${HF_CKPT}"
     --load "${MEGATRON_LOAD}"
-    --save "${SAVE_DIR}"
-    --save-interval "${SAVE_INTERVAL:-50}"
-    --no-save-optim
-    --no-save-rng
     --megatron-to-hf-mode bridge
 )
+if [[ -n "${SAVE_INTERVAL}" ]]; then
+    CKPT_ARGS+=(
+        --save "${SAVE_DIR}"
+        --save-interval "${SAVE_INTERVAL}"
+        --no-save-optim
+        --no-save-rng
+    )
+else
+    echo "SAVE_INTERVAL is empty: no checkpoints will be written." >&2
+    echo "  The ledger and wandb carry every number the analysis reads; what is" >&2
+    echo "  lost is the ability to re-evaluate or reuse a trained policy later." >&2
+fi
 
 ROLLOUT_ARGS=(
     --prompt-data "${TRAIN_JSONL}"
@@ -181,6 +200,13 @@ WANDB_ARGS=(
     --use-wandb
     --wandb-project "${WANDB_PROJECT}"
     --wandb-group "${WANDB_GROUP}"
+    # Group and name are different things here, and both matter. The sweep sets
+    # WANDB_GROUP to the METHOD, so all seven FullFT arms share a group and all
+    # twenty-one LoRA arms share another -- which is what makes the dashboard
+    # readable. Without an explicit run name the name IS the group, so those
+    # seven arms all appear as "full" and the learning rate is only visible by
+    # opening each run's config. LAUNCHER_NAME is the arm name.
+    --wandb-run-name "${WANDB_RUN_NAME:-${LAUNCHER_NAME}}"
     --disable-wandb-random-suffix
 )
 

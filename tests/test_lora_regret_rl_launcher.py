@@ -208,3 +208,23 @@ def test_the_peft_arms_keep_train_offload():
     assert "--no-offload-train" not in text, (
         "no branch of this launcher should disable train offload"
     )
+
+
+def test_rl_launcher_names_each_wandb_run_after_its_arm():
+    """The sweep sets WANDB_GROUP to the METHOD, so seven FullFT arms share one
+    group. Without an explicit run name the name IS the group, and all seven
+    appear as "full" with the learning rate visible only inside each config."""
+    content = _text()
+    assert '--wandb-run-name "${WANDB_RUN_NAME:-${LAUNCHER_NAME}}"' in content
+    assert "--disable-wandb-random-suffix" in content
+
+
+def test_rl_launcher_can_switch_checkpointing_off_entirely():
+    """`SAVE_INTERVAL=` (empty) must drop --save-interval, not pass a large one.
+    `should_run_periodic_action` short-circuits on `interval is None` and only
+    then checks the final rollout, so any non-None interval still writes one
+    checkpoint -- 616 s and 15 GB for a FullFT arm."""
+    content = _text()
+    assert "SAVE_INTERVAL=${SAVE_INTERVAL-50}" in content, "must use `-`, not `:-`"
+    assert 'if [[ -n "${SAVE_INTERVAL}" ]]; then' in content
+    assert '--save-interval "${SAVE_INTERVAL:-' not in content

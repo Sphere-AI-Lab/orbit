@@ -1554,6 +1554,16 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
             parser.add_argument("--wandb-host", type=str, default=None)
             parser.add_argument("--wandb-team", type=str, default=None)
             parser.add_argument("--wandb-group", type=str, default=None)
+            parser.add_argument(
+                "--wandb-run-name",
+                type=str,
+                default=None,
+                help=(
+                    "Name for this run. Defaults to --wandb-group, which is the historical "
+                    "behaviour. Set it when several runs share a group -- a learning-rate "
+                    "sweep grouped by method otherwise puts every arm under one name."
+                ),
+            )
             reset_arg(parser, "--wandb-project", type=str, default=None)
             parser.add_argument(
                 "--disable-wandb-random-suffix",

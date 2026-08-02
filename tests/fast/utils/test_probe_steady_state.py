@@ -92,18 +92,24 @@ class TestSteadyIgnoresOneOffCosts:
 class TestSavesArePricedSeparately:
     def test_the_launcher_save_interval_is_the_one_the_estimate_uses(self):
         """Pinned against the launcher rather than retyped: if the cadence
-        changes there, this estimate is silently wrong until it changes here."""
+        changes there, this estimate is silently wrong until it changes here.
+
+        The launcher spells it `${SAVE_INTERVAL-50}` with a bare `-`, so that an
+        explicitly empty value drops `--save-interval` altogether rather than
+        falling back to 50. That matters because
+        `should_run_periodic_action` short-circuits on `interval is None` and
+        only then checks the final rollout: a large interval still writes one
+        checkpoint, and only the absent flag writes none."""
         from pathlib import Path
 
         from tools.lora_regret.probe import SAVE_INTERVAL
 
-        launcher = (
+        text = (
             Path(__file__).resolve().parents[3]
             / "examples/high_precision/run-llama3_1-8b-bf16-rl-math-gsm8k.sh"
-        )
-        assert f'--save-interval "${{SAVE_INTERVAL:-{SAVE_INTERVAL}}}"' in launcher.read_text(
-            encoding="utf-8"
-        )
+        ).read_text(encoding="utf-8")
+        assert f"SAVE_INTERVAL=${{SAVE_INTERVAL-{SAVE_INTERVAL}}}" in text
+        assert f"${{SAVE_INTERVAL:-{SAVE_INTERVAL}}}" not in text, "the colon form loses `off`"
 
     @pytest.mark.parametrize(
         "full_rollouts,probe_rollouts,expected",
