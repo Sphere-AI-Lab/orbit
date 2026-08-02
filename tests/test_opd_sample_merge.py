@@ -103,3 +103,24 @@ def test_merge_samples_student_top_logprobs_metadata_concatenates():
     a, b = _make_pair_kl(None, None, meta_a={"opd_student_top_logprobs": a_top}, meta_b={"opd_student_top_logprobs": b_top})
     merged = merge_samples([a, b], _FakeTokenizer())
     assert merged.metadata["opd_student_top_logprobs"] == a_top + [[]] + b_top
+
+
+def test_merge_samples_teacher_hidden_states_one_sided_zero_fills():
+    # Full-vocab OPD edge: hidden states are normally scored post-merge, but a
+    # scored segment must survive a late merge -- missing half and observation
+    # span become zero rows (loss-masked anyway), mirroring teacher_log_probs.
+    import numpy as np
+
+    a, b = _make_pair(None, None)
+    a.teacher_hidden_states = np.ones((a.response_length, 4), dtype=np.float32)
+    merged = merge_samples([a, b], _FakeTokenizer())
+    assert merged.teacher_hidden_states.shape == (merged.response_length, 4)
+    assert merged.teacher_hidden_states[: a.response_length].tolist() == np.ones((a.response_length, 4)).tolist()
+    assert not merged.teacher_hidden_states[a.response_length :].any()
+    merged.validate()
+
+
+def test_merge_samples_teacher_hidden_states_none_stays_none():
+    a, b = _make_pair(None, None)
+    merged = merge_samples([a, b], _FakeTokenizer())
+    assert merged.teacher_hidden_states is None

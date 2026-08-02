@@ -1,3 +1,4 @@
+import math
 from argparse import Namespace
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -32,6 +33,13 @@ from .cp_utils import (
     get_sum_of_sample_mean,
 )
 from .parallel import get_parallel_state
+from .teacher_lm_head import load_teacher_lm_head
+from .vocab_parallel import (
+    vocab_parallel_log_softmax,
+    vocab_parallel_sum,
+    vocab_parallel_topk_indices,
+    vocab_shard_start,
+)
 
 def _response_masked_max(
     x: torch.Tensor,
@@ -908,6 +916,186 @@ def sft_loss_function(
     )
 
 
+def _clip_pointwise_kl(kl_elem: torch.Tensor, clip: float | None) -> torch.Tensor:
+    """Cap each individual (response-position, vocab-token) divergence summand before it is
+    summed over the vocabulary dimension.
+
+    Borrowed from OPSD's (github.com/siyan-zhao/OPSD) `--jsd_token_clip`: they found stylistic
+    tokens (e.g. "wait", "think") can carry 6-15x higher per-vocab-entry divergence than
+    content/math tokens and dominate the training signal if left unclipped.
+    """
+    if clip is None:
+        return kl_elem
+    return kl_elem.clamp(max=clip)
+
+
+def opd_jsd_loss_function(
+    args: Namespace,
+    batch: RolloutBatch,
+    logits: torch.Tensor,
+    sum_of_sample_mean: Callable[[torch.Tensor], torch.Tensor],
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """Compute exact full-vocabulary generalized JSD against a frozen teacher.
+
+    Follows Eq. (1) of the GKD paper. The teacher distribution is reconstructed locally from
+    `batch["teacher_hidden_states"]` and the teacher's LM head rather than shipped over the
+    wire. `--opd-jsd-beta` (`b`) interpolates between forward `KL(teacher||student)` at `b=0`
+    and reverse `KL(student||teacher)` at `b=1`, over the mixture `M = (1-b)*student + b*teacher`:
+
+        jsd(b) = b * KL(teacher || M) + (1-b) * KL(student || M)
+
+    `batch["teacher_hidden_states"]` holds one CPU fp32 tensor per sample, already CP-sliced
+    row-for-row with this rank's response logits by `get_rollout_data` (the same
+    `slice_log_prob_with_cp` treatment `teacher_log_probs` gets), so each chunk only needs a
+    device move here.
+
+    Returns `(loss, metrics)`; `metrics` holds detached "loss" and "entropy", plus "kl_loss"
+    under --use-kl-loss and "topk_overlap_k{k}" under --opd-log-topk-overlap.
+    """
+    parallel_state = get_parallel_state()
+    assert not args.allgather_cp, (
+        "opd_jsd_loss does not support --allgather-cp: teacher_hidden_states are CP-sliced by "
+        "slice_log_prob_with_cp (get_logits_and_tokens_offset_with_cp chunks), not by the DSA "
+        "split get_responses takes under that flag."
+    )
+    beta = args.opd_jsd_beta
+    assert 0.0 <= beta <= 1.0, f"--opd-jsd-beta must be in [0, 1], got {beta}"
+    response_lengths = batch["response_lengths"]
+    total_lengths = batch["total_lengths"]
+
+    tp_group = parallel_state.tp.group if parallel_state.tp.size > 1 else None
+    # The student's logits are the authority on how the vocabulary is split -- they carry
+    # exactly this rank's shard, whichever global vocab size the model was actually built with.
+    local_vocab_size = logits.size(-1)
+    vocab_start = vocab_shard_start(local_vocab_size) if tp_group is not None else 0
+    teacher_lm_head = load_teacher_lm_head(args, local_vocab_size=local_vocab_size).to(
+        logits.device, torch.float32
+    )
+    # How many of this rank's vocab columns are real rather than divisibility padding.
+    teacher_vocab_size = teacher_lm_head.size(0)
+
+    kl_per_sample = []
+    entropy_per_sample = []
+
+    ref_kl_sampled_log_probs = [] if args.use_kl_loss else None
+    topk_ks = tuple(args.opd_topk_overlap_ks) if args.opd_log_topk_overlap else ()
+    topk_overlap_per_sample: dict[int, list[torch.Tensor]] = {k: [] for k in topk_ks}
+    max_seq_lens = batch.get("max_seq_lens", None)
+    responses = get_responses(
+        logits,
+        args=args,
+        unconcat_tokens=batch["unconcat_tokens"],
+        total_lengths=total_lengths,
+        response_lengths=response_lengths,
+        max_seq_lens=max_seq_lens,
+    )
+    for i, (logits_chunk, tokens_chunk) in enumerate(responses):
+        vocab_size = logits_chunk.size(-1)
+        # Columns past the teacher's real vocab stay at this fill. A large finite negative
+        # rather than -inf, which would go NaN (0 * -inf) on stray student mass.
+        teacher_log_probs_full = logits_chunk.new_full((logits_chunk.size(0), vocab_size), -1e4)
+        if logits_chunk.size(0) > 0:
+            with torch.no_grad():
+                teacher_hidden_states = batch["teacher_hidden_states"][i].to(
+                    dtype=torch.float32, device=logits_chunk.device
+                )
+                assert teacher_hidden_states.size(0) == logits_chunk.size(0), (
+                    f"sample {i}: {teacher_hidden_states.size(0)} teacher hidden-state rows vs "
+                    f"{logits_chunk.size(0)} response logits -- get_rollout_data's CP slicing "
+                    "has drifted from get_responses()."
+                )
+                teacher_logits = teacher_hidden_states @ teacher_lm_head.T
+
+                rollout_temperature = float(args.rollout_temperature)
+                if rollout_temperature != 1.0:
+                    teacher_logits.div_(rollout_temperature)
+                # The clamp bounds forward KL, which weights by the fixed teacher probs.
+                teacher_log_probs_full[:, :teacher_vocab_size] = vocab_parallel_log_softmax(
+                    teacher_logits, tp_group
+                ).clamp_(min=args.opd_log_prob_min_clamp)
+
+        student_log_probs_full = vocab_parallel_log_softmax(logits_chunk.float(), tp_group).clamp(
+            min=args.opd_log_prob_min_clamp
+        )
+        student_probs_full = student_log_probs_full.exp()
+        teacher_probs_full = teacher_log_probs_full.exp()
+
+        if topk_ks:
+            max_k = max(topk_ks)
+            student_topk_idx = vocab_parallel_topk_indices(student_log_probs_full, max_k, vocab_start, tp_group)
+            teacher_topk_idx = vocab_parallel_topk_indices(teacher_log_probs_full, max_k, vocab_start, tp_group)
+            topk_match = student_topk_idx.unsqueeze(-1) == teacher_topk_idx.unsqueeze(-2)  # [R, max_k, max_k]
+            for k in topk_ks:
+                overlap_count = topk_match[:, :k, :k].any(dim=-1).sum(dim=-1)  # [R]
+                topk_overlap_per_sample[k].append(overlap_count.float() / k)
+
+        if beta == 0.0:
+            kl_elem = teacher_probs_full * (teacher_log_probs_full - student_log_probs_full)
+        elif beta == 1.0:
+            kl_elem = student_probs_full * (student_log_probs_full - teacher_log_probs_full)
+        else:
+            mixture_log_probs = torch.logsumexp(
+                torch.stack(
+                    [student_log_probs_full + math.log1p(-beta), teacher_log_probs_full + math.log(beta)]
+                ),
+                dim=0,
+            )
+            kl_teacher_elem = teacher_probs_full * (teacher_log_probs_full - mixture_log_probs)
+            kl_student_elem = student_probs_full * (student_log_probs_full - mixture_log_probs)
+
+            kl_elem = beta * kl_teacher_elem + (1 - beta) * kl_student_elem
+
+        kl_elem = _clip_pointwise_kl(kl_elem, args.opd_jsd_pointwise_clip)
+        # The vocab sum crosses TP shards, so it must complete before the per-position clamp.
+        kl = vocab_parallel_sum(kl_elem, tp_group).clamp(max=args.opd_loss_max_clamp)
+        kl_per_sample.append(kl)
+        entropy_per_sample.append(vocab_parallel_sum(-(student_probs_full * student_log_probs_full), tp_group))
+        if ref_kl_sampled_log_probs is not None:
+            student_log_prob, _ = calculate_log_probs_and_entropy(
+                logits_chunk,
+                tokens_chunk,
+                parallel_state.tp.group,
+                chunk_size=args.log_probs_chunk_size,
+                true_on_policy=args.true_on_policy_mode,
+                vocab_size=getattr(args, "vocab_size", None),
+            )
+            ref_kl_sampled_log_probs.append(student_log_prob.squeeze(-1))
+
+    kl_per_sample = torch.cat(kl_per_sample, dim=0)
+    loss = sum_of_sample_mean(kl_per_sample)
+
+    # compute_ref_log_probs() populates batch["ref_log_probs"] for any loss_type.
+    ref_kl_loss = None
+    if args.use_kl_loss:
+        student_sampled_log_probs = torch.cat(ref_kl_sampled_log_probs, dim=0)
+        ref_log_probs = torch.cat(batch["ref_log_probs"], dim=0)
+        ref_kl = compute_approx_kl(student_sampled_log_probs, ref_log_probs, kl_loss_type=args.kl_loss_type)
+        ref_kl_loss = sum_of_sample_mean(ref_kl)
+        loss = loss + args.kl_loss_coef * ref_kl_loss
+
+    # make sure the gradient could backprop correctly.
+    if kl_per_sample.numel() == 0:
+        loss = loss + 0 * logits.sum()
+
+    # Per-token quantities, so the same reduction as loss keeps them on a comparable scale.
+    entropy_concat = torch.cat(entropy_per_sample, dim=0)
+    entropy_metric = sum_of_sample_mean(entropy_concat)
+
+    topk_overlap_concat = {k: torch.cat(topk_overlap_per_sample[k], dim=0) for k in topk_ks}
+    topk_overlap_metric = {k: sum_of_sample_mean(topk_overlap_concat[k]) for k in topk_ks}
+
+    metrics = {
+        "loss": loss.clone().detach(),
+        "entropy": entropy_metric.clone().detach(),
+    }
+    if ref_kl_loss is not None:
+        metrics["kl_loss"] = ref_kl_loss.clone().detach()
+    for k in topk_ks:
+        metrics[f"topk_overlap_k{k}"] = topk_overlap_metric[k].clone().detach()
+
+    return (loss, metrics)
+
+
 def loss_function(
     args: Namespace,
     batch: RolloutBatch,
@@ -917,8 +1105,8 @@ def loss_function(
 ) -> tuple[torch.Tensor, int | torch.Tensor, dict[str, list[str] | torch.Tensor]]:
     """Dispatch to the configured loss and rescale for Megatron integration.
 
-    Selects one of "policy_loss", "value_loss", "sft_loss", or a custom loss
-    function based on `args.loss_type`, computes the loss and metrics, then
+    Selects one of "policy_loss", "value_loss", "sft_loss", "opd_jsd_loss", or a
+    custom loss function based on `args.loss_type`, computes the loss and metrics, then
     rescales the loss by micro-batch and parallelism factors to integrate with
     Megatron's gradient accumulation.
 
@@ -958,6 +1146,8 @@ def loss_function(
             func = value_loss_function
         case "sft_loss":
             func = sft_loss_function
+        case "opd_jsd_loss":
+            func = opd_jsd_loss_function
         case "custom_loss":
             func = load_function(args.custom_loss_function_path)
         case _:

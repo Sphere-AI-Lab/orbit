@@ -2,6 +2,7 @@ import logging
 from argparse import Namespace
 from collections.abc import Sequence
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
@@ -146,6 +147,7 @@ def get_rollout_data(args: Namespace, rollout_data_ref: Box) -> RolloutBatch:
     _tensorize_cp_sliced_log_probs(args, rollout_data, "rollout_log_probs", dtype=_rollout_logprob_dtype(args))
     _tensorize_cp_sliced_log_probs(args, rollout_data, "teacher_log_probs")
     _tensorize_cp_sliced_log_probs(args, rollout_data, "opd_reverse_kl")
+    _tensorize_cp_sliced_teacher_hidden_states(args, rollout_data)
     if "rollout_routed_experts" in rollout_data:
         rollout_data["rollout_routed_experts"] = [torch.from_numpy(r) for r in rollout_data["rollout_routed_experts"]]
     return rollout_data
@@ -188,6 +190,37 @@ def _tensorize_cp_sliced_log_probs(
             dtype=dtype,
         )
         for i, (log_prob, total_length, response_length) in enumerate(
+            zip(
+                values,
+                rollout_data["total_lengths"],
+                rollout_data["response_lengths"],
+                strict=False,
+            )
+        )
+    ]
+
+
+def _tensorize_cp_sliced_teacher_hidden_states(args: Namespace, rollout_data: RolloutBatch) -> None:
+    """Tensorize + CP-slice per-sample ``(response_length, hidden)`` teacher hidden states
+    (full-vocab OPD) in place, mirroring ``_tensorize_cp_sliced_log_probs`` --
+    ``slice_log_prob_with_cp`` row-slices a 2D tensor exactly like a 1D one.
+
+    Kept on CPU deliberately: a rollout batch of hidden states is ~hidden_size times larger
+    than its log-probs; ``opd_jsd_loss`` moves one micro-batch chunk to GPU at a time.
+    """
+    values = rollout_data.get("teacher_hidden_states")
+    if not values or isinstance(values[0], torch.Tensor):
+        return
+    max_seq_lens = rollout_data.get("max_seq_lens")
+    rollout_data["teacher_hidden_states"] = [
+        slice_log_prob_with_cp(
+            torch.from_numpy(np.ascontiguousarray(hidden_states)).to(torch.float32),
+            total_length,
+            response_length,
+            args.qkv_format,
+            max_seq_lens[i] if max_seq_lens is not None else None,
+        )
+        for i, (hidden_states, total_length, response_length) in enumerate(
             zip(
                 values,
                 rollout_data["total_lengths"],

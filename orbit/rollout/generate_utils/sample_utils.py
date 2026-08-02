@@ -1,6 +1,8 @@
 from copy import deepcopy
 from dataclasses import fields
 
+import numpy as np
+
 from orbit.utils.types import Sample
 
 _OPD_STUDENT_TOP_LOGPROBS_KEY = "opd_student_top_logprobs"
@@ -40,6 +42,22 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
         av = av if av is not None else [0.0] * a.response_length
         bv = bv if bv is not None else [0.0] * b.response_length
         return av + [0.0] * obs_len + bv
+
+    def _merge_optional_hidden_states():
+        # Full-vocab OPD teacher hidden states are produced by the custom-rm hooks on
+        # the *merged* sample, so both sides are normally still None here. Mirror the
+        # per-token list merge anyway (zero rows over the injected observation span,
+        # which the loss mask zeroes out) so a scored segment survives a late merge
+        # instead of silently vanishing.
+        av, bv = a.teacher_hidden_states, b.teacher_hidden_states
+        if av is None and bv is None:
+            return None
+        hidden_size = av.shape[1] if av is not None else bv.shape[1]
+        if av is not None and bv is not None:
+            assert av.shape[1] == bv.shape[1], f"teacher hidden size mismatch: {av.shape} vs {bv.shape}"
+        av = av if av is not None else np.zeros((a.response_length, hidden_size), dtype=np.float32)
+        bv = bv if bv is not None else np.zeros((b.response_length, hidden_size), dtype=np.float32)
+        return np.concatenate([av, np.zeros((obs_len, hidden_size), dtype=av.dtype), bv], axis=0)
 
     def _pop_opd_student_top_logprobs(metadata):
         if metadata is None:
@@ -114,6 +132,7 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
             weight_versions=a.weight_versions + b.weight_versions,
             rollout_log_probs=a.rollout_log_probs + [0.0] * obs_len + b.rollout_log_probs,
             teacher_log_probs=_merge_optional_per_token("teacher_log_probs"),
+            teacher_hidden_states=_merge_optional_hidden_states(),
             opd_reverse_kl=_merge_optional_per_token("opd_reverse_kl"),
             rollout_routed_experts=b.rollout_routed_experts,
             remove_sample=_merge_equal_value("remove_sample"),

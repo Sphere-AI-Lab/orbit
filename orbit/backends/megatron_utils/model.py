@@ -517,6 +517,7 @@ def train_one_step(
                 "advantages",
                 "returns",
                 "rollout_log_probs",
+                "teacher_hidden_states",
                 "max_seq_lens",
             ],
             args.data_pad_size_multiplier,

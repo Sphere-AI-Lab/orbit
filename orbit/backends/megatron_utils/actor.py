@@ -34,6 +34,7 @@ from ..training_utils.data import DataIterator, get_data_iterator, get_rollout_d
 from ..training_utils.log_utils import log_cpu_memory, log_perf_data, log_rollout_data
 from ..training_utils.loss import compute_advantages_and_returns, get_log_probs_and_entropy, get_values
 from ..training_utils.parallel import get_parallel_state
+from ..training_utils.teacher_lm_head import load_teacher_lm_head, offload_teacher_lm_head, onload_teacher_lm_head
 from .checkpoint import load_checkpoint
 from .critic_adapter import build_critic_instance, save_critic_checkpoint, value_loss_phase
 from .initialize import init, is_megatron_main_rank
@@ -235,6 +236,11 @@ class MegatronTrainRayActor(TrainRayActor):
         if with_ref and not is_peft_enabled(self.args):
             self.load_other_checkpoint("ref", args.ref_load)
 
+        if self.args.loss_type == "opd_jsd_loss":
+            # Eagerly load now (onto CPU) so the first train step doesn't stall on a
+            # safetensors read; wake_up() moves it to GPU before use.
+            load_teacher_lm_head(self.args)
+
         # In-process OPD teacher. Same-base specs (base/adapter:/self:*) need no
         # second model: the teacher is the resident base with adapters toggled.
         # Only the legacy load:<ckpt> spec loads a full second model like "ref".
@@ -346,6 +352,10 @@ class MegatronTrainRayActor(TrainRayActor):
         offload_megatron_frozen_base_to_cpu(self.model)
         print_memory("after offload frozen_base")
 
+        if self.args.loss_type == "opd_jsd_loss":
+            offload_teacher_lm_head(self.args.teacher_hf_checkpoint)
+            print_memory("after offload teacher_lm_head")
+
         print_memory("after offload model")
 
         if self._is_main_rank and hasattr(self, "_last_rollout_id"):
@@ -394,6 +404,11 @@ class MegatronTrainRayActor(TrainRayActor):
         if self.args.offload_train_grad_buffers:
             load_megatron_grad_buffers(self.model)
             print_memory("after wake_up grad_buffers")
+        if self.args.loss_type == "opd_jsd_loss":
+            onload_teacher_lm_head(
+                self.args.teacher_hf_checkpoint, torch.device("cuda", torch.cuda.current_device())
+            )
+            print_memory("after wake_up teacher_lm_head")
         clear_memory()
         reload_process_groups()
         print_memory("after wake_up model")
@@ -677,10 +692,14 @@ class MegatronTrainRayActor(TrainRayActor):
                 )
 
         with inverse_timer("train_wait"), timer("train"):
+            # Outside the advantages block so loss types that skip the PPO
+            # advantage/returns pipeline (opd_jsd_loss) can still opt into
+            # --use-kl-loss; compute_ref_log_probs returns None when neither
+            # kl_coef nor use_kl_loss asks for a ref forward.
+            ref_data = self.compute_ref_log_probs(data_iterator, num_microbatches)
+            if ref_data is not None:
+                rollout_data.update(ref_data)
             if self.args.compute_advantages_and_returns:
-                ref_data = self.compute_ref_log_probs(data_iterator, num_microbatches)
-                if ref_data is not None:
-                    rollout_data.update(ref_data)
                 teacher_data = self.compute_teacher_log_probs(data_iterator, num_microbatches, ref_data=ref_data)
                 if teacher_data is not None:
                     rollout_data.update(teacher_data)

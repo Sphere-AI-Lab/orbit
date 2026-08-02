@@ -195,6 +195,76 @@ def add_on_policy_distillation_arguments(parser):
         ),
     )
     parser.add_argument(
+        "--teacher-score-mode",
+        type=str,
+        choices=["sampled_token", "full_vocab"],
+        default="sampled_token",
+        help=(
+            "How the external sglang OPD teacher is scored: 'sampled_token' (default) scores "
+            "only the response tokens the student already sampled. 'full_vocab' requests the "
+            "teacher's last-layer hidden state at every response position "
+            "(return_hidden_states=True) for --loss-type opd_jsd_loss's exact divergence; the "
+            "trainer reconstructs the full teacher distribution via --teacher-hf-checkpoint's "
+            "LM head. The teacher server must run with --enable-return-hidden-states, "
+            "--disable-radix-cache and --chunked-prefill-size -1."
+        ),
+    )
+    parser.add_argument(
+        "--teacher-hf-checkpoint",
+        type=str,
+        default=None,
+        help=(
+            "HF checkpoint directory of the frozen full-vocab OPD teacher; the trainer loads "
+            "its LM head (model.embed_tokens.weight when tie_word_embeddings) to reconstruct "
+            "full-vocab teacher logits from the hidden states. Must be the same checkpoint the "
+            "teacher server at --opd-teacher-url serves."
+        ),
+    )
+    parser.add_argument(
+        "--opd-jsd-beta",
+        type=float,
+        default=0.5,
+        help=(
+            "Generalized-JSD interpolation for --loss-type opd_jsd_loss: 0 = forward "
+            "KL(teacher||student), 1 = reverse KL(student||teacher), in between the "
+            "GKD Eq.(1) mixture over M = (1-b)*student + b*teacher."
+        ),
+    )
+    parser.add_argument(
+        "--opd-log-prob-min-clamp",
+        type=float,
+        default=-30.0,
+        help="Lower clamp on student/teacher log-probs inside opd_jsd_loss (bounds forward-KL summands).",
+    )
+    parser.add_argument(
+        "--opd-loss-max-clamp",
+        type=float,
+        default=10.0,
+        help="Upper clamp on the per-position vocab-summed divergence in opd_jsd_loss.",
+    )
+    parser.add_argument(
+        "--opd-jsd-pointwise-clip",
+        type=float,
+        default=None,
+        help=(
+            "Cap each (position, vocab-token) divergence summand before the vocab sum "
+            "(OPSD's --jsd_token_clip); unset disables."
+        ),
+    )
+    parser.add_argument(
+        "--opd-log-topk-overlap",
+        action="store_true",
+        default=False,
+        help="Log student/teacher top-k overlap metrics from opd_jsd_loss.",
+    )
+    parser.add_argument(
+        "--opd-topk-overlap-ks",
+        type=int,
+        nargs="+",
+        default=[1, 5, 20],
+        help="k values for --opd-log-topk-overlap.",
+    )
+    parser.add_argument(
         "--opd-teacher-key",
         type=str,
         default="opd_teacher",
@@ -471,6 +541,42 @@ def _validate_opd_args(args) -> None:
             "mutually exclusive. Pure MOPD is reward-free distillation; --use-opd blends a distillation "
             "KL onto a reward-based estimator. Pick one."
         )
+
+    # Full-vocab OPD: --loss-type opd_jsd_loss and --teacher-score-mode full_vocab come as a
+    # pair, on the external single-URL sglang teacher transport.
+    score_mode = getattr(args, "teacher_score_mode", "sampled_token") or "sampled_token"
+    if (getattr(args, "loss_type", None) == "opd_jsd_loss") != (score_mode == "full_vocab"):
+        raise ValueError(
+            "--loss-type opd_jsd_loss and --teacher-score-mode full_vocab must be used together, "
+            f"got loss_type={getattr(args, 'loss_type', None)!r} with teacher_score_mode={score_mode!r}."
+        )
+    if score_mode == "full_vocab":
+        if getattr(args, "opd_type", None) != "sglang":
+            raise ValueError("--teacher-score-mode full_vocab requires --opd-type sglang.")
+        if not getattr(args, "opd_teacher_url", None):
+            raise ValueError(
+                "--teacher-score-mode full_vocab requires --opd-teacher-url (a single external teacher)."
+            )
+        if getattr(args, "opd_teacher_urls", None):
+            raise ValueError(
+                "--teacher-score-mode full_vocab does not support --opd-teacher-urls routing/ensembles: "
+                "mixing reconstructed distributions needs per-member LM heads trainer-side."
+            )
+        if opd_top_k > 0:
+            raise ValueError("--teacher-score-mode full_vocab is incompatible with --opd-log-prob-top-k > 0.")
+        if not getattr(args, "teacher_hf_checkpoint", None):
+            raise ValueError(
+                "--teacher-score-mode full_vocab requires --teacher-hf-checkpoint to reconstruct "
+                "the teacher distribution trainer-side."
+            )
+        if getattr(args, "use_opd", False) or args.advantage_estimator == "on_policy_distillation":
+            raise ValueError(
+                "--loss-type opd_jsd_loss is a pure distillation loss: it replaces the OPD "
+                "advantage machinery, so --use-opd / --advantage-estimator on_policy_distillation "
+                "must be off."
+            )
+        # Pure distillation: no PPO advantage/returns pipeline.
+        args.compute_advantages_and_returns = False
 
     # sglang-teacher OPD blend is only safe when the teacher scores through the
     # local rollout-engine adapter slot (same-base): the external-URL teacher's
@@ -1767,10 +1873,12 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
             parser.add_argument(
                 "--loss-type",
                 type=str,
-                choices=["policy_loss", "sft_loss", "custom_loss"],
+                choices=["policy_loss", "sft_loss", "opd_jsd_loss", "custom_loss"],
                 default="policy_loss",
                 help=(
-                    "Choose loss type, currently support ppo policy_loss or sft_loss, "
+                    "Choose loss type, currently support ppo policy_loss, sft_loss, or "
+                    "opd_jsd_loss (full-vocab on-policy distillation, requires "
+                    "--teacher-score-mode full_vocab); "
                     "if custom_loss is set, we will use the function path from `--custom-loss-function-path`."
                 ),
             )

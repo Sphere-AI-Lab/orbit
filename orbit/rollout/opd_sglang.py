@@ -43,6 +43,8 @@ from argparse import Namespace
 from collections.abc import Iterable
 from typing import Any
 
+import numpy as np
+import pybase64
 import torch
 
 from orbit.rollout.scoring_client import post_json
@@ -75,6 +77,33 @@ STUDENT_ON_TEACHER_STRATEGIES = {"only-teacher", "union", "xor"}
 
 # Reserved teacher name in --opd-teacher-urls used as the fallback route.
 DEFAULT_TEACHER_NAME = "default"
+
+# Element type of the teacher hidden states sglang sends back (full-vocab mode).
+_HIDDEN_STATE_DTYPE = np.dtype(np.float32)
+
+_warned_legacy_hidden_states = False
+
+
+def _warn_legacy_hidden_states_format() -> None:
+    """Warn once per process that the teacher is on the slow nested-JSON path.
+
+    Emitted per sample would be one line per request, so this fires a single
+    time and then stays quiet.
+    """
+    global _warned_legacy_hidden_states
+    if _warned_legacy_hidden_states:
+        return
+    _warned_legacy_hidden_states = True
+    logger.warning(
+        "Teacher returned hidden_states as nested JSON floats rather than a base64 buffer. "
+        "This works but is the dominant cost of a full-vocab OPD step: the sglang server "
+        "spends minutes per step materializing hundreds of millions of Python floats and "
+        "serializing them to multi-GB JSON while its GPU idles."
+    )
+
+
+def teacher_score_mode(args: Namespace) -> str:
+    return getattr(args, "teacher_score_mode", "sampled_token") or "sampled_token"
 
 
 def _parse_teacher_target(part: str, entry: str) -> TeacherTarget:
@@ -635,6 +664,77 @@ def _sampled_teacher_log_probs(payload: dict[str, Any], response_length: int) ->
     return _extract_teacher_log_probs(payload, response_length)
 
 
+def _full_vocab_payload(input_ids: list[int]) -> dict[str, Any]:
+    """Prefill-only scoring request for the teacher's per-position hidden states.
+
+    No ``return_logprob``: full-vocab mode reconstructs the whole teacher
+    distribution trainer-side from the hidden states and the teacher's LM head
+    (orbit/backends/training_utils/teacher_lm_head.py). The teacher server must
+    run with ``--enable-return-hidden-states``, ``--disable-radix-cache`` (a
+    cache hit skips the forward pass, so no hidden states for the matched
+    prefix) and ``--chunked-prefill-size -1`` (only the last chunk of a chunked
+    prefill returns hidden states -- sgl-project/sglang#8066).
+    """
+    return {
+        "input_ids": input_ids,
+        "sampling_params": {
+            "temperature": 0,
+            "max_new_tokens": 0,
+            "skip_special_tokens": False,
+        },
+        "return_hidden_states": True,
+    }
+
+
+def _teacher_hidden_states_from_payload(payload: dict[str, Any], num_tokens: int, response_length: int) -> np.ndarray:
+    """Pure decode/slice logic for a full-vocab scoring response (no I/O).
+
+    ``meta_info["hidden_states"]`` is wrapped in a request-batch dimension
+    (always length 1 here: each HTTP call scores exactly one sample); the inner
+    payload is one vector per input token, base64-encoded fp32 on current
+    sglang, nested JSON floats on the legacy path. ``hidden_states[t]`` is the
+    state after consuming token ``t`` -- what predicts token ``t+1`` -- so the
+    rows that score the response span are ``[num_tokens - response_length - 1,
+    num_tokens - 1)``.
+    """
+    outer_hidden_states = payload["meta_info"].get("hidden_states") or []
+    if len(outer_hidden_states) != 1:
+        raise ValueError(
+            f"expected meta_info['hidden_states'] to have exactly 1 (batch) entry, got "
+            f"{len(outer_hidden_states)} -- sglang's return_hidden_states response shape "
+            "changed. Check the teacher server flags in _full_vocab_payload's docstring."
+        )
+    raw_hidden_states = outer_hidden_states[0]
+    if isinstance(raw_hidden_states, str):
+        raw = pybase64.b64decode(raw_hidden_states.encode("ascii"))
+        if len(raw) % (num_tokens * _HIDDEN_STATE_DTYPE.itemsize) != 0:
+            meta_info = payload["meta_info"]
+            raise ValueError(
+                f"teacher hidden_states buffer of {len(raw)} bytes is not a whole number of "
+                f"{_HIDDEN_STATE_DTYPE.name} vectors over {num_tokens} input positions "
+                f"(response_length={response_length}, cached_tokens={meta_info.get('cached_tokens')}, "
+                f"prompt_tokens={meta_info.get('prompt_tokens')}). The teacher likely served fewer "
+                "positions than sent -- check the server flags in _full_vocab_payload's docstring."
+            )
+        hidden_states = np.frombuffer(raw, dtype=_HIDDEN_STATE_DTYPE).reshape(num_tokens, -1)
+    else:
+        _warn_legacy_hidden_states_format()
+        hidden_states = np.asarray(raw_hidden_states, dtype=_HIDDEN_STATE_DTYPE)
+        if hidden_states.ndim != 2 or hidden_states.shape[0] != num_tokens:
+            raise ValueError(
+                f"teacher hidden_states has shape {hidden_states.shape}, expected "
+                f"({num_tokens}, hidden_size) -- the teacher likely served fewer positions than "
+                "sent. Check the server flags in _full_vocab_payload's docstring."
+            )
+    hidden_start = num_tokens - response_length - 1
+    if hidden_start < 0:
+        raise ValueError(
+            "full-vocab teacher scoring needs at least one prompt token before the response "
+            f"(num_tokens={num_tokens}, response_length={response_length})"
+        )
+    return np.array(hidden_states[hidden_start : hidden_start + response_length])
+
+
 async def _score_with_teacher(
     args, sample: Sample, targets: list[TeacherTarget] | None = None, lora_path: str | None = None
 ) -> dict:
@@ -703,7 +803,21 @@ async def reward_func(args, sample: Sample, **kwargs) -> float:
     # Multi-teacher routing/ensemble: pick this sample's teacher group (falls
     # back to --opd-teacher-url when --opd-teacher-urls is unset).
     teacher_targets = _teacher_targets_for_sample(args, sample)
-    if _get_opd_top_k(args) > 0:
+    if teacher_score_mode(args) == "full_vocab":
+        if len(teacher_targets) != 1:
+            raise ValueError(
+                "--teacher-score-mode full_vocab supports a single teacher only: mixing "
+                "reconstructed distributions across ensemble members needs per-member LM heads "
+                f"trainer-side, got {len(teacher_targets)} targets."
+            )
+        if sample.response_length == 0:
+            sample.metadata[TEACHER_RESPONSE_METADATA_KEY] = {"empty_response": True}
+            return 0.0
+        url, _ = teacher_targets[0]
+        sample.metadata[TEACHER_RESPONSE_METADATA_KEY] = await _post_json(
+            url, _full_vocab_payload(sample.tokens), timeout_secs=_scoring_timeout(args)
+        )
+    elif _get_opd_top_k(args) > 0:
         sample.metadata[TEACHER_RESPONSE_METADATA_KEY] = await _score_top_k(args, sample, teacher_targets)
     else:
         sample.metadata[TEACHER_RESPONSE_METADATA_KEY] = await _score_with_teacher(args, sample, teacher_targets)
@@ -727,6 +841,7 @@ def post_process(args, samples: list[Sample], **kwargs):
     ``RolloutManager._convert_samples_to_train_data``.
     """
     top_k = _get_opd_top_k(args)
+    full_vocab = teacher_score_mode(args) == "full_vocab"
     unscored = 0
     for sample in samples:
         payload = sample.metadata.pop(TEACHER_RESPONSE_METADATA_KEY, None)
@@ -738,7 +853,14 @@ def post_process(args, samples: list[Sample], **kwargs):
             # rejects the mixed batch with an actionable error.
             unscored += 1
             continue
-        if top_k > 0:
+        if full_vocab:
+            if payload.get("empty_response"):
+                sample.teacher_hidden_states = np.zeros((0, 0), dtype=_HIDDEN_STATE_DTYPE)
+            else:
+                sample.teacher_hidden_states = _teacher_hidden_states_from_payload(
+                    payload, len(sample.tokens), sample.response_length
+                )
+        elif top_k > 0:
             sample.opd_reverse_kl = _compute_topk_reverse_kl(args, sample, payload).tolist()
             # The harvested per-position top-logprob lists are large (O(R*k) Python
             # objects); once the KL is computed they only bloat Ray transfers.
