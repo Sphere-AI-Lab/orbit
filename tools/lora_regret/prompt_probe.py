@@ -96,6 +96,13 @@ def grade(response: str, label: str) -> int:
 def summarise(style: str, dataset: str, records: list[dict], n_samples: int) -> dict:
     rewards = [r["reward"] for r in records]
     groups = [rewards[i : i + n_samples] for i in range(0, len(rewards), n_samples)]
+    # Sampling-health check, reported rather than assumed. If this is ~1 the
+    # draws within a group are not independent and `solvable_groups` is
+    # measuring the harness, not the policy -- see the batching note above.
+    response_groups = [
+        records[i : i + n_samples] for i in range(0, len(records), n_samples)
+    ]
+    distinct = [len({r["response"] for r in g}) for g in response_groups]
     # A group teaches nothing unless its samples disagree: advantage is reward
     # minus the group mean, so an all-0 or all-1 group has zero advantage.
     informative = [g for g in groups if 0 < sum(g) < len(g)]
@@ -107,6 +114,7 @@ def summarise(style: str, dataset: str, records: list[dict], n_samples: int) -> 
         "reward": sum(rewards) / max(len(rewards), 1),
         "solvable_groups": len(informative) / max(len(groups), 1),
         "any_correct_groups": sum(1 for g in groups if sum(g) > 0) / max(len(groups), 1),
+        "distinct_per_group": sum(distinct) / max(len(distinct), 1),
         "boxed": sum(1 for r in records if "\\boxed" in r["response"]) / max(len(records), 1),
         "truncated": sum(1 for r in records if r["truncated"]) / max(len(records), 1),
         "mean_response_chars": sum(len(r["response"]) for r in records) / max(len(records), 1),
@@ -171,36 +179,45 @@ def main() -> None:
             path = args.data_dir / f"{dataset}_test.jsonl"
             problems = load_problems(path, args.n_problems, args.seed)
             for style in styles:
-                prompts = []
-                labels = []
-                for row in problems:
-                    for _ in range(args.n_samples):
-                        prompts.append(build_prompt(row["problem"], style))
-                        labels.append(row["label"])
-                outputs = engine.generate(
-                    prompts,
-                    {
-                        "temperature": args.temperature,
-                        "top_p": 1.0,
-                        "max_new_tokens": args.max_new_tokens,
-                        "stop": stop_words(style),
-                    },
-                )
+                # One round per sample, each round submitting the DISTINCT
+                # prompts once. Not `[p]*n_samples` flattened into a single
+                # call: on 2026-08-02 that returned 8 byte-identical
+                # completions for all 128 GSM8K groups while MATH, same params
+                # same engine, returned 7.95 distinct out of 8. Whatever the
+                # mechanism, duplicate requests inside one batch are not 8
+                # independent draws, and the failure is invisible in the
+                # aggregate -- it reads as a policy with no sampling variance,
+                # which is exactly what `solvable_groups` exists to detect.
+                prompts = [build_prompt(row["problem"], style) for row in problems]
+                labels = [row["label"] for row in problems]
                 records = []
-                for prompt, label, out in zip(prompts, labels, outputs, strict=True):
-                    text = out["text"]
-                    meta = out.get("meta_info", {})
-                    records.append(
+                for _ in range(args.n_samples):
+                    outputs = engine.generate(
+                        prompts,
                         {
-                            "dataset": dataset,
-                            "style": style,
-                            "prompt": prompt,
-                            "response": text,
-                            "label": label,
-                            "reward": grade(text, label),
-                            "truncated": meta.get("finish_reason", {}).get("type") == "length",
-                        }
+                            "temperature": args.temperature,
+                            "top_p": 1.0,
+                            "max_new_tokens": args.max_new_tokens,
+                            "stop": stop_words(style),
+                        },
                     )
+                    for prompt, label, out in zip(prompts, labels, outputs, strict=True):
+                        text = out["text"]
+                        meta = out.get("meta_info", {})
+                        records.append(
+                            {
+                                "dataset": dataset,
+                                "style": style,
+                                "prompt": prompt,
+                                "response": text,
+                                "label": label,
+                                "reward": grade(text, label),
+                                "truncated": meta.get("finish_reason", {}).get("type") == "length",
+                            }
+                        )
+                # Records arrive sample-major; `summarise` slices problem-major.
+                order = {prompt: i for i, prompt in enumerate(prompts)}
+                records.sort(key=lambda r: order[r["prompt"]])
                 summary = summarise(style, dataset, records, args.n_samples)
                 summaries.append(summary)
                 all_records.extend(records)
@@ -208,9 +225,16 @@ def main() -> None:
                     f"{dataset:6s} {style:11s} reward={summary['reward']:.4f} "
                     f"solvable_groups={summary['solvable_groups']:.3f} "
                     f"any_correct={summary['any_correct_groups']:.3f} "
-                    f"boxed={summary['boxed']:.3f} truncated={summary['truncated']:.3f}",
+                    f"boxed={summary['boxed']:.3f} truncated={summary['truncated']:.3f} "
+                    f"distinct/group={summary['distinct_per_group']:.2f}/{args.n_samples}",
                     flush=True,
                 )
+                if summary["distinct_per_group"] < 1.5 and args.n_samples > 1:
+                    print(
+                        "    WARNING: draws within a group are near-identical; "
+                        "solvable_groups is not measuring the policy.",
+                        flush=True,
+                    )
                 first = records[0]
                 print(f"    sample response: {first['response'][:220]!r}\n", flush=True)
     finally:
