@@ -17,6 +17,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -216,8 +217,15 @@ def wandb_project(
     return project
 
 
+# One `wandb sync` at a time: the watcher thread and the after-arm call would
+# otherwise race over the same offline directories, and two concurrent replays
+# of one .wandb file are the kind of thing that works until it doesn't.
+_WANDB_SYNC_LOCK = threading.Lock()
+
+
 def sync_wandb_offline_runs(repo_root: Path) -> None:
-    """Upload every finished offline wandb run. Called after each arm.
+    """Upload every offline wandb run. Called after each arm and, via
+    `start_wandb_sync_watcher`, every few minutes while one trains.
 
     The campaign logs offline (`WANDB_MODE=offline`) because an online run from
     a compute node uploaded nothing at all on 2026-08-02 -- silently, with the
@@ -239,16 +247,51 @@ def sync_wandb_offline_runs(repo_root: Path) -> None:
         return
     env = dict(os.environ)
     env.pop("WANDB_MODE", None)  # or the upload writes straight back to disk
-    try:
-        proc = subprocess.run(
-            [sys.executable, "-m", "wandb", "sync", "--sync-all", "--include-offline"],
-            cwd=repo_root, env=env, capture_output=True, text=True, timeout=900,
-        )
-    except Exception as exc:  # noqa: BLE001  -- a failed sync must not kill a sweep
-        print(f"wandb sync skipped: {type(exc).__name__}: {exc}", file=sys.stderr)
-        return
+    with _WANDB_SYNC_LOCK:
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "wandb", "sync", "--sync-all", "--include-offline"],
+                cwd=repo_root, env=env, capture_output=True, text=True, timeout=900,
+            )
+        except Exception as exc:  # noqa: BLE001  -- a failed sync must not kill a sweep
+            print(f"wandb sync skipped: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return
     tail = (proc.stdout or proc.stderr).strip().splitlines()[-1:] or ["(nothing to sync)"]
     print(f"wandb sync rc={proc.returncode}: {tail[0]}", file=sys.stderr)
+
+
+def start_wandb_sync_watcher(repo_root: Path) -> threading.Event:
+    """Re-sync on an interval while arms train, for a near-live dashboard.
+
+    The after-arm sync alone means the dashboard runs a full ~90-minute arm
+    behind, and shows nothing at all during the first one. Syncing a live
+    offline directory is safe and documented behaviour: `wandb sync` replays
+    the transaction log up to its current tail and the next pass refreshes the
+    run (sync_wandb.sh relies on the same property for the manual path). The
+    one cosmetic wart is that a mid-flight run shows as "finished" between
+    passes.
+
+    `WANDB_SYNC_INTERVAL` seconds between passes; 0 disables the watcher and
+    leaves only the after-arm sync. 300 by default: the point is a near-live
+    view, and an upload of a few MB every five minutes costs the arm nothing.
+
+    The thread is a daemon and is never joined -- if it is mid-upload when the
+    sweep exits, the after-arm sync has already covered everything that
+    matters, and the login-node watcher covers even that.
+    """
+    stop = threading.Event()
+    interval = float(os.environ.get("WANDB_SYNC_INTERVAL", "300"))
+    if interval <= 0 or os.environ.get("WANDB_AUTOSYNC", "1") != "1":
+        stop.set()
+        return stop
+
+    def loop() -> None:
+        while not stop.wait(interval):
+            sync_wandb_offline_runs(repo_root)
+
+    threading.Thread(target=loop, name="wandb-sync-watcher", daemon=True).start()
+    print(f"wandb sync watcher: every {interval:.0f}s (WANDB_SYNC_INTERVAL)", file=sys.stderr)
+    return stop
 
 
 def load_ledger(path: Path) -> set[str]:
@@ -733,6 +776,8 @@ def main() -> None:
     launcher = MATRIX_LAUNCHERS[args.matrix]
     metric = MATRIX_METRICS[args.matrix]
     print(f"launcher={launcher} metric={metric}", file=sys.stderr)
+    if not args.dry_run and todo:
+        start_wandb_sync_watcher(repo_root)
     for i, arm in enumerate(todo, 1):
         print(f"[{i}/{len(todo)}] {arm.name}", file=sys.stderr)
         model = get_model(arm.model)
