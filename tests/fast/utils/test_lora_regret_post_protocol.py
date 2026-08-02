@@ -235,7 +235,9 @@ class TestTheModelIsVisibleInTheResults:
     """
 
     def test_two_models_do_not_share_a_wandb_project(self):
-        assert sweep.wandb_project("e4", "qwen3-1.7b") != sweep.wandb_project("e4", "llama3.1-8b")
+        assert sweep.wandb_project("e4", "qwen3-1.7b", "gsm8k", "lora") != sweep.wandb_project(
+            "e4", "llama3.1-8b", "gsm8k", "lora"
+        )
 
     def test_the_campaigns_own_dashboards_do_not_move(self):
         """The anchor model keeps the bare name, so every project the runbook
@@ -248,7 +250,7 @@ class TestTheModelIsVisibleInTheResults:
         """Suffixed, not prefixed: `test_the_project_name_describes_the_arms_it_routes`
         reads the `<dataset>-<sft|rl>-` head, and a model prefix would push the
         claim the name is making out of the position a reader looks at first."""
-        assert sweep.wandb_project("e4", "qwen3-1.7b").startswith("math-gsm8k-rl-")
+        assert sweep.wandb_project("e4", "qwen3-1.7b", "gsm8k", "lora").startswith("gsm8k-rl-")
 
     def test_the_ledger_records_which_model_produced_the_number(self, tmp_path, monkeypatch):
         """Globbing two models' ledgers into `analyze` must not merge their arms
@@ -276,11 +278,13 @@ class TestTheModelIsVisibleInTheResults:
 
         row = json.loads(results.read_text().splitlines()[0])
         assert row["model"] == "qwen3-1.7b"
-        assert row["wandb_project"] == "math-gsm8k-rl-rank-qwen3-1.7b"
+        assert row["wandb_project"] == "gsm8k-rl-rank-ft-qwen3-1.7b"
 
     def test_the_same_arm_on_the_anchor_model_is_told_apart_only_by_that_field(self):
         """Both halves of the hazard in one assertion: the names collide, and
         the recorded model is what separates them."""
         build = lambda m: MATRICES["e4"](m.hidden_size, m.ffn_size, m.qkv_output_size, 0, None, None)[0]
         assert build(QWEN).name == build(LLAMA).name
-        assert sweep.wandb_project("e4", "qwen3-1.7b") != sweep.wandb_project("e4", "llama3.1-8b")
+        assert sweep.wandb_project("e4", "qwen3-1.7b", "gsm8k", "lora") != sweep.wandb_project(
+            "e4", "llama3.1-8b", "gsm8k", "lora"
+        )

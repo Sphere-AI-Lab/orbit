@@ -101,7 +101,15 @@ DATA_DIR = "/lustre/fast/fast/groups/ei-slm/data/lora_regret"
 # gsm8k_test separately so per-dataset accuracy stays visible instead of being
 # averaged away. So `arm_env` must not export a TEST_JSONL for it.
 RL_MIX_DATASET = "math_gsm8k"
-DATASETS_WITHOUT_TEST_SPLIT = frozenset({RL_MIX_DATASET})
+# Figure 6 is TWO panels, one per dataset, so E4 trains a separate arm on each
+# rather than one arm on the concatenation. The mix remains what `e4place` and
+# `e5rl` use -- they ask about placement and about OFT, not about a per-dataset
+# learning-rate curve, so pooling costs them nothing and halves their arms.
+RL_DATASETS = ("gsm8k", "math")
+# Every RL arm's eval set follows its training set, so `TEST_JSONL` -- which the
+# RL launcher never reads, since it takes `--eval-prompt-data` pairs -- would be
+# noise in the environment either way.
+DATASETS_WITHOUT_TEST_SPLIT = frozenset({RL_MIX_DATASET, *RL_DATASETS})
 
 
 # Where an unscouted OFT cell looks for its optimum. OFT parameterizes a
@@ -762,6 +770,7 @@ def e4_arms(
     ffn_size: int = LLAMA31_8B_FFN,
     oft_lr_centre: float | None = None,
     qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
+    datasets: tuple[str, ...] = RL_DATASETS,
 ) -> list[Arm]:
     """E4: RL parity at low rank -- decides C5.
 
@@ -778,24 +787,26 @@ def e4_arms(
     argmins say otherwise for RL, that is a finding rather than a grid error.
     """
     arms: list[Arm] = []
-    for lr in rl_lr_grid(RL_FULL_LR_CENTRE):
-        arms.append(
-            Arm(_name("full", "na", "", lr, seed), "full", None, None, "", lr, seed, dataset=RL_MIX_DATASET)
-        )
-    for rank in (1, 16, 256):
-        for lr in rl_lr_grid(RL_LORA_LR_CENTRE):
+    for dataset in datasets:
+        for lr in rl_lr_grid(RL_FULL_LR_CENTRE):
             arms.append(
-                Arm(
-                    _name("lora", f"r{rank}", ALL_MODULES, lr, seed),
-                    "lora",
-                    rank,
-                    None,
-                    ALL_MODULES,
-                    lr,
-                    seed,
-                    dataset=RL_MIX_DATASET,
-                )
+                Arm(_name("full", "na", "", lr, seed, extra=dataset), "full", None, None, "",
+                    lr, seed, dataset=dataset)
             )
+        for rank in (1, 16, 256):
+            for lr in rl_lr_grid(RL_LORA_LR_CENTRE):
+                arms.append(
+                    Arm(
+                        _name("lora", f"r{rank}", ALL_MODULES, lr, seed, extra=dataset),
+                        "lora",
+                        rank,
+                        None,
+                        ALL_MODULES,
+                        lr,
+                        seed,
+                        dataset=dataset,
+                    )
+                )
     # RL's own OFT scout: the SFT span shifted down a decade, matching how RL's
     # FullFT and LoRA centres sit a decade below their SFT counterparts. Nothing
     # has ever measured OFT under policy gradient, so these are `oftscout` arms
@@ -804,11 +815,11 @@ def e4_arms(
     # block above OFT_MAX_BLOCK_SGLANG. b128 matches LoRA r24 all-modules, which
     # sits beside this matrix's own r16 arm rather than the r256 the SFT cells
     # match -- a smaller adapter, but one that runs.
-    arms += _oft_cell(256, ALL_MODULES, hidden_size, ffn_size, seed, RL_MIX_DATASET,
-                      oft_lr_centre, n=RL_GRID_POINTS, step_decades=RL_STEP_DECADES,
-                      span=RL_OFT_SCOUT_SPAN, sig_figs=RL_SIG_FIGS,
-                      qkv_output_size=qkv_output_size,
-                      max_block=OFT_MAX_BLOCK_SGLANG)
+        arms += _oft_cell(256, ALL_MODULES, hidden_size, ffn_size, seed, dataset,
+                          oft_lr_centre, n=RL_GRID_POINTS, step_decades=RL_STEP_DECADES,
+                          span=RL_OFT_SCOUT_SPAN, sig_figs=RL_SIG_FIGS,
+                          qkv_output_size=qkv_output_size, extra=dataset,
+                          max_block=OFT_MAX_BLOCK_SGLANG)
     return arms
 
 
@@ -1243,6 +1254,13 @@ def arm_env(arm: Arm, data_dir: str = DATA_DIR) -> dict[str, str]:
         env["EVAL_NLL_INTERVAL"] = str(arm.eval_nll_interval)
     if arm.dataset is not None:
         env["TRAIN_JSONL"] = f"{data_dir}/{arm.dataset}_train.jsonl"
+        # A per-dataset RL arm must be SCORED on its own dataset. The launcher
+        # otherwise evaluates MATH and GSM8K both, and `parse_final_accuracy`
+        # takes the mean across datasets -- so a GSM8K panel's y-values would
+        # each be the average of GSM8K and MATH accuracy. It also halves the
+        # eval cost, but that is not why it is here.
+        if arm.dataset in RL_DATASETS:
+            env["EVAL_DATASETS"] = arm.dataset
         if arm.dataset not in DATASETS_WITHOUT_TEST_SPLIT:
             # The launcher derives EVAL_NLL_DATA from TEST_JSONL at its own
             # default, but only if TEST_JSONL was exported before it ran --

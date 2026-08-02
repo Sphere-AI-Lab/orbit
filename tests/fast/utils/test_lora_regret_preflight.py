@@ -64,7 +64,7 @@ class TestCheckMatrices:
         assert checks["matrix:e1"].ok and "45" in checks["matrix:e1"].detail
         assert checks["matrix:e2"].ok and "48" in checks["matrix:e2"].detail
         assert checks["matrix:e3"].ok and "35" in checks["matrix:e3"].detail
-        assert checks["matrix:e4"].ok and "35" in checks["matrix:e4"].detail
+        assert checks["matrix:e4"].ok and "70" in checks["matrix:e4"].detail
         assert checks["matrix:e5scout"].ok and "5" in checks["matrix:e5scout"].detail
         assert checks["matrix:e5"].ok and "50" in checks["matrix:e5"].detail
 

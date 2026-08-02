@@ -259,13 +259,30 @@ PERF_ARGS=(
     --sequence-parallel
 )
 
+# Which held-out set an arm is scored on. `both` is the default and is right for
+# an arm trained on the MATH+GSM8K mix. A per-dataset arm must be scored on its
+# own dataset instead: `parse_final_accuracy` takes the mean across whatever
+# datasets were evaluated, so scoring a GSM8K-trained arm on both would make
+# every point of the GSM8K panel the average of GSM8K and MATH accuracy. Halving
+# the eval cost is a side effect, not the reason.
+EVAL_DATASETS=${EVAL_DATASETS:-both}
+case "${EVAL_DATASETS}" in
+    gsm8k) EVAL_PROMPT_DATA=( --eval-prompt-data gsm8k_test "${GSM8K_TEST_JSONL}" ) ;;
+    math)  EVAL_PROMPT_DATA=( --eval-prompt-data math_test "${MATH_TEST_JSONL}" ) ;;
+    both)  EVAL_PROMPT_DATA=( --eval-prompt-data math_test "${MATH_TEST_JSONL}" gsm8k_test "${GSM8K_TEST_JSONL}" ) ;;
+    *)
+        echo "Unsupported EVAL_DATASETS=${EVAL_DATASETS}; expected one of: gsm8k math both" >&2
+        exit 2
+        ;;
+esac
+
 # E4-3 reads validation-accuracy curves, so the eval is generation-based against
 # the held-out MATH and GSM8K splits. Held-out NLL is deliberately absent: an RL
 # policy's own output distribution shifts as it trains, so NLL on a fixed
 # reference set stops being comparable across arms.
 EVAL_ARGS=(
     --eval-interval "${EVAL_INTERVAL:-25}"
-    --eval-prompt-data math_test "${MATH_TEST_JSONL}" gsm8k_test "${GSM8K_TEST_JSONL}"
+    "${EVAL_PROMPT_DATA[@]}"
     --n-samples-per-eval-prompt "${N_SAMPLES_PER_EVAL_PROMPT:-1}"
     --eval-max-response-len "${EVAL_MAX_RESPONSE_LEN:-2048}"
     --eval-top-k 1

@@ -338,7 +338,7 @@ class TestMethodCoverage:
 
     def test_the_new_counts(self):
         expected = {"e1": 45, "e1short": 21, "e1ot": 45, "e2": 48,
-                    "e3": 35, "e4": 35, "e4place": 35}
+                    "e3": 35, "e4": 70, "e4place": 35}
         actual = {m: len(MATRICES[m](HIDDEN, FFN, QKV, 0, None, None)) for m in expected}
         assert actual == expected
 

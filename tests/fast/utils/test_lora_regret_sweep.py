@@ -500,12 +500,13 @@ class TestE4Matrix:
     """E4 decides C5 (LoRA matches FullFT under policy gradient even at rank 1,
     with a wider band of performant LRs)."""
 
-    def test_arm_count_is_thirty_five(self):
-        """28 LoRA/FullFT arms, plus the RL OFT scout cell -- five cells at
-        seven learning rates each."""
+    def test_arm_count_is_seventy(self):
+        """Figure 6 is two panels, so every cell runs once per dataset: five
+        cells x seven learning rates x two datasets."""
         arms = e4_arms()
-        assert len(arms) == 35
-        assert sum(1 for a in arms if a.method != "oft") == 28
+        assert len(arms) == 70
+        assert sum(1 for a in arms if a.method != "oft") == 56
+        assert {a.dataset for a in arms} == {"gsm8k", "math"}
 
     def test_rank_one_is_present(self):
         """C5's whole point. Not the arm to drop under budget pressure."""
@@ -516,8 +517,8 @@ class TestE4Matrix:
         LRs wide -- the OFT cell mirrors the width it is compared against."""
         cells = {}
         for arm in e4_arms():
-            cells.setdefault((arm.method, arm.rank, arm.oft_block_size), []).append(arm.lr)
-        assert len(cells) == 5
+            cells.setdefault((arm.dataset, arm.method, arm.rank, arm.oft_block_size), []).append(arm.lr)
+        assert len(cells) == 10, "five cells on each of two datasets"
         assert all(len(lrs) == 7 for lrs in cells.values())
 
     def test_the_two_grids_sit_one_decade_apart_and_overlap(self):
@@ -573,9 +574,19 @@ class TestE4Matrix:
         ratios = [b / a for a, b in zip(lrs, lrs[1:], strict=False)]
         assert all(r == pytest.approx(10**0.3835, rel=0.25) for r in ratios)
 
-    def test_env_points_at_the_combined_rl_training_file(self):
-        env = arm_env(e4_arms()[0])
-        assert env["TRAIN_JSONL"].endswith("math_gsm8k_train.jsonl")
+    def test_env_points_at_the_arms_own_training_file(self):
+        """Each panel trains on its own dataset. The mix is what `e4place` and
+        `e5rl` still use -- they ask about placement and OFT, not about a
+        per-dataset learning-rate curve."""
+        for arm in e4_arms():
+            assert arm_env(arm)["TRAIN_JSONL"].endswith(f"{arm.dataset}_train.jsonl")
+
+    def test_each_arm_is_scored_on_the_dataset_it_trained_on(self):
+        """`parse_final_accuracy` means across the datasets that were
+        evaluated, so scoring a GSM8K arm on MATH as well would make every
+        point of the GSM8K panel an average of two datasets."""
+        for arm in e4_arms():
+            assert arm_env(arm)["EVAL_DATASETS"] == arm.dataset
 
     def test_env_sets_no_test_jsonl(self):
         """There is no math_gsm8k_test.jsonl: E4 evaluates the MATH and GSM8K
@@ -729,9 +740,15 @@ class TestRlEvalDatasetNames:
         rename in the launcher's --eval-prompt-data would make it match nothing
         and every E4 arm would be recorded as failed for one silent reason."""
         launcher = (REPO_ROOT / sweep.RL_LAUNCHER).read_text(encoding="utf-8")
-        eval_line = next(line for line in launcher.splitlines() if "--eval-prompt-data" in line)
+        # Every branch of the EVAL_DATASETS case, not just the first: the
+        # launcher now selects one dataset or both, and the parser has to match
+        # whichever name is configured.
+        eval_lines = [line for line in launcher.splitlines() if "--eval-prompt-data" in line]
+        assert eval_lines
         for name in sweep.RL_EVAL_DATASETS:
-            assert f" {name} " in eval_line, f"{name} not configured in the launcher"
+            assert any(f" {name} " in line for line in eval_lines), (
+                f"{name} not configured in the launcher"
+            )
 
     def test_explicit_names_exclude_passrate_and_truncation_submetrics(self):
         """With --log-passrate and n_samples_per_eval_prompt > 1, rollout.py emits
@@ -1079,13 +1096,14 @@ class TestDryRunPrintsAPasteableCommand:
         # No matrix given, so this arm is unrouted: the bare campaign project,
         # never a real task's. Group is the method. See TestWandbRouting.
         assert "WANDB_PROJECT=lora-without-regret " in line + " "
-        assert "WANDB_GROUP=lora" in line
+        assert "WANDB_GROUP=r16" in line
         # and still the arm's own knobs
         assert "LORA_RANK=16" in line
         assert line.endswith("bash examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh")
 
     def test_rl_arms_are_previewed_against_the_rl_launcher_and_group(self, tmp_path, capsys):
-        arm = Arm("lora-r1-all-lr1e-05-s0", "lora", 1, None, ALL_MODULES, 1e-5, 0)
+        arm = Arm("lora-r1-all-gsm8k-lr1e-05-s0", "lora", 1, None, ALL_MODULES, 1e-5, 0,
+                  dataset="gsm8k")
         run_arm(
             arm, tmp_path, tmp_path / "r.jsonl", dry_run=True,
             launcher=sweep.RL_LAUNCHER, metric="accuracy", matrix="e4",
@@ -1093,8 +1111,8 @@ class TestDryRunPrintsAPasteableCommand:
         line = capsys.readouterr().out.strip()
         # The project carries the task; the sft/rl distinction the old group
         # spelled out is already implied by which launcher runs.
-        assert "WANDB_PROJECT=math-gsm8k-rl-rank" in line
-        assert "WANDB_GROUP=lora" in line
+        assert "WANDB_PROJECT=gsm8k-rl-rank-lora" in line
+        assert "WANDB_GROUP=r1" in line
         assert line.endswith(f"bash {sweep.RL_LAUNCHER}")
 
 
@@ -1368,18 +1386,30 @@ class TestWandbRouting:
     """
 
     def test_every_matrix_gets_its_own_project(self):
+        """Distinct on the FULL name, which is where the dataset now lives.
+
+        `e1` and `e1ot` share the task stem `sft-rank` -- they are the same
+        study on two datasets -- so comparing stems would report a collision
+        that does not exist. What must not collide is the name a run actually
+        lands in."""
         from tools.lora_regret.arms import MATRICES
         from tools.lora_regret.sweep import MATRIX_PROJECTS, wandb_project
 
         assert set(MATRIX_PROJECTS) == set(MATRICES)
-        projects = {name: wandb_project(name) for name in MATRICES}
-        # Distinct, or two tasks would silently share a dashboard.
-        assert len(set(projects.values())) == len(MATRICES)
-        assert projects["e1"] == "tulu3-sft-rank"
-        assert projects["e1ot"] == "openthoughts3-sft-rank"
-        assert projects["e1short"] == "tulu3-sft-lr-horizon"
-        assert projects["e4place"] == "math-gsm8k-rl-placement"
-        assert projects["e5scout"] == "tulu3-sft-oft-scout"
+        assert wandb_project("e1", None, "tulu3", "lora") == "tulu3-sft-rank-lora"
+        assert wandb_project("e1ot", None, "openthoughts3", "lora") == "openthoughts3-sft-rank-lora"
+        assert wandb_project("e4", None, "gsm8k", "full") == "gsm8k-rl-rank-ft"
+        assert wandb_project("e4", None, "math", "lora") == "math-rl-rank-lora"
+        assert wandb_project("e4place", None, "math_gsm8k", "oft") == "math_gsm8k-rl-placement-oft"
+
+    def test_the_method_is_in_the_project_name(self):
+        """C5 IS the FullFT-against-LoRA comparison, so each side gets its own
+        dashboard rather than being a group inside a shared one."""
+        from tools.lora_regret.sweep import wandb_project
+
+        names = {m: wandb_project("e4", None, "gsm8k", m) for m in ("full", "lora", "oft")}
+        assert len(set(names.values())) == 3
+        assert names["full"].endswith("-ft"), "the post calls it FullFT, not `full`"
 
     @pytest.mark.parametrize(
         "matrix", sorted(set(sweep.MATRIX_PROJECTS) - {"e1long"})
@@ -1397,19 +1427,23 @@ class TestWandbRouting:
         from tools.lora_regret.sweep import MATRIX_METRICS, wandb_project
 
         arms = MATRICES[matrix](4096, 14336, 6144, 0, 1e-4 if matrix in MATRICES_REQUIRING_OFT_CENTRE else None, None)
-        # `None` means the arm takes the launcher's default, which is tulu3.
-        datasets = {(a.dataset or "tulu3") for a in arms}
-        assert len(datasets) == 1, f"{matrix} mixes datasets: {sorted(datasets)}"
-        dataset = datasets.pop().replace("_", "-")
         mode = "rl" if MATRIX_METRICS[matrix] == "accuracy" else "sft"
-        assert wandb_project(matrix).startswith(f"{dataset}-{mode}-")
+        # A matrix may now span datasets -- e4 runs one arm per panel -- so the
+        # claim is per arm rather than per matrix: whatever dataset an arm
+        # trains on is the one its project names.
+        for arm in arms:
+            dataset = arm.dataset or "tulu3"
+            project = wandb_project(matrix, arm.model, dataset, arm.method)
+            assert project.startswith(f"{dataset}-{mode}-"), (matrix, arm.name, project)
 
     def test_e4_and_e4place_do_not_share_a_project(self):
         """They run the same launcher at the same four learning rates. Pooling
         them would put the placement panel and the rank panel on one axis."""
         from tools.lora_regret.sweep import wandb_project
 
-        assert wandb_project("e4") != wandb_project("e4place")
+        assert wandb_project("e4", None, "gsm8k", "lora") != wandb_project(
+            "e4place", None, "gsm8k", "lora"
+        )
 
     def test_an_unrouted_arm_lands_where_a_hand_run_one_does(self):
         """`run_arm` is callable directly, and a made-up default matrix would
@@ -1419,7 +1453,9 @@ class TestWandbRouting:
         from tools.lora_regret.sweep import UNROUTED_WANDB_PROJECT, wandb_project
 
         assert wandb_project(None) == UNROUTED_WANDB_PROJECT
-        assert wandb_project(None) not in {wandb_project(m) for m in MATRICES}
+        assert wandb_project(None) not in {
+            wandb_project(m, None, "tulu3", "lora") for m in MATRICES
+        }
         launcher = (REPO_ROOT / sweep.LAUNCHER).read_text(encoding="utf-8")
         assert f"WANDB_PROJECT:-{UNROUTED_WANDB_PROJECT}" in launcher
 
@@ -1431,20 +1467,27 @@ class TestWandbRouting:
             wandb_project("e9")
 
     def test_the_dry_run_exports_the_matrixs_project(self, tmp_path, capsys):
-        arm = Arm("lora-r16-all-lr0.00025-s0", "lora", 16, None, ALL_MODULES, 2.5e-4, 0)
+        arm = Arm("lora-r16-all-lr0.00025-s0", "lora", 16, None, ALL_MODULES, 2.5e-4, 0,
+                  dataset="openthoughts3")
         run_arm(arm, tmp_path, tmp_path / "r.jsonl", dry_run=True, matrix="e1ot")
-        assert "WANDB_PROJECT=openthoughts3-sft-rank" in capsys.readouterr().out
+        assert "WANDB_PROJECT=openthoughts3-sft-rank-lora" in capsys.readouterr().out
 
     @pytest.mark.parametrize(
-        "method,rank,block,modules",
-        [("full", None, None, ""), ("lora", 16, None, ALL_MODULES), ("oft", None, 64, ALL_MODULES)],
+        "method,rank,block,modules,group",
+        [
+            ("full", None, None, "", "full"),
+            ("lora", 16, None, ALL_MODULES, "r16"),
+            ("oft", None, 64, ALL_MODULES, "b64"),
+        ],
     )
-    def test_the_group_is_the_arms_method(self, tmp_path, capsys, method, rank, block, modules):
-        """FullFT, LoRA and OFT arms of one task group apart inside its project.
-        The old group repeated the sft/rl split, which the project now states."""
+    def test_the_group_is_the_arms_capacity(self, tmp_path, capsys, method, rank, block, modules, group):
+        """The method moved into the project, so the group carries what is
+        actually compared inside one: the rank, or the OFT block size. FullFT
+        has no capacity knob and says `full` rather than `na`, which would read
+        as a missing value."""
         arm = Arm(f"{method}-probe", method, rank, block, modules, 2.5e-4, 0)
         run_arm(arm, tmp_path, tmp_path / "r.jsonl", dry_run=True, matrix="e5")
-        assert f"WANDB_GROUP={method}" in capsys.readouterr().out
+        assert f"WANDB_GROUP={group}" in capsys.readouterr().out
 
     def test_the_ledger_records_where_the_run_went(self, tmp_path, monkeypatch):
         """A ledger row that cannot name its wandb project cannot be traced back
@@ -1459,8 +1502,8 @@ class TestWandbRouting:
         results = tmp_path / "r.jsonl"
         run_arm(arm, tmp_path, results, dry_run=False, matrix="e3")
         record = json.loads(results.read_text().splitlines()[0])
-        assert record["wandb_project"] == "tulu3-sft-placement"
-        assert record["wandb_group"] == "lora"
+        assert record["wandb_project"] == "tulu3-sft-placement-lora"
+        assert record["wandb_group"] == "r16"
 
 
 class TestSmokeRunsAreQuarantined:
@@ -1492,8 +1535,8 @@ class TestSmokeRunsAreQuarantined:
         arm = Arm("lora-r16-all-lr0.00025-s0", "lora", 16, None, ALL_MODULES, 2.5e-4, 0)
         run_arm(arm, tmp_path, tmp_path / "r.jsonl", dry_run=True, matrix="e1")
         printed = capsys.readouterr().out
-        assert "WANDB_PROJECT=tulu3-sft-rank" in printed
-        assert "WANDB_GROUP=lora" in printed
+        assert "WANDB_PROJECT=tulu3-sft-rank-lora" in printed
+        assert "WANDB_GROUP=r16" in printed
 
     def test_the_smoke_project_is_not_a_task_project(self):
         from tools.lora_regret.sweep import MATRIX_PROJECTS, SMOKE_WANDB_PROJECT

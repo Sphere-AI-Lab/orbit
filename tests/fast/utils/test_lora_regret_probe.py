@@ -290,21 +290,37 @@ class TestPathLevel:
         assert probe_plan() == probe_plan("path")
         assert len(probe_plan("path")) < len(probe_plan("method"))
 
-    def test_two_tasks_running_identical_code_are_probed_once(self):
-        """e4/full and e4place/full are the same script over the same data
-        wrapping the same (empty) module set. Probing both proves nothing the
-        first did not, at 8 GPUs a time."""
+    def test_arms_differing_only_in_learning_rate_are_probed_once(self):
+        """Seven FullFT arms on one dataset are one code path at seven values
+        of a number the pace does not depend on -- measured, at two learning
+        rates 20x apart, in runbook section 22. Probing all seven would spend
+        seven whole nodes to learn one thing.
+
+        What is NOT collapsed any more is e4/full against e4place/full. They
+        were one path while both trained on the mix; E4's split makes e4/full
+        a gsm8k-shaped and a math-shaped run, and `dataset` is on the probe's
+        axis because row shape moves both memory and step time."""
         from tools.lora_regret.probe import path_key
 
         runs = probe_plan("path")
         rl_full = [r for r in runs if r.metric == "accuracy" and r.method == "full"]
-        assert len(rl_full) == 1, [r.arm for r in rl_full]
-        # ...and the pair it stands for really is one path.
+        # One per DATASET, not one overall. `dataset` is on the probe's own
+        # axis -- a shape difference, not a code difference -- and E4's split
+        # into gsm8k and math is exactly that: mean prompt 70 tokens against
+        # 86, max 222 against 1,567. e4place keeps the mix, so three.
+        assert len(rl_full) == 3, [r.arm for r in rl_full]
+        assert {r.arm.split("-")[3] for r in rl_full} == {"gsm8k", "math", "place"}
+        # Within one dataset, every learning rate is one path...
         from tools.lora_regret.arms import e4_arms, e4place_arms
 
-        a = next(x for x in e4_arms() if x.method == "full")
-        b = next(x for x in e4place_arms(4096, 14336) if x.method == "full")
-        assert path_key("e4", a) == path_key("e4place", b)
+        gsm = [x for x in e4_arms() if x.method == "full" and x.dataset == "gsm8k"]
+        assert len(gsm) == 7
+        assert len({path_key("e4", x) for x in gsm}) == 1
+        # ...and across datasets it is not.
+        math = next(x for x in e4_arms() if x.method == "full" and x.dataset == "math")
+        place = next(x for x in e4place_arms(4096, 14336) if x.method == "full")
+        assert path_key("e4", gsm[0]) != path_key("e4", math)
+        assert path_key("e4", gsm[0]) != path_key("e4place", place)
 
     def test_target_modules_are_not_collapsed(self):
         """`linear_fc1` is Orbit's fused gate+up. Wrapping it is not the same
@@ -386,7 +402,9 @@ class TestTheGpuSplit:
         in any form, while the SFT paths have a passing smoke behind them."""
         eight = [r for r in probe_plan("path") if r.gpus == 8]
         assert {r.metric for r in eight} == {"accuracy"}
-        assert len(eight) == 7
+        # Grew from 7 when E4 split into two per-dataset panels: every RL code
+        # path is now probed once per dataset it actually runs on.
+        assert len(eight) == 13
 
     def test_the_four_gpu_script_is_exactly_the_sft_fullft_paths(self):
         four = [r for r in probe_plan("path") if r.gpus == 4]

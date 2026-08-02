@@ -100,26 +100,37 @@ RL_EVAL_DATASETS = ("math_test", "gsm8k_test")
 # decides C6. The matrix is the unit an operator schedules, reads and re-runs,
 # so it is the unit the dashboard is split on.
 #
-# The name spells out `<dataset>-<sft|rl>-<what is tested>` rather than the
-# matrix code, because "e4place" is only meaningful to someone holding the plan
-# and "math-gsm8k-rl-placement" is meaningful to anyone opening the sidebar. The
-# first two components are not decoration: they are checked against each
+# The name spells out `<dataset>-<sft|rl>-<what is tested>-<method>` rather than
+# the matrix code, because "e4place" is only meaningful to someone holding the
+# plan and "gsm8k-rl-placement-lora" is meaningful to anyone opening the sidebar.
+# The first two components are not decoration: they are checked against each
 # matrix's own arms by test_the_project_name_describes_the_arms_it_routes, so a
 # project cannot end up claiming a dataset or a training mode it does not run.
+#
+# Only `<sft|rl>-<what is tested>` lives here. The DATASET comes from the
+# arm and the METHOD is appended, so a project is `<dataset>-<mode>-<task>-<method>`
+# -- `gsm8k-rl-rank-lora`, `math-rl-rank-ft`. Two reasons the dataset cannot stay
+# in this table: E4 now trains a separate arm per dataset, so one matrix spans
+# two of them; and a hardcoded "math-gsm8k" would have gone on claiming the mix
+# after that stopped being true.
 MATRIX_PROJECTS = {
-    "e1": "tulu3-sft-rank",
-    "e1long": "tulu3-sft-curves",
-    "e1short": "tulu3-sft-lr-horizon",
-    "e1ot": "openthoughts3-sft-rank",
-    "e2": "openthoughts3-sft-batch",
-    "e3": "tulu3-sft-placement",
-    "e4": "math-gsm8k-rl-rank",
-    "e4place": "math-gsm8k-rl-placement",
-    "e5rl": "math-gsm8k-rl-oft-match",
-    "e5scout": "tulu3-sft-oft-scout",
-    "e5": "tulu3-sft-oft-match",
-    "sft82": "tulu3-sft-bracket",
+    "e1": "sft-rank",
+    "e1long": "sft-curves",
+    "e1short": "sft-lr-horizon",
+    "e1ot": "sft-rank",
+    "e2": "sft-batch",
+    "e3": "sft-placement",
+    "e4": "rl-rank",
+    "e4place": "rl-placement",
+    "e5rl": "rl-oft-match",
+    "e5scout": "sft-oft-scout",
+    "e5": "sft-oft-match",
+    "sft82": "sft-bracket",
 }
+
+# What the sidebar calls each method. `full` is spelled `ft` because that is what
+# the post and every plan document call it.
+METHOD_LABELS = {"full": "ft", "lora": "lora", "oft": "oft"}
 
 # Where an arm goes when no matrix routed it. Deliberately the launchers' own
 # default rather than any task's name: `run_arm` is callable directly (tests,
@@ -127,6 +138,13 @@ MATRIX_PROJECTS = {
 # dashboard whose numbers are being quoted. This way an unrouted arm lands
 # exactly where a hand-run one does.
 UNROUTED_WANDB_PROJECT = "lora-without-regret"
+
+# What an arm that names no dataset is training on. `sft82`, the legacy matrix,
+# sets no `dataset` on any of its 82 arms and so takes the SFT launcher's own
+# default. Spelled out here because the project name has to state a dataset, and
+# omitting the component would produce `sft-bracket-lora` -- a name that reads
+# like a project rather than like a missing field.
+LAUNCHER_DEFAULT_DATASET = "tulu3"
 
 # Every probe run, whatever task it names. Smoke runs are three rollouts with a
 # real-looking loss curve; mixed into `tulu3-sft-rank` they would sit beside the
@@ -137,32 +155,62 @@ UNROUTED_WANDB_PROJECT = "lora-without-regret"
 SMOKE_WANDB_PROJECT = "lora-regret-smoke"
 
 
-def wandb_project(matrix: str | None, model: str | None = None) -> str:
-    """The wandb project for one matrix on one model, or the default for none.
+def arm_capacity(arm: Arm) -> str:
+    """The arm's capacity, as the wandb group inside a method's project.
 
-    **The model has to be in the name, because it is nowhere else.** An arm name
-    carries method, capacity, placement, learning rate and seed -- not the base
-    model, since every matrix was single-model when the names were designed. Now
-    that `--model` exists, `lora-r1-all-lr1e-05-s0` on Qwen3-1.7B and the same
-    arm on Llama-3.1-8B are two different experiments with one run name; pooled
-    in one project they are indistinguishable in the sidebar, and the better of
-    the two would look like the arm's result.
+    `r1`/`r16`/`r256` for LoRA, `b32`.. for OFT, `full` for full fine-tuning --
+    which has no capacity knob, and labelling it `na` would read as a missing
+    value rather than as the point.
+    """
+    if arm.rank is not None:
+        return f"r{arm.rank}"
+    if arm.oft_block_size is not None:
+        return f"b{arm.oft_block_size}"
+    return "full"
 
-    Only non-default models are suffixed. `llama3.1-8b` keeps the bare name so
-    the dashboards the campaign already points at do not move, and so the
+
+def wandb_project(
+    matrix: str | None,
+    model: str | None = None,
+    dataset: str | None = None,
+    method: str | None = None,
+) -> str:
+    """The wandb project for one arm: `<dataset>-<mode>-<task>-<method>`.
+
+    Four components, each of which would otherwise be invisible or ambiguous in
+    the sidebar:
+
+    **dataset**, because E4 trains one arm per dataset now -- `gsm8k-rl-rank-lora`
+    and `math-rl-rank-lora` are two panels of Figure 6 and pooling them would put
+    two different y-axes in one project.
+
+    **method**, because it is the comparison C5 IS. Splitting FullFT and LoRA into
+    their own projects is what lets each be read, and re-read, without the other's
+    runs in the list.
+
+    **model**, because an arm name carries method, capacity, placement, learning
+    rate and seed but not the base model -- every matrix was single-model when the
+    names were designed. `lora-r1-all-lr1e-05-s0` on Qwen3-1.7B and the same arm
+    on Llama-3.1-8B are two experiments with one run name. Only non-default models
+    are suffixed, so the campaign's own dashboards keep the bare name and the
     `<dataset>-<sft|rl>-` head that
-    `test_the_project_name_describes_the_arms_it_routes` pins stays first --
-    suffixing rather than prefixing is what keeps that claim readable.
+    `test_the_project_name_describes_the_arms_it_routes` pins stays first.
+
+    `dataset` and `method` are optional so a caller holding only a matrix -- the
+    probe, which routes everything to one smoke project anyway -- still gets a
+    usable name.
     """
     if matrix is None:
         return UNROUTED_WANDB_PROJECT
     try:
-        project = MATRIX_PROJECTS[matrix]
+        task = MATRIX_PROJECTS[matrix]
     except KeyError:
         raise KeyError(
             f"no wandb project for matrix {matrix!r}; add one to MATRIX_PROJECTS "
             f"(known: {sorted(MATRIX_PROJECTS)})"
         ) from None
+    parts = [p for p in (dataset, task, METHOD_LABELS.get(method, method)) if p]
+    project = "-".join(parts)
     if model is not None and model != DEFAULT_MODEL:
         project = f"{project}-{model}"
     return project
@@ -337,7 +385,13 @@ def run_arm(
     overrides = dict(model_env(get_model(arm.model), repo_root))
     overrides.update(arm_env(arm))
     if probe_rollouts is None:
-        project, group = wandb_project(matrix, arm.model), arm.method
+        project = wandb_project(
+            matrix, arm.model, arm.dataset or LAUNCHER_DEFAULT_DATASET, arm.method
+        )
+        # The method is in the project now, so the group carries CAPACITY --
+        # the rank or the OFT block size -- which is what a reader compares
+        # inside one method's dashboard. FullFT has none, and says so.
+        group = arm_capacity(arm)
     else:
         # The task moves into the group so one smoke project still separates
         # e4place/oft from e1/lora, without either polluting a real dashboard.
