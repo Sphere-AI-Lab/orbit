@@ -4,7 +4,9 @@
 #
 #   bash scripts/lora_regret/run_e4_ft_8gpu.sh
 #
-# 4 arms, ~5 h -- one per learning rate on the half-decade grid centred at 1e-6.
+# 7 arms -- one per learning rate on the shared half-decade grid, 1e-06 .. 1e-03.
+# ~2.3 h per arm per 100 rollouts at the measured FullFT pace (59 s/rollout,
+# plus eval), so ~16 h at NUM_ROLLOUT=100 and ~24 h at 150.
 # Half-decade rather than E1's 0.3 because C5's second half is about the WIDTH
 # of the performant band, which needs coverage more than resolution.
 #
@@ -15,5 +17,5 @@
 #
 # Run this before or alongside run_e4_lora_8gpu.sh -- they are independent, and
 # C5 is the difference between them.
-exec env MATRIX=e4 METHOD_RE='^full-' RESULTS=results/e4_full.jsonl EXPECT_ARMS=4 \
+exec env MATRIX=e4 METHOD_RE='^full-' RESULTS=results/e4_full.jsonl EXPECT_ARMS=7 \
     bash "$(dirname "${BASH_SOURCE[0]}")/campaign.sh" "$@"

@@ -70,11 +70,42 @@ LORA_A_INIT_METHOD = "kaiming"
 # into the grid instead of fitted out of it.
 FULL_LR_CENTRE = 2.5e-5
 LORA_LR_CENTRE = 2.5e-4
-# RL runs an order of magnitude lower than SFT, and the post gives no multiplier
-# for policy gradient -- these are the RL launcher's own documented defaults,
-# used as scout centres rather than as predictions.
-RL_FULL_LR_CENTRE = 1e-6
-RL_LORA_LR_CENTRE = 1e-5
+# **One shared RL grid for both methods**, 1e-06 .. 1e-03, so the LoRA/FullFT
+# ratio is read off the result instead of built into it.
+#
+# The post disagrees with itself here, which is why nothing is assumed. Its prose
+# says the optimum is "consistently 10x ... for both supervised learning and
+# reinforcement learning"; its own RL figure has FullFT peaking at 2e-05 and LoRA
+# at 4e-05 - 8e-05, which is **2-4x**; reading the published SVG's x-positions
+# gives FullFT 6.25e-06 and LoRA 4e-05, which is **6.4x**. Three numbers, one
+# paper. Baking in any of them picks a side of that contradiction before
+# measuring. A shared grid picks none, and the ratio falls out of two argmins on
+# the same points.
+#
+# The centre is the geometric middle of the span the endpoints demand, not a
+# prediction of where the peak is: 10**-4.5 is the midpoint of 1e-06 .. 1e-03,
+# and seven half-decade points around it land on
+#
+#   1e-06  3e-06  1e-05  3e-05  1e-04  3e-04  1e-03
+#
+# Written 3.16e-05 and not 3e-05 on purpose. `lr_grid` rounds the points it
+# generates, never the centre it generates them from, so a 3e-05 centre puts the
+# ends at 9e-07 and 9e-04 -- the same span to within 5%, but it reads as a fitted
+# value rather than a grid point, which is what the round-numbers pass fixed.
+#
+# The span brackets:
+#
+#   every candidate optimum   6.25e-06 (SVG) .. 1e-04 (GSM r256), with at least
+#                             two points on each side of each one
+#   FullFT's collapse         "by ~3e-05" (plan section 14), seen at 3e-05/1e-04
+#   LoRA's useful ceiling     "up to ~2e-04", bracketed by 1e-04 and 3e-04
+#   LoRA's collapse           "all ranks fail by 1e-03", the top point
+#
+# It also fixes a live hazard the earlier 1e-6 FullFT centre had: that grid
+# topped out at 1e-05, *below* the 2e-05 the post's figure shows, so its argmin
+# would have landed on the top edge and `analyze` would have refused to quote it.
+RL_FULL_LR_CENTRE = 3.16e-5
+RL_LORA_LR_CENTRE = 3.16e-5
 # One Tulu3 epoch is (939,343 - 1,000 held out) / 32 = 29,323 optimizer steps,
 # and ~1% of that is 293 -- about 100 trace points, which is what C1's departure
 # detector needs, for ~1.9 h of eval against ~70 h of training. At the
@@ -120,7 +151,13 @@ OFT_SCOUT_SPAN = (1e-5, 1e-3)
 # been scouted in either regime -- so the RL scout is the SFT span shifted by
 # that decade. That shift is an assumption, which is exactly why these arms are
 # named `oftscout` and not `oft`.
-RL_OFT_SCOUT_SPAN = (1e-6, 1e-4)
+#
+# Widened from (1e-6, 1e-4) when the RL grid went from 4 points to 7: a scout
+# NARROWER than the grid it will be compared against cannot find an optimum the
+# comparison would care about, and `test_the_oft_grid_is_never_loras_grid`
+# enforces that. Same centre (1e-5), same seven points, half a decade further
+# out on each side -- so it costs no extra arms.
+RL_OFT_SCOUT_SPAN = (3e-7, 3e-4)
 
 
 def lr_grid(
@@ -153,16 +190,28 @@ def lr_grid(
 
 
 # Every RL cell shares one grid shape, so it is written down once. Half-decade
-# steps because C5's second half is about the *width* of the performant band;
-# one significant figure so the four points are 3e-07 / 1e-06 / 3e-06 / 1e-05
-# rather than 3.16e-07 / ... -- see `lr_grid`.
-RL_GRID_POINTS = 4
+# steps because C5's second half is about the *width* of the performant band,
+# which needs span more than resolution; one significant figure so the points
+# are 1e-06 / 3e-06 / ... rather than 9.5e-07 / 3.0e-06 / ... -- see `lr_grid`.
+#
+# Seven, not four: four half-decade points span 1.5 decades, and the candidate
+# optima alone (6.25e-06 .. 1e-04) span 1.2 of those, leaving no room for either
+# collapse edge. Seven spans 3.0 decades and holds every candidate optimum with
+# at least two points on each side, plus both collapse boundaries.
+#
+# Half a decade locates an argmin to about x1.8, so the *ratio* of two argmins
+# carries roughly x3 of uncertainty -- enough to tell 10x from 2x, not 6x from
+# 10x. If the ratio is wanted as a number rather than an order of magnitude,
+# refine with +/-0.25-decade points around each argmin after the first pass;
+# resolution everywhere would double the arm count to buy precision in the
+# regions that turn out to be flat.
+RL_GRID_POINTS = 7
 RL_STEP_DECADES = 0.5
 RL_SIG_FIGS = 1
 
 
 def rl_lr_grid(centre: float) -> list[float]:
-    """The four-point half-decade RL grid around `centre`, on round numbers."""
+    """The seven-point half-decade RL grid around `centre`, on round numbers."""
     return lr_grid(
         centre, n=RL_GRID_POINTS, step_decades=RL_STEP_DECADES, sig_figs=RL_SIG_FIGS
     )

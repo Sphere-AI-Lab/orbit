@@ -4,7 +4,7 @@
 #
 #   bash scripts/lora_regret/run_e4place_lora_8gpu.sh
 #
-# 8 arms, ~11 h -- attention-only r256 against MLP-only r92, four learning rates
+# 14 arms -- attention-only r256 against MLP-only r92, seven learning rates
 # each on E4's own grid so the placement result and the rank result are
 # comparable arm for arm.
 #
@@ -20,5 +20,5 @@
 #
 # The post studies placement for SFT only. This is one of the two cells that go
 # beyond it.
-exec env MATRIX=e4place METHOD_RE='^lora-' RESULTS=results/e4place_lora.jsonl EXPECT_ARMS=8 \
+exec env MATRIX=e4place METHOD_RE='^lora-' RESULTS=results/e4place_lora.jsonl EXPECT_ARMS=14 \
     bash "$(dirname "${BASH_SOURCE[0]}")/campaign.sh" "$@"

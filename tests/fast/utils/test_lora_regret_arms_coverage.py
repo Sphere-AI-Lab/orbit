@@ -91,14 +91,14 @@ class TestE1Short:
 
 
 class TestE4Place:
-    def test_eight_arms_two_placements_four_lrs(self):
+    def test_fourteen_arms_two_placements_seven_lrs(self):
         from tools.lora_regret.arms import e4place_arms
 
         arms = e4place_arms(HIDDEN, FFN)
-        assert len(arms) == 20
+        assert len(arms) == 35
         peft = [a for a in arms if a.method != "full"]
         assert {a.target_modules for a in peft} == {ATTN_MODULES, MLP_MODULES}
-        assert len([a for a in peft if a.method == "lora"]) == 8
+        assert len([a for a in peft if a.method == "lora"]) == 14
 
     def test_it_does_not_restate_any_arm_e4_already_runs(self):
         """e4's LoRA r256 all-modules cell uses this exact grid, so an
@@ -130,7 +130,7 @@ class TestE4Place:
         from tools.lora_regret.arms import e4place_arms
 
         full = [a for a in e4place_arms(HIDDEN, FFN) if a.method == "full"]
-        assert len(full) == 4
+        assert len(full) == 7
         assert {a.target_modules for a in full} == {""}
         assert all("place" in a.name for a in full)
 
@@ -149,7 +149,7 @@ class TestE4Place:
         # the points on 3e-06 / 1e-05 / ... rather than 3.16e-06 / ...
         steps = [math.log10(b / a) for a, b in zip(lrs, lrs[1:])]
         assert all(abs(s - 0.5) < 0.03 for s in steps), steps
-        assert math.log10(lrs[-1] / lrs[0]) == pytest.approx(1.5, abs=0.03)
+        assert math.log10(lrs[-1] / lrs[0]) == pytest.approx(3.0, abs=0.03)
         e4_lora = sorted({a.lr for a in e4_arms() if a.method == "lora"})
         assert lrs == e4_lora
 
@@ -158,7 +158,7 @@ class TestE4Place:
 
         assert MATRIX_METRICS["e4place"] == "accuracy"
         assert "rl-math-gsm8k" in MATRIX_LAUNCHERS["e4place"]
-        assert len(MATRICES["e4place"](HIDDEN, FFN, QKV, 0, None, None)) == 20
+        assert len(MATRICES["e4place"](HIDDEN, FFN, QKV, 0, None, None)) == 35
 
 
 class TestMethodCoverage:
@@ -338,7 +338,7 @@ class TestMethodCoverage:
 
     def test_the_new_counts(self):
         expected = {"e1": 45, "e1short": 21, "e1ot": 45, "e2": 48,
-                    "e3": 35, "e4": 20, "e4place": 20}
+                    "e3": 35, "e4": 35, "e4place": 35}
         actual = {m: len(MATRICES[m](HIDDEN, FFN, QKV, 0, None, None)) for m in expected}
         assert actual == expected
 

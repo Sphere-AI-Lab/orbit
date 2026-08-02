@@ -500,29 +500,49 @@ class TestE4Matrix:
     """E4 decides C5 (LoRA matches FullFT under policy gradient even at rank 1,
     with a wider band of performant LRs)."""
 
-    def test_arm_count_is_twenty(self):
-        """16 LoRA/FullFT arms as before, plus the RL OFT scout cell."""
+    def test_arm_count_is_thirty_five(self):
+        """28 LoRA/FullFT arms, plus the RL OFT scout cell -- five cells at
+        seven learning rates each."""
         arms = e4_arms()
-        assert len(arms) == 20
-        assert sum(1 for a in arms if a.method != "oft") == 16
+        assert len(arms) == 35
+        assert sum(1 for a in arms if a.method != "oft") == 28
 
     def test_rank_one_is_present(self):
         """C5's whole point. Not the arm to drop under budget pressure."""
         assert {a.rank for a in e4_arms() if a.method == "lora"} == {1, 16, 256}
 
-    def test_four_lrs_per_arm(self):
-        """5 cells now: FullFT, LoRA r1/r16/r256, and the RL OFT scout. All four
+    def test_seven_lrs_per_arm(self):
+        """5 cells: FullFT, LoRA r1/r16/r256, and the RL OFT scout. All seven
         LRs wide -- the OFT cell mirrors the width it is compared against."""
         cells = {}
         for arm in e4_arms():
             cells.setdefault((arm.method, arm.rank, arm.oft_block_size), []).append(arm.lr)
         assert len(cells) == 5
-        assert all(len(lrs) == 4 for lrs in cells.values())
+        assert all(len(lrs) == 7 for lrs in cells.values())
 
-    def test_lora_centre_is_ten_times_the_full_centre(self):
+    def test_both_methods_run_the_same_grid(self):
+        """The replacement for a built-in 10x offset, and the reason E4 can
+        report a ratio at all.
+
+        The post contradicts itself on the multiplier -- prose says 10x, its own
+        RL figure reads 2-4x, the published SVG's x-positions read 6.4x -- so
+        offsetting the two grids by any of those would decide the question in
+        the design. Identical points mean the ratio is two argmins measured on
+        one lattice, and a disagreement with the post is then a finding rather
+        than an artefact of where the grids were centred."""
         full = sorted({a.lr for a in e4_arms() if a.method == "full"})
         lora = sorted({a.lr for a in e4_arms() if a.method == "lora"})
-        assert lora[1] == pytest.approx(10 * full[1], rel=0.02)
+        assert full == lora
+        assert full == [1e-06, 3e-06, 1e-05, 3e-05, 1e-04, 3e-04, 1e-03]
+
+    def test_the_grid_brackets_every_published_optimum(self):
+        """Each candidate peak needs points on both sides, or `analyze` refuses
+        the argmin as a boundary value. 6.25e-06 is the SVG's FullFT reading,
+        2e-05 the RL figure's, 4e-05 the LoRA reading, and 1e-04 GSM8K r256."""
+        grid = sorted({a.lr for a in e4_arms() if a.method == "full"})
+        for candidate in (6.25e-06, 2e-05, 4e-05, 1e-04):
+            assert any(lr < candidate for lr in grid), candidate
+            assert any(lr > candidate for lr in grid), candidate
 
     def test_grid_is_wider_than_the_sft_grids(self):
         """Half-decade steps, not E1's 0.3: the RL optimum is less well
@@ -537,9 +557,9 @@ class TestE4Matrix:
         and it is unaffected by the rounding.
         """
         lrs = sorted({a.lr for a in e4_arms() if a.method == "full"})
-        assert len(lrs) == 4
+        assert len(lrs) == 7
         span_decades = math.log10(lrs[-1] / lrs[0])
-        assert span_decades == pytest.approx(1.5, abs=0.03)
+        assert span_decades == pytest.approx(3.0, abs=0.03)
         # ...and every step is still ~half a decade, just not to three figures.
         ratios = [b / a for a, b in zip(lrs, lrs[1:], strict=False)]
         assert all(r == pytest.approx(10**0.5, rel=0.06) for r in ratios)

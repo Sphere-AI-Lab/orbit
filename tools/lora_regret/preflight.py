@@ -41,8 +41,8 @@ EXPECTED_ROWS = {
 # change any count -- every OFT cell keeps the width of the LoRA cell it mirrors,
 # only its learning rates move from the scout span onto a centred grid.
 EXPECTED_ARMS = {
-    "e1": 45, "e2": 48, "e3": 35, "e4": 20, "e5scout": 5, "e5": 50, "sft82": 82,
-    "e1ot": 45, "e1short": 21, "e4place": 20, "e5rl": 24,
+    "e1": 45, "e2": 48, "e3": 35, "e4": 35, "e5scout": 5, "e5": 50, "sft82": 82,
+    "e1ot": 45, "e1short": 21, "e4place": 35, "e5rl": 42,
 }
 
 # What each stage needs before it is worth starting. P3 is 2 rather than 1

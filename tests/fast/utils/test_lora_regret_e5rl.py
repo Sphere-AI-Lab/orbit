@@ -130,7 +130,7 @@ class TestItIsAnRlMatrix:
         argmin supplies this one's centre."""
         arms = _arms()
         lrs = sorted({a.lr for a in arms if a.method == "oft"})
-        assert len(lrs) == 4
+        assert len(lrs) == 7
         # ~half a decade each; the points are rounded to one significant figure
         # (3e-06, not 3.16e-06), so the steps alternate 3.33x / 3.0x.
         ratios = [lrs[i + 1] / lrs[i] for i in range(len(lrs) - 1)]

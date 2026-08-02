@@ -1056,14 +1056,15 @@ project is about RL". That removes nine matrices — `sft82`, `e1`, `e1long`,
 and C8, which are SFT claims. It also removed the only "ours" matrix, so `e5rl`
 was added to carry the matched-parameter OFT contribution under policy gradient.
 
-Three matrices remain. **64 arms, ~807 GPU-hours**, against 22,124 h for the
-original design.
+Three matrices remain. Counts below are at the **seven-point** RL grid adopted
+2026-08-02 (§23.4); costs are quoted per 100 rollouts because `NUM_ROLLOUT` is
+an operator choice, and they scale linearly in it.
 
-| matrix | what it decides | arms | cost |
+| matrix | what it decides | arms | cost / 100 rollouts |
 |---|---|---|---|
-| `e4` | C5 — RL parity at low rank. **This is the blog post's RL experiment.** FullFT + LoRA r1/r16/r256, plus an OFT cell | 20 | ~241 h |
-| `e4place` | C4 under policy gradient — attention-only vs MLP-only at matched parameters | 20 | ~246 h |
-| `e5rl` | ours — does matched-parameter OFT *track* LoRA as capacity varies | 24 | ~319 h |
+| `e4` | C5 — RL parity at low rank. **This is the blog post's RL experiment.** FullFT + LoRA r1/r16/r256, plus an OFT cell | 35 | ~95 h |
+| `e4place` | C4 under policy gradient — attention-only vs MLP-only at matched parameters | 35 | ~97 h |
+| `e5rl` | ours — does matched-parameter OFT *track* LoRA as capacity varies | 42 | ~118 h |
 
 `e4` alone reproduces the post's RL result. `e4place` and `e5rl` go beyond it:
 the post studies placement for SFT only, and never studies OFT.
@@ -1155,12 +1156,12 @@ GPUS_PER_NODE=8 python -m tools.lora_regret.sweep --matrix e5rl \
 method) cell, with its own ledger, so two can be booked on two nodes without
 appending to one file. **28 arms, ~39 h**, no OFT:
 
-| script | arms | cost | decides |
+| script | arms | cost / 100 rollouts | decides |
 |---|---|---|---|
-| `run_e4_ft_8gpu.sh` | 4 | ~5 h | the FullFT reference line for C5 |
-| `run_e4_lora_8gpu.sh` | 12 | ~17 h | the rank ladder r1/r16/r256 → **C5** |
-| `run_e4place_lora_8gpu.sh` | 8 | ~11 h | attention r256 vs MLP r92 → **C4 under RL** |
-| `run_e4place_ft_8gpu.sh` | 4 | ~5 h | placement dashboard reference — **drop first** |
+| `run_e4_ft_8gpu.sh` | 7 | ~16 h | the FullFT reference line for C5 |
+| `run_e4_lora_8gpu.sh` | 21 | ~59 h | the rank ladder r1/r16/r256 → **C5** |
+| `run_e4place_lora_8gpu.sh` | 14 | ~39 h | attention r256 vs MLP r92 → **C4 under RL** |
+| `run_e4place_ft_8gpu.sh` | 7 | ~16 h | placement dashboard reference — **drop first** |
 
 They **all say `_8gpu` because every RL arm is an 8-GPU arm**, so unlike the
 coverage probes they do not divide by node size — they divide by (matrix,
@@ -1378,3 +1379,48 @@ own baseline — ~0.06 on GSM8K, ~0.035 on MATH. A `reward` far above that means
 the frame is doing the task's work and the RL gain will not resemble Figure 6;
 a `solvable_groups` near 0 means there is still no gradient and the sweep must
 not start.
+
+### 23.4 The RL learning-rate grid is seven shared points (2026-08-02)
+
+```
+1e-06   3e-06   1e-05   3e-05   1e-04   3e-04   1e-03
+```
+
+**Both methods run all seven.** The post contradicts itself on the LoRA/FullFT
+multiplier — prose says "consistently 10x ... for both supervised learning and
+reinforcement learning", its own RL figure reads 2-4x, and the published SVG's
+x-positions read 6.4x — so offsetting the two grids by any of those would settle
+the question in the design rather than measure it. Identical points make the
+ratio two argmins on one lattice, and a disagreement with the post becomes a
+finding instead of an artefact of where the grids were centred.
+
+Four points were not enough. Four half-decade points span 1.5 decades; the
+candidate optima alone (6.25e-06 from the SVG, 2e-05 from the RL figure, 4e-05
+for LoRA, 1e-04 for GSM8K r256) span 1.2 of those, leaving no room for either
+collapse edge. Seven spans 3.0 decades and brackets every candidate with at
+least two points on each side, plus FullFT's collapse ("by ~3e-05"), LoRA's
+useful ceiling ("up to ~2e-04") and LoRA's collapse ("all ranks by 1e-03").
+
+`RL_FULL_LR_CENTRE = RL_LORA_LR_CENTRE = 3.16e-5`, which is 10**-4.5, the
+geometric middle of the span — not a prediction of where the peak is. Written
+3.16e-5 and not 3e-5 because `lr_grid` rounds the points it generates and never
+the centre it generates them from: a 3e-5 centre puts the ends at 9e-07 and
+9e-04, the same span to within 5% but reading as fitted values rather than grid
+points.
+
+**Resolution, and what it cannot tell you.** Half a decade locates an argmin to
+about ×1.8, so a *ratio* of two argmins carries roughly ×3 of uncertainty —
+enough to distinguish 10x from 2x, not 6x from 10x. If the multiplier is wanted
+as a number, refine with ±0.25-decade points around each argmin after the first
+pass (~4 arms per panel); buying that resolution everywhere would double the arm
+count to gain precision in the regions that turn out to be flat.
+
+**Knock-on changes.** `RL_OFT_SCOUT_SPAN` widened from (1e-6, 1e-4) to
+(3e-7, 3e-4) — same centre, same seven points, half a decade further out on each
+side, so no extra arms. A scout narrower than the grid it will be compared
+against cannot find an optimum the comparison would care about;
+`test_the_oft_grid_is_never_loras_grid` enforces that and caught it. Arm counts
+moved to e4 35, e4place 35, e5rl 42, and the `EXPECT_ARMS` guards in all four
+`run_e4*_8gpu.sh` wrappers moved with them — a wrapper whose guard disagrees
+with the matrix refuses to start rather than running a different experiment
+silently.

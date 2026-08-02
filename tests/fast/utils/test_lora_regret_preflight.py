@@ -64,7 +64,7 @@ class TestCheckMatrices:
         assert checks["matrix:e1"].ok and "45" in checks["matrix:e1"].detail
         assert checks["matrix:e2"].ok and "48" in checks["matrix:e2"].detail
         assert checks["matrix:e3"].ok and "35" in checks["matrix:e3"].detail
-        assert checks["matrix:e4"].ok and "20" in checks["matrix:e4"].detail
+        assert checks["matrix:e4"].ok and "35" in checks["matrix:e4"].detail
         assert checks["matrix:e5scout"].ok and "5" in checks["matrix:e5scout"].detail
         assert checks["matrix:e5"].ok and "50" in checks["matrix:e5"].detail
 
@@ -122,7 +122,7 @@ def test_every_matrix_is_expected_at_its_documented_count():
     assert set(EXPECTED_ARMS) == set(MATRICES) - {"e1long"}
     assert EXPECTED_ARMS["e1ot"] == 45
     assert EXPECTED_ARMS["e1short"] == 21
-    assert EXPECTED_ARMS["e4place"] == 20
+    assert EXPECTED_ARMS["e4place"] == 35
 
 
 def test_the_fullft_stages_agree_with_the_registrys_formula():
