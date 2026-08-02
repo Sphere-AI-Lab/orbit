@@ -34,13 +34,22 @@ PANELS: dict[str, str] = {
     "short_run_multiplier": "c8",
 }
 
-# The post's own figures, for side-by-side comparison where one exists.
-REFERENCE_FIGURES = {
-    "lr_vs_loss": "third_party/lora-without-regret/figures/sft_lr_vs_nll_by_rank.png",
-    "learning_curves": "third_party/lora-without-regret/figures/sft_training_curves.png",
-    "placement": "third_party/lora-without-regret/figures/sft_lr_vs_nll_by_type.png",
-    "rl_accuracy": "third_party/lora-without-regret/figures/rl_lr_vs_acc.png",
-}
+# Figures to compare a panel against, by panel name.
+#
+# **Empty since 2026-08-02.** These pointed at
+# `third_party/lora-without-regret/figures/`, which was a *community
+# reproduction* of the blog post -- michaelbzhu/lora-without-regret, run on
+# Qwen3-1.7B -- not the post's own output, and it was deleted for having been
+# read as the post throughout the campaign. Its four PNGs were that repository
+# author's plots.
+#
+# Left as an empty dict rather than deleted, because the consumer already
+# handles "no reference for this panel" and prints nothing: a panel with no
+# comparison is the honest state, while a `compare:` line pointing at someone
+# else's reproduction is the failure that cost this campaign a re-plan. To
+# restore the feature, put figures from the post itself here -- with a comment
+# saying where each came from.
+REFERENCE_FIGURES: dict[str, str] = {}
 
 
 def _batch_points(payload: dict) -> list[dict]:

@@ -11,7 +11,9 @@ to get right: the log-prob/token index alignment, the packed-logits layout, the
 token-weighted reduction, and the temperature bypass.
 
 Why this script exists instead of the vendored oracle (`third_party/lora-without-regret/
-sft_full.py`): that script's real flag surface is exactly `--model-id --lr --wandb-project
+sft_full.py`, a community reproduction deleted 2026-08-02 -- see the runbook's
+§22.6; the reasoning below is kept because it is why this file was written):
+that script's real flag surface was exactly `--model-id --lr --wandb-project
 --wandb-run-name --no-wandb --batch-size --gradient-accumulation-steps --num-epochs
 --output-dir --seed` (verified by reading it). There is no `--max-steps` and no `--dtype`.
 Nothing in that list stops the run after step 0 -- `--lr 0.0` alone still runs a full epoch

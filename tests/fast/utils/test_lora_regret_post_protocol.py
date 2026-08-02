@@ -1,17 +1,24 @@
-"""Running the campaign as the blog post ran it, on Qwen3-1.7B.
+"""Running a matrix on a base model other than the campaign's anchor.
 
-The campaign was built around Llama-3.1-8B, and the post's published RL results
-are Qwen3-1.7B on `qwedsacf/competition_math`. Three things have to be true at
-once before a number here is comparable to a number there, and each is a place
-where being wrong is silent rather than loud:
+**Correction, 2026-08-02.** This file was written to support switching the
+campaign to Qwen3-1.7B "to match the blog post". That was wrong: the source read
+as the post was `third_party/lora-without-regret`, a community reproduction
+(michaelbzhu) run on Qwen3-1.7B. The post itself uses **Llama-3.1-8B base on
+MATH + GSM8K** for its RL experiments and explicitly avoids Qwen, whose
+pretraining data inflates math performance and confounds what RL is measured to
+teach. The campaign's anchor was already the post's setup; the vendored
+directory is deleted.
 
-  * the model must be selectable, and selecting it must move the *shapes* as well
-    as the checkpoint -- a matrix solved for Llama's 6144-wide fused QKV and then
-    run on Qwen produces identically-named arms with the wrong adapter sizes;
-  * the OFT/LoRA capacity ladder must be re-solved, because a block size means a
-    different parameter count on every model;
-  * the data must be the post's split under the post's prompt, not the campaign's
-    MATH+GSM8K mix.
+What survives is worth keeping on its own terms, because `--model` is real
+machinery and each of these is a place where being wrong is silent:
+
+  * selecting a model must move the *shapes* as well as the checkpoint -- a
+    matrix solved for Llama's 6144-wide fused QKV and run on another model
+    produces identically-named arms with the wrong adapter sizes;
+  * the OFT/LoRA capacity ladder must be re-solved per model, because a block
+    size means a different parameter count on every set of shapes;
+  * the model must reach the wandb project and the ledger row, since arm names
+    do not carry it.
 """
 
 from __future__ import annotations
@@ -30,10 +37,9 @@ from tools.lora_regret.arms import (
 )
 from tools.lora_regret.models import get as get_model
 from tools.lora_regret.prepare_data import (
-    POST_RL_PROMPT_TEMPLATE,
-    POST_RL_TRAIN_ROWS,
-    POST_RL_VAL_END,
-    POST_RL_VAL_START,
+    COMPETITION_MATH_TRAIN_ROWS,
+    COMPETITION_MATH_VAL_END,
+    COMPETITION_MATH_VAL_START,
     prepare_competition_math,
 )
 
@@ -154,8 +160,12 @@ class TestTheOftLadderIsResolvedPerModel:
         assert all(a.matched_ratio is not None for a in arms)
 
 
-class TestThePostsOwnSplit:
-    """`prepare_competition_math` reproduces `rl_lora.py`'s data exactly."""
+class TestTheCompetitionMathSplit:
+    """A positional split needs its bounds and its source count asserted.
+
+    Not the post's protocol -- see the module docstring. The assertions are worth
+    having anyway: the split is by row index, so a changed upstream row count
+    silently changes which problems are trained on."""
 
     @staticmethod
     def _fake_source(monkeypatch, n=12_500):
@@ -165,11 +175,11 @@ class TestThePostsOwnSplit:
         monkeypatch.setattr(pd, "_load_split", lambda *_a, **_k: rows)
         return rows
 
-    def test_the_split_boundaries_are_the_posts(self, tmp_path, monkeypatch):
+    def test_the_split_boundaries_are_positional_and_fixed(self, tmp_path, monkeypatch):
         self._fake_source(monkeypatch)
         result = prepare_competition_math(tmp_path)
-        assert result.train_rows == POST_RL_TRAIN_ROWS
-        assert result.test_rows == POST_RL_VAL_END - POST_RL_VAL_START
+        assert result.train_rows == COMPETITION_MATH_TRAIN_ROWS
+        assert result.test_rows == COMPETITION_MATH_VAL_END - COMPETITION_MATH_VAL_START
 
     def test_train_and_validation_do_not_overlap(self, tmp_path, monkeypatch):
         self._fake_source(monkeypatch)
@@ -177,24 +187,6 @@ class TestThePostsOwnSplit:
         train = {r["label"] for r in _rows(result.train_path)}
         val = {r["label"] for r in _rows(result.test_path)}
         assert not (train & val)
-
-    def test_the_prompt_template_is_applied_verbatim(self, tmp_path, monkeypatch):
-        self._fake_source(monkeypatch)
-        result = prepare_competition_math(tmp_path, prompt_template=POST_RL_PROMPT_TEMPLATE)
-        first = _rows(result.train_path)[0]["prompt"]
-        assert first.endswith("Question: q0")
-        assert first.startswith("Think for a bit about the question")
-
-    def test_the_posts_doubled_backslash_is_preserved(self):
-        """Not a typo to clean up.
-
-        `third_party/lora-without-regret/boxed.prompt` really contains `\\\\boxed{}`,
-        so the published accuracies were measured while asking for a
-        double-escaped box. Normalising it would silently change the prompt and
-        break the only thing this split is for -- comparability with the post.
-        """
-        assert "\\\\boxed{}" in POST_RL_PROMPT_TEMPLATE
-        assert POST_RL_PROMPT_TEMPLATE.count("{question}") == 1
 
     def test_without_a_template_the_problem_text_is_untouched(self, tmp_path, monkeypatch):
         """The library must not mutate source text silently."""
@@ -292,70 +284,3 @@ class TestTheModelIsVisibleInTheResults:
         build = lambda m: MATRICES["e4"](m.hidden_size, m.ffn_size, m.qkv_output_size, 0, None, None)[0]
         assert build(QWEN).name == build(LLAMA).name
         assert sweep.wandb_project("e4", "qwen3-1.7b") != sweep.wandb_project("e4", "llama3.1-8b")
-
-
-class TestTheRlGridsAreCentredOnThePostsOwnMeasurement:
-    """Re-centred 2026-08-02. Each assertion pins a number the post measured.
-
-    The previous FullFT centre (1e-6) put the post-scaled optimum on the top
-    grid edge, where `analyze` refuses to quote an argmin -- so the most likely
-    outcome of running it was a refusal and a re-run of all four arms.
-    """
-
-    @staticmethod
-    def _grid(centre):
-        from tools.lora_regret.arms import lr_grid
-        return [float(f"{lr:g}") for lr in lr_grid(centre, n=4, step_decades=0.5)]
-
-    def test_the_fullft_grid_brackets_both_predictions(self):
-        """~1e-5 from scaling the post's 2e-5 by width, ~1e-6 from 8B practice.
-        A grid that contains only one of two live hypotheses is not a sweep."""
-        from tools.lora_regret.arms import RL_FULL_LR_CENTRE
-
-        grid = self._grid(RL_FULL_LR_CENTRE)
-        assert grid == [1e-06, 3.16e-06, 1e-05, 3.16e-05]
-        assert min(grid) <= 1e-6 and max(grid) > 1e-5
-
-    def test_the_post_scaled_optimum_is_no_longer_on_the_edge(self):
-        """The whole reason for the change: an argmin on a boundary is a
-        boundary value, not an optimum, and `analyze` exits 3 rather than quote
-        one."""
-        from tools.lora_regret.arms import RL_FULL_LR_CENTRE
-
-        grid = self._grid(RL_FULL_LR_CENTRE)
-        assert grid.index(1e-05) not in (0, len(grid) - 1)
-        assert self._grid(1e-6).index(1e-05) == len(grid) - 1  # what it used to be
-
-    def test_the_lora_grid_already_contained_its_prediction_so_it_did_not_move(self):
-        """The post's LoRA optima are 6e-5 / 9e-5 / 7e-5; halved for width that
-        is ~3.5e-5, with grid points either side. Moving it would have been
-        change for its own sake."""
-        from tools.lora_regret.arms import RL_LORA_LR_CENTRE
-
-        grid = self._grid(RL_LORA_LR_CENTRE)
-        assert min(grid) < 3.5e-5 < max(grid)
-
-    def test_the_ratio_between_the_centres_is_the_posts_rl_ratio_not_its_sft_one(self):
-        """C2's 10x is measured on SFT. The post's own RL runs give 3.0x (r1),
-        4.5x (r16) and 3.5x (r256), so 3.16x is the prior with evidence behind
-        it -- and it is now a consequence of where the two centres sit, not a
-        separate constant that could drift from them."""
-        from tools.lora_regret.arms import RL_FULL_LR_CENTRE, RL_LORA_LR_CENTRE
-
-        assert 3.0 <= RL_LORA_LR_CENTRE / RL_FULL_LR_CENTRE <= 4.5
-
-    def test_both_cells_keep_the_same_number_of_points(self):
-        """C5 is a comparison. An argmin found on 5 points and one found on 4
-        are not comparable, so neither cell may be quietly finer."""
-        from tools.lora_regret.arms import RL_FULL_LR_CENTRE, RL_LORA_LR_CENTRE
-
-        assert len(self._grid(RL_FULL_LR_CENTRE)) == len(self._grid(RL_LORA_LR_CENTRE))
-
-    def test_the_arm_count_is_unchanged_so_the_launch_scripts_still_hold(self):
-        """`scripts/lora_regret/run_*_8gpu.sh` assert EXPECT_ARMS and refuse to
-        start on a mismatch. Re-centring must move learning rates, not counts."""
-        for matrix, expected in (("e4", 20), ("e4place", 20)):
-            arms = MATRICES[matrix](LLAMA.hidden_size, LLAMA.ffn_size, LLAMA.qkv_output_size,
-                                    0, None, None)
-            assert len(arms) == expected
-            assert len([a for a in arms if a.method == "full"]) == 4

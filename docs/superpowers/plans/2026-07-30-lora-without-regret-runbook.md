@@ -618,34 +618,11 @@ GPUS_PER_NODE=8 python -m tools.lora_regret.sweep --matrix e4 \
   --hidden-size 4096 --ffn-size 14336 --num-layers 32 --only '^full' --results results/e4_full.jsonl
 ```
 
-The grid is **half-decade** here, not E1's 0.3: C5's second half is about the
-*width* of the performant band, which needs coverage more than resolution.
-
-**Both cells were re-centred on 2026-08-02** against the post's own RL sweep,
-which its wandb export records and nothing in the campaign had read:
-
-```
-FullFT   1e-6, 3.16e-6, 1e-5, 3.16e-5      (centre moved up half a decade)
-LoRA     3.16e-6, 1e-5, 3.16e-5, 1e-4      (unchanged)
-```
-
-The post measures a FullFT optimum of **2e-5** on Qwen3-1.7B. Scaling by width
-(hidden 2048 → 4096, LR ~ 1/width) puts Llama-3.1-8B near **1e-5**, while 8B
-policy-gradient practice sits at **1e-6 – 5e-6**; the new centre 10^−5.5 is their
-geometric mean and the grid holds a point on each. The old grid
-(3.16e-7 … 1e-5) put the post-scaled optimum on its **top edge**, and `analyze`
-exits 3 on an edge argmin — so its most likely outcome was a refusal and a re-run
-of all four arms. Batch size no longer enters the comparison: since §22.7 the
-campaign and the post both train on 32 prompts × 8 samples = 256 per step.
-
-LoRA did not move because it did not need to: the post's optima are 6e-5 (r1),
-9e-5 (r16) and 7e-5 (r256), so ~3.5e-5 for Llama, which already sits inside its
-grid with points either side. The consequence is that the ratio built into the
-two centres falls from 10x to **√10 = 3.16x** — and the post's own RL runs
-measure 3.0x, 4.5x and 3.5x. **C2's 10x is an SFT rule**; carrying it into policy
-gradient was always a prior, and the post's data says it was the wrong one. If
-the measured RL argmins disagree with 3.16x as well, that is a finding, not a
-grid error.
+The grid is **half-decade** here, not E1's 0.3: the post gives a LR multiplier
+for SFT and none for policy gradient, and C5's second half is about the *width*
+of the performant band, which needs coverage more than resolution. LoRA is still
+centred a decade above FullFT (1e-5 against 1e-6) as a prior carried over from
+C2 — if the RL argmins disagree, that is a finding, not a grid error.
 
 `accuracy` in the ledger is the mean of the per-dataset scores at the highest
 rollout id, with `accuracy_per_dataset` alongside it. With `--rm-type boxed_math`
@@ -905,9 +882,9 @@ python -m tools.lora_regret.plot --analysis results/analysis.json --out results/
 ```
 
 One PNG per panel the payload supports, and nothing for the panels it does not:
-an empty axes reads as "measured, and flat". Each line printed names the post's
-own figure to compare against, where one exists
-(`third_party/lora-without-regret/figures/`). matplotlib is an extra —
+an empty axes reads as "measured, and flat". `REFERENCE_FIGURES` is **empty**
+since 2026-08-02 — it pointed into the deleted community reproduction (§22.6),
+whose plots were not the post's — so no `compare:` line is printed. matplotlib is an extra —
 `uv sync --extra plots` — and is imported lazily, so `plot.py` stays importable
 without it.
 
@@ -1079,33 +1056,17 @@ project is about RL". That removes nine matrices — `sft82`, `e1`, `e1long`,
 and C8, which are SFT claims. It also removed the only "ours" matrix, so `e5rl`
 was added to carry the matched-parameter OFT contribution under policy gradient.
 
-Three matrices remain. **64 arms, ~94 GPU-hours**, against 22,124 h for the
+Three matrices remain. **64 arms, ~807 GPU-hours**, against 22,124 h for the
 original design.
 
-| matrix | what it decides | arms | cost | was (500 rollouts) |
-|---|---|---|---|---|
-| `e4` | C5 — RL parity at low rank. **This is the blog post's RL experiment.** FullFT + LoRA r1/r16/r256, plus an OFT cell | 20 | **~30 h** | ~241 h |
-| `e4place` | C4 under policy gradient — attention-only vs MLP-only at matched parameters | 20 | **~28 h** | ~246 h |
-| `e5rl` | ours — does matched-parameter OFT *track* LoRA as capacity varies | 24 | **~36 h** | ~319 h |
+| matrix | what it decides | arms | cost |
+|---|---|---|---|
+| `e4` | C5 — RL parity at low rank. **This is the blog post's RL experiment.** FullFT + LoRA r1/r16/r256, plus an OFT cell | 20 | ~241 h |
+| `e4place` | C4 under policy gradient — attention-only vs MLP-only at matched parameters | 20 | ~246 h |
+| `e5rl` | ours — does matched-parameter OFT *track* LoRA as capacity varies | 24 | ~319 h |
 
 `e4` alone reproduces the post's RL result. `e4place` and `e5rl` go beyond it:
 the post studies placement for SFT only, and never studies OFT.
-
-**Where the new numbers come from, and why they are upper bounds.** The RL
-launcher's schedule defaults became the post's own on 2026-08-02 —
-`NUM_ROLLOUT` 500 → **50**, `N_SAMPLES_PER_PROMPT` 32 → **8** (§22.7). The costs
-above are the same probe measurements through the same estimator
-(`overhead + steady × rollouts + extra saves`, `probe.py`), re-evaluated at 50
-rollouts; run at 500 the identical arithmetic reproduces the previous 807 h to
-within 2%, which is the check that these are a re-costing rather than a new
-guess.
-
-Two things keep them **conservative**. Every `steady` was measured at 32 samples
-per prompt against the new default of 8, so each rollout now generates a quarter
-as many sequences — the true numbers should come in under these. And 8 of the 64
-arms have no probe of their own (`e4place`'s FullFT cell, `e5rl`'s 12 LoRA
-partners) and borrow `e4`'s measurement of the same method; that substitution
-was already in the 807 h figure. Per arm this is ~1.5 h, against ~12.6 h before.
 
 ### Measured, not estimated
 
@@ -1113,11 +1074,6 @@ Every one of these numbers came off an 8xH100 node between 2026-07-31 and
 2026-08-02, three rollouts per configuration. `steady` is the cheapest rollout
 after the first (see §22.3); where a configuration was probed at two learning
 rates, the lower of the two is quoted and the spread is shown below.
-
-**These were measured at 32 samples per prompt.** The default is now 8, so each
-rollout generates a quarter as many sequences and every `steady` below is an
-upper bound on what the same configuration now costs. Re-probe before quoting
-any of them as a current number.
 
 | method | placement | capacity | steady | note |
 |---|---|---|---|---|
@@ -1163,12 +1119,12 @@ oftscout-b512-mlp     lr=1.0e-06   89s  |  lr=2.2e-05   83s
 ### 22.1 Order of execution — the dependency is enforced in code
 
 ```
-phase 1   e4 + e4place    40 arms    ~58 h    (independent of each other)
+phase 1   e4 + e4place    40 arms   ~488 h    (independent of each other)
              |
              |  e4's `oftscout` arms ARE the RL OFT scout: they are built from
              |  RL_OFT_SCOUT_SPAN for exactly this purpose. Recover the argmin.
              v
-phase 2   e5rl            24 arms    ~36 h
+phase 2   e5rl            24 arms   ~319 h
 ```
 
 `e5rl_arms` **raises** without an `oft_lr_centre` rather than defaulting, and
@@ -1246,28 +1202,19 @@ three-rollout probe, dropping the first leaves two — and a median over two IS
 their mean. The probe's last rollout also writes the run's checkpoint, so that
 cost landed in the per-rollout figure: the FullFT arm's `[308, 59, 677]` gave
 `median(59, 677) = 368`, and the campaign estimate came out at 931 h against a
-true ~453 h. Every OFT row was distorted the same way. (Both of those are
-500-rollout numbers, from before §22.7 — the bug is what they illustrate, not
-the cost. Today's figures are in §22's table.)
+true ~453 h. Every OFT row was distorted the same way.
 
-Checkpoints are not thereby ignored. They are priced explicitly, and at the
-current defaults they price to **nothing**: `SAVE_INTERVAL` is 50 and an RL arm
-is now 50 rollouts, so it writes exactly one checkpoint — the one the probe
-already paid for inside `overhead`. `extra_saves` is 0. It was 9 additional
-writes when the RL default was 500, worth ~1.5 h per FullFT arm at the measured
-616.5s for its 15 GB. The SFT stages still run thousands of rollouts and still
-pay, which is why this stayed a computation rather than becoming a constant.
+Checkpoints are not thereby ignored. They are priced explicitly: `SAVE_INTERVAL`
+is 50, so a 500-rollout arm writes 10 while the probe wrote 1, and the extra 9
+are added at the measured rate (616.5s for FullFT's 15 GB, negligible for
+adapters).
 
 ### 22.4 What is still unverified
 
-Everything above was measured at **3 rollouts, and at 32 samples per prompt**.
-An arm is now 50 rollouts at 8 samples, so the gap is much smaller than it was
-against 500 — but it is a gap in both directions: the probe never ran a full arm,
-and it ran the rollouts it did run 4x heavier than they now are. Untested by
+Everything above was measured at **3 rollouts, not 500**. Untested by
 construction:
 
-- periodic checkpointing at `SAVE_INTERVAL=50` rather than one write at the end
-  (now moot for RL, which writes exactly one either way);
+- periodic checkpointing at `SAVE_INTERVAL=50` rather than one write at the end;
 - LR-schedule effects over a full arm;
 - slow memory growth. FullFT has ~55 GB of headroom at TP=4, which is the main
   thing that would have worried me, but that is an argument and not an
@@ -1287,104 +1234,47 @@ were open when the cut was made: **SFT FullFT OOMs at DP=4** (72.75 GB used,
 8.79 GB short — `models.py`'s `HEADROOM_GB = 20.0` is too optimistic for
 Llama-3.1-8B), and `e5scout` costs 683 h to locate one learning-rate decade
 because its five arms run at full length.
-### 22.6 Running it as the post ran it — Qwen3-1.7B (available, not decided)
+### 22.6 CORRECTION — the vendored "post" was a community reproduction
 
-The campaign anchors on Llama-3.1-8B base / MATH+GSM8K / 500 rollouts × 32
-samples. The post's published RL numbers are **Qwen3-1.7B / competition_math /
-50 GRPO steps × 8 rollouts**, and its own wandb export records what that cost:
-**59 runs, 67 GPU-hours, median 0.92 h each on one H100**. The plumbing to run
-the matrices that way now exists. Whether to use it is still open.
+**Retracted 2026-08-02, the same day it was written.** This section said the
+campaign could be run "as the post ran it" by switching to **Qwen3-1.7B** on
+`qwedsacf/competition_math`, at 50 GRPO steps with 8 rollouts per prompt, and
+priced that at ~1 GPU-hour per arm. Every one of those numbers came from
+`third_party/lora-without-regret/` — **michaelbzhu's community reproduction**,
+run on Qwen3-1.7B — which was vendored here as an oracle and read as the blog
+post itself.
 
-```bash
-# the post's split, under the post's own prompt file
-python -m tools.lora_regret.prepare_data --dataset post_rl --out-dir "$DATA_DIR"
+The post ([thinkingmachines.ai/blog/lora](https://thinkingmachines.ai/blog/lora/))
+says the opposite where it matters:
 
-# any matrix, on any registered model
-GPUS_PER_NODE=8 python -m tools.lora_regret.sweep --model qwen3-1.7b \
-  --matrix e4 --results results/e4_qwen.jsonl
-```
+| | vendored reproduction | the post |
+|---|---|---|
+| RL base model | Qwen3-1.7B | **Llama-3.1-8B base** |
+| why | — | Qwen "pretrained on data that improves their math performance", so RL's contribution is unmeasurable |
+| RL data | competition_math rows 0–8500 | **MATH and GSM8K** (DeepMath-103K at larger scale) |
+| schedule | 50 steps x 8 samples | 32 samples/problem; step count unpublished for MATH/GSM8K |
+| LoRA/FullFT LR | 3.0–4.5x measured | "consistently **10x** ... for both supervised learning and reinforcement learning" |
 
-`--model` moves the **shapes** along with the checkpoint, which is the part
-worth knowing. Before it existed the matrix builders took `hidden` and `ffn`
-and defaulted the fused-QKV width to Llama's 6144; a non-Llama model would have
-got its own hidden/FFN and Llama's QKV, which mis-solves every matched-parameter
-block size and rank **without changing a single arm name**. The width is now
-positional and has no default at that layer, so the mistake is a `TypeError`
-rather than a wrong experiment. `MIN_GPUS_FULLFT` comes out as 1 for
-Qwen3-1.7B — FullFT fits on one card.
+**The campaign's original anchor was already the post's setup**: Llama-3.1-8B
+base, MATH + GSM8K, 32 samples per problem, LoRA centred a decade above FullFT.
+The experiments plan recorded it correctly all along. Three changes made on the
+reproduction's authority — the 50/8 schedule, its re-costing, and re-centring the
+FullFT grid on 3.16e-6 — are reverted; `third_party/lora-without-regret/` is
+deleted, and `REFERENCE_FIGURES` in `plot.py` is empty because its four PNGs
+were that repository's plots, not the post's.
 
-E5-RL's ladder is re-solved per model rather than carried over, since a block
-size is not a capacity: block 512 pairs with LoRA **r98 on Llama-3.1-8B and r96
-on Qwen3-1.7B**. `e5rl_matched_ladder` raises if any rung's realized ratio
-leaves ±5% — a 20% capacity difference read as a method difference is exactly
-what that matrix exists to rule out. Both models clear it (worst rung 0.969).
+**What `--model` is still for.** The flag and the per-model OFT ladder stay: they
+are correct machinery, tested, and neutral to the Llama campaign. A block size is
+not a capacity, so block 512 pairs with LoRA r98 on Llama-3.1-8B and r96 on
+Qwen3-1.7B, and `e5rl_matched_ladder` raises if any rung's realized ratio leaves
+±5%. A non-default `--model` also suffixes the wandb project and is recorded in
+every ledger row (§4.5), because arm names do not carry the model. None of that
+is a reason to run Qwen — the post's reason not to still stands.
 
-Three things are **not** matched by the above and have to be set or disclosed:
-`NUM_ROLLOUT` 500→50 and `N_SAMPLES_PER_PROMPT` 32→8 in the launcher; the
-grader (`grade_answer_verl` here against the post's `hendrycks/math is_equiv`),
-so accuracies are not comparable to the third decimal; and Qwen3-1.7B is a
-post-trained thinking model where the campaign's Llama arm is a base model. The
-post applies Qwen's default chat template with `add_generation_prompt=True` and
-never passes `enable_thinking=False`, so it generates in thinking mode capped at
-1024 new tokens.
-
-`--dataset post_rl` writes `competition_math_{train,val}.jsonl` from rows
-[0:7500] and [7500:8500] and applies `boxed.prompt` verbatim — **including its
-doubled backslash** (`\\boxed{}`, not `\boxed{}`). That is what the published
-accuracies were measured under; normalising it changes the prompt and forfeits
-the comparability the split exists for. Bare `--dataset competition_math` writes
-the same split with the problem text untouched.
-
-
-### 22.7 The RL schedule defaults are now the post's (2026-08-02)
-
-`examples/high_precision/run-llama3_1-8b-bf16-rl-math-gsm8k.sh`:
-
-```
-NUM_ROLLOUT             500 -> 50     the post's 50 GRPO steps
-N_SAMPLES_PER_PROMPT     32 -> 8      the post's group size
-ROLLOUT_BATCH_SIZE       32           unchanged; already the post's 32 prompts/step
-GLOBAL_BATCH_SIZE       256           unchanged, and now load-bearing
-```
-
-Both old values were guesses standing in for numbers the post states. Its README
-gives 50 steps / 32 prompts / 8 rollouts, and its wandb export records
-`n_grpo_steps=50 group_size=8` on all 68 runs.
-
-**The change makes the launcher on-policy, which it was not.** Megatron derives
-`train_iters = num_rollout · rollout_batch_size · n_samples_per_prompt /
-global_batch_size` in `orbit/backends/megatron_utils/model.py`, so the four
-schedule numbers together decide how many optimizer updates each rollout takes:
-
-```
-before   32 prompts x 32 samples / 256  =  4 updates per rollout
-after    32 prompts x  8 samples / 256  =  1 update  per rollout
-```
-
-The post performs "a single optimizer update per GRPO step". Four updates on one
-batch of rollouts is off-policy after the first, and nothing in the launcher's
-text said so. `GLOBAL_BATCH_SIZE` is therefore not an independent knob any more —
-changing any of the four without re-checking that quotient changes which
-algorithm runs. `test_the_rl_default_is_exactly_one_optimizer_update_per_rollout`
-pins it.
-
-**Cost.** `probe.py`'s `RL_LAUNCHER_ROLLOUTS` follows to 50, so the estimator no
-longer bills every RL arm 10x. The campaign goes from **~807 h to ~94 h** over
-all 64 arms (§22's table); the reduction is 8.6x rather than 10x because per-arm
-startup does not scale with the rollout count. Checkpointing falls out entirely:
-at `SAVE_INTERVAL=50` a 50-rollout arm writes exactly one checkpoint, which the
-probe already paid for, so `extra_saves` is 0 for RL where it was 9.
-
-**Two totals, and they are not the same total.** `probe report` prints **37 h**
-on the current ledger (down from 322 h) while §22's table says ~94 h. The report
-sums only rows it can match to a probe and says so — 23 of them read `not run`,
-including `e4place/full` and `e5rl/lora` — so it is a lower bound over a subset.
-§22's table covers all 64 arms, substituting `e4`'s measurement of the same
-method for the 8 arms that were never probed. Quote 94 h for planning; the
-report's number is for checking which paths have actually been exercised.
-
-**This changes the Llama campaign too**, not only the Qwen3-1.7B reproduction —
-`e4`, `e4place` and `e5rl` all read these defaults. An arm that should run
-longer must now say so explicitly (`NUM_ROLLOUT=500 ...`), which is the right
-way round: the reproduction protocol is the default and a departure from it is
-visible in the command.
+**What reproduction means here, precisely.** Running §22.1's subset reproduces
+the post's RL *claims* — C5, "LoRA matches FullFT under policy gradient even at
+rank 1, with a wider band of performant learning rates" — on the post's own model
+and data. It cannot reproduce its *figures*: the post does not publish the
+MATH/GSM8K step count, batch size, or learning-rate grid, so any accuracy
+reported here is this setup's number, not a replication of a published one. Say
+so when reporting it.

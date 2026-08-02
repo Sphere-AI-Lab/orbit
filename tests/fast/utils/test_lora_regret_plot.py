@@ -174,24 +174,29 @@ def test_cli_reads_a_json_file(tmp_path):
     assert list(out.glob("*.png"))
 
 
-def test_reference_figures_are_vendored_for_comparison():
-    """The post's own figures are checked in so the comparison is visual rather
-    than asserted. If they move, the comparison silently stops happening."""
+def test_no_reference_figure_points_at_a_community_reproduction():
+    """`third_party/lora-without-regret` was michaelbzhu's reproduction on
+    Qwen3-1.7B, not the blog post's own output, and reading it as the post
+    mis-set the RL schedule and the FullFT learning-rate grid before anyone
+    noticed. It is deleted; nothing may point back into it."""
+    from tools.lora_regret.plot import REFERENCE_FIGURES
+
     repo_root = Path(__file__).resolve().parents[3]
-    figures = repo_root / "third_party/lora-without-regret/figures"
-    assert (figures / "sft_lr_vs_nll_by_rank.png").is_file()
-    assert (figures / "sft_training_curves.png").is_file()
+    assert not (repo_root / "third_party" / "lora-without-regret").exists()
+    assert not any("third_party" in path for path in REFERENCE_FIGURES.values())
 
 
 def test_every_reference_figure_named_by_a_panel_exists():
     """A stale REFERENCE_FIGURES entry prints a `compare:` path that is not
-    there, which is worse than printing nothing."""
+    there, which is worse than printing nothing. Vacuous while the dict is
+    empty, and that is the point: it is what makes refilling it safe."""
     from tools.lora_regret.plot import REFERENCE_FIGURES
 
     repo_root = Path(__file__).resolve().parents[3]
     for panel, relative in REFERENCE_FIGURES.items():
         assert panel in PANELS, panel
         assert (repo_root / relative).is_file(), relative
+
 
 
 @pytest.mark.parametrize("panel", sorted(PANELS))

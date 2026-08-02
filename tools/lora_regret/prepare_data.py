@@ -59,32 +59,23 @@ MATH_CONFIGS = (
 ASSISTANT_HEADER_LITERAL = "<|start_header_id|>assistant<|end_header_id|>"
 EOT_LITERAL = "<|eot_id|>"
 
-# The reproduction protocol: exactly what the post's own RL scripts trained on.
+# `qwedsacf/competition_math`, split positionally: rows [0:7500] train,
+# [7500:8500] validation.
 #
-# `rl_lora.py` / `rl_full.py` take `qwedsacf/competition_math`, use rows [0:7500]
-# for training and [7500:8500] for validation, and grade the boxed answer. These
-# are the same numbers as the campaign's MATH split by coincidence of size only --
-# the campaign uses EleutherAI/hendrycks_math with its official train/test split
-# and concatenates GSM8K, which is a different set of problems.
+# **This is not the blog post's protocol**, and it was labelled as such here from
+# 2026-08-02 until the post itself was read. It is the split used by
+# michaelbzhu/lora-without-regret, a *community reproduction* that was vendored
+# under `third_party/` and mistaken for the post's own code; the prompt template
+# that went with it has been removed along with that directory.
+#
+# The post uses **MATH + GSM8K on Llama-3.1-8B base** -- `prepare_math` and
+# `prepare_gsm8k` below, which is what the campaign's `e4` already reads. This
+# split is kept because it is a real, usable dataset path with its assertions
+# now in place, not because anything in the campaign wants it.
 COMPETITION_MATH_EXPECTED_ROWS = 12_500
-POST_RL_TRAIN_ROWS = 7_500
-POST_RL_VAL_START = 7_500
-POST_RL_VAL_END = 8_500
-
-# `third_party/lora-without-regret/boxed.prompt`, byte-for-byte after the
-# `.strip()` that `rl_lora.py` applies when it reads the file. This is the exact
-# string the published accuracies were measured under.
-#
-# The doubled backslash is faithfully reproduced, not a typo introduced here: the
-# post's file really contains `\\boxed{}` rather than `\boxed{}`, so its policy
-# was asked for a double-escaped box. "Fixing" it would change the prompt and
-# make the numbers no longer comparable to the post's -- which is the entire
-# point of running this split. Change it deliberately or not at all.
-POST_RL_PROMPT_TEMPLATE = (
-    "Think for a bit about the question and then put your final answer as a "
-    "number inside \\\\boxed{}. (i.e. \\\\boxed{answer here})\n"
-    "Question: {question}"
-)
+COMPETITION_MATH_TRAIN_ROWS = 7_500
+COMPETITION_MATH_VAL_START = 7_500
+COMPETITION_MATH_VAL_END = 8_500
 
 # Appended to RL prompts so `--rm-type boxed_math` has something to extract.
 # rm_hub strips \boxed{...} from the response before grading; a Llama-3.1 *base*
@@ -400,14 +391,14 @@ def prepare_no_robots(out_dir: Path, n_train: int = 6400, n_test: int = 100) -> 
 
 def prepare_competition_math(
     out_dir: Path,
-    n_train: int = POST_RL_TRAIN_ROWS,
-    val_start: int = POST_RL_VAL_START,
-    val_end: int = POST_RL_VAL_END,
+    n_train: int = COMPETITION_MATH_TRAIN_ROWS,
+    val_start: int = COMPETITION_MATH_VAL_START,
+    val_end: int = COMPETITION_MATH_VAL_END,
     *,
     prompt_template: str | None = None,
     expected_source_rows: int | None = COMPETITION_MATH_EXPECTED_ROWS,
 ) -> PreparedDataset:
-    """Write competition_math train/val JSONL: the post's own RL split.
+    """Write competition_math train/val JSONL.
 
     Rows whose solution has no \\boxed{...} answer are dropped and reported as
     `filtered_rows`, since the math reward function cannot grade them. The
@@ -415,12 +406,10 @@ def prepare_competition_math(
     same contract `prepare_math` uses, and the reason a few unusable rows do not
     block the rest.
 
-    `prompt_template` wraps each problem. Pass `POST_RL_PROMPT_TEMPLATE` (what the
-    CLI does) to reproduce the post exactly; pass None to keep the bare problem
-    text. It is a parameter rather than a constant applied unconditionally because
-    the library must not mutate source text silently -- the same split is the
-    right input for a differently-prompted experiment, and a hidden instruction
-    would be invisible in the resulting JSONL's provenance.
+    `prompt_template` wraps each problem; None keeps the bare problem text, which
+    is the default. It is a parameter rather than a constant applied
+    unconditionally because the library must not mutate source text silently -- a
+    hidden instruction would be invisible in the resulting JSONL's provenance.
 
     Returns a `PreparedDataset`; `test_path` is the validation split.
     """
@@ -863,7 +852,6 @@ def main() -> None:
             "gsm8k",
             "rl_mix",
             "campaign",
-            "post_rl",
         ],
         default="both",
     )
@@ -883,16 +871,8 @@ def main() -> None:
         train, test = prepare_no_robots(args.out_dir)
         print(f"no_robots: {train} {test}")
     summaries = []
-    if args.dataset in ("competition_math", "both", "post_rl"):
-        # `post_rl` is the reproduction protocol and gets the post's own prompt
-        # template; the bare `competition_math` target keeps the unmodified
-        # problem text, so the two targets are not the same data under one name.
-        summaries.append(
-            prepare_competition_math(
-                args.out_dir,
-                prompt_template=POST_RL_PROMPT_TEMPLATE if args.dataset == "post_rl" else None,
-            )
-        )
+    if args.dataset in ("competition_math", "both"):
+        summaries.append(prepare_competition_math(args.out_dir))
     if args.dataset == "llama3_sample":
         # Not part of "both": this regenerates the tiny (12-row) parity fixture,
         # e.g. `--out-dir tests/fast/fixtures/lora_regret`, not a training split.
