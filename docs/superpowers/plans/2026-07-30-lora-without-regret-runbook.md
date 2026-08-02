@@ -1056,12 +1056,23 @@ original design.
 `e4` alone reproduces the post's RL result. `e4place` and `e5rl` go beyond it:
 the post studies placement for SFT only, and never studies OFT.
 
+> **The RL launcher's schedule defaults changed on 2026-08-02** to the post's
+> own protocol — `NUM_ROLLOUT` 500 → **50**, `N_SAMPLES_PER_PROMPT` 32 → **8**,
+> `ROLLOUT_BATCH_SIZE` unchanged at 32. The cost figures in the table above and
+> the `steady` times below were measured under the old values and are now
+> **upper bounds**; see §22.7.
+
 ### Measured, not estimated
 
 Every one of these numbers came off an 8xH100 node between 2026-07-31 and
 2026-08-02, three rollouts per configuration. `steady` is the cheapest rollout
 after the first (see §22.3); where a configuration was probed at two learning
 rates, the lower of the two is quoted and the spread is shown below.
+
+**These were measured at 32 samples per prompt.** The default is now 8, so each
+rollout generates a quarter as many sequences and every `steady` below is an
+upper bound on what the same configuration now costs. Re-probe before quoting
+any of them as a current number.
 
 | method | placement | capacity | steady | note |
 |---|---|---|---|---|
@@ -1241,3 +1252,50 @@ accuracies were measured under; normalising it changes the prompt and forfeits
 the comparability the split exists for. Bare `--dataset competition_math` writes
 the same split with the problem text untouched.
 
+
+### 22.7 The RL schedule defaults are now the post's (2026-08-02)
+
+`examples/high_precision/run-llama3_1-8b-bf16-rl-math-gsm8k.sh`:
+
+```
+NUM_ROLLOUT             500 -> 50     the post's 50 GRPO steps
+N_SAMPLES_PER_PROMPT     32 -> 8      the post's group size
+ROLLOUT_BATCH_SIZE       32           unchanged; already the post's 32 prompts/step
+GLOBAL_BATCH_SIZE       256           unchanged, and now load-bearing
+```
+
+Both old values were guesses standing in for numbers the post states. Its README
+gives 50 steps / 32 prompts / 8 rollouts, and its wandb export records
+`n_grpo_steps=50 group_size=8` on all 68 runs.
+
+**The change makes the launcher on-policy, which it was not.** Megatron derives
+`train_iters = num_rollout · rollout_batch_size · n_samples_per_prompt /
+global_batch_size` in `orbit/backends/megatron_utils/model.py`, so the four
+schedule numbers together decide how many optimizer updates each rollout takes:
+
+```
+before   32 prompts x 32 samples / 256  =  4 updates per rollout
+after    32 prompts x  8 samples / 256  =  1 update  per rollout
+```
+
+The post performs "a single optimizer update per GRPO step". Four updates on one
+batch of rollouts is off-policy after the first, and nothing in the launcher's
+text said so. `GLOBAL_BATCH_SIZE` is therefore not an independent knob any more —
+changing any of the four without re-checking that quotient changes which
+algorithm runs. `test_the_rl_default_is_exactly_one_optimizer_update_per_rollout`
+pins it.
+
+**Cost.** `probe.py`'s `RL_LAUNCHER_ROLLOUTS` follows to 50, so the estimator no
+longer bills every RL arm 10x. On the existing probe ledger the campaign estimate
+drops from **322 h to 37 h** — 8.7x rather than 10x, because per-arm startup does
+not scale with the rollout count. That figure is still a lower bound over the
+measured subset *and* still built from `steady` times measured at 32 samples per
+prompt, so a re-probe should land under it. Checkpointing also falls out: at
+`SAVE_INTERVAL=50` a 50-rollout arm writes exactly one checkpoint, which the
+probe already paid for, so `extra_saves` is now 0 for RL (it was 9).
+
+**This changes the Llama campaign too**, not only the Qwen3-1.7B reproduction —
+`e4`, `e4place` and `e5rl` all read these defaults. An arm that should run
+longer must now say so explicitly (`NUM_ROLLOUT=500 ...`), which is the right
+way round: the reproduction protocol is the default and a departure from it is
+visible in the command.

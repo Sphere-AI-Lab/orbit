@@ -6,6 +6,7 @@ that would silently change what C5 measures, rather than the launcher's
 cosmetics.
 """
 
+import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -41,12 +42,43 @@ def test_rl_launcher_drives_train_py_not_train_async():
     assert not any("train_async.py" in line for line in code)
 
 
-def test_rl_launcher_uses_thirty_two_samples_per_problem():
-    """The post's setting. It is also what makes the GRPO-style baseline a
-    per-problem mean rather than noise."""
+def test_rl_launcher_runs_the_posts_own_grpo_protocol():
+    """50 steps, 32 prompts per step, 8 rollouts per prompt.
+
+    Not three independent preferences: these are the values
+    `third_party/lora-without-regret/README.md` states and its wandb export
+    records (`n_grpo_steps=50`, `group_size=8` on all 68 runs). They were 500 and
+    32, which made an arm ~40x the generation of the one whose published
+    accuracies it is compared against.
+    """
     content = _text()
-    assert "N_SAMPLES_PER_PROMPT=${N_SAMPLES_PER_PROMPT:-32}" in content
+    assert "NUM_ROLLOUT=${NUM_ROLLOUT:-50}" in content
+    assert "ROLLOUT_BATCH_SIZE=${ROLLOUT_BATCH_SIZE:-32}" in content
+    assert "N_SAMPLES_PER_PROMPT=${N_SAMPLES_PER_PROMPT:-8}" in content
     assert '--n-samples-per-prompt "${N_SAMPLES_PER_PROMPT}"' in content
+
+
+def test_the_rl_default_is_exactly_one_optimizer_update_per_rollout():
+    """On-policy, which is a property of a quotient rather than of a flag.
+
+    Megatron derives `train_iters = num_rollout * rollout_batch_size *
+    n_samples_per_prompt // global_batch_size`, so the three schedule defaults
+    and `GLOBAL_BATCH_SIZE` together decide how many updates each rollout takes.
+    The post performs a single update per GRPO step; at the previous 32
+    samples/prompt this launcher took 4, and nothing in its text said so.
+    """
+    content = _text()
+    values = {}
+    for name in ("NUM_ROLLOUT", "ROLLOUT_BATCH_SIZE", "N_SAMPLES_PER_PROMPT", "GLOBAL_BATCH_SIZE"):
+        match = re.search(rf"^{name}=\$\{{{name}:-(\d+)\}}", content, re.MULTILINE)
+        assert match, f"{name} default not found"
+        values[name] = int(match.group(1))
+
+    samples_per_rollout = values["ROLLOUT_BATCH_SIZE"] * values["N_SAMPLES_PER_PROMPT"]
+    assert samples_per_rollout % values["GLOBAL_BATCH_SIZE"] == 0
+    assert samples_per_rollout // values["GLOBAL_BATCH_SIZE"] == 1
+    # ...and the arm is then exactly the post's 50 GRPO steps.
+    assert values["NUM_ROLLOUT"] == 50
 
 
 def test_rl_launcher_uses_grpo_centering_with_no_kl_penalty_by_default():

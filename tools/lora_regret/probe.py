@@ -67,12 +67,13 @@ PROBE_OFT_CENTRE = 1e-4
 #   * e1ot     -- full_epoch, so the launcher derives ceil(rows / batch).
 #   * e1/e2/e3 -- the operator exports NUM_ROLLOUT=2000 (runbook section 8);
 #                 nothing in the code says 2000, so nothing can derive it.
-#   * e4/e4place -- the RL launcher's own default of 500.
+#   * e4/e4place -- the RL launcher's own default, now 50 (the post's GRPO step
+#                   count) rather than the 500 it guessed at before.
 #   * e5/e5scout -- Tulu3 SFT under the same runbook convention as e1.
 OPENTHOUGHTS3_TRAIN_ROWS = 10_000
 ROLLOUT_BATCH_SIZE = 32
 SFT_SWEEP_ROLLOUTS = 2000
-RL_LAUNCHER_ROLLOUTS = 500
+RL_LAUNCHER_ROLLOUTS = 50
 FULL_RUN_ROLLOUTS = {
     "e1": SFT_SWEEP_ROLLOUTS,
     "e1ot": (OPENTHOUGHTS3_TRAIN_ROWS + ROLLOUT_BATCH_SIZE - 1) // ROLLOUT_BATCH_SIZE,
@@ -314,10 +315,11 @@ def extra_saves(full_rollouts: int, probe_rollouts: int) -> int:
     estimate adds once. Only the ADDITIONAL writes a longer arm performs are
     charged on top; counting all of them would bill the first one twice.
 
-    At SAVE_INTERVAL=50 a 500-rollout arm writes 10 and the probe wrote 1, so 9
-    are added. For FullFT at ~616s each that is ~1.5h per arm -- small against
-    the 8.2h of rollouts, but not nothing, and it is the entire reason the
-    checkpoint is removed from `steady` rather than left to inflate it.
+    At SAVE_INTERVAL=50 a 50-rollout RL arm writes exactly 1 and the probe
+    already wrote 1, so **nothing is added** -- the whole checkpoint cost is
+    inside `overhead`. It was 9 extra writes (~1.5h per FullFT arm) when the RL
+    default was 500. The SFT stages still run thousands of rollouts and still pay
+    for the extra writes, which is why this is computed rather than dropped.
     """
     real = full_rollouts // SAVE_INTERVAL
     already_paid = 1 if probe_rollouts else 0

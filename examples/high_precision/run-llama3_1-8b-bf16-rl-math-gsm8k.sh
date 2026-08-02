@@ -62,11 +62,24 @@ MODEL_ARGS_FILE="${MODEL_ARGS_FILE:-${ORBIT_ROOT}/orbit_plugins/model_args/llama
 source "${MODEL_ARGS_FILE}"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
-NUM_ROLLOUT=${NUM_ROLLOUT:-500}
+# The post's own RL protocol: 50 GRPO steps, 32 prompts sampled per step, 8
+# rollouts per prompt (`third_party/lora-without-regret/README.md`, and the
+# `n_grpo_steps=50 group_size=8` recorded on all 68 runs of its wandb export).
+#
+# These were 500 and 32. Both were guesses standing in for a number the post
+# does state, and together they made an arm ~40x more generation than the one
+# whose accuracies we want to compare against.
+NUM_ROLLOUT=${NUM_ROLLOUT:-50}
 ROLLOUT_BATCH_SIZE=${ROLLOUT_BATCH_SIZE:-32}
-# 32 samples per problem: the post's setting, and what makes the GRPO baseline a
-# per-problem mean rather than noise.
-N_SAMPLES_PER_PROMPT=${N_SAMPLES_PER_PROMPT:-32}
+N_SAMPLES_PER_PROMPT=${N_SAMPLES_PER_PROMPT:-8}
+# Load-bearing against the two above, not an independent knob. Megatron derives
+# `train_iters = num_rollout * rollout_batch_size * n_samples_per_prompt //
+# global_batch_size` (orbit/backends/megatron_utils/model.py), so 32*8/256 = **1
+# optimizer step per rollout** -- which is the post's "on-policy: we only perform
+# a single optimizer update per GRPO step", and 50 rollouts is then exactly its
+# 50 GRPO steps. At the previous 32 samples/prompt the same 256 gave 4 updates
+# per rollout, so the run was not on-policy at all. Changing any of the three
+# without re-checking this quotient silently changes what the algorithm is.
 GLOBAL_BATCH_SIZE=${GLOBAL_BATCH_SIZE:-256}
 
 # === Reproducibility ===
