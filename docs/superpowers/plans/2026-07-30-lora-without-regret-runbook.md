@@ -1380,60 +1380,57 @@ the frame is doing the task's work and the RL gain will not resemble Figure 6;
 a `solvable_groups` near 0 means there is still no gradient and the sweep must
 not start.
 
-### 23.4 The RL learning-rate grids: seven points each, one decade apart (2026-08-02)
+### 23.4 The RL learning-rate grids: two windows, 200x each (2026-08-02)
 
 ```
-FullFT   5e-07  1e-06  2e-06  5e-06  1e-05  2e-05  5e-05
-LoRA            5e-06  1e-05  2e-05  5e-05  1e-04  2e-04  5e-04
-                       `------- 4 shared points -------'
+FullFT   5e-07  1e-06  3e-06  7e-06  2e-05  4e-05  1e-04
+LoRA            5e-06  1e-05  3e-05  7e-05  2e-04  4e-04  1e-03
+                `--------- ranges overlap, 1.3 decades ---------'
 ```
 
-Two grids, as the post has, on its own 1-2-5 lattice and its own third-decade
-step. The post offsets its two grids by **32x** at the centre and then measures
-optima only ~6.4x apart, so copying its placement would spend three FullFT arms
-below 1e-06 where §14 says the curve is flat at baseline. The offset here is
-**10x** — the post's own prose claim — and the four shared points keep every
-ratio from 1x to 100x measurable. The one assumption left is that LoRA's optimum
-is not *below* FullFT's; nothing in the post or in the norm-matching argument
-suggests it could be.
+Two grids, as the post has, defined by their **endpoints** rather than by a
+centre and a step, because the endpoints are what the evidence pins and the
+spacing is what falls out. Both windows span 200x; at seven points that is 0.384
+decades per step.
 
-Why seven points at a third of a decade rather than at a half. At fixed budget
-the choice is span against resolution, and per-method windows make span cheap —
-each grid only has to cover its own method's live range, so the points buy
-resolution instead. A third-decade step locates an argmin to ~x1.5 and a ratio
-of two argmins to ~x1.7, against ~x1.8 and ~x2.3 at half-decade width. **Sharing
-a lattice does not buy ratio precision**: the ratio is two argmins divided, and
-each one's error is its own step size. A shared lattice only guarantees the two
-curves are sampled at identical x-values, which matters for plotting them
-together, not for the number.
-
-Where each point earns its place — candidate optima marked `*`:
-
-| grid | point | why |
+| endpoint | value | why |
 |---|---|---|
-| FullFT | 5e-07, 1e-06 | baseline anchors. Two, because MATH's peak reads as low as 3e-06 and an argmin on the bottom edge is one `analyze` refuses |
-| | 2e-06, 5e-06 | `*`3e-06, MATH's low-end reading, sits between them |
-| | 1e-05 | `*`6.25e-06, the SVG reading, sits between 5e-06 and 1e-05 |
-| | 2e-05 | `*`the RL figure's own reading, exactly |
-| | 5e-05 | past "FullFT collapses by ~3e-05" |
-| LoRA | 5e-06, 1e-05 | the rising edge, "LoRA becomes strong around 1e-05" |
-| | 2e-05 | `*`MATH r256, exactly |
-| | 5e-05 | `*`4e-05, GSM8K r1/r16, sits between 2e-05 and 5e-05 |
-| | 1e-04 | `*`GSM8K r256, exactly |
-| | 2e-04 | `*`"remains useful up to ~2e-04", exactly |
-| | 5e-04 | past that ceiling, so the band's upper edge is bracketed |
+| FullFT low | 5e-07 | two baseline anchors below MATH's lowest peak reading (3e-06), so an argmin cannot land on the edge and be refused |
+| FullFT high | 1e-04 | well past "FullFT collapses by ~3e-05" (§14) |
+| LoRA low | 5e-06 | a step below "LoRA becomes strong around 1e-05", so the rising edge is bracketed |
+| LoRA high | 1e-03 | "all LoRA ranks collapse by 1e-03" — the floor the width claim is measured against |
 
-**What the seven points do not reach: LoRA's fully-collapsed floor at 1e-03.**
-The smallest point was set to 5e-07 / 5e-06 deliberately, to buy the two FullFT
-baseline anchors, and at fixed width the top moved down with it. The width claim
-needs the band's upper *edge*, which the 2e-04 -> 5e-04 transition brackets;
-"all ranks collapse by 1e-03" (§14, GSM8K signature 8 and MATH signature 7) is
-confirmation this sweep will not have. Add an eighth LoRA point at 1e-03 if that
-confirmation is wanted — three arms per panel, one constant.
+Every published optimum lands inside. FullFT's 3e-06 and 2e-05 are exact points
+and 6.25e-06 sits between 3e-06 and 7e-06; LoRA's 2e-05 sits between 1e-05 and
+3e-05, 4e-05 between 3e-05 and 7e-05, 1e-04 between 7e-05 and 2e-04, and 2e-04
+is exact.
 
-**Knock-on changes.** `RL_OFT_SCOUT_SPAN` is (3e-7, 3e-4), three decades against
-the LoRA grid's two, so the "a scout must be at least as wide as the grid it
-feeds" invariant still holds. Arm counts are e4 35, e4place 35, e5rl 42, and the
-`EXPECT_ARMS` guards in all four `run_e4*_8gpu.sh` wrappers match — a wrapper
-whose guard disagrees with the matrix refuses to start rather than silently
-running a different experiment.
+**The two ladders share no point, and neither do the post's** — its FullFT rungs
+run on 1.25/3.125/6.25 and its LoRA rungs on 1/2/4. What has to overlap is the
+RANGE, and these do, from 5e-06 to 1e-04, about 1.3 decades. That is what keeps
+a ratio near 1x measurable: both argmins would land in the interior rather than
+on an edge. Exact point coincidence would only matter for plotting the two
+series on identical x-values, and Figure 6 does not do that.
+
+The offset between the windows is 10x, the post's own prose claim. Its published
+grids are offset **32x** at the centre, and then measure optima only ~6.4x apart
+— so copying the placement would spend three FullFT arms below 1e-06 where §14
+says the curve is flat.
+
+**Resolution.** 0.384 decades locates an argmin to about ×1.55 and a ratio of
+two argmins to about ×1.8. Sharing a lattice would not improve that: the ratio
+is two argmins divided, and each one's error is its own step size. If the
+multiplier is wanted as a number rather than an order of magnitude, refine with
+±0.19-decade points around each argmin after the first pass.
+
+The one-significant-figure rounding makes realised steps alternate between 2.0x
+and 3.0x around the nominal 2.42x — ±24%, cosmetic against a grid whose own
+resolution is ±0.19 decades, and the price of arm names that read `lr7e-06`
+rather than `lr7.07e-06`. Tests assert the *mean* step for this reason; a
+per-step tolerance wide enough to admit the rounding would no longer distinguish
+0.384 from 0.3 or 0.5.
+
+**Knock-on.** `RL_OFT_SCOUT_SPAN` is (3e-7, 3e-4), three decades against each RL
+grid's 2.3, so the "a scout must be at least as wide as the grid it feeds"
+invariant holds. Arm counts are e4 35, e4place 35, e5rl 42, matching the
+`EXPECT_ARMS` guards in all four `run_e4*_8gpu.sh` wrappers.

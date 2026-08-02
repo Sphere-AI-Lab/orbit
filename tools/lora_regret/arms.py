@@ -16,8 +16,8 @@ Six matrices, selected by ``sweep.py --matrix``:
   5-point 0.3-decade grids *centred* on the post's own predictions. Centring is
   the point: a confirmation is then a hit rather than a fit.
 * ``e4`` -- RL (C5). Scored by accuracy, not NLL, and driven through the RL
-  launcher; half-decade spacing because the post gives no LR multiplier for policy
-  gradient and C5's second half is about the *width* of the performant band.
+  launcher; two seven-point windows an order of magnitude apart, each spanning
+  200x, because C5's second half is about the *width* of the performant band.
 * ``e5scout`` / ``e5`` -- matched-parameter OFT. The scout comes first and the
   refinement grid is centred on its argmin; see :func:`e5_arms` for why the match
   is solved by inverting to a LoRA rank rather than by choosing a block size.
@@ -70,43 +70,7 @@ LORA_A_INIT_METHOD = "kaiming"
 # into the grid instead of fitted out of it.
 FULL_LR_CENTRE = 2.5e-5
 LORA_LR_CENTRE = 2.5e-4
-# **Two RL grids, one decade apart**, on the post's own 1-2-5 lattice:
-#
-#   FullFT   5e-07  1e-06  2e-06  5e-06  1e-05  2e-05  5e-05
-#   LoRA            5e-06  1e-05  2e-05  5e-05  1e-04  2e-04  5e-04
-#                          `------- 4 shared points -------'
-#
-# The post publishes two grids too, and offsets them by 32x at the centre --
-# even though the optima it then measures differ by only ~6.4x. The offset here
-# is 10x, its own prose claim, and the windows overlap on four points, so any
-# ratio from 1x to 100x is measurable. What that assumes is only that LoRA's
-# optimum is not BELOW FullFT's; nothing in the post or in the norm-matching
-# argument suggests it could be.
-#
-# Where each point earns its place. Candidate optima are marked *:
-#
-#   FullFT   5e-07  1e-06   baseline anchors. Two, not one, because MATH's peak
-#                           reads as low as 3e-06 and an argmin on the bottom
-#                           edge is one `analyze` refuses to quote.
-#            2e-06  5e-06   *3e-06 (MATH low end) sits between them
-#            1e-05          *6.25e-06 (SVG) sits between 5e-06 and 1e-05
-#            2e-05          *the RL figure's own reading, exactly
-#            5e-05          past "FullFT collapses by ~3e-05"
-#
-#   LoRA     5e-06  1e-05   the rising edge, "LoRA becomes strong around 1e-05"
-#            2e-05          *MATH r256, exactly
-#            5e-05          *4e-05 (GSM r1/r16) sits between 2e-05 and 5e-05
-#            1e-04          *GSM r256, exactly
-#            2e-04          *"remains useful up to ~2e-04", exactly
-#            5e-04          past that ceiling, so the band's upper edge is
-#                           bracketed. NOT 1e-03: the smallest point was moved
-#                           down a step to buy the FullFT baseline anchors, and
-#                           the top went with it at fixed width. The band edge
-#                           (2e-04 -> 5e-04) is what the width claim needs; the
-#                           fully-collapsed floor at 1e-03 is confirmation the
-#                           seven points do not stretch to.
-RL_FULL_LR_CENTRE = 5e-6
-RL_LORA_LR_CENTRE = 5e-5
+# The RL grids are defined by their ENDPOINTS, below, next to RL_GRID_POINTS.
 # One Tulu3 epoch is (939,343 - 1,000 held out) / 32 = 29,323 optimizer steps,
 # and ~1% of that is 293 -- about 100 trace points, which is what C1's departure
 # detector needs, for ~1.9 h of eval against ~70 h of training. At the
@@ -190,23 +154,50 @@ def lr_grid(
     return [float(f"{lr:.{sig_figs}g}") for lr in grid]
 
 
-# Every RL cell shares one grid shape, so it is written down once. Half-decade
-# steps because C5's second half is about the *width* of the performant band,
-# which needs span more than resolution; one significant figure so the points
-# are 1e-06 / 3e-06 / ... rather than 9.5e-07 / 3.0e-06 / ... -- see `lr_grid`.
+# Every RL cell shares one grid SHAPE -- seven points, one significant figure --
+# but FullFT and LoRA get their own windows, an order of magnitude apart:
 #
-# Seven, not four: four points span 1.0 decade at this spacing, and the
-# candidate optima alone (3e-06 .. 2e-04) span 1.8 decades.
+#   FullFT   5e-07  1e-06  3e-06  7e-06  2e-05  4e-05  1e-04
+#   LoRA            5e-06  1e-05  3e-05  7e-05  2e-04  4e-04  1e-03
 #
-# A THIRD of a decade, the post's own step, not the half-decade the SFT matrices
-# use. At fixed budget the choice is span against resolution, and per-method
-# windows make span cheap -- each grid only has to cover its own method's live
-# range, so the points buy resolution instead. A third-decade step locates an
-# argmin to ~x1.5 and the ratio of two argmins to ~x1.7, against ~x1.8 and ~x2.3
-# at half-decade width. Sharing a lattice does NOT buy ratio precision: the
-# ratio is two argmins divided, and each one's error is its own step size.
+# Written as ENDPOINTS rather than as a centre and a step, because the endpoints
+# are what the evidence pins and the spacing is what falls out of them. Both
+# windows span 200x; at seven points that is 0.384 decades per step, a little
+# wider than the post's own 0.333.
+#
+# The two grids share no point, and the post's two do not either -- its FullFT
+# ladder runs on 1.25/3.125/6.25 and its LoRA ladder on 1/2/4. What matters is
+# that the RANGES overlap, 5e-06 .. 1e-04, about 1.3 decades: a ratio near 1x is
+# then still measurable, because both argmins would land in the interior. Exact
+# point coincidence would only matter for plotting the two series on identical
+# x-values, and Figure 6 does not do that.
+#
+# Each window's endpoints, and why they are where they are:
+#
+#   FullFT low   5e-07  two baseline anchors below MATH's lowest peak reading
+#                       (3e-06), so an argmin cannot land on the edge and be
+#                       refused by `analyze`
+#   FullFT high  1e-04  well past "FullFT collapses by ~3e-05" (plan section 14)
+#   LoRA low     5e-06  a step below "LoRA becomes strong around 1e-05", so the
+#                       rising edge is bracketed
+#   LoRA high    1e-03  "all LoRA ranks collapse by 1e-03" -- the floor the
+#                       width claim is measured against
+#
+# Every published optimum lands inside, most of them bracketed tightly: FullFT's
+# 3e-06 and 2e-05 are exact points and 6.25e-06 sits between 3e-06 and 7e-06;
+# LoRA's 2e-05 sits between 1e-05 and 3e-05, 4e-05 between 3e-05 and 7e-05,
+# 1e-04 between 7e-05 and 2e-04, and 2e-04 is an exact point.
+#
+# The 1-significant-figure rounding makes the realised steps alternate 2.0x to
+# 3.0x around the nominal 2.42x. That is +/-24%, cosmetic against a grid whose
+# own resolution is +/-0.19 decades, and it is the price of arm names that read
+# `lr7e-06` rather than `lr7.07e-06`.
 RL_GRID_POINTS = 7
-RL_STEP_DECADES = 1 / 3
+RL_FULL_LR_RANGE = (5e-7, 1e-4)
+RL_LORA_LR_RANGE = (5e-6, 1e-3)
+RL_STEP_DECADES = math.log10(RL_FULL_LR_RANGE[1] / RL_FULL_LR_RANGE[0]) / (RL_GRID_POINTS - 1)
+RL_FULL_LR_CENTRE = math.sqrt(RL_FULL_LR_RANGE[0] * RL_FULL_LR_RANGE[1])
+RL_LORA_LR_CENTRE = math.sqrt(RL_LORA_LR_RANGE[0] * RL_LORA_LR_RANGE[1])
 RL_SIG_FIGS = 1
 
 

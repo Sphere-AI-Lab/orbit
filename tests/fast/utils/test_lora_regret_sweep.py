@@ -528,9 +528,15 @@ class TestE4Matrix:
         optimum is not BELOW FullFT's, which nothing in the post disputes."""
         full = sorted({a.lr for a in e4_arms() if a.method == "full"})
         lora = sorted({a.lr for a in e4_arms() if a.method == "lora"})
-        assert full == [5e-07, 1e-06, 2e-06, 5e-06, 1e-05, 2e-05, 5e-05]
-        assert lora == [5e-06, 1e-05, 2e-05, 5e-05, 1e-04, 2e-04, 5e-04]
-        assert sorted(set(full) & set(lora)) == [5e-06, 1e-05, 2e-05, 5e-05]
+        assert full == [5e-07, 1e-06, 3e-06, 7e-06, 2e-05, 4e-05, 1e-04]
+        assert lora == [5e-06, 1e-05, 3e-05, 7e-05, 2e-04, 4e-04, 1e-03]
+        # The two ladders share no point -- neither do the post's own, whose
+        # FullFT runs on 1.25/3.125/6.25 and LoRA on 1/2/4. What has to overlap
+        # is the RANGE, so a ratio near 1x still puts both argmins in the
+        # interior rather than on an edge `analyze` would refuse.
+        assert not set(full) & set(lora)
+        assert lora[0] < full[-1], "the two windows must overlap in range"
+        assert math.log10(full[-1] / lora[0]) == pytest.approx(1.3, abs=0.05)
 
     def test_each_grid_brackets_its_own_published_optima(self):
         """Each candidate peak needs points on both sides, or `analyze` refuses
@@ -561,11 +567,11 @@ class TestE4Matrix:
         lrs = sorted({a.lr for a in e4_arms() if a.method == "full"})
         assert len(lrs) == 7
         span_decades = math.log10(lrs[-1] / lrs[0])
-        assert span_decades == pytest.approx(2.0, abs=0.03)
-        # ...and every step is ~a third of a decade, just not to three figures:
-        # the 1-2-5 rounding makes them alternate 2.0x / 2.5x around 2.154x.
+        assert span_decades == pytest.approx(2.301, abs=0.03)  # 200x
+        # ...and every step is ~0.384 decades, just not to three figures: the
+        # one-significant-figure rounding spreads them over 2.0x to 3.0x.
         ratios = [b / a for a, b in zip(lrs, lrs[1:], strict=False)]
-        assert all(r == pytest.approx(10 ** (1 / 3), rel=0.17) for r in ratios)
+        assert all(r == pytest.approx(10**0.3835, rel=0.25) for r in ratios)
 
     def test_env_points_at_the_combined_rl_training_file(self):
         env = arm_env(e4_arms()[0])
