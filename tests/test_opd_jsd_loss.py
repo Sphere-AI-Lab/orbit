@@ -208,3 +208,23 @@ def test_cp_hidden_state_slicing_matches_log_prob_slicing():
         assert torch.equal(sliced, expected), f"rank {rank}: rows {index_slice}"
         seen_rows.extend(index_slice)
     assert sorted(seen_rows) == list(range(response_length))
+
+
+def test_oversized_teacher_head_is_clipped_to_student_vocab():
+    """A bigger same-tokenizer teacher can pad its vocab wider than the student
+    (Qwen2.5-7B: 152064 vs 151936). Rows past the student's logit width are
+    padding the student cannot emit: the loss must behave exactly as if the
+    head were pre-clipped."""
+    _single_state()
+    args = _build_args(0.5)
+    logits, head, batch = _build_inputs()
+    generator = torch.Generator().manual_seed(99)
+    oversized = torch.cat([head, torch.randn(8, HIDDEN_SIZE, generator=generator)], dim=0)
+    assert oversized.size(0) > PADDED_VOCAB_SIZE - 8  # wider than the student's 512 - real 500? build: head=500 rows; oversized=508 <512! need > 512
+    oversized = torch.cat([oversized, torch.randn(8, HIDDEN_SIZE, generator=generator)], dim=0)
+    assert oversized.size(0) == TEACHER_VOCAB_SIZE + 16 > PADDED_VOCAB_SIZE
+
+    big_loss, _, big_grad = _run_loss(args, logits, oversized, batch)
+    clipped_loss, _, clipped_grad = _run_loss(args, logits, oversized[:PADDED_VOCAB_SIZE], batch)
+    assert torch.equal(big_loss, clipped_loss)
+    assert torch.equal(big_grad, clipped_grad)

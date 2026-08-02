@@ -978,7 +978,11 @@ def opd_jsd_loss_function(
         logits.device, torch.float32
     )
     # How many of this rank's vocab columns are real rather than divisibility padding.
-    teacher_vocab_size = teacher_lm_head.size(0)
+    # Clamped from above too: a bigger same-tokenizer teacher can carry MORE padded rows
+    # than the student (Qwen2.5-7B pads to 152064 vs 151936 below 3B); rows past the
+    # student's width are padding the student cannot emit, so dropping them conditions
+    # the teacher on the shared vocabulary. The TP shard path already slices this way.
+    teacher_vocab_size = min(teacher_lm_head.size(0), local_vocab_size)
 
     kl_per_sample = []
     entropy_per_sample = []
@@ -1010,7 +1014,7 @@ def opd_jsd_loss_function(
                     f"{logits_chunk.size(0)} response logits -- get_rollout_data's CP slicing "
                     "has drifted from get_responses()."
                 )
-                teacher_logits = teacher_hidden_states @ teacher_lm_head.T
+                teacher_logits = teacher_hidden_states @ teacher_lm_head[:teacher_vocab_size].T
 
                 rollout_temperature = float(args.rollout_temperature)
                 if rollout_temperature != 1.0:
