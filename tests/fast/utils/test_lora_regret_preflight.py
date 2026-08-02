@@ -60,7 +60,7 @@ class TestCheckCheckpoints:
 
 class TestCheckMatrices:
     def test_every_matrix_builds_at_its_documented_count(self):
-        checks = {c.name: c for c in check_matrices(4096, 14336)}
+        checks = {c.name: c for c in check_matrices(4096, 14336, 6144)}
         assert checks["matrix:e1"].ok and "45" in checks["matrix:e1"].detail
         assert checks["matrix:e2"].ok and "48" in checks["matrix:e2"].detail
         assert checks["matrix:e3"].ok and "35" in checks["matrix:e3"].detail
@@ -80,7 +80,7 @@ class TestCheckMatrices:
             raise ValueError("hidden_size and ffn_size must be positive")
 
         monkeypatch.setitem(preflight.MATRICES, "e1", boom)
-        checks = {c.name: c for c in check_matrices(4096, 14336)}
+        checks = {c.name: c for c in check_matrices(4096, 14336, 6144)}
         assert not checks["matrix:e1"].ok
         assert "ValueError" in checks["matrix:e1"].detail
         assert checks["matrix:e2"].ok  # the rest still ran
@@ -90,7 +90,7 @@ class TestCheckMatrices:
         import tools.lora_regret.preflight as preflight
 
         monkeypatch.setitem(preflight.EXPECTED_ARMS, "e1", 46)
-        checks = {c.name: c for c in check_matrices(4096, 14336)}
+        checks = {c.name: c for c in check_matrices(4096, 14336, 6144)}
         assert not checks["matrix:e1"].ok
         assert "45 arms, expected 46" in checks["matrix:e1"].detail
 

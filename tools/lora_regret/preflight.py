@@ -153,7 +153,7 @@ def check_data(data_dir: str | Path) -> list[Check]:
     return checks
 
 
-def check_matrices(hidden_size: int, ffn_size: int) -> list[Check]:
+def check_matrices(hidden_size: int, ffn_size: int, qkv_output_size: int) -> list[Check]:
     """Every matrix builds, at the count the runbook documents.
 
     A matrix that raises does so here, in a second, rather than after Ray has
@@ -164,7 +164,7 @@ def check_matrices(hidden_size: int, ffn_size: int) -> list[Check]:
     for name, expected in EXPECTED_ARMS.items():
         try:
             centre = 1e-4 if name in MATRICES_REQUIRING_OFT_CENTRE else None
-            built = MATRICES[name](hidden_size, ffn_size, 0, centre, None)
+            built = MATRICES[name](hidden_size, ffn_size, qkv_output_size, 0, centre, None)
             checks.append(
                 Check(f"matrix:{name}", len(built) == expected,
                       f"{len(built)} arms" if len(built) == expected
@@ -183,6 +183,10 @@ def main() -> int:
     parser.add_argument("--megatron-load", default=MEGATRON_LOAD)
     parser.add_argument("--hidden-size", type=int, default=4096)
     parser.add_argument("--ffn-size", type=int, default=14336)
+    # Fused q+k+v width. Not derivable from hidden_size under GQA, and it decides
+    # every matched-parameter block size, so a matrix audited at the wrong value
+    # passes while building arms for a different model.
+    parser.add_argument("--qkv-output-size", type=int, default=6144)
     parser.add_argument("--skip-gpu", action="store_true", help="for CPU-only preflight")
     args = parser.parse_args()
 
@@ -192,7 +196,7 @@ def main() -> int:
         checks += check_gpus(args.stage)
     checks += check_checkpoints(args.hf_checkpoint, args.megatron_load)
     checks += check_data(args.data_dir)
-    checks += check_matrices(args.hidden_size, args.ffn_size)
+    checks += check_matrices(args.hidden_size, args.ffn_size, args.qkv_output_size)
 
     width = max(len(c.name) for c in checks)
     for check in checks:

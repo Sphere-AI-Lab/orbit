@@ -10,7 +10,7 @@ from tools.lora_regret.arms import (
     e1ot_arms,
 )
 
-HIDDEN, FFN = 4096, 14336
+HIDDEN, FFN, QKV = 4096, 14336, 6144
 
 
 class TestE1Ot:
@@ -38,7 +38,7 @@ class TestE1Ot:
         assert {a.eval_nll_interval for a in e1ot_arms()} == {3}
 
     def test_it_is_registered(self):
-        assert len(MATRICES["e1ot"](HIDDEN, FFN, 0, None, None)) == 45
+        assert len(MATRICES["e1ot"](HIDDEN, FFN, QKV, 0, None, None)) == 45
 
 
 class TestE1Short:
@@ -155,7 +155,7 @@ class TestE4Place:
 
         assert MATRIX_METRICS["e4place"] == "accuracy"
         assert "rl-math-gsm8k" in MATRIX_LAUNCHERS["e4place"]
-        assert len(MATRICES["e4place"](HIDDEN, FFN, 0, None, None)) == 20
+        assert len(MATRICES["e4place"](HIDDEN, FFN, QKV, 0, None, None)) == 20
 
 
 class TestMethodCoverage:
@@ -174,7 +174,7 @@ class TestMethodCoverage:
 
     @pytest.mark.parametrize("matrix", GRID_MATRICES)
     def test_all_three_methods_are_present(self, matrix):
-        assert {a.method for a in MATRICES[matrix](HIDDEN, FFN, 0, None, None)} == {
+        assert {a.method for a in MATRICES[matrix](HIDDEN, FFN, QKV, 0, None, None)} == {
             "full", "lora", "oft"
         }
 
@@ -183,14 +183,14 @@ class TestMethodCoverage:
         """`oftscout-...` in the ledger and the dashboard. An arm named `oft-`
         on an unscouted grid would be quoted as a measurement of OFT's optimum
         when it is a search for it."""
-        arms = MATRICES[matrix](HIDDEN, FFN, 0, None, None)
+        arms = MATRICES[matrix](HIDDEN, FFN, QKV, 0, None, None)
         oft = [a for a in arms if a.method == "oft"]
         assert oft
         assert all(a.name.startswith("oftscout-") for a in oft), [a.name for a in oft]
 
     @pytest.mark.parametrize("matrix", GRID_MATRICES)
     def test_with_a_centre_they_become_measurements_on_a_centred_grid(self, matrix):
-        arms = MATRICES[matrix](HIDDEN, FFN, 0, 1e-4, None)
+        arms = MATRICES[matrix](HIDDEN, FFN, QKV, 0, 1e-4, None)
         oft = [a for a in arms if a.method == "oft"]
         assert oft
         assert all(a.name.startswith("oft-") for a in oft), [a.name for a in oft]
@@ -207,7 +207,7 @@ class TestMethodCoverage:
         """
         import math
 
-        arms = MATRICES[matrix](HIDDEN, FFN, 0, None, None)
+        arms = MATRICES[matrix](HIDDEN, FFN, QKV, 0, None, None)
         oft_lrs = sorted({a.lr for a in arms if a.method == "oft"})
         lora_lrs = sorted({a.lr for a in arms if a.method == "lora"})
         assert set(oft_lrs) != set(lora_lrs)
@@ -223,7 +223,7 @@ class TestMethodCoverage:
     def test_the_oft_cell_mirrors_the_width_of_the_lora_cell_it_sits_beside(self, matrix):
         """Same number of learning rates per cell, so an OFT cell cannot be
         quietly cheaper or finer than the LoRA cell it is compared against."""
-        arms = MATRICES[matrix](HIDDEN, FFN, 0, None, None)
+        arms = MATRICES[matrix](HIDDEN, FFN, QKV, 0, None, None)
         oft_cells = {}
         lora_cells = {}
         for arm in arms:
@@ -252,7 +252,7 @@ class TestMethodCoverage:
         from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT
 
         shapes = megatron_module_shapes(HIDDEN, FFN, LLAMA31_8B_QKV_OUTPUT)
-        arms = MATRICES[matrix](HIDDEN, FFN, 0, None, None)
+        arms = MATRICES[matrix](HIDDEN, FFN, QKV, 0, None, None)
         oft = [a for a in arms if a.method == "oft"]
         assert oft
         for arm in oft:
@@ -278,7 +278,7 @@ class TestMethodCoverage:
         from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT
 
         shapes = megatron_module_shapes(HIDDEN, FFN, LLAMA31_8B_QKV_OUTPUT)
-        arms = MATRICES[matrix](HIDDEN, FFN, 0, None, None)
+        arms = MATRICES[matrix](HIDDEN, FFN, QKV, 0, None, None)
         ranks_for: dict[str, set] = {}
         for arm in arms:
             if arm.method == "lora":
@@ -294,12 +294,12 @@ class TestMethodCoverage:
 
     def test_the_frozen_legacy_matrix_is_untouched(self):
         """sft82's dry run is recorded in the gate log; it must stay 82 arms."""
-        assert len(MATRICES["sft82"](HIDDEN, FFN, 0, None, None)) == 82
+        assert len(MATRICES["sft82"](HIDDEN, FFN, QKV, 0, None, None)) == 82
 
     def test_the_oft_scout_stage_is_not_turned_into_a_sweep(self):
         """e5scout exists to find OFT's learning rate. Adding FullFT and LoRA
         arms to it would make the scout a sweep and delay every OFT number."""
-        arms = MATRICES["e5scout"](HIDDEN, FFN, 0, None, None)
+        arms = MATRICES["e5scout"](HIDDEN, FFN, QKV, 0, None, None)
         assert len(arms) == 5
         assert {a.method for a in arms} == {"oft"}
 
@@ -336,7 +336,7 @@ class TestMethodCoverage:
     def test_the_new_counts(self):
         expected = {"e1": 45, "e1short": 21, "e1ot": 45, "e2": 48,
                     "e3": 35, "e4": 20, "e4place": 20}
-        actual = {m: len(MATRICES[m](HIDDEN, FFN, 0, None, None)) for m in expected}
+        actual = {m: len(MATRICES[m](HIDDEN, FFN, QKV, 0, None, None)) for m in expected}
         assert actual == expected
 
 
@@ -368,7 +368,7 @@ class TestOftBlockCeilingUnderRl:
     def test_rl_oft_blocks_fit_the_kernel(self, matrix):
         from tools.lora_regret.arms import OFT_MAX_BLOCK_SGLANG
 
-        arms = MATRICES[matrix](HIDDEN, FFN, 0, None, None)
+        arms = MATRICES[matrix](HIDDEN, FFN, QKV, 0, None, None)
         blocks = {a.oft_block_size for a in arms if a.method == "oft"}
         assert blocks, matrix
         assert max(blocks) <= OFT_MAX_BLOCK_SGLANG, (matrix, sorted(blocks))
@@ -407,9 +407,9 @@ class TestOftBlockCeilingUnderRl:
         an OFT arm meant something different in each. They agree again."""
         from tools.lora_regret.arms import OFT_MAX_BLOCK_SGLANG
 
-        sft = {a.oft_block_size for a in MATRICES["e1"](HIDDEN, FFN, 0, None, None)
+        sft = {a.oft_block_size for a in MATRICES["e1"](HIDDEN, FFN, QKV, 0, None, None)
                if a.method == "oft"}
-        rl = {a.oft_block_size for a in MATRICES["e4"](HIDDEN, FFN, 0, None, None)
+        rl = {a.oft_block_size for a in MATRICES["e4"](HIDDEN, FFN, QKV, 0, None, None)
               if a.method == "oft"}
         assert sft == rl == {1024}
         assert max(sft | rl) <= OFT_MAX_BLOCK_SGLANG
@@ -423,7 +423,7 @@ class TestOftBlockCeilingUnderRl:
         shapes = megatron_module_shapes(HIDDEN, FFN, LLAMA31_8B_QKV_OUTPUT)
         # e4's LoRA ladder includes r16, and the capped block reaches r24 --
         # within a factor of 2, so this matrix keeps its matched comparison.
-        for arm in MATRICES["e4"](HIDDEN, FFN, 0, None, None):
+        for arm in MATRICES["e4"](HIDDEN, FFN, QKV, 0, None, None):
             if arm.method != "oft":
                 continue
             sel = {n: s for n, s in shapes.items() if n in arm.target_modules.split(",")}

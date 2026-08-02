@@ -78,15 +78,19 @@ def test_competition_math_emits_prompt_label(tmp_path: Path, monkeypatch):
         "tools.lora_regret.prepare_data._load_split",
         lambda name, split: fake,
     )
-    train, val = prepare_competition_math(tmp_path, n_train=5, val_start=5, val_end=8)
+    result = prepare_competition_math(
+        tmp_path, n_train=5, val_start=5, val_end=8, expected_source_rows=len(fake)
+    )
 
-    train_rows = [json.loads(line) for line in train.read_text().splitlines()]
-    val_rows = [json.loads(line) for line in val.read_text().splitlines()]
+    train_rows = [json.loads(line) for line in result.train_path.read_text().splitlines()]
+    val_rows = [json.loads(line) for line in result.test_path.read_text().splitlines()]
 
     assert len(train_rows) == 5
     assert len(val_rows) == 3
-    assert train_rows[0] == {"prompt": "p0", "label": "0"}
-    assert val_rows[0] == {"prompt": "p5", "label": "5"}
+    assert train_rows[0] == {
+        "prompt": "p0", "label": "0", "metadata": {"dataset": "competition_math"}
+    }
+    assert val_rows[0]["prompt"] == "p5" and val_rows[0]["label"] == "5"
 
 
 def test_competition_math_skips_rows_without_boxed_answer(tmp_path: Path, monkeypatch):
@@ -99,8 +103,10 @@ def test_competition_math_skips_rows_without_boxed_answer(tmp_path: Path, monkey
         {"problem": "good3", "solution": r"\boxed{\frac{2\sqrt{35}}{35}}"},
     ]
     monkeypatch.setattr("tools.lora_regret.prepare_data._load_split", lambda name, split: fake)
-    train, _ = prepare_competition_math(tmp_path, n_train=4, val_start=4, val_end=4)
-    rows = [json.loads(line) for line in train.read_text().splitlines()]
+    result = prepare_competition_math(
+        tmp_path, n_train=4, val_start=4, val_end=4, expected_source_rows=len(fake)
+    )
+    rows = [json.loads(line) for line in result.train_path.read_text().splitlines()]
     assert [r["prompt"] for r in rows] == ["good", "good2", "good3"]
     assert rows[2]["label"] == r"\frac{2\sqrt{35}}{35}"
 

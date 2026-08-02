@@ -137,7 +137,9 @@ class ProbeRun:
 def _build(matrix: str):
     centre = PROBE_OFT_CENTRE if matrix in MATRICES_REQUIRING_OFT_CENTRE else None
     model = get_model(DEFAULT_MODEL)
-    return MATRICES[matrix](model.hidden_size, model.ffn_size, 0, centre, None)
+    return MATRICES[matrix](
+        model.hidden_size, model.ffn_size, model.qkv_output_size, 0, centre, None
+    )
 
 
 _MODULE_SHORT = {

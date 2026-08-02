@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from orbit.utils.peft_param_match import match_report
@@ -29,7 +30,7 @@ from tools.lora_regret.arms import (  # noqa: F401  (sft_arms re-exported)
     arm_env,
     sft_arms,
 )
-from tools.lora_regret.models import DEFAULT_MODEL, model_env
+from tools.lora_regret.models import DEFAULT_MODEL, MODELS, model_env
 from tools.lora_regret.models import get as get_model
 
 # The eval-line regex and phase labels live in trace.py -- one definition,
@@ -478,6 +479,18 @@ def argmins_from(patterns: list[str], allow_edge: bool) -> dict[tuple[str, int |
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--model",
+        choices=sorted(MODELS),
+        default=DEFAULT_MODEL,
+        help=(
+            "Which base model every arm in the matrix runs on. Selects the "
+            "checkpoint, the Megatron plugin, the loss-mask type and the GPU "
+            "floor together, and -- because they decide every matched-parameter "
+            "block size and rank -- the hidden, FFN and fused-QKV widths. "
+            f"Default {DEFAULT_MODEL}, the campaign's original anchor."
+        ),
+    )
     parser.add_argument("--hidden-size", type=int, default=None,
                         help="Deprecated: derived from the arm's model. Kept so the "
                              "runbook's existing commands still work; a value that "
@@ -564,15 +577,15 @@ def main() -> None:
     # only when it agrees, because silently preferring one of two sources is how
     # a ledger ends up with every adapter_params wrong by a constant factor and
     # nothing in the output looking suspicious.
-    default_model = get_model(DEFAULT_MODEL)
+    selected_model = get_model(args.model)
     for flag, given, derived in (
-        ("--hidden-size", args.hidden_size, default_model.hidden_size),
-        ("--ffn-size", args.ffn_size, default_model.ffn_size),
-        ("--num-layers", args.num_layers, default_model.num_layers),
+        ("--hidden-size", args.hidden_size, selected_model.hidden_size),
+        ("--ffn-size", args.ffn_size, selected_model.ffn_size),
+        ("--num-layers", args.num_layers, selected_model.num_layers),
     ):
         if given is not None and given != derived:
             parser.error(
-                f"{flag}={given} contradicts model {default_model.key!r}, which has "
+                f"{flag}={given} contradicts model {selected_model.key!r}, which has "
                 f"{derived}. These are derived from the arm's model now; drop the flag."
             )
 
@@ -581,9 +594,16 @@ def main() -> None:
         argmins_from(args.argmins_from, args.allow_edge_argmin) if args.argmins_from else None
     )
     arms = MATRICES[args.matrix](
-        default_model.hidden_size, default_model.ffn_size,
+        selected_model.hidden_size, selected_model.ffn_size, selected_model.qkv_output_size,
         args.seed, args.oft_lr_centre, recovered,
     )
+    # The builders stamp every arm with the registry's default model, since a
+    # matrix is single-model by construction. Re-stamp rather than teach twelve
+    # builders a new argument: `run_arm` reads `arm.model` to pick the checkpoint,
+    # so an unstamped arm would be solved for Qwen3-1.7B's shapes and then *run*
+    # on Llama-3.1-8B, with nothing in the arm name to show it.
+    if selected_model.key != DEFAULT_MODEL:
+        arms = [replace(arm, model=selected_model.key) for arm in arms]
     if args.only:
         pattern = re.compile(args.only)
         arms = [a for a in arms if pattern.search(a.name)]
@@ -595,7 +615,7 @@ def main() -> None:
     # block sizes, and printing it for a LoRA-only matrix invites reading it as a
     # property of arms that are about to run.
     if any(arm.method == "oft" for arm in arms):
-        print(_oft_match_summary(default_model.hidden_size), file=sys.stderr)
+        print(_oft_match_summary(selected_model.hidden_size), file=sys.stderr)
 
     launcher = MATRIX_LAUNCHERS[args.matrix]
     metric = MATRIX_METRICS[args.matrix]

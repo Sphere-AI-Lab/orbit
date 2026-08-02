@@ -1,0 +1,232 @@
+"""Running the campaign as the blog post ran it, on Qwen3-1.7B.
+
+The campaign was built around Llama-3.1-8B, and the post's published RL results
+are Qwen3-1.7B on `qwedsacf/competition_math`. Three things have to be true at
+once before a number here is comparable to a number there, and each is a place
+where being wrong is silent rather than loud:
+
+  * the model must be selectable, and selecting it must move the *shapes* as well
+    as the checkpoint -- a matrix solved for Llama's 6144-wide fused QKV and then
+    run on Qwen produces identically-named arms with the wrong adapter sizes;
+  * the OFT/LoRA capacity ladder must be re-solved, because a block size means a
+    different parameter count on every model;
+  * the data must be the post's split under the post's prompt, not the campaign's
+    MATH+GSM8K mix.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+
+import pytest
+
+from tools.lora_regret import sweep
+from tools.lora_regret.arms import (
+    E5RL_BLOCK_LADDER,
+    MATRICES,
+    arm_env,
+    e5rl_matched_ladder,
+)
+from tools.lora_regret.models import get as get_model
+from tools.lora_regret.prepare_data import (
+    POST_RL_PROMPT_TEMPLATE,
+    POST_RL_TRAIN_ROWS,
+    POST_RL_VAL_END,
+    POST_RL_VAL_START,
+    prepare_competition_math,
+)
+
+LLAMA = get_model("llama3.1-8b")
+QWEN = get_model("qwen3-1.7b")
+
+
+def _rows(path):
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+class TestModelSelection:
+    """`--model` has to move the shapes, not only the checkpoint."""
+
+    def _argv(self, *extra):
+        return ["sweep.py", "--dry-run", *extra]
+
+    def test_selecting_a_model_points_every_arm_at_its_checkpoint(
+        self, monkeypatch, capsys, tmp_path
+    ):
+        monkeypatch.setattr(
+            sys, "argv",
+            self._argv("--model", "qwen3-1.7b", "--matrix", "e4",
+                       "--results", str(tmp_path / "r.jsonl")),
+        )
+        sweep.main()
+        printed = capsys.readouterr().out
+        assert f"MEGATRON_LOAD={QWEN.megatron_load}" in printed
+        assert "MODEL_KEY=qwen3-1.7b" in printed
+        assert LLAMA.megatron_load not in printed
+
+    def test_the_default_is_still_the_campaigns_anchor(self, monkeypatch, capsys, tmp_path):
+        """Every pre-existing ledger and runbook command assumes this."""
+        monkeypatch.setattr(
+            sys, "argv",
+            self._argv("--matrix", "e4", "--results", str(tmp_path / "r.jsonl")),
+        )
+        sweep.main()
+        assert "MODEL_KEY=llama3.1-8b" in capsys.readouterr().out
+
+    def test_the_fused_qkv_width_follows_the_model(self):
+        """The silent failure this exists to prevent.
+
+        `qkv_output_size` is not derivable from `hidden_size` under GQA, and it
+        decides every matched-parameter block size and rank. Before it was
+        threaded, a non-Llama model got its own hidden/FFN and **Llama's** 6144,
+        which changes the adapters without changing a single arm name.
+        """
+        wrong = MATRICES["e4place"](QWEN.hidden_size, QWEN.ffn_size, LLAMA.qkv_output_size, 0, None, None)
+        right = MATRICES["e4place"](QWEN.hidden_size, QWEN.ffn_size, QWEN.qkv_output_size, 0, None, None)
+        assert {a.name for a in wrong} != {a.name for a in right}
+
+    def test_a_contradicting_shape_flag_is_refused_against_the_selected_model(
+        self, monkeypatch, tmp_path
+    ):
+        """--hidden-size 4096 is right for Llama and wrong for Qwen3-1.7B."""
+        monkeypatch.setattr(
+            sys, "argv",
+            self._argv("--model", "qwen3-1.7b", "--hidden-size", "4096",
+                       "--matrix", "e4", "--results", str(tmp_path / "r.jsonl")),
+        )
+        with pytest.raises(SystemExit) as excinfo:
+            sweep.main()
+        assert excinfo.value.code == 2
+
+    def test_an_agreeing_shape_flag_still_passes(self, monkeypatch, capsys, tmp_path):
+        monkeypatch.setattr(
+            sys, "argv",
+            self._argv("--model", "qwen3-1.7b", "--hidden-size", str(QWEN.hidden_size),
+                       "--matrix", "e4", "--results", str(tmp_path / "r.jsonl")),
+        )
+        sweep.main()
+        assert "MODEL_KEY=qwen3-1.7b" in capsys.readouterr().out
+
+    def test_the_arm_records_which_model_it_ran_on(self):
+        arms = MATRICES["e4"](QWEN.hidden_size, QWEN.ffn_size, QWEN.qkv_output_size, 0, None, None)
+        stamped = [sweep.replace(a, model="qwen3-1.7b") for a in arms]
+        assert all(a.model == "qwen3-1.7b" for a in stamped)
+        assert all(arm_env(a) is not None for a in stamped)
+
+
+class TestTheOftLadderIsResolvedPerModel:
+    def test_the_same_block_pairs_with_a_different_rank_on_each_model(self):
+        """A block size is not a capacity. OFT's count follows `d_in` and LoRA's
+        follows `d_in + d_out`, so the partner rank moves with the shapes."""
+        llama = {r["block_size"]: r["lora_rank"]
+                 for r in e5rl_matched_ladder(LLAMA.hidden_size, LLAMA.ffn_size, LLAMA.qkv_output_size)}
+        qwen = {r["block_size"]: r["lora_rank"]
+                for r in e5rl_matched_ladder(QWEN.hidden_size, QWEN.ffn_size, QWEN.qkv_output_size)}
+        assert set(llama) == set(qwen) == set(E5RL_BLOCK_LADDER)
+        assert llama[512] == 98 and qwen[512] == 96
+
+    def test_every_rung_is_matched_on_both_models(self):
+        for model in (LLAMA, QWEN):
+            ladder = e5rl_matched_ladder(model.hidden_size, model.ffn_size, model.qkv_output_size)
+            assert all(abs(r["ratio"] - 1.0) <= 0.05 for r in ladder), model.key
+
+    def test_an_unmatched_ladder_is_refused_rather_than_built(self):
+        """The whole point of the guard.
+
+        `oft_lora_match_report` returns a pair at any ratio, and arms built from a
+        0.75 pair run, finish and report accuracies -- so "OFT does not track
+        LoRA" would read as a method difference when it is a capacity difference.
+        A tolerance tight enough to bite proves the guard is load-bearing.
+        """
+        with pytest.raises(ValueError, match="not matched"):
+            e5rl_matched_ladder(
+                LLAMA.hidden_size, LLAMA.ffn_size, LLAMA.qkv_output_size, tolerance=0.001
+            )
+
+    def test_the_arms_carry_the_re_solved_rank_not_the_llama_one(self):
+        arms = MATRICES["e5rl"](QWEN.hidden_size, QWEN.ffn_size, QWEN.qkv_output_size, 0, 1e-5, None)
+        ranks = {a.rank for a in arms if a.method == "lora"}
+        assert 96 in ranks and 98 not in ranks
+
+    def test_the_pairing_is_recorded_on_every_arm(self):
+        arms = MATRICES["e5rl"](QWEN.hidden_size, QWEN.ffn_size, QWEN.qkv_output_size, 0, 1e-5, None)
+        assert all(a.matched_ratio is not None for a in arms)
+
+
+class TestThePostsOwnSplit:
+    """`prepare_competition_math` reproduces `rl_lora.py`'s data exactly."""
+
+    @staticmethod
+    def _fake_source(monkeypatch, n=12_500):
+        import tools.lora_regret.prepare_data as pd
+
+        rows = [{"problem": f"q{i}", "solution": f"so \\boxed{{{i}}}"} for i in range(n)]
+        monkeypatch.setattr(pd, "_load_split", lambda *_a, **_k: rows)
+        return rows
+
+    def test_the_split_boundaries_are_the_posts(self, tmp_path, monkeypatch):
+        self._fake_source(monkeypatch)
+        result = prepare_competition_math(tmp_path)
+        assert result.train_rows == POST_RL_TRAIN_ROWS
+        assert result.test_rows == POST_RL_VAL_END - POST_RL_VAL_START
+
+    def test_train_and_validation_do_not_overlap(self, tmp_path, monkeypatch):
+        self._fake_source(monkeypatch)
+        result = prepare_competition_math(tmp_path)
+        train = {r["label"] for r in _rows(result.train_path)}
+        val = {r["label"] for r in _rows(result.test_path)}
+        assert not (train & val)
+
+    def test_the_prompt_template_is_applied_verbatim(self, tmp_path, monkeypatch):
+        self._fake_source(monkeypatch)
+        result = prepare_competition_math(tmp_path, prompt_template=POST_RL_PROMPT_TEMPLATE)
+        first = _rows(result.train_path)[0]["prompt"]
+        assert first.endswith("Question: q0")
+        assert first.startswith("Think for a bit about the question")
+
+    def test_the_posts_doubled_backslash_is_preserved(self):
+        """Not a typo to clean up.
+
+        `third_party/lora-without-regret/boxed.prompt` really contains `\\\\boxed{}`,
+        so the published accuracies were measured while asking for a
+        double-escaped box. Normalising it would silently change the prompt and
+        break the only thing this split is for -- comparability with the post.
+        """
+        assert "\\\\boxed{}" in POST_RL_PROMPT_TEMPLATE
+        assert POST_RL_PROMPT_TEMPLATE.count("{question}") == 1
+
+    def test_without_a_template_the_problem_text_is_untouched(self, tmp_path, monkeypatch):
+        """The library must not mutate source text silently."""
+        self._fake_source(monkeypatch)
+        result = prepare_competition_math(tmp_path)
+        assert _rows(result.train_path)[0]["prompt"] == "q0"
+
+    def test_a_changed_source_row_count_is_refused(self, tmp_path, monkeypatch):
+        """The split is positional, so a changed dataset changes which problems
+        are trained on without changing anything visible in the output."""
+        self._fake_source(monkeypatch, n=12_499)
+        with pytest.raises(ValueError, match="source rows"):
+            prepare_competition_math(tmp_path)
+
+    def test_overlapping_bounds_are_refused(self, tmp_path, monkeypatch):
+        self._fake_source(monkeypatch)
+        with pytest.raises(ValueError, match="do not hold"):
+            prepare_competition_math(tmp_path, n_train=8_000, val_start=7_500, val_end=8_500)
+
+    def test_rows_carry_the_dataset_tag_the_rl_eval_keys_on(self, tmp_path, monkeypatch):
+        self._fake_source(monkeypatch)
+        result = prepare_competition_math(tmp_path)
+        assert all(r["metadata"]["dataset"] == "competition_math" for r in _rows(result.train_path))
+
+    def test_ungradeable_rows_are_dropped_and_counted(self, tmp_path, monkeypatch):
+        import tools.lora_regret.prepare_data as pd
+
+        rows = [{"problem": f"q{i}", "solution": "no box here"} if i < 3
+                else {"problem": f"q{i}", "solution": f"\\boxed{{{i}}}"} for i in range(20)]
+        monkeypatch.setattr(pd, "_load_split", lambda *_a, **_k: rows)
+        result = prepare_competition_math(
+            tmp_path, n_train=10, val_start=10, val_end=20, expected_source_rows=20
+        )
+        assert result.filtered_rows == 3
+        assert result.train_rows == 7

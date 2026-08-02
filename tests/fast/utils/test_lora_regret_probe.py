@@ -43,7 +43,7 @@ class TestPlan:
             if matrix in EXCLUDED_MATRICES:
                 continue
             centre = 1e-4 if matrix in MATRICES_REQUIRING_OFT_CENTRE else None
-            arms = MATRICES[matrix](4096, 14336, 0, centre, None)
+            arms = MATRICES[matrix](4096, 14336, 6144, 0, centre, None)
             wanted = {config_key(a) for a in arms}
             probed = {
                 config_key(next(a for a in arms if a.name == r.arm))
@@ -95,7 +95,7 @@ class TestPlan:
             planned.setdefault(run.matrix, set()).add(run.method)
         for matrix, methods in planned.items():
             centre = 1e-4 if matrix in MATRICES_REQUIRING_OFT_CENTRE else None
-            built = MATRICES[matrix](4096, 14336, 0, centre, None)
+            built = MATRICES[matrix](4096, 14336, 6144, 0, centre, None)
             assert methods == {a.method for a in built}, matrix
 
     def test_the_excluded_matrices_say_why(self):
@@ -107,7 +107,7 @@ class TestPlan:
 
         for run in probe_plan('config'):
             centre = 1e-4 if run.matrix in MATRICES_REQUIRING_OFT_CENTRE else None
-            names = {a.name for a in MATRICES[run.matrix](4096, 14336, 0, centre, None)}
+            names = {a.name for a in MATRICES[run.matrix](4096, 14336, 6144, 0, centre, None)}
             assert run.arm in names, (run.matrix, run.arm)
 
     def test_the_only_regex_matches_exactly_one_arm(self):
@@ -120,7 +120,7 @@ class TestPlan:
 
         for run in probe_plan('config'):
             centre = 1e-4 if run.matrix in MATRICES_REQUIRING_OFT_CENTRE else None
-            arms = MATRICES[run.matrix](4096, 14336, 0, centre, None)
+            arms = MATRICES[run.matrix](4096, 14336, 6144, 0, centre, None)
             pattern = re.compile(run.only)
             matched = [a.name for a in arms if pattern.search(a.name)]
             assert matched == [run.arm], (run.matrix, run.method, matched)

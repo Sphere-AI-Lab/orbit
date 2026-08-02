@@ -31,7 +31,7 @@ from tools.lora_regret.arms import (
     e5rl_arms,
 )
 
-HIDDEN, FFN = 4096, 14336
+HIDDEN, FFN, QKV = 4096, 14336, 6144
 # Any positive value: these tests are about structure, not about which LR wins.
 CENTRE = 1e-4
 
@@ -164,7 +164,7 @@ class TestItDoesNotDuplicateWhatAlreadyRuns:
         the same rule that keeps all-modules out of e4place."""
         mine = {a.name for a in _arms()}
         for other in ("e4", "e4place"):
-            theirs = {a.name for a in MATRICES[other](HIDDEN, FFN, 0, CENTRE, None)}
+            theirs = {a.name for a in MATRICES[other](HIDDEN, FFN, QKV, 0, CENTRE, None)}
             assert not (mine & theirs), (other, sorted(mine & theirs))
 
     def test_placement_is_left_to_e4place(self):

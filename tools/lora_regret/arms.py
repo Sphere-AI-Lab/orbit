@@ -394,6 +394,7 @@ def e1_arms(
     hidden_size: int = LLAMA31_8B_HIDDEN,
     ffn_size: int = LLAMA31_8B_FFN,
     oft_lr_centre: float | None = None,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
 ) -> list[Arm]:
     """E1: capacity, rank, and the 10x LR rule -- decides C1 and C2.
 
@@ -420,7 +421,7 @@ def e1_arms(
                 )
             )
     arms += _oft_cell(256, ALL_MODULES, hidden_size, ffn_size, seed, "tulu3",
-                      oft_lr_centre, n=5)
+                      oft_lr_centre, n=5, qkv_output_size=qkv_output_size)
     return arms
 
 
@@ -473,6 +474,7 @@ def e1ot_arms(
     hidden_size: int = LLAMA31_8B_HIDDEN,
     ffn_size: int = LLAMA31_8B_FFN,
     oft_lr_centre: float | None = None,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
 ) -> list[Arm]:
     """E1-OT: the rank ladder on OpenThoughts3 -- the post's second SFT dataset.
 
@@ -506,6 +508,7 @@ def e1ot_arms(
             )
     arms += _oft_cell(256, ALL_MODULES, hidden_size, ffn_size, seed, "openthoughts3",
                       oft_lr_centre, n=5, full_epoch=True,
+                      qkv_output_size=qkv_output_size,
                       eval_nll_interval=E1OT_EVAL_INTERVAL)
     return arms
 
@@ -530,6 +533,7 @@ def e1short_arms(
     hidden_size: int = LLAMA31_8B_HIDDEN,
     ffn_size: int = LLAMA31_8B_FFN,
     oft_lr_centre: float | None = None,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
 ) -> list[Arm]:
     """E1-short: the ~100-step learning-rate multiplier (the second half of C2).
 
@@ -563,6 +567,7 @@ def e1short_arms(
     arms += _oft_cell(256, ALL_MODULES, hidden_size, ffn_size, seed, "tulu3",
                       oft_lr_centre, n=E1SHORT_POINTS,
                       step_decades=E1SHORT_STEP_DECADES, extra="short",
+                      qkv_output_size=qkv_output_size,
                       num_rollout=E1SHORT_ROLLOUTS,
                       eval_nll_interval=E1SHORT_EVAL_INTERVAL)
     return arms
@@ -573,6 +578,7 @@ def e2_arms(
     hidden_size: int = LLAMA31_8B_HIDDEN,
     ffn_size: int = LLAMA31_8B_FFN,
     oft_lr_centre: float | None = None,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
 ) -> list[Arm]:
     """E2: batch-size sensitivity -- decides C3.
 
@@ -615,6 +621,7 @@ def e2_arms(
         # parameterizes the update.
         arms += _oft_cell(256, ALL_MODULES, hidden_size, ffn_size, seed,
                           "openthoughts3", oft_lr_centre, n=4, scale=scale,
+                          qkv_output_size=qkv_output_size,
                           extra=f"b{batch}", global_batch_size=batch)
     return arms
 
@@ -680,6 +687,7 @@ def e4_arms(
     hidden_size: int = LLAMA31_8B_HIDDEN,
     ffn_size: int = LLAMA31_8B_FFN,
     oft_lr_centre: float | None = None,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
 ) -> list[Arm]:
     """E4: RL parity at low rank -- decides C5.
 
@@ -724,6 +732,7 @@ def e4_arms(
     # match -- a smaller adapter, but one that runs.
     arms += _oft_cell(256, ALL_MODULES, hidden_size, ffn_size, seed, RL_MIX_DATASET,
                       oft_lr_centre, n=4, step_decades=0.5, span=RL_OFT_SCOUT_SPAN,
+                      qkv_output_size=qkv_output_size,
                       max_block=OFT_MAX_BLOCK_SGLANG)
     return arms
 
@@ -814,9 +823,24 @@ E5_SCOUT_BLOCK = 64
 #     lattice cannot follow below 16: block 8 matches rank 1 at ratio 1.34, and
 #     a 34% capacity mismatch would confound exactly what this matrix isolates.
 #
-# Realized match against the solved LoRA ranks: 0.988 (b32, r6), 1.012 (b128,
-# r24), 0.997 (b512, r98). Every arm carries its own ratio into the ledger.
+# The realized match is **per model**, because the solved LoRA rank follows the
+# shapes. Measured by `e5rl_matched_ladder`, not asserted here:
+#
+#   llama3.1-8b (4096/14336/6144)  0.988 (b32, r6)  1.012 (b128, r24)  0.997 (b512, r98)
+#   qwen3-1.7b  (2048/6144/4096)   0.969 (b32, r6)  0.992 (b128, r24)  0.998 (b512, r96)
+#
+# Every arm still carries its own ratio into the ledger.
 E5RL_BLOCK_LADDER = (32, 128, 512)
+
+# How far a rung's realized OFT/LoRA parameter ratio may sit from 1.0 before the
+# ladder is not a matched ladder any more. 5% because both models above clear it
+# with room (worst rung 0.969) while the failure this guards against is not
+# marginal: OFT's count follows `d_in` and LoRA's follows `d_in + d_out`, so a
+# model whose divisor lattice is coarse relative to its shapes lands 20-35% off
+# (block 8 matches rank 1 at 1.31-1.34 on both models above). A 20% capacity
+# difference read as a method difference is the one error this matrix exists to
+# rule out, so it fails at build time rather than in the analysis.
+E5RL_MATCH_TOLERANCE = 0.05
 
 # Matrices whose arms cannot be built without a measured OFT learning-rate
 # centre, because OFT parameterizes a rotation and no LoRA learning rate
@@ -866,6 +890,45 @@ def e5_scout_arms(
     ]
 
 
+def e5rl_matched_ladder(
+    hidden_size: int,
+    ffn_size: int,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
+    tolerance: float = E5RL_MATCH_TOLERANCE,
+) -> list[dict]:
+    """E5-RL's ladder solved for *these* shapes, or a refusal.
+
+    The rungs of `E5RL_BLOCK_LADDER` are block sizes, and a block size means a
+    different number of parameters on every model -- so the LoRA partner rank is
+    re-solved here rather than carried over. On Llama-3.1-8B block 512 pairs with
+    rank 98; on Qwen3-1.7B the same block pairs with rank 96, because the fused
+    QKV width is 4096 rather than 6144 and the FFN is 6144 rather than 14336.
+
+    Raises when a rung's realized ratio leaves `tolerance`, and this is the point
+    of the function. `oft_lora_match_report` will happily return a pair at ratio
+    0.75; the arms built from it run, finish and report accuracies, and the
+    resulting "OFT does not track LoRA" reads as a method difference when it is a
+    25% capacity difference. Whether the rung is matched is a property of the
+    model's shapes, so it can only be decided once the model is known.
+    """
+    shapes = _e5_shapes(hidden_size, ffn_size, qkv_output_size)
+    ladder = [oft_lora_match_report(block, shapes) for block in E5RL_BLOCK_LADDER]
+    off = [r for r in ladder if abs(r["ratio"] - 1.0) > tolerance]
+    if off:
+        detail = ", ".join(
+            f"b{r['block_size']} pairs with r{r['lora_rank']} at ratio {r['ratio']:.3f}"
+            for r in off
+        )
+        raise ValueError(
+            f"E5-RL's block ladder {E5RL_BLOCK_LADDER} is not matched on shapes "
+            f"hidden={hidden_size} ffn={ffn_size} qkv_output={qkv_output_size}: "
+            f"{detail} (tolerance {tolerance:.0%}). Re-solve the ladder for this "
+            "model -- a capacity difference this large is not separable from the "
+            "method difference e5rl exists to measure."
+        )
+    return ladder
+
+
 def e5rl_arms(
     hidden_size: int,
     ffn_size: int,
@@ -908,13 +971,13 @@ def e5rl_arms(
             "(--argmins-from results/e4*.jsonl, or --oft-lr-centre)"
         )
 
-    shapes = _e5_shapes(hidden_size, ffn_size, qkv_output_size)
+    ladder = e5rl_matched_ladder(hidden_size, ffn_size, qkv_output_size)
     oft_grid = lr_grid(oft_lr_centre, n=4, step_decades=0.5)
     lora_grid = lr_grid(RL_LORA_LR_CENTRE, n=4, step_decades=0.5)
     arms: list[Arm] = []
 
-    for block_size in E5RL_BLOCK_LADDER:
-        report = oft_lora_match_report(block_size, shapes)
+    for report in ladder:
+        block_size = report["block_size"]
         rank = report["lora_rank"]
         ratio = report["ratio"]
         for lr in oft_grid:
@@ -1031,36 +1094,54 @@ def e5_arms(
     return arms
 
 
+# Every builder takes the same four shape/config arguments in the same order:
+# `(hidden, ffn, qkv_output, seed, ...)`. `qkv_output` is positional and has no
+# default at this layer on purpose. It used to be absent, so a caller selecting a
+# model other than Llama-3.1-8B got that model's `hidden`/`ffn` and **Llama's**
+# 6144 fused-QKV width -- which silently mis-solves every matched-parameter block
+# size and rank without changing a single arm name. A missing argument is a
+# TypeError; a wrong `qkv_output` is a wrong experiment nobody can see.
 MATRICES = {
-    "sft82": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: sft_arms(hidden, ffn, seed=seed),
-    "e1": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1_arms(
-        seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre
+    "sft82": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: sft_arms(
+        hidden, ffn, seed=seed
     ),
-    "e1long": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1long_arms(argmins, seed=seed),
-    "e1ot": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1ot_arms(
-        seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre
+    "e1": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e1_arms(
+        seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre,
+        qkv_output_size=qkv_output,
     ),
-    "e1short": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e1short_arms(
-        seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre
+    "e1long": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e1long_arms(
+        argmins, seed=seed
     ),
-    "e2": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e2_arms(
-        seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre
+    "e1ot": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e1ot_arms(
+        seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre,
+        qkv_output_size=qkv_output,
     ),
-    "e3": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e3_arms(
-        hidden, ffn, seed=seed, oft_lr_centre=oft_lr_centre
+    "e1short": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e1short_arms(
+        seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre,
+        qkv_output_size=qkv_output,
     ),
-    "e4": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e4_arms(
-        seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre
+    "e2": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e2_arms(
+        seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre,
+        qkv_output_size=qkv_output,
     ),
-    "e4place": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e4place_arms(
-        hidden, ffn, seed=seed, oft_lr_centre=oft_lr_centre
+    "e3": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e3_arms(
+        hidden, ffn, seed=seed, oft_lr_centre=oft_lr_centre, qkv_output_size=qkv_output
     ),
-    "e5rl": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e5rl_arms(
-        hidden, ffn, seed=seed, oft_lr_centre=oft_lr_centre
+    "e4": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e4_arms(
+        seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre,
+        qkv_output_size=qkv_output,
     ),
-    "e5scout": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e5_scout_arms(hidden, ffn, seed=seed),
-    "e5": lambda hidden, ffn, seed, oft_lr_centre=None, argmins=None: e5_arms(
-        hidden, ffn, seed=seed, oft_lr_centre=oft_lr_centre
+    "e4place": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e4place_arms(
+        hidden, ffn, seed=seed, oft_lr_centre=oft_lr_centre, qkv_output_size=qkv_output
+    ),
+    "e5rl": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e5rl_arms(
+        hidden, ffn, seed=seed, oft_lr_centre=oft_lr_centre, qkv_output_size=qkv_output
+    ),
+    "e5scout": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e5_scout_arms(
+        hidden, ffn, seed=seed, qkv_output_size=qkv_output
+    ),
+    "e5": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e5_arms(
+        hidden, ffn, seed=seed, oft_lr_centre=oft_lr_centre, qkv_output_size=qkv_output
     ),
 }
 

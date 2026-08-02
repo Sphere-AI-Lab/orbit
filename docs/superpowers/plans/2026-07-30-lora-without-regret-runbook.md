@@ -1193,3 +1193,51 @@ were open when the cut was made: **SFT FullFT OOMs at DP=4** (72.75 GB used,
 8.79 GB short — `models.py`'s `HEADROOM_GB = 20.0` is too optimistic for
 Llama-3.1-8B), and `e5scout` costs 683 h to locate one learning-rate decade
 because its five arms run at full length.
+### 22.6 Running it as the post ran it — Qwen3-1.7B (available, not decided)
+
+The campaign anchors on Llama-3.1-8B base / MATH+GSM8K / 500 rollouts × 32
+samples. The post's published RL numbers are **Qwen3-1.7B / competition_math /
+50 GRPO steps × 8 rollouts**, and its own wandb export records what that cost:
+**59 runs, 67 GPU-hours, median 0.92 h each on one H100**. The plumbing to run
+the matrices that way now exists. Whether to use it is still open.
+
+```bash
+# the post's split, under the post's own prompt file
+python -m tools.lora_regret.prepare_data --dataset post_rl --out-dir "$DATA_DIR"
+
+# any matrix, on any registered model
+GPUS_PER_NODE=8 python -m tools.lora_regret.sweep --model qwen3-1.7b \
+  --matrix e4 --results results/e4_qwen.jsonl
+```
+
+`--model` moves the **shapes** along with the checkpoint, which is the part
+worth knowing. Before it existed the matrix builders took `hidden` and `ffn`
+and defaulted the fused-QKV width to Llama's 6144; a non-Llama model would have
+got its own hidden/FFN and Llama's QKV, which mis-solves every matched-parameter
+block size and rank **without changing a single arm name**. The width is now
+positional and has no default at that layer, so the mistake is a `TypeError`
+rather than a wrong experiment. `MIN_GPUS_FULLFT` comes out as 1 for
+Qwen3-1.7B — FullFT fits on one card.
+
+E5-RL's ladder is re-solved per model rather than carried over, since a block
+size is not a capacity: block 512 pairs with LoRA **r98 on Llama-3.1-8B and r96
+on Qwen3-1.7B**. `e5rl_matched_ladder` raises if any rung's realized ratio
+leaves ±5% — a 20% capacity difference read as a method difference is exactly
+what that matrix exists to rule out. Both models clear it (worst rung 0.969).
+
+Three things are **not** matched by the above and have to be set or disclosed:
+`NUM_ROLLOUT` 500→50 and `N_SAMPLES_PER_PROMPT` 32→8 in the launcher; the
+grader (`grade_answer_verl` here against the post's `hendrycks/math is_equiv`),
+so accuracies are not comparable to the third decimal; and Qwen3-1.7B is a
+post-trained thinking model where the campaign's Llama arm is a base model. The
+post applies Qwen's default chat template with `add_generation_prompt=True` and
+never passes `enable_thinking=False`, so it generates in thinking mode capped at
+1024 new tokens.
+
+`--dataset post_rl` writes `competition_math_{train,val}.jsonl` from rows
+[0:7500] and [7500:8500] and applies `boxed.prompt` verbatim — **including its
+doubled backslash** (`\\boxed{}`, not `\boxed{}`). That is what the published
+accuracies were measured under; normalising it changes the prompt and forfeits
+the comparability the split exists for. Bare `--dataset competition_math` writes
+the same split with the problem text untouched.
+

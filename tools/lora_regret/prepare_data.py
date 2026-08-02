@@ -59,6 +59,33 @@ MATH_CONFIGS = (
 ASSISTANT_HEADER_LITERAL = "<|start_header_id|>assistant<|end_header_id|>"
 EOT_LITERAL = "<|eot_id|>"
 
+# The reproduction protocol: exactly what the post's own RL scripts trained on.
+#
+# `rl_lora.py` / `rl_full.py` take `qwedsacf/competition_math`, use rows [0:7500]
+# for training and [7500:8500] for validation, and grade the boxed answer. These
+# are the same numbers as the campaign's MATH split by coincidence of size only --
+# the campaign uses EleutherAI/hendrycks_math with its official train/test split
+# and concatenates GSM8K, which is a different set of problems.
+COMPETITION_MATH_EXPECTED_ROWS = 12_500
+POST_RL_TRAIN_ROWS = 7_500
+POST_RL_VAL_START = 7_500
+POST_RL_VAL_END = 8_500
+
+# `third_party/lora-without-regret/boxed.prompt`, byte-for-byte after the
+# `.strip()` that `rl_lora.py` applies when it reads the file. This is the exact
+# string the published accuracies were measured under.
+#
+# The doubled backslash is faithfully reproduced, not a typo introduced here: the
+# post's file really contains `\\boxed{}` rather than `\boxed{}`, so its policy
+# was asked for a double-escaped box. "Fixing" it would change the prompt and
+# make the numbers no longer comparable to the post's -- which is the entire
+# point of running this split. Change it deliberately or not at all.
+POST_RL_PROMPT_TEMPLATE = (
+    "Think for a bit about the question and then put your final answer as a "
+    "number inside \\\\boxed{}. (i.e. \\\\boxed{answer here})\n"
+    "Question: {question}"
+)
+
 # Appended to RL prompts so `--rm-type boxed_math` has something to extract.
 # rm_hub strips \boxed{...} from the response before grading; a Llama-3.1 *base*
 # policy does not box unprompted, so without this every rollout scores 0 and
@@ -373,32 +400,82 @@ def prepare_no_robots(out_dir: Path, n_train: int = 6400, n_test: int = 100) -> 
 
 def prepare_competition_math(
     out_dir: Path,
-    n_train: int = 7500,
-    val_start: int = 7500,
-    val_end: int = 8500,
-) -> tuple[Path, Path]:
-    """Write competition_math train/val JSONL in Orbit prompt/label format.
+    n_train: int = POST_RL_TRAIN_ROWS,
+    val_start: int = POST_RL_VAL_START,
+    val_end: int = POST_RL_VAL_END,
+    *,
+    prompt_template: str | None = None,
+    expected_source_rows: int | None = COMPETITION_MATH_EXPECTED_ROWS,
+) -> PreparedDataset:
+    """Write competition_math train/val JSONL: the post's own RL split.
 
-    Rows whose solution has no \\boxed{...} answer are dropped, since the math
-    reward function cannot grade them.
+    Rows whose solution has no \\boxed{...} answer are dropped and reported as
+    `filtered_rows`, since the math reward function cannot grade them. The
+    *source* count stays asserted, so a changed dataset is still caught -- the
+    same contract `prepare_math` uses, and the reason a few unusable rows do not
+    block the rest.
 
-    Returns (train_path, val_path).
+    `prompt_template` wraps each problem. Pass `POST_RL_PROMPT_TEMPLATE` (what the
+    CLI does) to reproduce the post exactly; pass None to keep the bare problem
+    text. It is a parameter rather than a constant applied unconditionally because
+    the library must not mutate source text silently -- the same split is the
+    right input for a differently-prompted experiment, and a hidden instruction
+    would be invisible in the resulting JSONL's provenance.
+
+    Returns a `PreparedDataset`; `test_path` is the validation split.
     """
     out_dir = Path(out_dir)
     raw = _load_split(COMPETITION_MATH_REPO, "train")
+    if expected_source_rows is not None and len(raw) != expected_source_rows:
+        raise ValueError(
+            f"competition_math: expected {expected_source_rows} source rows, got {len(raw)}. "
+            "The post's split is positional (rows 0-7500 train, 7500-8500 val), so a "
+            "changed row count silently changes which problems are trained on."
+        )
+    if not 0 <= n_train <= val_start <= val_end <= len(raw):
+        raise ValueError(
+            f"competition_math: split bounds 0 <= {n_train} <= {val_start} <= {val_end} "
+            f"<= {len(raw)} do not hold; a val range overlapping train leaks the "
+            "training set into the reported accuracy."
+        )
+
+    dropped: list[dict[str, Any]] = []
 
     def _convert(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         out = []
         for row in rows:
             answer = extract_boxed(row["solution"])
             if answer is None:
+                dropped.append(row)
                 continue
-            out.append({"prompt": row["problem"], "label": answer})
+            problem = row["problem"]
+            prompt = prompt_template.replace("{question}", problem) if prompt_template else problem
+            out.append(
+                {
+                    "prompt": prompt,
+                    "label": answer,
+                    "metadata": {"dataset": "competition_math"},
+                }
+            )
         return out
 
-    train_path = _write_jsonl(out_dir / "competition_math_train.jsonl", _convert(raw[:n_train]))
-    val_path = _write_jsonl(out_dir / "competition_math_val.jsonl", _convert(raw[val_start:val_end]))
-    return train_path, val_path
+    train_rows = _convert(raw[:n_train])
+    val_rows = _convert(raw[val_start:val_end])
+    train_path = _write_jsonl_atomic(
+        out_dir / "competition_math_train.jsonl", train_rows, len(train_rows)
+    )
+    val_path = _write_jsonl_atomic(
+        out_dir / "competition_math_val.jsonl", val_rows, len(val_rows)
+    )
+    return PreparedDataset(
+        name="competition_math",
+        train_path=train_path,
+        test_path=val_path,
+        source_rows=len(raw),
+        train_rows=len(train_rows),
+        test_rows=len(val_rows),
+        filtered_rows=len(dropped),
+    )
 
 
 def prepare_tulu3(
@@ -786,6 +863,7 @@ def main() -> None:
             "gsm8k",
             "rl_mix",
             "campaign",
+            "post_rl",
         ],
         default="both",
     )
@@ -804,15 +882,22 @@ def main() -> None:
     if args.dataset in ("no_robots", "both"):
         train, test = prepare_no_robots(args.out_dir)
         print(f"no_robots: {train} {test}")
-    if args.dataset in ("competition_math", "both"):
-        train, val = prepare_competition_math(args.out_dir)
-        print(f"competition_math: {train} {val}")
+    summaries = []
+    if args.dataset in ("competition_math", "both", "post_rl"):
+        # `post_rl` is the reproduction protocol and gets the post's own prompt
+        # template; the bare `competition_math` target keeps the unmodified
+        # problem text, so the two targets are not the same data under one name.
+        summaries.append(
+            prepare_competition_math(
+                args.out_dir,
+                prompt_template=POST_RL_PROMPT_TEMPLATE if args.dataset == "post_rl" else None,
+            )
+        )
     if args.dataset == "llama3_sample":
         # Not part of "both": this regenerates the tiny (12-row) parity fixture,
         # e.g. `--out-dir tests/fast/fixtures/lora_regret`, not a training split.
         fixture = prepare_llama3_sample(args.out_dir)
         print(f"llama3_sample: {fixture}")
-    summaries = []
     if args.dataset in ("tulu3", "campaign"):
         summaries.append(prepare_tulu3(args.out_dir))
     if args.dataset in ("openthoughts3", "campaign"):
