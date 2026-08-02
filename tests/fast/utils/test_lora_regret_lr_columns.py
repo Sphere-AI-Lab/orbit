@@ -25,7 +25,7 @@ from pathlib import Path
 from tools.lora_regret.arms import e4_arms
 
 SCRIPTS = sorted(
-    (Path(__file__).resolve().parents[3] / "scripts" / "lora_regret").glob("run_e4_lr*_8gpu.sh")
+    (Path(__file__).resolve().parents[3] / "scripts" / "lora_regret").glob("run_e4_*_lr*_8gpu.sh")
 )
 
 
@@ -48,28 +48,31 @@ def _selected(path: Path) -> list[str]:
     return [a.name for a in _arms() if _pattern(path).search(a.name)]
 
 
-def test_there_is_one_script_per_grid_point():
-    assert len(SCRIPTS) == 7
-    assert {p.name for p in SCRIPTS} == {f"run_e4_lr{i}_8gpu.sh" for i in range(1, 8)}
-
-
-def test_each_script_covers_both_panels():
-    """A column is one point of each of Figure 6's two panels, so a script
-    carries both datasets. They stay separable downstream because each arm
-    names its own dataset and is evaluated on it alone."""
+def test_there_is_one_script_per_grid_point_per_panel():
+    """Figure 6 is two panels, and each is schedulable on its own."""
     from tools.lora_regret.arms import RL_DATASETS
 
+    assert len(SCRIPTS) == 7 * len(RL_DATASETS)
+    assert {p.name for p in SCRIPTS} == {
+        f"run_e4_{ds}_lr{i}_8gpu.sh" for ds in RL_DATASETS for i in range(1, 8)
+    }
+
+
+def test_each_script_selects_one_dataset_only():
+    """A column that mixed panels would put two y-axes in one ledger, and
+    `analyze` globs a panel's ledgers together."""
     for path in SCRIPTS:
-        selected = {a.name: a for a in _arms() if _pattern(path).search(a.name)}
-        assert {a.dataset for a in selected.values()} == set(RL_DATASETS), path.name
+        datasets = {a.dataset for a in _arms() if _pattern(path).search(a.name)}
+        assert len(datasets) == 1, (path.name, datasets)
+        assert path.name.startswith(f"run_e4_{datasets.pop()}_lr")
 
 
-def test_each_script_selects_one_fullft_arm_and_three_lora_ranks_per_panel():
-    """One point on each of C5's four curves, on each of the two panels."""
+def test_each_script_selects_one_fullft_arm_and_three_lora_ranks():
+    """One point on each of C5's four curves, at a single learning rate."""
     for path in SCRIPTS:
         names = _selected(path)
-        assert len(names) == 8, (path.name, names)
-        assert sum(n.startswith("full-") for n in names) == 2, (path.name, names)
+        assert len(names) == 4, (path.name, names)
+        assert sum(n.startswith("full-") for n in names) == 1, (path.name, names)
         assert {n.split("-")[1] for n in names if n.startswith("lora-")} == {"r1", "r16", "r256"}, (
             path.name,
             names,
@@ -111,10 +114,10 @@ def test_each_script_writes_its_own_ledger():
     ledgers = {
         re.search(r"RESULTS=(\S+)", path.read_text(encoding="utf-8")).group(1) for path in SCRIPTS
     }
-    assert len(ledgers) == 7
-    assert all(led.startswith("results/e4_lr") for led in ledgers)
+    assert len(ledgers) == 14
+    assert all(led.startswith("results/e4_") for led in ledgers)
 
 
 def test_each_script_asserts_its_own_arm_count():
     for path in SCRIPTS:
-        assert "EXPECT_ARMS=8" in path.read_text(encoding="utf-8"), path.name
+        assert "EXPECT_ARMS=4" in path.read_text(encoding="utf-8"), path.name
