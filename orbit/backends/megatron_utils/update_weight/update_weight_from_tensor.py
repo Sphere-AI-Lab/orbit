@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 import os
 from argparse import Namespace
@@ -13,6 +14,10 @@ from ray.actor import ActorHandle
 
 from orbit.backends.megatron_utils.peft_utils import (
     build_peft_sync_spec,
+)
+from orbit.backends.megatron_utils.peft_transport.slots import (
+    MutationPurpose,
+    authorize_adapter_destination,
 )
 from orbit.backends.training_utils.parallel import get_parallel_state
 from orbit.utils.distributed_utils import get_gloo_group
@@ -478,36 +483,39 @@ class UpdateWeightFromTensor:
         return all_refs, long_lived_tensors
 
     def _send_adapter_params(
-        self, hf_named_tensors, adapter_name: str | None = None
+        self,
+        hf_named_tensors,
+        adapter_name: str | None = None,
+        *,
+        purpose: MutationPurpose = MutationPurpose.STUDENT_SYNC,
     ) -> tuple[list[ObjectRef], Any, list[Any] | None]:
+        authorized_name = authorize_adapter_destination(
+            self._peft_args,
+            requested_name=adapter_name,
+            purpose=purpose,
+        )
         if self.use_distribute and not self._is_distributed_src_rank:
             return [], [], []
         if self._peft_transport is None:
             raise RuntimeError("_send_adapter_params called without a PEFT transport")
-        if adapter_name is None:
-            # Student sync: byte-identical to before — the transport reads its
-            # own sync_spec.adapter_name.
-            send_result = self._peft_transport.send_adapter(
-                hf_named_tensors,
-                weight_version=self.weight_version,
-            )
-            return send_result.refs, [], send_result.results
-        # Teacher promotion: retarget the SAME transport at the reserved slot
-        # for this one call by swapping in a replaced sync_spec (all backends
-        # read the destination name from self.sync_spec.adapter_name), then
-        # restore so the next student sync is untouched.
-        import dataclasses
 
         transport = self._peft_transport
         original_sync_spec = transport.sync_spec
-        transport.sync_spec = dataclasses.replace(original_sync_spec, adapter_name=adapter_name)
+        transport.sync_spec = dataclasses.replace(
+            original_sync_spec,
+            adapter_name=authorized_name,
+        )
         # The IPC/Ray LoRA transport unloads the previous adapter before
         # reloading, gated on transport._peft_loaded — which tracks the STUDENT
         # slot. Point it at the teacher slot's own loaded-state so the first
         # promotion does not unload an orbit_teacher that is not there yet.
         # (NcclBackend has no _peft_loaded and stages/activates instead, so the
         # getattr returns None and this is a no-op there.)
-        student_peft_loaded = getattr(transport, "_peft_loaded", None)
+        student_peft_loaded = (
+            getattr(transport, "_peft_loaded", None)
+            if purpose is MutationPurpose.LEGACY_SELF_TEACHER_PROMOTION
+            else None
+        )
         if student_peft_loaded is not None:
             transport._peft_loaded = self._teacher_slot_loaded
         try:
@@ -535,6 +543,11 @@ class UpdateWeightFromTensor:
         """
         from orbit.utils.opd_teacher_spec import OPD_TEACHER_ADAPTER_NAME
 
+        authorized_name = authorize_adapter_destination(
+            self._peft_args,
+            requested_name=OPD_TEACHER_ADAPTER_NAME,
+            purpose=MutationPurpose.LEGACY_SELF_TEACHER_PROMOTION,
+        )
         if self._peft_sync_spec is None:
             raise RuntimeError("push_teacher_adapter requires a PEFT (LoRA/OFT) run.")
 
@@ -554,7 +567,9 @@ class UpdateWeightFromTensor:
         sync_chunk_count = 0
         for hf_named_tensors in weight_chunks:
             refs, _long_lived, completed_results = self._send_adapter_params(
-                hf_named_tensors, adapter_name=OPD_TEACHER_ADAPTER_NAME
+                hf_named_tensors,
+                adapter_name=authorized_name,
+                purpose=MutationPurpose.LEGACY_SELF_TEACHER_PROMOTION,
             )
             results = completed_results if completed_results is not None else ray.get(refs)
             _check_weight_sync_results(results, sync_type=_sync_type_label(self.peft_method))
