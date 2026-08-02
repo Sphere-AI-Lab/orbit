@@ -663,7 +663,13 @@ def policy_loss_function(
     else:
         old_log_probs = torch.cat(old_log_probs, dim=0)
         log_probs = torch.cat(log_probs, dim=0)
-        ppo_kl = old_log_probs - log_probs
+        if getattr(args, "force_on_policy_ratio", False):
+            # Ratio pinned to exactly 1.0 with the gradient preserved: the surrogate
+            # degenerates to REINFORCE, the exact objective of pure sampled-token MOPD.
+            # Independent behaviour correction may still be applied with TIS.
+            ppo_kl = log_probs.detach() - log_probs
+        else:
+            ppo_kl = old_log_probs - log_probs
 
     pg_loss, pg_clipfrac = compute_policy_loss(
         ppo_kl,

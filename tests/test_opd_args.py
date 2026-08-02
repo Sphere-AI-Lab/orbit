@@ -573,3 +573,89 @@ def test_sglang_local_mode_without_peft_rejected():
     )
     with pytest.raises(ValueError, match="PEFT|adapter structure"):
         _validate_opd_args(args)
+        force_on_policy_ratio=False,
+        use_tis=False,
+        tis_clip_low=0.0,
+        tis_clip=2.0,
+        num_steps_per_rollout=None,
+def test_force_on_policy_ratio_defaults_false_and_parses_true():
+    assert _parse([]).force_on_policy_ratio is False
+    assert _parse(["--force-on-policy-ratio"]).force_on_policy_ratio is True
+
+
+def _valid_force_ratio_args(**overrides):
+    values = {
+        "advantage_estimator": "on_policy_distillation",
+        "force_on_policy_ratio": True,
+        "use_tis": True,
+        "tis_clip_low": 0.2,
+        "tis_clip": 5.0,
+        "num_steps_per_rollout": 1,
+        "opd_type": "sglang",
+        "opd_teacher_url": "http://host/generate",
+        "custom_rm_path": "orbit.rollout.opd_sglang.reward_func",
+        "custom_reward_post_process_path": (
+            "orbit.rollout.opd_sglang.post_process"
+        ),
+    }
+    values.update(overrides)
+    return _base_args(**values)
+
+
+def test_force_on_policy_ratio_accepts_pure_mopd_with_independent_tis():
+    _validate_opd_args(_valid_force_ratio_args())
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    (
+        ({"advantage_estimator": "grpo"}, "on_policy_distillation"),
+        ({"use_opd": True}, "use-opd"),
+        ({"use_rollout_logprobs": True}, "use-rollout-logprobs"),
+        ({"num_steps_per_rollout": None}, "one training step|num-steps"),
+        ({"num_steps_per_rollout": 2}, "one training step|num-steps"),
+        ({"num_steps_per_rollout": True}, "one training step|num-steps"),
+        ({"force_on_policy_ratio": 1}, "boolean"),
+    ),
+)
+def test_force_on_policy_ratio_rejects_noncanonical_combinations(
+    overrides: dict[str, object],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _validate_opd_args(_valid_force_ratio_args(**overrides))
+
+
+@pytest.mark.parametrize(
+    ("low", "high", "message"),
+    (
+        (True, 5.0, "float"),
+        (0, 5.0, "float"),
+        (0.2, 5, "float"),
+        (float("nan"), 5.0, "finite"),
+        (0.2, float("inf"), "finite"),
+        (-0.1, 5.0, "0 <=|bounds"),
+        (1.0, 1.0, "low|bounds"),
+        (5.0, 1.0, "low|bounds"),
+    ),
+)
+def test_tis_bounds_are_exact_finite_ordered_floats(
+    low: object,
+    high: object,
+    message: str,
+) -> None:
+    args = _base_args(
+        use_tis=True,
+        tis_clip_low=low,
+        tis_clip=high,
+    )
+    with pytest.raises(ValueError, match=message):
+        _validate_opd_args(args)
+
+
+def test_tis_bounds_accept_finite_ordered_floats_without_opd():
+    _validate_opd_args(
+        _base_args(use_tis=True, tis_clip_low=0.2, tis_clip=5.0)
+    )
+
+

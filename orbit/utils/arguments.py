@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import math
 import os
 from typing import Any
 
@@ -192,6 +193,15 @@ def add_on_policy_distillation_arguments(parser):
             "Per-request timeout for OPD teacher/student scoring calls. Set this to "
             "give (typically larger, slower) teacher servers a different bound than "
             "generation requests."
+        ),
+    )
+    parser.add_argument(
+        "--force-on-policy-ratio",
+        action="store_true",
+        default=False,
+        help=(
+            "Force the PPO update ratio to exactly one while preserving gradients. "
+            "Independent actor/behaviour correction may still be applied with TIS."
         ),
     )
     parser.add_argument(
@@ -638,6 +648,39 @@ def _validate_opd_args(args) -> None:
         # Pure distillation: no PPO advantage/returns pipeline.
         args.compute_advantages_and_returns = False
 
+    # Forced on-policy ratio (Stage-3 MOPD kernel): the PPO ratio is pinned to exactly 1
+    # (REINFORCE semantics), so every knob that would reintroduce a behaviour/actor
+    # mismatch is checked with exact types -- silent coercion here changes the objective.
+    force_on_policy_ratio = getattr(args, "force_on_policy_ratio", False)
+    if type(force_on_policy_ratio) is not bool:
+        raise ValueError("--force-on-policy-ratio must be an exact boolean.")
+    use_tis = getattr(args, "use_tis", False)
+    if type(use_tis) is not bool:
+        raise ValueError("--use-tis must be an exact boolean.")
+    if use_tis:
+        tis_clip_low = getattr(args, "tis_clip_low", 0.0)
+        tis_clip = getattr(args, "tis_clip", 2.0)
+        if type(tis_clip_low) is not float or type(tis_clip) is not float:
+            raise ValueError("--tis-clip-low and --tis-clip must be exact float values.")
+        if not math.isfinite(tis_clip_low) or not math.isfinite(tis_clip):
+            raise ValueError("--tis-clip-low and --tis-clip must be finite float values.")
+        if not 0.0 <= tis_clip_low < tis_clip:
+            raise ValueError("TIS clipping bounds must satisfy 0 <= --tis-clip-low < --tis-clip.")
+    if force_on_policy_ratio:
+        if getattr(args, "use_opd", False):
+            raise ValueError("--force-on-policy-ratio forbids --use-opd blend mode.")
+        if args.advantage_estimator != "on_policy_distillation":
+            raise ValueError(
+                "--force-on-policy-ratio requires --advantage-estimator on_policy_distillation."
+            )
+        if getattr(args, "use_rollout_logprobs", False):
+            raise ValueError("--force-on-policy-ratio forbids --use-rollout-logprobs.")
+        steps_per_rollout = getattr(args, "num_steps_per_rollout", None)
+        if type(steps_per_rollout) is not int or steps_per_rollout != 1:
+            raise ValueError(
+                "--force-on-policy-ratio requires exactly one training step per "
+                "rollout (--num-steps-per-rollout 1)."
+            )
 
     # sglang-teacher OPD blend is only safe when the teacher scores through the
     # local rollout-engine adapter slot (same-base): the external-URL teacher's
@@ -2076,7 +2119,7 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
             parser.add_argument(
                 "--tis-clip-low",
                 type=float,
-                default=0,
+                default=0.0,
                 help="Lower bound clipping threshold C for importance sampling ratios to control variance.",
             )
             parser.add_argument(

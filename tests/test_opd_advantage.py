@@ -1,6 +1,11 @@
 import pytest
 import torch
 
+import orbit.backends.training_utils.loss as training_loss
+
+
+_ORIGINAL_VANILLA_TIS = training_loss.vanilla_tis_function
+
 from orbit.utils.ppo_utils import (
     apply_opd_icepop_gate,
     apply_opd_kl_to_advantages,
@@ -164,6 +169,191 @@ def test_apply_opd_icepop_gate_raises_without_rollout_log_probs():
 
     with pytest.raises(ValueError, match="rollout_log_probs"):
         apply_opd_icepop_gate(rollout_data, advantages, 0.0, 2.0)
+
+
+def _exercise_policy_ratio(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    collection_log_probs: torch.Tensor,
+    rollout_log_probs: torch.Tensor,
+    force_on_policy_ratio: bool,
+) -> dict[str, torch.Tensor]:
+    current_log_probs = torch.tensor([-0.4, 0.1, 0.8], requires_grad=True)
+    captures: dict[str, torch.Tensor] = {}
+    args = type(
+        "Args",
+        (),
+        {
+            "use_rollout_logprobs": False,
+            "use_opsm": False,
+            "advantage_estimator": "on_policy_distillation",
+            "force_on_policy_ratio": force_on_policy_ratio,
+            "entropy_coef": 0.0,
+            "eps_clip": 0.2,
+            "eps_clip_high": 0.2,
+            "eps_clip_c": None,
+            "get_mismatch_metrics": False,
+            "use_tis": True,
+            "tis_clip_low": 0.2,
+            "tis_clip": 5.0,
+            "custom_tis_function_path": None,
+            "calculate_per_token_loss": True,
+            "qkv_format": "thd",
+            "custom_pg_loss_reducer_function_path": None,
+            "use_kl_loss": False,
+        },
+    )()
+    batch = {
+        "advantages": [torch.ones(3)],
+        "log_probs": [collection_log_probs],
+        "rollout_log_probs": [rollout_log_probs],
+        "response_lengths": [3],
+        "total_lengths": [3],
+        "loss_masks": [torch.ones(3)],
+        "unconcat_tokens": [torch.arange(3)],
+    }
+
+    monkeypatch.setattr(training_loss, "get_parallel_state", lambda: object())
+    monkeypatch.setattr(
+        training_loss,
+        "get_log_probs_and_entropy",
+        lambda *args, **kwargs: {
+            "log_probs": [current_log_probs],
+            "entropy": [torch.zeros_like(current_log_probs)],
+        },
+    )
+
+    def policy_loss(
+        ppo_kl: torch.Tensor,
+        advantages: torch.Tensor,
+        *args,
+        **kwargs,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        captures["ppo_kl"] = ppo_kl.detach().clone()
+        ratio = torch.exp(-ppo_kl)
+        captures["ppo_ratio"] = ratio.detach().clone()
+        return -(advantages * ratio), torch.zeros_like(ratio)
+
+    monkeypatch.setattr(training_loss, "compute_policy_loss", policy_loss)
+    def capture_tis(**kwargs):
+        train = torch.cat(kwargs["train_log_probs"])
+        rollout = torch.cat(kwargs["rollout_log_probs"])
+        captures["tis_weight"] = torch.exp(train - rollout).clamp(
+            min=kwargs["args"].tis_clip_low,
+            max=kwargs["args"].tis_clip,
+        )
+        captures["tis_train_log_probs"] = train.clone()
+        captures["tis_rollout_log_probs"] = rollout.clone()
+        return _ORIGINAL_VANILLA_TIS(**kwargs)
+
+    monkeypatch.setattr(training_loss, "vanilla_tis_function", capture_tis)
+
+    def reduce(values: torch.Tensor) -> torch.Tensor:
+        return values.mean()
+
+    monkeypatch.setattr(
+        training_loss,
+        "get_sum_of_sample_mean",
+        lambda *args, **kwargs: reduce,
+    )
+    monkeypatch.setattr(
+        training_loss,
+        "_response_masked_max",
+        lambda values, **kwargs: values.max(),
+    )
+
+    loss, _ = training_loss.policy_loss_function(
+        args,
+        batch,
+        torch.zeros(1, 3, 2, requires_grad=True),
+        reduce,
+    )
+    loss.backward()
+    assert current_log_probs.grad is not None
+    captures["current_log_probs"] = current_log_probs.detach().clone()
+    captures["current_grad"] = current_log_probs.grad.detach().clone()
+    return captures
+
+
+def test_force_on_policy_ratio_is_one_while_tis_remains_independent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    collection = torch.log(torch.tensor([0.1, 1.0, 10.0]))
+    rollout = torch.zeros(3)
+
+    captures = _exercise_policy_ratio(
+        monkeypatch,
+        collection_log_probs=collection,
+        rollout_log_probs=rollout,
+        force_on_policy_ratio=True,
+    )
+
+    assert torch.equal(captures["ppo_kl"], torch.zeros(3))
+    assert torch.equal(captures["ppo_ratio"], torch.ones(3))
+    assert torch.equal(captures["tis_weight"], torch.tensor([0.2, 1.0, 5.0]))
+    assert torch.equal(captures["tis_train_log_probs"], collection)
+    assert torch.equal(captures["tis_rollout_log_probs"], rollout)
+    assert torch.count_nonzero(captures["current_grad"]) > 0
+
+
+def test_force_on_policy_ratio_ignores_collection_changes_but_tis_does_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rollout = torch.zeros(3)
+    first = _exercise_policy_ratio(
+        monkeypatch,
+        collection_log_probs=torch.log(torch.tensor([0.1, 1.0, 10.0])),
+        rollout_log_probs=rollout,
+        force_on_policy_ratio=True,
+    )
+    second = _exercise_policy_ratio(
+        monkeypatch,
+        collection_log_probs=torch.log(torch.tensor([0.5, 2.0, 3.0])),
+        rollout_log_probs=rollout,
+        force_on_policy_ratio=True,
+    )
+
+    assert torch.equal(first["ppo_ratio"], second["ppo_ratio"])
+    assert torch.equal(first["ppo_ratio"], torch.ones(3))
+    assert not torch.equal(first["tis_weight"], second["tis_weight"])
+
+
+def test_force_on_policy_ratio_ignores_rollout_changes_but_tis_does_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    collection = torch.tensor([-0.4, 0.0, 0.7])
+    first = _exercise_policy_ratio(
+        monkeypatch,
+        collection_log_probs=collection,
+        rollout_log_probs=torch.zeros(3),
+        force_on_policy_ratio=True,
+    )
+    second = _exercise_policy_ratio(
+        monkeypatch,
+        collection_log_probs=collection,
+        rollout_log_probs=torch.tensor([1.0, -1.0, 0.2]),
+        force_on_policy_ratio=True,
+    )
+
+    assert torch.equal(first["ppo_ratio"], second["ppo_ratio"])
+    assert not torch.equal(first["tis_weight"], second["tis_weight"])
+
+
+def test_disabling_force_on_policy_ratio_preserves_existing_ppo_ratio(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    collection = torch.tensor([-1.0, 0.4, 1.2])
+    captures = _exercise_policy_ratio(
+        monkeypatch,
+        collection_log_probs=collection,
+        rollout_log_probs=torch.zeros(3),
+        force_on_policy_ratio=False,
+    )
+    expected_kl = collection - captures["current_log_probs"]
+    expected_ratio = torch.exp(-expected_kl)
+
+    assert torch.equal(captures["ppo_kl"], expected_kl)
+    assert torch.equal(captures["ppo_ratio"], expected_ratio)
 
 
 def test_apply_opd_kl_is_noop_when_student_log_probs_none():
