@@ -60,13 +60,40 @@ def test_rl_launcher_uses_grpo_centering_with_no_kl_penalty_by_default():
     assert '--entropy-coef "${ENTROPY_COEF:-0.0}"' in content
 
 
-def test_rl_launcher_grades_with_the_boxed_math_verifier():
-    """rm_hub dispatches `boxed_math` to extract_boxed_answer + grade_answer_verl.
-    `deepscaler` is the wrong choice here: it returns 0 unless the response
-    contains `</think>` or `###Response`, neither of which a Llama-3.1 *base*
-    policy emits."""
-    assert '--rm-type "${RM_TYPE:-boxed_math}"' in _text()
+def test_rl_launcher_grades_with_the_verl_math_verifier():
+    """`math` dispatches to grade_answer_verl, which extracts the final
+    \\boxed{...} from the response itself.
+
+    NOT `boxed_math`, which double-extracts and can never return 1 -- see
+    tests/test_lora_regret_reward_grading.py, which asserts the behaviour
+    rather than the spelling. NOT `deepscaler`, which returns 0 unless the
+    response contains `</think>` or `###Response`, neither of which a
+    Llama-3.1 *base* policy emits."""
+    assert '--rm-type "${RM_TYPE:-math}"' in _text()
     assert not any("deepscaler" in line for line in _code())
+    assert not any("boxed_math" in line for line in _code())
+
+
+def test_rl_launcher_does_not_wrap_a_base_policy_in_the_instruct_chat_template():
+    """The policy is Llama-3.1-8B *base*. The pinned template is Instruct's, so
+    applying it conditions the base model on turn-delimiter tokens it was never
+    trained to read: the 2026-07-31 probe logged degenerate continuations and
+    reward 0 on every rollout. `render_prompt` writes the frame into the jsonl
+    instead, so the prompt string reaches the engine unmodified."""
+    assert not any("--apply-chat-template" in line for line in _code())
+
+
+def test_rl_launcher_stops_generation_at_the_frame_the_data_uses():
+    """A base policy continues the pattern into a next problem and runs to the
+    token cap; a truncated response has lost its \\boxed{...} and grades 0. The
+    stop word therefore has to be exactly the frame prepare_data emits."""
+    from tools.lora_regret.prepare_data import COMPLETION_STOP
+
+    assert any("--rollout-stop" in line for line in _code())
+    # The launcher spells the default with bash ANSI-C quoting; compare against
+    # the escaped form so the two definitions cannot drift apart.
+    escaped = COMPLETION_STOP.replace("\n", "\\n")
+    assert any(f"$'{escaped}'" in line for line in _code())
 
 
 def test_rl_launcher_keeps_the_blogs_optimizer_protocol():

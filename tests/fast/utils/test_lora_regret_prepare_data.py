@@ -15,6 +15,7 @@ from tools.lora_regret.prepare_data import (
     extract_boxed,
     extract_gsm8k_answer,
     prepare_competition_math,
+    render_prompt,
     prepare_gsm8k,
     prepare_math,
     prepare_no_robots,
@@ -226,8 +227,10 @@ def test_math_combines_categories_and_preserves_official_splits(tmp_path: Path, 
     assert len(train_rows) == len(MATH_CONFIGS)
     assert len(test_rows) == len(MATH_CONFIGS)
     assert train_rows[0]["metadata"] == {"dataset": "math", "category": MATH_CONFIGS[0]}
-    assert train_rows[0]["prompt"].endswith("-tr")
-    assert test_rows[0]["prompt"].endswith("-te")
+    # `render_prompt` frames the problem for a base policy, so the problem text
+    # is inside a Problem:/Solution: block rather than being the whole prompt.
+    assert train_rows[0]["prompt"] == render_prompt(f"{MATH_CONFIGS[0]}-tr")
+    assert test_rows[0]["prompt"] == render_prompt(f"{MATH_CONFIGS[0]}-te")
 
 
 def test_math_reports_rather_than_raises_on_a_missing_boxed_answer(tmp_path: Path, monkeypatch):
@@ -267,8 +270,10 @@ def test_gsm8k_preserves_official_splits_and_extracts_labels(tmp_path: Path, mon
     monkeypatch.setattr("tools.lora_regret.prepare_data._load_config_split", _fake_load)
     result = prepare_gsm8k(tmp_path, expected_train_rows=1, expected_test_rows=1)
 
-    assert _read_jsonl(result.train_path) == [{"prompt": "train", "label": "72", "metadata": {"dataset": "gsm8k"}}]
-    assert _read_jsonl(result.test_path)[0]["prompt"] == "test"
+    assert _read_jsonl(result.train_path) == [
+        {"prompt": render_prompt("train"), "label": "72", "metadata": {"dataset": "gsm8k"}}
+    ]
+    assert _read_jsonl(result.test_path)[0]["prompt"] == render_prompt("test")
 
 
 # ---------------------------------------------------------------------------
@@ -279,9 +284,9 @@ def test_gsm8k_preserves_official_splits_and_extracts_labels(tmp_path: Path, mon
 
 
 def test_math_appends_the_answer_instruction_when_asked(tmp_path: Path, monkeypatch):
-    """`--rm-type boxed_math` strips \\boxed{...} from the response before
-    grading. A Llama-3.1 *base* policy does not box unprompted, so without this
-    every rollout scores 0 and every E4 arm looks identical."""
+    """`--rm-type math` grades the \\boxed{...} it finds in the response. A
+    Llama-3.1 *base* policy does not box unprompted, so without this every
+    rollout scores 0 and every E4 arm looks identical."""
 
     def _fake_load(name, config, split):
         return [{"problem": "2+2?", "solution": r"\boxed{4}"}]
@@ -295,7 +300,7 @@ def test_math_appends_the_answer_instruction_when_asked(tmp_path: Path, monkeypa
     )
 
     prompt = _read_jsonl(result.train_path)[0]["prompt"]
-    assert prompt.startswith("2+2?")
+    assert "2+2?" in prompt
     assert ANSWER_INSTRUCTION in prompt
     # The label is the bare answer either way -- the instruction changes the
     # prompt, never the grading target.
@@ -315,7 +320,7 @@ def test_gsm8k_appends_the_answer_instruction_when_asked(tmp_path: Path, monkeyp
     )
 
     row = _read_jsonl(result.train_path)[0]
-    assert row["prompt"].startswith("how many?")
+    assert "how many?" in row["prompt"]
     assert ANSWER_INSTRUCTION in row["prompt"]
     assert row["label"] == "72"
 
@@ -329,7 +334,8 @@ def test_answer_instruction_is_off_by_default(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr("tools.lora_regret.prepare_data._load_config_split", _fake_load)
     result = prepare_gsm8k(tmp_path, expected_train_rows=1, expected_test_rows=1)
-    assert _read_jsonl(result.train_path)[0]["prompt"] == "how many?"
+    assert _read_jsonl(result.train_path)[0]["prompt"] == render_prompt("how many?")
+    assert "\\boxed" not in _read_jsonl(result.train_path)[0]["prompt"]
 
 
 def test_rl_mix_concatenates_math_and_gsm8k(tmp_path: Path):

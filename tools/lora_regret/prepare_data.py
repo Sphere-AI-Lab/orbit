@@ -77,12 +77,51 @@ COMPETITION_MATH_TRAIN_ROWS = 7_500
 COMPETITION_MATH_VAL_START = 7_500
 COMPETITION_MATH_VAL_END = 8_500
 
-# Appended to RL prompts so `--rm-type boxed_math` has something to extract.
-# rm_hub strips \boxed{...} from the response before grading; a Llama-3.1 *base*
-# policy does not box unprompted, so without this every rollout scores 0 and
-# every E4 arm looks identical. Off by default in the library (do not mutate
-# source text silently), on by default in the CLI (which builds runnable data).
+# Appended to RL prompts so `--rm-type math` has something to extract.
+# grade_answer_verl pulls the final \boxed{...} out of the response and grades
+# that; a Llama-3.1 *base* policy does not box unprompted, so without this every
+# rollout scores 0 and every E4 arm looks identical. Off by default in the
+# library (do not mutate source text silently), on by default in the CLI (which
+# builds runnable data).
 ANSWER_INSTRUCTION = "\n\nPut your final answer in \\boxed{}."
+
+# --- prompt rendering -------------------------------------------------------
+#
+# The policy is `Llama-3.1-8B`, the BASE checkpoint. It has no instruction
+# tuning and no turn structure: the Instruct chat template's control tokens are
+# in its vocabulary, but it was never trained to condition on them as
+# delimiters, and the 2026-07-31 probe recorded what it emits after an assistant
+# header -- web-scrape noise and private-use codepoints, reward 0 on all 1,024
+# rollouts of every step.
+#
+# So the prompt is rendered as ordinary text that a pretraining corpus is full
+# of: a `Problem:` block and a `Solution:` cue the model continues. The frame is
+# part of the DATA, not of the launcher, so the exact bytes the policy sees are
+# in the jsonl and are identical for FullFT and every LoRA rank. Rendering two
+# arms differently would confound the axis E4 sweeps.
+#
+# COMPLETION_STOP is passed to the engine as a stop word: a base model continues
+# the pattern past its own answer and starts writing the next problem. Without
+# it, rollouts run to the token cap (10.2% truncated at 2,048 in the probe) and
+# a truncated response has lost its \boxed{...}, so it grades 0 whatever it
+# argued.
+COMPLETION_STOP = "\n\nProblem:"
+PROMPT_STYLES = ("completion", "raw")
+
+
+def render_prompt(problem: str, *, answer_instruction: str = "", style: str = "completion") -> str:
+    """Render one problem into the exact string the policy is conditioned on.
+
+    `raw` is the pre-2026-08-02 behaviour -- the bare problem text, which only
+    makes sense downstream of `--apply-chat-template`. It is kept because the
+    chat-template path is still a legitimate configuration for an *Instruct*
+    checkpoint, not because anything in this campaign uses it.
+    """
+    if style == "raw":
+        return problem + answer_instruction
+    if style == "completion":
+        return f"Problem:\n{problem}{answer_instruction}\n\nSolution:"
+    raise ValueError(f"unknown prompt style {style!r}; expected one of {PROMPT_STYLES}")
 
 
 @dataclass(frozen=True)
@@ -520,6 +559,7 @@ def _math_rows(
     dataset: str,
     category: str | None = None,
     answer_instruction: str = "",
+    prompt_style: str = "completion",
     dropped: list[dict[str, Any]] | None = None,
 ):
     """Convert MATH-shaped rows, setting aside any without a usable answer.
@@ -541,7 +581,7 @@ def _math_rows(
         if category is not None:
             metadata["category"] = category
         yield {
-            "prompt": row["problem"] + answer_instruction,
+            "prompt": render_prompt(row["problem"], answer_instruction=answer_instruction, style=prompt_style),
             "label": answer,
             "metadata": metadata,
         }
@@ -553,6 +593,7 @@ def prepare_math(
     expected_train_rows: int = MATH_EXPECTED_TRAIN_ROWS,
     expected_test_rows: int = MATH_EXPECTED_TEST_ROWS,
     answer_instruction: str = "",
+    prompt_style: str = "completion",
 ) -> PreparedDataset:
     """Convert every official MATH category and preserve its train/test split.
 
@@ -576,6 +617,7 @@ def prepare_math(
                 dataset="math",
                 category=config,
                 answer_instruction=answer_instruction,
+                prompt_style=prompt_style,
                 dropped=dropped,
             )
         )
@@ -585,6 +627,7 @@ def prepare_math(
                 dataset="math",
                 category=config,
                 answer_instruction=answer_instruction,
+                prompt_style=prompt_style,
                 dropped=dropped,
             )
         )
@@ -619,10 +662,10 @@ def extract_gsm8k_answer(answer: str) -> str:
     return final_answer.strip()
 
 
-def _gsm8k_rows(rows: Iterable[dict[str, Any]], *, answer_instruction: str = ""):
+def _gsm8k_rows(rows: Iterable[dict[str, Any]], *, answer_instruction: str = "", prompt_style: str = "completion"):
     for row in rows:
         yield {
-            "prompt": row["question"] + answer_instruction,
+            "prompt": render_prompt(row["question"], answer_instruction=answer_instruction, style=prompt_style),
             "label": extract_gsm8k_answer(row["answer"]),
             "metadata": {"dataset": "gsm8k"},
         }
@@ -634,18 +677,21 @@ def prepare_gsm8k(
     expected_train_rows: int = GSM8K_EXPECTED_TRAIN_ROWS,
     expected_test_rows: int = GSM8K_EXPECTED_TEST_ROWS,
     answer_instruction: str = "",
+    prompt_style: str = "completion",
 ) -> PreparedDataset:
     """Convert GSM8K's official main train/test splits."""
     train_rows = list(
         _gsm8k_rows(
             _load_config_split(GSM8K_REPO, "main", "train"),
             answer_instruction=answer_instruction,
+            prompt_style=prompt_style,
         )
     )
     test_rows = list(
         _gsm8k_rows(
             _load_config_split(GSM8K_REPO, "main", "test"),
             answer_instruction=answer_instruction,
+            prompt_style=prompt_style,
         )
     )
     if len(train_rows) != expected_train_rows:
@@ -860,8 +906,20 @@ def main() -> None:
         action="store_true",
         help=(
             "Do not append the boxed-answer instruction to MATH/GSM8K prompts. "
-            "Only use this if the reward is not --rm-type boxed_math: without the "
+            "Only use this if the reward is not --rm-type math: without the "
             "instruction a base policy never boxes, so every rollout scores 0."
+        ),
+    )
+    parser.add_argument(
+        "--prompt-style",
+        choices=PROMPT_STYLES,
+        default="completion",
+        help=(
+            "How MATH/GSM8K prompts are framed. `completion` writes the exact "
+            "text the base policy is conditioned on (Problem:/Solution:), which "
+            "is what the RL launcher feeds through unmodified. `raw` writes the "
+            "bare problem and only makes sense with --apply-chat-template, i.e. "
+            "against an Instruct checkpoint."
         ),
     )
     args = parser.parse_args()
@@ -883,9 +941,9 @@ def main() -> None:
     if args.dataset in ("openthoughts3", "campaign"):
         summaries.append(prepare_openthoughts3(args.out_dir))
     if args.dataset in ("math", "campaign"):
-        summaries.append(prepare_math(args.out_dir, answer_instruction=answer_instruction))
+        summaries.append(prepare_math(args.out_dir, answer_instruction=answer_instruction, prompt_style=args.prompt_style))
     if args.dataset in ("gsm8k", "campaign"):
-        summaries.append(prepare_gsm8k(args.out_dir, answer_instruction=answer_instruction))
+        summaries.append(prepare_gsm8k(args.out_dir, answer_instruction=answer_instruction, prompt_style=args.prompt_style))
     if args.dataset in ("rl_mix", "campaign"):
         # Last, so `--dataset campaign` writes the mix from the files it just
         # produced rather than from a stale pair.

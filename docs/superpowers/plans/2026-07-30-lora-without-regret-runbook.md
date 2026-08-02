@@ -1278,3 +1278,103 @@ and data. It cannot reproduce its *figures*: the post does not publish the
 MATH/GSM8K step count, batch size, or learning-rate grid, so any accuracy
 reported here is this setup's number, not a replication of a published one. Say
 so when reporting it.
+
+---
+
+## 23. CORRECTION — the campaign's reward was structurally zero (2026-08-02)
+
+**Nothing run before this date measured anything.** Every RL probe row in
+`results/probe/` reports `accuracy: 0.0` on both eval splits, and the run logs
+report `rollout/rewards: 0.0`, `passrate/pass@32: 0.0`, `rollout/advantages:
+0.0` on every rollout. That reads as a base-model or prompt problem. It was two
+independent bugs, and the first one alone made a nonzero reward impossible.
+
+### 23.1 `--rm-type boxed_math` has range {0}
+
+Both halves of that spelling extract the box. `rm_hub.async_rm` sees the
+`boxed_` prefix and strips `\boxed{152}` down to `"152"`; the grader it then
+calls, `grade_answer_verl`, opens with `extract_answer(solution_str)`, which
+returns `None` for any string with no `\boxed` in it. So a *correct* response
+scores 0:
+
+```
+rm_type=boxed_math   reward=0     # "...the final answer is \boxed{152}", label 152
+rm_type=math         reward=1     # same response, same label
+```
+
+The launcher now defaults to `--rm-type math`, which extracts the box itself.
+`tests/test_lora_regret_reward_grading.py` reads the launcher's configured
+RM_TYPE and runs a correct response through it, so an empty positive range fails
+in five seconds instead of in a 500-node-hour sweep. The same trap applies to
+`boxed_dapo` — `compute_score_dapo` also extracts.
+
+This is why an all-zero reward is dangerous rather than loud: advantage is
+reward minus the group mean, so an all-zero group has zero advantage and
+contributes no gradient. Every arm at every learning rate trains on nothing and
+finishes cleanly, and the sweep reports a tidy flat line.
+
+### 23.2 The base policy was being fed the Instruct chat template
+
+`--apply-chat-template` with the pinned Llama-3.1 *Instruct* template wrapped
+each problem in `<|start_header_id|>system/user/assistant<|end_header_id|>`
+turns. Those tokens are in the base vocabulary, but `Llama-3.1-8B` base was
+never trained to condition on them as delimiters. The 2026-07-31 log shows what
+it emits after an assistant header — "Back to Index", runs of private-use
+codepoints — and where it stayed coherent it answered in prose with no
+`\boxed{}`, which grades 0 anyway.
+
+The frame now lives in the data, not the launcher: `prepare_data.render_prompt`
+writes
+
+```
+Problem:
+{problem}
+
+Put your final answer in \boxed{}.
+
+Solution:
+```
+
+so the jsonl `prompt` is byte-for-byte what the policy sees, identically for
+FullFT and every LoRA rank. `--apply-chat-template` is gone from the launcher
+and `--rollout-stop $'\n\nProblem:'` is in: a base policy continues the pattern
+into a next problem and otherwise runs to the token cap (10.2% of probe rollouts
+truncated at 2,048), and a truncated response has lost its box.
+
+### 23.3 What the operator has to do
+
+The RL splits were regenerated in place on 2026-08-02 with the new renderer —
+`math_train` (7,498), `gsm8k_train` (7,473), `math_gsm8k_train` (14,971),
+`math_test` (5,000), `gsm8k_test` (1,319), all in
+`/lustre/fast/fast/groups/ei-slm/data/lora_regret`. Anything regenerated after
+this date must keep `--prompt-style completion` (the default). A file written
+with `--prompt-style raw` is only correct downstream of
+`--apply-chat-template`, i.e. against an Instruct checkpoint.
+
+**Still unmeasured: whether the new rendering earns a nonzero reward.** The
+grader fix is verified on CPU; the rendering is an argument about a distribution
+nobody has sampled. `tools/lora_regret/prompt_probe.py` settles it — it runs the
+real reward function against real problems and reports, per rendering, the mean
+reward, the boxed rate, the truncation rate, and `solvable_groups`: the fraction
+of problems whose samples *disagree*. That last number, not the reward, is what
+decides whether policy gradient has anything to learn from.
+
+```bash
+source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
+cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
+export CUDA_HOME=/is/software/nvidia/cuda-13.2 && source env.sh
+
+python -m tools.lora_regret.prompt_probe \
+  --style completion --style chat \
+  --dataset gsm8k --dataset math \
+  --n-problems 128 --n-samples 8 --dp 8 \
+  --out results/prompt_probe.jsonl \
+  --samples-out results/prompt_probe_samples.jsonl
+```
+
+Gate before booking any node for the sweep: `completion` must beat `chat` on
+`solvable_groups` by a wide margin, and its `reward` should land near the post's
+own baseline — ~0.06 on GSM8K, ~0.035 on MATH. A `reward` far above that means
+the frame is doing the task's work and the RL gain will not resemble Figure 6;
+a `solvable_groups` near 0 means there is still no gradient and the sweep must
+not start.

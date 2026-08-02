@@ -244,7 +244,7 @@ def parse_final_accuracy(
 ) -> tuple[float | None, int | None, dict[str, float]]:
     """The arm's accuracy: the mean over datasets at the highest rollout id.
 
-    With `--rm-type boxed_math` the reward is exactly 1 or 0, so rollout.py's
+    With `--rm-type math` the reward is exactly 1 or 0, so rollout.py's
     `sum(rewards) / len(rewards)` per-dataset score *is* accuracy on that split.
 
     Returns `(mean_score, rollout_id, per_dataset_scores)`. The mean is recomputed

@@ -94,11 +94,30 @@ ROLLOUT_ARGS=(
     --prompt-data "${TRAIN_JSONL}"
     --input-key prompt
     --label-key label
-    --apply-chat-template
+    # NO --apply-chat-template. The policy is Llama-3.1-8B *base*, and the
+    # pinned template is Llama-3.1 *Instruct*'s: it wraps every problem in
+    # <|start_header_id|>system/user/assistant<|end_header_id|> turns. Those
+    # tokens are in the base vocabulary but the base model was never trained to
+    # condition on them as delimiters, and the 2026-07-31 probe recorded the
+    # result -- "Back to Index", runs of private-use codepoints, reward 0 on
+    # every one of 1,024 rollouts per step, so zero advantage and no gradient
+    # for any arm at any learning rate.
+    #
+    # prepare_data.py's `render_prompt` now writes the Problem:/Solution: frame
+    # into the jsonl instead, so the prompt string here IS the text the policy
+    # sees, byte for byte, and it is identical across FullFT and every rank.
     --rollout-shuffle
-    # boxed_math: rm_hub strips \boxed{...} from the response, then grades with
-    # grade_answer_verl against the bare answer string prepare_data.py wrote
+    # math: grade_answer_verl extracts the final \boxed{...} from the response
+    # itself and grades it against the bare answer string prepare_data.py wrote
     # (extract_boxed for MATH, the post-#### token for GSM8K).
+    #
+    # NOT boxed_math, which was the default until 2026-08-02 and whose range is
+    # {0}. Both halves extract: rm_hub's `boxed_` prefix strips \boxed{...} down
+    # to "152", and grade_answer_verl then calls extract_answer("152"), which
+    # returns None for any string with no \boxed in it. A perfectly correct
+    # response scored 0, so every group's advantage was 0, so no arm at any
+    # learning rate received a gradient. tests/test_lora_regret_reward_grading.py
+    # runs the launcher's configured RM_TYPE and fails if its range is empty.
     #
     # NOT deepscaler, which returns 0 unless the response contains "</think>"
     # or "###Response" -- a Llama-3.1 *base* policy emits neither, so every
@@ -106,12 +125,19 @@ ROLLOUT_ARGS=(
     #
     # This requires the prompts to ask for a boxed answer. prepare_data.py's
     # --answer-instruction does that; the runbook makes it a required step.
-    --rm-type "${RM_TYPE:-boxed_math}"
+    --rm-type "${RM_TYPE:-math}"
     --num-rollout "${NUM_ROLLOUT}"
     --rollout-batch-size "${ROLLOUT_BATCH_SIZE}"
     --n-samples-per-prompt "${N_SAMPLES_PER_PROMPT}"
     --rollout-max-response-len "${ROLLOUT_MAX_RESPONSE_LEN:-2048}"
     --rollout-temperature "${ROLLOUT_TEMPERATURE:-1.0}"
+    # A base policy continues the pattern: after finishing its solution it
+    # writes the next "Problem:" and keeps going to the token cap (10.2% of
+    # probe rollouts truncated at 2,048). A truncated response has lost its
+    # \boxed{...} and grades 0 however well it argued, so the stop word is part
+    # of the reward path, not a throughput tweak. Must match
+    # prepare_data.COMPLETION_STOP; a test pins the pair together.
+    --rollout-stop "${ROLLOUT_STOP:-$'\n\nProblem:'}"
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
     --rollout-seed "${ROLLOUT_SEED}"
     # Llama-3.1-8B *base* ships no chat_template, so load_tokenizer raises
