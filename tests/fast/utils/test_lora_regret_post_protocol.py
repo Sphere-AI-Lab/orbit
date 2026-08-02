@@ -230,3 +230,65 @@ class TestThePostsOwnSplit:
         )
         assert result.filtered_rows == 3
         assert result.train_rows == 7
+
+
+class TestTheModelIsVisibleInTheResults:
+    """`--model` made two experiments share one identity. This is the fix.
+
+    Arm names carry method, capacity, placement, LR and seed -- never the base
+    model, because every matrix was single-model when the names were designed.
+    So `lora-r1-all-lr1e-05-s0` is the same string on both models, and without
+    the two assertions below a Qwen run and a Llama run are one run everywhere a
+    human or `analyze` would look.
+    """
+
+    def test_two_models_do_not_share_a_wandb_project(self):
+        assert sweep.wandb_project("e4", "qwen3-1.7b") != sweep.wandb_project("e4", "llama3.1-8b")
+
+    def test_the_campaigns_own_dashboards_do_not_move(self):
+        """The anchor model keeps the bare name, so every project the runbook
+        already names still exists and every pre-`--model` ledger row still
+        points at a real dashboard."""
+        for matrix in ("e4", "e4place", "e5rl"):
+            assert sweep.wandb_project(matrix, "llama3.1-8b") == sweep.wandb_project(matrix)
+
+    def test_the_dataset_and_mode_stay_at_the_front(self):
+        """Suffixed, not prefixed: `test_the_project_name_describes_the_arms_it_routes`
+        reads the `<dataset>-<sft|rl>-` head, and a model prefix would push the
+        claim the name is making out of the position a reader looks at first."""
+        assert sweep.wandb_project("e4", "qwen3-1.7b").startswith("math-gsm8k-rl-")
+
+    def test_the_ledger_records_which_model_produced_the_number(self, tmp_path, monkeypatch):
+        """Globbing two models' ledgers into `analyze` must not merge their arms
+        into one argmin. The row has to say which model it came from; nothing
+        else in it does -- the arm name is byte-identical across models."""
+        import subprocess
+
+        monkeypatch.setattr(
+            sweep.subprocess, "run",
+            lambda cmd, env, cwd: subprocess.CompletedProcess(cmd, 0),
+        )
+        arm = sweep.replace(
+            MATRICES["e4"](QWEN.hidden_size, QWEN.ffn_size, QWEN.qkv_output_size, 0, None, None)[0],
+            model="qwen3-1.7b",
+        )
+        results = tmp_path / "r.jsonl"
+        log = tmp_path / "logs" / "lora_regret" / f"{arm.name}.log"
+        log.parent.mkdir(parents=True)
+        log.write_text(
+            "eval/rollout_id=0 eval/math_test=0.5 eval/gsm8k_test=0.5\n"
+        )
+
+        sweep.run_arm(arm, tmp_path, results, False, launcher=sweep.RL_LAUNCHER,
+                      metric="accuracy", matrix="e4")
+
+        row = json.loads(results.read_text().splitlines()[0])
+        assert row["model"] == "qwen3-1.7b"
+        assert row["wandb_project"] == "math-gsm8k-rl-rank-qwen3-1.7b"
+
+    def test_the_same_arm_on_the_anchor_model_is_told_apart_only_by_that_field(self):
+        """Both halves of the hazard in one assertion: the names collide, and
+        the recorded model is what separates them."""
+        build = lambda m: MATRICES["e4"](m.hidden_size, m.ffn_size, m.qkv_output_size, 0, None, None)[0]
+        assert build(QWEN).name == build(LLAMA).name
+        assert sweep.wandb_project("e4", "qwen3-1.7b") != sweep.wandb_project("e4", "llama3.1-8b")

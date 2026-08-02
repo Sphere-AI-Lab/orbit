@@ -137,17 +137,35 @@ UNROUTED_WANDB_PROJECT = "lora-without-regret"
 SMOKE_WANDB_PROJECT = "lora-regret-smoke"
 
 
-def wandb_project(matrix: str | None) -> str:
-    """The wandb project for one matrix, or the campaign default for none."""
+def wandb_project(matrix: str | None, model: str | None = None) -> str:
+    """The wandb project for one matrix on one model, or the default for none.
+
+    **The model has to be in the name, because it is nowhere else.** An arm name
+    carries method, capacity, placement, learning rate and seed -- not the base
+    model, since every matrix was single-model when the names were designed. Now
+    that `--model` exists, `lora-r1-all-lr1e-05-s0` on Qwen3-1.7B and the same
+    arm on Llama-3.1-8B are two different experiments with one run name; pooled
+    in one project they are indistinguishable in the sidebar, and the better of
+    the two would look like the arm's result.
+
+    Only non-default models are suffixed. `llama3.1-8b` keeps the bare name so
+    the dashboards the campaign already points at do not move, and so the
+    `<dataset>-<sft|rl>-` head that
+    `test_the_project_name_describes_the_arms_it_routes` pins stays first --
+    suffixing rather than prefixing is what keeps that claim readable.
+    """
     if matrix is None:
         return UNROUTED_WANDB_PROJECT
     try:
-        return MATRIX_PROJECTS[matrix]
+        project = MATRIX_PROJECTS[matrix]
     except KeyError:
         raise KeyError(
             f"no wandb project for matrix {matrix!r}; add one to MATRIX_PROJECTS "
             f"(known: {sorted(MATRIX_PROJECTS)})"
         ) from None
+    if model is not None and model != DEFAULT_MODEL:
+        project = f"{project}-{model}"
+    return project
 
 
 def load_ledger(path: Path) -> set[str]:
@@ -319,7 +337,7 @@ def run_arm(
     overrides = dict(model_env(get_model(arm.model), repo_root))
     overrides.update(arm_env(arm))
     if probe_rollouts is None:
-        project, group = wandb_project(matrix), arm.method
+        project, group = wandb_project(matrix, arm.model), arm.method
     else:
         # The task moves into the group so one smoke project still separates
         # e4place/oft from e1/lora, without either polluting a real dashboard.
@@ -386,6 +404,12 @@ def run_arm(
         results_path,
         {
             "arm": arm.name,
+            # Which base model produced this number. Not derivable from `arm`:
+            # the name carries method, capacity, placement, LR and seed, and was
+            # designed when every matrix was single-model. Without it, globbing a
+            # Qwen ledger and a Llama ledger into `analyze` merges two models'
+            # arms into one argmin and nothing in the output looks wrong.
+            "model": arm.model,
             "method": arm.method,
             "rank": arm.rank,
             "oft_block_size": arm.oft_block_size,

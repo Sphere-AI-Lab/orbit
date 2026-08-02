@@ -284,8 +284,20 @@ project does — would put E1's rank ladder, E3's placement pair and E5's OFT ar
 in one flat namespace of 112 runs, where the run deciding C2 is indistinguishable
 in the sidebar from the one deciding C6.
 
-Every ledger row now carries `wandb_project` and `wandb_group`, so a number read
-months later can be traced back to the dashboard it came off.
+Every ledger row now carries `wandb_project`, `wandb_group` and `model`, so a
+number read months later can be traced back to the dashboard it came off and to
+the base model that produced it.
+
+**A non-default `--model` suffixes the project**: `math-gsm8k-rl-rank` on
+Llama-3.1-8B, `math-gsm8k-rl-rank-qwen3-1.7b` on Qwen3-1.7B. Arm names carry
+method, capacity, placement, learning rate and seed but **never the model** —
+they were designed when every matrix was single-model — so `lora-r1-all-lr1e-05-s0`
+is the same string on both. Pooled in one project the two are one
+indistinguishable set in the sidebar, and the better of them would read as the
+arm's result. The `model` field in the ledger closes the same hole for
+`analyze`, which globs ledgers and would otherwise merge two models' arms into
+one argmin with nothing in the output looking wrong. The anchor model keeps the
+bare project name, so every project named above is unchanged.
 
 Hand-run arms (§3's smoke, §4's P3) do not go through the sweep and keep the
 launcher's own `WANDB_PROJECT=lora-without-regret` default. Calling `run_arm`
