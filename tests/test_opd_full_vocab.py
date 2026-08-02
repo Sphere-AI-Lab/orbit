@@ -97,16 +97,18 @@ def _sample(num_tokens: int = 7, response_length: int = 3) -> Sample:
 def test_reward_func_stashes_full_vocab_response(monkeypatch):
     seen = {}
 
-    async def fake_post_json(url, payload, timeout_secs=None):
-        seen["url"], seen["payload"] = url, payload
+    async def fake_post_json(url, payload, timeout_secs=None, max_response_bytes=None):
+        seen["url"], seen["payload"], seen["max_response_bytes"] = url, payload, max_response_bytes
         return {"meta_info": {"hidden_states": ["canned"]}}
 
     monkeypatch.setattr(opd_sglang, "_post_json", fake_post_json)
+    monkeypatch.setattr(opd_sglang, "_full_vocab_response_byte_limit", lambda args, n: 123456)
     args = _full_vocab_args()
     sample = _sample()
     assert asyncio.run(reward_func(args, sample)) == 0.0
     assert seen["url"] == args.opd_teacher_url
     assert seen["payload"]["return_hidden_states"] is True
+    assert seen["max_response_bytes"] == 123456
     assert sample.metadata[TEACHER_RESPONSE_METADATA_KEY] == {"meta_info": {"hidden_states": ["canned"]}}
 
 
@@ -194,3 +196,37 @@ def test_validation_accepts_full_vocab_and_disables_advantages():
 def test_validation_rejects_bad_full_vocab_configs(overrides, match):
     with pytest.raises(ValueError, match=match):
         _validate_opd_args(_validate_args(**overrides))
+
+
+def test_reward_func_eval_bypass_uses_real_task_rm(monkeypatch):
+    # Eval samples must get the real task reward, not the 0.0 transport return --
+    # and must never ship hidden states (the teacher endpoint would be hit with
+    # eval-length payloads for nothing).
+    async def explode(*a, **k):
+        raise AssertionError("teacher must not be scored for evaluation samples")
+
+    monkeypatch.setattr(opd_sglang, "_post_json", explode)
+    monkeypatch.setattr(opd_sglang, "post_json", explode)
+    args = _full_vocab_args(custom_rm_path="orbit.rollout.opd_sglang.reward_func", rm_type="math")
+    sample = _sample()
+    sample.response = "The answer is \\boxed{72}."
+    sample.label = "72"
+    assert asyncio.run(reward_func(args, sample, evaluation=True)) == 1
+    sample.label = "73"
+    assert asyncio.run(reward_func(args, sample, evaluation=True)) == 0
+
+
+def test_full_vocab_response_limit_scales_with_teacher_hidden(tmp_path):
+    import json as json_mod
+
+    ckpt = tmp_path / "teacher"
+    ckpt.mkdir()
+    (ckpt / "config.json").write_text(json_mod.dumps({"hidden_size": 3584}))
+    args = _full_vocab_args(teacher_hf_checkpoint=str(ckpt))
+
+    from orbit.rollout.scoring_client import SCORING_MAX_RESPONSE_BYTES
+
+    big = opd_sglang._full_vocab_response_byte_limit(args, 1100)
+    assert big > 20 * 1024 * 1024  # 1100 x 3584 x fp32 x base64 ~ 21MB
+    small = opd_sglang._full_vocab_response_byte_limit(args, 10)
+    assert small == SCORING_MAX_RESPONSE_BYTES  # generic cap stays the floor

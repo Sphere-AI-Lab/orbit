@@ -586,7 +586,9 @@ async def generate_and_rm(
             return sample
         # for multi-turn environment, a reward could be assigned to the agent.
         if sample.reward is None:
-            sample.reward = await async_rm(args, sample)
+            # Custom rms receive the evaluation flag so reward-slot transports
+            # (OPD teacher scoring) can hand eval samples to the real task RM.
+            sample.reward = await async_rm(args, sample, evaluation=evaluation)
 
     return sample
 

@@ -2617,7 +2617,9 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
                 help=(
                     "Path to the custom reward model function. "
                     "If set, we will use this function to calculate the reward instead of the default one. "
-                    "The function should have the signature `def custom_rm(args, sample) -> float`."
+                    "The function should have the signature "
+                    "`async def custom_rm(args, sample, **kwargs) -> float`; kwargs carry "
+                    "`evaluation=True` for eval samples."
                 ),
             )
             parser.add_argument(

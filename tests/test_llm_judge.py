@@ -47,7 +47,7 @@ def _sample(**overrides):
 def _mock_success_decode_failure(monkeypatch, failure):
     attempts = []
 
-    async def fail(url, payload, timeout, *, headers):
+    async def fail(url, payload, timeout, *, headers, max_response_bytes=None):
         attempts.append(1)
         raise scoring_client.ScoringProtocolError(type(failure).__name__)
 

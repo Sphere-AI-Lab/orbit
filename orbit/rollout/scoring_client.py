@@ -116,6 +116,7 @@ async def _post_json_once(
     timeout: aiohttp.ClientTimeout,
     *,
     headers: Mapping[str, str],
+    max_response_bytes: int = SCORING_MAX_RESPONSE_BYTES,
 ) -> dict[str, Any]:
     request_options: dict[str, Any] = {
         "json": payload,
@@ -152,20 +153,20 @@ async def _post_json_once(
                 chunk = await response.content.read(
                     min(
                         1024 * 1024,
-                        SCORING_MAX_RESPONSE_BYTES + 1 - len(encoded),
+                        max_response_bytes + 1 - len(encoded),
                     )
                 )
                 if not chunk:
                     break
                 encoded.extend(chunk)
-                if len(encoded) > SCORING_MAX_RESPONSE_BYTES:
+                if len(encoded) > max_response_bytes:
                     raise ScoringProtocolError(
                         "scoring response exceeds its byte limit"
                     )
     try:
         body = loads_strict(
             bytes(encoded),
-            max_bytes=SCORING_MAX_RESPONSE_BYTES,
+            max_bytes=max_response_bytes,
             max_depth=_SCORING_MAX_JSON_DEPTH,
         )
     except (TypeError, ValueError):
@@ -184,8 +185,11 @@ async def post_json_with_metadata(
     *,
     max_retries: int = SCORING_MAX_RETRIES,
     headers: Mapping[str, str] | None = None,
+    max_response_bytes: int | None = None,
 ) -> ScoringJSONResponse:
     _validate_max_retries(max_retries)
+    if max_response_bytes is None:
+        max_response_bytes = SCORING_MAX_RESPONSE_BYTES
     safe_headers = _validate_scoring_headers(headers)
     timeout = aiohttp.ClientTimeout(total=timeout_secs)
     for attempt in range(max_retries + 1):
@@ -195,6 +199,7 @@ async def post_json_with_metadata(
                 payload,
                 timeout,
                 headers=safe_headers,
+                max_response_bytes=max_response_bytes,
             )
             return ScoringJSONResponse(body=body, retry_count=attempt)
         except asyncio.CancelledError:
@@ -216,12 +221,14 @@ async def post_json(
     timeout_secs: int | float | None = None,
     *,
     max_retries: int = SCORING_MAX_RETRIES,
+    max_response_bytes: int | None = None,
 ) -> dict[str, Any]:
     response = await post_json_with_metadata(
         url,
         payload,
         timeout_secs,
         max_retries=max_retries,
+        max_response_bytes=max_response_bytes,
     )
     return response.body
 

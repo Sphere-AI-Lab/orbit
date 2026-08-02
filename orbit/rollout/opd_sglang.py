@@ -106,6 +106,34 @@ def teacher_score_mode(args: Namespace) -> str:
     return getattr(args, "teacher_score_mode", "sampled_token") or "sampled_token"
 
 
+_TEACHER_HIDDEN_SIZE_CACHE: dict[str, int] = {}
+
+
+def _teacher_hidden_size(checkpoint_path: str) -> int:
+    if checkpoint_path not in _TEACHER_HIDDEN_SIZE_CACHE:
+        import json as _json
+        import os as _os
+
+        with open(_os.path.join(checkpoint_path, "config.json")) as f:
+            _TEACHER_HIDDEN_SIZE_CACHE[checkpoint_path] = int(_json.load(f)["hidden_size"])
+    return _TEACHER_HIDDEN_SIZE_CACHE[checkpoint_path]
+
+
+def _full_vocab_response_byte_limit(args: Namespace, num_tokens: int) -> int:
+    """Response cap for one full-vocab scoring call, sized to its actual payload.
+
+    The dominant field is base64 fp32 hidden states: num_tokens x hidden_size x 4
+    bytes x 4/3 encoding overhead. A 7B teacher (hidden 3584) scoring an eval-length
+    sample legitimately exceeds the generic SCORING_MAX_RESPONSE_BYTES, so the cap
+    scales with the request instead; the generic cap stays as the floor.
+    """
+    from orbit.rollout.scoring_client import SCORING_MAX_RESPONSE_BYTES
+
+    hidden = _teacher_hidden_size(args.teacher_hf_checkpoint)
+    payload = (num_tokens * hidden * 4 * 4) // 3 + 1024 * 1024
+    return max(payload, SCORING_MAX_RESPONSE_BYTES)
+
+
 def _parse_teacher_target(part: str, entry: str) -> TeacherTarget:
     """Parse one ``URL[@WEIGHT]`` group member.
 
@@ -277,10 +305,15 @@ def _scoring_timeout(args: Namespace) -> int | float | None:
     return getattr(args, "sglang_router_request_timeout_secs", None)
 
 
-async def _post_json(url: str, payload: dict[str, Any], timeout_secs: int | float | None = None) -> dict[str, Any]:
+async def _post_json(
+    url: str,
+    payload: dict[str, Any],
+    timeout_secs: int | float | None = None,
+    max_response_bytes: int | None = None,
+) -> dict[str, Any]:
     # Thin module-level wrapper around the shared scoring client so tests can
     # monkeypatch opd_sglang._post_json.
-    return await post_json(url, payload, timeout_secs=timeout_secs)
+    return await post_json(url, payload, timeout_secs=timeout_secs, max_response_bytes=max_response_bytes)
 
 
 def _mixture_log_probs(per_teacher: list[torch.Tensor], weights: list[float]) -> torch.Tensor:
@@ -800,6 +833,15 @@ async def reward_func(args, sample: Sample, **kwargs) -> float:
     task reward, and the learning signal comes entirely from the OPD
     (MOPD/blend) advantage term.
     """
+    # Evaluation samples want the real task reward, not teacher scoring: this hook
+    # occupies the reward slot as a transport, and its 0.0 returns would zero every
+    # eval pass-rate (and, in full_vocab mode, ship eval-length hidden states for
+    # nothing). Delegate to the rule-based RM dispatch instead.
+    if kwargs.get("evaluation"):
+        from orbit.rollout.rm_hub import default_async_rm
+
+        return await default_async_rm(args, sample)
+
     # Multi-teacher routing/ensemble: pick this sample's teacher group (falls
     # back to --opd-teacher-url when --opd-teacher-urls is unset).
     teacher_targets = _teacher_targets_for_sample(args, sample)
@@ -815,7 +857,10 @@ async def reward_func(args, sample: Sample, **kwargs) -> float:
             return 0.0
         url, _ = teacher_targets[0]
         sample.metadata[TEACHER_RESPONSE_METADATA_KEY] = await _post_json(
-            url, _full_vocab_payload(sample.tokens), timeout_secs=_scoring_timeout(args)
+            url,
+            _full_vocab_payload(sample.tokens),
+            timeout_secs=_scoring_timeout(args),
+            max_response_bytes=_full_vocab_response_byte_limit(args, len(sample.tokens)),
         )
     elif _get_opd_top_k(args) > 0:
         sample.metadata[TEACHER_RESPONSE_METADATA_KEY] = await _score_top_k(args, sample, teacher_targets)

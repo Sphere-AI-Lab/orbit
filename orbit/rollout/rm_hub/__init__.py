@@ -32,6 +32,16 @@ async def async_rm(args, sample: Sample, **kwargs):
         rm_function = load_function(args.custom_rm_path)
         return await rm_function(args, sample, **kwargs)
 
+    return await default_async_rm(args, sample)
+
+
+async def default_async_rm(args, sample: Sample):
+    """The rule-based/remote RM dispatch, bypassing any --custom-rm-path.
+
+    Exposed so custom rms that hijack the reward slot for non-reward transports
+    (e.g. OPD teacher scoring) can still hand evaluation samples to the real
+    task reward.
+    """
     metadata = sample.metadata if isinstance(sample.metadata, dict) else {}
     rm_type = (metadata.get("rm_type") or args.rm_type or "").strip()
     response = sample.response

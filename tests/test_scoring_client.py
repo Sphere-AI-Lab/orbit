@@ -65,7 +65,7 @@ class _HTTPFactory:
 def test_post_json_max_retries_zero_makes_one_attempt(monkeypatch):
     attempts = 0
 
-    async def fail(url, payload, timeout, *, headers):
+    async def fail(url, payload, timeout, *, headers, max_response_bytes=None):
         nonlocal attempts
         attempts += 1
         raise aiohttp.ClientConnectionError("down")
@@ -81,7 +81,7 @@ def test_post_json_max_retries_zero_makes_one_attempt(monkeypatch):
 def test_post_json_default_preserves_one_retry(monkeypatch):
     attempts = 0
 
-    async def fail(url, payload, timeout, *, headers):
+    async def fail(url, payload, timeout, *, headers, max_response_bytes=None):
         nonlocal attempts
         attempts += 1
         raise aiohttp.ClientConnectionError("down")
@@ -234,7 +234,7 @@ def test_post_json_with_metadata_returns_retry_count_and_copies_headers(
     attempts = 0
     observed = []
 
-    async def scripted(url, payload, timeout, *, headers):
+    async def scripted(url, payload, timeout, *, headers, max_response_bytes=None):
         nonlocal attempts
         attempts += 1
         observed.append(headers)
