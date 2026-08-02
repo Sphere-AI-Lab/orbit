@@ -216,6 +216,41 @@ def wandb_project(
     return project
 
 
+def sync_wandb_offline_runs(repo_root: Path) -> None:
+    """Upload every finished offline wandb run. Called after each arm.
+
+    The campaign logs offline (`WANDB_MODE=offline`) because an online run from
+    a compute node uploaded nothing at all on 2026-08-02 -- silently, with the
+    correct project and run name and no error anywhere. Offline is the only
+    local format `wandb sync` can replay into real history, but a directory
+    nobody syncs is a dashboard nobody sees, so the sync runs here rather than
+    being left to the operator.
+
+    After each arm, not at the end of the column: a column is four arms and
+    twelve hours, and a run that appears when it finishes is worth far more than
+    four that appear together at midnight.
+
+    Never fatal. If this node cannot reach the API the arms must still run --
+    the directories stay on disk and the next successful sync, here or from the
+    login node, picks them up. `wandb sync` records what it has already
+    uploaded, so repeated calls are cheap and idempotent.
+    """
+    if os.environ.get("WANDB_AUTOSYNC", "1") != "1":
+        return
+    env = dict(os.environ)
+    env.pop("WANDB_MODE", None)  # or the upload writes straight back to disk
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "wandb", "sync", "--sync-all", "--include-offline"],
+            cwd=repo_root, env=env, capture_output=True, text=True, timeout=900,
+        )
+    except Exception as exc:  # noqa: BLE001  -- a failed sync must not kill a sweep
+        print(f"wandb sync skipped: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return
+    tail = (proc.stdout or proc.stderr).strip().splitlines()[-1:] or ["(nothing to sync)"]
+    print(f"wandb sync rc={proc.returncode}: {tail[0]}", file=sys.stderr)
+
+
 def load_ledger(path: Path) -> set[str]:
     """Arm names already completed successfully. Tolerates a truncated tail."""
     if not Path(path).exists():
@@ -710,6 +745,8 @@ def main() -> None:
                 qkv_output_size=model.qkv_output_size,
             ),
         )
+        if not args.dry_run:
+            sync_wandb_offline_runs(repo_root)
 
 
 if __name__ == "__main__":

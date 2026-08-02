@@ -207,3 +207,17 @@ def test_campaign_sources_the_protocol_itself():
     text = (PROTOCOL.parent / "campaign.sh").read_text(encoding="utf-8")
     assert 'source "${ORBIT_ROOT}/scripts/lora_regret/e4_protocol.sh"' in text
     assert 'if [[ "${WANDB_MODE:-}" != "offline" ]]; then' in text
+
+
+def test_the_sweep_syncs_wandb_after_every_arm():
+    """"Offline" must not mean "manual". A directory nobody syncs is a
+    dashboard nobody sees, so the upload runs inside the sweep after each arm
+    rather than being left to the operator -- and after EACH arm, not at the
+    end of a twelve-hour column."""
+    text = (PROTOCOL.parent.parent.parent / "tools" / "lora_regret" / "sweep.py").read_text(
+        encoding="utf-8"
+    )
+    assert "def sync_wandb_offline_runs" in text
+    assert "sync_wandb_offline_runs(repo_root)" in text
+    assert 'env.pop("WANDB_MODE", None)' in text, "the upload must not itself run offline"
+    assert 'os.environ.get("WANDB_AUTOSYNC", "1")' in text, "must be defeatable"
