@@ -1158,6 +1158,35 @@ GPUS_PER_NODE=8 python -m tools.lora_regret.sweep --matrix e5rl \
   --argmins-from results/e4.jsonl --results results/e5rl.jsonl
 ```
 
+#### The FullFT + LoRA subset — one bookable job per script
+
+`scripts/lora_regret/run_<matrix>_<method>_8gpu.sh` runs a single (matrix,
+method) cell, with its own ledger, so two can be booked on two nodes without
+appending to one file. **28 arms, ~39 h**, no OFT:
+
+| script | arms | cost | decides |
+|---|---|---|---|
+| `run_e4_ft_8gpu.sh` | 4 | ~5 h | the FullFT reference line for C5 |
+| `run_e4_lora_8gpu.sh` | 12 | ~17 h | the rank ladder r1/r16/r256 → **C5** |
+| `run_e4place_lora_8gpu.sh` | 8 | ~11 h | attention r256 vs MLP r92 → **C4 under RL** |
+| `run_e4place_ft_8gpu.sh` | 4 | ~5 h | placement dashboard reference — **drop first** |
+
+They **all say `_8gpu` because every RL arm is an 8-GPU arm**, so unlike the
+coverage probes they do not divide by node size — they divide by (matrix,
+method). FullFT has no choice (§22.2: TP=4/DP=2 is the only configuration it
+fits in). LoRA arms were measured at eight and would plausibly fit on four;
+nothing has run them there, so no script claims it.
+
+Each wrapper passes `EXPECT_ARMS` and `campaign.sh` **refuses to start** if the
+selection is not that many, or if it contains an OFT arm. A `--only` regex is a
+claim about which arms run, and when it drifts the sweep runs a different
+experiment silently — every arm it does launch still succeeds.
+
+`MODEL=qwen3-1.7b bash scripts/lora_regret/run_e4place_lora_8gpu.sh` runs the
+same cell as the post's own reproduction; the shapes, checkpoint and solved
+ranks all follow the key (the MLP partner becomes r116, not r92). `DRY_RUN=1`
+prints the launcher commands and runs nothing.
+
 ### 22.2 Configuration asymmetries to disclose
 
 **FullFT runs at TP=4 / DP=2; LoRA and OFT run at TP=1 / DP=8.** It is the only
