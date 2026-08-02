@@ -123,20 +123,49 @@ OFT_SCOUT_SPAN = (1e-5, 1e-3)
 RL_OFT_SCOUT_SPAN = (1e-6, 1e-4)
 
 
-def lr_grid(centre: float, n: int = 5, step_decades: float = 0.3) -> list[float]:
+def lr_grid(
+    centre: float, n: int = 5, step_decades: float = 0.3, sig_figs: int = 3
+) -> list[float]:
     """`n` learning rates spaced `step_decades` apart, with `centre` inside.
 
     For odd `n` the centre sits in the middle; for even `n` it sits at index 1,
-    so a 4-point grid still has a point below the prediction. Values are rounded
-    to three significant figures, which keeps arm names stable and readable at
-    the cost of the spacing being 0.3 decades to within ~0.3%.
+    so a 4-point grid still has a point below the prediction.
+
+    `sig_figs` is how hard the computed values are rounded, and it is a
+    *readability* knob rather than a numerical one. At 3 (the SFT default) a
+    half-decade grid reads 3.16e-06; at **1** the same grid reads 3e-06, because
+    10**0.5 = 3.162 rounds to 3 and every half-decade grid therefore lands on the
+    1-3-10 preferred-number sequence. Nothing about the sweep changes -- the span
+    is identical and the spacing moves from a constant 3.16x to an alternating
+    3.33x / 3.0x, which is 5% and immaterial next to a half-decade grid's own
+    +/-0.25-decade resolution. What changes is that `lr3e-06` reads as a grid
+    point while `lr3.16e-06` reads as a fitted value, in an arm name, a wandb
+    sidebar and a paper table alike.
     """
     if n < 2:
         raise ValueError(f"n must be at least 2, got {n}")
+    if sig_figs < 1:
+        raise ValueError(f"sig_figs must be at least 1, got {sig_figs}")
     low = -(n // 2) if n % 2 else -1
     exponents = [low + i for i in range(n)]
     grid = [centre * 10 ** (step_decades * k) for k in exponents]
-    return [float(f"{lr:.3g}") for lr in grid]
+    return [float(f"{lr:.{sig_figs}g}") for lr in grid]
+
+
+# Every RL cell shares one grid shape, so it is written down once. Half-decade
+# steps because C5's second half is about the *width* of the performant band;
+# one significant figure so the four points are 3e-07 / 1e-06 / 3e-06 / 1e-05
+# rather than 3.16e-07 / ... -- see `lr_grid`.
+RL_GRID_POINTS = 4
+RL_STEP_DECADES = 0.5
+RL_SIG_FIGS = 1
+
+
+def rl_lr_grid(centre: float) -> list[float]:
+    """The four-point half-decade RL grid around `centre`, on round numbers."""
+    return lr_grid(
+        centre, n=RL_GRID_POINTS, step_decades=RL_STEP_DECADES, sig_figs=RL_SIG_FIGS
+    )
 
 
 @dataclass(frozen=True)
@@ -179,6 +208,7 @@ def oft_lr_values(
     step_decades: float = 0.3,
     scale: float = 1.0,
     span: tuple[float, float] = OFT_SCOUT_SPAN,
+    sig_figs: int = 3,
 ) -> tuple[list[float], bool]:
     """An OFT cell's learning rates, and whether they are a scout.
 
@@ -191,10 +221,11 @@ def oft_lr_values(
     (fewer points, so a worse argmin) or finer than what it is compared against.
     """
     if centre is not None:
-        return [lr * scale for lr in lr_grid(centre, n=n, step_decades=step_decades)], False
+        grid = lr_grid(centre, n=n, step_decades=step_decades, sig_figs=sig_figs)
+        return [lr * scale for lr in grid], False
     low, high = span
     step = (math.log10(high) - math.log10(low)) / (n - 1)
-    return [float(f"{low * 10 ** (step * i) * scale:.3g}") for i in range(n)], True
+    return [float(f"{low * 10 ** (step * i) * scale:.{sig_figs}g}") for i in range(n)], True
 
 
 # Block sizes an OFT cell may use. Powers of two because Megatron-Bridge's
@@ -299,6 +330,7 @@ def _oft_cell(
     step_decades: float = 0.3,
     scale: float = 1.0,
     span: tuple[float, float] = OFT_SCOUT_SPAN,
+    sig_figs: int = 3,
     qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
     extra: str = "",
     max_block: int | None = None,
@@ -312,7 +344,9 @@ def _oft_cell(
     block, report = matched_oft_block(
         rank, modules, hidden_size, ffn_size, qkv_output_size, max_block=max_block
     )
-    lrs, scouting = oft_lr_values(centre, n, step_decades=step_decades, scale=scale, span=span)
+    lrs, scouting = oft_lr_values(
+        centre, n, step_decades=step_decades, scale=scale, span=span, sig_figs=sig_figs
+    )
     label = "oftscout" if scouting else "oft"
     return [
         Arm(_name(label, f"b{block}", modules, lr, seed, extra=extra),
@@ -704,12 +738,12 @@ def e4_arms(
     argmins say otherwise for RL, that is a finding rather than a grid error.
     """
     arms: list[Arm] = []
-    for lr in lr_grid(RL_FULL_LR_CENTRE, n=4, step_decades=0.5):
+    for lr in rl_lr_grid(RL_FULL_LR_CENTRE):
         arms.append(
             Arm(_name("full", "na", "", lr, seed), "full", None, None, "", lr, seed, dataset=RL_MIX_DATASET)
         )
     for rank in (1, 16, 256):
-        for lr in lr_grid(RL_LORA_LR_CENTRE, n=4, step_decades=0.5):
+        for lr in rl_lr_grid(RL_LORA_LR_CENTRE):
             arms.append(
                 Arm(
                     _name("lora", f"r{rank}", ALL_MODULES, lr, seed),
@@ -731,7 +765,8 @@ def e4_arms(
     # sits beside this matrix's own r16 arm rather than the r256 the SFT cells
     # match -- a smaller adapter, but one that runs.
     arms += _oft_cell(256, ALL_MODULES, hidden_size, ffn_size, seed, RL_MIX_DATASET,
-                      oft_lr_centre, n=4, step_decades=0.5, span=RL_OFT_SCOUT_SPAN,
+                      oft_lr_centre, n=RL_GRID_POINTS, step_decades=RL_STEP_DECADES,
+                      span=RL_OFT_SCOUT_SPAN, sig_figs=RL_SIG_FIGS,
                       qkv_output_size=qkv_output_size,
                       max_block=OFT_MAX_BLOCK_SGLANG)
     return arms
@@ -776,7 +811,7 @@ def e4place_arms(
     ]
     arms: list[Arm] = []
     for rank, modules in configs:
-        for lr in lr_grid(RL_LORA_LR_CENTRE, n=4, step_decades=0.5):
+        for lr in rl_lr_grid(RL_LORA_LR_CENTRE):
             arms.append(
                 Arm(_name("lora", f"r{rank}", modules, lr, seed), "lora", rank, None,
                     modules, lr, seed, dataset=RL_MIX_DATASET)
@@ -785,7 +820,7 @@ def e4place_arms(
     # four names would be byte-identical to E4's, which is a duplicate key the
     # moment both ledgers are globbed into `analyze` together -- the same hazard
     # the missing all-modules cell above avoids.
-    for lr in lr_grid(RL_FULL_LR_CENTRE, n=4, step_decades=0.5):
+    for lr in rl_lr_grid(RL_FULL_LR_CENTRE):
         arms.append(
             Arm(_name("full", "na", "", lr, seed, extra="place"), "full", None, None,
                 "", lr, seed, dataset=RL_MIX_DATASET)
@@ -793,8 +828,9 @@ def e4place_arms(
     for rank, modules in configs:
         # Capped for SGLang -- see OFT_MAX_BLOCK_SGLANG.
         arms += _oft_cell(rank, modules, hidden_size, ffn_size, seed, RL_MIX_DATASET,
-                          oft_lr_centre, n=4, step_decades=0.5,
-                          span=RL_OFT_SCOUT_SPAN, qkv_output_size=qkv_output_size,
+                          oft_lr_centre, n=RL_GRID_POINTS, step_decades=RL_STEP_DECADES,
+                          span=RL_OFT_SCOUT_SPAN, sig_figs=RL_SIG_FIGS,
+                          qkv_output_size=qkv_output_size,
                           max_block=OFT_MAX_BLOCK_SGLANG)
     return arms
 
@@ -972,8 +1008,8 @@ def e5rl_arms(
         )
 
     ladder = e5rl_matched_ladder(hidden_size, ffn_size, qkv_output_size)
-    oft_grid = lr_grid(oft_lr_centre, n=4, step_decades=0.5)
-    lora_grid = lr_grid(RL_LORA_LR_CENTRE, n=4, step_decades=0.5)
+    oft_grid = rl_lr_grid(oft_lr_centre)
+    lora_grid = rl_lr_grid(RL_LORA_LR_CENTRE)
     arms: list[Arm] = []
 
     for report in ladder:

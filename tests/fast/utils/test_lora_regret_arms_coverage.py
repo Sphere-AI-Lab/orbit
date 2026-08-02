@@ -145,8 +145,11 @@ class TestE4Place:
         assert {a.dataset for a in place} == {RL_MIX_DATASET}
         lrs = sorted({a.lr for a in place
                       if a.method == "lora" and a.target_modules == ATTN_MODULES})
+        # Half a decade to within the one-significant-figure rounding that puts
+        # the points on 3e-06 / 1e-05 / ... rather than 3.16e-06 / ...
         steps = [math.log10(b / a) for a, b in zip(lrs, lrs[1:])]
-        assert all(abs(s - 0.5) < 0.01 for s in steps), steps
+        assert all(abs(s - 0.5) < 0.03 for s in steps), steps
+        assert math.log10(lrs[-1] / lrs[0]) == pytest.approx(1.5, abs=0.03)
         e4_lora = sorted({a.lr for a in e4_arms() if a.method == "lora"})
         assert lrs == e4_lora
 

@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import math
+
 import pytest
 
 from tools.lora_regret.arms import (
@@ -525,10 +527,22 @@ class TestE4Matrix:
     def test_grid_is_wider_than_the_sft_grids(self):
         """Half-decade steps, not E1's 0.3: the RL optimum is less well
         predicted than the SFT one, and C5's claim is about the *width* of the
-        performant band, which needs coverage more than resolution."""
+        performant band, which needs coverage more than resolution.
+
+        Asserted on the **span**, not on each ratio. The points are rounded to
+        one significant figure so they read 3e-06 rather than 3.16e-06, which
+        makes the steps alternate 3.33x / 3.0x around the 3.16x half-decade --
+        5% either way, and invisible next to the grid's own +/-0.25-decade
+        resolution. The span is what "wider than the SFT grid" actually means
+        and it is unaffected by the rounding.
+        """
         lrs = sorted({a.lr for a in e4_arms() if a.method == "full"})
+        assert len(lrs) == 4
+        span_decades = math.log10(lrs[-1] / lrs[0])
+        assert span_decades == pytest.approx(1.5, abs=0.03)
+        # ...and every step is still ~half a decade, just not to three figures.
         ratios = [b / a for a, b in zip(lrs, lrs[1:], strict=False)]
-        assert all(r == pytest.approx(10**0.5, rel=0.02) for r in ratios)
+        assert all(r == pytest.approx(10**0.5, rel=0.06) for r in ratios)
 
     def test_env_points_at_the_combined_rl_training_file(self):
         env = arm_env(e4_arms()[0])

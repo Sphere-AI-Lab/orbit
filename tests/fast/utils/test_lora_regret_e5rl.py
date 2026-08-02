@@ -131,9 +131,11 @@ class TestItIsAnRlMatrix:
         arms = _arms()
         lrs = sorted({a.lr for a in arms if a.method == "oft"})
         assert len(lrs) == 4
+        # ~half a decade each; the points are rounded to one significant figure
+        # (3e-06, not 3.16e-06), so the steps alternate 3.33x / 3.0x.
         ratios = [lrs[i + 1] / lrs[i] for i in range(len(lrs) - 1)]
         for r in ratios:
-            assert abs(r - 10 ** 0.5) < 0.01, ratios
+            assert abs(r - 10 ** 0.5) < 0.2, ratios
 
     def test_it_is_registered(self):
         assert "e5rl" in MATRICES
