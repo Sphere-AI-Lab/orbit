@@ -194,3 +194,16 @@ def test_the_arm_count_guard_survives_a_partial_ledger():
     assert "arms selected" in text and "SWEEP_ERR" in text
     assert 'SELECTED=$(printf' not in text, "the guard must not count the to-run list"
     assert '"${TODO}" -eq 0' in text, "a fully-done selection should exit cleanly, not run nothing"
+
+
+def test_campaign_sources_the_protocol_itself():
+    """So a one-off single-arm invocation cannot lose it.
+
+    On 2026-08-03 a LoRA arm was launched as `MATRIX=e4 METHOD_RE=... bash
+    campaign.sh` with the protocol left unsourced. It ran in wandb's online
+    mode from a compute node with no egress and logged nothing, silently:
+    correct project, correct run name, `wandb_mode = None`, and a `run-*`
+    directory where an `offline-run-*` should have been."""
+    text = (PROTOCOL.parent / "campaign.sh").read_text(encoding="utf-8")
+    assert 'source "${ORBIT_ROOT}/scripts/lora_regret/e4_protocol.sh"' in text
+    assert 'if [[ "${WANDB_MODE:-}" != "offline" ]]; then' in text

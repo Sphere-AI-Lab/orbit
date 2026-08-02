@@ -105,6 +105,26 @@ if [[ "${SKIP_PREFLIGHT}" != "1" ]]; then
     fi
 fi
 
+# --- protocol ---------------------------------------------------------------
+# Sourced HERE as well as by the column wrappers, so a one-off invocation --
+# `MATRIX=e4 METHOD_RE=... bash campaign.sh` for a single arm -- gets the same
+# protocol as a column instead of whatever the shell happens to carry.
+#
+# On 2026-08-03 a single LoRA arm was launched that way with the protocol left
+# unsourced. It ran in wandb's ONLINE mode from a compute node with no egress,
+# which is the failure that logs nothing and says nothing: correct project,
+# correct run name, `wandb_mode = None`, and a `run-*` directory instead of an
+# `offline-run-*` one. Nothing in the run reports it; you find out by listing a
+# directory. `: "${VAR=x}"` in the protocol means an explicit override from the
+# caller still wins.
+source "${ORBIT_ROOT}/scripts/lora_regret/e4_protocol.sh"
+
+if [[ "${WANDB_MODE:-}" != "offline" ]]; then
+    echo "WARNING: WANDB_MODE=${WANDB_MODE:-<unset>}, not offline." >&2
+    echo "  Compute nodes have no egress; an online run uploads nothing and" >&2
+    echo "  its local files cannot be replayed into history. See e4_protocol.sh." >&2
+fi
+
 # --- the selection ---------------------------------------------------------
 SWEEP_ARGS=(--model "${MODEL}" --matrix "${MATRIX}" --only "${METHOD_RE}"
             --seed "${SEED}" --results "${RESULTS}")
