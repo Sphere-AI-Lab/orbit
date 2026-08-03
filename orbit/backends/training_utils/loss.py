@@ -136,7 +136,10 @@ def get_responses(
     # to the input but allocates a fresh full-vocab tensor (~6.5 GiB at
     # MAX_TOKENS_PER_GPU=16384 with fp32 logits) that immediately drives the
     # CUDA allocator near OOM on the GRPO loss path.
-    if rollout_temperature != 1.0:
+    # Scale only vocab-shaped logits: value logits [*, 1] are not a distribution
+    # (miles cc93d97c4). Non-positive temperatures are rejected at arg validation;
+    # the > 0 check here keeps the guard total if a caller bypasses validation.
+    if logits.size(-1) > 1 and rollout_temperature > 0 and rollout_temperature != 1.0:
         logits = logits.div(rollout_temperature)
     if args.true_on_policy_mode:
         # Parity contract: SGLang computes log_softmax over bf16 logits, so the
