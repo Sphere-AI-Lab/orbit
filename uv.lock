@@ -2991,6 +2991,9 @@ allinone = [
 fsdp = [
     { name = "torch" },
 ]
+plots = [
+    { name = "matplotlib" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -3014,6 +3017,7 @@ requires-dist = [
     { name = "liger-kernel", marker = "extra == 'allinone'", specifier = "==0.8.0" },
     { name = "mamba-ssm", marker = "extra == 'allinone'", specifier = "==2.3.1" },
     { name = "math-verify", marker = "extra == 'allinone'", specifier = "==0.9.0" },
+    { name = "matplotlib", marker = "extra == 'plots'", specifier = ">=3.8" },
     { name = "mcp", extras = ["cli"], specifier = "==1.27.1" },
     { name = "megatron-bridge", git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git?rev=85c84cbc26d4c983a3d6e46c804f02e2a99af5a2" },
     { name = "megatron-core", git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git?rev=00eb75b0c803b0fc8e5413d736529d9d3b82b6bd" },
@@ -3035,7 +3039,7 @@ requires-dist = [
     { name = "ring-flash-attn" },
     { name = "scikit-build-core", marker = "extra == 'allinone'" },
     { name = "sgl-kernel", marker = "extra == 'allinone'", git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=sgl-kernel&rev=9c83ae8be07cbb1eb6898ce608ae244e3be375b4" },
-    { name = "sglang", git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=9c83ae8be07cbb1eb6898ce608ae244e3be375b4" },
+    { name = "sglang", git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=89ea43812ec6fb161fe29902a6c6f1fbefb524dd" },
     { name = "sglang-router", url = "https://github.com/zhuzilin/sgl-router/releases/download/v0.3.2-5f8d397/sglang_router-0.3.2-cp38-abi3-manylinux_2_28_x86_64.whl" },
     { name = "starlette", specifier = "==0.52.1" },
     { name = "tensorboard", specifier = "==2.20.0" },
@@ -3049,7 +3053,7 @@ requires-dist = [
     { name = "trl", marker = "extra == 'allinone'" },
     { name = "wandb", specifier = "==0.27.0" },
 ]
-provides-extras = ["fsdp", "allinone"]
+provides-extras = ["fsdp", "plots", "allinone"]
 
 [[package]]
 name = "orjson"
@@ -4077,8 +4081,8 @@ source = { git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=sgl-k
 
 [[package]]
 name = "sglang"
-version = "0.0.0.dev9873+g9c83ae8be"
-source = { git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=9c83ae8be07cbb1eb6898ce608ae244e3be375b4#9c83ae8be07cbb1eb6898ce608ae244e3be375b4" }
+version = "0.0.0.dev9883+g89ea43812"
+source = { git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=89ea43812ec6fb161fe29902a6c6f1fbefb524dd#89ea43812ec6fb161fe29902a6c6f1fbefb524dd" }
 dependencies = [
     { name = "aiohttp" },
     { name = "anthropic" },
