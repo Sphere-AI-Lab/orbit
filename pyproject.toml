@@ -162,15 +162,24 @@ nvidia-resiliency-ext = { git = "https://github.com/NVIDIA/nvidia-resiliency-ext
 # Ahead of sgl-kernel below, deliberately. This range tiles the OFT rotation
 # kernels so block sizes above 128 can launch at all -- 893f329a2 did the fused
 # QKV/gate_up kernel, 166041d28 the un-fused `gemm_oft_r`/`sgemm_oft_r` pair
-# that `o_proj` and `down_proj` take. Both change pure-Python files only;
-# nothing under sgl-kernel/, whose tree hash is identical across all of them.
-# Keeping sgl-kernel pinned to the older rev means a sync reinstalls only
-# sglang and leaves the 852 MB compiled extension cached.
+# that `o_proj` and `down_proj` take -- and 89ea43812 bounds what the streamed
+# adapter LOAD allocates. All change pure-Python files only; nothing under
+# sgl-kernel/, whose tree hash is identical across all of them. Keeping
+# sgl-kernel pinned to the older rev means a sync reinstalls only sglang and
+# leaves the 852 MB compiled extension cached.
 #
 # Do not drop back to 893f329a2: the fused kernel alone is not enough. An OFT
 # arm with --target all reaches gemm_oft_r on every layer and dies there with
 # `OutOfResources ... Required: 2228224` several minutes into a rollout.
-sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "166041d287685e4c5043095a4d54a51d04d48179", subdirectory = "python" }
+#
+# Do not drop back to 166041d28 either. Its streamed-load chunk limit was
+# accounted in COMPACT bytes while the allocations are expanded full blocks
+# plus Cayley intermediates (~10x), and row-parallel groups bypassed the limit
+# entirely -- so every OFT adapter update transiently took 7-9 GB. Colocated
+# with a paused ~20 GB KV arena whose resume runs immediately after, that OOM'd
+# in torch_memory_saver's cuMemCreate on the 4th rollout. Measured on
+# 2026-08-03: 8.8 GB per update before, 0.6 GB after, 10/10 rollouts clean.
+sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "89ea43812ec6fb161fe29902a6c6f1fbefb524dd", subdirectory = "python" }
 # TransformerEngine built from source (verified end-to-end). The orbit-build-wheels
 # prebuilt is cu13/torch-2.11-correct too, but swapping it in perturbed libcudart load
 # order and exposed a flaky tilelang<->flashinfer find_loaded_library("libcudart")
@@ -207,7 +216,7 @@ tested-ref = "85c84cbc26d4c983a3d6e46c804f02e2a99af5a2"
 [tool.orbit.release.backend-pins.sglang]
 source = "https://github.com/Sphere-AI-Lab/sglang.git"
 subdirectory = "python"
-tested-ref = "166041d287685e4c5043095a4d54a51d04d48179"
+tested-ref = "89ea43812ec6fb161fe29902a6c6f1fbefb524dd"
 
 [tool.isort]
 profile = "black"  # black-compatible
