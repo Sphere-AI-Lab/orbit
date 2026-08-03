@@ -7,9 +7,35 @@
 #   bash scripts/lora_regret/sync_wandb.sh          # sync once
 #   WATCH=300 bash scripts/lora_regret/sync_wandb.sh  # re-sync every 5 minutes
 #
-# Safe to run repeatedly and while arms are still training: `wandb sync` marks a
-# directory done in `wandb/.sync/`, so a second pass uploads only what is new.
-# A run synced mid-flight shows up as finished and is refreshed by the next pass.
+# Only STALE directories are uploaded: a directory whose run-*.wandb file is no
+# newer than its .synced marker has nothing new to say, and is skipped.
+#
+# The marker needs help, and that is most of what this script is for. wandb
+# writes `.synced` only when the run stream contains an EXIT record
+# (sync.py: "Only mark synced if the run actually finished") -- so a run whose
+# process was killed, which on a preempted cluster is a normal way for a run
+# to end, is "unfinished" FOREVER. Measured on 2026-08-03: 49 of 63 offline
+# directories came from killed or superseded invocations, none of them could
+# ever be marked, and every `--sync-all` pass re-uploaded all 49 to refresh
+# the two that were live. So after a successful upload, any directory whose
+# .wandb file has been quiet for QUIESCE_MIN minutes -- its writer is gone,
+# the file cannot grow again -- gets the marker written by us. A marked dir
+# is also eligible for `wandb sync --clean`, which is correct: it is fully
+# uploaded and final.
+#
+# Live runs stay unmarked on purpose, in BOTH mechanisms: wandb sees no exit
+# record and we see a recent mtime. They re-sync on every pass, which is the
+# near-live dashboard the protocol wants.
+#
+# A retried arm has SEVERAL offline directories sharing one run id (one per
+# launcher invocation; the run id is derived from the arm name). Each replays
+# into the same server run; directories sync in timestamp order, so where
+# attempts overlap on a step the newest attempt's value lands last and wins.
+# That is why a sync pass can legitimately print the same run id twice.
+#
+# Concurrent passes are excluded with a lock: two syncs replaying the same
+# directory into the same run at once are convergent but racy and doubly slow.
+# A second invocation (say, WATCH mode already running) exits 0 immediately.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 
@@ -22,11 +48,64 @@ fi
 # `wandb sync` must not itself be offline, whatever the shell inherited.
 unset WANDB_MODE
 
+mkdir -p wandb
+exec 9>"wandb/.sync_wandb.lock"
+if ! flock -n 9; then
+    echo "another sync_wandb.sh is already running (wandb/.sync_wandb.lock); nothing to do."
+    exit 0
+fi
+
+QUIESCE_MIN=${QUIESCE_MIN:-10}
+
 sync_once() {
-    local n
-    n=$(ls -d wandb/offline-run-* 2>/dev/null | wc -l)
-    echo "=== $(date +%H:%M:%S): ${n} offline run dir(s) ==="
-    wandb sync --sync-all --include-offline 2>&1 | grep -vE "^wandb: (Loading|Find logs)" || true
+    local stale=() stale_files=() current=0 no_file=0
+    for dir in wandb/offline-run-*; do
+        [[ -d "${dir}" ]] || continue
+        local wandb_file
+        wandb_file=$(ls "${dir}"/run-*.wandb 2>/dev/null | head -1)
+        if [[ -z "${wandb_file}" ]]; then
+            no_file=$(( no_file + 1 ))   # crashed before writing anything
+            continue
+        fi
+        # -nt is false for a missing marker too, so never-synced dirs are stale.
+        if [[ -f "${wandb_file}.synced" && ! "${wandb_file}" -nt "${wandb_file}.synced" ]]; then
+            current=$(( current + 1 ))
+            continue
+        fi
+        stale+=("${dir}")
+        stale_files+=("${wandb_file}")
+    done
+
+    echo "=== $(date +%H:%M:%S): ${#stale[@]} stale, ${current} already current, ${no_file} empty ==="
+    (( ${#stale[@]} > 0 )) || return 0
+
+    # No `|| true` here: it would run `true` on failure and overwrite PIPESTATUS
+    # before the read below. Without `-e`, a failing pipeline doesn't exit the
+    # script, and grep filtering every line (rc 1) must not read as a wandb
+    # failure -- hence PIPESTATUS[0], not $?.
+    wandb sync "${stale[@]}" 2>&1 | grep -vE "^wandb: (Loading|Find logs)"
+    local sync_rc=${PIPESTATUS[0]}
+    if (( sync_rc != 0 )); then
+        echo "wandb sync exited ${sync_rc}; leaving all markers untouched." >&2
+        return 0
+    fi
+
+    # Mark what wandb will not: a dir synced just now whose .wandb has been
+    # quiet for QUIESCE_MIN minutes is final (see the header). Quiet is judged
+    # AFTER the upload, so a run that wrote during it stays stale for the next
+    # pass. wandb's own marker (exit record present) supersedes this path.
+    local marked=0
+    for wandb_file in "${stale_files[@]}"; do
+        [[ -f "${wandb_file}.synced" ]] && continue   # wandb marked it itself
+        if [[ -n "$(find "${wandb_file}" -mmin "+${QUIESCE_MIN}" 2>/dev/null)" ]]; then
+            touch "${wandb_file}.synced"
+            marked=$(( marked + 1 ))
+        fi
+    done
+    if (( marked > 0 )); then
+        echo "marked ${marked} quiescent dir(s) synced; they will be skipped from now on."
+    fi
+    return 0
 }
 
 if [[ -n "${WATCH:-}" ]]; then
