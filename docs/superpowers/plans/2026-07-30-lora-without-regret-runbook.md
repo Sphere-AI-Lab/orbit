@@ -987,15 +987,21 @@ python -m tools.lora_regret.probe report --ledger 'results/probe/*.jsonl'
 ```
 
 
-## 21. The OFT kernel in orbit_env (2026-07-31)
+## 21. The OFT kernel in orbit_env (2026-07-31, updated 2026-08-03)
 
-`orbit_env` runs **sglang 0.0.0.dev9882+g166041d28** — a proper install from
+`orbit_env` runs **sglang `89ea43812`** — a proper install from
 `Sphere-AI-Lab/sglang` `orbit-main`, not a patched file.
 
 ```
-sglang     166041d28   ALL FOUR OFT rotation kernels tiled
+sglang     89ea43812   streamed adapter LOAD bounded (2026-08-03)
+           166041d28   ALL FOUR OFT rotation kernels tiled (2026-07-31)
 sgl-kernel 9c83ae8be   deliberately NOT bumped
 ```
+
+The two sglang lines are cumulative, not alternatives: `89ea43812` sits on top
+of `166041d28` and needs it. Bumping the pin is what section 21.1 is about;
+which commit made each kernel launchable stays as written below, because that
+is history and does not move.
 
 **Two commits, and the first alone is not enough.** `893f329a2` tiled the fused
 QKV/gate_up kernel (`fused_rotate_project`). With only that installed, an OFT
@@ -1026,7 +1032,7 @@ a future sglang commit ever touches that subdirectory, bump both — check with
 ```bash
 uv pip uninstall sglang
 uv pip install --no-deps \
-  "sglang @ git+https://github.com/Sphere-AI-Lab/sglang.git@166041d287685e4c5043095a4d54a51d04d48179#subdirectory=python"
+  "sglang @ git+https://github.com/Sphere-AI-Lab/sglang.git@89ea43812ec6fb161fe29902a6c6f1fbefb524dd#subdirectory=python"
 ```
 
 `--no-deps` is the load-bearing flag: it stops the resolver touching anything
@@ -1045,6 +1051,43 @@ matched parameters against its r256/r92 LoRA cells.
 A full copy of the pre-change package is at
 `/fast/zqiu/orbit-iclr/sglang_env_backup_20260731/` with the before/after
 `uv pip freeze` output, if a rollback is ever needed.
+
+### 21.1 The streamed adapter load (2026-08-03) — `89ea43812`
+
+The kernels above make an OFT block size of 1024 *launchable*. They do not
+bound what LOADING an adapter allocates, and that turned out to be the thing
+that killed OFT under RL: every adapter update cost 7-9 GB of transient GPU
+memory, and the KV-cache arena resume that runs immediately after the update
+OOM'd inside `torch_memory_saver`'s `cuMemCreate` on the fourth rollout.
+
+Two defects in `srt/oft/streamed_weight_loader.py`, both now fixed:
+
+- `SGLANG_OFT_BATCH_CHUNK_MB` was accounted in **compact** bytes — the
+  upper-triangular payload — while what actually allocates is the expanded
+  full blocks plus `cayley_neumann`'s intermediates (skew, R, Q², rolling
+  Q-power, result), about 10x larger. A "512 MB" chunk expanded to ~4-5 GB.
+- **Row-parallel groups bypassed the limiter entirely**, and `fc2`/`down_proj`
+  — the row-parallel module — carries the most blocks of any module in the
+  model, so the largest group was the one group never chunked.
+
+The fix measures the chunk against the estimated working set, routes
+row-parallel groups through the same chunker, and calls `empty_cache()` after
+the load so the scratch returns to the driver rather than sitting in the
+caching allocator, where `cuMemCreate` cannot see it.
+
+Measured on the 10-rollout smoke (2026-08-03), free GB on rank 0 either side of
+`update_weights`:
+
+```
+166041d28   b56.5 a47.6 | b36.0 a28.9 | b30.9 a23.7 | OOM on rollout 3
+89ea43812   b56.5 a54.1 | b40.1 a39.5 | b33.4 a32.8 | ... | b27.9 a27.3
+```
+
+8.8 GB per update before, 0.6 GB after, flat steady state, 10/10 rollouts and
+an eval accuracy of 0.521 — the first time OFT has completed a policy-gradient
+run in this repo. Six CPU tests in `test/srt/oft/test_streamed_chunk_limit.py`
+pin the accounting and prove the chunked flush writes byte-identical rotations
+to the unchunked one.
 
 ---
 
