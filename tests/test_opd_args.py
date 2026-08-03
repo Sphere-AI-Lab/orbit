@@ -612,7 +612,6 @@ def test_force_on_policy_ratio_accepts_pure_mopd_with_independent_tis():
         ({"advantage_estimator": "grpo"}, "on_policy_distillation"),
         ({"use_opd": True}, "use-opd"),
         ({"use_rollout_logprobs": True}, "use-rollout-logprobs"),
-        ({"num_steps_per_rollout": None}, "one training step|num-steps"),
         ({"num_steps_per_rollout": 2}, "one training step|num-steps"),
         ({"num_steps_per_rollout": True}, "one training step|num-steps"),
         ({"force_on_policy_ratio": 1}, "boolean"),

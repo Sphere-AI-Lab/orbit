@@ -712,10 +712,13 @@ def _validate_opd_args(args) -> None:
         if getattr(args, "use_rollout_logprobs", False):
             raise ValueError("--force-on-policy-ratio forbids --use-rollout-logprobs.")
         steps_per_rollout = getattr(args, "num_steps_per_rollout", None)
-        if type(steps_per_rollout) is not int or steps_per_rollout != 1:
+        # Dev semantics: None means one optimizer pass over the rollout (the
+        # ultra default was a literal 1); anything beyond one step reuses data
+        # off-policy and contradicts the forced ratio.
+        if steps_per_rollout is not None and (type(steps_per_rollout) is not int or steps_per_rollout != 1):
             raise ValueError(
                 "--force-on-policy-ratio requires exactly one training step per "
-                "rollout (--num-steps-per-rollout 1)."
+                "rollout (--num-steps-per-rollout 1 or unset)."
             )
 
     # sglang-teacher OPD blend is only safe when the teacher scores through the
