@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# E4, gsm8k panel, learning-rate column 4 of 7: FullFT at 7e-06 and LoRA
+# E4, gsm8k panel, learning-rate column 4 of 7: FullFT at 7e-07 and LoRA
 # r1/r16/r256 at 7e-05.  Book a WHOLE node.
 #
 #   source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
@@ -27,7 +27,7 @@
 # ACROSS columns, so a partial run is a partial curve, not a partial answer.
 #
 # FullFT and LoRA sit on separate grids an order of magnitude apart (runbook
-# section 23.4), so column 4 pairs the 4th point of each: 7e-06 against 7e-05.
+# section 23.4), so column 4 pairs the 4th point of each: 7e-07 against 7e-05.
 #
 # Trains on gsm8k_train.jsonl and is scored on gsm8k_test.jsonl alone. Not both:
 # `parse_final_accuracy` means across whatever datasets were evaluated, so
@@ -50,5 +50,5 @@ set -uo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "${HERE}/e4_protocol.sh"
 
-exec env MATRIX=e4 METHOD_RE='^(full-na-na-gsm8k-lr7e\-06|lora-r(1|16|256)-all-gsm8k-lr7e\-05)-s' RESULTS=results/e4_gsm8k_lr4.jsonl EXPECT_ARMS=4 \
+exec env MATRIX=e4 METHOD_RE='^(full-na-na-gsm8k-lr7e\-07|lora-r(1|16|256)-all-gsm8k-lr7e\-05)-s' RESULTS=results/e4_gsm8k_lr4.jsonl EXPECT_ARMS=4 \
     bash "${HERE}/campaign.sh" "$@"

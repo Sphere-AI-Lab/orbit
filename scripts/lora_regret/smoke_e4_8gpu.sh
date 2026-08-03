@@ -61,8 +61,7 @@
 # `analyze` exits non-zero on any ledger containing one, and the runs go to the
 # `lora-regret-smoke` wandb project. Ten rollouts cannot say which learning rate
 # wins and nothing here will let them try. The reward numbers it prints are
-# plumbing evidence, not results -- the middle-of-grid FullFT arm is one that
-# does not learn at 150 rollouts either.
+# plumbing evidence, not results.
 #
 # Knobs:
 #   SMOKE_RESULTS=results/smoke/e4_smoke.jsonl

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# E4, math panel, learning-rate column 6 of 7: FullFT at 4e-05 and LoRA
+# E4, math panel, learning-rate column 6 of 7: FullFT at 4e-06 and LoRA
 # r1/r16/r256 at 0.0004.  Book a WHOLE node.
 #
 #   source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
@@ -27,7 +27,7 @@
 # ACROSS columns, so a partial run is a partial curve, not a partial answer.
 #
 # FullFT and LoRA sit on separate grids an order of magnitude apart (runbook
-# section 23.4), so column 6 pairs the 6th point of each: 4e-05 against 0.0004.
+# section 23.4), so column 6 pairs the 6th point of each: 4e-06 against 0.0004.
 #
 # Trains on math_train.jsonl and is scored on math_test.jsonl alone. Not both:
 # `parse_final_accuracy` means across whatever datasets were evaluated, so
@@ -50,5 +50,5 @@ set -uo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "${HERE}/e4_protocol.sh"
 
-exec env MATRIX=e4 METHOD_RE='^(full-na-na-math-lr4e\-05|lora-r(1|16|256)-all-math-lr0\.0004)-s' RESULTS=results/e4_math_lr6.jsonl EXPECT_ARMS=4 \
+exec env MATRIX=e4 METHOD_RE='^(full-na-na-math-lr4e\-06|lora-r(1|16|256)-all-math-lr0\.0004)-s' RESULTS=results/e4_math_lr6.jsonl EXPECT_ARMS=4 \
     bash "${HERE}/campaign.sh" "$@"

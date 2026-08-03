@@ -163,45 +163,57 @@ def lr_grid(
 
 
 # Every RL cell shares one grid SHAPE -- seven points, one significant figure --
-# but FullFT and LoRA get their own windows, an order of magnitude apart:
+# but FullFT and LoRA get their own windows, two decades apart:
 #
-#   FullFT   5e-07  1e-06  3e-06  7e-06  2e-05  4e-05  1e-04
-#   LoRA            5e-06  1e-05  3e-05  7e-05  2e-04  4e-04  1e-03
+#   FullFT   5e-08  1e-07  3e-07  7e-07  2e-06  4e-06  1e-05
+#   LoRA                          5e-06  1e-05  3e-05  7e-05  2e-04  4e-04  1e-03
 #
 # Written as ENDPOINTS rather than as a centre and a step, because the endpoints
 # are what the evidence pins and the spacing is what falls out of them. Both
 # windows span 200x; at seven points that is 0.384 decades per step, a little
 # wider than the post's own 0.333.
 #
-# The two grids share no point, and the post's two do not either -- its FullFT
-# ladder runs on 1.25/3.125/6.25 and its LoRA ladder on 1/2/4. What matters is
-# that the RANGES overlap, 5e-06 .. 1e-04, about 1.3 decades: a ratio near 1x is
-# then still measurable, because both argmins would land in the interior. Exact
-# point coincidence would only matter for plotting the two series on identical
-# x-values, and Figure 6 does not do that.
+# The FullFT window is the original (5e-7, 1e-4) shifted down one decade, and
+# the shift is MEASURED, not assumed. The original placement trusted the post's
+# readings (MATH's lowest peak at 3e-06, "collapses by ~3e-05"); the 2026-08-03
+# gsm8k pass measured, under THIS protocol -- no clipping, no std
+# normalisation, four updates per rollout -- that the boundary sits an order of
+# magnitude lower: 5e-07 trained healthily (peak reward 0.736 at rollout 85,
+# final 0.718), 1e-06 collapsed at rollout 84, 3e-06 at 70, and everything at
+# 7e-06 and above never left ~0.001. Four of seven columns were spent where
+# nothing learns, and the one healthy arm sat on the grid edge, which
+# `argmins_from` refuses by design. The reward traces are in
+# results/backfill/e4_gsm8k_lr*.jsonl.
 #
 # Each window's endpoints, and why they are where they are:
 #
-#   FullFT low   5e-07  two baseline anchors below MATH's lowest peak reading
-#                       (3e-06), so an argmin cannot land on the edge and be
-#                       refused by `analyze`
-#   FullFT high  1e-04  well past "FullFT collapses by ~3e-05" (plan section 14)
+#   FullFT low   5e-08  two anchors below the measured healthy 5e-07, so the
+#                       argmin cannot land on the edge and be refused by
+#                       `analyze` -- 5e-07 itself falls between grid points
+#                       3e-07 and 7e-07
+#   FullFT high  1e-05  well past the measured collapse at 1e-06, so the
+#                       falling edge and the dead floor are both on-grid; and
+#                       the post's MATH low reading 3e-06 stays interior
+#                       (between 2e-06 and 4e-06), so a math panel that behaves
+#                       like the post rather than like gsm8k is still bracketed
 #   LoRA low     5e-06  a step below "LoRA becomes strong around 1e-05", so the
-#                       rising edge is bracketed
+#                       rising edge is bracketed -- and measured: r1's best
+#                       final reward was at 1e-05, with 5e-06 and 3e-05 lower
 #   LoRA high    1e-03  "all LoRA ranks collapse by 1e-03" -- the floor the
 #                       width claim is measured against
 #
-# Every published optimum lands inside, most of them bracketed tightly: FullFT's
-# 3e-06 and 2e-05 are exact points and 6.25e-06 sits between 3e-06 and 7e-06;
-# LoRA's 2e-05 sits between 1e-05 and 3e-05, 4e-05 between 3e-05 and 7e-05,
-# 1e-04 between 7e-05 and 2e-04, and 2e-04 is an exact point.
+# The windows now share one point (1e-05) and their RANGES overlap by only 0.3
+# decades. The old 1.3-decade overlap existed so a LoRA/FullFT argmin ratio
+# near 1x would stay measurable with both argmins interior; the measured ratio
+# is ~20x (r1 best at 1e-05 against FullFT's ~5e-07), so wide overlap buys
+# nothing and each window is placed on its own method's evidence instead.
 #
 # The 1-significant-figure rounding makes the realised steps alternate 2.0x to
 # 3.0x around the nominal 2.42x. That is +/-24%, cosmetic against a grid whose
 # own resolution is +/-0.19 decades, and it is the price of arm names that read
-# `lr7e-06` rather than `lr7.07e-06`.
+# `lr7e-07` rather than `lr7.07e-07`.
 RL_GRID_POINTS = 7
-RL_FULL_LR_RANGE = (5e-7, 1e-4)
+RL_FULL_LR_RANGE = (5e-8, 1e-5)
 RL_LORA_LR_RANGE = (5e-6, 1e-3)
 RL_STEP_DECADES = math.log10(RL_FULL_LR_RANGE[1] / RL_FULL_LR_RANGE[0]) / (RL_GRID_POINTS - 1)
 RL_FULL_LR_CENTRE = math.sqrt(RL_FULL_LR_RANGE[0] * RL_FULL_LR_RANGE[1])

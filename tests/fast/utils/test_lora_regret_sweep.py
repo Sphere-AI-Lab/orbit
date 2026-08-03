@@ -522,33 +522,40 @@ class TestE4Matrix:
         assert len(cells) == 10, "five cells on each of two datasets"
         assert all(len(lrs) == 7 for lrs in cells.values())
 
-    def test_the_two_grids_sit_one_decade_apart_and_overlap(self):
-        """The post publishes two grids as well, but offsets them by 32x at the
-        centre -- and then measures optima only ~6.4x apart. The offset here is
-        10x, its own prose claim, and the four shared points keep every ratio
-        from 1x to 100x measurable. The single assumption left is that LoRA's
-        optimum is not BELOW FullFT's, which nothing in the post disputes."""
+    def test_the_two_grids_sit_two_decades_apart_and_still_overlap(self):
+        """The windows started 10x apart, trusting the post's readings. The
+        2026-08-03 gsm8k pass measured the FullFT boundary an order of
+        magnitude lower under this protocol -- 5e-07 healthy, 1e-06 collapsed,
+        >=7e-06 never learned -- so the FullFT window moved down one decade and
+        the offset is now 100x. The wide overlap existed to keep a ratio near
+        1x measurable; the measured ratio is ~20x (r1 best at 1e-05 against
+        FullFT's ~5e-07), so each window now sits on its own evidence."""
         full = sorted({a.lr for a in e4_arms() if a.method == "full"})
         lora = sorted({a.lr for a in e4_arms() if a.method == "lora"})
-        assert full == [5e-07, 1e-06, 3e-06, 7e-06, 2e-05, 4e-05, 1e-04]
+        assert full == [5e-08, 1e-07, 3e-07, 7e-07, 2e-06, 4e-06, 1e-05]
         assert lora == [5e-06, 1e-05, 3e-05, 7e-05, 2e-04, 4e-04, 1e-03]
-        # The two ladders share no point -- neither do the post's own, whose
-        # FullFT runs on 1.25/3.125/6.25 and LoRA on 1/2/4. What has to overlap
-        # is the RANGE, so a ratio near 1x still puts both argmins in the
-        # interior rather than on an edge `analyze` would refuse.
-        assert not set(full) & set(lora)
+        # The ranges still overlap -- 5e-06 .. 1e-05, sharing the 1e-05 point
+        # -- so a surprise on the math panel (a FullFT argmin far above
+        # gsm8k's) would land in-window rather than off the top edge.
+        assert set(full) & set(lora) == {1e-05}
         assert lora[0] < full[-1], "the two windows must overlap in range"
-        assert math.log10(full[-1] / lora[0]) == pytest.approx(1.3, abs=0.05)
+        assert math.log10(full[-1] / lora[0]) == pytest.approx(0.3, abs=0.05)
 
-    def test_each_grid_brackets_its_own_published_optima(self):
+    def test_each_grid_brackets_its_own_optimum_candidates(self):
         """Each candidate peak needs points on both sides, or `analyze` refuses
-        the argmin as a boundary value. 6.25e-06 is the SVG's FullFT reading,
-        2e-05 the RL figure's, 3e-06 MATH's low end; 4e-05 is GSM8K r1/r16,
-        1e-04 GSM8K r256, 2e-05 MATH r256 and 2e-04 the "useful up to"
-        ceiling."""
+        the argmin as a boundary value. FullFT's candidates are 5e-07 -- the
+        one arm the 2026-08-03 gsm8k pass measured healthy (peak reward 0.736,
+        final 0.718) -- and 3e-06, the post's MATH low reading, kept as the
+        hedge for the unrun math panel. The post's higher FullFT readings
+        (6.25e-06, 2e-05) are deliberately NOT candidates any more: measured
+        under this protocol, nothing at 7e-06 or above ever left ~0.001
+        reward, and bracketing 2e-05 is exactly what spent four of seven
+        columns on a dead region. LoRA's candidates are unchanged: 2e-05
+        between 1e-05 and 3e-05, 4e-05 GSM8K r1/r16, 1e-04 GSM8K r256, 2e-04
+        the "useful up to" ceiling."""
         full = sorted({a.lr for a in e4_arms() if a.method == "full"})
         lora = sorted({a.lr for a in e4_arms() if a.method == "lora"})
-        for grid, candidates in ((full, (3e-06, 6.25e-06, 2e-05)),
+        for grid, candidates in ((full, (5e-07, 3e-06)),
                                  (lora, (2e-05, 4e-05, 1e-04, 2e-04))):
             for candidate in candidates:
                 assert any(lr < candidate for lr in grid), candidate

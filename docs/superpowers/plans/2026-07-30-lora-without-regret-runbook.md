@@ -1423,10 +1423,10 @@ the frame is doing the task's work and the RL gain will not resemble Figure 6;
 a `solvable_groups` near 0 means there is still no gradient and the sweep must
 not start.
 
-### 23.4 The RL learning-rate grids: two windows, 200x each (2026-08-02)
+### 23.4 The RL learning-rate grids: two windows, 200x each (2026-08-02, FullFT re-placed 2026-08-03 — §23.4.1)
 
 ```
-FullFT   5e-07  1e-06  3e-06  7e-06  2e-05  4e-05  1e-04
+FullFT   5e-07  1e-06  3e-06  7e-06  2e-05  4e-05  1e-04   <- superseded, see 23.4.1
 LoRA            5e-06  1e-05  3e-05  7e-05  2e-04  4e-04  1e-03
                 `--------- ranges overlap, 1.3 decades ---------'
 ```
@@ -1477,3 +1477,53 @@ per-step tolerance wide enough to admit the rounding would no longer distinguish
 grid's 2.3, so the "a scout must be at least as wide as the grid it feeds"
 invariant holds. Arm counts are e4 35, e4place 35, e5rl 42, matching the
 `EXPECT_ARMS` guards in all four `run_e4*_8gpu.sh` wrappers.
+
+### 23.4.1 The FullFT window, re-placed by the first gsm8k pass (2026-08-03)
+
+```
+FullFT   5e-08  1e-07  3e-07  7e-07  2e-06  4e-06  1e-05
+LoRA                          5e-06  1e-05  3e-05  7e-05  2e-04  4e-04  1e-03
+                              `-- overlap 0.3 decades, 1e-05 shared --'
+```
+
+The original window trusted the post's readings — MATH's lowest peak at 3e-06,
+"collapses by ~3e-05". The 2026-08-03 gsm8k pass measured the boundary an
+order of magnitude lower under **this** protocol (no clipping, no std
+normalisation, four updates per rollout). From the recovered reward traces in
+`results/backfill/e4_gsm8k_lr*.jsonl`:
+
+```
+5e-07   healthy    peak 0.736 @ rollout 85, final 0.718
+1e-06   collapsed  @ rollout 84 (peak 0.699 @ 49)
+3e-06   collapsed  @ rollout 70 (peak 0.461 @ 4)
+>=7e-06 never learned — reward never left ~0.001
+```
+
+Four of seven columns sat where nothing learns, and the one healthy arm was on
+the grid edge, which `argmins_from` refuses by design. The window moved down
+exactly one decade — `RL_FULL_LR_RANGE = (5e-8, 1e-5)` — which keeps the shape
+(200x, 0.384 decades/step, one significant figure) and re-centres on the
+evidence: the measured 5e-07 falls between grid points 3e-07 and 7e-07 with two
+anchors below, the measured collapse at 1e-06 sits between 7e-07 and 2e-06, and
+the post's MATH low reading 3e-06 stays interior (between 2e-06 and 4e-06) in
+case the math panel behaves like the post rather than like gsm8k.
+
+The offset to the LoRA window is now 100x and the ranges overlap only 0.3
+decades, sharing the 1e-05 point. The 1.3-decade overlap above existed to keep
+a LoRA/FullFT argmin ratio near 1x measurable; the measured ratio is ~20x (r1's
+best final reward at 1e-05 against FullFT's ~5e-07), so wide overlap buys
+nothing and each window now sits on its own method's evidence. The LoRA window
+is unmoved: r1's argmax (1e-05) is interior and bracketed.
+
+Column pairing after the shift, `run_e4_<ds>_lr{1..7}_8gpu.sh`:
+
+```
+column   1      2      3      4      5      6      7
+FullFT   5e-08  1e-07  3e-07  7e-07  2e-06  4e-06  1e-05
+LoRA     5e-06  1e-05  3e-05  7e-05  2e-04  4e-04  1e-03
+```
+
+The old failed rows in `results/e4_gsm8k_lr*.jsonl` are inert — `analyze`
+skips any row whose status is not `ok`, and the sweep resumes past `ok` rows
+only — so the re-run appends to the same ledgers. Arm counts and
+`EXPECT_ARMS` are unchanged.
