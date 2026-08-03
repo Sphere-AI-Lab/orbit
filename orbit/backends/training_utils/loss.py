@@ -423,6 +423,8 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch, 
             values_list=values,
             rewards_list=token_rewards,
             terminal_rewards=terminal_rewards,
+            qkv_format=args.qkv_format,
+            max_seq_lens=max_seq_lens,
             gamma=args.gamma,
             lambd=args.lambd,
         )
