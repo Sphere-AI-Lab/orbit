@@ -628,7 +628,7 @@ def get_advantages_and_returns_batch(
         rewards_list:      list[Tensor], same shape as values_list
         terminal_rewards:  list[float], one scalar sequence reward per sample
         qkv_format:        str, sequence layout used to split tensors across CP ranks
-        max_seq_lens:      list[int] of BSHD padded lengths, or None for THD
+        max_seq_lens:      list[int] of padded lengths (BSHD, or padded THD e.g. DSV4), or None
         loss_masks:        list[Tensor], full-response masks, each has shape [R_i]
     Output:
         advantages_list:   list[Tensor], each current-CP-rank tensor has shape [C_i]
