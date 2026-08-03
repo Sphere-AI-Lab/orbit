@@ -845,7 +845,9 @@ class MegatronTrainRayActor(TrainRayActor):
 
             maybe_finalize_async_save(blocking=True)
 
-        save(rollout_id, self.model, self.optimizer, self.opt_param_scheduler, self_teacher=self._self_teacher)
+        # getattr: the separate-critic actor shares this method but never runs the
+        # OPD teacher init that creates _self_teacher.
+        save(rollout_id, self.model, self.optimizer, self.opt_param_scheduler, self_teacher=getattr(self, "_self_teacher", None))
 
         if uses_adapter_critic(self.args) and self.args.critic_save:
             save_critic_checkpoint(self.args, rollout_id, self.critic_model, optimizer=self.critic_optimizer)
