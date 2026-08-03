@@ -91,16 +91,23 @@
 # 15 GB is expensive.
 : "${SAVE_INTERVAL=}"
 
-# One eval, at the end. The same final-rollout branch fires for any non-None
-# interval, so a large number means exactly one pass rather than none -- and one
-# is required, because `MATRIX_METRICS["e4"]` is `accuracy` and `sweep.py`
-# parses it out of the eval output into the ledger. Zero evals would leave every
-# ledger row with `accuracy: null` and `analyze` with nothing to read.
+# Eval every 25 rollouts: seven passes per arm (before training, then rollouts
+# 24/49/74/99/124/149). The headline number is unchanged -- `sweep.py` takes the
+# eval with the HIGHEST rollout id, and the final-rollout branch guarantees one
+# at 149 regardless of divisibility -- so the intermediate passes are a curve on
+# top, not a different measurement.
 #
-# Worth more than the checkpoint saving: at the launcher's default of 25 an arm
-# evaluates seven times over 6,319 held-out prompts, ~12% of the campaign, and
-# nothing in the analysis reads the intermediate values.
-: "${EVAL_INTERVAL=100000}"
+# This was 100000 -- "once, at the end" -- when an eval meant all 6,319 held-out
+# prompts of both datasets, ~12% of the campaign. Both inputs to that trade have
+# since moved. The per-dataset arms eval only their own split (`arm_env` sets
+# EVAL_DATASETS), and the smoke measured that split at ~27 s for gsm8k_test's
+# 1,319 prompts against 2.5-5.5 h arms: seven passes cost ~1% on the gsm8k
+# panel and a few percent on math's 5,000. And the 2026-08-03 campaign showed
+# what end-only measurement cannot see: its collapses (1e-06 at rollout 84,
+# 3e-06 at 70) exist only as TRAINING reward traces, with no held-out number
+# anywhere in the fall -- and the r16 arm that died at 620 s left nothing at
+# all, where an every-25 schedule would have salvaged a partial curve.
+: "${EVAL_INTERVAL=25}"
 
 # Response length is deliberately NOT overridden here: the launcher's 2,048
 # stands. The 2026-08-02 probe measured 7.1% (gsm8k) and 10.6% (math) truncation
