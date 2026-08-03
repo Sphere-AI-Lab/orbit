@@ -48,12 +48,32 @@ fi
 # `wandb sync` must not itself be offline, whatever the shell inherited.
 unset WANDB_MODE
 
+# mkdir, NOT flock. `wandb/` is on Lustre, which is mounted without the flock
+# option here -- `flock -n 9` fails with "Function not implemented", which is
+# indistinguishable from "someone else holds it", so a flock-based guard makes
+# this script refuse to sync anything, ever. mkdir is atomic on every POSIX
+# filesystem including Lustre.
 mkdir -p wandb
-exec 9>"wandb/.sync_wandb.lock"
-if ! flock -n 9; then
-    echo "another sync_wandb.sh is already running (wandb/.sync_wandb.lock); nothing to do."
-    exit 0
+LOCK_DIR="wandb/.sync_wandb.lock.d"
+if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
+    # A lock left behind by a killed pass would block every future sync, which
+    # is the same failure in slower motion -- so a lock whose owner is gone is
+    # taken over rather than respected. Same-host check: these all run on the
+    # login node.
+    owner=$(cat "${LOCK_DIR}/pid" 2>/dev/null || echo "")
+    if [[ -n "${owner}" ]] && kill -0 "${owner}" 2>/dev/null; then
+        echo "another sync_wandb.sh is running (pid ${owner}); nothing to do."
+        exit 0
+    fi
+    echo "clearing a stale lock from pid ${owner:-unknown}" >&2
+    rm -rf "${LOCK_DIR}"
+    if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
+        echo "could not take ${LOCK_DIR}; another pass just started. Nothing to do."
+        exit 0
+    fi
 fi
+echo $$ > "${LOCK_DIR}/pid"
+trap 'rm -rf "${LOCK_DIR}"' EXIT
 
 QUIESCE_MIN=${QUIESCE_MIN:-10}
 
