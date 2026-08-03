@@ -163,6 +163,9 @@ def load_checkpoint(
             )
             if loaded:
                 logger.info(f"Successfully loaded PEFT adapter from {adapter_path}")
+                # Self-teacher sidecars (and future pool bindings) live beside the
+                # adapter; the actor's restore hook reads this after teacher init.
+                args._peft_resume_adapter_dir = str(adapter_path)
                 if iteration is not None:
                     result = (iteration, result[1])
             else:

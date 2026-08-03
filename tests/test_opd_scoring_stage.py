@@ -52,3 +52,30 @@ def test_score_payload_lora_path_threading():
     # existing fields unchanged
     assert without["sampling_params"]["max_new_tokens"] == 0
     assert without["return_logprob"] is True
+
+
+def test_actor_teacher_state_keeps_vpp_chunk_identity(monkeypatch):
+    import torch
+
+    import orbit.backends.megatron_utils.actor as actor_module
+
+    class Chunk(torch.nn.Module):
+        def __init__(self, value):
+            super().__init__()
+            self.container = torch.nn.Module()
+            self.container.adapter = torch.nn.ParameterDict(
+                {"delta": torch.nn.Parameter(torch.full((1,), value))}
+            )
+
+    monkeypatch.setattr(actor_module, "is_adapter_param_name", lambda name: ".adapter." in name)
+    actor = object.__new__(actor_module.MegatronTrainRayActor)
+    actor.model = [Chunk(1.0), Chunk(2.0)]
+
+    params = actor._adapter_named_params()
+
+    assert set(params) == {
+        (0, "container.adapter.delta"),
+        (1, "container.adapter.delta"),
+    }
+    assert params[(0, "container.adapter.delta")] is actor.model[0].container.adapter["delta"]
+    assert params[(1, "container.adapter.delta")] is actor.model[1].container.adapter["delta"]

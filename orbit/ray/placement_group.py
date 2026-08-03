@@ -86,9 +86,17 @@ def _opd_teacher_extra_gpus(args) -> int:
     Zero under --colocate: the teacher shares the actor/rollout GPUs there (see
     start_rollout_servers' bundle-cursor reset), matching how rollout itself colocates.
     """
-    if not getattr(args, "opd_serve_teacher", False) or args.colocate:
+    if args.colocate:
         return 0
-    return args.opd_teacher_num_gpus
+    total = 0
+    if getattr(args, "opd_serve_teacher", False):
+        total += args.opd_teacher_num_gpus
+    pool_path = getattr(args, "opd_teacher_pool", None)
+    if pool_path is not None:
+        from orbit.ray.rollout import _opd_teacher_pool
+
+        total += _opd_teacher_pool(args).served_num_gpus
+    return total
 
 
 def create_placement_groups(args):

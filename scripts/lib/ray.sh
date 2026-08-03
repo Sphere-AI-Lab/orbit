@@ -186,7 +186,36 @@ _prepare_megatron_pythonpath() {
     fi
 }
 
+_ray_opd_teacher_pool_gpus() {
+    # Sum served-teacher GPUs from an --opd-teacher-pool manifest (yaml/json).
+    local pool_path="$1"
+    python3 - "${pool_path}" <<'PYEOF'
+import json, sys
+
+path = sys.argv[1]
+raw = open(path).read()
+if path.endswith(".json"):
+    data = json.loads(raw)
+else:
+    import yaml
+
+    data = yaml.safe_load(raw)
+total = sum(
+    int(e.get("num_gpus", 1))
+    for e in (data or {}).get("teachers", [])
+    if isinstance(e, dict) and e.get("kind") == "served"
+)
+print(total)
+PYEOF
+}
+
 _ray_opd_teacher_num_gpus() {
+    local pool_path
+    pool_path=$(_ray_array_value_after_any --opd-teacher-pool RL_ARGS ROLLOUT_ARGS MISC_ARGS 2>/dev/null || true)
+    if [[ -n "${pool_path}" ]]; then
+        _ray_opd_teacher_pool_gpus "${pool_path}"
+        return 0
+    fi
     # Extra GPUs for a managed OPD teacher (--opd-serve-teacher). Zero when the flag is
     # absent or when colocated (the teacher shares the actor/rollout GPUs there) --
     # mirrors placement_group.py::_opd_teacher_extra_gpus.

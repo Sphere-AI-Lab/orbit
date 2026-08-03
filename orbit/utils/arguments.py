@@ -205,6 +205,18 @@ def add_on_policy_distillation_arguments(parser):
         ),
     )
     parser.add_argument(
+        "--opd-teacher-pool",
+        type=str,
+        default=None,
+        help=(
+            "Path to a teacher pool manifest (yaml/json): several named frozen teachers, "
+            "kind url (external endpoint) or served (this job serves the HF checkpoint on "
+            "extra GPUs, like --opd-serve-teacher). Resolves to the --opd-teacher-urls "
+            "router: per-sample routing via sample.metadata[--opd-teacher-key], weighted "
+            "ensembles per name, 'default' as fallback. Sampled-token scoring only."
+        ),
+    )
+    parser.add_argument(
         "--opd-serve-teacher",
         action="store_true",
         default=False,
@@ -580,6 +592,30 @@ def _validate_opd_args(args) -> None:
             "KL onto a reward-based estimator. Pick one."
         )
 
+    # Teacher pools: several named frozen teachers resolved onto the existing
+    # multi-teacher router; served members are launched like --opd-serve-teacher.
+    if getattr(args, "opd_teacher_pool", None) is not None:
+        if getattr(args, "opd_type", None) != "sglang":
+            raise ValueError("--opd-teacher-pool requires --opd-type sglang.")
+        if (
+            getattr(args, "opd_serve_teacher", False)
+            or getattr(args, "opd_teacher_url", None)
+            or getattr(args, "opd_teacher_urls", None)
+        ):
+            raise ValueError(
+                "--opd-teacher-pool subsumes --opd-serve-teacher/--opd-teacher-url(s); "
+                "declare every teacher in the manifest instead."
+            )
+        if getattr(args, "teacher_score_mode", "sampled_token") == "full_vocab":
+            raise ValueError(
+                "--opd-teacher-pool is sampled-token only: full-vocab reconstruction needs one "
+                "trainer-side LM head per member; use --opd-serve-teacher/--opd-teacher-url for "
+                "a single full-vocab teacher."
+            )
+        from orbit.utils.opd_teacher_pool import parse_teacher_pool
+
+        parse_teacher_pool(args.opd_teacher_pool)  # fail fast on a malformed manifest
+
     # Managed teacher serving: the job launches the frozen teacher itself and publishes
     # its endpoint as opd_teacher_url once the engines are up (start_rollout_servers).
     if getattr(args, "opd_serve_teacher", False):
@@ -676,10 +712,13 @@ def _validate_opd_args(args) -> None:
         if getattr(args, "use_rollout_logprobs", False):
             raise ValueError("--force-on-policy-ratio forbids --use-rollout-logprobs.")
         steps_per_rollout = getattr(args, "num_steps_per_rollout", None)
-        if type(steps_per_rollout) is not int or steps_per_rollout != 1:
+        # Dev semantics: None means one optimizer pass over the rollout (the
+        # ultra default was a literal 1); anything beyond one step reuses data
+        # off-policy and contradicts the forced ratio.
+        if steps_per_rollout is not None and (type(steps_per_rollout) is not int or steps_per_rollout != 1):
             raise ValueError(
                 "--force-on-policy-ratio requires exactly one training step per "
-                "rollout (--num-steps-per-rollout 1)."
+                "rollout (--num-steps-per-rollout 1 or unset)."
             )
 
     # sglang-teacher OPD blend is only safe when the teacher scores through the
@@ -693,6 +732,7 @@ def _validate_opd_args(args) -> None:
             getattr(args, "opd_teacher_url", None)
             or getattr(args, "opd_teacher_urls", None)
             or getattr(args, "opd_serve_teacher", False)
+            or getattr(args, "opd_teacher_pool", None)
         )
         if external or not is_same_base(spec_for_blend):
             raise ValueError(
@@ -788,6 +828,7 @@ def _validate_opd_args(args) -> None:
             args.opd_teacher_url
             or getattr(args, "opd_teacher_urls", None)
             or getattr(args, "opd_serve_teacher", False)
+            or getattr(args, "opd_teacher_pool", None)
         )
         if external:
             # Legacy external-teacher path: unchanged hook requirements.

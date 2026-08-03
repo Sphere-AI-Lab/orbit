@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# Qwen2.5-0.5B-Instruct BF16 full-finetune pure MOPD (megatron teacher).
-# Smoke config for the reward-free on-policy-distillation estimator
-# (--advantage-estimator on_policy_distillation, no critic). The teacher is
-# the same 0.5B checkpoint as the student — numerically boring, but exercises
-# the teacher load/forward, teacher_log_probs threading, and mopd advantages.
-# NOTE: full finetune (no PEFT): --opd-type megatron rejects PEFT runs.
+# Qwen2.5-0.5B-Instruct sampled-token MOPD against a DECLARATIVE TEACHER POOL
+# (--opd-teacher-pool): served members are launched by the job itself and the
+# pool resolves onto the multi-teacher router (per-sample routing by
+# sample.metadata[--opd-teacher-key], weighted ensembles, default fallback).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,7 +11,7 @@ source "${ORBIT_ROOT}/scripts/lib/tool_env.sh"
 source "${ORBIT_ROOT}/scripts/lib/common.sh"
 
 # === Recipe identity ===
-LAUNCHER_NAME=smoke_qwen25_05b_opd_mopd
+LAUNCHER_NAME=smoke_qwen25_05b_opd_teacher_pool
 WANDB_PROJECT=${WANDB_PROJECT:-orbit-release}
 WANDB_GROUP=${WANDB_GROUP:-${LAUNCHER_NAME}}
 PRECISION_PROFILE=bf16
@@ -23,8 +21,11 @@ RUN_LOG="${ORBIT_ROOT}/logs/${LAUNCHER_NAME}_$(date +%Y%m%d_%H%M%S).log"
 # === Paths ===
 : "${HF_CKPT:?set HF_CKPT to a Hugging Face checkpoint path}"
 : "${MEGATRON_LOAD:?set MEGATRON_LOAD to a Megatron torch_dist checkpoint path}"
-OPD_TEACHER_LOAD="${OPD_TEACHER_LOAD:-${MEGATRON_LOAD}}"
-SAVE_DIR="${ORBIT_ROOT}/orbit_ckpts/Qwen2.5-0.5B-Instruct_opd_mopd_smoke"
+: "${OPD_TEACHER_POOL:?set OPD_TEACHER_POOL to a teacher pool manifest path}"
+OPD_TOPK="${OPD_TOPK:-0}"
+OPD_TAIL_BUCKET="${OPD_TAIL_BUCKET:-0}"
+OPD_KL_TYPE="${OPD_KL_TYPE:-reverse}"
+SAVE_DIR="${ORBIT_ROOT}/orbit_ckpts/Qwen2.5-0.5B-Instruct_opd_teacher_pool_smoke"
 : "${TRAIN_JSONL:?set TRAIN_JSONL to a training jsonl path}"
 TEST_JSONL=${TEST_JSONL:-}
 
@@ -53,8 +54,7 @@ CKPT_ARGS=(
     --hf-checkpoint "${HF_CKPT}"
     --load "${MEGATRON_LOAD}"
     --save "${SAVE_DIR}/actor"
-    --opd-teacher-load "${OPD_TEACHER_LOAD}"
-    --save-interval 200
+    --save-interval "${SAVE_INTERVAL:-200}"
     --no-save-optim
     --no-save-rng
     --megatron-to-hf-mode bridge
@@ -73,6 +73,8 @@ ROLLOUT_ARGS=(
     --rollout-max-response-len "${ROLLOUT_MAX_RESPONSE_LEN}"
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
+    --custom-rm-path orbit.rollout.opd_sglang.reward_func
+    --custom-reward-post-process-path orbit.rollout.opd_sglang.post_process
 )
 
 OPTIMIZER_ARGS=(
@@ -86,7 +88,9 @@ OPTIMIZER_ARGS=(
 
 RL_ARGS=(
     --advantage-estimator on_policy_distillation
-    --opd-type megatron
+    --opd-type sglang
+    --opd-teacher-pool "${OPD_TEACHER_POOL}"
+    --opd-teacher-key "${OPD_TEACHER_KEY:-dataset}"
     --kl-loss-coef 0.0
     --kl-loss-type k1
     --kl-coef 0.0
@@ -96,11 +100,12 @@ RL_ARGS=(
     --gamma 1.0
     --lambd 1.0
 )
-
-# Optional extra RL args (space-separated), e.g. EXTRA_RL_ARGS="--force-on-policy-ratio".
-if [[ -n "${EXTRA_RL_ARGS:-}" ]]; then
-    read -r -a _extra_rl_args <<< "${EXTRA_RL_ARGS}"
-    RL_ARGS+=( "${_extra_rl_args[@]}" )
+if [ "${OPD_TOPK}" -gt 0 ]; then
+    RL_ARGS+=(--opd-log-prob-top-k "${OPD_TOPK}" --opd-top-k-strategy only-student)
+    RL_ARGS+=(--opd-kl-type "${OPD_KL_TYPE}")
+fi
+if [ "${OPD_TAIL_BUCKET}" = "1" ]; then
+    RL_ARGS+=(--opd-topk-tail-bucket)
 fi
 
 LOSS_ARGS=(

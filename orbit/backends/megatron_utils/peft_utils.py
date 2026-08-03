@@ -2,7 +2,7 @@ import json
 import logging
 import os
 from argparse import Namespace
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -14,14 +14,64 @@ from safetensors.torch import save_file as safetensors_save_file
 
 from orbit.backends.training_utils.parallel import get_parallel_state
 from orbit.backends.megatron_utils.update_weight.common import is_dsv4_grouped_moe_oft_param_name
+from orbit.utils.adapter_tensors import (
+    AdapterTensorKey,
+    adapter_named_parameters,
+    adapter_tensor_key_digest,
+)
 
 logger = logging.getLogger(__name__)
 
 
 LORA_SYNC_TRANSPORT = "lora_adapter"
 OFT_SYNC_TRANSPORT = "oft_adapter"
+_OPTIMIZER_PARAMETER_STATE_PREFIX = "optimizer_parameter_state_rank"
+_MAX_CHECKPOINT_COUNTER = 2**63 - 1
 
 Variant = Literal["standard", "canonical", "mla", "dsv4"]
+
+
+def _is_bounded_nonnegative_integer(value: object) -> bool:
+    return type(value) is int and 0 <= value <= _MAX_CHECKPOINT_COUNTER
+
+
+def _is_canonical_student_version(value: object) -> bool:
+    if (
+        type(value) is not str
+        or not value.isascii()
+        or not value.isdecimal()
+        or len(value) > 19
+        or (len(value) > 1 and value.startswith("0"))
+    ):
+        return False
+    return int(value) <= _MAX_CHECKPOINT_COUNTER
+
+
+def _contains_tensor(value: Any) -> bool:
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, torch.Tensor):
+            return True
+        if type(item) is dict:
+            pending.extend(item.values())
+        elif type(item) in (list, tuple):
+            pending.extend(item)
+    return False
+
+
+def _contains_inline_optimizer_tensor(value: Any) -> bool:
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if type(item) is dict:
+            if "state" in item and _contains_tensor(item["state"]):
+                return True
+            if "optimizer" in item:
+                pending.append(item["optimizer"])
+        elif type(item) in (list, tuple):
+            pending.extend(item)
+    return False
 
 
 @dataclass(frozen=True)
@@ -130,6 +180,7 @@ def save_peft_checkpoint(
     optimizer: Any | None = None,
     opt_param_scheduler: Any | None = None,
     iteration: int | None = None,
+    active_student_version: str | None = None,
 ) -> str:
     method = get_peft_method(args)
     if method == "lora":
@@ -142,6 +193,7 @@ def save_peft_checkpoint(
             optimizer=optimizer,
             opt_param_scheduler=opt_param_scheduler,
             iteration=iteration,
+            active_student_version=active_student_version,
         )
     if method == "oft":
         from .oft_utils import save_oft_checkpoint
@@ -153,6 +205,7 @@ def save_peft_checkpoint(
             optimizer=optimizer,
             opt_param_scheduler=opt_param_scheduler,
             iteration=iteration,
+            active_student_version=active_student_version,
         )
     raise ValueError(f"Cannot save PEFT checkpoint when peft_method={method!r}.")
 
@@ -164,6 +217,8 @@ def load_peft_adapter(
     *,
     optimizer: Any | None = None,
     opt_param_scheduler: Any | None = None,
+    expected_iteration: int | None = None,
+    expected_active_student_version: str | None = None,
 ) -> tuple[bool, int | None]:
     method = get_peft_method(args)
     adapter_dir = Path(adapter_path)
@@ -177,6 +232,8 @@ def load_peft_adapter(
             adapter_path,
             optimizer=optimizer,
             opt_param_scheduler=opt_param_scheduler,
+            expected_iteration=expected_iteration,
+            expected_active_student_version=expected_active_student_version,
         )
     if method == "oft":
         from .oft_utils import load_oft_adapter
@@ -187,6 +244,8 @@ def load_peft_adapter(
             adapter_path,
             optimizer=optimizer,
             opt_param_scheduler=opt_param_scheduler,
+            expected_iteration=expected_iteration,
+            expected_active_student_version=expected_active_student_version,
         )
     raise ValueError(f"Cannot load PEFT adapter when peft_method={method!r}.")
 
@@ -201,16 +260,37 @@ def save_training_state(
     optimizer: Any | None,
     opt_param_scheduler: Any | None,
     iteration: int | None,
+    *,
+    active_student_version: str | None = None,
 ) -> None:
+    if iteration is not None and not _is_bounded_nonnegative_integer(iteration):
+        raise ValueError("PEFT checkpoint iteration must be a bounded nonnegative integer")
+    if active_student_version is not None and not _is_canonical_student_version(
+        active_student_version
+    ):
+        raise ValueError("active student version must be canonical nonnegative decimal text")
     if optimizer is None:
         return
 
     rank = dist.get_rank() if dist.is_initialized() else 0
     state_path = Path(adapter_dir) / f"training_state_rank{rank}.pt"
+    optimizer_state = optimizer.state_dict()
+    save_parameter_state = getattr(optimizer, "save_parameter_state", None)
+    has_external_parameter_state = (
+        not _contains_inline_optimizer_tensor(optimizer_state)
+        and callable(save_parameter_state)
+    )
+    if has_external_parameter_state:
+        parameter_state_path = (
+            Path(adapter_dir) / f"{_OPTIMIZER_PARAMETER_STATE_PREFIX}{rank}.pt"
+        )
+        save_parameter_state(str(parameter_state_path))
     torch.save(
         {
             "iteration": iteration,
-            "optimizer": optimizer.state_dict(),
+            "active_student_version": active_student_version,
+            "optimizer": optimizer_state,
+            "optimizer_parameter_state": has_external_parameter_state,
             "opt_param_scheduler": opt_param_scheduler.state_dict() if opt_param_scheduler else None,
         },
         state_path,
@@ -222,25 +302,79 @@ def load_training_state(
     adapter_dir: Path,
     optimizer: Any | None,
     opt_param_scheduler: Any | None,
+    *,
+    expected_iteration: int | None = None,
+    expected_active_student_version: str | None = None,
 ) -> int | None:
-    if optimizer is None:
+    if expected_iteration is not None and not _is_bounded_nonnegative_integer(
+        expected_iteration
+    ):
+        raise ValueError("expected PEFT checkpoint iteration must be bounded and nonnegative")
+    if (
+        expected_active_student_version is not None
+        and not _is_canonical_student_version(expected_active_student_version)
+    ):
+        raise ValueError("expected active student version must be canonical decimal text")
+    if (
+        optimizer is None
+        and expected_iteration is None
+        and expected_active_student_version is None
+    ):
         return None
 
     rank = dist.get_rank() if dist.is_initialized() else 0
     state_path = Path(adapter_dir) / f"training_state_rank{rank}.pt"
     if not state_path.exists():
+        if expected_iteration is not None or expected_active_student_version is not None:
+            raise RuntimeError("PEFT checkpoint training state required by binding is missing")
         return None
 
     training_state = torch.load(state_path, map_location="cpu", weights_only=False)
 
+    if type(training_state) is not dict:
+        raise RuntimeError("PEFT checkpoint training state is invalid")
+    iteration = training_state.get("iteration")
+    if expected_iteration is not None and (
+        not _is_bounded_nonnegative_integer(iteration)
+        or iteration != expected_iteration
+    ):
+        raise RuntimeError(
+            "PEFT checkpoint iteration does not match teacher-pool binding"
+        )
+    active_student_version = training_state.get("active_student_version")
+    if (
+        expected_active_student_version is not None
+        and (
+            not _is_canonical_student_version(active_student_version)
+            or active_student_version != expected_active_student_version
+        )
+    ):
+        raise RuntimeError(
+            "PEFT checkpoint active student version does not match teacher-pool binding"
+        )
+
+    if optimizer is None:
+        if iteration is not None:
+            logger.info(f"Validated PEFT training state at iteration {iteration}")
+        return iteration
+
     optimizer.load_state_dict(training_state["optimizer"])
+    parameter_state_path = (
+        Path(adapter_dir) / f"{_OPTIMIZER_PARAMETER_STATE_PREFIX}{rank}.pt"
+    )
+    load_parameter_state = getattr(optimizer, "load_parameter_state", None)
+    if training_state.get("optimizer_parameter_state") is True:
+        if not callable(load_parameter_state):
+            raise RuntimeError(
+                "PEFT checkpoint requires distributed optimizer parameter state"
+            )
+        load_parameter_state(str(parameter_state_path))
     logger.info("Restored optimizer state from PEFT checkpoint")
 
     if opt_param_scheduler is not None and training_state.get("opt_param_scheduler") is not None:
         opt_param_scheduler.load_state_dict(training_state["opt_param_scheduler"])
         logger.info("Restored LR scheduler state from PEFT checkpoint")
 
-    iteration = training_state.get("iteration")
     if iteration is not None:
         logger.info(f"Resuming PEFT training from iteration {iteration}")
     return iteration
@@ -559,6 +693,90 @@ def resolve_target_modules_hf(args: Namespace) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def native_adapter_state(
+    model: Sequence[torch.nn.Module],
+) -> dict[AdapterTensorKey, torch.Tensor]:
+    """Snapshot every local adapter tensor with its VPP chunk identity."""
+
+    return {
+        key: parameter.detach().cpu().clone()
+        for key, parameter in adapter_named_parameters(model, is_adapter_param_name).items()
+    }
+
+
+def _mapping_difference_message(
+    expected: set[AdapterTensorKey],
+    actual: set[AdapterTensorKey],
+) -> str:
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    return f"native adapter state keys do not match model; missing={missing[:5]!r}, unknown={extra[:5]!r}"
+
+
+def resolve_native_adapter_state(
+    model: Sequence[torch.nn.Module],
+    state: Mapping[object, object],
+) -> dict[AdapterTensorKey, torch.Tensor]:
+    """Validate tuple-key native state or unambiguous legacy plain-name state.
+
+    The returned mapping is complete and shape-checked. Callers can therefore
+    prepare all device conversions before mutating any live parameter.
+    """
+
+    params = adapter_named_parameters(model, is_adapter_param_name)
+    if type(state) is not dict or not state:
+        raise ValueError("native adapter state must be a nonempty exact dict")
+
+    raw_keys = list(state)
+    tuple_format = all(type(key) is tuple for key in raw_keys)
+    legacy_format = all(type(key) is str and bool(key) for key in raw_keys)
+    if not tuple_format and not legacy_format:
+        raise ValueError("native adapter state key format is invalid or mixed")
+
+    resolved: dict[AdapterTensorKey, object]
+    if tuple_format:
+        adapter_tensor_key_digest(raw_keys)
+        actual_keys = set(raw_keys)
+        expected_keys = set(params)
+        if actual_keys != expected_keys:
+            raise ValueError(_mapping_difference_message(expected_keys, actual_keys))
+        resolved = {key: state[key] for key in params}
+    else:
+        resolved = {}
+        for legacy_name in raw_keys:
+            matches = [
+                key
+                for key in params
+                if key[1] == legacy_name
+                or _maybe_legacy_canonical_oft_key(key[1]) == legacy_name
+            ]
+            if len(matches) > 1:
+                raise ValueError(
+                    f"legacy native adapter name {legacy_name!r} is ambiguous across model chunks"
+                )
+            if not matches:
+                raise ValueError(f"legacy native adapter state has unknown key {legacy_name!r}")
+            key = matches[0]
+            if key in resolved:
+                raise ValueError(f"legacy native adapter state maps multiple names to {key!r}")
+            resolved[key] = state[legacy_name]
+        if set(resolved) != set(params):
+            raise ValueError(_mapping_difference_message(set(params), set(resolved)))
+
+    validated: dict[AdapterTensorKey, torch.Tensor] = {}
+    for key, parameter in params.items():
+        tensor = resolved[key]
+        if not isinstance(tensor, torch.Tensor):
+            raise TypeError(f"native adapter state value for {key!r} is not a tensor")
+        if tensor.shape != parameter.shape:
+            raise ValueError(
+                f"native adapter tensor {key!r} shape {tuple(tensor.shape)} "
+                f"does not match model shape {tuple(parameter.shape)}"
+            )
+        validated[key] = tensor
+    return validated
+
+
 def _to_peft_canonical_key(name: str) -> str:
     """Wrap a megatron-bridge adapter weight name into peft on-disk form.
 
@@ -646,6 +864,7 @@ def save_peft_adapter_checkpoint(
     optimizer: Any | None = None,
     opt_param_scheduler: Any | None = None,
     iteration: int | None = None,
+    active_student_version: str | None = None,
 ) -> str:
     """Save a PEFT adapter checkpoint (native per-rank shards + HF artifacts).
 
@@ -668,12 +887,7 @@ def save_peft_adapter_checkpoint(
 
     # Megatron-native format (per TP/PP rank, fast resume)
     if is_dp_rank_0:
-        adapter_state = {
-            name: param.data.cpu()
-            for chunk in model
-            for name, param in chunk.named_parameters()
-            if is_adapter_param_name(name)
-        }
+        adapter_state = native_adapter_state(model)
         native_path = save_path / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt"
         torch.save(adapter_state, native_path)
         logger.info(f"Saved {len(adapter_state)} adapter tensors (native) to {native_path}")
@@ -700,7 +914,13 @@ def save_peft_adapter_checkpoint(
             base_model_name_or_path=args.hf_checkpoint,
         )
 
-    save_training_state(save_path, optimizer, opt_param_scheduler, iteration)
+    save_training_state(
+        save_path,
+        optimizer,
+        opt_param_scheduler,
+        iteration,
+        active_student_version=active_student_version,
+    )
 
     if dist.is_initialized():
         dist.barrier()
@@ -715,6 +935,8 @@ def load_peft_adapter_checkpoint(
     label: str,
     optimizer: Any | None = None,
     opt_param_scheduler: Any | None = None,
+    expected_iteration: int | None = None,
+    expected_active_student_version: str | None = None,
 ) -> tuple[bool, int | None]:
     """Load a PEFT adapter checkpoint from Megatron-native shards.
 
@@ -732,39 +954,44 @@ def load_peft_adapter_checkpoint(
 
     native_path = adapter_dir / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt"
     if native_path.exists():
+        validated_iteration = None
+        binding_metadata_expected = (
+            expected_iteration is not None
+            or expected_active_student_version is not None
+        )
+        if binding_metadata_expected:
+            # Binding metadata must validate before adapter parameters or
+            # optimizer state are mutated.
+            validated_iteration = load_training_state(
+                adapter_dir,
+                None,
+                None,
+                expected_iteration=expected_iteration,
+                expected_active_student_version=expected_active_student_version,
+            )
         state_dict = torch.load(native_path, map_location="cpu", weights_only=True)
-        loaded = 0
-        legacy_oft_broadcasts = 0
-        for chunk in model:
-            for name, param in chunk.named_parameters():
-                if name in state_dict:
-                    param.data.copy_(state_dict[name].to(device=param.device))
-                    loaded += 1
-                    continue
-                # CanonicalOFT legacy-checkpoint compatibility: a pre-fix run
-                # saved a single shared `adapter.oft_r` for the fused QKV/FC1
-                # wrappers. The new model has `adapter_q/k/v/gate/up.oft_r`;
-                # broadcast the legacy single R into each slice so resume
-                # remains possible (the first step diverges, which is the
-                # intended math correction).
-                legacy_key = _maybe_legacy_canonical_oft_key(name)
-                if legacy_key is not None and legacy_key in state_dict:
-                    param.data.copy_(state_dict[legacy_key].to(device=param.device))
-                    loaded += 1
-                    legacy_oft_broadcasts += 1
-        if legacy_oft_broadcasts:
-            logger.warning(
-                f"{label}: broadcast {legacy_oft_broadcasts} legacy shared-R OFT "
-                f"tensors into CanonicalOFT split slices. First training step "
-                f"after resume will diverge from the legacy shared-R math."
-            )
-        if loaded == 0:
-            logger.warning(
-                f"{label} adapter checkpoint at {native_path} did not match any local adapter tensors"
-            )
-            return False, None
+        resolved = resolve_native_adapter_state(model, state_dict)
+        params = adapter_named_parameters(model, is_adapter_param_name)
+        converted = {
+            key: resolved[key].to(device=parameter.device, dtype=parameter.dtype)
+            for key, parameter in params.items()
+        }
+        with torch.no_grad():
+            for key, parameter in params.items():
+                parameter.copy_(converted[key])
+        loaded = len(params)
         logger.info(f"Loaded {loaded} adapter tensors from Megatron-native checkpoint: {native_path}")
-        iteration = load_training_state(adapter_dir, optimizer, opt_param_scheduler)
+        iteration = (
+            validated_iteration
+            if optimizer is None and binding_metadata_expected
+            else load_training_state(
+                adapter_dir,
+                optimizer,
+                opt_param_scheduler,
+                expected_iteration=expected_iteration,
+                expected_active_student_version=expected_active_student_version,
+            )
+        )
         return True, iteration
 
     hf_safetensors = adapter_dir / "adapter_model.safetensors"
@@ -785,8 +1012,8 @@ def load_peft_adapter_checkpoint(
 def load_adapter_tensors_for_teacher(
     model: Sequence[torch.nn.Module],
     adapter_path: str,
-) -> dict[str, torch.Tensor]:
-    """Load a frozen teacher adapter as a name->tensor dict (never into params).
+) -> dict[AdapterTensorKey, torch.Tensor]:
+    """Load a frozen teacher adapter as a chunk-aware tensor dict.
 
     Requires Megatron-native shards (adapter_megatron_tp{tp}_pp{pp}.pt) as
     written by save_peft_checkpoint; HF-only artifacts are rejected — the
@@ -803,17 +1030,9 @@ def load_adapter_tensors_for_teacher(
             "loadable trainer-side)."
         )
     state_dict = torch.load(native_path, map_location="cpu", weights_only=True)
-    tensors: dict[str, torch.Tensor] = {}
-    for chunk in model:
-        for name, param in chunk.named_parameters():
-            if not is_adapter_param_name(name):
-                continue
-            source = state_dict.get(name)
-            if source is None:
-                legacy_key = _maybe_legacy_canonical_oft_key(name)
-                if legacy_key is not None:
-                    source = state_dict.get(legacy_key)
-            if source is None:
-                raise KeyError(f"Teacher adapter shard {native_path} is missing tensor {name!r}.")
-            tensors[name] = source.to(device=param.device, dtype=param.dtype)
-    return tensors
+    resolved = resolve_native_adapter_state(model, state_dict)
+    params = adapter_named_parameters(model, is_adapter_param_name)
+    return {
+        key: resolved[key].to(device=parameter.device, dtype=parameter.dtype).detach().clone()
+        for key, parameter in params.items()
+    }

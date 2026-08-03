@@ -161,6 +161,7 @@ def save_oft_checkpoint(
     optimizer: Any | None = None,
     opt_param_scheduler: Any | None = None,
     iteration: int | None = None,
+    active_student_version: str | None = None,
 ) -> str:
     from . import peft_utils
 
@@ -173,6 +174,7 @@ def save_oft_checkpoint(
         optimizer=optimizer,
         opt_param_scheduler=opt_param_scheduler,
         iteration=iteration,
+        active_student_version=active_student_version,
     )
 
 
@@ -182,6 +184,8 @@ def load_oft_adapter(
     *,
     optimizer: Any | None = None,
     opt_param_scheduler: Any | None = None,
+    expected_iteration: int | None = None,
+    expected_active_student_version: str | None = None,
 ) -> tuple[bool, int | None]:
     from . import peft_utils
 
@@ -191,4 +195,6 @@ def load_oft_adapter(
         label="OFT",
         optimizer=optimizer,
         opt_param_scheduler=opt_param_scheduler,
+        expected_iteration=expected_iteration,
+        expected_active_student_version=expected_active_student_version,
     )

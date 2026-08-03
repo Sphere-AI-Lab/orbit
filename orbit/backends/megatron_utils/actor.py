@@ -23,6 +23,7 @@ from orbit.utils.processing_utils import load_tokenizer
 from orbit.utils.ray_utils import Box
 from orbit.utils.reloadable_process_group import destroy_process_groups, monkey_patch_torch_dist, reload_process_groups
 from orbit.utils.replay_base import all_replay_managers
+from orbit.utils.adapter_tensors import AdapterTensorKey, adapter_named_parameters
 from orbit.utils.self_teacher import SelfTeacherBuffer
 from orbit.utils.timer import Timer, inverse_timer, timer
 from orbit.utils.tracking_utils import init_tracking
@@ -245,7 +246,7 @@ class MegatronTrainRayActor(TrainRayActor):
         # second model: the teacher is the resident base with adapters toggled.
         # Only the legacy load:<ckpt> spec loads a full second model like "ref".
         self._opd_teacher_spec = getattr(self.args, "opd_teacher_spec", None)
-        self._opd_teacher_tensors: dict[str, torch.Tensor] | None = None
+        self._opd_teacher_tensors: dict[AdapterTensorKey, torch.Tensor] | None = None
         self._self_teacher = None
         if with_opd_teacher:
             if self._opd_teacher_spec is None:
@@ -295,6 +296,7 @@ class MegatronTrainRayActor(TrainRayActor):
         # Set True after the engine's orbit_teacher slot has been filled once
         # (startup promotion in update_weights); scoring an empty slot 404s.
         self._teacher_slot_startup_promoted = False
+        self._restore_checkpoint_teacher_state()
 
         if self.args.keep_old_actor:
             # Load old_actor checkpoint
@@ -470,7 +472,7 @@ class MegatronTrainRayActor(TrainRayActor):
             # Follow-up: maybe extract a common process function for here and get_batch?
             max_seq_lens = batch.get("max_seq_lens")
 
-            def sample_max_seq_len(index: int) -> int | None:
+            def sample_max_seq_len(index: int, max_seq_lens=max_seq_lens) -> int | None:
                 return max_seq_lens[index] if max_seq_lens is not None else None
 
             if qkv_format == "bshd":
@@ -555,13 +557,31 @@ class MegatronTrainRayActor(TrainRayActor):
         self._switch_model("ref")
         return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="ref_")
 
-    def _adapter_named_params(self) -> dict[str, torch.Tensor]:
-        params: dict[str, torch.Tensor] = {}
-        for chunk in self.model:
-            for name, param in chunk.named_parameters():
-                if is_adapter_param_name(name):
-                    params[name] = param
-        return params
+    def _restore_checkpoint_teacher_state(self) -> None:
+        """Resume the EMA/lag self-teacher from its checkpoint sidecar, if present.
+
+        The sidecar is written next to the PEFT adapter checkpoint (model.save);
+        without it a resumed run silently re-seeds the self-teacher from the
+        resumed student, losing the teacher's lag. Absence is legal (checkpoints
+        predating sidecars); corruption is not.
+        """
+        adapter_dir = getattr(self.args, "_peft_resume_adapter_dir", None)
+        if adapter_dir is None or self._self_teacher is None:
+            return
+        from orbit.utils.self_teacher_checkpoint import has_self_teacher_sidecar, load_self_teacher_sidecar
+
+        rank = dist.get_rank() if dist.is_initialized() else 0
+        world_size = dist.get_world_size() if dist.is_initialized() else 1
+        if not has_self_teacher_sidecar(adapter_dir, rank=rank):
+            logger.info(f"No self-teacher sidecar at {adapter_dir}; keeping freshly seeded teacher state.")
+            return
+        load_self_teacher_sidecar(adapter_dir, self._self_teacher, rank=rank, world_size=world_size)
+        logger.info(f"Restored self-teacher state from checkpoint sidecar at {adapter_dir}")
+
+    def _adapter_named_params(self) -> dict[AdapterTensorKey, torch.nn.Parameter]:
+        # (vp_stage, name) keys: plain names collide across virtual-pipeline chunks,
+        # silently merging distinct adapter tensors in self-teacher/transport flows.
+        return adapter_named_parameters(self.model, is_adapter_param_name)
 
     def compute_teacher_log_probs(
         self,
@@ -825,7 +845,9 @@ class MegatronTrainRayActor(TrainRayActor):
 
             maybe_finalize_async_save(blocking=True)
 
-        save(rollout_id, self.model, self.optimizer, self.opt_param_scheduler)
+        # getattr: the separate-critic actor shares this method but never runs the
+        # OPD teacher init that creates _self_teacher.
+        save(rollout_id, self.model, self.optimizer, self.opt_param_scheduler, self_teacher=getattr(self, "_self_teacher", None))
 
         if uses_adapter_critic(self.args) and self.args.critic_save:
             save_critic_checkpoint(self.args, rollout_id, self.critic_model, optimizer=self.critic_optimizer)

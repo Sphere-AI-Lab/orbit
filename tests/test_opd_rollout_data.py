@@ -136,3 +136,24 @@ def test_tensorize_helper_noop_on_already_tensor_entries():
     data._tensorize_cp_sliced_log_probs(args, rollout_data, "teacher_log_probs")
 
     assert rollout_data["teacher_log_probs"][0] is t
+
+
+def test_tensorize_helper_leaves_teacher_provenance_as_plain_dicts():
+    args = Namespace(qkv_format="thd")
+    provenance = {"request_id": "5:request-5"}
+    rollout_data = {
+        "teacher_log_probs": [],
+        "teacher_scoring_provenance": [provenance],
+        "total_lengths": [],
+        "response_lengths": [],
+    }
+
+    data._tensorize_cp_sliced_log_probs(
+        args,
+        rollout_data,
+        "teacher_log_probs",
+    )
+
+    assert rollout_data["teacher_scoring_provenance"] == [provenance]
+    assert rollout_data["teacher_scoring_provenance"][0] is provenance
+    assert type(rollout_data["teacher_scoring_provenance"][0]) is dict
