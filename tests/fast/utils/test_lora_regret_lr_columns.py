@@ -241,3 +241,60 @@ def test_the_sweep_can_sync_wandb_during_arms_but_does_not_by_default():
     assert 'os.environ.get("WANDB_SYNC_INTERVAL", "0")' in text, "off unless asked for"
     assert "_WANDB_SYNC_LOCK" in text, "watcher and after-arm sync must not overlap"
     assert "daemon=True" in text, "the watcher must never keep a finished sweep alive"
+
+
+def test_every_periodic_action_in_train_py_is_told_the_rollout_count():
+    """The protocol's "one eval, at the end" depends entirely on this argument.
+
+    `should_run_periodic_action(rollout_id, interval, per_epoch, num_rollout)`
+    fires on the last rollout via `rollout_id == num_rollout - 1`, and that
+    branch is unreachable when the fourth argument is omitted. EVAL_INTERVAL is
+    100000 precisely so the modulo never matches and only the final-rollout
+    branch fires -- so an omitted `num_rollout` does not degrade the eval
+    cadence, it removes post-training eval entirely.
+
+    That is not hypothetical. train.py's generation-eval call omitted it while
+    the held-out-NLL call twenty lines above passed it, so E4's gsm8k columns
+    ran 150 rollouts apiece and evaluated only the UNTRAINED policy, from the
+    separate eval-before-train branch. Every ledger row read `accuracy: null,
+    status: failed` beside a complete, healthy log.
+
+    Checked over the AST rather than the text because the call spans lines and
+    a grep for the argument name would pass on a comment mentioning it.
+    """
+    import ast
+
+    train_py = PROTOCOL.parents[2] / "train.py"
+    tree = ast.parse(train_py.read_text(encoding="utf-8"))
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "should_run_periodic_action"
+    ]
+    assert len(calls) >= 3, f"expected the eval, eval-nll and save call sites, found {len(calls)}"
+    for call in calls:
+        passed = len(call.args) + len(call.keywords)
+        assert passed == 4, (
+            f"{train_py.name}:{call.lineno} passes {passed} arguments to "
+            "should_run_periodic_action; without num_rollout its final-rollout "
+            "branch is dead and the last rollout produces no measurement"
+        )
+
+
+def test_a_periodic_action_without_the_rollout_count_never_fires_on_the_last_rollout():
+    """The behaviour the pin above protects, stated directly: at the protocol's
+    own settings -- 150 rollouts, interval 100000 -- the fourth argument is the
+    only thing standing between one eval and none."""
+    from orbit.utils.misc import should_run_periodic_action
+
+    fires = [
+        rollout_id
+        for rollout_id in range(150)
+        if should_run_periodic_action(rollout_id, 100000, None, 150)
+    ]
+    assert fires == [149]
+    assert not any(
+        should_run_periodic_action(rollout_id, 100000, None) for rollout_id in range(150)
+    )

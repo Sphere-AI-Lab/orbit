@@ -37,7 +37,11 @@ from tools.lora_regret.models import get as get_model
 # The eval-line regex and phase labels live in trace.py -- one definition,
 # built from EVAL_NLL_METRIC_KEY. Imported under the existing private names so
 # every call site and the TestLogFormatPins pins keep working unchanged.
-from tools.lora_regret.probe_log import parse_rollout_seconds, parse_save_seconds
+from tools.lora_regret.probe_log import (
+    last_run_segment,
+    parse_rollout_seconds,
+    parse_save_seconds,
+)
 from tools.lora_regret.trace import (  # noqa: F401  (parse_trace re-exported)
     NLL_LINE as _NLL_LINE,
     PHASE_AFTER_TRAIN as _PHASE_AFTER_TRAIN,
@@ -86,11 +90,36 @@ MATRIX_METRICS = {
     "e5scout": "nll",
     "e5": "nll",
 }
-# The eval dataset names the RL launcher passes to --eval-prompt-data. Given
-# explicitly so parse_final_accuracy matches them exactly instead of guessing the
-# key shape; pinned against the launcher's own text by
+# The eval dataset names the RL launcher passes to --eval-prompt-data when
+# EVAL_DATASETS is left at its default. Given explicitly so parse_final_accuracy
+# matches them exactly instead of guessing the key shape; pinned against the
+# launcher's own text by
 # test_the_rl_launcher_configures_exactly_the_datasets_the_parser_expects.
 RL_EVAL_DATASETS = ("math_test", "gsm8k_test")
+
+
+def rl_eval_datasets(env: dict[str, str]) -> tuple[str, ...]:
+    """Which `eval/<name>` keys THIS arm's log will carry.
+
+    Read off the very environment the launcher is handed, not restated. The
+    restated version is what broke: `arm_env` sets `EVAL_DATASETS=<dataset>` for
+    a per-dataset RL arm so a GSM8K panel is scored on GSM8K alone, while the
+    parser went on demanding the two-dataset default. `parse_final_accuracy`
+    fails closed on a missing dataset -- correctly, it is guarding against a
+    half-reported eval -- so every gsm8k arm parsed as None and was recorded
+    `status: "failed"` with a full, healthy log sitting next to it. Fifty-six
+    arms were queued behind that.
+
+    Deriving it from `env` means the launcher's selection and the parser's
+    expectation cannot drift again: there is one decision, made in `arm_env`,
+    and this reads it. The `_test` suffix is the launcher's own naming
+    (`--eval-prompt-data gsm8k_test ...`), pinned by
+    test_every_eval_datasets_branch_maps_to_the_names_the_parser_expects.
+    """
+    selected = env.get("EVAL_DATASETS", "both")
+    if selected == "both":
+        return RL_EVAL_DATASETS
+    return (f"{selected}_test",)
 
 # One wandb project per task, one group per method inside it.
 #
@@ -517,7 +546,14 @@ def run_arm(
     rollout_seconds: list[float] = []
     save_seconds: list[float] = []
     if log_path.exists():
-        log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        # THIS invocation's output, not the file's. RUN_LOG is a fixed path per
+        # arm and the launcher opens it with `tee -a`, so a retried arm -- which
+        # is every arm that ever recorded `failed` -- appends to its predecessor
+        # and every parser below would answer about a run that never happened.
+        # `full-na-na-gsm8k-lr5e-07-s0` holds three invocations (108 rollouts, a
+        # startup failure, a complete 150) and its ledger row recorded 258
+        # rollout timings.
+        log_text = last_run_segment(log_path.read_text(encoding="utf-8", errors="replace"))
         # Measured per rollout by train.py's own ETA tracker, for SFT and RL
         # alike. Recorded on every row, not only probes: it is the only place a
         # completed arm's pace survives, and logs/ is gitignored.
@@ -527,7 +563,7 @@ def run_arm(
         # figure doubled the campaign estimate.
         save_seconds = parse_save_seconds(log_text)
         if metric == "accuracy":
-            accuracy, steps, per_dataset = parse_final_accuracy(log_text, RL_EVAL_DATASETS)
+            accuracy, steps, per_dataset = parse_final_accuracy(log_text, rl_eval_datasets(env))
         else:
             nll, steps = parse_final_nll(log_text)
             trace_points = parse_trace(log_text)

@@ -10,6 +10,7 @@ not hand-typed strings that would trivially satisfy this module's own regex.
 """
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -699,19 +700,57 @@ class TestRunArmAccuracyMetric:
         monkeypatch.setattr(
             sweep.subprocess, "run", lambda cmd, env, cwd: subprocess.CompletedProcess(cmd, 0)
         )
+        # A GSM8K-panel arm, scored on GSM8K alone -- which is what `arm_env`
+        # configures and therefore the only log the launcher can produce for it.
+        # This test previously fed it a two-dataset eval line and asserted the
+        # mean of both, a log shape that cannot occur, and so passed while every
+        # real gsm8k arm was being recorded `failed`.
         arm = e4_arms()[0]
+        assert arm.dataset == "gsm8k"
         results_path = tmp_path / "results.jsonl"
         log_path = tmp_path / "logs" / "lora_regret" / f"{arm.name}.log"
         log_path.parent.mkdir(parents=True)
-        log_path.write_text(_render_eval(100, {"math_test": 0.33, "gsm8k_test": 0.55}) + "\n")
+        log_path.write_text(_render_eval(100, {"gsm8k_test": 0.55}) + "\n")
 
         run_arm(arm, tmp_path, results_path, dry_run=False, metric="accuracy")
 
         record = json.loads(results_path.read_text().splitlines()[0])
         assert record["status"] == "ok"
-        assert record["accuracy"] == pytest.approx(0.44)
-        assert record["accuracy_per_dataset"]["gsm8k_test"] == pytest.approx(0.55)
+        assert record["accuracy"] == pytest.approx(0.55)
+        assert record["accuracy_per_dataset"] == {"gsm8k_test": pytest.approx(0.55)}
         assert record["test_nll"] is None
+
+    def test_a_single_dataset_arm_is_not_scored_against_the_other_panel(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """The production regression, verbatim.
+
+        E4's gsm8k columns ran 150 rollouts each and every one landed in the
+        ledger as `status: "failed"`, `accuracy: null`, because the parser was
+        handed the fixed pair ("math_test", "gsm8k_test") while `arm_env` had
+        told the launcher to evaluate gsm8k only. `parse_final_accuracy` fails
+        closed on a missing dataset, so a complete, healthy log parsed to None.
+
+        A math arm gets the mirror-image check in the same test, because a fix
+        that special-cased gsm8k would pass half of this."""
+        monkeypatch.setattr(
+            sweep.subprocess, "run", lambda cmd, env, cwd: subprocess.CompletedProcess(cmd, 0)
+        )
+        for arm, name, score in [
+            (next(a for a in e4_arms() if a.dataset == "gsm8k"), "gsm8k_test", 0.72),
+            (next(a for a in e4_arms() if a.dataset == "math"), "math_test", 0.29),
+        ]:
+            results_path = tmp_path / f"{arm.dataset}.jsonl"
+            log_path = tmp_path / "logs" / "lora_regret" / f"{arm.name}.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.write_text(_render_eval(149, {name: score}) + "\n")
+
+            run_arm(arm, tmp_path, results_path, dry_run=False, metric="accuracy")
+
+            record = json.loads(results_path.read_text().splitlines()[0])
+            assert record["status"] == "ok", f"{arm.name} still parses as failed"
+            assert record["accuracy"] == pytest.approx(score)
+            assert record["accuracy_per_dataset"] == {name: pytest.approx(score)}
 
     def test_accuracy_arm_with_no_eval_line_is_failed(self, tmp_path: Path, monkeypatch):
         monkeypatch.setattr(
@@ -749,6 +788,39 @@ class TestRlEvalDatasetNames:
             assert any(f" {name} " in line for line in eval_lines), (
                 f"{name} not configured in the launcher"
             )
+
+    def test_every_eval_datasets_branch_maps_to_the_names_the_parser_expects(self):
+        """Per BRANCH, not per name. The test above only asks whether each name
+        appears somewhere in the launcher -- both do, in the `both)` branch --
+        so it passed throughout the run in which every single-dataset arm was
+        recorded as failed. What has to hold is stronger: for each value of
+        EVAL_DATASETS the launcher accepts, `rl_eval_datasets` must return
+        exactly the names that branch configures."""
+        launcher = (REPO_ROOT / sweep.RL_LAUNCHER).read_text(encoding="utf-8")
+        branches = re.findall(
+            r"^\s*(\w+)\)\s*EVAL_PROMPT_DATA=\((.*)\)\s*;;", launcher, re.MULTILINE
+        )
+        assert {b for b, _ in branches} == {"gsm8k", "math", "both"}, branches
+        for value, body in branches:
+            # `--eval-prompt-data` takes NAME PATH pairs and `both)` passes two
+            # of them under a single flag, so the names are the tokens sitting
+            # in front of a "${...}" path, not the ones after the flag.
+            configured = re.findall(r'(\w+)\s+"\$\{\w+\}"', body)
+            assert configured, body
+            assert set(sweep.rl_eval_datasets({"EVAL_DATASETS": value})) == set(configured), (
+                f"EVAL_DATASETS={value}: launcher configures {configured}, "
+                f"parser expects {sweep.rl_eval_datasets({'EVAL_DATASETS': value})}"
+            )
+
+    def test_an_unset_eval_datasets_falls_back_to_the_launchers_own_default(self):
+        """`arm_env` sets EVAL_DATASETS only for a per-dataset RL arm. Everything
+        else -- the mixed-dataset arms, and any SFT matrix reusing this parser --
+        reaches the launcher's `${EVAL_DATASETS:-both}`, so the parser has to
+        agree with that default rather than with the last arm it saw."""
+        assert sweep.rl_eval_datasets({}) == sweep.RL_EVAL_DATASETS
+        assert "EVAL_DATASETS=${EVAL_DATASETS:-both}" in (
+            REPO_ROOT / sweep.RL_LAUNCHER
+        ).read_text(encoding="utf-8")
 
     def test_explicit_names_exclude_passrate_and_truncation_submetrics(self):
         """With --log-passrate and n_samples_per_eval_prompt > 1, rollout.py emits

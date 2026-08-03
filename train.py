@@ -253,7 +253,17 @@ async def train(args):
             async with _timed_phase(prefix, "onload rollout kv", timing_raw=timing_raw):
                 await rollout_manager.onload_kv.remote()
 
-        if should_run_periodic_action(rollout_id, args.eval_interval, num_rollout_per_epoch):
+        # num_rollout is passed for the same reason the held-out NLL eval above
+        # passes it: the final rollout must always produce a measurement. An RL
+        # arm's headline number is its accuracy after the last update, and
+        # without this a run whose num_rollout is not a multiple of the interval
+        # ends having evaluated only the UNTRAINED policy, from the
+        # eval-before-train branch. That is not a hypothetical -- the E4 gsm8k
+        # columns ran 150 rollouts at --eval-interval 100000, chosen precisely
+        # to mean "once, at the end", and produced zero post-training evals.
+        if should_run_periodic_action(
+            rollout_id, args.eval_interval, num_rollout_per_epoch, args.num_rollout
+        ):
             async with _timed_phase(prefix, "eval", timing_raw=timing_raw):
                 await rollout_manager.eval.remote(rollout_id)
 
