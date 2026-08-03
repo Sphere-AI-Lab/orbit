@@ -586,30 +586,34 @@ def get_advantages_and_returns_batch(
     response_lengths,
     values_list,
     rewards_list,
+    terminal_rewards,
     gamma,
     lambd,
     chunked: bool = True,
 ):
     """
     Batched GAE with CP support.
+    C_i is the length of values_list[i] and rewards_list[i] on the current CP rank.
     Input:
         total_lengths:     list[int], each sample's total_len
         response_lengths:  list[int], each sample's response_len
-        values_list:       list[Tensor], each shape = [resp_len_i]
-        rewards_list:      list[Tensor], same shape
+        values_list:       list[Tensor], each current-CP-rank tensor has shape [C_i]
+        rewards_list:      list[Tensor], same shape as values_list
+        terminal_rewards:  list[float], one scalar sequence reward per sample
     Output:
-        advantages_list:   list[Tensor], each shape = [resp_len_i]
+        advantages_list:   list[Tensor], each current-CP-rank tensor has shape [C_i]
         returns_list:      list[Tensor], same shape
     """
-
-    from megatron.core import mpu
 
     with torch.no_grad():
         B = len(response_lengths)
         assert B == len(values_list)
         assert B == len(rewards_list)
+        assert B == len(terminal_rewards)
 
-        cp_size = mpu.get_context_parallel_world_size()
+        from orbit.backends.training_utils.parallel import get_parallel_state
+
+        cp_size = get_parallel_state().cp.size
         device = values_list[0].device
         dtype = values_list[0].dtype
 
@@ -627,7 +631,7 @@ def get_advantages_and_returns_batch(
                 full_values_list.append(full_v)
                 full_rewards_list.append(full_r)
 
-            # full_values_list[i].shape = [total_len_i]
+            # full_values_list[i].shape = [resp_len_i]
         else:
             full_values_list = values_list
             full_rewards_list = rewards_list
@@ -642,6 +646,8 @@ def get_advantages_and_returns_batch(
             L = response_lengths[i]
             full_values[i, :L] = full_values_list[i][:L]
             full_rewards[i, :L] = full_rewards_list[i][:L]
+            if L > 0:
+                full_rewards[i, L - 1] += terminal_rewards[i]
 
         if not chunked:
             full_advantages, full_returns = vanilla_gae(

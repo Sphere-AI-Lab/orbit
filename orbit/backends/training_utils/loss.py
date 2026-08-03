@@ -411,17 +411,20 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch, 
         advantages = [r for r in returns]
 
     elif args.advantage_estimator == "ppo":
-        old_rewards = rewards
-        rewards = []
+        terminal_rewards = rewards
+        token_rewards = []
         kl_coef = -args.kl_coef
-        cp_rank = parallel_state.cp.rank
-        for reward, k in zip(old_rewards, kl, strict=False):
+        for k in kl:
             k *= kl_coef
-            if cp_rank == 0:
-                k[-1] += reward
-            rewards.append(k)
+            token_rewards.append(k)
         advantages, returns = get_advantages_and_returns_batch(
-            total_lengths, response_lengths, values, rewards, args.gamma, args.lambd
+            total_lengths=total_lengths,
+            response_lengths=response_lengths,
+            values_list=values,
+            rewards_list=token_rewards,
+            terminal_rewards=terminal_rewards,
+            gamma=args.gamma,
+            lambd=args.lambd,
         )
 
     elif args.advantage_estimator == "reinforce_plus_plus":
