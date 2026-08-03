@@ -210,3 +210,66 @@ def test_ppo_bshd_cp_uses_padded_layout_metadata() -> None:
 
 def test_ppo_padded_thd_cp_uses_padded_layout_metadata() -> None:
     run_multiprocess(_worker_padded_thd_layout_metadata)
+
+
+def _run_ppo_masked_case(rank: int) -> None:
+    total_length, response_length = 7, 6
+    loss_mask = torch.tensor([1.0, 1.0, 0.0, 0.0, 1.0, 0.0])
+
+    for gamma, lambd in [(0.0, 0.0), (0.9, 0.8)]:
+        args = _ppo_args(gamma=gamma, lambd=lambd)
+        full_kl = torch.arange(1, response_length + 1, dtype=torch.float32)
+        full_values = torch.tensor([0.5, -0.3, 0.7, 0.1, -0.2, 0.4])
+
+        set_parallel_state(_parallel_state(rank=rank, world_size=2))
+        local_kl = slice_log_prob_with_cp(full_kl, total_length, response_length).clone()
+        local_values = slice_log_prob_with_cp(full_values, total_length, response_length).clone()
+
+        rollout_data = _ppo_rollout_data(
+            log_probs=[local_kl],
+            rewards=[10.0],
+            values=[local_values],
+            loss_masks=[loss_mask.clone()],
+            total_lengths=[total_length],
+            response_lengths=[response_length],
+        )
+        compute_advantages_and_returns(args, rollout_data)
+        cp_advantages = all_gather_with_cp(rollout_data["advantages"][0], total_length, response_length)
+        cp_returns = all_gather_with_cp(rollout_data["returns"][0], total_length, response_length)
+
+        set_parallel_state(_parallel_state())
+        baseline_data = _ppo_rollout_data(
+            log_probs=[full_kl.clone()],
+            rewards=[10.0],
+            values=[full_values.clone()],
+            loss_masks=[loss_mask.clone()],
+            total_lengths=[total_length],
+            response_lengths=[response_length],
+        )
+        compute_advantages_and_returns(args, baseline_data)
+
+        torch.testing.assert_close(cp_advantages, baseline_data["advantages"][0])
+        torch.testing.assert_close(cp_returns, baseline_data["returns"][0])
+        assert torch.all(cp_advantages[loss_mask == 0] == 0)
+        assert torch.all(cp_returns[loss_mask == 0] == 0)
+
+        if gamma == 0.0 and lambd == 0.0:
+            # Terminal reward lands on the last trainable token (index 4), and
+            # with gamma = 0 each trainable advantage is reward - value.
+            expected = torch.zeros(response_length)
+            expected[0] = -0.1 * 1.0 - 0.5
+            expected[1] = -0.1 * 2.0 - (-0.3)
+            expected[4] = -0.1 * 5.0 + 10.0 - (-0.2)
+            torch.testing.assert_close(cp_advantages, expected)
+
+
+def _worker_masked_case(rank: int, world_size: int, port: int) -> None:
+    init_gloo(rank, world_size, port=port)
+    try:
+        _run_ppo_masked_case(rank)
+    finally:
+        dist.destroy_process_group()
+
+
+def test_ppo_masked_gae_matches_single_rank_baseline() -> None:
+    run_multiprocess(_worker_masked_case)
