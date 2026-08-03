@@ -1,7 +1,7 @@
 import asyncio
 
 from orbit.ray.placement_group import create_placement_groups, create_rollout_manager, create_training_models
-from orbit.utils.arguments import parse_args, uses_separate_critic
+from orbit.utils.arguments import parse_args, uses_separate_critic, validate_async_off_policy_correction
 from orbit.utils.async_utils import eager_create_task
 from orbit.utils.logging_utils import configure_logger
 from orbit.utils.misc import should_run_periodic_action
@@ -12,6 +12,7 @@ from orbit.utils.tracking_utils import init_tracking
 async def train(args):
     assert not args.colocate, "Colocation is not supported for async training."
     assert args.training_mode != "sft", "SFT mode is supported by train.py; train_async.py is RL rollout-only."
+    validate_async_off_policy_correction(args)
     configure_logger()
     # allocate the GPUs
     pgs = create_placement_groups(args)
