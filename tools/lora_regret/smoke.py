@@ -54,15 +54,30 @@ from tools.lora_regret.sweep import rl_eval_datasets
 SMOKE_MATRIX = "e4"
 SMOKE_DATASET = "gsm8k"
 
-# Ten rollouts and an eval every five, so the run contains TWO post-training
-# evals. Two rather than one on purpose: one eval could be produced by either
-# the periodic branch or the final-rollout branch, so a single eval cannot tell
-# a working final-rollout branch from a broken one. At interval 5 with 10
-# rollouts the periodic branch fires at rollout 4 and the final-rollout branch
-# at rollout 9 -- if the second is missing, defect (1) is back.
+# Ten rollouts and an eval every FOUR -- an interval that does NOT divide the
+# rollout count, and that property is the whole test. The periodic branch fires
+# at rollouts 3 and 7 (steps 4 and 8); rollout 9 is reached only by the
+# final-rollout branch, the one defect (1) killed. So three evals means both
+# branches work, and two means the regression is back.
+#
+# At interval 5 -- the first version of this file -- rollout 9 is step 10,
+# which the periodic branch also fires on, so the broken and the fixed train.py
+# produce the identical eval schedule [4, 9] and the smoke proves nothing about
+# the defect it was written for. `10 % interval != 0` is load-bearing, and
+# test_the_interval_must_not_divide_the_rollout_count pins it.
 SMOKE_ROLLOUTS = 10
-SMOKE_EVAL_INTERVAL = 5
-EXPECTED_POST_TRAIN_EVALS = 2
+SMOKE_EVAL_INTERVAL = 4
+EXPECTED_POST_TRAIN_EVALS = 3
+
+# One checkpoint, at the final rollout. SAVE_INTERVAL=999999 never matches the
+# modulo, so the save comes from `should_run_periodic_action`'s final-rollout
+# branch alone -- the save call always passed `num_rollout`, and this keeps it
+# honest. The campaign itself runs with saves off (SAVE_INTERVAL empty), so this
+# is the one place the save path is exercised at all before someone needs a
+# checkpoint; a FullFT save is ~15 GB and ~10 minutes, which is the bulk of what
+# the smoke costs over its training time.
+SMOKE_SAVE_INTERVAL = 999999
+EXPECTED_SAVES = 1
 
 # rollout.py logs the eval as a dict repr; sweep.py parses the same shape.
 EVAL_LINE = re.compile(r"eval (?P<rollout_id>\d+): \{(?P<body>.*)\}")
@@ -139,7 +154,9 @@ def offline_run_dir(log_text: str, repo_root: Path) -> Path | None:
     return path if path.is_absolute() else repo_root / path
 
 
-def check_arm(arm, row: dict | None, repo_root: Path) -> list[tuple[bool, str]]:
+def check_arm(
+    arm, row: dict | None, repo_root: Path, expect_saves: int = EXPECTED_SAVES
+) -> list[tuple[bool, str]]:
     """Every link, in the order the data travels. Returns (ok, description)."""
     log_path = repo_root / "logs" / "lora_regret" / f"{arm.name}.log"
     datasets = rl_eval_datasets({"EVAL_DATASETS": arm.dataset} if arm.dataset else {})
@@ -161,6 +178,16 @@ def check_arm(arm, row: dict | None, repo_root: Path) -> list[tuple[bool, str]]:
         f"post-training evals at {evals or 'NONE'} "
         f"(need {EXPECTED_POST_TRAIN_EVALS}, scoring {'+'.join(datasets)})",
     ))
+    # Named separately from the count because it is a different defect: the
+    # periodic evals at rollouts 3 and 7 can both fire while the final-rollout
+    # branch is dead, and that branch is the one that decides whether an arm's
+    # headline number describes its LAST update or an intermediate one.
+    final = SMOKE_ROLLOUTS - 1
+    results.append((
+        final in evals,
+        f"final-rollout eval at {final}" + ("" if final in evals else " MISSING -- "
+         "the final-rollout branch of should_run_periodic_action is dead again"),
+    ))
 
     seconds = parse_rollout_seconds(segment)
     results.append((
@@ -175,10 +202,36 @@ def check_arm(arm, row: dict | None, repo_root: Path) -> list[tuple[bool, str]]:
 
     results.append((row.get("accuracy") is not None, f"ledger accuracy = {row.get('accuracy')}"))
     results.append((row.get("status") == "ok", f"ledger status = {row.get('status')!r}"))
+    # The row's number must be the FINAL eval, not whichever one parsed. With
+    # evals at 3, 7 and 9, an accuracy quietly taken from rollout 7 would pass
+    # every check above and still misreport what the arm ended at.
+    results.append((
+        row.get("steps") == final,
+        f"ledger accuracy is from rollout {row.get('steps')} (final = {final})",
+    ))
     results.append((
         set(row.get("accuracy_per_dataset") or {}) == set(datasets),
         f"scored on {sorted(row.get('accuracy_per_dataset') or {})}, configured {list(datasets)}",
     ))
+
+    if expect_saves:
+        # Both halves of the save path, separately: the timer line proves the
+        # actor ran a save, the directory proves it landed on disk. `analyze`
+        # never reads checkpoints, so this smoke is the only thing that would
+        # notice a save path that stopped working before someone books a node
+        # with SAVE_INTERVAL set expecting to keep the policy.
+        saves = row.get("save_seconds") or []
+        results.append((
+            len(saves) == expect_saves,
+            f"{len(saves)} save(s) for expected {expect_saves}",
+        ))
+        save_dir = repo_root / "orbit_ckpts" / "lora_regret" / arm.name
+        wrote = save_dir.is_dir() and any(save_dir.iterdir())
+        results.append((
+            wrote,
+            f"checkpoint dir {save_dir.relative_to(repo_root)}"
+            + ("" if wrote else " MISSING/EMPTY"),
+        ))
 
     run_dir = offline_run_dir(segment, repo_root)
     if run_dir is None:
@@ -218,6 +271,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", choices=("plan", "check"))
     parser.add_argument("--ledger", type=Path, default=Path("results/smoke/e4_smoke.jsonl"))
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
+    parser.add_argument(
+        "--expect-saves", type=int, default=EXPECTED_SAVES,
+        help="Checkpoints each arm should have written. The script passes 0 "
+             "under SMOKE_SAVE=0, which skips the save checks rather than "
+             "failing them -- unexercised, not passing.",
+    )
     args = parser.parse_args(argv)
 
     arms = smoke_arms()
@@ -232,7 +291,9 @@ def main(argv: list[str] | None = None) -> int:
     failures = 0
     for arm in arms:
         print(f"\n=== {arm.method}: {arm.name}")
-        for ok, description in check_arm(arm, rows.get(arm.name), args.repo_root):
+        for ok, description in check_arm(
+            arm, rows.get(arm.name), args.repo_root, expect_saves=args.expect_saves
+        ):
             print(f"  {'PASS' if ok else 'FAIL'}  {description}")
             failures += not ok
 

@@ -33,11 +33,22 @@
 #
 #     does a number measured on the GPU reach the ledger, correctly labelled?
 #
-# WHY 10 ROLLOUTS AND AN EVAL EVERY 5. Two post-training evals, not one. One
-# eval could come from either the periodic branch or the final-rollout branch,
-# so it cannot distinguish a working final-rollout branch from defect (1). At
-# interval 5 over 10 rollouts the periodic branch fires at rollout 4 and the
-# final-rollout branch at rollout 9; a run that reports one has regressed.
+# WHY 10 ROLLOUTS AND AN EVAL EVERY 4 -- an interval that does NOT divide the
+# rollout count, and that property IS the test. The periodic branch fires at
+# rollouts 3 and 7; rollout 9 is reached only by the final-rollout branch, the
+# branch defect (1) killed, so its eval present means the branch works and
+# absent means the regression is back. At interval 5 the two schedules are
+# IDENTICAL ([4, 9] both ways, because 10 is a multiple of 5) and the smoke
+# proves nothing about the defect it exists for; a unit test pins 10 % 4 != 0.
+#
+# WHY A CHECKPOINT. SAVE_INTERVAL=999999 never matches the modulo, so the one
+# save comes from the final-rollout branch alone, and the check wants both the
+# actor's `Timer save_model` line and a non-empty orbit_ckpts/lora_regret/<arm>
+# directory. The campaign runs with saves OFF, so this is the only place the
+# save path executes at all -- and the day someone books a node with
+# SAVE_INTERVAL set to keep a policy is the wrong day to learn it broke.
+# Costs ~15 GB and ~10 min for the FullFT arm (LoRA/OFT adapters are MBs);
+# SMOKE_SAVE=0 skips it, and the check then reports save UNEXERCISED, not ok.
 #
 # WHY THE REAL MATRIX. The three arms are read out of `e4` itself -- one per
 # method, the middle learning rate of each grid -- rather than named here. A
@@ -55,6 +66,7 @@
 #
 # Knobs:
 #   SMOKE_RESULTS=results/smoke/e4_smoke.jsonl
+#   SMOKE_SAVE=1        set 0 to skip the checkpoint leg (saves ~15 GB / ~10 min)
 #   SKIP_PREFLIGHT=0    set 1 to skip the pre-run audit
 #   SKIP_SYNC=0         set 1 to leave wandb unsynced (the check still reports it)
 #   DRY_RUN=0           set 1 to print the plan and run nothing
@@ -68,6 +80,7 @@ ORBIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 cd "${ORBIT_ROOT}"
 
 SMOKE_RESULTS=${SMOKE_RESULTS:-results/smoke/e4_smoke.jsonl}
+SMOKE_SAVE=${SMOKE_SAVE:-1}
 SKIP_PREFLIGHT=${SKIP_PREFLIGHT:-0}
 SKIP_SYNC=${SKIP_SYNC:-0}
 DRY_RUN=${DRY_RUN:-0}
@@ -107,18 +120,27 @@ fi
 # normalisation, clipping off, checkpoints off, wandb offline -- so a smoke that
 # set its own knobs would clear a protocol nothing is going to use.
 #
-# EVAL_INTERVAL is exported FIRST because every value in the protocol is
+# The two overrides are exported FIRST because every value in the protocol is
 # `: "${VAR=default}"`, which assigns only when unset. This is the documented
-# override path, not a trick.
-export EVAL_INTERVAL=5
-# shellcheck disable=SC1091
-source "${ORBIT_ROOT}/scripts/lora_regret/e4_protocol.sh"
-
-SMOKE_ROLLOUTS=$(python -c 'from tools.lora_regret.smoke import SMOKE_ROLLOUTS; print(SMOKE_ROLLOUTS)')
-if [[ -z "${SMOKE_ROLLOUTS}" ]]; then
-    echo "could not read SMOKE_ROLLOUTS from tools.lora_regret.smoke" >&2
+# override path, not a trick. Both values come from smoke.py so the schedule
+# that runs and the schedule the checker assumes cannot drift apart -- the
+# eval interval in particular is only diagnostic because it does not divide
+# the rollout count, and two hand-copied numbers would not stay that way.
+read -r SMOKE_ROLLOUTS SMOKE_EVAL_INTERVAL SMOKE_SAVE_INTERVAL < <(python -c \
+    'from tools.lora_regret import smoke as s; print(s.SMOKE_ROLLOUTS, s.SMOKE_EVAL_INTERVAL, s.SMOKE_SAVE_INTERVAL)')
+if [[ -z "${SMOKE_ROLLOUTS:-}" || -z "${SMOKE_EVAL_INTERVAL:-}" || -z "${SMOKE_SAVE_INTERVAL:-}" ]]; then
+    echo "could not read the smoke schedule from tools.lora_regret.smoke" >&2
     exit 1
 fi
+export EVAL_INTERVAL="${SMOKE_EVAL_INTERVAL}"
+EXPECT_SAVES=1
+if [[ "${SMOKE_SAVE}" == "1" ]]; then
+    export SAVE_INTERVAL="${SMOKE_SAVE_INTERVAL}"
+else
+    EXPECT_SAVES=0
+fi
+# shellcheck disable=SC1091
+source "${ORBIT_ROOT}/scripts/lora_regret/e4_protocol.sh"
 
 # --- preflight -------------------------------------------------------------
 if [[ "${SKIP_PREFLIGHT}" != "1" ]]; then
@@ -138,7 +160,7 @@ if (( ${#PLAN[@]} != 3 )); then
     exit 1
 fi
 printf '%s\n' "${PLAN[@]}" | column -t
-echo "rollouts each=${SMOKE_ROLLOUTS}  eval every ${EVAL_INTERVAL}  ledger=${SMOKE_RESULTS}"
+echo "rollouts each=${SMOKE_ROLLOUTS}  eval every ${EVAL_INTERVAL}  saves=${EXPECT_SAVES}  ledger=${SMOKE_RESULTS}"
 
 if [[ "${DRY_RUN}" == "1" ]]; then
     say "dry run -- nothing launched"
@@ -187,14 +209,17 @@ if [[ "${SKIP_SYNC}" != "1" ]]; then
         echo "sync failed (expected on a compute node -- no egress)." >&2
         echo "Run it from the login node, then re-run the check:" >&2
         echo "  bash scripts/lora_regret/sync_wandb.sh" >&2
-        echo "  python -m tools.lora_regret.smoke check --ledger ${SMOKE_RESULTS}" >&2
+        echo "  python -m tools.lora_regret.smoke check --ledger ${SMOKE_RESULTS} --expect-saves ${EXPECT_SAVES}" >&2
     }
 fi
 
 # --- the verdict -----------------------------------------------------------
 say "verdict"
-python -m tools.lora_regret.smoke check --ledger "${SMOKE_RESULTS}"
+python -m tools.lora_regret.smoke check --ledger "${SMOKE_RESULTS}" --expect-saves "${EXPECT_SAVES}"
 verdict=$?
+if [[ "${EXPECT_SAVES}" == "0" ]]; then
+    echo "NOTE: SMOKE_SAVE=0 -- the save path was NOT exercised, not passed."
+fi
 
 echo
 if (( failed > 0 )); then

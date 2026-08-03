@@ -10,6 +10,7 @@ coverage probe does not make.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -212,41 +213,84 @@ class TestPostTrainEvalCount:
 
 
 class TestSmokeSchedule:
-    def test_ten_rollouts_at_interval_five_produce_exactly_two_post_training_evals(self):
-        """The reason for both numbers. One eval could come from either the
-        periodic branch or the final-rollout branch, so a single eval cannot
-        tell a working final-rollout branch from the broken one. Two can: the
-        periodic branch fires at rollout 4 and the final-rollout branch at 9."""
-        fires = [
+    def test_the_schedule_separates_the_periodic_and_final_rollout_branches(self):
+        """The fixed train.py evaluates at [3, 7, 9]; one with the num_rollout
+        argument dropped again evaluates at [3, 7]. The schedules DIFFER, which
+        is the entire diagnostic content of the smoke's eval check -- and the
+        broken schedule is computed here with the genuinely broken call shape,
+        not assumed."""
+        fixed = [
             rollout_id
             for rollout_id in range(smoke.SMOKE_ROLLOUTS)
             if should_run_periodic_action(
                 rollout_id, smoke.SMOKE_EVAL_INTERVAL, None, smoke.SMOKE_ROLLOUTS
             )
         ]
-        assert fires == [4, 9]
-        assert len(fires) == smoke.EXPECTED_POST_TRAIN_EVALS
+        broken = [
+            rollout_id
+            for rollout_id in range(smoke.SMOKE_ROLLOUTS)
+            if should_run_periodic_action(rollout_id, smoke.SMOKE_EVAL_INTERVAL, None)
+        ]
+        assert fixed == [3, 7, 9]
+        assert broken == [3, 7]
+        assert len(fixed) == smoke.EXPECTED_POST_TRAIN_EVALS
+        assert smoke.SMOKE_ROLLOUTS - 1 in fixed
+        assert smoke.SMOKE_ROLLOUTS - 1 not in broken
 
-    def test_the_script_overrides_eval_interval_before_sourcing_the_protocol(self):
-        """Every protocol value is `: "${VAR=default}"`, which assigns only when
-        unset -- so the export has to come FIRST. Sourced after, EVAL_INTERVAL
-        would be 100000 and the smoke would run one eval, not two."""
+    def test_the_interval_must_not_divide_the_rollout_count(self):
+        """The property the test above rests on, pinned directly. This file's
+        first version used interval 5 against 10 rollouts, and because 10 % 5
+        == 0 the periodic branch fired on the final rollout too -- the broken
+        and the fixed train.py produced the IDENTICAL schedule [4, 9], and the
+        smoke could not detect the very defect it was written for. Anyone
+        retuning these numbers hits this assertion before shipping that."""
+        assert smoke.SMOKE_ROLLOUTS % smoke.SMOKE_EVAL_INTERVAL != 0
+
+    def test_a_save_fires_exactly_once_via_the_final_rollout_branch(self):
+        """SAVE_INTERVAL=999999 never matches the modulo, so the smoke's one
+        checkpoint isolates the final-rollout branch of the save call."""
+        fires = [
+            rollout_id
+            for rollout_id in range(smoke.SMOKE_ROLLOUTS)
+            if should_run_periodic_action(
+                rollout_id, smoke.SMOKE_SAVE_INTERVAL, None, smoke.SMOKE_ROLLOUTS
+            )
+        ]
+        assert fires == [smoke.SMOKE_ROLLOUTS - 1]
+        assert len(fires) == smoke.EXPECTED_SAVES
+
+    def test_the_script_reads_the_schedule_from_smoke_py_and_exports_before_sourcing(self):
+        """Two properties. The numbers must come from smoke.py -- the eval
+        interval is only diagnostic while it does not divide the rollout count,
+        and a hand-copied pair in the script would not stay that way. And the
+        exports must precede the protocol source: every protocol value is
+        `: "${VAR=default}"`, which assigns only when unset, so sourced first
+        EVAL_INTERVAL would be 100000 and the smoke would run zero periodic
+        evals."""
         script = (REPO_ROOT / "scripts" / "lora_regret" / "smoke_e4_8gpu.sh").read_text(
             encoding="utf-8"
         )
-        export_at = script.index("export EVAL_INTERVAL=")
+        assert "print(s.SMOKE_ROLLOUTS, s.SMOKE_EVAL_INTERVAL, s.SMOKE_SAVE_INTERVAL)" in script
+        assert 'export EVAL_INTERVAL="${SMOKE_EVAL_INTERVAL}"' in script
+        assert 'export SAVE_INTERVAL="${SMOKE_SAVE_INTERVAL}"' in script
+        export_at = script.index('export EVAL_INTERVAL="${SMOKE_EVAL_INTERVAL}"')
         source_at = script.index('source "${ORBIT_ROOT}/scripts/lora_regret/e4_protocol.sh"')
         assert export_at < source_at
-        assert f"export EVAL_INTERVAL={smoke.SMOKE_EVAL_INTERVAL}\n" in script
 
     def test_the_script_sources_the_real_protocol_rather_than_setting_its_own_knobs(self):
         """A smoke that set its own configuration would clear a protocol nothing
-        is going to run."""
+        is going to run. Exactly two overrides are allowed, because each IS a
+        thing under test rather than a preference: EVAL_INTERVAL (the schedule
+        whose final-rollout eval detects the dead branch) and SAVE_INTERVAL
+        (the campaign runs with saves off, so the smoke is the only exercise
+        the save path gets). The knobs that shape the update itself -- the
+        advantage, the clipping, where the metrics go -- must come from the
+        protocol untouched."""
         script = (REPO_ROOT / "scripts" / "lora_regret" / "smoke_e4_8gpu.sh").read_text(
             encoding="utf-8"
         )
         assert "e4_protocol.sh" in script
-        for knob in ("RL_EXTRA_ARGS", "EPS_CLIP", "SAVE_INTERVAL", "WANDB_MODE"):
+        for knob in ("RL_EXTRA_ARGS", "EPS_CLIP", "EPS_CLIP_HIGH", "NUM_ROLLOUT", "WANDB_MODE"):
             assert f"export {knob}=" not in script, f"{knob} must come from the protocol"
 
     def test_smoke_rows_can_never_reach_a_real_analysis(self):
@@ -266,12 +310,15 @@ class TestCheckArm:
         )
         return tmp_path
 
-    def test_a_healthy_smoke_passes_every_link(self, tmp_path: Path):
-        arm = smoke.smoke_arms()[0]
+    def _healthy(self, tmp_path: Path, arm) -> tuple[str, dict]:
+        """A log and row shaped exactly like a fully working smoke arm."""
         run_dir = tmp_path / "wandb" / "offline-run-20260803_000000-abcdefgh"
-        run_dir.mkdir(parents=True)
+        run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "run-abcdefgh.wandb").write_bytes(b"x" * 4096)
         (run_dir / "run-abcdefgh.wandb.synced").write_text("")
+        ckpt = tmp_path / "orbit_ckpts" / "lora_regret" / arm.name / "iter_0000010"
+        ckpt.mkdir(parents=True, exist_ok=True)
+        (ckpt / "model.pt").write_bytes(b"x")
         log = "\n".join(
             [f"{RUN_START_MARKER}/logs/arm.log", _eval(0, {"gsm8k_test": 0.03})]
             + [_rollout(i, 0.3) for i in range(smoke.SMOKE_ROLLOUTS)]
@@ -280,15 +327,73 @@ class TestCheckArm:
                 f"last=00:00:30 avg=00:00:30 eta_remaining=00:00:00 eta_at=x"
                 for i in range(smoke.SMOKE_ROLLOUTS)
             ]
-            + [_eval(4, {"gsm8k_test": 0.2}), _eval(9, {"gsm8k_test": 0.31})]
+            + [_eval(3, {"gsm8k_test": 0.1}), _eval(7, {"gsm8k_test": 0.2}),
+               _eval(9, {"gsm8k_test": 0.31})]
+            + ["[ts] timer.py:32 - Timer save_model end (elapsed: 12.5s)"]
             + [f"wandb sync \x1b[0m{run_dir}\x1b[0m"]
         )
-        self._setup(tmp_path, arm.name, log)
         row = {
-            "arm": arm.name, "accuracy": 0.31, "status": "ok",
-            "accuracy_per_dataset": {"gsm8k_test": 0.31},
+            "arm": arm.name, "accuracy": 0.31, "status": "ok", "steps": 9,
+            "accuracy_per_dataset": {"gsm8k_test": 0.31}, "save_seconds": [12.5],
         }
+        return log, row
+
+    def test_a_healthy_smoke_passes_every_link(self, tmp_path: Path):
+        arm = smoke.smoke_arms()[0]
+        log, row = self._healthy(tmp_path, arm)
+        self._setup(tmp_path, arm.name, log)
         results = smoke.check_arm(arm, row, tmp_path)
+        assert all(ok for ok, _ in results), [d for ok, d in results if not ok]
+
+    def test_a_missing_final_rollout_eval_fails_even_though_two_evals_ran(self, tmp_path: Path):
+        """The regression of bug 1 in the smoke's own terms: periodic evals at
+        3 and 7 both fire while the final-rollout branch is dead. The count
+        alone (2 of 3) fails too, but the named check has to point AT the
+        final rollout, because that is the branch to go look at."""
+        arm = smoke.smoke_arms()[0]
+        log, row = self._healthy(tmp_path, arm)
+        log = "\n".join(
+            line for line in log.splitlines() if not line.startswith("[ts] rollout.py:1 - eval 9")
+        )
+        row = {**row, "accuracy": 0.2, "steps": 7}
+        self._setup(tmp_path, arm.name, log)
+        failed = [d for ok, d in smoke.check_arm(arm, row, tmp_path) if not ok]
+        assert any("final-rollout branch" in d for d in failed)
+        assert any("from rollout 7" in d for d in failed)
+
+    def test_an_accuracy_from_an_intermediate_eval_is_caught(self, tmp_path: Path):
+        """All three evals in the log, but the ledger's number came from
+        rollout 7. Every other link is green; only the steps check sees it."""
+        arm = smoke.smoke_arms()[0]
+        log, row = self._healthy(tmp_path, arm)
+        row = {**row, "accuracy": 0.2, "steps": 7, "accuracy_per_dataset": {"gsm8k_test": 0.2}}
+        self._setup(tmp_path, arm.name, log)
+        failed = [d for ok, d in smoke.check_arm(arm, row, tmp_path) if not ok]
+        assert failed == ["ledger accuracy is from rollout 7 (final = 9)"]
+
+    def test_a_save_that_never_ran_fails_both_save_links(self, tmp_path: Path):
+        arm = smoke.smoke_arms()[0]
+        log, row = self._healthy(tmp_path, arm)
+        log = "\n".join(line for line in log.splitlines() if "save_model" not in line)
+        row = {**row, "save_seconds": []}
+        shutil.rmtree(tmp_path / "orbit_ckpts")
+        self._setup(tmp_path, arm.name, log)
+        failed = [d for ok, d in smoke.check_arm(arm, row, tmp_path) if not ok]
+        assert any("0 save(s) for expected 1" in d for d in failed)
+        assert any("MISSING/EMPTY" in d for d in failed)
+
+    def test_expect_saves_zero_skips_the_save_links_rather_than_failing_them(
+        self, tmp_path: Path
+    ):
+        """SMOKE_SAVE=0 means unexercised, not broken; the script prints the
+        distinction and the checker must not contradict it."""
+        arm = smoke.smoke_arms()[0]
+        log, row = self._healthy(tmp_path, arm)
+        log = "\n".join(line for line in log.splitlines() if "save_model" not in line)
+        row = {**row, "save_seconds": []}
+        shutil.rmtree(tmp_path / "orbit_ckpts")
+        self._setup(tmp_path, arm.name, log)
+        results = smoke.check_arm(arm, row, tmp_path, expect_saves=0)
         assert all(ok for ok, _ in results), [d for ok, d in results if not ok]
 
     def test_the_real_failure_is_reported_link_by_link(self, tmp_path: Path):
