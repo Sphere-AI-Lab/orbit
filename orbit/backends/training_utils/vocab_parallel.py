@@ -102,6 +102,88 @@ def vocab_parallel_sum(x: torch.Tensor, group: dist.ProcessGroup | None) -> torc
     return _ReduceFromVocabParallelRegion.apply(total, group)
 
 
+def compute_vocab_parallel_topk_log_probs(
+    logits: torch.Tensor,
+    topk_ids: torch.Tensor,
+    process_group: dist.ProcessGroup | None = None,
+) -> torch.Tensor:
+    """Gather (differentiable) log-probs at externally supplied token ids from vocab-parallel logits.
+
+    Used by on_policy_distillation's "topk" loss (`opd_topk_loss_function`) to score the
+    student -- with gradients -- at the teacher's top-k token ids for every position, not
+    just whichever token the student happened to sample. Deliberately avoids Megatron's
+    `fused_vocab_parallel_cross_entropy` (which is wrapped in `@jit_fuser` / torch.compile):
+    that kernel recompiles and re-autotunes per new input shape, and calling it once per
+    top-k slot in a loop from inside a pipeline-parallel `forward_step` has been observed
+    to crash with "CUDA driver error: invalid argument" during Triton autotuning. This
+    implementation instead does a single vectorized gather over all K ids at once using
+    plain eager ops (mirrors the masked-gather + all-reduce pattern Megatron's own
+    vocab-parallel cross-entropy uses internally, and the log-sum-exp all-reduce pattern
+    already used by `_VocabParallelEntropy` above), computing the log-normalizer once and
+    reusing it for every id.
+
+    Differentiable w.r.t. `logits`. The max used to shift logits for a numerically stable
+    log-sum-exp is detached: log-sum-exp's gradient (softmax) is exactly the same
+    regardless of which constant shift was used, so detaching the shift only avoids
+    differentiating through an arbitrary arg-max tie-break -- it does not change the
+    gradient. The sum-of-exp and per-id gather all-reduces use `_ReduceFromVocabParallelRegion`
+    (identity backward, not a second all-reduce): everything downstream -- the caller's loss --
+    is computed redundantly from the same replicated total on every TP rank, so each rank's
+    local partial must enter that loss with unit weight, exactly as `vocab_parallel_sum` above
+    already relies on for the same reason.
+
+    `process_group=None` (TP=1 / no tensor parallelism) short-circuits to a plain local
+    `log_softmax` + `gather` -- no collectives.
+
+    Adapted from czy/opd @ 0a33680 (`orbit/utils/ppo_utils.py:234-300`), with the backward
+    convention above fixed: czy's version used a `_DifferentiableAllReduceSum` whose backward
+    re-all-reduces the incoming gradient, which double-counts under a TP-replicated loss and
+    was empirically observed to inflate gradients by exactly `tp_size` at TP=2.
+
+    Args:
+        logits: `[R, V_local]` vocab-parallel logits (this rank's shard). Requires grad.
+        topk_ids: `[R, K]` global (unsharded) token ids to gather log-probs for.
+        process_group: Tensor-parallel process group, or `None` if TP is off.
+
+    Returns:
+        `[R, K]` log-probs, differentiable w.r.t. `logits`.
+    """
+    k = topk_ids.size(-1)
+    if logits.size(0) == 0:
+        return logits.new_zeros((0, k))
+
+    # teacher_topk_ids arrives from TeacherManager via Ray (CPU tensor); logits is
+    # the direct output of the student's own forward pass (GPU). Move to match
+    # before indexing -- torch.gather requires index and input on the same device.
+    topk_ids = topk_ids.to(device=logits.device)
+    logits = logits.float()
+
+    if process_group is None:
+        return torch.log_softmax(logits, dim=-1).gather(-1, topk_ids)
+
+    tp_rank = dist.get_rank(group=process_group)
+    partition_vocab_size = logits.size(-1)
+    vocab_start_index = tp_rank * partition_vocab_size
+    vocab_end_index = vocab_start_index + partition_vocab_size
+
+    with torch.no_grad():
+        logits_max = logits.max(dim=-1, keepdim=True).values
+        dist.all_reduce(logits_max, op=dist.ReduceOp.MAX, group=process_group)
+
+    exp_logits = (logits - logits_max).exp()
+    sum_exp_logits_local = exp_logits.sum(dim=-1, keepdim=True)
+    sum_exp_logits = _ReduceFromVocabParallelRegion.apply(sum_exp_logits_local, process_group)
+    log_normalizer = logits_max.squeeze(-1) + sum_exp_logits.squeeze(-1).log()  # [R]
+
+    local_ids = (topk_ids - vocab_start_index).clamp(0, partition_vocab_size - 1)
+    owned_mask = (topk_ids >= vocab_start_index) & (topk_ids < vocab_end_index)
+    gathered_logit = torch.gather(logits, dim=-1, index=local_ids)  # [R, K]
+    gathered_logit = torch.where(owned_mask, gathered_logit, torch.zeros_like(gathered_logit))
+    gathered_logit = _ReduceFromVocabParallelRegion.apply(gathered_logit, process_group)
+
+    return gathered_logit - log_normalizer.unsqueeze(-1)
+
+
 def vocab_parallel_topk_indices(
     log_probs: torch.Tensor,
     k: int,

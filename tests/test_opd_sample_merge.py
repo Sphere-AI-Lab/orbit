@@ -7,6 +7,7 @@ merge_samples call raised "Sample field mismatch. Missing: {'teacher_log_probs'}
 """
 
 from orbit.rollout.generate_utils.sample_utils import merge_samples
+from orbit.rollout.opd_sglang import _TOPK_PAD_LOGPROB, _TOPK_PAD_TOKEN_ID
 from orbit.utils.types import Sample
 
 
@@ -124,3 +125,89 @@ def test_merge_samples_teacher_hidden_states_none_stays_none():
     a, b = _make_pair(None, None)
     merged = merge_samples([a, b], _FakeTokenizer())
     assert merged.teacher_hidden_states is None
+
+
+def _make_pair_topk(ids_a, ids_b, logprobs_a, logprobs_b):
+    a, b = _make_pair(None, None)
+    a.teacher_topk_ids, b.teacher_topk_ids = ids_a, ids_b
+    a.teacher_topk_logprobs, b.teacher_topk_logprobs = logprobs_a, logprobs_b
+    return a, b
+
+
+def test_merge_samples_teacher_topk_none_stays_none():
+    # Non-opd_topk_loss path: both halves None must stay None, same rationale as
+    # teacher_log_probs -- zero/pad-filling here would poison non-OPD batches.
+    a, b = _make_pair_topk(None, None, None, None)
+    merged = merge_samples([a, b], _FakeTokenizer())
+    assert merged.teacher_topk_ids is None
+    assert merged.teacher_topk_logprobs is None
+    merged.validate()
+
+
+def test_merge_samples_teacher_topk_concatenates_with_pad_row_obs_span():
+    # --loss-type opd_topk_loss: both halves scored -> merged rows are
+    # a + [K-wide pad-sentinel row] (one obs position) + b, mirroring
+    # opd_reverse_kl's shape but with a full row (not a scalar 0.0) over the gap.
+    ids_a = [[7, 42], [3, _TOPK_PAD_TOKEN_ID]]
+    logprobs_a = [[-0.35, -1.2], [-0.10, _TOPK_PAD_LOGPROB]]
+    ids_b = [[15, 9], [5, 6]]
+    logprobs_b = [[-0.5, -1.5], [-0.05, -0.9]]
+    a, b = _make_pair_topk(ids_a, ids_b, logprobs_a, logprobs_b)
+    merged = merge_samples([a, b], _FakeTokenizer())
+    pad_row_ids = [_TOPK_PAD_TOKEN_ID, _TOPK_PAD_TOKEN_ID]
+    pad_row_logprobs = [_TOPK_PAD_LOGPROB, _TOPK_PAD_LOGPROB]
+    assert merged.teacher_topk_ids == ids_a + [pad_row_ids] + ids_b
+    assert merged.teacher_topk_logprobs == logprobs_a + [pad_row_logprobs] + logprobs_b
+    merged.validate()
+
+
+def test_merge_samples_teacher_topk_one_sided_fills_missing_half_with_pad_rows():
+    # Edge: only one half carries retained top-k rows -> the missing half AND the
+    # observation span become K-wide pad-sentinel rows (not scalar zeros, since
+    # each position is a [K] row, not a float).
+    ids_a = [[7, 42], [3, _TOPK_PAD_TOKEN_ID]]
+    logprobs_a = [[-0.35, -1.2], [-0.10, _TOPK_PAD_LOGPROB]]
+    a, b = _make_pair_topk(ids_a, None, logprobs_a, None)
+    merged = merge_samples([a, b], _FakeTokenizer())
+    pad_row_ids = [_TOPK_PAD_TOKEN_ID, _TOPK_PAD_TOKEN_ID]
+    pad_row_logprobs = [_TOPK_PAD_LOGPROB, _TOPK_PAD_LOGPROB]
+    # obs_len=1 (the injected gap) + b.response_length=2 (missing half) = 3 pad rows.
+    assert merged.teacher_topk_ids == ids_a + [pad_row_ids] * 3
+    assert merged.teacher_topk_logprobs == logprobs_a + [pad_row_logprobs] * 3
+    merged.validate()
+
+
+def test_merge_samples_teacher_topk_both_sides_empty_rows_yields_zero_width_pad():
+    # Documented edge case: both original samples have response_length == 0 with
+    # top-k OPD scoring active (teacher_topk_ids == [] rather than None), so K
+    # cannot be inferred from either side and the injected observation span gets
+    # 0-width pad rows. Internally consistent here (every row in this merged
+    # sample is 0-width) -- the risk is only if this sample were later mixed
+    # into a batch alongside samples with real (nonzero-K) rows.
+    a = Sample(
+        group_index=0,
+        index=0,
+        prompt="P",
+        tokens=[1],
+        response="",
+        response_length=0,
+        status=Sample.Status.COMPLETED,
+        teacher_topk_ids=[],
+        teacher_topk_logprobs=[],
+    )
+    b = Sample(
+        group_index=0,
+        index=0,
+        prompt="P",
+        tokens=[1, 2, 3],
+        response="",
+        response_length=0,
+        status=Sample.Status.COMPLETED,
+        teacher_topk_ids=[],
+        teacher_topk_logprobs=[],
+    )
+    merged = merge_samples([a, b], _FakeTokenizer())
+    assert merged.response_length == 2  # obs_len = len(b.tokens) - len(a.tokens) - b.response_length
+    assert merged.teacher_topk_ids == [[], []]
+    assert merged.teacher_topk_logprobs == [[], []]
+    merged.validate()

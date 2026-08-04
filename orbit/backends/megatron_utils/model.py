@@ -519,6 +519,8 @@ def train_one_step(
                 "returns",
                 "rollout_log_probs",
                 "teacher_hidden_states",
+                "teacher_topk_ids",
+                "teacher_topk_logprobs",
                 "max_seq_lens",
             ],
             args.data_pad_size_multiplier,

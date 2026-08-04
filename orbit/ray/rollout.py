@@ -772,6 +772,16 @@ class RolloutManager:
                 )
             train_data["opd_reverse_kl"] = [sample.opd_reverse_kl for sample in samples]
 
+        if any(sample.teacher_topk_ids is not None for sample in samples):
+            missing = sum(1 for sample in samples if sample.teacher_topk_ids is None)
+            if missing:
+                raise ValueError(
+                    f"teacher_topk_ids is set on some samples but missing on {missing}/{len(samples)}; "
+                    "the top-k OPD scorer must score every sample in the batch."
+                )
+            train_data["teacher_topk_ids"] = [sample.teacher_topk_ids for sample in samples]
+            train_data["teacher_topk_logprobs"] = [sample.teacher_topk_logprobs for sample in samples]
+
         if any(sample.teacher_hidden_states is not None for sample in samples):
             missing = sum(1 for sample in samples if sample.teacher_hidden_states is None)
             if missing:
@@ -827,6 +837,8 @@ class RolloutManager:
                 "teacher_log_probs",
                 "teacher_hidden_states",
                 "opd_reverse_kl",
+                "teacher_topk_ids",
+                "teacher_topk_logprobs",
                 "weight_versions",
             ]:
                 if key not in data:

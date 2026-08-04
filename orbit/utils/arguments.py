@@ -419,6 +419,17 @@ def add_on_policy_distillation_arguments(parser):
         ),
     )
     parser.add_argument(
+        "--opd-topk-zero-outside",
+        action=argparse.BooleanOptionalAction,
+        help=(
+            "For --loss-type opd_topk_loss's reverse/mixed KL: add the out-of-support "
+            "correction for student mass that falls outside the teacher's reported top-k "
+            "(see opd_topk_loss_function). Unset resolves at validation time to on for "
+            "--opd-kl-type reverse/mixed, off (inert; a warning is logged) for forward, "
+            "where the top-k KL never leaves the teacher's own support."
+        ),
+    )
+    parser.add_argument(
         "--judge-base-url",
         type=str,
         default=None,
@@ -575,6 +586,152 @@ def _validate_genrm_args(args) -> None:
         )
 
 
+def validate_opd_topk_loss_args(args) -> None:
+    """Validate --loss-type opd_topk_loss's structural requirements ("raw-mass v1",
+    spec Phase D). No-op unless opd_topk_loss is selected.
+
+    --opd-log-prob-top-k > 0 and --opd-type sglang are already enforced by the
+    top-k block above regardless of loss type; this adds opd_topk_loss-specific
+    requirements: --opd-top-k-strategy only-teacher (the raw-mass semantics
+    truncate to the teacher's own reported support), no teacher ensembles, the
+    external single-URL teacher transport (not the managed/same-engine path --
+    see below), an untempered rollout, CP == 1, --opd-topk-tail-bucket off, and
+    the OPD custom-reward hooks (--custom-rm-path/--custom-reward-post-process-path),
+    since opd_topk_loss bypasses needs_opd_teacher()'s own hook check the same way
+    --teacher-score-mode full_vocab does. It also resolves --opd-topk-zero-outside's
+    default and couples compute_advantages_and_returns=False, exactly like
+    opd_jsd_loss's --teacher-score-mode full_vocab block above.
+    """
+    if getattr(args, "loss_type", None) != "opd_topk_loss":
+        return
+
+    if (getattr(args, "opd_log_prob_top_k", 0) or 0) <= 0:
+        raise ValueError("--loss-type opd_topk_loss requires --opd-log-prob-top-k > 0.")
+
+    strategy = getattr(args, "opd_top_k_strategy", "only-student")
+    if strategy != "only-teacher":
+        raise ValueError(
+            "--loss-type opd_topk_loss requires --opd-top-k-strategy only-teacher: the raw-mass "
+            f"semantics truncate to the teacher's own reported top-k support, got {strategy!r}."
+        )
+
+    if getattr(args, "opd_teacher_urls", None):
+        # Local import to keep orbit.utils free of rollout imports at module load
+        # (matches the existing --opd-teacher-urls parse above).
+        from orbit.rollout.opd_sglang import parse_teacher_urls
+
+        url_map = parse_teacher_urls(args.opd_teacher_urls)
+        if any(len(targets) > 1 for targets in url_map.values()):
+            raise ValueError(
+                "--loss-type opd_topk_loss does not support teacher ensembles (--opd-teacher-urls "
+                "groups with more than one URL): the retained transport (teacher_topk_ids/"
+                "teacher_topk_logprobs) is single-teacher only in v1."
+            )
+
+    # Mirrors --teacher-score-mode full_vocab's own presence check above: without this,
+    # a config with no teacher at all (no --opd-teacher-url(s), no --opd-serve-teacher,
+    # and a not-same-base or unset --opd-teacher) sails through local_scoring_enabled
+    # below (False, since is_same_base is False too) and the hooks check further down
+    # (which only checks hook *names*, not that a teacher exists), only surfacing as a
+    # KeyError deep into a rollout once training reads the missing transport keys.
+    if not (
+        getattr(args, "opd_teacher_url", None)
+        or getattr(args, "opd_teacher_urls", None)
+        or getattr(args, "opd_serve_teacher", False)
+    ):
+        raise ValueError(
+            "--loss-type opd_topk_loss requires an external teacher: --opd-teacher-url, "
+            "--opd-teacher-urls, or --opd-serve-teacher (managed in-job serving that publishes "
+            "its endpoint as --opd-teacher-url once its engines are up)."
+        )
+
+    # The managed/same-engine teacher path (a same-base --opd-teacher with no external
+    # teacher URL, orbit.rollout.opd_scoring.opd_score_sample via local_scoring_enabled)
+    # scores through _score_top_k too, but only sets sample.opd_reverse_kl -- it never
+    # calls opd_sglang._extract_teacher_topk, so teacher_topk_ids/teacher_topk_logprobs
+    # would stay None. Only the external-URL path (opd_sglang.post_process's top-k
+    # branch, Task 1) retains them.
+    from orbit.rollout.opd_scoring import local_scoring_enabled
+
+    if local_scoring_enabled(args):
+        raise ValueError(
+            "--loss-type opd_topk_loss requires an external teacher (--opd-teacher-url, "
+            "--opd-teacher-urls, or --opd-serve-teacher, which resolves to --opd-teacher-url once "
+            "its engines are up): the managed/same-engine teacher path (a same-base --opd-teacher "
+            "with no external teacher URL) scores through orbit.rollout.opd_scoring.opd_score_sample, "
+            "which does not retain teacher_topk_ids/teacher_topk_logprobs -- that transport lives "
+            "only on the external-URL scoring path (orbit.rollout.opd_sglang.post_process) in v1."
+        )
+
+    temperature = float(getattr(args, "rollout_temperature", 1.0))
+    if temperature != 1.0:
+        raise ValueError(
+            "--loss-type opd_topk_loss requires --rollout-temperature == 1.0: top-k log-probs "
+            f"cannot be re-tempered client-side, got {temperature}."
+        )
+
+    cp_size = getattr(args, "context_parallel_size", 1) or 1
+    if cp_size != 1:
+        raise ValueError(
+            "--loss-type opd_topk_loss requires --context-parallel-size == 1: the retained top-k "
+            f"transport is not CP-slice-aware in v1, got {cp_size}."
+        )
+
+    if getattr(args, "allgather_cp", False):
+        raise ValueError(
+            "--loss-type opd_topk_loss is incompatible with --allgather-cp: the CP redistribution "
+            "helper only handles 1D per-token tensors, not the [R, K] student_topk_log_probs "
+            "tensor (get_log_probs_and_entropy raises the same NotImplementedError at compute time)."
+        )
+
+    if getattr(args, "opd_topk_tail_bucket", False):
+        raise ValueError(
+            "--loss-type opd_topk_loss is incompatible with --opd-topk-tail-bucket: tail-bucket is "
+            "a PG-arm reward feature whose own startup validation requires --opd-top-k-strategy "
+            "only-student or intersection, structurally incompatible with opd_topk_loss's required "
+            "only-teacher strategy."
+        )
+
+    # opd_topk_loss bypasses needs_opd_teacher() in the common case (default
+    # advantage_estimator=grpo, use_opd=False), exactly like full_vocab above, so the
+    # legacy hook check further down never runs for it either -- enforce the scoring
+    # transport here (mirrors the full_vocab block's own enforcement immediately above).
+    # Without this, a missing/wrong hook silently falls through to the default reward
+    # path: no teacher_topk_ids/logprobs ever get populated, and the run only dies after
+    # a full rollout on a bare KeyError once training reads the missing transport keys.
+    expected_rm = "orbit.rollout.opd_sglang.reward_func"
+    expected_post = "orbit.rollout.opd_sglang.post_process"
+    if (
+        getattr(args, "custom_rm_path", None) != expected_rm
+        or getattr(args, "custom_reward_post_process_path", None) != expected_post
+    ):
+        raise ValueError(
+            "--loss-type opd_topk_loss scores samples through the OPD custom-reward hooks; set "
+            f"--custom-rm-path {expected_rm} and --custom-reward-post-process-path {expected_post}."
+        )
+
+    # Resolve --opd-topk-zero-outside's default here (not at parse time): on for
+    # reverse/mixed, off (with a warning) for forward, where the top-k KL never
+    # leaves the teacher's own reported support so the correction is a no-op.
+    # opd_topk_loss_function's own getattr(..., None) fallback mirrors this
+    # resolution as defense only -- this is the source of truth.
+    kl_type = getattr(args, "opd_kl_type", "reverse") or "reverse"
+    if getattr(args, "opd_topk_zero_outside", None) is None:
+        if kl_type == "forward":
+            args.opd_topk_zero_outside = False
+            logger.warning(
+                "--opd-topk-zero-outside defaults to False with --opd-kl-type forward: the forward "
+                "top-k KL only ever sums over the teacher's own reported support, so the "
+                "out-of-support correction would have no effect."
+            )
+        else:
+            args.opd_topk_zero_outside = True
+
+    # Pure distillation: no PPO advantage/returns pipeline, exactly like opd_jsd_loss's
+    # --teacher-score-mode full_vocab block above.
+    args.compute_advantages_and_returns = False
+
+
 def _validate_opd_args(args) -> None:
     """Validate on-policy distillation args. Mirrors slime arguments.py:1761-1791."""
     from orbit.utils.opd_teacher_spec import is_same_base, is_self_teacher, parse_teacher_spec
@@ -722,6 +879,10 @@ def _validate_opd_args(args) -> None:
             )
         # Pure distillation: no PPO advantage/returns pipeline.
         args.compute_advantages_and_returns = False
+
+    # Direct top-k OPD loss: sibling of the full_vocab block above (own transport,
+    # own coupling), on the existing top-k API rather than full-vocab reconstruction.
+    validate_opd_topk_loss_args(args)
 
     # Forced on-policy ratio (Stage-3 MOPD kernel): the PPO ratio is pinned to exactly 1
     # (REINFORCE semantics), so every knob that would reintroduce a behaviour/actor
@@ -2065,12 +2226,16 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
             parser.add_argument(
                 "--loss-type",
                 type=str,
-                choices=["policy_loss", "sft_loss", "opd_jsd_loss", "custom_loss"],
+                choices=["policy_loss", "sft_loss", "opd_jsd_loss", "opd_topk_loss", "custom_loss"],
                 default="policy_loss",
                 help=(
-                    "Choose loss type, currently support ppo policy_loss, sft_loss, or "
+                    "Choose loss type, currently support ppo policy_loss, sft_loss, "
                     "opd_jsd_loss (full-vocab on-policy distillation, requires "
-                    "--teacher-score-mode full_vocab); "
+                    "--teacher-score-mode full_vocab), or opd_topk_loss (direct top-k "
+                    "on-policy distillation on Orbit's own raw-mass semantics -- the "
+                    "teacher's top-k log-probs are used as-is, not renormalized within the "
+                    "subset; requires --opd-log-prob-top-k > 0 and --opd-top-k-strategy "
+                    "only-teacher); "
                     "if custom_loss is set, we will use the function path from `--custom-loss-function-path`."
                 ),
             )
