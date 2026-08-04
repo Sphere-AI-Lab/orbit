@@ -323,7 +323,9 @@ def test_topk_ensemble_rejects_non_student_strategy():
 async def test_post_teacher_group_singleton_returns_raw_response(monkeypatch):
     from orbit.rollout import opd_sglang
 
-    async def fake_post(url, payload, timeout_secs=None):
+    async def fake_post(url, payload, timeout_secs=None, max_response_bytes=None):
+        # Assert the response cap is forwarded (payload-sized limit for scoring)
+        assert max_response_bytes is None
         return {"meta_info": {"url": url}}
 
     monkeypatch.setattr(opd_sglang, "_post_json", fake_post)
@@ -334,7 +336,9 @@ async def test_post_teacher_group_singleton_returns_raw_response(monkeypatch):
 async def test_post_teacher_group_ensemble_returns_responses_and_weights(monkeypatch):
     from orbit.rollout import opd_sglang
 
-    async def fake_post(url, payload, timeout_secs=None):
+    async def fake_post(url, payload, timeout_secs=None, max_response_bytes=None):
+        # Assert the response cap is forwarded (payload-sized limit for scoring)
+        assert max_response_bytes is None
         return {"meta_info": {"url": url}}
 
     monkeypatch.setattr(opd_sglang, "_post_json", fake_post)
