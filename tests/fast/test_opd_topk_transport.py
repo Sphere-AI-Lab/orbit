@@ -6,6 +6,17 @@ response byte cap (gate-discovered: rollout-0 scoring died with
 ``_score_top_k`` passed no ``max_response_bytes``, defaulting to the 16MiB
 generic cap even though ``input_top_logprobs`` legitimately exceeds it).
 
+Also covers a second gate-discovered defect: under ``--loss-type
+opd_topk_loss`` + ``--opd-top-k-strategy only-teacher``, ``_score_top_k`` still
+ran the PG rung's ``student_on_teacher`` rescore -- collecting the union of the
+teacher's per-position top-k ids and re-scoring the student at all of them,
+uncapped -- even though the direct loss never reads that rescore or the
+``opd_reverse_kl`` estimate it feeds. The transport blowup is
+positions x unique-ids response entries, which is exactly the field the first
+defect already had to cap; here the fix is to skip the call entirely under the
+direct loss, and to size the cap correctly (off the actual requested id count,
+not ``top_k``) for the PG configurations that still need it.
+
 Fixture: R=3 response positions, k=2, 5-token prompt (8 input tokens total).
 ``meta_info.input_top_logprobs`` therefore has 8 entries: index 0 is SGLang's
 placeholder (no logprob for the very first token), indices 1-4 are the
@@ -154,3 +165,144 @@ def test_score_top_k_forwards_computed_byte_cap_to_both_posts(monkeypatch):
     expected = opd_sglang._topk_response_byte_limit(args, 10)
     assert seen["teacher_max_response_bytes"] == expected
     assert seen["student_max_response_bytes"] == expected
+
+
+# --- _topk_response_byte_limit's entries_per_token override -------------------
+
+
+def test_topk_response_byte_limit_entries_per_token_override_ignores_top_k():
+    # top_k=999 must be ignored once entries_per_token is given explicitly --
+    # the student_on_teacher rescore uses this to size its cap off the actual
+    # requested id count, not --opd-log-prob-top-k.
+    args = _topk_limit_args(top_k=999)
+    num_tokens = 2000
+    entries_per_token = 100
+    expected = num_tokens * entries_per_token * 64 * 2
+    assert expected > SCORING_MAX_RESPONSE_BYTES
+    assert opd_sglang._topk_response_byte_limit(args, num_tokens, entries_per_token=entries_per_token) == expected
+
+
+# --- _score_top_k under --loss-type opd_topk_loss: skip the PG rescore -------
+
+
+def test_score_top_k_direct_loss_performs_only_the_teacher_group_post(monkeypatch):
+    calls = {"teacher_group": 0, "post_json": 0}
+
+    async def fake_post_teacher_group(targets, payload, timeout_secs, max_response_bytes=None):
+        calls["teacher_group"] += 1
+        return _teacher_group_response(response_length=3)
+
+    async def fake_post_json(url, payload, timeout_secs=None, max_response_bytes=None):
+        calls["post_json"] += 1
+        return {"meta_info": {"input_token_ids_logprobs": []}}
+
+    monkeypatch.setattr(opd_sglang, "_post_teacher_group", fake_post_teacher_group)
+    monkeypatch.setattr(opd_sglang, "_post_json", fake_post_json)
+
+    args = _score_top_k_args()
+    args.loss_type = "opd_topk_loss"
+    sample = Sample(tokens=list(range(10)), response_length=3)
+    reward_payload = asyncio.run(opd_sglang._score_top_k(args, sample))
+
+    assert calls["teacher_group"] == 1
+    assert calls["post_json"] == 0
+    assert "student_on_teacher" not in reward_payload
+
+
+def test_score_top_k_pg_configuration_still_rescores_student_with_capped_bytes(monkeypatch):
+    # No loss_type set -> the PG configuration (opd_reverse_kl consumer): the
+    # student_on_teacher rescore must still happen, and its cap must be sized
+    # off the teacher's actual reported unique ids (2, from the fixture's
+    # repeated real_entry), not off --opd-log-prob-top-k (100000) -- proving
+    # the fix uses the new formula rather than the pre-existing top_k-based one.
+    seen = {}
+
+    async def fake_post_teacher_group(targets, payload, timeout_secs, max_response_bytes=None):
+        seen["teacher_max_response_bytes"] = max_response_bytes
+        return _teacher_group_response(response_length=3)
+
+    async def fake_post_json(url, payload, timeout_secs=None, max_response_bytes=None):
+        seen["student_max_response_bytes"] = max_response_bytes
+        seen["student_token_ids"] = payload["token_ids_logprob"]
+        return {"meta_info": {"input_token_ids_logprobs": []}}
+
+    monkeypatch.setattr(opd_sglang, "_post_teacher_group", fake_post_teacher_group)
+    monkeypatch.setattr(opd_sglang, "_post_json", fake_post_json)
+
+    args = _score_top_k_args()
+    args.opd_log_prob_top_k = 100000
+    sample = Sample(tokens=list(range(50000)), response_length=3)
+    asyncio.run(opd_sglang._score_top_k(args, sample))
+
+    assert seen["student_token_ids"] == [1, 2]
+    teacher_expected = opd_sglang._topk_response_byte_limit(args, 50000)
+    student_expected = opd_sglang._topk_response_byte_limit(args, 50000, entries_per_token=3)
+    assert seen["teacher_max_response_bytes"] == teacher_expected
+    assert seen["student_max_response_bytes"] == student_expected
+    assert student_expected < teacher_expected
+
+
+# --- post_process under --loss-type opd_topk_loss: skip opd_reverse_kl -------
+
+
+def _post_process_args(**overrides) -> argparse.Namespace:
+    args = _score_top_k_args()
+    for key, value in overrides.items():
+        setattr(args, key, value)
+    return args
+
+
+def _student_on_teacher_response() -> dict:
+    # Same 8-position shape as _payload()'s teacher fixture (placeholder + 4
+    # dropped prompt positions + 3 response rows), reporting the student's own
+    # logprob at each id the teacher reported at that position -- the ids
+    # `_compute_topk_reverse_kl` looks up for strategy only-teacher.
+    return {
+        "meta_info": {
+            "input_token_ids_logprobs": [
+                None,
+                None,
+                None,
+                None,
+                None,
+                [_entry(math.log(0.6), 42), _entry(math.log(0.4), 7)],
+                [_entry(math.log(0.9), 3)],
+                [_entry(math.log(0.55), 9), _entry(math.log(0.45), 15)],
+            ]
+        }
+    }
+
+
+def test_post_process_direct_loss_skips_reverse_kl_keeps_teacher_topk_extraction():
+    args = _post_process_args(loss_type="opd_topk_loss")
+    sample = Sample(tokens=[0] * 8, response_length=3)
+    sample.metadata[opd_sglang.TEACHER_RESPONSE_METADATA_KEY] = _payload()
+
+    opd_sglang.post_process(args, [sample])
+
+    assert sample.opd_reverse_kl is None
+    assert sample.teacher_topk_ids == [[7, 42], [3, _TOPK_PAD_TOKEN_ID], [15, 9]]
+    expected_logprobs = [
+        [math.log(0.7), math.log(0.3)],
+        [math.log(0.9), _TOPK_PAD_LOGPROB],
+        [math.log(0.5), math.log(0.2)],
+    ]
+    for got_row, expected_row in zip(sample.teacher_topk_logprobs, expected_logprobs, strict=True):
+        assert got_row == pytest.approx(expected_row)
+
+
+def test_post_process_pg_configuration_still_computes_reverse_kl():
+    # No loss_type set -> existing behavior pinned: opd_reverse_kl still
+    # computed, teacher_topk_ids/logprobs stay unset (only opd_topk_loss sets them).
+    args = _post_process_args()
+    sample = Sample(tokens=[0] * 8, response_length=3)
+    payload = _payload()
+    payload["student_on_teacher"] = _student_on_teacher_response()
+    sample.metadata[opd_sglang.TEACHER_RESPONSE_METADATA_KEY] = payload
+
+    opd_sglang.post_process(args, [sample])
+
+    assert sample.opd_reverse_kl is not None
+    assert len(sample.opd_reverse_kl) == 3
+    assert sample.teacher_topk_ids is None
+    assert sample.teacher_topk_logprobs is None

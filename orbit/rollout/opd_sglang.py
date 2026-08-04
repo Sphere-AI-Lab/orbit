@@ -150,22 +150,29 @@ def _full_vocab_response_byte_limit(args: Namespace, num_tokens: int) -> int:
 _TOPK_LOGPROB_ENTRY_BYTES = 64
 
 
-def _topk_response_byte_limit(args: Namespace, num_tokens: int) -> int:
+def _topk_response_byte_limit(args: Namespace, num_tokens: int, entries_per_token: int | None = None) -> int:
     """Response cap for one top-k scoring call, sized to its actual payload.
 
-    The dominant field is ``input_top_logprobs``: one entry per input position
-    for the always-present observed-token logprob, plus up to
-    ``--opd-log-prob-top-k`` entries for the top-k itself, so
-    ``num_tokens * (top_k + 1)`` JSON array entries at
-    ``_TOPK_LOGPROB_ENTRY_BYTES`` bytes each, doubled for safety margin. A
-    large ``--opd-log-prob-top-k`` legitimately exceeds the generic
-    SCORING_MAX_RESPONSE_BYTES, so the cap scales with the request instead;
-    the generic cap stays as the floor.
+    The dominant field is one JSON array of per-input-position logprob entries
+    (``input_top_logprobs`` for the teacher-group request, or
+    ``input_token_ids_logprobs`` for a token_ids-targeted rescore):
+    ``num_tokens * entries_per_token`` entries at ``_TOPK_LOGPROB_ENTRY_BYTES``
+    bytes each, doubled for safety margin. A large request legitimately
+    exceeds the generic SCORING_MAX_RESPONSE_BYTES, so the cap scales with the
+    request instead; the generic cap stays as the floor.
+
+    ``entries_per_token`` defaults to ``top_k + 1`` (the teacher-group
+    request: the always-present observed-token logprob plus up to
+    ``--opd-log-prob-top-k`` top-k entries). Callers scoring a fixed, explicit
+    token-id set instead -- e.g. ``_score_top_k``'s ``student_on_teacher``
+    rescore, which requests exactly the teacher's reported unique ids -- pass
+    that count directly, since it can be far smaller than ``top_k``.
     """
     from orbit.rollout.scoring_client import SCORING_MAX_RESPONSE_BYTES
 
-    top_k = _get_opd_top_k(args)
-    payload = num_tokens * (top_k + 1) * _TOPK_LOGPROB_ENTRY_BYTES * 2
+    if entries_per_token is None:
+        entries_per_token = _get_opd_top_k(args) + 1
+    payload = num_tokens * entries_per_token * _TOPK_LOGPROB_ENTRY_BYTES * 2
     return max(payload, SCORING_MAX_RESPONSE_BYTES)
 
 
@@ -859,15 +866,30 @@ async def _score_top_k(
     top-k and/or on the student's top-k token ids; optionally the student
     re-scored on the teacher's top-k ids (via the rollout router). Returns the
     reward payload consumed by ``_compute_topk_reverse_kl``.
+
+    ``--loss-type opd_topk_loss`` (the direct top-k loss) computes student
+    log-probs trainer-side (its own gather against ``teacher_topk_ids``) and
+    never reads ``_compute_topk_reverse_kl``'s PG estimate -- ``post_process``
+    skips computing it entirely under this loss. So the ``student_on_teacher``
+    rescore below (and the student-top harvest that only ever feeds it) is
+    dead work under the direct loss, and worse than dead: with strategy
+    only-teacher (the only strategy opd_topk_loss permits) it re-scores the
+    student at the UNION of the teacher's per-position top-k ids across every
+    response position -- a positions x unique-ids response that is hundreds of
+    MB at moderate k and unbounded as k approaches the full vocabulary. That
+    transport blowup is what died in the gate run this fixes
+    (ScoringProtocolError: scoring response exceeds its byte limit), so it is
+    skipped outright here rather than merely capped.
     """
     top_k = _get_opd_top_k(args)
     strategy = _get_top_k_strategy(args)
+    direct_loss = getattr(args, "loss_type", None) == "opd_topk_loss"
     targets = targets or [(args.opd_teacher_url, 1.0)]
     request_timeout = _scoring_timeout(args)
     response_byte_limit = _topk_response_byte_limit(args, len(sample.tokens))
 
     teacher_token_ids = None
-    if strategy in TEACHER_ON_STUDENT_STRATEGIES:
+    if not direct_loss and strategy in TEACHER_ON_STUDENT_STRATEGIES:
         student_top = _student_top_logprobs(sample, sample.response_length)
         teacher_token_ids = _unique_ids(student_top)
 
@@ -882,7 +904,7 @@ async def _score_top_k(
     )
 
     reward_payload = group_response if "teachers" in group_response else {"teacher": group_response}
-    if strategy in STUDENT_ON_TEACHER_STRATEGIES:
+    if not direct_loss and strategy in STUDENT_ON_TEACHER_STRATEGIES:
         if "teachers" in reward_payload:
             raise ValueError(f"Teacher ensembles require --opd-top-k-strategy only-student, got {strategy!r}.")
         teacher_top = _trim_input_field(
@@ -893,7 +915,9 @@ async def _score_top_k(
             _student_score_url(args),
             _score_payload(sample.tokens, token_ids=student_token_ids),
             timeout_secs=request_timeout,
-            max_response_bytes=response_byte_limit,
+            max_response_bytes=_topk_response_byte_limit(
+                args, len(sample.tokens), entries_per_token=len(student_token_ids) + 1
+            ),
         )
     return reward_payload
 
@@ -981,13 +1005,19 @@ def post_process(args, samples: list[Sample], **kwargs):
                     payload, len(sample.tokens), sample.response_length
                 )
         elif top_k > 0:
-            sample.opd_reverse_kl = _compute_topk_reverse_kl(args, sample, payload).tolist()
             if getattr(args, "loss_type", None) == "opd_topk_loss":
+                # The direct top-k loss gathers student log-probs trainer-side
+                # (against teacher_topk_ids) and never reads opd_reverse_kl or the
+                # student_on_teacher rescore it depends on, so skip computing it --
+                # this is what lets _score_top_k skip that rescore call too (see
+                # its docstring for the transport blowup this avoids).
                 sample.teacher_topk_ids, sample.teacher_topk_logprobs = _extract_teacher_topk(
                     payload, sample.response_length, top_k
                 )
+            else:
+                sample.opd_reverse_kl = _compute_topk_reverse_kl(args, sample, payload).tolist()
             # The harvested per-position top-logprob lists are large (O(R*k) Python
-            # objects); once the KL is computed they only bloat Ray transfers.
+            # objects); once the KL/extraction is done they only bloat Ray transfers.
             sample.metadata.pop(STUDENT_TOP_LOGPROBS_METADATA_KEY, None)
         else:
             sample.teacher_log_probs = _sampled_teacher_log_probs(payload, sample.response_length)
