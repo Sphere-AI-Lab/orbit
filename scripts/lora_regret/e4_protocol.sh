@@ -37,6 +37,28 @@
 : "${EPS_CLIP=1e9}"
 : "${EPS_CLIP_HIGH=1e9}"
 
+# One update per rollout batch: GLOBAL_BATCH_SIZE equals ROLLOUT_BATCH_SIZE=32
+# times N_SAMPLES_PER_PROMPT=32, so the learner consumes each iteration's 1,024
+# rollouts in a single optimizer step and the importance ratio is identically 1.
+#
+# This is what makes the clipping-off choice above coherent rather than merely
+# aggressive. At the launcher's 256 the learner took FOUR updates per rollout,
+# minibatches 2-4 were off-policy, and with EPS_CLIP=1e9 the -rho*A term on
+# those minibatches was unbounded. The 2026-08-04 gsm8k column 4 measured the
+# consequence: FullFT at 7e-07 -- the BOTTOM of the grid -- ran healthy for 130
+# rollouts (raw_reward 0.65, held-out 0.68) and then collapsed in one iteration
+# (0.649 at rollout 130, 0.060 at 131, ~0 after; ppo_kl 9.2e-2 at the cliff),
+# and LoRA r1 at 7e-05 died the same way at ~97. The collapse is one-way:
+# every response runs to the 2,048 cap, truncation loses the \boxed{}, every
+# reward in the group is 0, so the centred advantage is 0 and no gradient can
+# ever pull the policy back.
+#
+# On-policy, the ratio never leaves 1 and no clip is needed -- which is the
+# post's actual setting, not a softening of it. The cost: 150 optimizer steps
+# per arm instead of 600, at 4x the batch. Same tokens, same exposures; the
+# LR axis now measures the step size of an on-policy update.
+: "${GLOBAL_BATCH_SIZE=1024}"
+
 # --- where the metrics go ------------------------------------------------------
 #
 # OFFLINE, and synced afterwards from a node that has egress. Not a preference:
@@ -116,4 +138,4 @@
 # argued. Mean response is only ~250-280 tokens, so the cost of the headroom is
 # small and the cost of clipping the tail is a reward of zero.
 
-export RL_EXTRA_ARGS EPS_CLIP EPS_CLIP_HIGH NUM_ROLLOUT SAVE_INTERVAL EVAL_INTERVAL WANDB_MODE
+export RL_EXTRA_ARGS EPS_CLIP EPS_CLIP_HIGH GLOBAL_BATCH_SIZE NUM_ROLLOUT SAVE_INTERVAL EVAL_INTERVAL WANDB_MODE
