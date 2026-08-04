@@ -304,6 +304,11 @@ def apply_true_on_policy_parse_defaults(args: Any) -> None:
     args.deterministic_mode = True
 
     kernel_policy = plan.kernel_policy
+    # Lets log_utils.py's exact train/rollout parity CI gate self-activate the
+    # day a contract flips megatron_uses_sglang_backend to True (Phase 5:
+    # SGLang kernels running inside Megatron via the fork rebase); until then
+    # it stays False and the parity gap is measured, not asserted exact.
+    args.true_on_policy_megatron_uses_sglang_backend = kernel_policy.megatron_uses_sglang_backend
     args.batch_invariant_mode = kernel_policy.batch_invariant_mode
     if kernel_policy.disable_rope_fusion:
         args.apply_rope_fusion = False

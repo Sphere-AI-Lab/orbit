@@ -135,6 +135,17 @@ def test_switch_expands_rollout_and_mode_dests():
     assert "NCCL_ALGO" in args.train_env_vars
 
 
+def test_expansion_sets_megatron_uses_sglang_backend_flag():
+    # Phase 5 (SGLang-kernels-in-Megatron) is not ported for qwen3_dense yet
+    # (orbit/true_on_policy/contracts.py); log_utils.py's exact train/rollout
+    # parity CI gate reads this dest and stays off until a contract flips it.
+    args = _args()
+
+    apply_true_on_policy_parse_defaults(args)
+
+    assert args.true_on_policy_megatron_uses_sglang_backend is False
+
+
 def test_expansion_applies_training_side_determinism_flags():
     args = _args()
 

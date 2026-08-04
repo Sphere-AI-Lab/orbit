@@ -200,11 +200,19 @@ def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatc
             if "rollout/entropy" in reduced_log_dict:
                 assert 0 < reduced_log_dict["rollout/entropy"] < 0.7
 
-        if args.ci_test and args.true_on_policy_mode:
+        if args.ci_test and args.true_on_policy_mode and args.true_on_policy_megatron_uses_sglang_backend:
+            # Exact train/rollout parity only holds once Phase 5 (SGLang kernels
+            # running inside Megatron, via the fork rebase) is ported -- that's
+            # what megatron_uses_sglang_backend=True means (see the contract's
+            # kernel_policy_kwargs_for in orbit/true_on_policy/contracts.py).
+            # Until a contract ships Phase 5, Megatron and SGLang legitimately
+            # run different kernels; the gap is measured instead, via
+            # train_rollout_logprob_abs_diff{,_max} (orbit/backends/training_utils/loss.py).
             assert log_dict["log_probs"] == log_dict["rollout_log_probs"], (
-                f"CI check failed: true_on_policy_mode is enabled, but log_probs "
-                f"({log_dict['log_probs']}) != rollout_log_probs "
-                f"({log_dict['rollout_log_probs']})"
+                f"CI check failed: true_on_policy_mode is enabled with the Phase-5 "
+                f"SGLang-in-Megatron backend active, so log_probs must equal "
+                f"rollout_log_probs exactly, but log_probs ({log_dict['log_probs']}) "
+                f"!= rollout_log_probs ({log_dict['rollout_log_probs']})"
             )
 
     if args.log_multi_turn:
