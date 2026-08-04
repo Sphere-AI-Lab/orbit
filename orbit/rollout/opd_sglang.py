@@ -140,6 +140,35 @@ def _full_vocab_response_byte_limit(args: Namespace, num_tokens: int) -> int:
     return max(payload, SCORING_MAX_RESPONSE_BYTES)
 
 
+# Conservative per-entry byte estimate for one JSON-serialized top-k logprob
+# triple, ``[logprob, token_id, token_text]`` -- as returned in the sglang
+# response's ``input_top_logprobs`` rows. Measuring a realistic entry (a
+# full-precision negative float64, a 6-digit token id, and an 8-character
+# token text -- worst case multi-byte/CJK, which json.dumps's default
+# ensure_ascii escapes to ~6 bytes/char) gives 45-70 bytes; rounded up for
+# headroom and JSON array punctuation.
+_TOPK_LOGPROB_ENTRY_BYTES = 64
+
+
+def _topk_response_byte_limit(args: Namespace, num_tokens: int) -> int:
+    """Response cap for one top-k scoring call, sized to its actual payload.
+
+    The dominant field is ``input_top_logprobs``: one entry per input position
+    for the always-present observed-token logprob, plus up to
+    ``--opd-log-prob-top-k`` entries for the top-k itself, so
+    ``num_tokens * (top_k + 1)`` JSON array entries at
+    ``_TOPK_LOGPROB_ENTRY_BYTES`` bytes each, doubled for safety margin. A
+    large ``--opd-log-prob-top-k`` legitimately exceeds the generic
+    SCORING_MAX_RESPONSE_BYTES, so the cap scales with the request instead;
+    the generic cap stays as the floor.
+    """
+    from orbit.rollout.scoring_client import SCORING_MAX_RESPONSE_BYTES
+
+    top_k = _get_opd_top_k(args)
+    payload = num_tokens * (top_k + 1) * _TOPK_LOGPROB_ENTRY_BYTES * 2
+    return max(payload, SCORING_MAX_RESPONSE_BYTES)
+
+
 def _parse_teacher_target(part: str, entry: str) -> TeacherTarget:
     """Parse one ``URL[@WEIGHT]`` group member.
 
@@ -701,7 +730,10 @@ def _extract_teacher_log_probs(response: dict, response_length: int) -> list[flo
 
 
 async def _post_teacher_group(
-    targets: list[TeacherTarget], payload: dict[str, Any], timeout_secs: int | float | None
+    targets: list[TeacherTarget],
+    payload: dict[str, Any],
+    timeout_secs: int | float | None,
+    max_response_bytes: int | None = None,
 ) -> dict[str, Any]:
     """Score one payload against a teacher group.
 
@@ -710,7 +742,12 @@ async def _post_teacher_group(
     member in parallel — wall clock is max(teacher latencies), not the sum —
     and returns the responses with their mixture weights.
     """
-    responses = await asyncio.gather(*[_post_json(url, payload, timeout_secs=timeout_secs) for url, _ in targets])
+    responses = await asyncio.gather(
+        *[
+            _post_json(url, payload, timeout_secs=timeout_secs, max_response_bytes=max_response_bytes)
+            for url, _ in targets
+        ]
+    )
     if len(responses) == 1:
         return responses[0]
     return {"teachers": list(responses), "teacher_weights": [weight for _, weight in targets]}
@@ -827,6 +864,7 @@ async def _score_top_k(
     strategy = _get_top_k_strategy(args)
     targets = targets or [(args.opd_teacher_url, 1.0)]
     request_timeout = _scoring_timeout(args)
+    response_byte_limit = _topk_response_byte_limit(args, len(sample.tokens))
 
     teacher_token_ids = None
     if strategy in TEACHER_ON_STUDENT_STRATEGIES:
@@ -839,7 +877,9 @@ async def _score_top_k(
         token_ids=teacher_token_ids,
         lora_path=lora_path,
     )
-    group_response = await _post_teacher_group(targets, teacher_payload, request_timeout)
+    group_response = await _post_teacher_group(
+        targets, teacher_payload, request_timeout, max_response_bytes=response_byte_limit
+    )
 
     reward_payload = group_response if "teachers" in group_response else {"teacher": group_response}
     if strategy in STUDENT_ON_TEACHER_STRATEGIES:
@@ -853,6 +893,7 @@ async def _score_top_k(
             _student_score_url(args),
             _score_payload(sample.tokens, token_ids=student_token_ids),
             timeout_secs=request_timeout,
+            max_response_bytes=response_byte_limit,
         )
     return reward_payload
 
