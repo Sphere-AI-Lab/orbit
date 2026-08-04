@@ -68,11 +68,13 @@ class IpcBackend(PeftWeightTransport):
         if self.method_spec.payload_shaper is not None:
             # The registry holds the shaper; use it.
             payload = self.method_spec.payload_shaper(weight_tensors)
-            # The OFT wire format inherited from verl: outer pickle wraps inner
+            # The wire format inherited from verl: outer pickle wraps inner
             # IPC-handle-bearing serialization of the flat tensor. See
-            # update_weight_from_tensor.py:488-525 for provenance.
+            # update_weight_from_tensor.py:488-525 for provenance. The tag is
+            # per-method: sglang's normalize_{oft,lora}_weight_payload asserts on
+            # "flattened_oft_payload" / "flattened_lora_payload" respectively.
             inner = (
-                "flattened_oft_payload",
+                f"flattened_{self.method_spec.name}_payload",
                 MultiprocessingSerializer.serialize(payload.flat_tensor),
                 payload.metadata,
                 payload.extra["entries"],

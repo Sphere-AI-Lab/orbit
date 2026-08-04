@@ -68,8 +68,11 @@ def init(args):
 
     set_parallel_state(create_megatron_parallel_state())
 
-    # https://github.com/NVIDIA/Megatron-LM/issues/1563
-    assert np.__version__.startswith("1."), "Megatron does not support numpy 2.x"
+    # numpy 2.x is OK with this (Sphere-patched) Megatron-LM: NVIDIA/Megatron-LM#1563
+    # (np.product in dist_checkpointing/validation.py) is already fixed to np.prod
+    # here, and no other numpy-2.0-removed API is used. The old
+    # `assert np.__version__.startswith("1.")` guard is removed so cu13-env
+    # (numpy 2.x, shared with the sglang rollout / torch / flashinfer) can run.
 
     # Random seeds for reproducibility.
     if args.rank == 0:

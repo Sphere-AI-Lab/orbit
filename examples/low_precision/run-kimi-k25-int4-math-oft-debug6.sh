@@ -77,7 +77,6 @@ export USE_ROLLOUT_LOGPROBS=${USE_ROLLOUT_LOGPROBS:-0}
 export SGLANG_OFT_MARLIN_MOE=${SGLANG_OFT_MARLIN_MOE:-1}
 export SGLANG_FORCE_OFT_TRITON_MOE=${SGLANG_FORCE_OFT_TRITON_MOE:-0}
 export SGLANG_OFT_EXPERT_PARITY_MODE=${SGLANG_OFT_EXPERT_PARITY_MODE:-0}
-export SGLANG_OFT_PARITY_MODE=${SGLANG_OFT_PARITY_MODE:-1}
 export SGLANG_ENABLE_FP32_LM_HEAD=${SGLANG_ENABLE_FP32_LM_HEAD:-1}
 export SGLANG_ENABLE_DETERMINISTIC_INFERENCE=${SGLANG_ENABLE_DETERMINISTIC_INFERENCE:-1}
 export SGLANG_MOE_ROUTER_FORCE_FP32=${SGLANG_MOE_ROUTER_FORCE_FP32:-1}
@@ -209,9 +208,6 @@ SGLANG_ARGS=(
     --router-disable-circuit-breaker
     --sglang-enable-deterministic-inference
 )
-if [[ "${SGLANG_OFT_PARITY_MODE,,}" =~ ^(1|true|yes|y|on)$ ]]; then
-    SGLANG_ARGS+=( --sglang-oft-parity-mode )
-fi
 if [[ "${SGLANG_DISABLE_CUDA_GRAPH,,}" =~ ^(1|true|yes|y|on)$ ]]; then
     SGLANG_ARGS+=( --sglang-disable-cuda-graph )
 fi

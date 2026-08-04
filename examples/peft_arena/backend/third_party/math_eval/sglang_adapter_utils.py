@@ -63,13 +63,13 @@ def build_sglang_engine_config(args):
     elif adapter_type == "OFT":
         engine_kwargs.update(
             {
-                "enable_oft": True,
-                "oft_paths": {adapter_name: adapter_path},
+                "peft_method": "oft",
+                "peft_paths": {adapter_name: adapter_path},
                 "oft_backend": getattr(args, "oft_backend", "triton"),
                 "max_ofts_per_batch": 2,
             }
         )
-        generate_kwargs["oft_path"] = adapter_name
+        generate_kwargs["adapter_path"] = adapter_name
     else:
         raise ValueError(f"Unsupported direct SGLang adapter_type={adapter_type!r}")
 

@@ -17,7 +17,6 @@ import sglang_router
 from packaging.version import parse
 from tqdm import tqdm
 
-from orbit.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME
 from orbit.backends.megatron_utils.oft_utils import OFT_ADAPTER_NAME
 from orbit.backends.megatron_utils.peft_utils import get_peft_method
 from orbit.rollout.base_types import RolloutFnEvalOutput, RolloutFnTrainOutput
@@ -399,11 +398,18 @@ async def generate(
     }
 
     peft_method = get_peft_method(args)
-    if peft_method == "lora":
-        payload["lora_path"] = LORA_ADAPTER_NAME
-    elif peft_method == "oft":
+    # LoRA is routed through the fork's SINGLE-ACTIVE peft/lora (peft_method="lora",
+    # see sglang_engine.py) -- NOT upstream's multi-tenant LoRAManager. The
+    # single-active path applies the index-0 adapter UNCONDITIONALLY to every token
+    # (LoRAManager.prepare_lora_batch: per-request routing is deferred), so the
+    # generate request must NOT name an adapter. Sending lora_path would instead hit
+    # upstream's _validate_and_resolve_lora, which requires enable_lora=True and
+    # 400s otherwise ("LoRA adapter ... was requested, but LoRA is not enabled").
+    # OFT differs: it runs multi-slot (base slot 0 + adapter slot 1), so it must
+    # still select its trained slot by name.
+    if peft_method == "oft":
         if not os.environ.get("ORBIT_DSV4_DISABLE_OFT_REQUEST"):
-            payload["oft_path"] = OFT_ADAPTER_NAME
+            payload["adapter_path"] = OFT_ADAPTER_NAME
 
     if args.use_rollout_routing_replay:
         payload["return_routed_experts"] = True

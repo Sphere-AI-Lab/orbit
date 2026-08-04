@@ -68,7 +68,6 @@ if [[ "${PARITY_CHECK,,}" =~ ^(1|true|yes|y|on)$ ]]; then
     USE_ROLLOUT_ROUTING_REPLAY=${USE_ROLLOUT_ROUTING_REPLAY:-1}
     DISABLE_SAVE=${DISABLE_SAVE:-1}
     # NVFP4 MoE is not compatible with SGLang's weighted-SwiGLU mode; leave it off.
-    SGLANG_OFT_PARITY_MODE=${SGLANG_OFT_PARITY_MODE:-1}
     SGLANG_ENABLE_FP32_LM_HEAD=${SGLANG_ENABLE_FP32_LM_HEAD:-1}
     SGLANG_ENABLE_DETERMINISTIC_INFERENCE=${SGLANG_ENABLE_DETERMINISTIC_INFERENCE:-1}
     # Single-GPU defaults so parity runs on one device by default; override

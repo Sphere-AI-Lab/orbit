@@ -368,19 +368,19 @@ class SGLangEngine(RayActor):
 
     def load_oft_adapter_from_tensors(
         self,
-        oft_name: str,
+        adapter_name: str,
         serialized_tensors: str,
         config_dict: dict,
         pinned: bool = False,
     ):
         """Load an OFT adapter from serialized tensor data.
 
-        Requires the sglang server to be launched with ``enable_oft=True``;
+        Requires the sglang server to be launched with ``peft_method="oft"``;
         orbit's SGLangEngine kwargs builder sets this automatically when OFT
         is configured.
         """
         payload = {
-            "oft_name": oft_name,
+            "adapter_name": adapter_name,
             "serialized_tensors": serialized_tensors,
             "config_dict": config_dict,
             "pinned": pinned,
@@ -471,10 +471,10 @@ class SGLangEngine(RayActor):
             {"lora_name": lora_name},
         )
 
-    def unload_oft_adapter(self, oft_name: str):
+    def unload_oft_adapter(self, adapter_name: str):
         return self._make_request(
             "unload_oft_adapter",
-            {"oft_name": oft_name},
+            {"adapter_name": adapter_name},
         )
 
     def release_memory_occupation(self, tags: list[str] = None):
@@ -857,39 +857,39 @@ def _compute_server_args(
             )
 
     if peft_method == "lora":
-        lora_backend = kwargs.get("lora_backend", getattr(args, "sglang_lora_backend", "csgmv") or "csgmv")
-        if (
-            lora_backend != "triton"
-            and _args_indicate_moe_model(args)
-            and _target_modules_request_moe_lora(args.target_modules)
-        ):
-            raise ValueError("MoE LoRA requires sglang_lora_backend='triton'.")
-        # Decline BP-7 until the merge gate verifies that recover_updatable_engines and
-        # steady-state offload do not depend on the dense CPU snapshot before
-        # disabling it. Until that is verified (or a per-cycle dense re-sync
-        # replacement is added in orbit/ray/rollout.py), keep orbit's existing
-        # default of mirroring args.offload_rollout. Engine kwargs may still
-        # override (used by the external-engine code path).
-        kwargs["enable_lora"] = True
-        kwargs["lora_backend"] = lora_backend
-        kwargs["max_loras_per_batch"] = 1
-        if getattr(args, "adapter_double_buffer", False):
-            kwargs["max_loras_per_batch"] = max(kwargs["max_loras_per_batch"], 2)
-        kwargs["max_lora_rank"] = max(getattr(args, "lora_rank", 0), 1)
-        kwargs["lora_target_modules"] = convert_target_modules_to_hf(args.target_modules)
+        # Route LoRA through the fork's SINGLE-ACTIVE peft/lora (peft_method="lora"),
+        # symmetric to the OFT branch below -- NOT upstream's multi-tenant
+        # LoRAManager (enable_lora). The IPC weight-sync then goes through
+        # update_weights_from_tensor(load_format="lora_adapter") in the
+        # peft_transport IPC backend, matching the C1-validated single-active
+        # streamed path. peft/lora is single-active: no lora_backend /
+        # max_loras_per_batch pool (MoE-LoRA rides upstream's triton
+        # fused_moe_lora by construction, so the old triton-backend check is moot).
+        # Offload (BP-7): this branch only changes WHICH LoRA manager handles the
+        # adapter; recover_updatable_engines / steady-state offload still mirror
+        # args.offload_rollout as before.
+        kwargs["peft_method"] = "lora"
+        kwargs["peft_target_modules"] = convert_target_modules_to_hf(args.target_modules)
+        kwargs["peft_max_lora_rank"] = max(getattr(args, "lora_rank", 0), 1)
+        # Double-buffer weight-sync: the fork sizes LoRA's mem-pool to 2 slots
+        # (active+staging) from this flag. Unlike OFT (which also bumps
+        # max_ofts_per_batch above), LoRA has no slot-count knob, so this is the
+        # sole init-time signal enabling stage/activate.
+        kwargs["peft_double_buffer"] = bool(getattr(args, "adapter_double_buffer", False))
 
         lora_adapter_path = getattr(args, "lora_adapter_path", None)
         if lora_adapter_path is not None:
-            kwargs["lora_paths"] = {LORA_ADAPTER_NAME: lora_adapter_path}
+            kwargs["peft_paths"] = {LORA_ADAPTER_NAME: lora_adapter_path}
         else:
             logger.info("No pre-trained LoRA adapter_path provided, will use random initial weights")
     elif peft_method == "oft":
         # Same BP-7 decline as above; mirror args.offload_rollout until the
         # merge gate is verified for the OFT recovery / offload path too.
-        kwargs["enable_oft"] = True
+        kwargs["peft_method"] = "oft"
         kwargs["max_oft_block_size"] = args.oft_block_size
-        kwargs["oft_target_modules"] = convert_target_modules_to_hf(args.target_modules)
+        kwargs["peft_target_modules"] = convert_target_modules_to_hf(args.target_modules)
         kwargs["oft_dtype"] = _training_adapter_dtype_arg(args)
+        kwargs["oft_type"] = args.oft_type
         # max_ofts_per_batch includes the base-only request -- sglang's
         # init_memory_pool() eagerly loads the base into slot 0, so the
         # minimum usable value is 2 (base + 1 trained adapter). With the
@@ -900,10 +900,13 @@ def _compute_server_args(
         kwargs["max_ofts_per_batch"] = 2
         if getattr(args, "adapter_double_buffer", False):
             kwargs["max_ofts_per_batch"] = max(kwargs["max_ofts_per_batch"], 3)
+        # Enable the fork's stage/activate double-buffer path (staging slot =
+        # max_ofts_per_batch-1); paired with the max_ofts_per_batch=3 bump above.
+        kwargs["peft_double_buffer"] = bool(getattr(args, "adapter_double_buffer", False))
         kwargs["oft_backend"] = getattr(args, "sglang_oft_backend", "triton")
         oft_adapter_path = getattr(args, "oft_adapter_path", None)
         if oft_adapter_path is not None:
-            kwargs["oft_paths"] = {OFT_ADAPTER_NAME: oft_adapter_path}
+            kwargs["peft_paths"] = {OFT_ADAPTER_NAME: oft_adapter_path}
         else:
             logger.info("No pre-trained OFT adapter_path provided, will use random initial weights")
 
@@ -925,7 +928,7 @@ def _compute_server_args(
             kwargs.pop(key)
 
     # Compute the external-engine sanity-check field set after every kwargs
-    # mutation has settled (PEFT branches add enable_lora / enable_oft /
+    # mutation has settled (PEFT branches add peft_method / enable_lora /
     # lora_backend / etc.; the dataclasses-fields auto-pass-through pulls in
     # any sglang_<attr> override; the unused_keys pop trims dead keys). If
     # we computed this earlier, _init_external would silently miss those

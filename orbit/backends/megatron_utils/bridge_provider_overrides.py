@@ -31,6 +31,11 @@ def apply_bridge_provider_overrides(
     )
     _maybe_set_provider_attr(provider, "attention_softmax_in_fp32", getattr(args, "attention_softmax_in_fp32", None))
     _maybe_set_provider_attr(provider, "calculate_per_token_loss", getattr(args, "calculate_per_token_loss", None))
+    # Propagate --[no-]gradient-accumulation-fusion to the provider: the bridge
+    # GPTProvider defaults it via can_enable_gradient_accumulation_fusion()
+    # independently of the arg, so without this the fused_weight_gradient_mlp_cuda
+    # (APEX) extension is required even when --no-gradient-accumulation-fusion is set.
+    _maybe_set_provider_attr(provider, "gradient_accumulation_fusion", getattr(args, "gradient_accumulation_fusion", None))
     _maybe_set_provider_attr(provider, "recompute_method", getattr(args, "recompute_method", None))
     _maybe_set_provider_attr(provider, "recompute_granularity", getattr(args, "recompute_granularity", None))
     _maybe_set_provider_attr(provider, "recompute_num_layers", getattr(args, "recompute_num_layers", None))
