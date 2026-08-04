@@ -128,5 +128,21 @@ LD_LIBRARY_PATH="${SITE_PACKAGES}/torch/lib:${CUDNN_PATH}/lib:${NCCL_ROOT}/lib:$
 # --- runtime: nvidia-modelopt (via megatron.bridge) dlopens libz3.so.4.15 by soname ---
 LD_LIBRARY_PATH="${SITE_PACKAGES}/z3/lib:${LD_LIBRARY_PATH}"
 
+# --- runtime: FlashInfer JIT cache must not be the shared home cache ---
+# ~/.cache/flashinfer carries cached_ops compiled by whatever CUDA toolchain
+# last wrote them. On 2026-08-04 the B200 smoke found a 100a/fmha_gen.so there
+# linked against libcudart.so.12 -- left by the July CUDA-12 sglang experiments
+# -- and this CUDA-13 stack has no libcudart.so.12, so the SGLang server died at
+# cuda-graph capture before serving a single token. H100 runs never load that
+# path (sm_90 attention goes through FA3's flash_ops), which is why the poison
+# sat unnoticed until the first Blackwell run. Same pattern and reasoning as
+# examples/load_cuda13_2_orbit_env.sh: node-local /tmp, per-env namespace --
+# Lustre also lacks the file locks FlashInfer's JIT wants when all TP ranks
+# compile the same op at once.
+FLASHINFER_WORKSPACE_BASE="${FLASHINFER_WORKSPACE_BASE:-/tmp/flashinfer-${USER:-orbit}/orbit-env-cu130}"
+if [ -n "${CUDA_HOME:-}" ] && [ -x "${CUDA_HOME}/bin/nvcc" ]; then
+    FLASHINFER_NVCC="${FLASHINFER_NVCC:-${CUDA_HOME}/bin/nvcc}"
+fi
+
 unset _cuda_mod _nccl_mod _c _cc _ram_gb _jobs _ncpu 2>/dev/null || true
 set +a
