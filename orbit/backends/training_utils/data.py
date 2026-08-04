@@ -147,6 +147,8 @@ def get_rollout_data(args: Namespace, rollout_data_ref: Box) -> RolloutBatch:
     _tensorize_cp_sliced_log_probs(args, rollout_data, "rollout_log_probs", dtype=_rollout_logprob_dtype(args))
     _tensorize_cp_sliced_log_probs(args, rollout_data, "teacher_log_probs")
     _tensorize_cp_sliced_log_probs(args, rollout_data, "opd_reverse_kl")
+    _tensorize_cp_sliced_log_probs(args, rollout_data, "teacher_topk_ids", dtype=torch.long)
+    _tensorize_cp_sliced_log_probs(args, rollout_data, "teacher_topk_logprobs")
     _tensorize_cp_sliced_teacher_hidden_states(args, rollout_data)
     if "rollout_routed_experts" in rollout_data:
         rollout_data["rollout_routed_experts"] = [torch.from_numpy(r) for r in rollout_data["rollout_routed_experts"]]

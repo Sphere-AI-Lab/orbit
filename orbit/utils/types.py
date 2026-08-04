@@ -49,6 +49,8 @@ class Sample:
     # full-vocab OPD (--teacher-score-mode full_vocab) sets this instead of teacher_log_probs.
     teacher_hidden_states: numpy.ndarray | None = None
     opd_reverse_kl: list[float] | None = None  # Precomputed per-token OPD reverse-KL estimate
+    teacher_topk_ids: list[list[int]] | None = None  # Per-position teacher top-k token ids (--loss-type opd_topk_loss)
+    teacher_topk_logprobs: list[list[float]] | None = None  # Per-position teacher top-k logprobs (opd_topk_loss)
     rollout_routed_experts: numpy.ndarray | None = (
         None  # Routed experts from rollout engine. shape: (num_tokens-1, num_layers, moe_router_topk), dtype=int32
     )

@@ -17,6 +17,8 @@ def merge_samples(samples: list[Sample], tokenizer) -> Sample:
 
 def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
     """Merge two samples generated from sibling inference engine calls."""
+    from orbit.rollout.opd_sglang import _TOPK_PAD_LOGPROB, _TOPK_PAD_TOKEN_ID
+
     a, b = deepcopy(a), deepcopy(b)
 
     def _merge_equal_value(field):
@@ -58,6 +60,21 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
         av = av if av is not None else np.zeros((a.response_length, hidden_size), dtype=np.float32)
         bv = bv if bv is not None else np.zeros((b.response_length, hidden_size), dtype=np.float32)
         return np.concatenate([av, np.zeros((obs_len, hidden_size), dtype=av.dtype), bv], axis=0)
+
+    def _merge_optional_topk_rows(field, pad_value):
+        # Optional [R][K] OPD top-k rows (teacher_topk_ids/teacher_topk_logprobs,
+        # --loss-type opd_topk_loss): mirror _merge_optional_per_token, but pad the
+        # injected observation span with K-wide all-pad-sentinel rows (zero valid
+        # mass) instead of scalar zeros, matching _extract_teacher_topk's fixed
+        # row width.
+        av, bv = getattr(a, field), getattr(b, field)
+        if av is None and bv is None:
+            return None
+        top_k = len(av[0]) if av else (len(bv[0]) if bv else 0)
+        pad_row = [pad_value] * top_k
+        av = av if av is not None else [pad_row] * a.response_length
+        bv = bv if bv is not None else [pad_row] * b.response_length
+        return av + [pad_row] * obs_len + bv
 
     def _pop_opd_student_top_logprobs(metadata):
         if metadata is None:
@@ -134,6 +151,8 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
             teacher_log_probs=_merge_optional_per_token("teacher_log_probs"),
             teacher_hidden_states=_merge_optional_hidden_states(),
             opd_reverse_kl=_merge_optional_per_token("opd_reverse_kl"),
+            teacher_topk_ids=_merge_optional_topk_rows("teacher_topk_ids", _TOPK_PAD_TOKEN_ID),
+            teacher_topk_logprobs=_merge_optional_topk_rows("teacher_topk_logprobs", _TOPK_PAD_LOGPROB),
             rollout_routed_experts=b.rollout_routed_experts,
             remove_sample=_merge_equal_value("remove_sample"),
             status=b.status,

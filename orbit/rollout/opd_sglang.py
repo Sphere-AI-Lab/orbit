@@ -65,6 +65,12 @@ TeacherTarget = tuple[str, float]
 # float64 rounding; the floor (log ~= -27.6) is a last-resort guard, not a working range.
 TAIL_PROB_FLOOR = 1e-12
 
+# Padding sentinels for --loss-type opd_topk_loss's retained teacher top-k rows (czy's
+# scheme): _TOPK_PAD_LOGPROB is chosen so exp(_TOPK_PAD_LOGPROB) underflows to exactly
+# 0.0 in fp32, which the loss uses directly as the pad-slot validity mask.
+_TOPK_PAD_TOKEN_ID = 0
+_TOPK_PAD_LOGPROB = -1e4
+
 
 TOP_K_STRATEGIES = {"only-student", "only-teacher", "intersection", "union", "xor"}
 REWARD_WEIGHT_MODES = {"student_p", "teacher_p", "none"}
@@ -390,6 +396,34 @@ def _input_logprob_maps(response: dict[str, Any], field: str, response_length: i
     return [
         _top_entries_to_map(entries) for entries in _trim_input_field(response["meta_info"], field, response_length)
     ]
+
+
+def _extract_teacher_topk(
+    reward_payload: dict[str, Any], response_length: int, top_k: int
+) -> tuple[list[list[int]], list[list[float]]]:
+    """Build per-position ``(ids, logprobs)`` rows of width exactly ``top_k`` for
+    --loss-type opd_topk_loss's retained transport, from the single-teacher
+    payload's ``input_top_logprobs`` maps. Rows are sorted by descending
+    logprob and padded with (_TOPK_PAD_TOKEN_ID, _TOPK_PAD_LOGPROB) when a
+    position has fewer than ``top_k`` entries.
+
+    Raises ``ValueError`` on ensemble payloads (``"teachers" in reward_payload``)
+    -- validation (Task 4) makes this unreachable in production.
+    """
+    if "teachers" in reward_payload:
+        raise ValueError("--loss-type opd_topk_loss does not support teacher ensembles.")
+    if response_length == 0:
+        return [], []
+
+    position_maps = _input_logprob_maps(reward_payload["teacher"], "input_top_logprobs", response_length)
+    ids_rows: list[list[int]] = []
+    logprobs_rows: list[list[float]] = []
+    for position_map in position_maps:
+        entries = sorted(position_map.items(), key=lambda item: item[1], reverse=True)[:top_k]
+        pad_count = top_k - len(entries)
+        ids_rows.append([token_id for token_id, _ in entries] + [_TOPK_PAD_TOKEN_ID] * pad_count)
+        logprobs_rows.append([logprob for _, logprob in entries] + [_TOPK_PAD_LOGPROB] * pad_count)
+    return ids_rows, logprobs_rows
 
 
 def _student_top_logprobs(sample: Sample, response_length: int) -> TopLogprobs:
@@ -907,6 +941,10 @@ def post_process(args, samples: list[Sample], **kwargs):
                 )
         elif top_k > 0:
             sample.opd_reverse_kl = _compute_topk_reverse_kl(args, sample, payload).tolist()
+            if getattr(args, "loss_type", None) == "opd_topk_loss":
+                sample.teacher_topk_ids, sample.teacher_topk_logprobs = _extract_teacher_topk(
+                    payload, sample.response_length, top_k
+                )
             # The harvested per-position top-logprob lists are large (O(R*k) Python
             # objects); once the KL is computed they only bloat Ray transfers.
             sample.metadata.pop(STUDENT_TOP_LOGPROBS_METADATA_KEY, None)
