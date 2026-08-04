@@ -253,6 +253,8 @@ class Sample:
         self.teacher_log_probs = None
         self.teacher_hidden_states = None
         self.opd_reverse_kl = None
+        self.teacher_topk_ids = None
+        self.teacher_topk_logprobs = None
         if self.metadata:
             # metadata is kept across retries, but OPD scoring artifacts belong to
             # the discarded generation and would poison the retried sample.
