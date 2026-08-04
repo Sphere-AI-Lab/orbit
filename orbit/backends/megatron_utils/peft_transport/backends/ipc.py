@@ -113,8 +113,26 @@ class IpcBackend(PeftWeightTransport):
 
         # LoRA path: unload existing adapter before loading new weights so SGLang
         # doesn't layer new tensors on top of stale state.
+        #
+        # Cloned into fresh CUDA allocations before serializing, never shipped
+        # as handles to the raw Megatron param-buffer views. On B200
+        # (2026-08-04 smoke) the engine's TP1 scheduler could not open the
+        # param buffers' IPC handles cross-device -- cudaIpcOpenMemHandle
+        # returned "invalid argument" while TP0's same-device open of the
+        # identical payload succeeded -- yet FullFT's FlattenedTensorBucket and
+        # OFT's flat payload, both fresh contiguous allocations from the same
+        # trainer process, opened fine on both ranks. Not CPU tensors either:
+        # ForkingPickler ships those as resource_sharer fds, which only a
+        # child of the serializing process can redeem, and the scheduler is
+        # not one (AuthenticationError: digest sent was rejected, measured).
+        # The clones must stay alive until the blocking ray.get in
+        # _record_weight_version_after_load returns, so the dict is bound here.
+        cloned_tensors = {
+            name: tensor.detach().clone()
+            for name, tensor in dict(weight_tensors).items()
+        }
         serialized = MultiprocessingSerializer.serialize(
-            dict(weight_tensors), output_str=True
+            cloned_tensors, output_str=True
         )
         gathered = [None] * world_size if is_src else None
         dist.gather_object(
