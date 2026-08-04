@@ -152,6 +152,13 @@ def add_sglang_arguments(parser):
 
 def validate_args(args):
     args.sglang_tp_size = args.rollout_num_gpus_per_engine
+
+    # Fallback net: --true-on-policy-mode can be set directly, bypassing the
+    # --true-on-policy parse-time expansion (orbit/true_on_policy/config.py),
+    # which is the primary path that forces this (miles parity).
+    if args.true_on_policy_mode:
+        args.sglang_enable_deterministic_inference = True
+
     args.sglang_dp_size = args.sglang_data_parallel_size
     args.sglang_pp_size = args.sglang_pipeline_parallel_size
     args.sglang_ep_size = args.sglang_expert_parallel_size
