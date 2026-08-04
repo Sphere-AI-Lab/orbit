@@ -1066,6 +1066,12 @@ def opd_jsd_loss_function(
 
         jsd(b) = b * KL(teacher || M) + (1-b) * KL(student || M)
 
+    `b=0`/`b=1` are their own branch in the loop below, not literal evaluations of the formula
+    above: plugging either endpoint into it degenerates to `KL(Q||Q) = 0` (and, approached from
+    `0 < b < 1`, the `else` branch's `math.log(b)`/`math.log1p(-b)` would hit a domain error
+    exactly there), so the two endpoints are hard-coded to the non-degenerate KL directions
+    stated above instead of falling out of the mixture formula.
+
     `batch["teacher_hidden_states"]` holds one CPU fp32 tensor per sample, already CP-sliced
     row-for-row with this rank's response logits by `get_rollout_data` (the same
     `slice_log_prob_with_cp` treatment `teacher_log_probs` gets), so each chunk only needs a

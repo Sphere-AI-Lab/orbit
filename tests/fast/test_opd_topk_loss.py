@@ -20,12 +20,14 @@ import torch.nn.functional as F
 
 from tests.fast.dist_utils import find_free_port, init_gloo
 
+from orbit.backends.training_utils import teacher_lm_head as teacher_lm_head_module
 from orbit.backends.training_utils.cp_utils import get_sum_of_sample_mean
 from orbit.backends.training_utils.loss import (
     _TOPK_LOG_INF,
     _response_masked_min,
     _topk_kl_terms,
     _topk_overlap_membership,
+    opd_jsd_loss_function,
     opd_topk_loss_function,
 )
 from orbit.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
@@ -619,3 +621,171 @@ def test_topk_overlap_membership_all_sentinel_row_never_matches():
     result = _topk_overlap_membership(student_topk_ids, teacher_ids_for_match)
 
     assert not result.any()
+
+
+# ---------------------------------------------------------------------------
+# Decisive direct-loss equivalence: opd_topk_loss_function vs opd_jsd_loss_function
+# on IDENTICAL inputs in one process. The end-to-end GPU gate (train each loss under
+# a separate launcher, compare curves) is confounded -- different launchers produce
+# different sampled bf16 rollouts, so a curve comparison can never prove numerical
+# equivalence. Running both production loss functions on the same tensors in the
+# same process is the only way to actually settle it, and it's a permanent
+# regression test besides.
+#
+# beta<->direction mapping, derived from opd_jsd_loss_function's code (not assumed
+# from its docstring): the beta==0.0 and beta==1.0 branches bypass the mixture
+# entirely and hard-code
+#   beta=0.0: teacher_probs * (teacher_logp - student_logp) = KL(teacher||student)  (teacher-weighted)
+#   beta=1.0: student_probs * (student_logp - teacher_logp) = KL(student||teacher)  (student-weighted)
+# which is exactly _topk_kl_terms's own forward (teacher-weighted) / reverse
+# (student-weighted) split -- so beta=0.0 pairs with --opd-kl-type forward and
+# beta=1.0 with --opd-kl-type reverse. This is the mapping the docstring already
+# claimed, but it does not fall out of the mixture *formula* shown there (plugging
+# b=0 or b=1 into `jsd(b) = b*KL(teacher||M) + (1-b)*KL(student||M)` degenerates to
+# `KL(Q||Q)=0`, not the stated endpoint value); only the special-cased branches
+# produce it, which is why the docstring is corrected in this same commit to say so.
+# ---------------------------------------------------------------------------
+
+_EQUIV_VOCAB_SIZE = 64
+_EQUIV_CHECKPOINT_KEY = "<test-opd-topk-direct-equivalence>"
+
+
+def _build_direct_equivalence_inputs(seed: int = 12345):
+    """One student logits tensor plus one teacher distribution per response
+    position, expressed in both loss functions' native input formats: jsd's
+    `teacher_hidden_states` (reconstructed through an identity LM head, so the
+    reconstruction is exact) and topk's `teacher_topk_ids` = `arange(V)` /
+    `teacher_topk_logprobs` = `log_softmax(teacher_logits)` -- i.e. k >= vocab,
+    no padding, no truncation."""
+    generator = torch.Generator().manual_seed(seed)
+    response_lengths = [3, 2]
+    prompt_lengths = [2, 3]
+    total_lengths = [p + r for p, r in zip(prompt_lengths, response_lengths, strict=True)]
+
+    unconcat_tokens = [
+        torch.randint(0, _EQUIV_VOCAB_SIZE, (total,), generator=generator) for total in total_lengths
+    ]
+    loss_masks = [torch.ones(r, dtype=torch.int64) for r in response_lengths]
+    logits = torch.randn(1, sum(total_lengths), _EQUIV_VOCAB_SIZE, generator=generator, dtype=torch.float32)
+
+    teacher_logits_per_sample = [
+        torch.randn(r, _EQUIV_VOCAB_SIZE, generator=generator, dtype=torch.float32) for r in response_lengths
+    ]
+    teacher_logprobs_per_sample = [F.log_softmax(tl, dim=-1) for tl in teacher_logits_per_sample]
+
+    common = {
+        "unconcat_tokens": unconcat_tokens,
+        "response_lengths": response_lengths,
+        "total_lengths": total_lengths,
+        "loss_masks": loss_masks,
+    }
+    batch_jsd = {**common, "teacher_hidden_states": teacher_logits_per_sample}
+    teacher_topk_ids = [
+        torch.arange(_EQUIV_VOCAB_SIZE, dtype=torch.long).unsqueeze(0).expand(r, _EQUIV_VOCAB_SIZE).clone()
+        for r in response_lengths
+    ]
+    batch_topk = {
+        **common,
+        "teacher_topk_ids": teacher_topk_ids,
+        "teacher_topk_logprobs": teacher_logprobs_per_sample,
+    }
+
+    sum_of_sample_mean = get_sum_of_sample_mean(total_lengths, response_lengths, loss_masks, False, "thd", None)
+    return logits, batch_jsd, batch_topk, sum_of_sample_mean
+
+
+def _build_jsd_args(beta: float) -> Namespace:
+    return Namespace(
+        opd_jsd_beta=beta,
+        rollout_temperature=1.0,
+        # Inert: real log-probs / summed KL at V=64 never approach these bounds, so
+        # both losses are compared on their unclamped math, not a clamp artifact.
+        opd_log_prob_min_clamp=-1e30,
+        opd_loss_max_clamp=1e30,
+        opd_jsd_pointwise_clip=None,
+        opd_log_topk_overlap=False,
+        use_kl_loss=False,
+        teacher_hf_checkpoint=_EQUIV_CHECKPOINT_KEY,
+        qkv_format="thd",
+        allgather_cp=False,
+        log_probs_chunk_size=-1,
+        true_on_policy_mode=False,
+    )
+
+
+def _build_topk_args(kl_type: str, zero_outside: bool | None) -> Namespace:
+    return Namespace(
+        qkv_format="thd",
+        true_on_policy_mode=False,
+        rollout_temperature=1.0,
+        log_probs_chunk_size=-1,
+        allgather_cp=False,
+        vocab_size=None,
+        opd_kl_type=kl_type,
+        opd_mixed_kl_weight=0.5,
+        opd_topk_zero_outside=zero_outside,
+    )
+
+
+def _run_both_losses(beta: float, kl_type: str, zero_outside: bool | None):
+    _single_state()
+    logits, batch_jsd, batch_topk, sum_of_sample_mean = _build_direct_equivalence_inputs()
+
+    # Identity LM head: teacher_hidden_states @ I.T == teacher_hidden_states exactly
+    # (every output element sums exact zeros plus one exact *1.0 term -- no rounding),
+    # so opd_jsd_loss_function reconstructs precisely the logits placed into
+    # teacher_hidden_states, with zero reconstruction error to worry about.
+    teacher_lm_head_module._TEACHER_LM_HEAD_CACHE[_EQUIV_CHECKPOINT_KEY] = torch.eye(
+        _EQUIV_VOCAB_SIZE, dtype=torch.float32
+    )
+    teacher_lm_head_module._SHARDED.add(_EQUIV_CHECKPOINT_KEY)
+
+    args_jsd = _build_jsd_args(beta)
+    args_topk = _build_topk_args(kl_type, zero_outside)
+
+    logits_jsd = logits.detach().clone().requires_grad_(True)
+    loss_jsd, _ = opd_jsd_loss_function(args_jsd, batch_jsd, logits_jsd, sum_of_sample_mean)
+    loss_jsd.backward()
+
+    logits_topk = logits.detach().clone().requires_grad_(True)
+    loss_topk, _ = opd_topk_loss_function(args_topk, batch_topk, logits_topk, sum_of_sample_mean)
+    loss_topk.backward()
+
+    return loss_jsd.detach(), logits_jsd.grad.detach(), loss_topk.detach(), logits_topk.grad.detach()
+
+
+def test_opd_topk_forward_matches_opd_jsd_beta0_at_k_ge_vocab():
+    """k >= vocab (teacher_topk_ids = arange(V): no padding, no truncation): the
+    top-k forward KL(teacher||student) must equal opd_jsd_loss's beta=0.0 branch,
+    which sums the identical (teacher, student) distributions the identical way.
+    Both losses read the same student logits through the same `get_responses`
+    slicing, so this also pins gradient equivalence w.r.t. those logits -- the
+    part that actually matters for training, not just the scalar loss value.
+
+    Observed: bit-exact (0.0 diff, both loss and grad) -- forward never touches the
+    entropy kernel, so there is no second code path to disagree with the first."""
+    loss_jsd, grad_jsd, loss_topk, grad_topk = _run_both_losses(beta=0.0, kl_type="forward", zero_outside=None)
+
+    torch.testing.assert_close(loss_topk, loss_jsd, atol=1e-5, rtol=1e-5)
+    torch.testing.assert_close(grad_topk, grad_jsd, atol=1e-5, rtol=1e-5)
+
+
+def test_opd_topk_reverse_matches_opd_jsd_beta1_at_k_ge_vocab():
+    """k >= vocab: the top-k reverse KL(student||teacher) with the zero-outside
+    correction (a no-op here -- there is no student mass outside a full-support
+    top-k) must equal opd_jsd_loss's beta=1.0 branch. Unlike the forward case, the
+    correction recomputes `sum_v student_prob(v) * student_logprob(v)` (and relies
+    on `sum_v student_prob(v) == 1`) through the entropy kernel
+    (`_VocabParallelEntropy`), a second, independently-implemented code path from
+    the plain log_softmax+gather the rest of the loss uses -- so the two losses
+    only agree up to float32 cross-path rounding here, not bit-exactly.
+
+    Observed max over a 20-seed x {16, 64, 256}-vocab sweep: loss diff < 2e-5, grad
+    diff < 3e-6 -- both several orders of magnitude below the tolerance here, and
+    consistent with float32 cross-path rounding rather than a real sign/semantic
+    mismatch (which would show up at O(0.1-1.0), the scale of the quantities
+    themselves, not O(1e-5))."""
+    loss_jsd, grad_jsd, loss_topk, grad_topk = _run_both_losses(beta=1.0, kl_type="reverse", zero_outside=True)
+
+    torch.testing.assert_close(loss_topk, loss_jsd, atol=1e-4, rtol=1e-4)
+    torch.testing.assert_close(grad_topk, grad_jsd, atol=1e-4, rtol=1e-4)
