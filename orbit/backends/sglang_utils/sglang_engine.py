@@ -447,8 +447,24 @@ class SGLangEngine(RayActor):
         actor can embed multiprocessing resource-sharer handles with a
         different auth key, so distributed Ray transport serializes here,
         inside the SGLangEngine actor that owns the server process.
+
+        Serialized under the ``file_system`` sharing strategy, never the
+        ``file_descriptor`` default. The endpoint takes ONE payload and every
+        TP-rank scheduler deserializes it, but a fd-strategy DupFd is
+        redeemable exactly once: on a TP=2 engine, TP0's deserialize consumes
+        the fd and TP1 dies on EOFError in recvfds (measured on the
+        2026-08-04 B200 probe, reproduced deterministically on CPU). A
+        file_system storage is a named shm segment any process can attach
+        any number of times, which is what a broadcast payload needs.
         """
-        serialized_tensors = MultiprocessingSerializer.serialize(tensors, output_str=True)
+        import torch.multiprocessing as torch_mp  # local: the module keeps torch off its import path
+
+        old_strategy = torch_mp.get_sharing_strategy()
+        torch_mp.set_sharing_strategy("file_system")
+        try:
+            serialized_tensors = MultiprocessingSerializer.serialize(tensors, output_str=True)
+        finally:
+            torch_mp.set_sharing_strategy(old_strategy)
         return self.load_lora_adapter_from_tensors(
             lora_name=lora_name,
             serialized_tensors=serialized_tensors,
