@@ -20,8 +20,10 @@ import torch.nn.functional as F
 
 from tests.fast.dist_utils import find_free_port, init_gloo
 
+from orbit.backends.training_utils.cp_utils import get_sum_of_sample_mean
 from orbit.backends.training_utils.loss import (
     _TOPK_LOG_INF,
+    _response_masked_min,
     _topk_kl_terms,
     opd_topk_loss_function,
 )
@@ -243,6 +245,64 @@ def test_zero_outside_with_forward_warns_and_is_inert():
 
 
 # ---------------------------------------------------------------------------
+# Regression (code review round 1): _response_masked_min's empty/all-masked-sample
+# identity. `-_response_masked_max(-x, ...)` silently reported `-0.` for any batch
+# containing an empty or fully-masked sample, because `_response_masked_max`'s `0`
+# fallback (a safe identity for maxing a non-negative quantity) becomes the *supremum*
+# once negated into a min -- it then wins over every real value in [0, 1] and dominates
+# the reported minimum. Reviewer repro: real per-sample masses [0.66, 0.70, 0.58] with
+# one empty sample -> old code reported -0. instead of 0.58.
+# ---------------------------------------------------------------------------
+
+
+def test_response_masked_min_ignores_empty_sample_not_zero():
+    _single_state()
+    real_masses = torch.tensor([0.66, 0.70, 0.58])  # sample 0's 3 real per-position masses
+    x = torch.cat([real_masses, torch.zeros(0)])  # sample 1: empty response, contributes 0 rows
+
+    result = _response_masked_min(
+        x,
+        total_lengths=[5, 2],
+        response_lengths=[3, 0],
+        loss_masks=[torch.ones(3, dtype=torch.int64), torch.zeros(0, dtype=torch.int64)],
+    )
+
+    assert torch.allclose(result, torch.tensor(0.58), atol=1e-6), result
+
+
+def test_response_masked_min_all_masked_sample_excluded_too():
+    """A non-empty but fully-masked sample (loss_mask all 0) must also be excluded from
+    the min, not just a genuinely empty (R=0) one."""
+    _single_state()
+    real_masses = torch.tensor([0.9])
+    masked_out_masses = torch.tensor([0.01, 0.02])  # would wrongly win an unguarded min
+    x = torch.cat([real_masses, masked_out_masses])
+
+    result = _response_masked_min(
+        x,
+        total_lengths=[1, 2],
+        response_lengths=[1, 2],
+        loss_masks=[torch.ones(1, dtype=torch.int64), torch.zeros(2, dtype=torch.int64)],
+    )
+
+    assert torch.allclose(result, torch.tensor(0.9), atol=1e-6), result
+
+
+def test_response_masked_min_no_valid_sample_falls_back_to_one():
+    _single_state()
+    x = torch.zeros(0)
+
+    result = _response_masked_min(
+        x,
+        total_lengths=[2],
+        response_lengths=[0],
+        loss_masks=[torch.zeros(0, dtype=torch.int64)],
+    )
+
+    assert torch.allclose(result, torch.tensor(1.0)), result
+
+
+# ---------------------------------------------------------------------------
 # Step 3: opd_topk_loss_function integration test
 # ---------------------------------------------------------------------------
 
@@ -335,3 +395,84 @@ def test_opd_topk_loss_function_end_to_end(kl_type):
     ):
         assert key in metrics, key
         assert torch.isfinite(metrics[key]), key
+
+
+def test_opd_topk_loss_function_diagnostics_match_hand_computed_references():
+    """Regression for finding 3 (code review round 1): the diagnostics were only ever
+    checked for finiteness, which is exactly why finding 1's `teacher_mass_min` sign bug
+    slipped through. This pins all four `opd_topk/*` metrics against references computed
+    independently in the test (fixed, non-random logits; the real `get_sum_of_sample_mean`
+    reducer, not a toy `.sum()`), including a genuinely empty-response sample so
+    `teacher_mass_min` must equal the min over the *real* sample's positions only."""
+    _single_state()
+
+    # sample 0: 3 real response positions; sample 1: empty response (R=0).
+    response_lengths = [3, 0]
+    total_lengths = [5, 2]  # prompt_length=2 for both
+    unconcat_tokens = [torch.tensor([0, 1, 2, 3, 4]), torch.tensor([0, 1])]
+    loss_masks = [torch.ones(3, dtype=torch.int64), torch.zeros(0, dtype=torch.int64)]
+
+    teacher_logits_0 = torch.tensor(
+        [
+            [2.0, -1.0, 0.5, 3.0, -2.0, 1.0],
+            [0.0, 1.0, 2.0, -1.0, 0.5, -0.5],
+            [1.0, 1.0, -1.0, 0.5, 2.0, 0.0],
+        ]
+    )
+    student_logits_0 = torch.tensor(
+        [
+            [1.0, 0.5, -0.5, 2.0, 1.5, 0.0],
+            [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            [0.5, -0.5, 1.5, 0.0, -1.0, 2.0],
+        ]
+    )
+
+    t_lp_0 = F.log_softmax(teacher_logits_0, dim=-1)
+    ids_0 = torch.topk(t_lp_0, k=K, dim=-1).indices
+    t_topk_lp_0 = t_lp_0.gather(-1, ids_0)
+
+    teacher_topk_ids = [ids_0, torch.zeros((0, K), dtype=torch.long)]
+    teacher_topk_logprobs = [t_topk_lp_0, torch.zeros((0, K), dtype=torch.float32)]
+
+    # Embed student_logits_0 at the exact rows get_responses' thd slicing picks out for
+    # sample 0: end=5, start=end-response_length=2 -> logits[start-1:end-1] = logits[1:4].
+    full_logits = torch.zeros(1, sum(total_lengths), VOCAB)
+    full_logits[0, 1:4] = student_logits_0
+    logits = full_logits.detach().clone().requires_grad_(True)
+
+    batch = {
+        "unconcat_tokens": unconcat_tokens,
+        "response_lengths": response_lengths,
+        "total_lengths": total_lengths,
+        "loss_masks": loss_masks,
+        "teacher_topk_ids": teacher_topk_ids,
+        "teacher_topk_logprobs": teacher_topk_logprobs,
+    }
+    args = _build_args(kl_type="reverse")
+    sum_of_sample_mean = get_sum_of_sample_mean(total_lengths, response_lengths, loss_masks, False, "thd", None)
+
+    loss, metrics = opd_topk_loss_function(args, batch, logits, sum_of_sample_mean)
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert torch.isfinite(logits.grad).all()
+
+    # Independent references built from the same fixed logits, not by reusing the
+    # implementation's own vectorized ops.
+    s_lp_0 = F.log_softmax(student_logits_0, dim=-1)
+    teacher_mass_ref = t_topk_lp_0.exp().sum(dim=-1)  # [3], no padding (V=6 >= K=2)
+    student_mass_ref = s_lp_0.exp().gather(-1, ids_0).sum(dim=-1)  # [3]
+    overlap_ref = torch.tensor(
+        [
+            len(set(torch.topk(student_logits_0[r], k=K).indices.tolist()) & set(ids_0[r].tolist())) / K
+            for r in range(3)
+        ]
+    )
+
+    # sample 1 is empty: get_sum_of_sample_mean's per-sample term for it is 0/clamp_min(0,1)
+    # = 0, so the aggregate below reduces to sample 0's own mean over its 3 positions.
+    torch.testing.assert_close(metrics["opd_topk/teacher_mass"], teacher_mass_ref.mean())
+    torch.testing.assert_close(metrics["opd_topk/student_mass"], student_mass_ref.mean())
+    torch.testing.assert_close(metrics["opd_topk/overlap_ratio"], overlap_ref.mean())
+    # The regression itself: min over the *real* sample's positions only, not -0./0.
+    # from the empty sample 1.
+    torch.testing.assert_close(metrics["opd_topk/teacher_mass_min"], teacher_mass_ref.min())

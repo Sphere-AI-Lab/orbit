@@ -90,6 +90,64 @@ def _response_masked_max(
     return torch.stack(max_values).max()
 
 
+def _response_masked_min(
+    x: torch.Tensor,
+    *,
+    total_lengths: list[int],
+    response_lengths: list[int],
+    loss_masks: list[torch.Tensor],
+    qkv_format: str = "thd",
+    max_seq_lens: list[int] | None = None,
+) -> torch.Tensor:
+    """Minimum of `x` over loss-mask-valid response positions -- the `_response_masked_max`
+    sibling for diagnostics that want a worst-case floor (e.g. `opd_topk/teacher_mass_min`).
+
+    Not implemented as `-_response_masked_max(-x, ...)`: `_response_masked_max`'s fallback
+    of `0` for an empty/all-masked sample is a safe *identity* only for a max of a
+    non-negative quantity (0 is a lower bound, so it can never win a real max). Negated
+    into a min, that same `0` becomes the *supremum* of `-x` for `x` in `[0, 1]` (like
+    `teacher_mass`) and would silently dominate every real value -- reported min ends up
+    `-0.` regardless of the real data (caught by review; see the regression test). Samples
+    with nothing valid are therefore skipped entirely here rather than injected as a fake
+    reading; if literally no sample in the microbatch has a valid position, there is no
+    worst case to report, so this returns `1.0` (this metric's natural upper bound, i.e.
+    "no evidence of a problem") rather than fabricate one.
+    """
+    parallel_state = get_parallel_state()
+    cp_size = parallel_state.cp.size
+
+    if cp_size == 1:
+        chunk_lengths = response_lengths
+        chunked_loss_masks = loss_masks
+    else:
+        chunk_lengths = []
+        chunked_loss_masks = []
+        for i, (total_length, response_length, loss_mask) in enumerate(
+            zip(total_lengths, response_lengths, loss_masks, strict=False)
+        ):
+            max_seq_len = max_seq_lens[i] if max_seq_lens is not None else None
+            prompt_length = total_length - response_length
+            _, _, _, tokens_offset = get_logits_and_tokens_offset_with_cp(
+                total_length, response_length, qkv_format, max_seq_len
+            )
+            loss_mask_0 = loss_mask[tokens_offset[0][0] - prompt_length : tokens_offset[0][1] - prompt_length]
+            loss_mask_1 = loss_mask[tokens_offset[1][0] - prompt_length : tokens_offset[1][1] - prompt_length]
+            chunked_loss_mask = torch.cat([loss_mask_0, loss_mask_1], dim=0)
+            chunked_loss_masks.append(chunked_loss_mask)
+            chunk_lengths.append(chunked_loss_mask.size(0))
+
+    min_values = []
+    for x_i, loss_mask_i in zip(x.split(chunk_lengths, dim=0), chunked_loss_masks, strict=False):
+        valid_mask = loss_mask_i.to(device=x_i.device, dtype=torch.bool)
+        if x_i.numel() == 0 or not bool(valid_mask.any()):
+            continue
+        min_values.append(x_i.masked_fill(~valid_mask, torch.inf).min())
+
+    if not min_values:
+        return torch.ones((), dtype=x.dtype, device=x.device)
+    return torch.stack(min_values).min()
+
+
 def get_responses(
     logits: torch.Tensor,
     *,
@@ -1336,9 +1394,18 @@ def opd_topk_loss_function(
     Returns:
         Tuple of `(loss, metrics)`.
     """
+    parallel_state = get_parallel_state()
     device = logits.device
     teacher_topk_ids = [t.to(device=device) for t in batch["teacher_topk_ids"]]
     teacher_topk_logprobs = [t.to(device=device) for t in batch["teacher_topk_logprobs"]]
+
+    # For the overlap_ratio diagnostic's *student* top-k: dev's opd_jsd pattern (mirrors
+    # `vocab_parallel_topk_indices`'s two call sites in opd_jsd_loss_function above) --
+    # the student's own local shard is the authority on the vocab split, and vocab_start
+    # is only meaningful once TP is actually on.
+    tp_group = parallel_state.tp.group if parallel_state.tp.size > 1 else None
+    local_vocab_size = logits.size(-1)
+    vocab_start = vocab_shard_start(local_vocab_size) if tp_group is not None else 0
 
     kl_type, mixed_weight = _resolve_opd_topk_kl_type(args)
     zero_outside = getattr(args, "opd_topk_zero_outside", None)
@@ -1391,8 +1458,14 @@ def opd_topk_loss_function(
         student_mass_per_sample.append(masked_student_weight.sum(dim=-1))
 
         k = t_ids.size(-1)
-        k_local = min(k, logits_chunk.size(-1))
-        student_topk_ids = torch.topk(logits_chunk, k=k_local, dim=-1).indices
+        # vocab_parallel_topk_indices returns *global* ids (shard-local candidates offset
+        # by vocab_start, then all-gathered/re-ranked across TP -- see its docstring):
+        # a plain local torch.topk on logits_chunk would instead be shard-local ids in
+        # [0, V_local), only coincidentally comparable to the teacher's global ids at
+        # tp.size == 1. Raw logits (not log-probs) are fine here: log_softmax only
+        # shifts each row by a per-row constant, so it never changes the top-k ordering,
+        # and this is diagnostic-only (no_grad inside the helper).
+        student_topk_ids = vocab_parallel_topk_indices(logits_chunk, k, vocab_start, tp_group)
         teacher_ids_for_match = torch.where(valid, t_ids, torch.full_like(t_ids, -1))
         overlap_match = student_topk_ids.unsqueeze(-1) == teacher_ids_for_match.unsqueeze(-2)
         overlap_ratio_per_sample.append(overlap_match.any(dim=-1).sum(dim=-1).float() / max(k, 1))
@@ -1408,10 +1481,8 @@ def opd_topk_loss_function(
     student_mass = torch.cat(student_mass_per_sample, dim=0)
     overlap_ratio = torch.cat(overlap_ratio_per_sample, dim=0)
 
-    # min(x) == -max(-x): reuses `_response_masked_max`'s CP-aware chunking and its
-    # already-guarded empty/all-masked-out fallback (0) instead of duplicating it.
-    teacher_mass_min = -_response_masked_max(
-        -teacher_mass,
+    teacher_mass_min = _response_masked_min(
+        teacher_mass,
         total_lengths=total_lengths,
         response_lengths=response_lengths,
         loss_masks=batch["loss_masks"],
