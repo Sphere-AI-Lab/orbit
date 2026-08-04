@@ -5,6 +5,7 @@ import torch
 
 from orbit.backends.training_utils import cp_utils
 from orbit.backends.training_utils import data as data_utils
+from orbit.backends.training_utils.data import DataIterator, get_batch
 from orbit.backends.training_utils.parallel import GroupInfo, ParallelState
 from orbit.utils.ppo_utils import apply_opd_kl_to_advantages
 
@@ -117,3 +118,73 @@ def test_sglang_opd_response_fields_follow_rollout_log_prob_cp_slice(
             advantages[0],
             1.0 - 0.5 * rollout_data[opd_key][0],
         )
+
+
+# --- get_batch threads teacher_topk_ids/teacher_topk_logprobs through -------
+#
+# Gate-discovered defect: the megatron forward_step's get_batch(...) key list
+# carried "teacher_hidden_states" but not "teacher_topk_ids"/"teacher_topk_logprobs",
+# so opd_topk_loss's KeyError: 'teacher_topk_ids' surfaced only once training
+# actually reached loss_function. This exercises the real get_batch/DataIterator
+# path (cp_size=1, qkv_format="thd") with a synthetic 4-sample rollout split into
+# two micro-batches, asserting both keys survive and stay aligned to the right
+# sample per micro-batch. The single hard `.cuda()` call inside get_batch's thd
+# cu_seqlens path (independent of torch.cuda.current_device) is monkeypatched to
+# stay on CPU, mirroring this file's existing torch.cuda.current_device patch.
+
+
+def test_get_batch_threads_teacher_topk_keys_with_micro_batch_alignment(monkeypatch: pytest.MonkeyPatch) -> None:
+    parallel_state = _parallel_state(cp_size=1)
+    monkeypatch.setattr(data_utils, "get_parallel_state", lambda: parallel_state)
+    monkeypatch.setattr(cp_utils, "get_parallel_state", lambda: parallel_state)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(torch.Tensor, "cuda", lambda self, *args, **kwargs: self)
+
+    # 4 samples, response_lengths 3/2/1/2, each already tensorized (mirroring what
+    # get_rollout_data's _tensorize_cp_sliced_log_probs does before get_batch runs).
+    teacher_topk_ids = [
+        torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=torch.long),
+        torch.tensor([[7, 8], [9, 10]], dtype=torch.long),
+        torch.tensor([[11, 12]], dtype=torch.long),
+        torch.tensor([[13, 14], [15, 16]], dtype=torch.long),
+    ]
+    teacher_topk_logprobs = [
+        torch.tensor([[-0.1, -0.2], [-0.3, -0.4], [-0.5, -0.6]]),
+        torch.tensor([[-0.7, -0.8], [-0.9, -1.0]]),
+        torch.tensor([[-1.1, -1.2]]),
+        torch.tensor([[-1.3, -1.4], [-1.5, -1.6]]),
+    ]
+    rollout_data = {
+        "tokens": [torch.arange(7), torch.arange(5), torch.arange(4), torch.arange(6)],
+        "loss_masks": [torch.ones(3), torch.ones(2), torch.ones(1), torch.ones(2)],
+        "total_lengths": [7, 5, 4, 6],
+        "response_lengths": [3, 2, 1, 2],
+        "max_seq_lens": [7, 5, 4, 6],
+        "teacher_topk_ids": teacher_topk_ids,
+        "teacher_topk_logprobs": teacher_topk_logprobs,
+    }
+
+    keys = [
+        "tokens",
+        "total_lengths",
+        "response_lengths",
+        "loss_masks",
+        "teacher_topk_ids",
+        "teacher_topk_logprobs",
+        "max_seq_lens",
+    ]
+    # Same as model.py's forward_step: micro_batch_size=2 -> batch 1 gets samples
+    # [0, 1], batch 2 gets samples [2, 3].
+    iterator = DataIterator(rollout_data, micro_batch_size=2)
+
+    batch1 = get_batch(iterator, keys, pad_multiplier=16, qkv_format="thd", allgather_cp=False)
+    assert "teacher_topk_ids" in batch1
+    assert "teacher_topk_logprobs" in batch1
+    torch.testing.assert_close(batch1["teacher_topk_ids"], teacher_topk_ids[0:2])
+    torch.testing.assert_close(batch1["teacher_topk_logprobs"], teacher_topk_logprobs[0:2])
+
+    batch2 = get_batch(iterator, keys, pad_multiplier=16, qkv_format="thd", allgather_cp=False)
+    assert "teacher_topk_ids" in batch2
+    assert "teacher_topk_logprobs" in batch2
+    torch.testing.assert_close(batch2["teacher_topk_ids"], teacher_topk_ids[2:4])
+    torch.testing.assert_close(batch2["teacher_topk_logprobs"], teacher_topk_logprobs[2:4])
