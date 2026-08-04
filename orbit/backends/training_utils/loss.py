@@ -9,6 +9,7 @@ from torch.utils.checkpoint import checkpoint
 from orbit.utils.distributed_utils import distributed_masked_whiten
 from orbit.utils.misc import load_function
 from orbit.utils.ppo_utils import (
+    _safe_clamp_log_ratio,
     _safe_exp_neg_ppo_kl,
     apply_opd_icepop_gate,
     apply_opd_kl_to_advantages,
@@ -762,7 +763,10 @@ def policy_loss_function(
         ref_log_probs = torch.cat(ref_log_probs, dim=0)
         importance_ratio = None
         if args.use_unbiased_kl:
-            importance_ratio = torch.exp(log_probs - old_log_probs)
+            # Route the exponent through the same safe clamp as every other
+            # ratio path: async/off-policy drift can push |log_probs -
+            # old_log_probs| past exp overflow. Differentiable inside the band.
+            importance_ratio = _safe_clamp_log_ratio(log_probs - old_log_probs).exp()
         kl = compute_approx_kl(
             log_probs,
             ref_log_probs,
