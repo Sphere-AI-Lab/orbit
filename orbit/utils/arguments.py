@@ -68,6 +68,45 @@ def uses_adapter_critic(args) -> bool:
     return getattr(args, "use_critic", False) and getattr(args, "critic_mode", "full") == "adapter"
 
 
+def validate_async_off_policy_correction(args) -> None:
+    """Require an explicit behavior-policy choice for async PPO training.
+
+    In the async train loop the next rollout is generated before the current
+    weight update is published, so samples can come from a stale policy. With
+    the default flags the PPO ratio denominator (``log_probs``) is recomputed
+    by the *current* actor, silently anchoring clipping (and KL-shaped
+    advantages) to a policy that never generated the trajectory; the recorded
+    ``weight_versions`` are a metric, not an enforcement mechanism.
+
+    Called from ``train_async.py`` only — synchronous training recomputes log
+    probs against the same weights that generated the rollout. Mirrors miles
+    bc232eb88 with the ``use_critic`` gate adapted to dev's estimator arg
+    (PPO implies a critic in both adapter and separate modes).
+    """
+    if args.advantage_estimator != "ppo":
+        return
+    assert args.use_rollout_logprobs or args.use_tis or args.keep_old_actor, (
+        "Async PPO training requires an explicit behavior-policy correction, because rollouts are "
+        "generated before the current weight update while log probs are recomputed by the current "
+        "actor by default. Pass one of: --use-rollout-logprobs (use the rollout engine's log probs "
+        "as the ratio denominator), --use-tis (truncated importance sampling correction), or "
+        "--keep-old-actor (recompute the denominator with the weights the rollout engines used)."
+    )
+
+
+def validate_rollout_temperature(args) -> None:
+    """Reject non-positive training rollout temperatures (spec Phase S).
+
+    ``get_responses`` divides logits by this value; 0 would produce infs and
+    a negative value silently flips the distribution. Greedy evaluation is
+    configured via the eval args, not by zeroing the training temperature.
+    """
+    if float(args.rollout_temperature) <= 0:
+        raise ValueError(
+            f"--rollout-temperature must be > 0 for training rollouts, got {args.rollout_temperature}."
+        )
+
+
 def add_on_policy_distillation_arguments(parser):
     """On-policy distillation (OPD) teacher config. Mirrors slime arguments.py:1084-1125."""
     parser.add_argument(
@@ -3198,6 +3237,8 @@ def orbit_validate_args(args):
 
 
 def _common_orbit_validate_args(args):
+    validate_rollout_temperature(args)
+
     args.eval_datasets = _resolve_eval_datasets(args)
 
     # Normalize --tito-allowed-append-roles: lowercase + deduplicate.

@@ -9,6 +9,7 @@ from torch.utils.checkpoint import checkpoint
 from orbit.utils.distributed_utils import distributed_masked_whiten
 from orbit.utils.misc import load_function
 from orbit.utils.ppo_utils import (
+    _safe_clamp_log_ratio,
     _safe_exp_neg_ppo_kl,
     apply_opd_icepop_gate,
     apply_opd_kl_to_advantages,
@@ -136,7 +137,10 @@ def get_responses(
     # to the input but allocates a fresh full-vocab tensor (~6.5 GiB at
     # MAX_TOKENS_PER_GPU=16384 with fp32 logits) that immediately drives the
     # CUDA allocator near OOM on the GRPO loss path.
-    if rollout_temperature != 1.0:
+    # Scale only vocab-shaped logits: value logits [*, 1] are not a distribution
+    # (miles cc93d97c4). Non-positive temperatures are rejected at arg validation;
+    # the > 0 check here keeps the guard total if a caller bypasses validation.
+    if logits.size(-1) > 1 and rollout_temperature > 0 and rollout_temperature != 1.0:
         logits = logits.div(rollout_temperature)
     if args.true_on_policy_mode:
         # Parity contract: SGLang computes log_softmax over bf16 logits, so the
@@ -759,7 +763,10 @@ def policy_loss_function(
         ref_log_probs = torch.cat(ref_log_probs, dim=0)
         importance_ratio = None
         if args.use_unbiased_kl:
-            importance_ratio = torch.exp(log_probs - old_log_probs)
+            # Route the exponent through the same safe clamp as every other
+            # ratio path: async/off-policy drift can push |log_probs -
+            # old_log_probs| past exp overflow. Differentiable inside the band.
+            importance_ratio = _safe_clamp_log_ratio(log_probs - old_log_probs).exp()
         kl = compute_approx_kl(
             log_probs,
             ref_log_probs,
