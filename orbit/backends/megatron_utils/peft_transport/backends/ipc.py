@@ -114,44 +114,49 @@ class IpcBackend(PeftWeightTransport):
         # LoRA path: unload existing adapter before loading new weights so SGLang
         # doesn't layer new tensors on top of stale state.
         #
-        # Cloned into fresh CUDA allocations before serializing, never shipped
-        # as handles to the raw Megatron param-buffer views. On B200
-        # (2026-08-04 smoke) the engine's TP1 scheduler could not open the
-        # param buffers' IPC handles cross-device -- cudaIpcOpenMemHandle
-        # returned "invalid argument" while TP0's same-device open of the
-        # identical payload succeeded -- yet FullFT's FlattenedTensorBucket and
-        # OFT's flat payload, both fresh contiguous allocations from the same
-        # trainer process, opened fine on both ranks. Not CPU tensors either:
-        # ForkingPickler ships those as resource_sharer fds, which only a
-        # child of the serializing process can redeem, and the scheduler is
-        # not one (AuthenticationError: digest sent was rejected, measured).
-        # The clones must stay alive until the blocking ray.get in
-        # _record_weight_version_after_load returns, so the dict is bound here.
-        cloned_tensors = {
-            name: tensor.detach().clone()
-            for name, tensor in dict(weight_tensors).items()
-        }
-        serialized = MultiprocessingSerializer.serialize(
-            cloned_tensors, output_str=True
-        )
-        gathered = [None] * world_size if is_src else None
-        dist.gather_object(
-            serialized,
-            object_gather_list=gathered,
-            dst=self.ipc_gather_src,
-            group=self.ipc_gather_group,
-        )
+        # CPU copies through the engine actor's from_ray_tensors path -- never
+        # CUDA IPC handles, and never trainer-side CPU serialization. Both were
+        # measured failures on B200 (2026-08-04 smokes):
+        #   - CUDA handles: the scheduler's cross-device cudaIpcOpenMemHandle
+        #     fails with "invalid argument" -- deterministically for raw
+        #     Megatron param-buffer views, and still intermittently for fresh
+        #     clones (one engine in four at the first smoke push).
+        #   - Trainer-side CPU serialize: ForkingPickler ships storages as
+        #     multiprocessing resource-sharer fds, redeemable only by the
+        #     serializer's descendants; the scheduler is not one
+        #     (AuthenticationError: digest sent was rejected).
+        # The engine actor IS the server process's parent, so it re-serializes
+        # legitimately -- the same reasoning, and the same receive path, as the
+        # distributed RayObjectBackend.
+        send_result: PeftSendResult | None = None
+        load_error: Exception | None = None
         if is_src:
+            cpu_tensors = {
+                name: tensor.detach().to(device="cpu", copy=True).contiguous()
+                for name, tensor in weight_tensors
+            }
             engine = self._engines[0]
-            if self._peft_loaded:
-                ray.get(engine.unload_lora_adapter.remote(lora_name=self.sync_spec.adapter_name))
-            load_ref = engine.load_lora_adapter_from_tensors.remote(
-                lora_name=self.sync_spec.adapter_name,
-                serialized_tensors=gathered[0],
-                config_dict=self.sync_spec.adapter_config,
-            )
-            self._peft_loaded = True
-            return self._record_weight_version_after_load(engine, load_ref, weight_version)
+            try:
+                if self._peft_loaded:
+                    ray.get(engine.unload_lora_adapter.remote(lora_name=self.sync_spec.adapter_name))
+                load_ref = engine.load_lora_adapter_from_ray_tensors.remote(
+                    lora_name=self.sync_spec.adapter_name,
+                    tensors=cpu_tensors,
+                    config_dict=self.sync_spec.adapter_config,
+                )
+                self._peft_loaded = True
+                send_result = self._record_weight_version_after_load(engine, load_ref, weight_version)
+            except Exception as exc:  # noqa: BLE001  -- re-raised after the barrier
+                load_error = exc
+        # The old gather_object was a rendezvous as well as a (redundant, only
+        # gathered[0] was read) data move. Peers returning before the src rank
+        # finishes its RPCs is a timing change this fix must not smuggle in,
+        # so the collective stays as a barrier.
+        dist.barrier(group=self.ipc_gather_group)
+        if load_error is not None:
+            raise load_error
+        if send_result is not None:
+            return send_result
         return PeftSendResult(refs=[])
 
     def _record_weight_version_after_load(self, engine, load_ref: ObjectRef, weight_version: int) -> PeftSendResult:
