@@ -1245,6 +1245,14 @@ def _topk_kl_terms(
     slots, so a padded column changes nothing (czy's `_topk_forward_kl`, generalized to
     all three directions; their `renormalize` branch is dropped per spec).
 
+    The same float32 underflow floor sits at log-prob ~-103.97 (ln(2**-149), the
+    smallest denormal): a genuine (non-pad) teacher entry that far below the peak also
+    reads as invalid and is dropped from the support the same way a pad slot is, with
+    the reverse-direction correction re-flooring it at `_TOPK_LOG_INF` (-100.0) instead
+    of its true value -- unreachable at any realistic `k` (the teacher's own top-k
+    entries are never that improbable), but reachable once `k` approaches the full
+    vocabulary.
+
     Forward (teacher-weighted, `--opd-kl-type forward`):
         `sum_K valid * teacher_prob * (teacher_log_prob - student_log_prob)`
     `zero_outside` is structurally inert here -- the sum never leaves the teacher's own
@@ -1398,6 +1406,15 @@ def opd_topk_loss_function(
     device = logits.device
     teacher_topk_ids = [t.to(device=device) for t in batch["teacher_topk_ids"]]
     teacher_topk_logprobs = [t.to(device=device) for t in batch["teacher_topk_logprobs"]]
+    # The real transport (get_rollout_data's torch.tensor(...) over the raw per-sample
+    # list[list[int]] payload) collapses an empty response's row list (`[]`, not
+    # `[[], ...]`) to a 1-D `[0]` tensor rather than `[0, K]`. Normalize to 2-D here --
+    # R=0 either way, K is unknowable from an empty sample and irrelevant since there
+    # are no rows -- so the per-sample `.sum(dim=-1)` diagnostics below reduce the K
+    # axis, not the (already-empty) R axis, and concatenate cleanly with real samples'
+    # `[R]`-shaped output instead of collapsing to a 0-d scalar.
+    teacher_topk_ids = [t if t.dim() > 1 else t.reshape(0, 0) for t in teacher_topk_ids]
+    teacher_topk_logprobs = [t if t.dim() > 1 else t.reshape(0, 0) for t in teacher_topk_logprobs]
 
     # For the overlap_ratio diagnostic's *student* top-k: dev's opd_jsd pattern (mirrors
     # `vocab_parallel_topk_indices`'s two call sites in opd_jsd_loss_function above) --
@@ -1406,6 +1423,20 @@ def opd_topk_loss_function(
     tp_group = parallel_state.tp.group if parallel_state.tp.size > 1 else None
     local_vocab_size = logits.size(-1)
     vocab_start = vocab_shard_start(local_vocab_size) if tp_group is not None else 0
+
+    # A bigger-config-vocab teacher (e.g. Qwen2.5-7B pads to 152064 vs a <3B student's
+    # 151936) can report top-k ids past the student's own vocabulary. Left alone these
+    # break compute_vocab_parallel_topk_log_probs's gather: at TP=1 they index-error; at
+    # TP>1 every rank's ownership mask is False for them, so the gather silently returns
+    # a fake `0 - log_normalizer` log-prob instead. Mask them to a pad slot before the
+    # gather -- id -> 0, logprob -> -1e4 -- exactly like the transport's own padding
+    # (orbit.rollout.opd_sglang._TOPK_PAD_TOKEN_ID/_TOPK_PAD_LOGPROB): the -1e4 underflows
+    # to exact 0 mass under _topk_kl_terms's `valid` mask.
+    global_student_vocab = local_vocab_size * parallel_state.tp.size
+    for i, (t_ids, t_lp) in enumerate(zip(teacher_topk_ids, teacher_topk_logprobs, strict=True)):
+        overhang = t_ids >= global_student_vocab
+        teacher_topk_ids[i] = torch.where(overhang, torch.zeros_like(t_ids), t_ids)
+        teacher_topk_logprobs[i] = torch.where(overhang, torch.full_like(t_lp, -1e4), t_lp)
 
     kl_type, mixed_weight = _resolve_opd_topk_kl_type(args)
     zero_outside = getattr(args, "opd_topk_zero_outside", None)

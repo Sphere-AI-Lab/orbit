@@ -350,8 +350,11 @@ def _build_batch(generator: torch.Generator):
     teacher_topk_logprobs = []
     for r in response_lengths:
         if r == 0:
-            teacher_topk_ids.append(torch.zeros((0, K), dtype=torch.long))
-            teacher_topk_logprobs.append(torch.zeros((0, K), dtype=torch.float32))
+            # Real transport shape for an empty response: the raw per-sample payload
+            # is a plain Python `[]` (not `[[], ...]`), so torch.tensor([]) tensorizes
+            # to a 1-D `[0]` shape, not `[0, K]`.
+            teacher_topk_ids.append(torch.zeros(0, dtype=torch.long))
+            teacher_topk_logprobs.append(torch.zeros(0, dtype=torch.float32))
             continue
         teacher_logits = torch.randn(r, VOCAB, generator=generator)
         t_lp = F.log_softmax(teacher_logits, dim=-1)
@@ -431,8 +434,10 @@ def test_opd_topk_loss_function_diagnostics_match_hand_computed_references():
     ids_0 = torch.topk(t_lp_0, k=K, dim=-1).indices
     t_topk_lp_0 = t_lp_0.gather(-1, ids_0)
 
-    teacher_topk_ids = [ids_0, torch.zeros((0, K), dtype=torch.long)]
-    teacher_topk_logprobs = [t_topk_lp_0, torch.zeros((0, K), dtype=torch.float32)]
+    # Real transport shape for an empty response: 1-D `[0]`, not `[0, K]` (see
+    # _build_batch above).
+    teacher_topk_ids = [ids_0, torch.zeros(0, dtype=torch.long)]
+    teacher_topk_logprobs = [t_topk_lp_0, torch.zeros(0, dtype=torch.float32)]
 
     # Embed student_logits_0 at the exact rows get_responses' thd slicing picks out for
     # sample 0: end=5, start=end-response_length=2 -> logits[start-1:end-1] = logits[1:4].
@@ -476,3 +481,75 @@ def test_opd_topk_loss_function_diagnostics_match_hand_computed_references():
     # The regression itself: min over the *real* sample's positions only, not -0./0.
     # from the empty sample 1.
     torch.testing.assert_close(metrics["opd_topk/teacher_mass_min"], teacher_mass_ref.min())
+
+
+# ---------------------------------------------------------------------------
+# Regression (final-review finding 2): teacher-vocab overhang ids must be masked to
+# a pad slot before the student gather, not corrupt it.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("kl_type", ["forward", "reverse"])
+def test_teacher_vocab_overhang_id_masked_like_pad_slot(kl_type):
+    """A bigger-config-vocab teacher (e.g. Qwen2.5-7B pads to 152064 vs a <3B
+    student's 151936) can report top-k ids past the student's own vocabulary. Left
+    unmasked these break compute_vocab_parallel_topk_log_probs's gather: at TP=1 they
+    index-error (this test's VOCAB=6 student would IndexError on id=11 without the
+    fix); at TP>1 every rank's ownership mask is False for them so the gather
+    silently returns a fake `0 - log_normalizer` value instead. Pins the fix's
+    behavior: a slot with an overhang id must produce exactly the same loss and
+    diagnostics as the same slot manually replaced by a pad slot (id=0,
+    logprob=-1e4, matching orbit.rollout.opd_sglang's own padding convention)."""
+    _single_state()
+
+    response_lengths = [2]
+    total_lengths = [4]  # prompt_length=2
+    unconcat_tokens = [torch.tensor([0, 1, 2, 3])]
+    loss_masks = [torch.ones(2, dtype=torch.int64)]
+
+    student_logits = torch.tensor(
+        [
+            [1.0, 0.5, -0.5, 2.0, 1.5, 0.0],
+            [0.2, -0.3, 1.1, 0.0, -0.7, 0.9],
+        ]
+    )
+    # get_responses' thd slicing for response_length=2, total_length=4: end=4,
+    # start=end-2=2 -> logits[start-1:end-1] = logits[1:3].
+    full_logits = torch.zeros(1, sum(total_lengths), VOCAB)
+    full_logits[0, 1:3] = student_logits
+
+    overhang_id = VOCAB + 5  # past the student's vocabulary (VOCAB=6)
+    teacher_topk_ids_overhang = torch.tensor([[0, overhang_id], [1, overhang_id]], dtype=torch.long)
+    teacher_topk_logprobs = torch.tensor([[-0.5, -0.2], [-0.9, -0.1]], dtype=torch.float32)
+
+    # Reference: the overhang slot manually replaced by a pad slot, exactly like the
+    # transport's own padding (_TOPK_PAD_TOKEN_ID=0, _TOPK_PAD_LOGPROB=-1e4).
+    teacher_topk_ids_padded = torch.tensor([[0, 0], [1, 0]], dtype=torch.long)
+    teacher_topk_logprobs_padded = torch.tensor([[-0.5, -1e4], [-0.9, -1e4]], dtype=torch.float32)
+
+    args = _build_args(kl_type=kl_type)
+    sum_of_sample_mean = get_sum_of_sample_mean(total_lengths, response_lengths, loss_masks, False, "thd", None)
+
+    def _run(ids, logprobs):
+        logits = full_logits.detach().clone().requires_grad_(True)
+        batch = {
+            "unconcat_tokens": unconcat_tokens,
+            "response_lengths": response_lengths,
+            "total_lengths": total_lengths,
+            "loss_masks": loss_masks,
+            "teacher_topk_ids": [ids.clone()],
+            "teacher_topk_logprobs": [logprobs.clone()],
+        }
+        return opd_topk_loss_function(args, batch, logits, sum_of_sample_mean)
+
+    loss_overhang, metrics_overhang = _run(teacher_topk_ids_overhang, teacher_topk_logprobs)
+    loss_padded, metrics_padded = _run(teacher_topk_ids_padded, teacher_topk_logprobs_padded)
+
+    torch.testing.assert_close(loss_overhang, loss_padded)
+    for key in (
+        "opd_topk/teacher_mass",
+        "opd_topk/teacher_mass_min",
+        "opd_topk/student_mass",
+        "opd_topk/overlap_ratio",
+    ):
+        torch.testing.assert_close(metrics_overhang[key], metrics_padded[key])

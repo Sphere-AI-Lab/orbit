@@ -80,6 +80,25 @@ def test_allows_multi_named_single_member_routing():
     validate_opd_topk_loss_args(args)
 
 
+def test_rejects_no_teacher_configured():
+    # Finding 3 (final-review): nothing external configured at all (no
+    # --opd-teacher-url(s), no --opd-serve-teacher, and an unset --opd-teacher so
+    # local_scoring_enabled is False too) must be rejected with a clear message,
+    # not silently sail through to the hooks check and only fail deep into a
+    # rollout on a missing-key error.
+    args = _valid_args(opd_teacher_url=None, opd_teacher_urls=None, opd_teacher=None)
+    with pytest.raises(ValueError, match="external teacher"):
+        validate_opd_topk_loss_args(args)
+
+
+def test_allows_opd_serve_teacher_as_teacher_presence():
+    # --opd-serve-teacher is a valid remedy: it publishes its endpoint as
+    # --opd-teacher-url once its engines are up, so it must satisfy the presence
+    # check even though opd_teacher_url is still unset at validation time.
+    args = _valid_args(opd_teacher_url=None, opd_teacher_urls=None, opd_teacher=None, opd_serve_teacher=True)
+    validate_opd_topk_loss_args(args)
+
+
 def test_rejects_managed_same_engine_teacher_path():
     # opd_teacher="base" with no external URL selects
     # orbit.rollout.opd_scoring.local_scoring_enabled's path, which does not
@@ -98,6 +117,15 @@ def test_requires_unit_rollout_temperature():
 def test_requires_cp_size_one():
     args = _valid_args(context_parallel_size=2)
     with pytest.raises(ValueError, match="context-parallel-size"):
+        validate_opd_topk_loss_args(args)
+
+
+def test_rejects_allgather_cp():
+    # Finding 6 (final-review): --allgather-cp is only enforced at loss-compute time
+    # today (get_log_probs_and_entropy's NotImplementedError) -- validate it up front
+    # too, so a misconfigured run fails fast instead of after a full rollout.
+    args = _valid_args(allgather_cp=True)
+    with pytest.raises(ValueError, match="allgather-cp"):
         validate_opd_topk_loss_args(args)
 
 

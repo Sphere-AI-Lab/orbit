@@ -628,6 +628,23 @@ def validate_opd_topk_loss_args(args) -> None:
                 "teacher_topk_logprobs) is single-teacher only in v1."
             )
 
+    # Mirrors --teacher-score-mode full_vocab's own presence check above: without this,
+    # a config with no teacher at all (no --opd-teacher-url(s), no --opd-serve-teacher,
+    # and a not-same-base or unset --opd-teacher) sails through local_scoring_enabled
+    # below (False, since is_same_base is False too) and the hooks check further down
+    # (which only checks hook *names*, not that a teacher exists), only surfacing as a
+    # KeyError deep into a rollout once training reads the missing transport keys.
+    if not (
+        getattr(args, "opd_teacher_url", None)
+        or getattr(args, "opd_teacher_urls", None)
+        or getattr(args, "opd_serve_teacher", False)
+    ):
+        raise ValueError(
+            "--loss-type opd_topk_loss requires an external teacher: --opd-teacher-url, "
+            "--opd-teacher-urls, or --opd-serve-teacher (managed in-job serving that publishes "
+            "its endpoint as --opd-teacher-url once its engines are up)."
+        )
+
     # The managed/same-engine teacher path (a same-base --opd-teacher with no external
     # teacher URL, orbit.rollout.opd_scoring.opd_score_sample via local_scoring_enabled)
     # scores through _score_top_k too, but only sets sample.opd_reverse_kl -- it never
@@ -638,8 +655,9 @@ def validate_opd_topk_loss_args(args) -> None:
 
     if local_scoring_enabled(args):
         raise ValueError(
-            "--loss-type opd_topk_loss requires an external teacher (--opd-teacher-url or "
-            "--opd-teacher-urls): the managed/same-engine teacher path (a same-base --opd-teacher "
+            "--loss-type opd_topk_loss requires an external teacher (--opd-teacher-url, "
+            "--opd-teacher-urls, or --opd-serve-teacher, which resolves to --opd-teacher-url once "
+            "its engines are up): the managed/same-engine teacher path (a same-base --opd-teacher "
             "with no external teacher URL) scores through orbit.rollout.opd_scoring.opd_score_sample, "
             "which does not retain teacher_topk_ids/teacher_topk_logprobs -- that transport lives "
             "only on the external-URL scoring path (orbit.rollout.opd_sglang.post_process) in v1."
@@ -657,6 +675,13 @@ def validate_opd_topk_loss_args(args) -> None:
         raise ValueError(
             "--loss-type opd_topk_loss requires --context-parallel-size == 1: the retained top-k "
             f"transport is not CP-slice-aware in v1, got {cp_size}."
+        )
+
+    if getattr(args, "allgather_cp", False):
+        raise ValueError(
+            "--loss-type opd_topk_loss is incompatible with --allgather-cp: the CP redistribution "
+            "helper only handles 1D per-token tensors, not the [R, K] student_topk_log_probs "
+            "tensor (get_log_probs_and_entropy raises the same NotImplementedError at compute time)."
         )
 
     if getattr(args, "opd_topk_tail_bucket", False):
