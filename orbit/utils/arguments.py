@@ -595,10 +595,12 @@ def validate_opd_topk_loss_args(args) -> None:
     requirements: --opd-top-k-strategy only-teacher (the raw-mass semantics
     truncate to the teacher's own reported support), no teacher ensembles, the
     external single-URL teacher transport (not the managed/same-engine path --
-    see below), an untempered rollout, CP == 1, and --opd-topk-tail-bucket off.
-    It also resolves --opd-topk-zero-outside's default and couples
-    compute_advantages_and_returns=False, exactly like opd_jsd_loss's
-    --teacher-score-mode full_vocab block above.
+    see below), an untempered rollout, CP == 1, --opd-topk-tail-bucket off, and
+    the OPD custom-reward hooks (--custom-rm-path/--custom-reward-post-process-path),
+    since opd_topk_loss bypasses needs_opd_teacher()'s own hook check the same way
+    --teacher-score-mode full_vocab does. It also resolves --opd-topk-zero-outside's
+    default and couples compute_advantages_and_returns=False, exactly like
+    opd_jsd_loss's --teacher-score-mode full_vocab block above.
     """
     if getattr(args, "loss_type", None) != "opd_topk_loss":
         return
@@ -663,6 +665,24 @@ def validate_opd_topk_loss_args(args) -> None:
             "a PG-arm reward feature whose own startup validation requires --opd-top-k-strategy "
             "only-student or intersection, structurally incompatible with opd_topk_loss's required "
             "only-teacher strategy."
+        )
+
+    # opd_topk_loss bypasses needs_opd_teacher() in the common case (default
+    # advantage_estimator=grpo, use_opd=False), exactly like full_vocab above, so the
+    # legacy hook check further down never runs for it either -- enforce the scoring
+    # transport here (mirrors the full_vocab block's own enforcement immediately above).
+    # Without this, a missing/wrong hook silently falls through to the default reward
+    # path: no teacher_topk_ids/logprobs ever get populated, and the run only dies after
+    # a full rollout on a bare KeyError once training reads the missing transport keys.
+    expected_rm = "orbit.rollout.opd_sglang.reward_func"
+    expected_post = "orbit.rollout.opd_sglang.post_process"
+    if (
+        getattr(args, "custom_rm_path", None) != expected_rm
+        or getattr(args, "custom_reward_post_process_path", None) != expected_post
+    ):
+        raise ValueError(
+            "--loss-type opd_topk_loss scores samples through the OPD custom-reward hooks; set "
+            f"--custom-rm-path {expected_rm} and --custom-reward-post-process-path {expected_post}."
         )
 
     # Resolve --opd-topk-zero-outside's default here (not at parse time): on for

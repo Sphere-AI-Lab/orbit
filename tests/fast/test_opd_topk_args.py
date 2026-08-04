@@ -11,7 +11,8 @@ from orbit.utils.arguments import _validate_opd_args, validate_opd_topk_loss_arg
 
 def _valid_args(**overrides) -> Namespace:
     """A fully valid opd_topk_loss config: external single-teacher transport,
-    only-teacher strategy, untempered rollout, CP=1, no tail-bucket."""
+    only-teacher strategy, untempered rollout, CP=1, no tail-bucket, correct
+    OPD custom-reward hooks wired."""
     defaults = dict(
         loss_type="opd_topk_loss",
         opd_type="sglang",
@@ -30,6 +31,8 @@ def _valid_args(**overrides) -> Namespace:
         compute_advantages_and_returns=True,
         advantage_estimator="grpo",
         use_opd=False,
+        custom_rm_path="orbit.rollout.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.rollout.opd_sglang.post_process",
     )
     defaults.update(overrides)
     return Namespace(**defaults)
@@ -101,6 +104,28 @@ def test_requires_cp_size_one():
 def test_rejects_tail_bucket():
     args = _valid_args(opd_topk_tail_bucket=True)
     with pytest.raises(ValueError, match="opd-topk-tail-bucket"):
+        validate_opd_topk_loss_args(args)
+
+
+def test_rejects_missing_custom_rm_path():
+    # opd_topk_loss bypasses needs_opd_teacher() (default grpo estimator, no
+    # --use-opd), so nothing else enforces the OPD custom-reward hooks; without
+    # this check a missing --custom-rm-path silently falls through to the
+    # default reward path and teacher_topk_ids/logprobs never get populated.
+    args = _valid_args(custom_rm_path=None)
+    with pytest.raises(ValueError, match="custom-rm-path"):
+        validate_opd_topk_loss_args(args)
+
+
+def test_rejects_wrong_custom_rm_path():
+    args = _valid_args(custom_rm_path="some.other.reward_func")
+    with pytest.raises(ValueError, match="custom-rm-path"):
+        validate_opd_topk_loss_args(args)
+
+
+def test_rejects_missing_custom_reward_post_process_path():
+    args = _valid_args(custom_reward_post_process_path=None)
+    with pytest.raises(ValueError, match="custom-reward-post-process-path"):
         validate_opd_topk_loss_args(args)
 
 
