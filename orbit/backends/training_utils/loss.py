@@ -1,4 +1,5 @@
 import math
+import warnings
 from argparse import Namespace
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -36,6 +37,7 @@ from .cp_utils import (
 from .parallel import get_parallel_state
 from .teacher_lm_head import load_teacher_lm_head
 from .vocab_parallel import (
+    compute_vocab_parallel_topk_log_probs,
     vocab_parallel_log_softmax,
     vocab_parallel_sum,
     vocab_parallel_topk_indices,
@@ -227,6 +229,7 @@ def get_log_probs_and_entropy(
     entropy_no_grad: bool = False,
     non_loss_data: bool = True,
     max_seq_lens: list[int] | None = None,
+    teacher_topk_ids: list[torch.Tensor] | None = None,
 ) -> dict[str, list[torch.Tensor]]:
     """Compute per-token log-probabilities (and optionally entropy) on responses.
 
@@ -244,23 +247,47 @@ def get_log_probs_and_entropy(
         response_lengths: Response segment lengths per sample.
         with_entropy: If True, include "entropy" key in result.
         non_loss_data: Unused; kept for API compatibility.
+        teacher_topk_ids: For on_policy_distillation's "topk" mode, a list of
+            `[R, K]` token-id tensors (one per sample, from TeacherManager) to
+            additionally gather student log-probs for at each response
+            position. When None (the default), no extra gather is done.
 
     Returns:
         Dict with key "log_probs" mapping to a list of `[R]` tensors per
         sample. If `with_entropy` is True, also includes "entropy" key with
-        a list of `[R]` tensors.
+        a list of `[R]` tensors. If `teacher_topk_ids` is given, also
+        includes "student_topk_log_probs" mapping to a list of `[R, K]`
+        tensors.
     """
     parallel_state = get_parallel_state()
     assert non_loss_data
+
+    if teacher_topk_ids is not None and args.allgather_cp:
+        raise NotImplementedError(
+            "on_policy_distillation opd_loss_type='topk' does not support --allgather-cp: "
+            "the CP redistribution helper only handles 1D per-token tensors, not the "
+            "[R, K] student_topk_log_probs tensor."
+        )
+
+    # dev's opd_jsd pattern: only pay for the TP collective path when TP is actually
+    # on, rather than czy's unconditional parallel_state.tp.group.
+    tp_group = parallel_state.tp.group if parallel_state.tp.size > 1 else None
+
     log_probs_list = []
     entropy_list = []
-    for logits_chunk, tokens_chunk in get_responses(
-        logits,
-        args=args,
-        unconcat_tokens=unconcat_tokens,
-        total_lengths=total_lengths,
-        response_lengths=response_lengths,
-        max_seq_lens=max_seq_lens,
+    topk_log_probs_list = [] if teacher_topk_ids is not None else None
+    topk_ids_iter = teacher_topk_ids if teacher_topk_ids is not None else [None] * len(unconcat_tokens)
+    for (logits_chunk, tokens_chunk), sample_topk_ids in zip(
+        get_responses(
+            logits,
+            args=args,
+            unconcat_tokens=unconcat_tokens,
+            total_lengths=total_lengths,
+            response_lengths=response_lengths,
+            max_seq_lens=max_seq_lens,
+        ),
+        topk_ids_iter,
+        strict=True,
     ):
         log_prob, entropy = calculate_log_probs_and_entropy(
             logits_chunk,
@@ -276,11 +303,29 @@ def get_log_probs_and_entropy(
         log_probs_list.append(log_prob.squeeze(-1))
         entropy_list.append(entropy)
 
+        if sample_topk_ids is not None:
+            # Deliberately not calculate_log_probs_and_entropy/fused_vocab_parallel_
+            # cross_entropy here: that path is wrapped in @jit_fuser (torch.compile),
+            # which recompiles/re-autotunes per new input shape. Calling it many times
+            # (once per top-k slot) from inside a pipeline-parallel forward_step has
+            # been observed to crash with "CUDA driver error: invalid argument" during
+            # Triton autotuning. compute_vocab_parallel_topk_log_probs uses only plain
+            # eager ops and computes the log-normalizer once for all k.
+            topk_log_probs_list.append(
+                compute_vocab_parallel_topk_log_probs(
+                    logits_chunk,
+                    sample_topk_ids,
+                    tp_group,
+                )
+            )
+
     res = {
         "log_probs": log_probs_list,
     }
     if with_entropy:
         res["entropy"] = entropy_list
+    if topk_log_probs_list is not None:
+        res["student_topk_log_probs"] = topk_log_probs_list
 
     # we need to turn the all gather kv into zigzag ring attn kv
     if args.allgather_cp:
@@ -1119,6 +1164,272 @@ def opd_jsd_loss_function(
     return (loss, metrics)
 
 
+_TOPK_LOG_INF = -100.0
+_TOPK_KL_TYPES = ("forward", "reverse", "mixed")
+
+
+def _topk_kl_terms(
+    teacher_topk_logprobs: torch.Tensor,
+    student_topk_logprobs: torch.Tensor,
+    entropy: torch.Tensor | None,
+    kl_type: str,
+    mixed_weight: float,
+    zero_outside: bool,
+) -> torch.Tensor:
+    """Per-token top-k KL between the frozen teacher and the student, truncated to the
+    teacher's own top-k support (plus, for the reverse direction, an optional correction
+    for the student mass that falls outside that support).
+
+    Padded slots (see `orbit.rollout.opd_sglang._TOPK_PAD_LOGPROB`) carry a teacher
+    log-prob of -1e4, so `teacher_topk_logprobs.exp()` underflows to exactly 0.0 in
+    float32 -- used below as an exact (not approximate) validity mask over the K
+    dimension. Both the forward and the uncorrected-reverse sums only ever touch valid
+    slots, so a padded column changes nothing (czy's `_topk_forward_kl`, generalized to
+    all three directions; their `renormalize` branch is dropped per spec).
+
+    Forward (teacher-weighted, `--opd-kl-type forward`):
+        `sum_K valid * teacher_prob * (teacher_log_prob - student_log_prob)`
+    `zero_outside` is structurally inert here -- the sum never leaves the teacher's own
+    reported support -- so passing it true is a caller mistake we warn about once
+    (Python's default warning filter already dedupes by message+location) rather than
+    silently ignore.
+
+    Reverse (student-weighted, `--opd-kl-type reverse`):
+        `sum_K valid * student_prob * (student_log_prob - teacher_log_prob)`
+    truncated the same way, but `student_prob`/`student_log_prob` keep gradients (the
+    teacher side is always detached -- it is frozen). Without `zero_outside`, this
+    silently drops all of the student's probability mass that falls *outside* the
+    teacher's reported top-k, which lets the optimizer push probability there for free.
+    `zero_outside=True` adds a correction that makes the result exactly equal to the
+    full-vocabulary reverse KL against a teacher extended with a `log_inf=-100.0`
+    log-prob at every out-of-support token id (see the closed-form test for the
+    from-scratch full-vocab derivation this mirrors):
+
+        correction = (H_all - sum_K valid * student_prob * student_log_prob)
+                     - log_inf * (1 - sum_K valid * student_prob)
+
+    where `H_all = sum_v student_prob(v) * student_log_prob(v)` is the student's own
+    full-vocabulary self-term (note: negative). `calculate_log_probs_and_entropy`'s
+    "entropy" output was verified (see the closed-form correction test, which pins this
+    sign) to already be the *standard* positive entropy `-sum_v p_v log p_v`, so
+    `H_all = -entropy` here, not `entropy` directly.
+
+    Mixed (`--opd-kl-type mixed`, `--opd-mixed-kl-weight` on the forward term, NeMo's
+    convention): `w * forward + (1 - w) * reverse`, where `reverse` already includes its
+    own correction when requested -- so the correction is implicitly scaled by `(1 - w)`
+    too, matching NeMo's DistillationLossFn.
+
+    Args:
+        teacher_topk_logprobs: `[R, K]` teacher log-probs at its own top-k token ids.
+            Treated as a constant; detached here regardless of what the caller passes.
+        student_topk_logprobs: `[R, K]` student log-probs at those same ids,
+            differentiable w.r.t. the student's parameters.
+        entropy: `[R]` student full-vocabulary entropy (standard positive convention),
+            or `None`. Required only when `zero_outside` and `kl_type != "forward"`.
+        kl_type: One of "forward", "reverse", "mixed".
+        mixed_weight: Weight on the forward term when `kl_type == "mixed"`, in `[0, 1]`.
+        zero_outside: Whether to add the reverse-direction out-of-support correction.
+
+    Returns:
+        `[R]` tensor of per-token KL values (the loss to minimize).
+    """
+    if kl_type not in _TOPK_KL_TYPES:
+        raise ValueError(f"Unknown top-k KL type: {kl_type!r}")
+
+    # Teacher is frozen: its log-probs arrive as plain (non-autograd) tensors from Ray
+    # anyway, but detach explicitly so the intent -- no gradient into the teacher side --
+    # is unambiguous regardless of caller.
+    teacher_topk_logprobs = teacher_topk_logprobs.detach()
+    teacher_weights = teacher_topk_logprobs.exp()
+    valid = teacher_weights > 0  # exact float32 underflow at padded slots, see above
+    masked_teacher_weights = torch.where(valid, teacher_weights, torch.zeros_like(teacher_weights))
+
+    if kl_type == "forward":
+        if zero_outside:
+            warnings.warn(
+                "--opd-topk-zero-outside has no effect with --opd-kl-type forward: the "
+                "forward top-k KL only ever sums over the teacher's own reported support.",
+                stacklevel=2,
+            )
+        return (masked_teacher_weights * (teacher_topk_logprobs - student_topk_logprobs)).sum(dim=-1)
+
+    student_weights = student_topk_logprobs.exp()
+    masked_student_weights = torch.where(valid, student_weights, torch.zeros_like(student_weights))
+    reverse = (masked_student_weights * (student_topk_logprobs - teacher_topk_logprobs)).sum(dim=-1)
+
+    if zero_outside:
+        if entropy is None:
+            raise ValueError("`entropy` is required when `zero_outside` is set for the reverse-direction term.")
+        h_all = -entropy  # see docstring: the machinery's "entropy" is the standard +H convention
+        sum_k_student_weight = masked_student_weights.sum(dim=-1)
+        sum_k_student_weighted_logprob = (masked_student_weights * student_topk_logprobs).sum(dim=-1)
+        correction = (h_all - sum_k_student_weighted_logprob) - _TOPK_LOG_INF * (1 - sum_k_student_weight)
+        reverse = reverse + correction
+
+    if kl_type == "reverse":
+        return reverse
+
+    forward = (masked_teacher_weights * (teacher_topk_logprobs - student_topk_logprobs)).sum(dim=-1)
+    return mixed_weight * forward + (1 - mixed_weight) * reverse
+
+
+def _resolve_opd_topk_kl_type(args: Namespace) -> tuple[str, float]:
+    """Local counterpart to `orbit.rollout.opd_sglang._get_kl_type` -- kept independent
+    (not imported) so this training-side loss module doesn't reach into rollout code for
+    a two-line resolution. Mirrors NeMo-RL's DistillationLossFn `kl_type`/`mixed_kl_weight`
+    convention: `reverse` (default), `forward`, or `mixed` with `--opd-mixed-kl-weight` on
+    the forward term.
+    """
+    kl_type = getattr(args, "opd_kl_type", "reverse") or "reverse"
+    if kl_type not in _TOPK_KL_TYPES:
+        raise ValueError(f"Unknown OPD KL type: {kl_type!r}")
+    mixed_weight = float(getattr(args, "opd_mixed_kl_weight", 0.5))
+    if not (0.0 <= mixed_weight <= 1.0):
+        raise ValueError(f"--opd-mixed-kl-weight must be in [0, 1], got {mixed_weight}.")
+    return kl_type, mixed_weight
+
+
+def opd_topk_loss_function(
+    args: Namespace,
+    batch: RolloutBatch,
+    logits: torch.Tensor,
+    sum_of_sample_mean: Callable[[torch.Tensor], torch.Tensor],
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """Direct (non-policy-gradient) top-k KL on_policy_distillation loss.
+
+    Unlike `--opd-loss-type sampled_token` (which treats `teacher_log_prob(a_t) -
+    student_log_prob(a_t)` as a REINFORCE advantage on the token the student happened to
+    sample, routed through `compute_policy_loss`'s PPO ratio/clip), this backpropagates
+    directly through the student's log-probs at all `--opd-topk-k` of the teacher's top-k
+    token ids for every response position -- mirroring verl's `forward_kl_topk` (see
+    https://verl.readthedocs.io/en/latest/algo/opd.html, "PG OPD" section). There is no
+    importance-sampling ratio here (and hence no PPO clip, no old/rollout log-probs
+    needed): the loss is computed directly against the current parameters in the same
+    forward pass, so there is no train/rollout policy mismatch to correct for.
+
+    `--opd-kl-type` (`reverse` default, `forward`, or `mixed`) and `--opd-mixed-kl-weight`
+    select the KL direction via `_topk_kl_terms`; `--opd-topk-zero-outside` (Task 4 wires
+    the arg) controls the reverse-direction out-of-support correction -- until then this
+    resolves `None` to `kl_type != "forward"` (correct the reverse direction's blind spot
+    by default; inert for forward either way).
+
+    Returns `(loss, metrics)`. In addition to "loss", `metrics` carries diagnostics that
+    do not affect the loss itself (Task 4 wires the args gating whether these get
+    logged): "opd_topk/teacher_mass" (+"_min") -- how much of the teacher's own
+    distribution its reported top-k actually covers, "opd_topk/student_mass" -- how much
+    of the *student's* distribution currently sits on the teacher's top-k ids, and
+    "opd_topk/overlap_ratio" -- the fraction of the student's own local top-k ids that
+    coincide with the teacher's. Every reduction here is a masked sum over a
+    clamped->=1 denominator (mirroring `sum_of_sample_mean`'s own convention), never a
+    bare `.mean()` over a selection that can be empty.
+
+    Args:
+        args: Configuration; uses `opd_kl_type`, `opd_mixed_kl_weight`, and (once Task 4
+            lands) `opd_topk_zero_outside`.
+        batch: Mini-batch with "teacher_topk_ids" (list of `[R, K]` token ids per sample),
+            "teacher_topk_logprobs" (list of `[R, K]` teacher log-probs per sample),
+            "unconcat_tokens", "total_lengths", "response_lengths", "loss_masks".
+        logits: Policy logits with shape `[1, T, V]`, from the current (grad-enabled)
+            forward pass.
+        sum_of_sample_mean: Reduction function that averages per-sample values.
+
+    Returns:
+        Tuple of `(loss, metrics)`.
+    """
+    device = logits.device
+    teacher_topk_ids = [t.to(device=device) for t in batch["teacher_topk_ids"]]
+    teacher_topk_logprobs = [t.to(device=device) for t in batch["teacher_topk_logprobs"]]
+
+    kl_type, mixed_weight = _resolve_opd_topk_kl_type(args)
+    zero_outside = getattr(args, "opd_topk_zero_outside", None)
+    if zero_outside is None:
+        # Task 4 moves this default into arg validation; until then, correct the reverse
+        # direction's out-of-support blind spot by default (inert for forward either way).
+        zero_outside = kl_type != "forward"
+    needs_correction = zero_outside and kl_type != "forward"
+
+    total_lengths = batch["total_lengths"]
+    response_lengths = batch["response_lengths"]
+    max_seq_lens = batch.get("max_seq_lens", None)
+
+    log_probs_and_entropy = get_log_probs_and_entropy(
+        logits,
+        args=args,
+        unconcat_tokens=batch["unconcat_tokens"],
+        total_lengths=total_lengths,
+        response_lengths=response_lengths,
+        with_entropy=needs_correction,
+        max_seq_lens=max_seq_lens,
+        teacher_topk_ids=teacher_topk_ids,
+    )
+    student_topk_log_probs = log_probs_and_entropy["student_topk_log_probs"]
+    entropy_per_sample = log_probs_and_entropy["entropy"] if needs_correction else [None] * len(teacher_topk_ids)
+
+    responses = get_responses(
+        logits,
+        args=args,
+        unconcat_tokens=batch["unconcat_tokens"],
+        total_lengths=total_lengths,
+        response_lengths=response_lengths,
+        max_seq_lens=max_seq_lens,
+    )
+
+    topk_kl_per_sample = []
+    teacher_mass_per_sample = []
+    student_mass_per_sample = []
+    overlap_ratio_per_sample = []
+    for (logits_chunk, _), t_ids, t_lp, s_lp, entropy_i in zip(
+        responses, teacher_topk_ids, teacher_topk_logprobs, student_topk_log_probs, entropy_per_sample, strict=True
+    ):
+        topk_kl_per_sample.append(_topk_kl_terms(t_lp, s_lp, entropy_i, kl_type, mixed_weight, zero_outside))
+
+        # Diagnostics only -- detached, no gradient needed.
+        valid = t_lp.exp() > 0
+        masked_teacher_weight = torch.where(valid, t_lp.exp(), torch.zeros_like(t_lp))
+        masked_student_weight = torch.where(valid, s_lp.exp().detach(), torch.zeros_like(s_lp))
+        teacher_mass_per_sample.append(masked_teacher_weight.sum(dim=-1))
+        student_mass_per_sample.append(masked_student_weight.sum(dim=-1))
+
+        k = t_ids.size(-1)
+        k_local = min(k, logits_chunk.size(-1))
+        student_topk_ids = torch.topk(logits_chunk, k=k_local, dim=-1).indices
+        teacher_ids_for_match = torch.where(valid, t_ids, torch.full_like(t_ids, -1))
+        overlap_match = student_topk_ids.unsqueeze(-1) == teacher_ids_for_match.unsqueeze(-2)
+        overlap_ratio_per_sample.append(overlap_match.any(dim=-1).sum(dim=-1).float() / max(k, 1))
+
+    topk_kl = torch.cat(topk_kl_per_sample, dim=0)
+    loss = sum_of_sample_mean(topk_kl)
+
+    # make sure the gradient could backprop correctly.
+    if topk_kl.numel() == 0:
+        loss = loss + 0 * logits.sum()
+
+    teacher_mass = torch.cat(teacher_mass_per_sample, dim=0)
+    student_mass = torch.cat(student_mass_per_sample, dim=0)
+    overlap_ratio = torch.cat(overlap_ratio_per_sample, dim=0)
+
+    # min(x) == -max(-x): reuses `_response_masked_max`'s CP-aware chunking and its
+    # already-guarded empty/all-masked-out fallback (0) instead of duplicating it.
+    teacher_mass_min = -_response_masked_max(
+        -teacher_mass,
+        total_lengths=total_lengths,
+        response_lengths=response_lengths,
+        loss_masks=batch["loss_masks"],
+        qkv_format=getattr(args, "qkv_format", "thd"),
+        max_seq_lens=max_seq_lens,
+    )
+
+    metrics = {
+        "loss": loss.clone().detach(),
+        "opd_topk/teacher_mass": sum_of_sample_mean(teacher_mass).clone().detach(),
+        "opd_topk/teacher_mass_min": teacher_mass_min.clone().detach(),
+        "opd_topk/student_mass": sum_of_sample_mean(student_mass).clone().detach(),
+        "opd_topk/overlap_ratio": sum_of_sample_mean(overlap_ratio).clone().detach(),
+    }
+
+    return loss, metrics
+
+
 def loss_function(
     args: Namespace,
     batch: RolloutBatch,
@@ -1128,8 +1439,8 @@ def loss_function(
 ) -> tuple[torch.Tensor, int | torch.Tensor, dict[str, list[str] | torch.Tensor]]:
     """Dispatch to the configured loss and rescale for Megatron integration.
 
-    Selects one of "policy_loss", "value_loss", "sft_loss", "opd_jsd_loss", or a
-    custom loss function based on `args.loss_type`, computes the loss and metrics, then
+    Selects one of "policy_loss", "value_loss", "sft_loss", "opd_jsd_loss", "opd_topk_loss",
+    or a custom loss function based on `args.loss_type`, computes the loss and metrics, then
     rescales the loss by micro-batch and parallelism factors to integrate with
     Megatron's gradient accumulation.
 
@@ -1171,6 +1482,8 @@ def loss_function(
             func = sft_loss_function
         case "opd_jsd_loss":
             func = opd_jsd_loss_function
+        case "opd_topk_loss":
+            func = opd_topk_loss_function
         case "custom_loss":
             func = load_function(args.custom_loss_function_path)
         case _:
