@@ -25,6 +25,7 @@ from orbit.backends.training_utils.loss import (
     _TOPK_LOG_INF,
     _response_masked_min,
     _topk_kl_terms,
+    _topk_overlap_membership,
     opd_topk_loss_function,
 )
 from orbit.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
@@ -553,3 +554,68 @@ def test_teacher_vocab_overhang_id_masked_like_pad_slot(kl_type):
         "opd_topk/overlap_ratio",
     ):
         torch.testing.assert_close(metrics_overhang[key], metrics_padded[key])
+
+
+# ---------------------------------------------------------------------------
+# Regression (gate-discovered defect 4): the overlap diagnostic's `[R, K, K]` broadcast
+# OOMs at k >= vocab (688 GiB at k=vocab_size=151936, R=32, confirmed in the gate log).
+# `_topk_overlap_membership` replaces it with a sort + `torch.searchsorted` (O(R*K)
+# memory) -- these pin exact equivalence to the old broadcast and a scale smoke test
+# that would OOM the old code even on CPU at this size.
+# ---------------------------------------------------------------------------
+
+
+def test_topk_overlap_membership_matches_kxk_broadcast_reference():
+    """Random ids with duplicates of the pad sentinel (-1) and some -1-masked teacher
+    slots, small k -- `_topk_overlap_membership`'s per-row overlap must exactly equal
+    the old `[R, K, K]` broadcast-equality it replaces, computed explicitly here (not
+    by re-deriving the same vectorized ops as the implementation)."""
+    generator = torch.Generator().manual_seed(0)
+    r, k_student, k_teacher, vocab = 6, 5, 7, 20
+
+    student_topk_ids = torch.randint(0, vocab, (r, k_student), generator=generator, dtype=torch.long)
+    teacher_ids_for_match = torch.randint(0, vocab, (r, k_teacher), generator=generator, dtype=torch.long)
+    # Mask ~40% of teacher slots to the -1 sentinel (mirrors invalid/pad slots) -- some
+    # rows end up with several -1 duplicates, exercising the sentinel-block sort case.
+    mask = torch.rand(r, k_teacher, generator=generator) < 0.4
+    teacher_ids_for_match = torch.where(mask, torch.full_like(teacher_ids_for_match, -1), teacher_ids_for_match)
+
+    # Reference: the exact old implementation, an explicit [R, K, K] broadcast.
+    reference = (student_topk_ids.unsqueeze(-1) == teacher_ids_for_match.unsqueeze(-2)).any(dim=-1)
+
+    result = _topk_overlap_membership(student_topk_ids, teacher_ids_for_match)
+
+    torch.testing.assert_close(result, reference)
+
+
+def test_topk_overlap_membership_scale_smoke_no_kxk_materialization():
+    """R=8, k=20000: the old `[R, K, K]` broadcast would allocate 8*20000^2 = 3.2e9
+    bools (3.2 GB) on CPU alone at this size -- at the gate's real k=vocab_size=151936,
+    R=32 it was 688 GiB and OOM'd. Must complete without materializing a K*K tensor and
+    produce a valid ratio in [0, 1]. Do NOT run the old K*K-broadcast code at this size."""
+    generator = torch.Generator().manual_seed(1)
+    r, k = 8, 20000
+
+    student_topk_ids = torch.randint(0, k, (r, k), generator=generator, dtype=torch.long)
+    teacher_ids_for_match = torch.randint(0, k, (r, k), generator=generator, dtype=torch.long)
+
+    match = _topk_overlap_membership(student_topk_ids, teacher_ids_for_match)
+    overlap_ratio = match.sum(dim=-1).float() / k
+
+    assert match.shape == (r, k)
+    assert torch.isfinite(overlap_ratio).all()
+    assert (overlap_ratio >= 0).all() and (overlap_ratio <= 1).all()
+
+
+def test_topk_overlap_membership_all_sentinel_row_never_matches():
+    """A row where every teacher slot is the -1 sentinel: no student id (always >= 0)
+    can match, regardless of duplicate -1s. Verifies the sort-then-searchsorted
+    reasoning that -1 sentinels sort to the front of the row and are therefore inert
+    against real (>= 0) ids -- a lower-bound search for a non-negative value can never
+    land inside the leading -1 block."""
+    student_topk_ids = torch.tensor([[0, 3, 3, 19]], dtype=torch.long)
+    teacher_ids_for_match = torch.full((1, 4), -1, dtype=torch.long)
+
+    result = _topk_overlap_membership(student_topk_ids, teacher_ids_for_match)
+
+    assert not result.any()

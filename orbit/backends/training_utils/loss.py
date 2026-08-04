@@ -1339,6 +1339,36 @@ def _topk_kl_terms(
     return mixed_weight * forward + (1 - mixed_weight) * reverse
 
 
+def _topk_overlap_membership(
+    student_topk_ids: torch.Tensor,
+    teacher_ids_for_match: torch.Tensor,
+) -> torch.Tensor:
+    """Row-wise membership of each `student_topk_ids` entry in that row's
+    `teacher_ids_for_match` -- an O(R*K log K) replacement for the naive `[R, K, K]`
+    broadcast-equality (`student.unsqueeze(-1) == teacher.unsqueeze(-2)`), which OOMs at
+    large k (688 GiB at k=vocab_size=151936, R=32; the gate-discovered defect this fixes).
+
+    Sorts each row of `teacher_ids_for_match` once (`O(K log K)`) and binary-searches
+    each student id into it (`torch.searchsorted`, batched 2-D x 2-D), instead of
+    comparing every student id against every teacher id.
+
+    `teacher_ids_for_match` may hold `-1` sentinels for invalid/masked slots (see the
+    caller). Real ids are always >= 0, so `-1` sorts to the front of every row and a
+    lower-bound search for a non-negative value can never land inside that block --
+    the sentinels are therefore inert without any separate exclusion.
+
+    Returns a `[R, student_K]` bool tensor.
+    """
+    k_teacher = teacher_ids_for_match.size(-1)
+    if k_teacher == 0:
+        # No teacher columns to match against (e.g. the reshaped-(0,0) empty-response
+        # sample) -- searchsorted's clamp below would need a nonexistent index 0..-1.
+        return torch.zeros_like(student_topk_ids, dtype=torch.bool)
+    sorted_teacher, _ = torch.sort(teacher_ids_for_match, dim=-1)
+    insert_pos = torch.searchsorted(sorted_teacher, student_topk_ids).clamp(max=k_teacher - 1)
+    return sorted_teacher.gather(-1, insert_pos) == student_topk_ids
+
+
 def _resolve_opd_topk_kl_type(args: Namespace) -> tuple[str, float]:
     """Local counterpart to `orbit.rollout.opd_sglang._get_kl_type` -- kept independent
     (not imported) so this training-side loss module doesn't reach into rollout code for
@@ -1498,8 +1528,8 @@ def opd_topk_loss_function(
         # and this is diagnostic-only (no_grad inside the helper).
         student_topk_ids = vocab_parallel_topk_indices(logits_chunk, k, vocab_start, tp_group)
         teacher_ids_for_match = torch.where(valid, t_ids, torch.full_like(t_ids, -1))
-        overlap_match = student_topk_ids.unsqueeze(-1) == teacher_ids_for_match.unsqueeze(-2)
-        overlap_ratio_per_sample.append(overlap_match.any(dim=-1).sum(dim=-1).float() / max(k, 1))
+        overlap_match = _topk_overlap_membership(student_topk_ids, teacher_ids_for_match)
+        overlap_ratio_per_sample.append(overlap_match.sum(dim=-1).float() / max(k, 1))
 
     topk_kl = torch.cat(topk_kl_per_sample, dim=0)
     loss = sum_of_sample_mean(topk_kl)
