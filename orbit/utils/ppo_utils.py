@@ -586,30 +586,75 @@ def get_advantages_and_returns_batch(
     response_lengths,
     values_list,
     rewards_list,
+    terminal_rewards,
+    qkv_format,
+    max_seq_lens,
+    loss_masks,
     gamma,
     lambd,
     chunked: bool = True,
 ):
     """
-    Batched GAE with CP support.
+    Batched GAE with CP support, computed over trainable tokens only.
+
+    Semantics:
+      - Masked tokens (`loss_mask == 0`, e.g. tool/env observations in
+        multi-turn rollouts) are not MDP transitions. GAE runs on the
+        subsequence of trainable tokens, so masked tokens carry no reward
+        (including KL shaping), contribute no value delta, and the GAE carry
+        crosses them without extra `gamma * lambd` decay.
+      - The terminal reward is added at the last trainable token, not the last
+        response token.
+      - Fully masked samples get zero advantages and returns; their terminal
+        reward is dropped.
+      - Truncated sequences use the same zero bootstrap as terminated ones:
+        the value after the last trainable token is taken as 0 and the
+        observed terminal reward is still applied.
+      - This function outputs zero advantages and returns at masked positions.
+        Downstream transforms may still shift these entries to nonzero values
+        (advantage whitening applies its affine transform to every position,
+        and the on-policy distillation KL penalty is added per token), but the
+        whitening statistics themselves are mask-weighted, so the injected
+        zeros do not bias them. Correctness relies on the policy and value
+        losses masking these positions out (the policy loss re-zeros
+        advantages at inactive tokens and all loss reducers weight by
+        `loss_mask`), so masked positions never receive gradient.
+
+    C_i is the length of values_list[i] and rewards_list[i] on the current CP rank.
     Input:
         total_lengths:     list[int], each sample's total_len
         response_lengths:  list[int], each sample's response_len
-        values_list:       list[Tensor], each shape = [resp_len_i]
-        rewards_list:      list[Tensor], same shape
+        values_list:       list[Tensor], each current-CP-rank tensor has shape [C_i]
+        rewards_list:      list[Tensor], same shape as values_list
+        terminal_rewards:  list[float], one scalar sequence reward per sample
+        qkv_format:        str, sequence layout used to split tensors across CP ranks
+        max_seq_lens:      list[int] of padded lengths (BSHD, or padded THD e.g. DSV4), or None
+        loss_masks:        list[Tensor], full-response masks, each has shape [R_i]
     Output:
-        advantages_list:   list[Tensor], each shape = [resp_len_i]
+        advantages_list:   list[Tensor], each current-CP-rank tensor has shape [C_i]
         returns_list:      list[Tensor], same shape
     """
-
-    from megatron.core import mpu
 
     with torch.no_grad():
         B = len(response_lengths)
         assert B == len(values_list)
         assert B == len(rewards_list)
+        assert B == len(terminal_rewards)
+        assert B == len(loss_masks)
 
-        cp_size = mpu.get_context_parallel_world_size()
+        from orbit.backends.training_utils.parallel import get_parallel_state
+
+        cp_size = get_parallel_state().cp.size
+        if cp_size > 1 and qkv_format == "bshd":
+            assert max_seq_lens is not None, "max_seq_lens is required for BSHD with CP"
+            assert B == len(max_seq_lens)
+            max_seq_lens_per_sample = max_seq_lens
+        elif cp_size > 1 and max_seq_lens is not None:  # padded THD (e.g. DSV4)
+            assert B == len(max_seq_lens)
+            max_seq_lens_per_sample = max_seq_lens
+        else:
+            max_seq_lens_per_sample = [None] * B
+
         device = values_list[0].device
         dtype = values_list[0].dtype
 
@@ -619,43 +664,51 @@ def get_advantages_and_returns_batch(
             full_values_list = []
             full_rewards_list = []
 
-            for total_len, resp_len, v, r in zip(
-                total_lengths, response_lengths, values_list, rewards_list, strict=False
+            for total_len, resp_len, v, r, max_seq_len in zip(
+                total_lengths, response_lengths, values_list, rewards_list,
+                max_seq_lens_per_sample, strict=False,
             ):
-                full_v = all_gather_with_cp(v, total_len, resp_len)
-                full_r = all_gather_with_cp(r, total_len, resp_len)
+                full_v = all_gather_with_cp(v, total_len, resp_len, qkv_format=qkv_format, max_seq_len=max_seq_len)
+                full_r = all_gather_with_cp(r, total_len, resp_len, qkv_format=qkv_format, max_seq_len=max_seq_len)
                 full_values_list.append(full_v)
                 full_rewards_list.append(full_r)
 
-            # full_values_list[i].shape = [total_len_i]
+            # full_values_list[i].shape = [resp_len_i]
         else:
             full_values_list = values_list
             full_rewards_list = rewards_list
 
-        # pad to max_len for batched GAE
-        max_len = max(response_lengths)
+        # Compress each sample to its trainable positions so that masked
+        # tokens do not act as MDP transitions in the GAE recursion.
+        trainable_indices = [
+            loss_masks[i][: response_lengths[i]].to(device).nonzero(as_tuple=True)[0] for i in range(B)
+        ]
+        trainable_lengths = [idx.numel() for idx in trainable_indices]
 
-        full_values = torch.zeros(B, max_len, device=device, dtype=dtype)
-        full_rewards = torch.zeros(B, max_len, device=device, dtype=dtype)
+        # pad to max_len for batched GAE
+        max_len = max(trainable_lengths)
+
+        packed_values = torch.zeros(B, max_len, device=device, dtype=dtype)
+        packed_rewards = torch.zeros(B, max_len, device=device, dtype=dtype)
 
         for i in range(B):
-            L = response_lengths[i]
-            full_values[i, :L] = full_values_list[i][:L]
-            full_rewards[i, :L] = full_rewards_list[i][:L]
+            K = trainable_lengths[i]
+            if K > 0:
+                idx = trainable_indices[i]
+                packed_values[i, :K] = full_values_list[i][idx]
+                packed_rewards[i, :K] = full_rewards_list[i][idx]
+                packed_rewards[i, K - 1] += terminal_rewards[i]
 
-        if not chunked:
-            full_advantages, full_returns = vanilla_gae(
-                rewards=full_rewards,
-                values=full_values,
-                gamma=gamma,
-                lambd=lambd,
+        if max_len == 0:
+            packed_advantages = torch.zeros(B, 0, device=device, dtype=dtype)
+            packed_returns = torch.zeros(B, 0, device=device, dtype=dtype)
+        elif not chunked:
+            packed_advantages, packed_returns = vanilla_gae(
+                rewards=packed_rewards, values=packed_values, gamma=gamma, lambd=lambd,
             )
         else:
-            full_advantages, full_returns = chunked_gae(
-                rewards=full_rewards,
-                values=full_values,
-                gamma=gamma,
-                lambd=lambd,
+            packed_advantages, packed_returns = chunked_gae(
+                rewards=packed_rewards, values=packed_values, gamma=gamma, lambd=lambd,
             )
 
         advantages_list = []
@@ -664,27 +717,30 @@ def get_advantages_and_returns_batch(
         if cp_size > 1:
             from orbit.backends.training_utils.cp_utils import slice_log_prob_with_cp
 
-            for total_len, resp_len, adv_row, ret_row in zip(
-                total_lengths,
-                response_lengths,
-                full_advantages,
-                full_returns,
-                strict=False,
-            ):
-                adv_full = adv_row  # shape = [resp_len_i padded to max_len]
-                ret_full = ret_row
+        for i in range(B):
+            resp_len = response_lengths[i]
+            K = trainable_lengths[i]
 
-                adv_sliced = slice_log_prob_with_cp(adv_full[:resp_len], total_len, resp_len)
-                ret_sliced = slice_log_prob_with_cp(ret_full[:resp_len], total_len, resp_len)
+            adv_full = torch.zeros(resp_len, device=device, dtype=dtype)
+            ret_full = torch.zeros(resp_len, device=device, dtype=dtype)
+            if K > 0:
+                idx = trainable_indices[i]
+                adv_full[idx] = packed_advantages[i, :K]
+                ret_full[idx] = packed_returns[i, :K]
 
-                advantages_list.append(adv_sliced)
-                returns_list.append(ret_sliced)
+            if cp_size > 1:
+                max_seq_len = max_seq_lens_per_sample[i]
+                adv_full = slice_log_prob_with_cp(
+                    adv_full, total_lengths[i], resp_len,
+                    qkv_format=qkv_format, max_token_len=max_seq_len,
+                )
+                ret_full = slice_log_prob_with_cp(
+                    ret_full, total_lengths[i], resp_len,
+                    qkv_format=qkv_format, max_token_len=max_seq_len,
+                )
 
-        else:
-            for i in range(B):
-                L = response_lengths[i]
-                advantages_list.append(full_advantages[i, :L])
-                returns_list.append(full_returns[i, :L])
+            advantages_list.append(adv_full)
+            returns_list.append(ret_full)
 
     return advantages_list, returns_list
 
