@@ -157,6 +157,9 @@ Expected: `test_reports_the_non_releasable_bytes_empty_cache_cannot_return` and
 `KeyError: 'inactive_split_GB'`. `test_the_existing_fields_are_not_disturbed` PASSES already
 — it guards against regression, so passing now is correct.
 
+Collection alone takes ~65 s on this machine: importing `orbit.utils.memory_utils` pulls in
+torch and megatron. That is normal, not a hang.
+
 - [ ] **Step 3: Add the three fields**
 
 In `orbit/utils/memory_utils.py`, replace the body of `available_memory()`:
