@@ -78,17 +78,26 @@ def test_survives_a_device_the_allocator_has_never_served(monkeypatch):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a real CUDA allocator")
-def test_the_stat_keys_this_module_reads_exist_in_this_torch():
-    """The .get(key, 0) defaults above make a typo indistinguishable from a
-    genuine zero -- and a genuine zero is what the spec reads as evidence
-    against fragmentation. Pin the key names against the installed torch so a
-    rename upstream fails here loudly instead of in a campaign's log."""
+def test_the_stat_keys_this_module_reads_exist_in_this_torch(monkeypatch):
+    """A misspelled key would return the `.get` default of 0, and a near-zero
+    reading is what the diagnostic interprets as evidence against fragmentation
+    -- so a typo does not fail loudly, it points at the wrong fix. Record the
+    keys `available_memory` actually queries and assert every one of them is
+    real, so drift in the module fails here rather than in a campaign's log."""
     torch.zeros(1, device="cuda")  # force the allocator to serve this device
-    stats = torch.cuda.memory_stats(torch.cuda.current_device())
+    real_stats = torch.cuda.memory_stats(torch.cuda.current_device())
 
-    for key in (
-        "inactive_split_bytes.all.current",
-        "segment.all.current",
-        "num_alloc_retries",
-    ):
-        assert key in stats, f"{key} missing from torch {torch.__version__} memory_stats"
+    queried = []
+
+    class _RecordingStats(dict):
+        def get(self, key, default=None):
+            queried.append(key)
+            return super().get(key, default)
+
+    monkeypatch.setattr(torch.cuda, "memory_stats", lambda device: _RecordingStats(real_stats))
+
+    memory_utils.available_memory()
+
+    assert queried, "available_memory() queried no allocator stats at all"
+    missing = [key for key in queried if key not in real_stats]
+    assert not missing, f"missing from torch {torch.__version__} memory_stats: {missing}"
