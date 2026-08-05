@@ -18,6 +18,9 @@ def clear_memory(clear_host_memory: bool = False):
 def available_memory():
     device = torch.cuda.current_device()
     free, total = torch.cuda.mem_get_info(device)
+    # Returns {} for a device the allocator has never served, and print_memory
+    # runs during setup before the first allocation -- hence .get on every key.
+    stats = torch.cuda.memory_stats(device)
     return {
         "gpu": str(device),
         "total_GB": _byte_to_gb(total),
@@ -25,6 +28,13 @@ def available_memory():
         "used_GB": _byte_to_gb(total - free),
         "allocated_GB": _byte_to_gb(torch.cuda.memory_allocated(device)),
         "reserved_GB": _byte_to_gb(torch.cuda.memory_reserved(device)),
+        # Torch calls this "Non-releasable memory": free bytes trapped inside a
+        # segment that still holds a live block, which empty_cache() cannot
+        # return. A large value here against a small allocated_GB is
+        # fragmentation, not a leak.
+        "inactive_split_GB": _byte_to_gb(stats.get("inactive_split_bytes.all.current", 0)),
+        "segments": stats.get("segment.all.current", 0),
+        "alloc_retries": stats.get("num_alloc_retries", 0),
     }
 
 
