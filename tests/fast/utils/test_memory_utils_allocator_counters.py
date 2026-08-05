@@ -75,3 +75,20 @@ def test_survives_a_device_the_allocator_has_never_served(monkeypatch):
     assert info["inactive_split_GB"] == 0.0
     assert info["segments"] == 0
     assert info["alloc_retries"] == 0
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a real CUDA allocator")
+def test_the_stat_keys_this_module_reads_exist_in_this_torch():
+    """The .get(key, 0) defaults above make a typo indistinguishable from a
+    genuine zero -- and a genuine zero is what the spec reads as evidence
+    against fragmentation. Pin the key names against the installed torch so a
+    rename upstream fails here loudly instead of in a campaign's log."""
+    torch.zeros(1, device="cuda")  # force the allocator to serve this device
+    stats = torch.cuda.memory_stats(torch.cuda.current_device())
+
+    for key in (
+        "inactive_split_bytes.all.current",
+        "segment.all.current",
+        "num_alloc_retries",
+    ):
+        assert key in stats, f"{key} missing from torch {torch.__version__} memory_stats"
