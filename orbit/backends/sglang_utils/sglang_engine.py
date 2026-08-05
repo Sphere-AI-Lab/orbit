@@ -26,6 +26,44 @@ logger = logging.getLogger(__name__)
 _COMPAT_SITE_DIR = Path(__file__).resolve().parent / "compat_site"
 
 
+def _balance_broadcast_shm_refcounts(tensors: dict, consumer_count: int) -> int:
+    """Pre-pay the shm refcount for a payload that ``consumer_count`` processes rebuild.
+
+    torch's ``file_system`` reduce/rebuild pair is a 1-producer -> 1-consumer
+    handshake: ``reduce_storage`` calls ``storage._shared_incref()`` exactly
+    once per serialization, and every ``rebuild_storage_filename`` ends in a
+    matching ``_shared_decref()`` (torch/multiprocessing/reductions.py). SGLang
+    hands ONE payload to EVERY TP scheduler and each deserializes it
+    (tp_worker.py:218), so a tp_size=N engine decrefs N times against that
+    single incref. The manager unlinks the segment N-1 releases early — while
+    this actor still holds ``tensors`` — and the rank that opens last dies with
+    ``unable to open shared memory object ... No such file or directory (2)``.
+    Ranks skew by roughly a batch, so it fires intermittently and always on the
+    slowest rank: three e4 gsm8k LoRA arms died this way at rollouts 28, 65 and
+    114 on 2026-08-04.
+
+    One extra incref per ADDITIONAL consumer restores the pairing. Deduped by
+    storage because ForkingPickler reduces a storage once however many tensors
+    view it — increfing per tensor would leak the segment instead.
+
+    Returns the number of increfs performed, for tests and diagnostics.
+    """
+    if consumer_count <= 1:
+        return 0
+    increfs = 0
+    seen: set[int] = set()
+    for tensor in tensors.values():
+        storage = tensor.untyped_storage()
+        key = storage.data_ptr()
+        if key in seen:
+            continue
+        seen.add(key)
+        for _ in range(consumer_count - 1):
+            storage._shared_incref()
+            increfs += 1
+    return increfs
+
+
 def get_base_gpu_id(args, rank):
     num_gpus = min(args.num_gpus_per_node, args.rollout_num_gpus_per_engine)
     if args.colocate:
@@ -431,6 +469,20 @@ class SGLangEngine(RayActor):
             payload,
         )
 
+    def _adapter_payload_consumers(self) -> int:
+        """How many processes will rebuild one broadcast adapter payload.
+
+        One scheduler per TP rank of this engine, and no more: SGLang's
+        dynamic-LoRA path asserts ``dp_size == 1``
+        (tokenizer_communicator_mixin.py:1137), so tp_size is the whole
+        fan-out. Falls back to 1 — the no-op count — when neither value is set,
+        which keeps single-GPU smokes on torch's own accounting.
+        """
+        per_engine = self.num_gpus_per_engine or getattr(
+            self.args, "rollout_num_gpus_per_engine", None
+        )
+        return int(per_engine or 1)
+
     def load_lora_adapter_from_ray_tensors(
         self,
         lora_name: str,
@@ -456,6 +508,10 @@ class SGLangEngine(RayActor):
         2026-08-04 B200 probe, reproduced deterministically on CPU). A
         file_system storage is a named shm segment any process can attach
         any number of times, which is what a broadcast payload needs.
+
+        Attaching is not the whole story: the segment's *lifetime* still has to
+        be paid for, once per rank. See
+        ``_balance_broadcast_shm_refcounts``.
         """
         import torch.multiprocessing as torch_mp  # local: the module keeps torch off its import path
 
@@ -463,6 +519,7 @@ class SGLangEngine(RayActor):
         torch_mp.set_sharing_strategy("file_system")
         try:
             serialized_tensors = MultiprocessingSerializer.serialize(tensors, output_str=True)
+            _balance_broadcast_shm_refcounts(tensors, self._adapter_payload_consumers())
         finally:
             torch_mp.set_sharing_strategy(old_strategy)
         return self.load_lora_adapter_from_tensors(
