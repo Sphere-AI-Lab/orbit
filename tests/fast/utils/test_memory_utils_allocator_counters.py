@@ -30,9 +30,7 @@ from orbit.utils import memory_utils
 def _patch_cuda(monkeypatch, stats):
     """A plausible 80 GB device, so only the stats dict varies between tests."""
     monkeypatch.setattr(torch.cuda, "current_device", lambda: 0)
-    monkeypatch.setattr(
-        torch.cuda, "mem_get_info", lambda device: (13 * 1024**3, 80 * 1024**3)
-    )
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (13 * 1024**3, 80 * 1024**3))
     monkeypatch.setattr(torch.cuda, "memory_allocated", lambda device: 1024**3 // 8)
     monkeypatch.setattr(torch.cuda, "memory_reserved", lambda device: 50 * 1024**3)
     monkeypatch.setattr(torch.cuda, "memory_stats", lambda device: stats)
