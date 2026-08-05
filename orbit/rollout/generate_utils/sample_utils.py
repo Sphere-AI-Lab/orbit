@@ -61,20 +61,41 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
         bv = bv if bv is not None else np.zeros((b.response_length, hidden_size), dtype=np.float32)
         return np.concatenate([av, np.zeros((obs_len, hidden_size), dtype=av.dtype), bv], axis=0)
 
-    def _merge_optional_topk_rows(field, pad_value):
-        # Optional [R][K] OPD top-k rows (teacher_topk_ids/teacher_topk_logprobs,
-        # --loss-type opd_topk_loss): mirror _merge_optional_per_token, but pad the
-        # injected observation span with K-wide all-pad-sentinel rows (zero valid
-        # mass) instead of scalar zeros, matching _extract_teacher_topk's fixed
-        # row width.
-        av, bv = getattr(a, field), getattr(b, field)
-        if av is None and bv is None:
-            return None
-        top_k = len(av[0]) if av else (len(bv[0]) if bv else 0)
-        pad_row = [pad_value] * top_k
-        av = av if av is not None else [pad_row] * a.response_length
-        bv = bv if bv is not None else [pad_row] * b.response_length
-        return av + [pad_row] * obs_len + bv
+    def _merge_optional_topk_pair():
+        # A missing *response* segment is not equivalent to the loss-masked
+        # observation gap: reverse/mixed direct OPD assigns an all-pad teacher row
+        # a large outside-support loss.  Therefore retained rows must cover both
+        # generated segments, or the merged trajectory must be re-scored as a
+        # whole.  Normal pre-score merging (both pairs None) remains unchanged.
+        a_scored = a.teacher_topk_ids is not None or a.teacher_topk_logprobs is not None
+        b_scored = b.teacher_topk_ids is not None or b.teacher_topk_logprobs is not None
+        if not a_scored and not b_scored:
+            return None, None
+        if a_scored != b_scored:
+            raise ValueError(
+                "cannot merge one direct-OPD-scored segment with one unscored segment; "
+                "merge before teacher scoring or re-score the merged sample"
+            )
+
+        a_top_k = a.validate_teacher_topk()
+        b_top_k = b.validate_teacher_topk()
+        if a_top_k is None and b_top_k is None:
+            raise ValueError(
+                "cannot infer K while merging scored empty direct-OPD segments; "
+                "merge before teacher scoring or re-score the merged sample"
+            )
+        top_k = a_top_k if a_top_k is not None else b_top_k
+        if a_top_k is not None and b_top_k is not None and a_top_k != b_top_k:
+            raise ValueError(f"cannot merge direct-OPD segments with different K: {a_top_k} != {b_top_k}")
+
+        ids_gap = [[_TOPK_PAD_TOKEN_ID] * top_k for _ in range(obs_len)]
+        logprobs_gap = [[_TOPK_PAD_LOGPROB] * top_k for _ in range(obs_len)]
+        return (
+            [list(row) for row in a.teacher_topk_ids] + ids_gap + [list(row) for row in b.teacher_topk_ids],
+            [list(row) for row in a.teacher_topk_logprobs]
+            + logprobs_gap
+            + [list(row) for row in b.teacher_topk_logprobs],
+        )
 
     def _pop_opd_student_top_logprobs(metadata):
         if metadata is None:
@@ -132,6 +153,7 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
         if a.rollout_routed_experts is not None:
             assert a.rollout_routed_experts.shape[0] <= b.rollout_routed_experts.shape[0]
         assert a.status == Sample.Status.COMPLETED, f"a.status must be COMPLETED, got {a.status}"
+        merged_topk_ids, merged_topk_logprobs = _merge_optional_topk_pair()
 
         return _create_with_all_fields(
             Sample,
@@ -151,8 +173,8 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
             teacher_log_probs=_merge_optional_per_token("teacher_log_probs"),
             teacher_hidden_states=_merge_optional_hidden_states(),
             opd_reverse_kl=_merge_optional_per_token("opd_reverse_kl"),
-            teacher_topk_ids=_merge_optional_topk_rows("teacher_topk_ids", _TOPK_PAD_TOKEN_ID),
-            teacher_topk_logprobs=_merge_optional_topk_rows("teacher_topk_logprobs", _TOPK_PAD_LOGPROB),
+            teacher_topk_ids=merged_topk_ids,
+            teacher_topk_logprobs=merged_topk_logprobs,
             rollout_routed_experts=b.rollout_routed_experts,
             remove_sample=_merge_equal_value("remove_sample"),
             status=b.status,

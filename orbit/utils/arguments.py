@@ -83,27 +83,61 @@ def validate_async_off_policy_correction(args) -> None:
     bc232eb88 with the ``use_critic`` gate adapted to dev's estimator arg
     (PPO implies a critic in both adapter and separate modes).
     """
+    update_weights_interval = args.update_weights_interval
+    if type(update_weights_interval) is not int or update_weights_interval <= 0:
+        raise ValueError(
+            "--update-weights-interval must be a positive integer for async training, "
+            f"got {update_weights_interval!r}."
+        )
+
     if args.advantage_estimator != "ppo":
         return
-    assert args.use_rollout_logprobs or args.use_tis or args.keep_old_actor, (
+    keep_old_actor_matches_behavior = args.keep_old_actor and update_weights_interval == 1
+    assert args.use_rollout_logprobs or args.use_tis or keep_old_actor_matches_behavior, (
         "Async PPO training requires an explicit behavior-policy correction, because rollouts are "
         "generated before the current weight update while log probs are recomputed by the current "
         "actor by default. Pass one of: --use-rollout-logprobs (use the rollout engine's log probs "
         "as the ratio denominator), --use-tis (truncated importance sampling correction), or "
-        "--keep-old-actor (recompute the denominator with the weights the rollout engines used)."
+        "--keep-old-actor with --update-weights-interval 1 (recompute the denominator with the "
+        "weights the rollout engines used)."
     )
 
 
 def validate_rollout_temperature(args) -> None:
-    """Reject non-positive training rollout temperatures (spec Phase S).
+    """Reject non-finite or non-positive training rollout temperatures (spec Phase S).
 
     ``get_responses`` divides logits by this value; 0 would produce infs and
     a negative value silently flips the distribution. Greedy evaluation is
     configured via the eval args, not by zeroing the training temperature.
     """
-    if float(args.rollout_temperature) <= 0:
+    rollout_temperature = float(args.rollout_temperature)
+    if not math.isfinite(rollout_temperature) or rollout_temperature <= 0:
         raise ValueError(
-            f"--rollout-temperature must be > 0 for training rollouts, got {args.rollout_temperature}."
+            "--rollout-temperature must be finite and > 0 for training rollouts, " f"got {args.rollout_temperature}."
+        )
+
+
+def validate_opd_topk_reference_kl_args(args) -> None:
+    """Reject ref-policy KL knobs before generic ref-checkpoint validation."""
+    if getattr(args, "loss_type", None) != "opd_topk_loss":
+        return
+    if getattr(args, "use_kl_loss", False) or float(getattr(args, "kl_coef", 0) or 0) != 0:
+        raise ValueError(
+            "--loss-type opd_topk_loss is incompatible with reference-policy KL settings "
+            "(--use-kl-loss/--kl-coef): this direct distillation loss does not consume "
+            "reference log-probs. Disable those settings or use policy_loss."
+        )
+
+
+def validate_opd_topk_vocab_size(args) -> None:
+    """Ensure direct-OPD K fits the real student vocabulary once it is known."""
+    if getattr(args, "loss_type", None) != "opd_topk_loss":
+        return
+    top_k = getattr(args, "opd_log_prob_top_k", 0) or 0
+    vocab_size = getattr(args, "vocab_size", None)
+    if vocab_size is not None and top_k > vocab_size:
+        raise ValueError(
+            f"--opd-log-prob-top-k ({top_k}) cannot exceed the student's real vocabulary " f"size ({vocab_size})."
         )
 
 
@@ -605,8 +639,11 @@ def validate_opd_topk_loss_args(args) -> None:
     if getattr(args, "loss_type", None) != "opd_topk_loss":
         return
 
-    if (getattr(args, "opd_log_prob_top_k", 0) or 0) <= 0:
+    top_k = getattr(args, "opd_log_prob_top_k", 0) or 0
+    if top_k <= 0:
         raise ValueError("--loss-type opd_topk_loss requires --opd-log-prob-top-k > 0.")
+    validate_opd_topk_vocab_size(args)
+    validate_opd_topk_reference_kl_args(args)
 
     strategy = getattr(args, "opd_top_k_strategy", "only-student")
     if strategy != "only-teacher":
@@ -759,7 +796,11 @@ def _validate_opd_args(args) -> None:
 
         url_map = parse_teacher_urls(args.opd_teacher_urls)  # fail fast on malformed/duplicate entries
         has_ensemble_group = any(len(targets) > 1 for targets in url_map.values())
-        if has_ensemble_group and opd_top_k > 0 and getattr(args, "opd_top_k_strategy", "only-student") != "only-student":
+        if (
+            has_ensemble_group
+            and opd_top_k > 0
+            and getattr(args, "opd_top_k_strategy", "only-student") != "only-student"
+        ):
             raise ValueError(
                 "Teacher ensembles (--opd-teacher-urls groups with multiple URLs) require "
                 "--opd-top-k-strategy only-student: every group member must be scored at the "
@@ -906,9 +947,7 @@ def _validate_opd_args(args) -> None:
         if getattr(args, "use_opd", False):
             raise ValueError("--force-on-policy-ratio forbids --use-opd blend mode.")
         if args.advantage_estimator != "on_policy_distillation":
-            raise ValueError(
-                "--force-on-policy-ratio requires --advantage-estimator on_policy_distillation."
-            )
+            raise ValueError("--force-on-policy-ratio requires --advantage-estimator on_policy_distillation.")
         if getattr(args, "use_rollout_logprobs", False):
             raise ValueError("--force-on-policy-ratio forbids --use-rollout-logprobs.")
         steps_per_rollout = getattr(args, "num_steps_per_rollout", None)
@@ -1183,7 +1222,16 @@ def _normalize_peft_args(args):
             if peft_variant == "dsv4":
                 modules = ["wq_a", "wq_b", "wkv", "wo_a", "wo_b"]
             elif peft_variant == "mla":
-                modules = ["q_a_proj", "q_b_proj", "kv_a_proj_with_mqa", "kv_b_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+                modules = [
+                    "q_a_proj",
+                    "q_b_proj",
+                    "kv_a_proj_with_mqa",
+                    "kv_b_proj",
+                    "o_proj",
+                    "gate_proj",
+                    "up_proj",
+                    "down_proj",
+                ]
             else:
                 modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
             if target_modules == "all":
@@ -1206,9 +1254,7 @@ def _normalize_peft_args(args):
 
         if exclude_modules:
             exclude_set = (
-                set(m.strip() for m in exclude_modules.split(","))
-                if "," in exclude_modules
-                else {exclude_modules}
+                set(m.strip() for m in exclude_modules.split(",")) if "," in exclude_modules else {exclude_modules}
             )
             modules = [m for m in modules if m not in exclude_set]
 
@@ -1220,9 +1266,7 @@ def _normalize_peft_args(args):
     if peft_method == "lora":
         if peft_adapter_path is not None:
             if lora_adapter_path is not None and lora_adapter_path != peft_adapter_path:
-                raise AssertionError(
-                    "--peft-adapter-path and --lora-adapter-path must match when both are set."
-                )
+                raise AssertionError("--peft-adapter-path and --lora-adapter-path must match when both are set.")
             args.lora_adapter_path = peft_adapter_path
             lora_adapter_path = peft_adapter_path
         if getattr(args, "lora_rank", 0) <= 0 and lora_adapter_path is None:
@@ -1232,9 +1276,7 @@ def _normalize_peft_args(args):
     elif peft_method == "oft":
         if peft_adapter_path is not None:
             if oft_adapter_path is not None and oft_adapter_path != peft_adapter_path:
-                raise AssertionError(
-                    "--peft-adapter-path and --oft-adapter-path must match when both are set."
-                )
+                raise AssertionError("--peft-adapter-path and --oft-adapter-path must match when both are set.")
             args.oft_adapter_path = peft_adapter_path
             oft_adapter_path = peft_adapter_path
         if getattr(args, "oft_block_size", 0) <= 0 and oft_adapter_path is None:
@@ -1259,8 +1301,7 @@ def _normalize_and_validate_peft_args(args):
     _normalize_peft_args(args)
 
     if args.peft_method != "none":
-        assert args.megatron_to_hf_mode == "bridge", \
-            "PEFT requires --megatron-to-hf-mode bridge."
+        assert args.megatron_to_hf_mode == "bridge", "PEFT requires --megatron-to-hf-mode bridge."
 
     return args
 
@@ -1351,18 +1392,12 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
             parser.add_argument(
                 "--offload-train-grad-buffers",
                 action=argparse.BooleanOptionalAction,
-                help=(
-                    "Whether --offload-train moves Megatron DDP grad buffers to CPU. "
-                    "Defaults to false."
-                ),
+                help=("Whether --offload-train moves Megatron DDP grad buffers to CPU. " "Defaults to false."),
             )
             parser.add_argument(
                 "--offload-train-optimizer",
                 action=argparse.BooleanOptionalAction,
-                help=(
-                    "Whether --offload-train moves Megatron optimizer params/state to CPU. "
-                    "Defaults to false."
-                ),
+                help=("Whether --offload-train moves Megatron optimizer params/state to CPU. " "Defaults to false."),
             )
             parser.add_argument(
                 "--offload-train-adapter",
@@ -1456,11 +1491,12 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
                 action="store_true",
                 default=False,
                 help=(
-                    "Enable bit-exact train/rollout parity via a named contract "
-                    "(orbit/true_on_policy/). Expands at parse time into the deterministic "
-                    "rollout flags, --true-on-policy-mode, --recompute-logprobs-via-prefill, "
-                    "--deterministic-mode and determinism env vars; validates the run "
-                    "(model family, topology, precision, adapter) against the contract."
+                    "Enable the deterministic true-on-policy ladder via a named contract "
+                    "(orbit/true_on_policy/). The current Phase 1-4 implementation aligns "
+                    "scoring and measures the remaining train/rollout kernel gap; it does not "
+                    "claim bit-exact parity until a contract enables the Phase-5 "
+                    "SGLang-in-Megatron backend. Expands at parse time into rollout and "
+                    "training determinism flags and validates model/topology/precision/adapter."
                 ),
             )
             parser.add_argument(
@@ -1474,8 +1510,9 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
                 action="store_true",
                 default=False,
                 help=(
-                    "Internal true-on-policy mode flag (training-side log-prob kernel + CI "
-                    "bitwise gate). Set automatically by --true-on-policy."
+                    "Internal true-on-policy scoring-mode flag. The exact per-token CI gate "
+                    "activates only for a contract with the Phase-5 SGLang-in-Megatron backend. "
+                    "Set automatically by --true-on-policy."
                 ),
             )
             parser.add_argument(
@@ -3278,9 +3315,7 @@ def _finalize_train_offload_args(args) -> None:
     if getattr(args, "offload_train_frozen_base_mode", None) is None:
         args.offload_train_frozen_base_mode = "auto"
     if args.offload_train_frozen_base_mode not in {"auto", "flat", "tms"}:
-        raise ValueError(
-            "--offload-train-frozen-base-mode must be one of: auto, flat, tms"
-        )
+        raise ValueError("--offload-train-frozen-base-mode must be one of: auto, flat, tms")
     if args.offload_train is None:
         args.offload_train = False
     if args.offload_train_grad_buffers is None:
@@ -3329,9 +3364,7 @@ def _apply_critic_args(args) -> None:
         if args.advantage_estimator != "ppo":
             raise ValueError("--critic-mode adapter requires --advantage-estimator ppo.")
         if args.peft_method == "none":
-            raise ValueError(
-                "--critic-mode adapter requires an enabled --peft-method: the critic is an adapter."
-            )
+            raise ValueError("--critic-mode adapter requires an enabled --peft-method: the critic is an adapter.")
         if args.train_backend != "megatron":
             raise ValueError("--critic-mode adapter requires the megatron train backend.")
         if args.keep_old_actor:
@@ -3386,9 +3419,7 @@ def _apply_custom_config_args(args) -> None:
     if data is None:
         data = {}
     elif not isinstance(data, dict):
-        raise ValueError(
-            f"--custom-config-path must contain a mapping at the root; got {type(data).__name__}."
-        )
+        raise ValueError(f"--custom-config-path must contain a mapping at the root; got {type(data).__name__}.")
     for k, v in data.items():
         if hasattr(args, k):
             logger.info(f"Warning: Argument {k} is already set to {getattr(args, k)}, will override with {v}.")
@@ -3403,6 +3434,9 @@ def orbit_validate_args(args):
 
 def _common_orbit_validate_args(args):
     validate_rollout_temperature(args)
+    # Fail with the direct-loss incompatibility before generic full-FT KL
+    # validation attempts to stat/load args.ref_load.
+    validate_opd_topk_reference_kl_args(args)
 
     args.eval_datasets = _resolve_eval_datasets(args)
 

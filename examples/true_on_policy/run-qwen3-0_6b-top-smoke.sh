@@ -3,8 +3,9 @@
 # TOP=1 adds --true-on-policy (contract qwen3_dense_true_on_policy_v1):
 # deterministic sglang rollout + prefill recompute + batch-invariant Megatron
 # kernels + fusion bans + bf16 log-prob pipeline. TP=2 exercises the Phase-4
-# TP-correct full-vocab gather. Compare train_rollout_logprob_abs_diff
-# against a TOP=0 run of this same script.
+# TP-correct full-vocab gather. This measures the remaining cross-kernel gap;
+# exact parity waits for Phase 5. Compare train_rollout_logprob_abs_diff against
+# a TOP=0 run of this same script.
 # NOTE: no --sequence-parallel (the contract rejects it); --attention-backend
 # flash is required by batch-invariant mode.
 set -euo pipefail

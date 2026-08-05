@@ -1,10 +1,15 @@
-from argparse import Namespace  # noqa: F401  (parity with sibling test files)
+from argparse import Namespace
 
 import pytest
 import torch
 
+from orbit.backends.training_utils import teacher_lm_head as teacher_lm_head_module
 from orbit.backends.training_utils.cp_utils import get_sum_of_sample_mean
+from orbit.backends.training_utils.loss import loss_function
 from orbit.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
+
+
+_JSD_CHECKPOINT_KEY = "<test-loss-function-microbatch-invariance>"
 
 
 @pytest.fixture(autouse=True)
@@ -39,9 +44,7 @@ def test_reduction_is_microbatch_invariant(calculate_per_token_loss: bool) -> No
     # scope here.
     total_lengths, response_lengths, loss_masks, x = _make_batch()
 
-    whole = get_sum_of_sample_mean(
-        total_lengths, response_lengths, loss_masks, calculate_per_token_loss
-    )(x)
+    whole = get_sum_of_sample_mean(total_lengths, response_lengths, loss_masks, calculate_per_token_loss)(x)
 
     split_total = torch.zeros(())
     start_sample, start_token = 0, 0
@@ -66,9 +69,7 @@ def test_reduction_gradient_is_microbatch_invariant(calculate_per_token_loss: bo
     x_whole = x.clone().requires_grad_(True)
     x_split = x.clone().requires_grad_(True)
 
-    get_sum_of_sample_mean(total_lengths, response_lengths, loss_masks, calculate_per_token_loss)(
-        x_whole
-    ).backward()
+    get_sum_of_sample_mean(total_lengths, response_lengths, loss_masks, calculate_per_token_loss)(x_whole).backward()
 
     total = torch.zeros(())
     start_sample, start_token = 0, 0
@@ -85,3 +86,125 @@ def test_reduction_gradient_is_microbatch_invariant(calculate_per_token_loss: bo
     total.backward()
 
     torch.testing.assert_close(x_split.grad, x_whole.grad)
+
+
+def _make_jsd_inputs() -> tuple[torch.Tensor, dict]:
+    generator = torch.Generator().manual_seed(91)
+    response_lengths = [3, 5, 2, 4, 6, 1]
+    prompt_lengths = [2, 3, 4, 2, 5, 3]
+    total_lengths = [prompt + response for prompt, response in zip(prompt_lengths, response_lengths, strict=True)]
+    vocab_size = 17
+    loss_masks = [
+        torch.randint(0, 2, (response,), generator=generator, dtype=torch.int64) for response in response_lengths
+    ]
+    loss_masks[2].zero_()  # Fully masked: its clamped normalizer must remain partition-invariant.
+    logits = torch.randn(1, sum(total_lengths), vocab_size, generator=generator)
+    batch = {
+        "unconcat_tokens": [torch.randint(0, vocab_size, (total,), generator=generator) for total in total_lengths],
+        "total_lengths": total_lengths,
+        "response_lengths": response_lengths,
+        "loss_masks": loss_masks,
+        # An identity teacher head turns these rows directly into teacher logits.
+        "teacher_hidden_states": [
+            torch.randn(response, vocab_size, generator=generator) for response in response_lengths
+        ],
+    }
+    return logits, batch
+
+
+def _jsd_args(*, calculate_per_token_loss: bool, global_batch_size: int) -> Namespace:
+    return Namespace(
+        loss_type="opd_jsd_loss",
+        calculate_per_token_loss=calculate_per_token_loss,
+        global_batch_size=global_batch_size,
+        use_dynamic_global_batch_size=False,
+        recompute_loss_function=False,
+        qkv_format="thd",
+        allgather_cp=False,
+        opd_jsd_beta=0.35,
+        rollout_temperature=1.0,
+        opd_log_prob_min_clamp=-1e30,
+        opd_loss_max_clamp=1e30,
+        opd_jsd_pointwise_clip=None,
+        opd_log_topk_overlap=False,
+        opd_topk_overlap_ks=[],
+        use_kl_loss=False,
+        teacher_hf_checkpoint=_JSD_CHECKPOINT_KEY,
+        log_probs_chunk_size=-1,
+        true_on_policy_mode=False,
+        vocab_size=17,
+    )
+
+
+def _slice_sample_batch(batch: dict, start: int, stop: int) -> dict:
+    """Slice sample-aligned list fields; reusable by JSD and top-k OPD batches."""
+    sample_count = len(batch["response_lengths"])
+    return {
+        key: value[start:stop] if isinstance(value, list) and len(value) == sample_count else value
+        for key, value in batch.items()
+    }
+
+
+def _run_megatron_scaled_loss(
+    args: Namespace,
+    batch: dict,
+    base_logits: torch.Tensor,
+    microbatch_sizes: tuple[int, ...],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Reproduce MCore's accumulation/final normalization around loss_function."""
+    assert sum(microbatch_sizes) == len(batch["response_lengths"])
+    logits = base_logits.detach().clone().requires_grad_(True)
+    num_microbatches = len(microbatch_sizes)
+    losses = []
+    normalizers = []
+    sample_start = 0
+    token_start = 0
+    for microbatch_size in microbatch_sizes:
+        sample_stop = sample_start + microbatch_size
+        token_stop = token_start + sum(batch["total_lengths"][sample_start:sample_stop])
+        microbatch = _slice_sample_batch(batch, sample_start, sample_stop)
+        loss, normalizer, _ = loss_function(
+            args,
+            microbatch,
+            num_microbatches,
+            logits[:, token_start:token_stop],
+            apply_megatron_loss_scaling=True,
+        )
+        losses.append(loss)
+        normalizers.append(normalizer)
+        sample_start = sample_stop
+        token_start = token_stop
+
+    accumulated_loss = torch.stack(losses).sum()
+    if args.calculate_per_token_loss:
+        # finalize_model_grads divides accumulated gradients by this token count.
+        objective = accumulated_loss / torch.stack(normalizers).sum()
+    else:
+        # MCore divides each microbatch loss by num_microbatches before backward.
+        objective = accumulated_loss / num_microbatches
+    objective.backward()
+    return objective.detach(), logits.grad.detach()
+
+
+@pytest.mark.parametrize("calculate_per_token_loss", [False, True])
+def test_opd_jsd_loss_function_is_microbatch_loss_and_gradient_invariant(
+    calculate_per_token_loss: bool,
+) -> None:
+    logits, batch = _make_jsd_inputs()
+    args = _jsd_args(
+        calculate_per_token_loss=calculate_per_token_loss,
+        global_batch_size=len(batch["response_lengths"]),
+    )
+    teacher_lm_head_module._TEACHER_LM_HEAD_CACHE[_JSD_CHECKPOINT_KEY] = torch.eye(logits.size(-1))
+    teacher_lm_head_module._SHARDED.add(_JSD_CHECKPOINT_KEY)
+    try:
+        whole_loss, whole_grad = _run_megatron_scaled_loss(args, batch, logits, (6,))
+        split_loss, split_grad = _run_megatron_scaled_loss(args, batch, logits, (2, 3, 1))
+    finally:
+        teacher_lm_head_module._TEACHER_LM_HEAD_CACHE.pop(_JSD_CHECKPOINT_KEY, None)
+        teacher_lm_head_module._SHARDED.discard(_JSD_CHECKPOINT_KEY)
+
+    assert whole_loss > 0
+    assert whole_grad.abs().sum() > 0
+    torch.testing.assert_close(split_loss, whole_loss, atol=2e-6, rtol=2e-6)
+    torch.testing.assert_close(split_grad, whole_grad, atol=2e-6, rtol=2e-6)

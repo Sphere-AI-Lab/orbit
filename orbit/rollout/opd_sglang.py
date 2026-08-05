@@ -407,17 +407,37 @@ def _teacher_responses_from_payload(reward_payload: dict[str, Any]) -> tuple[lis
 
 
 def _top_entry_token_id(entry: list[Any]) -> int:
-    return int(entry[1])
+    _validate_top_entry(entry)
+    return entry[1]
 
 
 def _top_entry_logprob(entry: list[Any]) -> float:
+    _validate_top_entry(entry)
     return float(entry[0])
+
+
+def _validate_top_entry(entry: object) -> None:
+    if type(entry) is not list or len(entry) < 2:
+        raise ValueError(f"top-logprob entry must be a list with at least two values, got {entry!r}")
+    logprob, token_id = entry[0], entry[1]
+    if type(logprob) not in (int, float) or not math.isfinite(logprob) or logprob > 0:
+        raise ValueError(f"top-logprob score must be finite and <= 0, got {logprob!r}")
+    if type(token_id) is not int or token_id < 0:
+        raise ValueError(f"top-logprob token id must be a nonnegative exact integer, got {token_id!r}")
 
 
 def _top_entries_to_map(entries: Iterable[list[Any]] | None) -> dict[int, float]:
     if not entries:
         return {}
-    return {_top_entry_token_id(entry): _top_entry_logprob(entry) for entry in entries if entry is not None}
+    result = {}
+    for entry in entries:
+        if entry is None:
+            continue
+        token_id = _top_entry_token_id(entry)
+        if token_id in result:
+            raise ValueError(f"top-logprob entries contain duplicate token id {token_id}")
+        result[token_id] = _top_entry_logprob(entry)
+    return result
 
 
 def _trim_input_field(meta_info: dict[str, Any], field: str, response_length: int) -> list[Any]:
@@ -435,7 +455,7 @@ def _input_logprob_maps(response: dict[str, Any], field: str, response_length: i
 
 
 def _extract_teacher_topk(
-    reward_payload: dict[str, Any], response_length: int, top_k: int
+    reward_payload: dict[str, Any], response_length: int, top_k: int, *, num_tokens: int | None = None
 ) -> tuple[list[list[int]], list[list[float]]]:
     """Build per-position ``(ids, logprobs)`` rows of width exactly ``top_k`` for
     --loss-type opd_topk_loss's retained transport, from the single-teacher
@@ -443,15 +463,40 @@ def _extract_teacher_topk(
     logprob and padded with (_TOPK_PAD_TOKEN_ID, _TOPK_PAD_LOGPROB) when a
     position has fewer than ``top_k`` entries.
 
-    Raises ``ValueError`` on ensemble payloads (``"teachers" in reward_payload``)
-    -- validation (Task 4) makes this unreachable in production.
+    When ``num_tokens`` is supplied (the production caller always supplies it),
+    the SGLang position count must match the scored input exactly.  This prevents
+    a short response from silently returning fewer than ``response_length`` rows,
+    or a long/stale response from being accepted by the tail slice below.
+
+    Raises ``ValueError`` on malformed position counts or ensemble payloads
+    (``"teachers" in reward_payload``) -- argument validation makes ensembles
+    unreachable in production.
     """
     if "teachers" in reward_payload:
         raise ValueError("--loss-type opd_topk_loss does not support teacher ensembles.")
+    if response_length < 0:
+        raise ValueError(f"response_length must be >= 0, got {response_length}.")
+    if top_k <= 0:
+        raise ValueError(f"top_k must be > 0, got {top_k}.")
     if response_length == 0:
         return [], []
 
+    teacher_meta = reward_payload["teacher"]["meta_info"]
+    input_top_logprobs = teacher_meta.get("input_top_logprobs")
+    if input_top_logprobs is None:
+        raise ValueError("Teacher response is missing meta_info.input_top_logprobs.")
+    if num_tokens is not None and len(input_top_logprobs) != num_tokens:
+        raise ValueError(
+            "Teacher response position count does not match the scored input: "
+            f"meta_info.input_top_logprobs has {len(input_top_logprobs)} rows, expected {num_tokens} "
+            f"(response_length={response_length})."
+        )
+
     position_maps = _input_logprob_maps(reward_payload["teacher"], "input_top_logprobs", response_length)
+    if len(position_maps) != response_length:
+        raise ValueError(
+            f"Teacher response has {len(position_maps)} top-k response rows, expected exactly {response_length}."
+        )
     ids_rows: list[list[int]] = []
     logprobs_rows: list[list[float]] = []
     for position_map in position_maps:
@@ -622,8 +667,7 @@ def _compute_topk_reverse_kl(
         # softmax; only-teacher/union/xor mix the rollout harvest with a
         # separate rescoring pass (also validated at startup).
         raise ValueError(
-            "--opd-topk-tail-bucket requires --opd-top-k-strategy only-student "
-            f"or intersection, got {strategy!r}."
+            "--opd-topk-tail-bucket requires --opd-top-k-strategy only-student " f"or intersection, got {strategy!r}."
         )
 
     student_top_maps = (
@@ -693,7 +737,7 @@ def _compute_topk_reverse_kl(
                 )
             )
 
-        def _reverse_term():
+        def _reverse_term(student_logps=student_logps, teacher_logps=teacher_logps):
             if tail_bucket:
                 return _tail_bucket_reverse_kl(student_logps, teacher_logps)
             weights = _reward_weights(student_logps, teacher_logps, weight_mode, normalize=normalize_weights)
@@ -701,7 +745,7 @@ def _compute_topk_reverse_kl(
                 w * (s_logp - t_logp) for w, s_logp, t_logp in zip(weights, student_logps, teacher_logps, strict=True)
             )
 
-        def _forward_term():
+        def _forward_term(student_logps=student_logps, teacher_logps=teacher_logps):
             # Forward KL weights by the teacher distribution (its natural
             # measure); --opd-reward-weight-mode applies to the reverse term only.
             if tail_bucket:
@@ -988,7 +1032,9 @@ def post_process(args, samples: list[Sample], **kwargs):
     full_vocab = teacher_score_mode(args) == "full_vocab"
     unscored = 0
     for sample in samples:
-        payload = sample.metadata.pop(TEACHER_RESPONSE_METADATA_KEY, None)
+        # Retain the raw payload until extraction validates successfully so a
+        # malformed teacher response remains inspectable/retryable.
+        payload = sample.metadata.get(TEACHER_RESPONSE_METADATA_KEY)
         if payload is None:
             # e.g. aborted-then-recovered partial rollout whose reward was not
             # produced by reward_func. Keep the OPD fields None (honest
@@ -1012,7 +1058,10 @@ def post_process(args, samples: list[Sample], **kwargs):
                 # this is what lets _score_top_k skip that rescore call too (see
                 # its docstring for the transport blowup this avoids).
                 sample.teacher_topk_ids, sample.teacher_topk_logprobs = _extract_teacher_topk(
-                    payload, sample.response_length, top_k
+                    payload,
+                    sample.response_length,
+                    top_k,
+                    num_tokens=len(sample.tokens),
                 )
             else:
                 sample.opd_reverse_kl = _compute_topk_reverse_kl(args, sample, payload).tolist()
@@ -1021,8 +1070,11 @@ def post_process(args, samples: list[Sample], **kwargs):
             sample.metadata.pop(STUDENT_TOP_LOGPROBS_METADATA_KEY, None)
         else:
             sample.teacher_log_probs = _sampled_teacher_log_probs(payload, sample.response_length)
+        sample.metadata.pop(TEACHER_RESPONSE_METADATA_KEY, None)
     if unscored:
-        logger.warning("OPD sglang post_process: %d/%d samples had no stashed teacher response.", unscored, len(samples))
+        logger.warning(
+            "OPD sglang post_process: %d/%d samples had no stashed teacher response.", unscored, len(samples)
+        )
 
     scalar_rewards = [0.0] * len(samples)
     return scalar_rewards, scalar_rewards

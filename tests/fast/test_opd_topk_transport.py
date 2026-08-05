@@ -27,15 +27,12 @@ response-position entries that ``_extract_teacher_topk`` must turn into rows.
 import argparse
 import asyncio
 import math
+from copy import deepcopy
 
 import pytest
 
 import orbit.rollout.opd_sglang as opd_sglang
-from orbit.rollout.opd_sglang import (
-    _TOPK_PAD_LOGPROB,
-    _TOPK_PAD_TOKEN_ID,
-    _extract_teacher_topk,
-)
+from orbit.rollout.opd_sglang import _TOPK_PAD_LOGPROB, _TOPK_PAD_TOKEN_ID, _extract_teacher_topk
 from orbit.rollout.scoring_client import SCORING_MAX_RESPONSE_BYTES
 from orbit.utils.types import Sample
 
@@ -93,11 +90,142 @@ def test_zero_response_length_returns_empty_lists():
     assert logprobs_rows == []
 
 
+@pytest.mark.parametrize("delta", [-1, 1])
+def test_extract_teacher_topk_rejects_wrong_scored_position_count(delta):
+    payload = deepcopy(_payload())
+    rows = payload["teacher"]["meta_info"]["input_top_logprobs"]
+    if delta < 0:
+        rows.pop()
+    else:
+        rows.append([_entry(math.log(0.8), 99)])
+
+    with pytest.raises(ValueError, match="position count does not match"):
+        _extract_teacher_topk(payload, response_length=3, top_k=2, num_tokens=8)
+
+
+def test_extract_teacher_topk_rejects_too_few_response_rows_without_num_tokens():
+    payload = {"teacher": {"meta_info": {"input_top_logprobs": [None, [_entry(-0.1, 1)]]}}}
+
+    with pytest.raises(ValueError, match="expected exactly 3"):
+        _extract_teacher_topk(payload, response_length=3, top_k=2)
+
+
 def test_ensemble_payload_raises_value_error():
     ensemble_payload = {"teachers": [_payload()["teacher"]], "teacher_weights": [1.0]}
 
     with pytest.raises(ValueError):
         _extract_teacher_topk(ensemble_payload, response_length=3, top_k=2)
+
+
+@pytest.mark.parametrize(
+    "bad_entry",
+    [
+        [-0.1, 1.9],
+        ["-0.1", 1],
+        [float("nan"), 1],
+        [float("inf"), 1],
+        [0.01, 1],
+        [-0.1, -1],
+        [-0.1, True],
+    ],
+)
+def test_extract_teacher_topk_rejects_invalid_entry_values_without_coercion(bad_entry):
+    payload = deepcopy(_payload())
+    payload["teacher"]["meta_info"]["input_top_logprobs"][-1][0] = bad_entry
+
+    with pytest.raises(ValueError, match="top-logprob"):
+        _extract_teacher_topk(payload, response_length=3, top_k=2)
+
+
+def test_extract_teacher_topk_rejects_duplicate_token_ids_per_position():
+    payload = deepcopy(_payload())
+    payload["teacher"]["meta_info"]["input_top_logprobs"][-1] = [
+        _entry(-0.1, 9),
+        _entry(-0.2, 9),
+    ]
+
+    with pytest.raises(ValueError, match="duplicate token id"):
+        _extract_teacher_topk(payload, response_length=3, top_k=2)
+
+
+# --- Sample-level pair/shape validation and truncation -----------------------
+
+
+def _retained_sample(ids, logprobs, response_length: int = 2) -> Sample:
+    return Sample(
+        tokens=[0] * (response_length + 1),
+        response_length=response_length,
+        teacher_topk_ids=ids,
+        teacher_topk_logprobs=logprobs,
+    )
+
+
+@pytest.mark.parametrize(
+    ("ids", "logprobs"),
+    [
+        ([[1, 2], [3, 4]], None),
+        (None, [[-0.1, -0.2], [-0.3, -0.4]]),
+    ],
+)
+def test_sample_validate_rejects_unpaired_teacher_topk_fields(ids, logprobs):
+    sample = _retained_sample(ids, logprobs)
+
+    with pytest.raises(ValueError, match="must be present together"):
+        sample.validate()
+
+
+@pytest.mark.parametrize(
+    ("ids", "logprobs", "message"),
+    [
+        ([[1, 2]], [[-0.1, -0.2]], "row count"),
+        ([[1, 2], [3]], [[-0.1, -0.2], [-0.3]], "ragged"),
+        ([[1, 2], [3, 4]], [[-0.1], [-0.3, -0.4]], "to match teacher_topk_ids"),
+    ],
+)
+def test_sample_validate_rejects_malformed_teacher_topk_shape(ids, logprobs, message):
+    sample = _retained_sample(ids, logprobs)
+
+    with pytest.raises(ValueError, match=message):
+        sample.validate()
+
+
+def test_sample_validate_teacher_topk_checks_configured_width_when_known():
+    sample = _retained_sample([[1, 2], [3, 4]], [[-0.1, -0.2], [-0.3, -0.4]])
+
+    assert sample.validate_teacher_topk(expected_top_k=2) == 2
+    with pytest.raises(ValueError, match="configured top-k"):
+        sample.validate_teacher_topk(expected_top_k=3)
+
+
+@pytest.mark.parametrize(
+    ("ids", "logprobs", "message"),
+    [
+        ([[1.5, 2], [3, 4]], [[-0.1, -0.2], [-0.3, -0.4]], "exact integer"),
+        ([[1, 2], [3, 4]], [[float("nan"), -0.2], [-0.3, -0.4]], "finite and <= 0"),
+        ([[1, 1], [3, 4]], [[-0.1, -0.2], [-0.3, -0.4]], "duplicate token id"),
+        ([[1, 2], [3, 4]], [[-1e4, -0.2], [-0.3, -0.4]], "padding"),
+    ],
+)
+def test_sample_validate_rejects_invalid_teacher_topk_values(ids, logprobs, message):
+    with pytest.raises(ValueError, match=message):
+        _retained_sample(ids, logprobs).validate()
+
+
+def test_strip_last_output_tokens_slices_both_teacher_topk_fields():
+    class _Tokenizer:
+        def decode(self, tokens):
+            return ""
+
+    sample = _retained_sample(
+        [[1, 2], [3, 4], [5, 6]],
+        [[-0.1, -0.2], [-0.3, -0.4], [-0.5, -0.6]],
+        response_length=3,
+    )
+    sample.strip_last_output_tokens(1, _Tokenizer())
+
+    assert sample.teacher_topk_ids == [[1, 2], [3, 4]]
+    assert sample.teacher_topk_logprobs == [[-0.1, -0.2], [-0.3, -0.4]]
+    sample.validate()
 
 
 # --- _topk_response_byte_limit -----------------------------------------------
@@ -289,6 +417,22 @@ def test_post_process_direct_loss_skips_reverse_kl_keeps_teacher_topk_extraction
     ]
     for got_row, expected_row in zip(sample.teacher_topk_logprobs, expected_logprobs, strict=True):
         assert got_row == pytest.approx(expected_row)
+    assert opd_sglang.TEACHER_RESPONSE_METADATA_KEY not in sample.metadata
+
+
+def test_post_process_keeps_malformed_teacher_payload_for_inspection_or_retry():
+    args = _post_process_args(loss_type="opd_topk_loss")
+    sample = Sample(tokens=[0] * 8, response_length=3)
+    payload = _payload()
+    payload["teacher"]["meta_info"]["input_top_logprobs"][-1][0] = [float("nan"), 9]
+    sample.metadata[opd_sglang.TEACHER_RESPONSE_METADATA_KEY] = payload
+
+    with pytest.raises(ValueError, match="finite"):
+        opd_sglang.post_process(args, [sample])
+
+    assert sample.metadata[opd_sglang.TEACHER_RESPONSE_METADATA_KEY] is payload
+    assert sample.teacher_topk_ids is None
+    assert sample.teacher_topk_logprobs is None
 
 
 def test_post_process_pg_configuration_still_computes_reverse_kl():

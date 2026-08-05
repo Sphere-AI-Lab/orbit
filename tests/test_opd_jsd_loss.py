@@ -47,6 +47,9 @@ def _build_args(beta: float, topk_overlap: bool = False) -> Namespace:
         allgather_cp=False,
         log_probs_chunk_size=-1,
         true_on_policy_mode=False,
+        # Megatron pads the model to 512 columns, but only the first 500 are
+        # real.  TP=2 therefore has a partially padded final shard.
+        vocab_size=TEACHER_VOCAB_SIZE,
     )
 
 
@@ -104,7 +107,7 @@ def _reference_loss(args, logits, head, batch):
         # logits row t predicts token t+1 -> rows [total-response-1, total-1)
         s_logits = flat[seq_start + total - response - 1 : seq_start + total - 1] / temperature
         seq_start += total
-        s_lp = torch.log_softmax(s_logits, dim=-1).clamp(min=args.opd_log_prob_min_clamp)
+        s_lp = torch.log_softmax(s_logits[:, : args.vocab_size], dim=-1).clamp(min=args.opd_log_prob_min_clamp)
 
         t_logits = (batch["teacher_hidden_states"][i].float() @ head.T) / temperature
         t_lp_real = torch.log_softmax(t_logits, dim=-1).clamp(min=args.opd_log_prob_min_clamp)
@@ -177,10 +180,37 @@ def test_jsd_tp2_matches_tp1():
     port = 29511 + os.getpid() % 1000
     ctx = mp.get_context("spawn")
     results = ctx.Queue()
-    mp.start_processes(
-        _tp_worker, args=(2, port, 0.5, results), nprocs=2, join=True, start_method="spawn"
-    )
+    mp.start_processes(_tp_worker, args=(2, port, 0.5, results), nprocs=2, join=True, start_method="spawn")
     assert results.get(timeout=10) == "ok"
+
+
+def test_jsd_ignores_student_padding_in_loss_and_gradient():
+    _single_state()
+    args = _build_args(0.0)
+    args.rollout_temperature = 1.0
+    args.opd_jsd_pointwise_clip = None
+    args.opd_log_prob_min_clamp = -1e30
+    args.vocab_size = 2
+    args.opd_log_topk_overlap = True
+    args.opd_topk_overlap_ks = [3]
+
+    # The single response uses logits row 0.  Teacher hidden state and the
+    # identity head reconstruct exactly the two real student logits; the two
+    # padding columns deliberately carry finite competing scores.
+    logits = torch.tensor([[[2.0, 1.0, 0.0, 0.0], [9.0, 9.0, 9.0, 9.0]]])
+    head = torch.eye(2)
+    batch = {
+        "unconcat_tokens": [torch.tensor([0, 1])],
+        "response_lengths": [1],
+        "total_lengths": [2],
+        "teacher_hidden_states": [torch.tensor([[2.0, 1.0]])],
+    }
+
+    loss, metrics, grad = _run_loss(args, logits, head, batch)
+
+    torch.testing.assert_close(loss, torch.zeros_like(loss), atol=1e-7, rtol=0)
+    torch.testing.assert_close(grad[..., 2:], torch.zeros_like(grad[..., 2:]), atol=0, rtol=0)
+    torch.testing.assert_close(metrics["topk_overlap_k3"], torch.ones_like(metrics["topk_overlap_k3"]))
 
 
 def test_cp_hidden_state_slicing_matches_log_prob_slicing():
@@ -194,9 +224,7 @@ def test_cp_hidden_state_slicing_matches_log_prob_slicing():
     seen_rows = []
     for rank in range(2):
         _cp_state(rank, 2)
-        index_slice = slice_log_prob_with_cp(
-            list(range(response_length)), total_length, response_length, "thd", None
-        )
+        index_slice = slice_log_prob_with_cp(list(range(response_length)), total_length, response_length, "thd", None)
         rollout_data = {
             "teacher_hidden_states": [hidden.copy()],
             "total_lengths": [total_length],
@@ -214,17 +242,19 @@ def test_oversized_teacher_head_is_clipped_to_student_vocab():
     """A bigger same-tokenizer teacher can pad its vocab wider than the student
     (Qwen2.5-7B: 152064 vs 151936). Rows past the student's logit width are
     padding the student cannot emit: the loss must behave exactly as if the
-    head were pre-clipped."""
+    head were pre-clipped to the student's real vocabulary."""
     _single_state()
     args = _build_args(0.5)
     logits, head, batch = _build_inputs()
     generator = torch.Generator().manual_seed(99)
     oversized = torch.cat([head, torch.randn(8, HIDDEN_SIZE, generator=generator)], dim=0)
-    assert oversized.size(0) > PADDED_VOCAB_SIZE - 8  # wider than the student's 512 - real 500? build: head=500 rows; oversized=508 <512! need > 512
+    assert (
+        oversized.size(0) > PADDED_VOCAB_SIZE - 8
+    )  # wider than the student's 512 - real 500? build: head=500 rows; oversized=508 <512! need > 512
     oversized = torch.cat([oversized, torch.randn(8, HIDDEN_SIZE, generator=generator)], dim=0)
     assert oversized.size(0) == TEACHER_VOCAB_SIZE + 16 > PADDED_VOCAB_SIZE
 
     big_loss, _, big_grad = _run_loss(args, logits, oversized, batch)
-    clipped_loss, _, clipped_grad = _run_loss(args, logits, oversized[:PADDED_VOCAB_SIZE], batch)
+    clipped_loss, _, clipped_grad = _run_loss(args, logits, oversized[: args.vocab_size], batch)
     assert torch.equal(big_loss, clipped_loss)
     assert torch.equal(big_grad, clipped_grad)

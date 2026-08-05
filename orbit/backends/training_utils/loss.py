@@ -10,6 +10,7 @@ from torch.utils.checkpoint import checkpoint
 from orbit.utils.distributed_utils import distributed_masked_whiten
 from orbit.utils.misc import load_function
 from orbit.utils.ppo_utils import (
+    _gather_true_on_policy_full_logits,
     _safe_clamp_log_ratio,
     _safe_exp_neg_ppo_kl,
     apply_opd_icepop_gate,
@@ -38,11 +39,13 @@ from .parallel import get_parallel_state
 from .teacher_lm_head import load_teacher_lm_head
 from .vocab_parallel import (
     compute_vocab_parallel_topk_log_probs,
+    compute_vocab_parallel_topk_log_probs_and_entropy,
     vocab_parallel_log_softmax,
     vocab_parallel_sum,
     vocab_parallel_topk_indices,
     vocab_shard_start,
 )
+
 
 def _response_masked_max(
     x: torch.Tensor,
@@ -288,6 +291,7 @@ def get_log_probs_and_entropy(
     non_loss_data: bool = True,
     max_seq_lens: list[int] | None = None,
     teacher_topk_ids: list[torch.Tensor] | None = None,
+    with_log_probs: bool = True,
 ) -> dict[str, list[torch.Tensor]]:
     """Compute per-token log-probabilities (and optionally entropy) on responses.
 
@@ -309,6 +313,8 @@ def get_log_probs_and_entropy(
             `[R, K]` token-id tensors (one per sample, from TeacherManager) to
             additionally gather student log-probs for at each response
             position. When None (the default), no extra gather is done.
+        with_log_probs: Compute sampled-token log-probs. The direct top-k OPD
+            loss disables this because it only consumes the supplied-id scores.
 
     Returns:
         Dict with key "log_probs" mapping to a list of `[R]` tensors per
@@ -347,35 +353,79 @@ def get_log_probs_and_entropy(
         topk_ids_iter,
         strict=True,
     ):
-        log_prob, entropy = calculate_log_probs_and_entropy(
-            logits_chunk,
-            tokens_chunk,
-            parallel_state.tp.group,
-            with_entropy=with_entropy,
-            entropy_no_grad=entropy_no_grad,
-            chunk_size=args.log_probs_chunk_size,
-            true_on_policy=args.true_on_policy_mode,
-            vocab_size=getattr(args, "vocab_size", None),
-        )
-
-        log_probs_list.append(log_prob.squeeze(-1))
-        entropy_list.append(entropy)
-
         if sample_topk_ids is not None:
-            # Deliberately not calculate_log_probs_and_entropy/fused_vocab_parallel_
-            # cross_entropy here: that path is wrapped in @jit_fuser (torch.compile),
-            # which recompiles/re-autotunes per new input shape. Calling it many times
-            # (once per top-k slot) from inside a pipeline-parallel forward_step has
-            # been observed to crash with "CUDA driver error: invalid argument" during
-            # Triton autotuning. compute_vocab_parallel_topk_log_probs uses only plain
-            # eager ops and computes the log-normalizer once for all k.
-            topk_log_probs_list.append(
-                compute_vocab_parallel_topk_log_probs(
+            vocab_size = getattr(args, "vocab_size", None)
+            if args.true_on_policy_mode:
+                # Match the sampled-token true-on-policy contract exactly: gather
+                # and truncate the real vocabulary, then run native-dtype
+                # log_softmax once for sampled ids, teacher ids, and entropy.
+                full_logits = _gather_true_on_policy_full_logits(
                     logits_chunk,
-                    sample_topk_ids,
                     tp_group,
+                    vocab_size=vocab_size,
                 )
+                full_log_probs = torch.log_softmax(full_logits, dim=-1)
+                sample_topk_ids = sample_topk_ids.to(device=full_logits.device)
+                topk_log_prob = full_log_probs.gather(-1, sample_topk_ids)
+                if with_log_probs:
+                    log_prob = full_log_probs.gather(-1, tokens_chunk.unsqueeze(-1)).squeeze(-1)
+                entropy_log_probs = full_log_probs.detach() if entropy_no_grad else full_log_probs
+                entropy = -(entropy_log_probs.exp() * entropy_log_probs).sum(dim=-1) if with_entropy else None
+            else:
+                # Deliberately avoid fused_vocab_parallel_cross_entropy here: it
+                # recompiles/re-autotunes per shape. This eager helper scores all K
+                # ids at once and, when needed, derives entropy from the same
+                # real-vocabulary normalizer so padding cannot skew the correction.
+                if with_entropy:
+                    topk_log_prob, entropy = compute_vocab_parallel_topk_log_probs_and_entropy(
+                        logits_chunk,
+                        sample_topk_ids,
+                        tp_group,
+                        vocab_size=vocab_size,
+                    )
+                    if entropy_no_grad:
+                        entropy = entropy.detach()
+                else:
+                    topk_log_prob = compute_vocab_parallel_topk_log_probs(
+                        logits_chunk,
+                        sample_topk_ids,
+                        tp_group,
+                        vocab_size=vocab_size,
+                    )
+                    entropy = None
+
+                if with_log_probs:
+                    log_prob, _ = calculate_log_probs_and_entropy(
+                        logits_chunk,
+                        tokens_chunk,
+                        parallel_state.tp.group,
+                        with_entropy=False,
+                        chunk_size=args.log_probs_chunk_size,
+                        true_on_policy=False,
+                        vocab_size=vocab_size,
+                    )
+
+            topk_log_probs_list.append(topk_log_prob)
+        else:
+            if not with_log_probs:
+                raise ValueError("with_log_probs=False requires teacher_topk_ids.")
+            log_prob, entropy = calculate_log_probs_and_entropy(
+                logits_chunk,
+                tokens_chunk,
+                parallel_state.tp.group,
+                with_entropy=with_entropy,
+                entropy_no_grad=entropy_no_grad,
+                chunk_size=args.log_probs_chunk_size,
+                true_on_policy=args.true_on_policy_mode,
+                vocab_size=getattr(args, "vocab_size", None),
             )
+
+        if with_log_probs:
+            # Standard Megatron CE returns [R, 1], whereas the true-on-policy
+            # full-vocab path returns [R]. Preserve the public per-token [R]
+            # shape even for one-token responses in both cases.
+            log_probs_list.append(log_prob.reshape(-1))
+        entropy_list.append(entropy)
 
     res = {
         "log_probs": log_probs_list,
@@ -867,9 +917,14 @@ def policy_loss_function(
         importance_ratio = None
         if args.use_unbiased_kl:
             # Route the exponent through the same safe clamp as every other
-            # ratio path: async/off-policy drift can push |log_probs -
-            # old_log_probs| past exp overflow. Differentiable inside the band.
-            importance_ratio = _safe_clamp_log_ratio(log_probs - old_log_probs).exp()
+            # ratio path: async/off-policy drift can push the log-ratio past exp
+            # overflow. TIS bridges the trainer snapshot to the rollout behavior
+            # policy for the PG term; the sampled KL needs that behavior policy as
+            # its denominator directly to remain unbiased.
+            behavior_log_probs = old_log_probs
+            if args.use_tis:
+                behavior_log_probs = torch.cat(batch["rollout_log_probs"], dim=0)
+            importance_ratio = _safe_clamp_log_ratio(log_probs - behavior_log_probs).exp()
         kl = compute_approx_kl(
             log_probs,
             ref_log_probs,
@@ -1096,21 +1151,27 @@ def opd_jsd_loss_function(
     # exactly this rank's shard, whichever global vocab size the model was actually built with.
     local_vocab_size = logits.size(-1)
     vocab_start = vocab_shard_start(local_vocab_size) if tp_group is not None else 0
-    teacher_lm_head = load_teacher_lm_head(args, local_vocab_size=local_vocab_size).to(
-        logits.device, torch.float32
-    )
+    padded_student_vocab = local_vocab_size * parallel_state.tp.size
+    configured_vocab_size = getattr(args, "vocab_size", None)
+    real_student_vocab = padded_student_vocab if configured_vocab_size is None else int(configured_vocab_size)
+    if not 0 < real_student_vocab <= padded_student_vocab:
+        raise ValueError(f"Student vocab_size must be in [1, {padded_student_vocab}], got {real_student_vocab}.")
+    valid_local_width = min(max(real_student_vocab - vocab_start, 0), local_vocab_size)
+    teacher_lm_head = load_teacher_lm_head(args, local_vocab_size=local_vocab_size).to(logits.device, torch.float32)
     # How many of this rank's vocab columns are real rather than divisibility padding.
     # Clamped from above too: a bigger same-tokenizer teacher can carry MORE padded rows
     # than the student (Qwen2.5-7B pads to 152064 vs 151936 below 3B); rows past the
     # student's width are padding the student cannot emit, so dropping them conditions
     # the teacher on the shared vocabulary. The TP shard path already slices this way.
-    teacher_vocab_size = min(teacher_lm_head.size(0), local_vocab_size)
+    teacher_vocab_size = min(teacher_lm_head.size(0), valid_local_width)
 
     kl_per_sample = []
     entropy_per_sample = []
 
     ref_kl_sampled_log_probs = [] if args.use_kl_loss else None
     topk_ks = tuple(args.opd_topk_overlap_ks) if args.opd_log_topk_overlap else ()
+    if any(type(k) is not int or k <= 0 for k in topk_ks):
+        raise ValueError(f"--opd-topk-overlap-ks values must be positive integers, got {topk_ks}.")
     topk_overlap_per_sample: dict[int, list[torch.Tensor]] = {k: [] for k in topk_ks}
     max_seq_lens = batch.get("max_seq_lens", None)
     responses = get_responses(
@@ -1122,11 +1183,19 @@ def opd_jsd_loss_function(
         max_seq_lens=max_seq_lens,
     )
     for i, (logits_chunk, tokens_chunk) in enumerate(responses):
+        # Keep full-width containers for diagnostics and elementwise KL, but
+        # normalize only the real student vocabulary.  The -1e4 padding has
+        # exactly zero mass in fp32 and, because no padded logit participates in
+        # the normalizer, receives exactly zero gradient.
         vocab_size = logits_chunk.size(-1)
+        student_log_probs_full = logits_chunk.float().new_full((logits_chunk.size(0), vocab_size), -1e4)
         # Columns past the teacher's real vocab stay at this fill. A large finite negative
         # rather than -inf, which would go NaN (0 * -inf) on stray student mass.
-        teacher_log_probs_full = logits_chunk.new_full((logits_chunk.size(0), vocab_size), -1e4)
+        teacher_log_probs_full = logits_chunk.float().new_full((logits_chunk.size(0), vocab_size), -1e4)
         if logits_chunk.size(0) > 0:
+            student_log_probs_full[:, :valid_local_width] = vocab_parallel_log_softmax(
+                logits_chunk[:, :valid_local_width].float(), tp_group
+            ).clamp(min=args.opd_log_prob_min_clamp)
             with torch.no_grad():
                 teacher_hidden_states = batch["teacher_hidden_states"][i].to(
                     dtype=torch.float32, device=logits_chunk.device
@@ -1145,21 +1214,30 @@ def opd_jsd_loss_function(
                 teacher_log_probs_full[:, :teacher_vocab_size] = vocab_parallel_log_softmax(
                     teacher_logits, tp_group
                 ).clamp_(min=args.opd_log_prob_min_clamp)
-
-        student_log_probs_full = vocab_parallel_log_softmax(logits_chunk.float(), tp_group).clamp(
-            min=args.opd_log_prob_min_clamp
-        )
         student_probs_full = student_log_probs_full.exp()
         teacher_probs_full = teacher_log_probs_full.exp()
 
         if topk_ks:
             max_k = max(topk_ks)
-            student_topk_idx = vocab_parallel_topk_indices(student_log_probs_full, max_k, vocab_start, tp_group)
-            teacher_topk_idx = vocab_parallel_topk_indices(teacher_log_probs_full, max_k, vocab_start, tp_group)
+            student_topk_idx = vocab_parallel_topk_indices(
+                student_log_probs_full,
+                max_k,
+                vocab_start,
+                tp_group,
+                vocab_size=real_student_vocab,
+            )
+            teacher_topk_idx = vocab_parallel_topk_indices(
+                teacher_log_probs_full,
+                max_k,
+                vocab_start,
+                tp_group,
+                vocab_size=real_student_vocab,
+            )
             topk_match = student_topk_idx.unsqueeze(-1) == teacher_topk_idx.unsqueeze(-2)  # [R, max_k, max_k]
             for k in topk_ks:
-                overlap_count = topk_match[:, :k, :k].any(dim=-1).sum(dim=-1)  # [R]
-                topk_overlap_per_sample[k].append(overlap_count.float() / k)
+                effective_k = min(k, real_student_vocab)
+                overlap_count = topk_match[:, :effective_k, :effective_k].any(dim=-1).sum(dim=-1)  # [R]
+                topk_overlap_per_sample[k].append(overlap_count.float() / effective_k)
 
         if beta == 0.0:
             kl_elem = teacher_probs_full * (teacher_log_probs_full - student_log_probs_full)
@@ -1167,9 +1245,7 @@ def opd_jsd_loss_function(
             kl_elem = student_probs_full * (student_log_probs_full - teacher_log_probs_full)
         else:
             mixture_log_probs = torch.logsumexp(
-                torch.stack(
-                    [student_log_probs_full + math.log1p(-beta), teacher_log_probs_full + math.log(beta)]
-                ),
+                torch.stack([student_log_probs_full + math.log1p(-beta), teacher_log_probs_full + math.log(beta)]),
                 dim=0,
             )
             kl_teacher_elem = teacher_probs_full * (teacher_log_probs_full - mixture_log_probs)
@@ -1468,9 +1544,18 @@ def opd_topk_loss_function(
     # gather -- id -> 0, logprob -> -1e4 -- exactly like the transport's own padding
     # (orbit.rollout.opd_sglang._TOPK_PAD_TOKEN_ID/_TOPK_PAD_LOGPROB): the -1e4 underflows
     # to exact 0 mass under _topk_kl_terms's `valid` mask.
-    global_student_vocab = local_vocab_size * parallel_state.tp.size
+    padded_student_vocab = local_vocab_size * parallel_state.tp.size
+    configured_vocab_size = getattr(args, "vocab_size", None)
+    global_student_vocab = padded_student_vocab if configured_vocab_size is None else int(configured_vocab_size)
+    if not 0 < global_student_vocab <= padded_student_vocab:
+        raise ValueError(f"Student vocab_size must be in [1, {padded_student_vocab}], got {global_student_vocab}.")
     for i, (t_ids, t_lp) in enumerate(zip(teacher_topk_ids, teacher_topk_logprobs, strict=True)):
-        overhang = t_ids >= global_student_vocab
+        if t_ids.size(-1) > global_student_vocab:
+            raise ValueError(
+                f"Teacher top-k width K={t_ids.size(-1)} exceeds the student's real vocabulary "
+                f"size {global_student_vocab}. Reduce --opd-log-prob-top-k."
+            )
+        overhang = (t_ids < 0) | (t_ids >= global_student_vocab)
         teacher_topk_ids[i] = torch.where(overhang, torch.zeros_like(t_ids), t_ids)
         teacher_topk_logprobs[i] = torch.where(overhang, torch.full_like(t_lp, -1e4), t_lp)
 
@@ -1495,6 +1580,7 @@ def opd_topk_loss_function(
         with_entropy=needs_correction,
         max_seq_lens=max_seq_lens,
         teacher_topk_ids=teacher_topk_ids,
+        with_log_probs=False,
     )
     student_topk_log_probs = log_probs_and_entropy["student_topk_log_probs"]
     entropy_per_sample = log_probs_and_entropy["entropy"] if needs_correction else [None] * len(teacher_topk_ids)
@@ -1532,7 +1618,13 @@ def opd_topk_loss_function(
         # tp.size == 1. Raw logits (not log-probs) are fine here: log_softmax only
         # shifts each row by a per-row constant, so it never changes the top-k ordering,
         # and this is diagnostic-only (no_grad inside the helper).
-        student_topk_ids = vocab_parallel_topk_indices(logits_chunk, k, vocab_start, tp_group)
+        student_topk_ids = vocab_parallel_topk_indices(
+            logits_chunk,
+            k,
+            vocab_start,
+            tp_group,
+            vocab_size=global_student_vocab,
+        )
         teacher_ids_for_match = torch.where(valid, t_ids, torch.full_like(t_ids, -1))
         overlap_match = _topk_overlap_membership(student_topk_ids, teacher_ids_for_match)
         overlap_ratio_per_sample.append(overlap_match.sum(dim=-1).float() / max(k, 1))
@@ -1658,9 +1750,14 @@ def loss_function(
         if apply_megatron_loss_scaling:
             loss = loss * parallel_state.cp.size
 
+    normalizer = (
+        num_tokens.detach().to(device=logits.device)
+        if args.calculate_per_token_loss
+        else torch.tensor(1, device=logits.device)
+    )
     return (
         loss,
-        torch.tensor(num_tokens if args.calculate_per_token_loss else 1, device=logits.device),
+        normalizer,
         {
             "keys": list(log.keys()),
             "values": torch.tensor(

@@ -1,16 +1,20 @@
 from argparse import Namespace
 
+import numpy as np
 import pytest
 import torch
 
 from orbit.backends.training_utils import cp_utils
 from orbit.backends.training_utils import data as data_utils
+from orbit.backends.training_utils import teacher_lm_head as teacher_lm_head_module
 from orbit.backends.training_utils.data import DataIterator, get_batch
-from orbit.backends.training_utils.parallel import GroupInfo, ParallelState
+from orbit.backends.training_utils.loss import opd_jsd_loss_function
+from orbit.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
 from orbit.utils.ppo_utils import apply_opd_kl_to_advantages
 
 _ROLLOUT_LOG_PROBS = torch.tensor([-0.2, -1.3, -0.7, -2.1, -0.4, -3.2, -1.8])
 _OPD_VALUES = torch.tensor([0.1, 0.9, -0.3, 1.7, -1.1, 0.4, 2.3])
+_JSD_CP_CHECKPOINT_KEY = "<test-dsv4-padded-cp-jsd>"
 
 
 def _parallel_state(*, cp_size: int, cp_rank: int = 0) -> ParallelState:
@@ -23,10 +27,13 @@ def _parallel_state(*, cp_size: int, cp_rank: int = 0) -> ParallelState:
     )
 
 
-def _args(qkv_format: str) -> Namespace:
+def _args(qkv_format: str, *, dsv4: bool = False) -> Namespace:
     return Namespace(
         qkv_format=qkv_format,
         data_pad_size_multiplier=16,
+        allgather_cp=False,
+        peft_variant="dsv4" if dsv4 else "standard",
+        dsv4_cp_chunk_size_multiple=4,
         true_on_policy_mode=False,
         bf16=False,
         fp16=False,
@@ -40,6 +47,7 @@ def _load_rollout_data(
     cp_size: int,
     cp_rank: int,
     opd_key: str,
+    dsv4: bool = False,
 ) -> dict:
     parallel_state = _parallel_state(cp_size=cp_size, cp_rank=cp_rank)
     rollout_data = {
@@ -60,7 +68,7 @@ def _load_rollout_data(
     monkeypatch.setattr(cp_utils, "get_parallel_state", lambda: parallel_state)
     monkeypatch.setattr(torch.cuda, "current_device", lambda: torch.device("cpu"))
 
-    return data_utils.get_rollout_data(_args(qkv_format), object())
+    return data_utils.get_rollout_data(_args(qkv_format, dsv4=dsv4), object())
 
 
 @pytest.mark.parametrize("opd_key", ["teacher_log_probs", "opd_reverse_kl"])
@@ -118,6 +126,104 @@ def test_sglang_opd_response_fields_follow_rollout_log_prob_cp_slice(
             advantages[0],
             1.0 - 0.5 * rollout_data[opd_key][0],
         )
+
+
+@pytest.mark.parametrize("opd_key", ["teacher_log_probs", "opd_reverse_kl"])
+@pytest.mark.parametrize(
+    ("cp_rank", "expected_indices"),
+    [
+        (0, [0]),
+        (1, [1, 2, 3, 4, 5, 6]),
+    ],
+)
+def test_dsv4_padded_thd_opd_fields_follow_rollout_log_prob_cp_slice(
+    monkeypatch: pytest.MonkeyPatch,
+    opd_key: str,
+    cp_rank: int,
+    expected_indices: list[int],
+) -> None:
+    # DSV4 aligns total_length=11 to max_seq_len=16 for CP=2. The padding
+    # changes the mirrored THD chunks and therefore the response-token owner:
+    # rank 0 owns response index 0, rank 1 owns indices 1..6.
+    rollout_data = _load_rollout_data(
+        monkeypatch,
+        qkv_format="thd",
+        cp_size=2,
+        cp_rank=cp_rank,
+        opd_key=opd_key,
+        dsv4=True,
+    )
+
+    assert rollout_data["max_seq_lens"] == [16]
+    expected_indices_tensor = torch.tensor(expected_indices)
+    torch.testing.assert_close(
+        rollout_data["rollout_log_probs"][0],
+        _ROLLOUT_LOG_PROBS[expected_indices_tensor],
+    )
+    torch.testing.assert_close(
+        rollout_data[opd_key][0],
+        _OPD_VALUES[expected_indices_tensor],
+    )
+    assert rollout_data[opd_key][0].dtype == torch.float32
+
+
+@pytest.mark.parametrize("cp_rank", [0, 1])
+def test_dsv4_padded_thd_teacher_hidden_states_align_with_actual_jsd_logits(
+    monkeypatch: pytest.MonkeyPatch,
+    cp_rank: int,
+) -> None:
+    parallel_state = _parallel_state(cp_size=2, cp_rank=cp_rank)
+    set_parallel_state(parallel_state)
+
+    hidden = np.arange(7 * 3, dtype=np.float32).reshape(7, 3) / 10
+    rollout_data = {
+        "tokens": [list(range(11))],
+        "loss_masks": [[1] * 7],
+        "total_lengths": [11],
+        "response_lengths": [7],
+        "rollout_log_probs": [_ROLLOUT_LOG_PROBS.tolist()],
+        "teacher_hidden_states": [hidden],
+    }
+    monkeypatch.setattr(data_utils, "process_rollout_data", lambda *args, **kwargs: rollout_data)
+    monkeypatch.setattr(data_utils, "get_parallel_state", lambda: parallel_state)
+    monkeypatch.setattr(cp_utils, "get_parallel_state", lambda: parallel_state)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: torch.device("cpu"))
+    args = _args("thd", dsv4=True)
+    args.opd_jsd_beta = 0.0
+    args.rollout_temperature = 1.0
+    args.opd_log_prob_min_clamp = -1e30
+    args.opd_loss_max_clamp = 1e30
+    args.opd_jsd_pointwise_clip = None
+    args.opd_log_topk_overlap = False
+    args.opd_topk_overlap_ks = []
+    args.use_kl_loss = False
+    args.teacher_hf_checkpoint = _JSD_CP_CHECKPOINT_KEY
+    args.log_probs_chunk_size = -1
+    args.vocab_size = 3
+
+    batch = data_utils.get_rollout_data(args, object())
+    batch["unconcat_tokens"] = [torch.as_tensor(batch["tokens"][0])]
+
+    # Rows 3..9 predict the seven response tokens.  Their real-vocabulary
+    # logits exactly match the teacher reconstruction; a large padded column
+    # verifies that both CP ranks exclude it from the JSD normalizer.
+    full_logits = torch.zeros(11, 4)
+    full_logits[3:10, :3] = torch.from_numpy(hidden)
+    full_logits[:, 3] = 25.0
+    local_logits = cp_utils.slice_with_cp(full_logits, 0.0, "thd", max_seq_len=16)
+    local_logits = local_logits.unsqueeze(0).requires_grad_(True)
+
+    teacher_lm_head_module._TEACHER_LM_HEAD_CACHE[_JSD_CP_CHECKPOINT_KEY] = torch.eye(3)
+    teacher_lm_head_module._SHARDED.add(_JSD_CP_CHECKPOINT_KEY)
+    try:
+        loss, _ = opd_jsd_loss_function(args, batch, local_logits, lambda value: value.sum())
+        loss.backward()
+    finally:
+        teacher_lm_head_module._TEACHER_LM_HEAD_CACHE.pop(_JSD_CP_CHECKPOINT_KEY, None)
+        teacher_lm_head_module._SHARDED.discard(_JSD_CP_CHECKPOINT_KEY)
+
+    torch.testing.assert_close(loss, torch.zeros_like(loss), atol=1e-7, rtol=0)
+    torch.testing.assert_close(local_logits.grad[..., 3], torch.zeros_like(local_logits.grad[..., 3]), atol=0, rtol=0)
 
 
 # --- get_batch threads teacher_topk_ids/teacher_topk_logprobs through -------

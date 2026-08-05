@@ -6,6 +6,8 @@ Before the fix, the new teacher_log_probs field was not passed, so every
 merge_samples call raised "Sample field mismatch. Missing: {'teacher_log_probs'}".
 """
 
+import pytest
+
 from orbit.rollout.generate_utils.sample_utils import merge_samples
 from orbit.rollout.opd_sglang import _TOPK_PAD_LOGPROB, _TOPK_PAD_TOKEN_ID
 from orbit.utils.types import Sample
@@ -101,7 +103,9 @@ def test_merge_samples_student_top_logprobs_metadata_concatenates():
     # other per-token fields, with empty entries over the observation span.
     a_top = [[[-0.1, 1]], [[-0.2, 2]]]
     b_top = [[[-0.3, 3]], [[-0.4, 4]]]
-    a, b = _make_pair_kl(None, None, meta_a={"opd_student_top_logprobs": a_top}, meta_b={"opd_student_top_logprobs": b_top})
+    a, b = _make_pair_kl(
+        None, None, meta_a={"opd_student_top_logprobs": a_top}, meta_b={"opd_student_top_logprobs": b_top}
+    )
     merged = merge_samples([a, b], _FakeTokenizer())
     assert merged.metadata["opd_student_top_logprobs"] == a_top + [[]] + b_top
 
@@ -161,29 +165,46 @@ def test_merge_samples_teacher_topk_concatenates_with_pad_row_obs_span():
     merged.validate()
 
 
-def test_merge_samples_teacher_topk_one_sided_fills_missing_half_with_pad_rows():
-    # Edge: only one half carries retained top-k rows -> the missing half AND the
-    # observation span become K-wide pad-sentinel rows (not scalar zeros, since
-    # each position is a [K] row, not a float).
-    ids_a = [[7, 42], [3, _TOPK_PAD_TOKEN_ID]]
-    logprobs_a = [[-0.35, -1.2], [-0.10, _TOPK_PAD_LOGPROB]]
-    a, b = _make_pair_topk(ids_a, None, logprobs_a, None)
+def test_merge_samples_teacher_topk_normalizes_valid_tuple_containers():
+    ids_a = ((7, 42), (3, _TOPK_PAD_TOKEN_ID))
+    logprobs_a = ((-0.35, -1.2), (-0.10, _TOPK_PAD_LOGPROB))
+    ids_b = ((15, 9), (5, 6))
+    logprobs_b = ((-0.5, -1.5), (-0.05, -0.9))
+    a, b = _make_pair_topk(ids_a, ids_b, logprobs_a, logprobs_b)
+
     merged = merge_samples([a, b], _FakeTokenizer())
-    pad_row_ids = [_TOPK_PAD_TOKEN_ID, _TOPK_PAD_TOKEN_ID]
-    pad_row_logprobs = [_TOPK_PAD_LOGPROB, _TOPK_PAD_LOGPROB]
-    # obs_len=1 (the injected gap) + b.response_length=2 (missing half) = 3 pad rows.
-    assert merged.teacher_topk_ids == ids_a + [pad_row_ids] * 3
-    assert merged.teacher_topk_logprobs == logprobs_a + [pad_row_logprobs] * 3
+
+    assert merged.teacher_topk_ids == [[7, 42], [3, 0], [0, 0], [15, 9], [5, 6]]
+    assert merged.teacher_topk_logprobs == [
+        [-0.35, -1.2],
+        [-0.10, _TOPK_PAD_LOGPROB],
+        [_TOPK_PAD_LOGPROB, _TOPK_PAD_LOGPROB],
+        [-0.5, -1.5],
+        [-0.05, -0.9],
+    ]
     merged.validate()
 
 
-def test_merge_samples_teacher_topk_both_sides_empty_rows_yields_zero_width_pad():
-    # Documented edge case: both original samples have response_length == 0 with
-    # top-k OPD scoring active (teacher_topk_ids == [] rather than None), so K
-    # cannot be inferred from either side and the injected observation span gets
-    # 0-width pad rows. Internally consistent here (every row in this merged
-    # sample is 0-width) -- the risk is only if this sample were later mixed
-    # into a batch alongside samples with real (nonzero-K) rows.
+@pytest.mark.parametrize("scored_side", ["a", "b"])
+def test_merge_samples_teacher_topk_one_sided_requires_rescore(scored_side):
+    # All-pad rows are safe only over the loss-masked observation gap. Filling a
+    # generated, loss-live segment would create a large reverse/mixed outside-
+    # support loss, so a partially scored merge must be rejected and re-scored.
+    ids_a = [[7, 42], [3, _TOPK_PAD_TOKEN_ID]]
+    logprobs_a = [[-0.35, -1.2], [-0.10, _TOPK_PAD_LOGPROB]]
+    if scored_side == "a":
+        a, b = _make_pair_topk(ids_a, None, logprobs_a, None)
+    else:
+        a, b = _make_pair_topk(None, ids_a, None, logprobs_a)
+
+    with pytest.raises(ValueError, match="merge before teacher scoring or re-score"):
+        merge_samples([a, b], _FakeTokenizer())
+
+
+def test_merge_samples_teacher_topk_both_empty_scored_segments_require_rescore():
+    # []/[] is a valid scored empty response, but it carries no row from which K
+    # can be inferred for the injected observation span. Preserve the invariant
+    # by requiring the merged trajectory to be scored after merging.
     a = Sample(
         group_index=0,
         index=0,
@@ -206,8 +227,16 @@ def test_merge_samples_teacher_topk_both_sides_empty_rows_yields_zero_width_pad(
         teacher_topk_ids=[],
         teacher_topk_logprobs=[],
     )
-    merged = merge_samples([a, b], _FakeTokenizer())
-    assert merged.response_length == 2  # obs_len = len(b.tokens) - len(a.tokens) - b.response_length
-    assert merged.teacher_topk_ids == [[], []]
-    assert merged.teacher_topk_logprobs == [[], []]
-    merged.validate()
+    with pytest.raises(ValueError, match="cannot infer K"):
+        merge_samples([a, b], _FakeTokenizer())
+
+
+def test_merge_samples_teacher_topk_rejects_different_widths():
+    ids_a = [[7, 42], [3, 4]]
+    logprobs_a = [[-0.35, -1.2], [-0.10, -0.2]]
+    ids_b = [[15], [5]]
+    logprobs_b = [[-0.5], [-0.05]]
+    a, b = _make_pair_topk(ids_a, ids_b, logprobs_a, logprobs_b)
+
+    with pytest.raises(ValueError, match="different K"):
+        merge_samples([a, b], _FakeTokenizer())

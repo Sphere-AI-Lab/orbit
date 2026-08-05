@@ -58,8 +58,11 @@ def test_policy_logits_are_temperature_scaled() -> None:
     torch.testing.assert_close(scaled[0], unscaled[0] / 0.5)
 
 
-def test_non_positive_rollout_temperature_rejected() -> None:
-    for bad in (0.0, -1.0):
-        with pytest.raises(ValueError, match="rollout-temperature"):
-            validate_rollout_temperature(Namespace(rollout_temperature=bad))
+@pytest.mark.parametrize("bad", [0.0, -1.0, float("nan"), float("inf"), float("-inf")])
+def test_non_finite_or_non_positive_rollout_temperature_rejected(bad: float) -> None:
+    with pytest.raises(ValueError, match="finite and > 0"):
+        validate_rollout_temperature(Namespace(rollout_temperature=bad))
+
+
+def test_positive_finite_rollout_temperature_accepted() -> None:
     validate_rollout_temperature(Namespace(rollout_temperature=1.0))

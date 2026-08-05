@@ -4,9 +4,10 @@
 #
 # TOP=1 adds --true-on-policy (contract qwen3_dense_true_on_policy_v1):
 # deterministic sglang rollout + prefill recompute + batch-invariant Megatron
-# kernels + fusion bans + bf16 log-prob pipeline, so train and rollout
-# log-probs are guaranteed to match to within kernel-noise tolerance. Compare
-# train_rollout_logprob_abs_diff against a TOP=0 run of this same script.
+# kernels + fusion bans + bf16 log-prob pipeline. This is the Phase 1-4
+# mismatch-measurement rung: compare train_rollout_logprob_abs_diff against a
+# TOP=0 run. Exact parity is not claimed until the Phase-5
+# SGLang-in-Megatron backend is available and enabled by the contract.
 #
 # Certified layouts for qwen3_dense (orbit/true_on_policy/model_profiles.py):
 #   train:   dp, tp, pp   (no cp -- the CP loss-scaling correction is unported)

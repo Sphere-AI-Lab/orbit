@@ -1,6 +1,5 @@
 import logging
 import os
-import re
 from pathlib import Path
 
 import torch.distributed as dist
@@ -178,7 +177,14 @@ def load_checkpoint(
     return result
 
 
-def save_checkpoint_with_peft(iteration, model, optimizer, opt_param_scheduler):
+def save_checkpoint_with_peft(
+    iteration,
+    model,
+    optimizer,
+    opt_param_scheduler,
+    *,
+    self_teacher=None,
+):
     """Extended save that handles PEFT adapters separately."""
     args = get_args()
 
@@ -192,6 +198,7 @@ def save_checkpoint_with_peft(iteration, model, optimizer, opt_param_scheduler):
             optimizer=optimizer,
             opt_param_scheduler=opt_param_scheduler,
             iteration=iteration,
+            self_teacher=self_teacher,
         )
     else:
         save_checkpoint(iteration, model, optimizer, opt_param_scheduler)

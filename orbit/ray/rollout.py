@@ -46,7 +46,7 @@ from orbit.utils.ray_utils import Box
 from orbit.utils.reward_normalization import normalize_grouped_rewards
 from orbit.utils.seqlen_balancing import get_seqlen_balanced_partitions
 from orbit.utils.tracking_utils import init_tracking
-from orbit.utils.types import Sample
+from orbit.utils.types import Sample, collect_teacher_topk_data
 
 from ..utils.metric_utils import has_repetition
 from .utils import Lock, build_noset_visible_devices_env_vars
@@ -772,15 +772,14 @@ class RolloutManager:
                 )
             train_data["opd_reverse_kl"] = [sample.opd_reverse_kl for sample in samples]
 
-        if any(sample.teacher_topk_ids is not None for sample in samples):
-            missing = sum(1 for sample in samples if sample.teacher_topk_ids is None)
-            if missing:
-                raise ValueError(
-                    f"teacher_topk_ids is set on some samples but missing on {missing}/{len(samples)}; "
-                    "the top-k OPD scorer must score every sample in the batch."
-                )
-            train_data["teacher_topk_ids"] = [sample.teacher_topk_ids for sample in samples]
-            train_data["teacher_topk_logprobs"] = [sample.teacher_topk_logprobs for sample in samples]
+        # The retained pair is validated together immediately before assembly:
+        # every sample must carry rectangular [R, K] rows of the configured K.
+        teacher_topk_data = collect_teacher_topk_data(
+            samples,
+            expected_top_k=getattr(self.args, "opd_log_prob_top_k", None),
+        )
+        if teacher_topk_data is not None:
+            train_data.update(teacher_topk_data)
 
         if any(sample.teacher_hidden_states is not None for sample in samples):
             missing = sum(1 for sample in samples if sample.teacher_hidden_states is None)

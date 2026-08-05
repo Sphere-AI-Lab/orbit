@@ -6,7 +6,12 @@ from argparse import Namespace
 
 import pytest
 
-from orbit.utils.arguments import _validate_opd_args, validate_opd_topk_loss_args
+from orbit.utils.arguments import (
+    _common_orbit_validate_args,
+    _validate_opd_args,
+    validate_opd_topk_loss_args,
+    validate_opd_topk_vocab_size,
+)
 
 
 def _valid_args(**overrides) -> Namespace:
@@ -17,6 +22,7 @@ def _valid_args(**overrides) -> Namespace:
         loss_type="opd_topk_loss",
         opd_type="sglang",
         opd_log_prob_top_k=8,
+        vocab_size=128,
         opd_top_k_strategy="only-teacher",
         opd_teacher_url="http://host:1234/generate",
         opd_teacher_urls=None,
@@ -31,6 +37,8 @@ def _valid_args(**overrides) -> Namespace:
         compute_advantages_and_returns=True,
         advantage_estimator="grpo",
         use_opd=False,
+        use_kl_loss=False,
+        kl_coef=0.0,
         custom_rm_path="orbit.rollout.opd_sglang.reward_func",
         custom_reward_post_process_path="orbit.rollout.opd_sglang.post_process",
     )
@@ -54,6 +62,39 @@ def test_requires_positive_top_k():
     args = _valid_args(opd_log_prob_top_k=0)
     with pytest.raises(ValueError, match="opd-log-prob-top-k"):
         validate_opd_topk_loss_args(args)
+
+
+def test_rejects_top_k_larger_than_real_student_vocab():
+    args = _valid_args(opd_log_prob_top_k=129, vocab_size=128)
+    with pytest.raises(ValueError, match="real vocabulary"):
+        validate_opd_topk_loss_args(args)
+
+
+def test_vocab_size_recheck_rejects_after_tokenizer_fills_deferred_value():
+    args = _valid_args(opd_log_prob_top_k=129, vocab_size=None)
+    validate_opd_topk_vocab_size(args)
+    args.vocab_size = 128
+    with pytest.raises(ValueError, match="real vocabulary"):
+        validate_opd_topk_vocab_size(args)
+
+
+@pytest.mark.parametrize("override", [{"use_kl_loss": True}, {"kl_coef": 0.1}])
+def test_rejects_ignored_reference_policy_kl_settings(override):
+    args = _valid_args(**override)
+    with pytest.raises(ValueError, match="reference-policy KL"):
+        validate_opd_topk_loss_args(args)
+
+
+def test_common_validation_rejects_topk_ref_kl_before_touching_missing_ref_load():
+    args = Namespace(
+        rollout_temperature=1.0,
+        loss_type="opd_topk_loss",
+        use_kl_loss=True,
+        kl_coef=0.0,
+        ref_load=None,
+    )
+    with pytest.raises(ValueError, match="reference-policy KL"):
+        _common_orbit_validate_args(args)
 
 
 def test_requires_only_teacher_strategy():

@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -9,11 +10,7 @@ import torch
 def _extract_policy_version(meta_info: dict) -> str | None:
     adapter_version = meta_info.get("adapter_version")
     weight_version = meta_info.get("weight_version")
-    if (
-        adapter_version is not None
-        and weight_version is not None
-        and str(adapter_version) != str(weight_version)
-    ):
+    if adapter_version is not None and weight_version is not None and str(adapter_version) != str(weight_version):
         raise ValueError(
             f"adapter_version ({adapter_version!r}) and weight_version ({weight_version!r}) "
             "disagree in meta_info; expected v1 invariant adapter_version == weight_version"
@@ -179,6 +176,90 @@ class Sample:
     def effective_response_length(self):
         return sum(self.loss_mask) if self.loss_mask is not None else self.response_length
 
+    def validate_teacher_topk(self, expected_top_k: int | None = None) -> int | None:
+        """Validate the retained direct-OPD top-k pair and return its row width.
+
+        Empty responses carry ``([], [])`` and therefore cannot encode their row
+        width.  In that case ``expected_top_k`` is returned when the caller knows
+        it from configuration; otherwise the result is ``None``.
+        """
+        ids = self.teacher_topk_ids
+        logprobs = self.teacher_topk_logprobs
+        if (ids is None) != (logprobs is None):
+            raise ValueError(
+                "teacher_topk_ids and teacher_topk_logprobs must be present together; "
+                f"got ids={ids is not None}, logprobs={logprobs is not None}"
+            )
+        if ids is None:
+            return None
+
+        if not isinstance(ids, (list, tuple)) or not isinstance(logprobs, (list, tuple)):
+            raise ValueError("teacher_topk_ids and teacher_topk_logprobs must be lists or tuples of rows")
+        if len(ids) != self.response_length:
+            raise ValueError(f"teacher_topk_ids row count ({len(ids)}) != response_length ({self.response_length})")
+        if len(logprobs) != self.response_length:
+            raise ValueError(
+                f"teacher_topk_logprobs row count ({len(logprobs)}) != response_length ({self.response_length})"
+            )
+
+        if expected_top_k is not None:
+            if type(expected_top_k) is not int or expected_top_k <= 0:
+                raise ValueError(f"expected_top_k must be a positive exact integer, got {expected_top_k!r}")
+
+        if self.response_length == 0:
+            return expected_top_k
+
+        row_width = None
+        for row_idx, (ids_row, logprobs_row) in enumerate(zip(ids, logprobs, strict=True)):
+            if not isinstance(ids_row, (list, tuple)):
+                raise ValueError(
+                    f"teacher_topk_ids row {row_idx} must be a list or tuple, got {type(ids_row).__name__}"
+                )
+            if not isinstance(logprobs_row, (list, tuple)):
+                raise ValueError(
+                    f"teacher_topk_logprobs row {row_idx} must be a list or tuple, "
+                    f"got {type(logprobs_row).__name__}"
+                )
+            if row_width is None:
+                row_width = len(ids_row)
+                if row_width <= 0:
+                    raise ValueError("teacher top-k rows must have positive width")
+            if len(ids_row) != row_width:
+                raise ValueError(
+                    f"teacher_topk_ids is ragged: row {row_idx} has width {len(ids_row)}, " f"expected {row_width}"
+                )
+            if len(logprobs_row) != row_width:
+                raise ValueError(
+                    f"teacher_topk_logprobs row {row_idx} has width {len(logprobs_row)}, "
+                    f"expected {row_width} to match teacher_topk_ids"
+                )
+
+            observed_ids = set()
+            for col_idx, (token_id, logprob) in enumerate(zip(ids_row, logprobs_row, strict=True)):
+                if type(token_id) is not int or token_id < 0:
+                    raise ValueError(
+                        f"teacher_topk_ids[{row_idx}][{col_idx}] must be a nonnegative exact integer, "
+                        f"got {token_id!r}"
+                    )
+                if type(logprob) not in (int, float) or not math.isfinite(logprob) or logprob > 0:
+                    raise ValueError(
+                        f"teacher_topk_logprobs[{row_idx}][{col_idx}] must be finite and <= 0, " f"got {logprob!r}"
+                    )
+                is_padding = logprob == -1e4
+                if is_padding and token_id != 0:
+                    raise ValueError(f"teacher top-k padding at row {row_idx}, column {col_idx} must use token id 0")
+                if not is_padding:
+                    if token_id in observed_ids:
+                        raise ValueError(f"teacher_topk_ids row {row_idx} contains duplicate token id {token_id}")
+                    observed_ids.add(token_id)
+
+        if row_width is None:
+            raise ValueError("teacher top-k row width could not be determined")
+        if expected_top_k is not None:
+            if row_width != expected_top_k:
+                raise ValueError(f"teacher top-k row width ({row_width}) != configured top-k ({expected_top_k})")
+        return row_width
+
     def validate(self):
         assert self.response_length >= 0, f"response_length must be >= 0, got {self.response_length}"
         assert (
@@ -205,6 +286,7 @@ class Sample:
             assert (
                 len(self.opd_reverse_kl) == self.response_length
             ), f"opd_reverse_kl length ({len(self.opd_reverse_kl)}) != response_length ({self.response_length})"
+        self.validate_teacher_topk()
         if self.rollout_routed_experts is not None:
             actual = len(self.rollout_routed_experts)
             expect = len(self.tokens) - 1
@@ -227,6 +309,10 @@ class Sample:
             self.teacher_hidden_states = self.teacher_hidden_states[:-n]
         if self.opd_reverse_kl is not None:
             self.opd_reverse_kl = self.opd_reverse_kl[:-n]
+        if self.teacher_topk_ids is not None:
+            self.teacher_topk_ids = self.teacher_topk_ids[:-n]
+        if self.teacher_topk_logprobs is not None:
+            self.teacher_topk_logprobs = self.teacher_topk_logprobs[:-n]
         if self.metadata and "opd_student_top_logprobs" in self.metadata:
             self.metadata["opd_student_top_logprobs"] = self.metadata["opd_student_top_logprobs"][:-n]
         if self.loss_mask is not None:
@@ -297,6 +383,39 @@ class Sample:
                 self.status = Sample.Status.ABORTED
             case "stop":
                 self.status = Sample.Status.COMPLETED
+
+
+def collect_teacher_topk_data(samples: list[Sample], expected_top_k: int | None) -> dict[str, list] | None:
+    """Validate and collect a batch of retained direct-OPD top-k rows."""
+    if not any(sample.teacher_topk_ids is not None or sample.teacher_topk_logprobs is not None for sample in samples):
+        return None
+
+    observed_top_k = None
+    for sample_idx, sample in enumerate(samples):
+        if sample.teacher_topk_ids is None and sample.teacher_topk_logprobs is None:
+            raise ValueError(
+                f"teacher top-k fields are missing on sample {sample_idx}/{len(samples)}; "
+                "the direct top-k OPD scorer must score every sample in the batch."
+            )
+        try:
+            sample_top_k = sample.validate_teacher_topk(expected_top_k=expected_top_k)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid teacher top-k transport on sample {sample_idx}: {exc}") from exc
+
+        if sample_top_k is None:
+            continue
+        if observed_top_k is None:
+            observed_top_k = sample_top_k
+        elif sample_top_k != observed_top_k:
+            raise ValueError(
+                f"teacher top-k width differs across samples: sample {sample_idx} has K={sample_top_k}, "
+                f"expected K={observed_top_k}."
+            )
+
+    return {
+        "teacher_topk_ids": [sample.teacher_topk_ids for sample in samples],
+        "teacher_topk_logprobs": [sample.teacher_topk_logprobs for sample in samples],
+    }
 
 
 @dataclass(frozen=True)

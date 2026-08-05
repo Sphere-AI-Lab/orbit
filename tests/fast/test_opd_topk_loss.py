@@ -27,6 +27,7 @@ from orbit.backends.training_utils.loss import (
     _response_masked_min,
     _topk_kl_terms,
     _topk_overlap_membership,
+    get_log_probs_and_entropy,
     opd_jsd_loss_function,
     opd_topk_loss_function,
 )
@@ -309,12 +310,10 @@ def test_response_masked_min_no_valid_sample_falls_back_to_one():
 # Step 3: opd_topk_loss_function integration test
 # ---------------------------------------------------------------------------
 
-# get_log_probs_and_entropy's log_probs half always runs through Megatron's fused
-# vocab-parallel cross-entropy kernel (independent of this task's top-k gather),
-# which calls torch.distributed collectives even for process_group=None -- it still
-# needs *a* default process group to exist. World size 1 is a single process, no
-# spawn needed, mirroring test_ppo_cp_advantages.py / test_vocab_parallel_topk.py's
-# single-process-group convention.
+
+# Keep a real single-member default group to mirror the normal trainer state. The
+# direct top-k fast path no longer invokes the sampled-token fused CE kernel, but
+# adjacent full-vocab equivalence cases still exercise distributed helpers.
 @pytest.fixture(scope="module", autouse=True)
 def _single_process_gloo_group():
     init_gloo(0, 1, port=find_free_port())
@@ -401,6 +400,94 @@ def test_opd_topk_loss_function_end_to_end(kl_type):
     ):
         assert key in metrics, key
         assert torch.isfinite(metrics[key]), key
+
+
+def test_opd_topk_loss_excludes_megatron_padding_from_distribution_and_grad():
+    """Identical real-vocab teacher/student distributions have zero forward KL.
+
+    Very large padded logits make the historical bug decisive: normalizing over
+    all four model columns instead of the real two-token vocabulary creates a
+    nonzero loss and gradients in the padded columns.
+    """
+    _single_state()
+    real_student_logits = torch.tensor([[2.0, 1.0]])
+    teacher_log_probs = F.log_softmax(real_student_logits, dim=-1)
+    teacher_ids = torch.tensor([[0, 1]], dtype=torch.long)
+
+    full_logits = torch.zeros(1, 3, 4)
+    full_logits[0, 1] = torch.tensor([2.0, 1.0, 10.0, 11.0])
+    logits = full_logits.requires_grad_(True)
+    batch = {
+        "unconcat_tokens": [torch.tensor([0, 0, 1])],
+        "response_lengths": [1],
+        "total_lengths": [3],
+        "loss_masks": [torch.ones(1, dtype=torch.int64)],
+        "teacher_topk_ids": [teacher_ids],
+        "teacher_topk_logprobs": [teacher_log_probs],
+    }
+    args = _build_args(kl_type="forward")
+    args.vocab_size = 2
+
+    loss, metrics = opd_topk_loss_function(args, batch, logits, sum_of_sample_mean=lambda x: x.sum())
+    torch.testing.assert_close(loss, torch.zeros_like(loss), rtol=0, atol=0)
+    torch.testing.assert_close(metrics["opd_topk/student_mass"], torch.tensor(1.0), rtol=0, atol=1e-7)
+    torch.testing.assert_close(metrics["opd_topk/overlap_ratio"], torch.tensor(1.0), rtol=0, atol=0)
+
+    loss.backward()
+    torch.testing.assert_close(logits.grad[..., 2:], torch.zeros_like(logits.grad[..., 2:]), rtol=0, atol=0)
+
+
+def test_true_on_policy_topk_scores_and_entropy_share_native_bf16_real_vocab():
+    _single_state()
+    full_logits = torch.zeros(1, 3, 4, dtype=torch.bfloat16)
+    full_logits[0, 1] = torch.tensor([2.0, 1.0, 10.0, 11.0], dtype=torch.bfloat16)
+    logits = full_logits.requires_grad_(True)
+    ids = torch.tensor([[0, 1]], dtype=torch.long)
+    args = _build_args(kl_type="reverse")
+    args.true_on_policy_mode = True
+    args.vocab_size = 2
+
+    result = get_log_probs_and_entropy(
+        logits,
+        args=args,
+        unconcat_tokens=[torch.tensor([0, 0, 1])],
+        total_lengths=[3],
+        response_lengths=[1],
+        with_entropy=True,
+        teacher_topk_ids=[ids],
+        with_log_probs=False,
+    )
+
+    expected_log_probs = torch.log_softmax(logits[0, 1, :2], dim=-1)
+    expected_entropy = -(expected_log_probs.exp() * expected_log_probs).sum()
+    assert result["log_probs"] == []  # sampled-token CE fast path is skipped
+    assert result["student_topk_log_probs"][0].dtype == torch.bfloat16
+    torch.testing.assert_close(result["student_topk_log_probs"][0], expected_log_probs.unsqueeze(0), rtol=0, atol=0)
+    torch.testing.assert_close(result["entropy"][0], expected_entropy.unsqueeze(0), rtol=0, atol=0)
+
+    (result["student_topk_log_probs"][0].sum() + result["entropy"][0].sum()).backward()
+    torch.testing.assert_close(logits.grad[..., 2:], torch.zeros_like(logits.grad[..., 2:]), rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("with_teacher_topk", [False, True])
+def test_true_on_policy_single_token_log_probs_keep_vector_shape(with_teacher_topk):
+    _single_state()
+    logits = torch.zeros(1, 3, 4, dtype=torch.bfloat16)
+    logits[0, 1] = torch.tensor([2.0, 1.0, 10.0, 11.0], dtype=torch.bfloat16)
+    args = _build_args()
+    args.true_on_policy_mode = True
+    args.vocab_size = 2
+
+    result = get_log_probs_and_entropy(
+        logits,
+        args=args,
+        unconcat_tokens=[torch.tensor([0, 0, 1])],
+        total_lengths=[3],
+        response_lengths=[1],
+        teacher_topk_ids=[torch.tensor([[0, 1]])] if with_teacher_topk else None,
+    )
+
+    assert result["log_probs"][0].shape == (1,)
 
 
 def test_opd_topk_loss_function_diagnostics_match_hand_computed_references():
@@ -662,9 +749,7 @@ def _build_direct_equivalence_inputs(seed: int = 12345):
     prompt_lengths = [2, 3]
     total_lengths = [p + r for p, r in zip(prompt_lengths, response_lengths, strict=True)]
 
-    unconcat_tokens = [
-        torch.randint(0, _EQUIV_VOCAB_SIZE, (total,), generator=generator) for total in total_lengths
-    ]
+    unconcat_tokens = [torch.randint(0, _EQUIV_VOCAB_SIZE, (total,), generator=generator) for total in total_lengths]
     loss_masks = [torch.ones(r, dtype=torch.int64) for r in response_lengths]
     logits = torch.randn(1, sum(total_lengths), _EQUIV_VOCAB_SIZE, generator=generator, dtype=torch.float32)
 
@@ -710,6 +795,7 @@ def _build_jsd_args(beta: float) -> Namespace:
         allgather_cp=False,
         log_probs_chunk_size=-1,
         true_on_policy_mode=False,
+        vocab_size=_EQUIV_VOCAB_SIZE,
     )
 
 

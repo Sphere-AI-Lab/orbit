@@ -1,5 +1,4 @@
 import logging
-import os
 import random
 import socket
 from argparse import Namespace
@@ -13,8 +12,13 @@ from transformers import AutoConfig
 from orbit.ray.train_actor import TrainRayActor
 from orbit.utils import train_dump_utils
 from orbit.utils.adapter_swap import swap_adapter_tensors
-from orbit.utils.arguments import uses_rollout_engines
-from orbit.utils.arguments import uses_adapter_critic, uses_separate_critic
+from orbit.utils.adapter_tensors import AdapterTensorKey, adapter_named_parameters
+from orbit.utils.arguments import (
+    uses_adapter_critic,
+    uses_rollout_engines,
+    uses_separate_critic,
+    validate_opd_topk_vocab_size,
+)
 from orbit.utils.context_utils import with_defer
 from orbit.utils.distributed_utils import get_gloo_group, init_process_group
 from orbit.utils.memory_utils import clear_memory, print_memory
@@ -23,7 +27,6 @@ from orbit.utils.processing_utils import load_tokenizer
 from orbit.utils.ray_utils import Box
 from orbit.utils.reloadable_process_group import destroy_process_groups, monkey_patch_torch_dist, reload_process_groups
 from orbit.utils.replay_base import all_replay_managers
-from orbit.utils.adapter_tensors import AdapterTensorKey, adapter_named_parameters
 from orbit.utils.self_teacher import SelfTeacherBuffer
 from orbit.utils.timer import Timer, inverse_timer, timer
 from orbit.utils.tracking_utils import init_tracking
@@ -65,6 +68,7 @@ from .state_mode import should_backup_actor_after_train, uses_adapter_state
 from .update_weight.common import named_adapter_params, named_params_and_buffers
 from .update_weight.update_weight_from_distributed.bridge import UpdateWeightFromDistributedBridge
 from .update_weight.update_weight_from_distributed.broadcast import UpdateWeightFromDistributed
+
 try:
     from .update_weight.update_weight_from_distributed.p2p import UpdateWeightP2P
 except ImportError:
@@ -171,6 +175,7 @@ class MegatronTrainRayActor(TrainRayActor):
                 m.enable_check_replay_result = m.enabled and self.args.ci_test
 
         from orbit.backends.megatron_utils.mtp_rl_patches import apply_mtp_in_rl_patches
+
         apply_mtp_in_rl_patches(self.args)
 
         (self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id) = initialize_model_and_optimizer(
@@ -179,6 +184,7 @@ class MegatronTrainRayActor(TrainRayActor):
 
         if role != "critic" and getattr(self.args, "use_rollout_routing_replay", False):
             from orbit.backends.megatron_utils.replay_utils import wire_routing_replay_to_models
+
             wire_routing_replay_to_models(self.model)
 
         parallel_state = get_parallel_state()
@@ -216,14 +222,19 @@ class MegatronTrainRayActor(TrainRayActor):
         start_rollout_id = loaded_rollout_id + 1
 
         if uses_adapter_state(self.args):
-            state_source_getter = lambda: named_adapter_params(self.model)
+
+            def state_source_getter():
+                return named_adapter_params(self.model)
+
         else:
-            state_source_getter = lambda: named_params_and_buffers(
-                self.args,
-                self.model,
-                convert_to_global_name=args.megatron_to_hf_mode == "raw",
-                translate_gpu_to_cpu=not self.args.enable_weights_backuper,
-            )
+
+            def state_source_getter():
+                return named_params_and_buffers(
+                    self.args,
+                    self.model,
+                    convert_to_global_name=args.megatron_to_hf_mode == "raw",
+                    translate_gpu_to_cpu=not self.args.enable_weights_backuper,
+                )
 
         self.model_state_manager = create_model_state_manager(
             self.args,
@@ -307,6 +318,9 @@ class MegatronTrainRayActor(TrainRayActor):
 
         if self.args.vocab_size is None:
             self.args.vocab_size = self.tokenizer.vocab_size
+        # Argument validation commonly runs before the tokenizer has filled the
+        # real vocab size. Recheck K here, before the first rollout is launched.
+        validate_opd_topk_vocab_size(self.args)
 
         update_weight_cls = _select_update_weight_cls(self.args)
         self.weight_updater = update_weight_cls(
@@ -407,9 +421,7 @@ class MegatronTrainRayActor(TrainRayActor):
             load_megatron_grad_buffers(self.model)
             print_memory("after wake_up grad_buffers")
         if self.args.loss_type == "opd_jsd_loss":
-            onload_teacher_lm_head(
-                self.args.teacher_hf_checkpoint, torch.device("cuda", torch.cuda.current_device())
-            )
+            onload_teacher_lm_head(self.args.teacher_hf_checkpoint, torch.device("cuda", torch.cuda.current_device()))
             print_memory("after wake_up teacher_lm_head")
         clear_memory()
         reload_process_groups()
@@ -483,8 +495,7 @@ class MegatronTrainRayActor(TrainRayActor):
                 replay_data = replay_data.reshape(batch_size * seqlen, num_layers, topk)
             else:
                 replay_data = [
-                    slice_with_cp(r, pad_func, qkv_format, sample_max_seq_len(i))
-                    for i, r in enumerate(replay_data)
+                    slice_with_cp(r, pad_func, qkv_format, sample_max_seq_len(i)) for i, r in enumerate(replay_data)
                 ]
                 replay_data = torch.cat(replay_data, dim=0)
                 pad_size = parallel_state.tp.size * self.args.data_pad_size_multiplier
@@ -565,17 +576,84 @@ class MegatronTrainRayActor(TrainRayActor):
         resumed student, losing the teacher's lag. Absence is legal (checkpoints
         predating sidecars); corruption is not.
         """
-        adapter_dir = getattr(self.args, "_peft_resume_adapter_dir", None)
-        if adapter_dir is None or self._self_teacher is None:
-            return
-        from orbit.utils.self_teacher_checkpoint import has_self_teacher_sidecar, load_self_teacher_sidecar
+        from orbit.utils.self_teacher_checkpoint import (
+            TeacherCheckpointError,
+            has_self_teacher_sidecar,
+            load_self_teacher_sidecar,
+        )
 
         rank = dist.get_rank() if dist.is_initialized() else 0
         world_size = dist.get_world_size() if dist.is_initialized() else 1
-        if not has_self_teacher_sidecar(adapter_dir, rank=rank):
+        adapter_dir = getattr(self.args, "_peft_resume_adapter_dir", None)
+
+        # Adapter loading is shard-local.  A missing TP/PP shard can therefore
+        # leave only some ranks with a resume directory.  Reach consensus before
+        # any early return so those ranks cannot diverge at the sidecar
+        # collectives below and hang the job.
+        local_restore_state = (
+            self._self_teacher is not None,
+            str(adapter_dir) if adapter_dir is not None else None,
+        )
+        if world_size > 1:
+            restore_states = [None] * world_size
+            dist.all_gather_object(restore_states, local_restore_state, group=get_gloo_group())
+        else:
+            restore_states = [local_restore_state]
+
+        teacher_enabled = [state[0] for state in restore_states]
+        if any(teacher_enabled) and not all(teacher_enabled):
+            raise TeacherCheckpointError("self-teacher initialization differs across distributed ranks")
+        if not any(teacher_enabled):
+            return
+
+        adapter_dirs = [state[1] for state in restore_states]
+        adapter_loaded = [path is not None for path in adapter_dirs]
+        if any(adapter_loaded) and not all(adapter_loaded):
+            missing = [str(missing_rank) for missing_rank, path in enumerate(adapter_dirs) if path is None]
+            raise TeacherCheckpointError(
+                "PEFT adapter checkpoint loaded on only some ranks; missing adapter shards on ranks "
+                + ", ".join(missing)
+            )
+        if not any(adapter_loaded):
+            return
+        if len(set(adapter_dirs)) != 1:
+            raise TeacherCheckpointError(
+                "PEFT adapter resume directory differs across distributed ranks: "
+                + ", ".join(f"rank {state_rank}: {path}" for state_rank, path in enumerate(adapter_dirs))
+            )
+        adapter_dir = adapter_dirs[0]
+
+        local_present = has_self_teacher_sidecar(adapter_dir, rank=rank)
+        if world_size > 1:
+            presence = [None] * world_size
+            dist.all_gather_object(presence, local_present, group=get_gloo_group())
+        else:
+            presence = [local_present]
+
+        if any(presence) and not all(presence):
+            missing = [str(missing_rank) for missing_rank, present in enumerate(presence) if not present]
+            raise TeacherCheckpointError(
+                "self-teacher checkpoint is only partially present; missing sidecars for ranks " + ", ".join(missing)
+            )
+        if not any(presence):
             logger.info(f"No self-teacher sidecar at {adapter_dir}; keeping freshly seeded teacher state.")
             return
-        load_self_teacher_sidecar(adapter_dir, self._self_teacher, rank=rank, world_size=world_size)
+
+        local_error = None
+        try:
+            load_self_teacher_sidecar(adapter_dir, self._self_teacher, rank=rank, world_size=world_size)
+        except Exception as exc:  # surface a corrupt shard consistently on all ranks
+            local_error = f"{type(exc).__name__}: {exc}"
+        if world_size > 1:
+            errors: list[str | None] = [None] * world_size
+            dist.all_gather_object(errors, local_error, group=get_gloo_group())
+        else:
+            errors = [local_error]
+        failures = [f"rank {failed_rank}: {error}" for failed_rank, error in enumerate(errors) if error]
+        if failures:
+            raise TeacherCheckpointError(
+                "self-teacher checkpoint load failed on one or more ranks; " + "; ".join(failures)
+            )
         logger.info(f"Restored self-teacher state from checkpoint sidecar at {adapter_dir}")
 
     def _adapter_named_params(self) -> dict[AdapterTensorKey, torch.nn.Parameter]:
@@ -761,12 +839,15 @@ class MegatronTrainRayActor(TrainRayActor):
                             critic_num_microbatches,
                         )
                     )
-                if self._active_model_tag != "actor":
-                    self._switch_model("actor")
-
                 # Calculate adv and returns. Need to performed before training (instead of on the fly),
                 # because we may need normalize the whole rollout.
                 compute_advantages_and_returns(self.args, rollout_data)
+
+            # A full-FT reference forward switches the resident parameters to
+            # the "ref" backup. Direct losses such as opd_jsd_loss skip the
+            # advantages block above, so restoration must not live inside it.
+            if self._active_model_tag != "actor":
+                self._switch_model("actor")
 
             if self.rollout_data_postprocess is not None:
                 self.rollout_data_postprocess(self.args)
@@ -775,9 +856,7 @@ class MegatronTrainRayActor(TrainRayActor):
 
             # Train
             self._set_replay_stage("replay_backward")
-            run_policy_phase = (
-                not uses_adapter_critic(self.args) or rollout_id >= self.args.num_critic_only_steps
-            )
+            run_policy_phase = not uses_adapter_critic(self.args) or rollout_id >= self.args.num_critic_only_steps
             with timer("actor_train"):
                 if run_policy_phase:
                     train(
@@ -788,12 +867,17 @@ class MegatronTrainRayActor(TrainRayActor):
                         data_iterator,
                         num_microbatches,
                     )
-                if self._self_teacher is not None:
-                    self._self_teacher.update(self._adapter_named_params())
-                    if should_promote_teacher(
-                        self._opd_teacher_spec.source, self.args.opd_promote_interval, rollout_id
-                    ):
-                        self._promote_self_teacher()
+                    if self._self_teacher is not None:
+                        # EMA/lag cadence is defined in actor optimizer steps;
+                        # critic-only warmup rollouts must not age the teacher.
+                        self._self_teacher.update(self._adapter_named_params())
+                        actor_step = rollout_id
+                        if uses_adapter_critic(self.args):
+                            actor_step -= self.args.num_critic_only_steps
+                        if should_promote_teacher(
+                            self._opd_teacher_spec.source, self.args.opd_promote_interval, actor_step
+                        ):
+                            self._promote_self_teacher()
 
             if uses_adapter_critic(self.args) and critic_data_iterator is not None:
                 with timer("critic_train"), value_loss_phase(self.args):
@@ -847,7 +931,13 @@ class MegatronTrainRayActor(TrainRayActor):
 
         # getattr: the separate-critic actor shares this method but never runs the
         # OPD teacher init that creates _self_teacher.
-        save(rollout_id, self.model, self.optimizer, self.opt_param_scheduler, self_teacher=getattr(self, "_self_teacher", None))
+        save(
+            rollout_id,
+            self.model,
+            self.optimizer,
+            self.opt_param_scheduler,
+            self_teacher=getattr(self, "_self_teacher", None),
+        )
 
         if uses_adapter_critic(self.args) and self.args.critic_save:
             save_critic_checkpoint(self.args, rollout_id, self.critic_model, optimizer=self.critic_optimizer)
@@ -858,7 +948,12 @@ class MegatronTrainRayActor(TrainRayActor):
         if self.args.save_hf is not None and self.role == "actor":
             from orbit.backends.megatron_utils.model import save_hf_model
 
-            save_hf_model(self.args, rollout_id, self.model)
+            save_hf_model(
+                self.args,
+                rollout_id,
+                self.model,
+                self_teacher=getattr(self, "_self_teacher", None),
+            )
 
         if self.args.offload_train:
             destroy_process_groups()
@@ -948,7 +1043,6 @@ class MegatronTrainRayActor(TrainRayActor):
             destroy_process_groups()
             clear_memory()
             print_memory("after update_weights destroy_process_groups")
-
 
     def load_other_checkpoint(self, model_tag: str, path: str) -> None:
         old_args = self.args.load, self.args.no_load_optim, self.args.no_load_rng, self.args.finetune

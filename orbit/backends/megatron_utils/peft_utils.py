@@ -12,13 +12,9 @@ import torch.distributed as dist
 from megatron.core import mpu
 from safetensors.torch import save_file as safetensors_save_file
 
-from orbit.backends.training_utils.parallel import get_parallel_state
 from orbit.backends.megatron_utils.update_weight.common import is_dsv4_grouped_moe_oft_param_name
-from orbit.utils.adapter_tensors import (
-    AdapterTensorKey,
-    adapter_named_parameters,
-    adapter_tensor_key_digest,
-)
+from orbit.backends.training_utils.parallel import get_parallel_state
+from orbit.utils.adapter_tensors import AdapterTensorKey, adapter_named_parameters, adapter_tensor_key_digest
 
 logger = logging.getLogger(__name__)
 
@@ -90,10 +86,7 @@ def is_peft_enabled(args) -> bool:
     return get_peft_method(args) != "none"
 
 
-from megatron.bridge.peft.param_names import (
-    CANONICAL_OFT_SLICE_NAMES,
-    is_peft_adapter_param_name,
-)
+from megatron.bridge.peft.param_names import CANONICAL_OFT_SLICE_NAMES, is_peft_adapter_param_name
 
 
 def is_adapter_param_name(name: str) -> bool:
@@ -130,9 +123,7 @@ def validate_peft_checkpoint_type(adapter_dir: Path, expected_method: str) -> di
     actual_type = config.get("peft_type")
     expected_type = expected_method.upper()
     if actual_type is not None and actual_type.upper() != expected_type:
-        raise ValueError(
-            f"PEFT checkpoint at {adapter_dir} has peft_type={actual_type}, expected {expected_type}."
-        )
+        raise ValueError(f"PEFT checkpoint at {adapter_dir} has peft_type={actual_type}, expected {expected_type}.")
     return config
 
 
@@ -181,12 +172,13 @@ def save_peft_checkpoint(
     opt_param_scheduler: Any | None = None,
     iteration: int | None = None,
     active_student_version: str | None = None,
+    self_teacher: Any | None = None,
 ) -> str:
     method = get_peft_method(args)
     if method == "lora":
         from .lora_utils import save_lora_checkpoint
 
-        return save_lora_checkpoint(
+        adapter_dir = save_lora_checkpoint(
             model,
             args,
             save_dir,
@@ -195,10 +187,10 @@ def save_peft_checkpoint(
             iteration=iteration,
             active_student_version=active_student_version,
         )
-    if method == "oft":
+    elif method == "oft":
         from .oft_utils import save_oft_checkpoint
 
-        return save_oft_checkpoint(
+        adapter_dir = save_oft_checkpoint(
             model,
             args,
             save_dir,
@@ -207,7 +199,39 @@ def save_peft_checkpoint(
             iteration=iteration,
             active_student_version=active_student_version,
         )
-    raise ValueError(f"Cannot save PEFT checkpoint when peft_method={method!r}.")
+    else:
+        raise ValueError(f"Cannot save PEFT checkpoint when peft_method={method!r}.")
+
+    if self_teacher is not None:
+        from orbit.utils.self_teacher_checkpoint import TeacherCheckpointError, save_self_teacher_sidecar
+
+        rank = dist.get_rank() if dist.is_initialized() else 0
+        world_size = dist.get_world_size() if dist.is_initialized() else 1
+        local_error = None
+        try:
+            save_self_teacher_sidecar(
+                adapter_dir,
+                self_teacher,
+                rank=rank,
+                world_size=world_size,
+            )
+        except Exception as exc:  # every rank must leave the collective together
+            local_error = f"{type(exc).__name__}: {exc}"
+
+        if world_size > 1:
+            from orbit.utils.distributed_utils import get_gloo_group
+
+            errors: list[str | None] = [None] * world_size
+            dist.all_gather_object(errors, local_error, group=get_gloo_group())
+        else:
+            errors = [local_error]
+
+        failures = [f"rank {failed_rank}: {error}" for failed_rank, error in enumerate(errors) if error]
+        if failures:
+            raise TeacherCheckpointError(
+                "self-teacher sidecar save failed on one or more ranks; " + "; ".join(failures)
+            )
+    return adapter_dir
 
 
 def load_peft_adapter(
@@ -265,9 +289,7 @@ def save_training_state(
 ) -> None:
     if iteration is not None and not _is_bounded_nonnegative_integer(iteration):
         raise ValueError("PEFT checkpoint iteration must be a bounded nonnegative integer")
-    if active_student_version is not None and not _is_canonical_student_version(
-        active_student_version
-    ):
+    if active_student_version is not None and not _is_canonical_student_version(active_student_version):
         raise ValueError("active student version must be canonical nonnegative decimal text")
     if optimizer is None:
         return
@@ -276,14 +298,11 @@ def save_training_state(
     state_path = Path(adapter_dir) / f"training_state_rank{rank}.pt"
     optimizer_state = optimizer.state_dict()
     save_parameter_state = getattr(optimizer, "save_parameter_state", None)
-    has_external_parameter_state = (
-        not _contains_inline_optimizer_tensor(optimizer_state)
-        and callable(save_parameter_state)
+    has_external_parameter_state = not _contains_inline_optimizer_tensor(optimizer_state) and callable(
+        save_parameter_state
     )
     if has_external_parameter_state:
-        parameter_state_path = (
-            Path(adapter_dir) / f"{_OPTIMIZER_PARAMETER_STATE_PREFIX}{rank}.pt"
-        )
+        parameter_state_path = Path(adapter_dir) / f"{_OPTIMIZER_PARAMETER_STATE_PREFIX}{rank}.pt"
         save_parameter_state(str(parameter_state_path))
     torch.save(
         {
@@ -306,20 +325,13 @@ def load_training_state(
     expected_iteration: int | None = None,
     expected_active_student_version: str | None = None,
 ) -> int | None:
-    if expected_iteration is not None and not _is_bounded_nonnegative_integer(
-        expected_iteration
-    ):
+    if expected_iteration is not None and not _is_bounded_nonnegative_integer(expected_iteration):
         raise ValueError("expected PEFT checkpoint iteration must be bounded and nonnegative")
-    if (
-        expected_active_student_version is not None
-        and not _is_canonical_student_version(expected_active_student_version)
+    if expected_active_student_version is not None and not _is_canonical_student_version(
+        expected_active_student_version
     ):
         raise ValueError("expected active student version must be canonical decimal text")
-    if (
-        optimizer is None
-        and expected_iteration is None
-        and expected_active_student_version is None
-    ):
+    if optimizer is None and expected_iteration is None and expected_active_student_version is None:
         return None
 
     rank = dist.get_rank() if dist.is_initialized() else 0
@@ -335,23 +347,15 @@ def load_training_state(
         raise RuntimeError("PEFT checkpoint training state is invalid")
     iteration = training_state.get("iteration")
     if expected_iteration is not None and (
-        not _is_bounded_nonnegative_integer(iteration)
-        or iteration != expected_iteration
+        not _is_bounded_nonnegative_integer(iteration) or iteration != expected_iteration
     ):
-        raise RuntimeError(
-            "PEFT checkpoint iteration does not match teacher-pool binding"
-        )
+        raise RuntimeError("PEFT checkpoint iteration does not match teacher-pool binding")
     active_student_version = training_state.get("active_student_version")
-    if (
-        expected_active_student_version is not None
-        and (
-            not _is_canonical_student_version(active_student_version)
-            or active_student_version != expected_active_student_version
-        )
+    if expected_active_student_version is not None and (
+        not _is_canonical_student_version(active_student_version)
+        or active_student_version != expected_active_student_version
     ):
-        raise RuntimeError(
-            "PEFT checkpoint active student version does not match teacher-pool binding"
-        )
+        raise RuntimeError("PEFT checkpoint active student version does not match teacher-pool binding")
 
     if optimizer is None:
         if iteration is not None:
@@ -359,15 +363,11 @@ def load_training_state(
         return iteration
 
     optimizer.load_state_dict(training_state["optimizer"])
-    parameter_state_path = (
-        Path(adapter_dir) / f"{_OPTIMIZER_PARAMETER_STATE_PREFIX}{rank}.pt"
-    )
+    parameter_state_path = Path(adapter_dir) / f"{_OPTIMIZER_PARAMETER_STATE_PREFIX}{rank}.pt"
     load_parameter_state = getattr(optimizer, "load_parameter_state", None)
     if training_state.get("optimizer_parameter_state") is True:
         if not callable(load_parameter_state):
-            raise RuntimeError(
-                "PEFT checkpoint requires distributed optimizer parameter state"
-            )
+            raise RuntimeError("PEFT checkpoint requires distributed optimizer parameter state")
         load_parameter_state(str(parameter_state_path))
     logger.info("Restored optimizer state from PEFT checkpoint")
 
@@ -747,13 +747,10 @@ def resolve_native_adapter_state(
             matches = [
                 key
                 for key in params
-                if key[1] == legacy_name
-                or _maybe_legacy_canonical_oft_key(key[1]) == legacy_name
+                if key[1] == legacy_name or _maybe_legacy_canonical_oft_key(key[1]) == legacy_name
             ]
             if len(matches) > 1:
-                raise ValueError(
-                    f"legacy native adapter name {legacy_name!r} is ambiguous across model chunks"
-                )
+                raise ValueError(f"legacy native adapter name {legacy_name!r} is ambiguous across model chunks")
             if not matches:
                 raise ValueError(f"legacy native adapter state has unknown key {legacy_name!r}")
             key = matches[0]
@@ -808,8 +805,7 @@ def _to_peft_canonical_key(name: str) -> str:
     stripped = name[: -len(".weight")] if name.endswith(".weight") else name
     if not any(stripped.endswith(f".{suffix}") for suffix in suffixes):
         raise ValueError(
-            f"cannot wrap adapter weight '{name}' to peft canonical form: "
-            f"expected suffix in {suffixes}"
+            f"cannot wrap adapter weight '{name}' to peft canonical form: " f"expected suffix in {suffixes}"
         )
     return f"base_model.model.{stripped}.weight"
 
@@ -839,10 +835,7 @@ def _save_peft_hf_artifacts(
             "string (typically args.hf_checkpoint)"
         )
 
-    serializable = {
-        _to_peft_canonical_key(name): tensor.detach().clone()
-        for name, tensor in state_dict.items()
-    }
+    serializable = {_to_peft_canonical_key(name): tensor.detach().clone() for name, tensor in state_dict.items()}
     safetensors_save_file(serializable, str(save_path / "adapter_model.safetensors"))
 
     enriched_config = dict(config)
@@ -894,9 +887,7 @@ def save_peft_adapter_checkpoint(
 
     # HF PEFT format — bridge export is TP-collective, so every rank calls it.
     bridge = AutoBridge.from_hf_pretrained(args.hf_checkpoint, trust_remote_code=True)
-    exporter = (
-        bridge.export_oft_adapter_weights if method == "oft" else bridge.export_adapter_weights
-    )
+    exporter = bridge.export_oft_adapter_weights if method == "oft" else bridge.export_adapter_weights
 
     state_dict: dict[str, torch.Tensor] = {}
     with megatron_bridge_utils.patch_megatron_model(model):
@@ -955,10 +946,7 @@ def load_peft_adapter_checkpoint(
     native_path = adapter_dir / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt"
     if native_path.exists():
         validated_iteration = None
-        binding_metadata_expected = (
-            expected_iteration is not None
-            or expected_active_student_version is not None
-        )
+        binding_metadata_expected = expected_iteration is not None or expected_active_student_version is not None
         if binding_metadata_expected:
             # Binding metadata must validate before adapter parameters or
             # optimizer state are mutated.
@@ -973,8 +961,7 @@ def load_peft_adapter_checkpoint(
         resolved = resolve_native_adapter_state(model, state_dict)
         params = adapter_named_parameters(model, is_adapter_param_name)
         converted = {
-            key: resolved[key].to(device=parameter.device, dtype=parameter.dtype)
-            for key, parameter in params.items()
+            key: resolved[key].to(device=parameter.device, dtype=parameter.dtype) for key, parameter in params.items()
         }
         with torch.no_grad():
             for key, parameter in params.items():

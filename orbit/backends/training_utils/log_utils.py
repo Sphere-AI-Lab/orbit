@@ -13,11 +13,138 @@ from orbit.utils.metric_utils import compute_pass_rate, compute_rollout_step
 from orbit.utils.types import RolloutBatch
 
 from ...utils import tracking_utils
-from .cp_utils import get_sum_of_sample_mean
+from .cp_utils import get_logits_and_tokens_offset_with_cp, get_sum_of_sample_mean
 from .data import DataIterator
 from .parallel import get_parallel_state
 
 logger = logging.getLogger(__name__)
+
+
+def _local_response_loss_masks(
+    *,
+    total_lengths: list[int],
+    response_lengths: list[int],
+    loss_masks: list[torch.Tensor],
+    qkv_format: str,
+    max_seq_lens: list[int] | None,
+) -> list[torch.Tensor]:
+    """Return loss masks in the same response/CP layout as stored log-probs."""
+    if get_parallel_state().cp.size == 1:
+        return loss_masks
+
+    local_masks = []
+    for i, (total_length, response_length, loss_mask) in enumerate(
+        zip(total_lengths, response_lengths, loss_masks, strict=True)
+    ):
+        max_seq_len = max_seq_lens[i] if max_seq_lens is not None else None
+        prompt_length = total_length - response_length
+        _, _, _, token_offsets = get_logits_and_tokens_offset_with_cp(
+            total_length,
+            response_length,
+            qkv_format,
+            max_seq_len,
+        )
+        first = loss_mask[token_offsets[0][0] - prompt_length : token_offsets[0][1] - prompt_length]
+        second = loss_mask[token_offsets[1][0] - prompt_length : token_offsets[1][1] - prompt_length]
+        local_masks.append(torch.cat((first, second), dim=0))
+    return local_masks
+
+
+def _assert_true_on_policy_logprob_parity(
+    args: Namespace,
+    rollout_data: RolloutBatch,
+    *,
+    total_lengths: list[int],
+    response_lengths: list[int],
+    loss_masks: list[torch.Tensor],
+    max_seq_lens: list[int] | None,
+) -> None:
+    """Require exact per-token train/rollout parity at valid response positions."""
+    train_log_probs = rollout_data.get("log_probs")
+    rollout_log_probs = rollout_data.get("rollout_log_probs")
+    assert train_log_probs is not None and rollout_log_probs is not None, (
+        "CI check failed: the Phase-5 true-on-policy parity gate requires both " "log_probs and rollout_log_probs."
+    )
+    assert len(train_log_probs) == len(rollout_log_probs) == len(loss_masks), (
+        "CI check failed: true-on-policy log-prob and loss-mask sample counts differ: "
+        f"{len(train_log_probs)}, {len(rollout_log_probs)}, and {len(loss_masks)}."
+    )
+
+    local_masks = _local_response_loss_masks(
+        total_lengths=total_lengths,
+        response_lengths=response_lengths,
+        loss_masks=loss_masks,
+        qkv_format=args.qkv_format,
+        max_seq_lens=max_seq_lens,
+    )
+    for sample_index, (train, rollout, loss_mask) in enumerate(
+        zip(train_log_probs, rollout_log_probs, local_masks, strict=True)
+    ):
+        assert isinstance(train, torch.Tensor) and isinstance(
+            rollout, torch.Tensor
+        ), "CI check failed: true-on-policy log-probs must be tensors."
+        assert train.shape == rollout.shape, (
+            f"CI check failed: true-on-policy sample {sample_index} shapes differ: "
+            f"{tuple(train.shape)} != {tuple(rollout.shape)}."
+        )
+        assert train.dtype == rollout.dtype, (
+            f"CI check failed: true-on-policy sample {sample_index} dtypes differ: "
+            f"{train.dtype} != {rollout.dtype}."
+        )
+        assert train.numel() == loss_mask.numel(), (
+            f"CI check failed: true-on-policy sample {sample_index} has {train.numel()} "
+            f"log-probs but {loss_mask.numel()} local response mask entries."
+        )
+
+        valid = loss_mask.to(device=train.device, dtype=torch.bool).reshape(train.shape)
+        rollout = rollout.to(device=train.device)
+        train_valid = train[valid]
+        rollout_valid = rollout[valid]
+        if not torch.equal(train_valid, rollout_valid):
+            max_abs_diff = (
+                (train_valid.float() - rollout_valid.float()).abs().max().item() if train_valid.numel() else 0.0
+            )
+            raise AssertionError(
+                "CI check failed: true_on_policy_mode is enabled with the Phase-5 "
+                "SGLang-in-Megatron backend active, but masked per-token log_probs "
+                f"and rollout_log_probs differ for sample {sample_index} "
+                f"(max_abs_diff={max_abs_diff})."
+            )
+
+
+def _assert_true_on_policy_logprob_parity_synchronized(
+    args: Namespace,
+    rollout_data: RolloutBatch,
+    *,
+    total_lengths: list[int],
+    response_lengths: list[int],
+    loss_masks: list[torch.Tensor],
+    max_seq_lens: list[int] | None,
+) -> None:
+    """Run the parity check without stranding peers in the next collective."""
+    local_error = None
+    try:
+        _assert_true_on_policy_logprob_parity(
+            args,
+            rollout_data,
+            total_lengths=total_lengths,
+            response_lengths=response_lengths,
+            loss_masks=loss_masks,
+            max_seq_lens=max_seq_lens,
+        )
+    except Exception as exc:  # synchronize structural errors as well as value mismatches
+        local_error = f"{type(exc).__name__}: {exc}"
+
+    group_info = get_parallel_state().intra_dp_cp
+    if group_info.size > 1:
+        errors: list[str | None] = [None] * group_info.size
+        dist.all_gather_object(errors, local_error, group=group_info.gloo_group)
+    else:
+        errors = [local_error]
+
+    failures = [f"rank {rank}: {error}" for rank, error in enumerate(errors) if error is not None]
+    if failures:
+        raise AssertionError("Synchronized true-on-policy parity failure; " + "; ".join(failures))
 
 
 def gather_log_data(
@@ -112,6 +239,23 @@ def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatc
         total_lengths = rollout_data["total_lengths"]
         max_seq_lens = rollout_data.get("max_seq_lens", None)
 
+        if (
+            getattr(args, "ci_test", False)
+            and not getattr(args, "ci_disable_logprobs_checker", False)
+            and getattr(args, "true_on_policy_mode", False)
+            and getattr(args, "true_on_policy_megatron_uses_sglang_backend", False)
+        ):
+            # A reduced scalar mean can hide equal-and-opposite token errors.
+            # Gate the contract on the raw, loss-mask-valid response values.
+            _assert_true_on_policy_logprob_parity_synchronized(
+                args,
+                rollout_data,
+                total_lengths=total_lengths,
+                response_lengths=response_lengths,
+                loss_masks=loss_masks,
+                max_seq_lens=max_seq_lens,
+            )
+
         for key, val in rollout_data.items():
             if key in [
                 "tokens",
@@ -199,21 +343,6 @@ def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatc
                 ), f"CI check failed: log_probs ({reduced_log_dict['rollout/log_probs']}) != rollout_log_probs ({reduced_log_dict['rollout/rollout_log_probs']})"
             if "rollout/entropy" in reduced_log_dict:
                 assert 0 < reduced_log_dict["rollout/entropy"] < 0.7
-
-        if args.ci_test and args.true_on_policy_mode and args.true_on_policy_megatron_uses_sglang_backend:
-            # Exact train/rollout parity only holds once Phase 5 (SGLang kernels
-            # running inside Megatron, via the fork rebase) is ported -- that's
-            # what megatron_uses_sglang_backend=True means (see the contract's
-            # kernel_policy_kwargs_for in orbit/true_on_policy/contracts.py).
-            # Until a contract ships Phase 5, Megatron and SGLang legitimately
-            # run different kernels; the gap is measured instead, via
-            # train_rollout_logprob_abs_diff{,_max} (orbit/backends/training_utils/loss.py).
-            assert log_dict["log_probs"] == log_dict["rollout_log_probs"], (
-                f"CI check failed: true_on_policy_mode is enabled with the Phase-5 "
-                f"SGLang-in-Megatron backend active, so log_probs must equal "
-                f"rollout_log_probs exactly, but log_probs ({log_dict['log_probs']}) "
-                f"!= rollout_log_probs ({log_dict['rollout_log_probs']})"
-            )
 
     if args.log_multi_turn:
         log_multi_turn_data(rollout_id, args, rollout_data)
@@ -395,18 +524,23 @@ def aggregate_train_losses(
     keys = losses_reduced[0]["keys"]
 
     max_metric_indices = {i + 1 for i, key in enumerate(keys) if key.endswith("_max")}
+    min_metric_indices = {i + 1 for i, key in enumerate(keys) if key.endswith("_min")}
     values = None
     max_values = None
+    min_values = None
     for log_dict in losses_reduced:
         log_values = log_dict["values"]
         if values is None:
             values = torch.zeros_like(log_values)
             max_values = torch.full_like(log_values, -torch.inf)
+            min_values = torch.full_like(log_values, torch.inf)
 
         values[0] += log_values[0]
         for i in range(1, log_values.numel()):
             if i in max_metric_indices:
                 max_values[i] = torch.maximum(max_values[i], log_values[i])
+            elif i in min_metric_indices:
+                min_values[i] = torch.minimum(min_values[i], log_values[i])
             else:
                 values[i] += log_values[i]
 
@@ -417,13 +551,17 @@ def aggregate_train_losses(
         dist.all_reduce(max_values, op=dist.ReduceOp.MAX, group=parallel_state.intra_dp_cp.group)
         for i in max_metric_indices:
             values[i] = max_values[i]
+    if min_metric_indices:
+        dist.all_reduce(min_values, op=dist.ReduceOp.MIN, group=parallel_state.intra_dp_cp.group)
+        for i in min_metric_indices:
+            values[i] = min_values[i]
 
     loss_reduced = {}
     values = values.tolist()
     num_samples_or_tokens = values[0]
 
     for key, value in zip(keys, values[1:], strict=False):
-        if key.endswith("_max"):
+        if key.endswith(("_max", "_min")):
             loss_reduced[key] = value
         else:
             loss_reduced[key] = value * parallel_state.cp.size / num_samples_or_tokens

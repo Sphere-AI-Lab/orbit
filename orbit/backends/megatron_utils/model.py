@@ -9,7 +9,6 @@ from functools import partial
 from pathlib import Path
 
 import torch
-import torch.distributed as dist
 from megatron.core import mpu
 from megatron.core.distributed import DistributedDataParallel as DDP
 from megatron.core.distributed import finalize_model_grads
@@ -724,11 +723,7 @@ def train(
         # Run training step.
         _mem_snapshot_dir = os.environ.get("ORBIT_MEMORY_SNAPSHOT_DIR")
         _mem_snapshot_step = int(os.environ.get("ORBIT_MEMORY_SNAPSHOT_STEP", "0"))
-        _mem_profile_this_step = (
-            _mem_snapshot_dir is not None
-            and rollout_id == 0
-            and step_id == _mem_snapshot_step
-        )
+        _mem_profile_this_step = _mem_snapshot_dir is not None and rollout_id == 0 and step_id == _mem_snapshot_step
         if _mem_profile_this_step:
             torch.cuda.memory._record_memory_history(
                 enabled="all", context="all", stacks="python", max_entries=2_000_000
@@ -856,7 +851,13 @@ def save(
         disable_forward_pre_hook(model)
 
     if is_peft_model(model):
-        save_checkpoint_with_peft(iteration, model, optimizer, opt_param_scheduler)
+        save_checkpoint_with_peft(
+            iteration,
+            model,
+            optimizer,
+            opt_param_scheduler,
+            self_teacher=self_teacher,
+        )
     else:
         save_checkpoint(
             iteration,
@@ -875,7 +876,7 @@ def save(
         enable_forward_pre_hook(model)
 
 
-def save_hf_model(args, rollout_id: int, model: Sequence[DDP]) -> None:
+def save_hf_model(args, rollout_id: int, model: Sequence[DDP], *, self_teacher=None) -> None:
     """Save Megatron model in HuggingFace format.
 
     For PEFT models this saves both:
@@ -890,6 +891,8 @@ def save_hf_model(args, rollout_id: int, model: Sequence[DDP]) -> None:
         args: Runtime arguments.
         model (Sequence[DDP]): Sequence of DDP-wrapped model chunks.
         rollout_id (int): Rollout ID for path formatting.
+        self_teacher: Optional per-rank self-teacher state saved beside the
+            adapter checkpoint.
     """
     should_log = get_parallel_state().intra_dp_cp.rank == 0 and mpu.get_tensor_model_parallel_rank() == 0
 
@@ -924,21 +927,18 @@ def save_hf_model(args, rollout_id: int, model: Sequence[DDP]) -> None:
             adapter_path = Path(args.save_hf.format(rollout_id=rollout_id)) / "adapter"
             if should_log:
                 logger.info(f"Saving PEFT adapter checkpoint to {adapter_path}")
-            save_peft_checkpoint(model, args, str(adapter_path))
-            if self_teacher is not None:
-                from orbit.utils.self_teacher_checkpoint import save_self_teacher_sidecar
-
-                save_self_teacher_sidecar(
-                    adapter_path,
-                    self_teacher,
-                    rank=dist.get_rank() if dist.is_initialized() else 0,
-                    world_size=dist.get_world_size() if dist.is_initialized() else 1,
-                )
+            save_peft_checkpoint(model, args, str(adapter_path), self_teacher=self_teacher)
             if should_log:
                 logger.info(f"Successfully saved PEFT adapter to {adapter_path}")
         except Exception as e:
             if should_log:
                 logger.error(f"Failed to save PEFT adapter: {e}")
+            # Preserve the historical best-effort HF export for ordinary PEFT
+            # saves.  A requested self-teacher sidecar is different: silently
+            # dropping it would make the exported checkpoint resume with a
+            # freshly seeded teacher instead of the teacher that produced it.
+            if self_teacher is not None:
+                raise
 
 
 def initialize_model_and_optimizer(
