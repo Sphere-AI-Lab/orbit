@@ -195,6 +195,118 @@ def test_post_json_requires_exact_top_level_object(monkeypatch):
         _run(scoring_client.post_json("http://teacher/generate", {}))
 
 
+def test_post_json_default_keeps_strict_decoder(monkeypatch):
+    class UnexpectedFastDecoder:
+        @staticmethod
+        def loads(encoded):
+            raise AssertionError("external scoring responses must remain on strict JSON")
+
+    # orjson accepts duplicate keys, while loads_strict rejects them. This
+    # distinguishes the security-sensitive default path from the managed-only
+    # fast path instead of merely checking that valid JSON happens to decode.
+    factory = _HTTPFactory((200, b'{"score":1,"score":2}'))
+    monkeypatch.setattr(scoring_client, "_orjson", UnexpectedFastDecoder)
+    monkeypatch.setattr(scoring_client.aiohttp, "ClientSession", factory)
+
+    with pytest.raises(scoring_client.ScoringProtocolError):
+        _run(scoring_client.post_json("http://external-teacher/generate", {}))
+
+    assert len(factory.post_calls) == 1
+
+
+def test_trusted_local_response_uses_fast_decoder_after_5xx_retry(monkeypatch):
+    decoded = []
+
+    class RecordingFastDecoder:
+        @staticmethod
+        def loads(encoded):
+            decoded.append(bytes(encoded))
+            return {"ok": True}
+
+    async def no_sleep(delay):
+        return None
+
+    factory = _HTTPFactory((503, b"discarded"), (200, b'{"ok":true}'))
+    monkeypatch.setattr(scoring_client, "_orjson", RecordingFastDecoder)
+    monkeypatch.setattr(scoring_client.aiohttp, "ClientSession", factory)
+    monkeypatch.setattr(scoring_client.asyncio, "sleep", no_sleep)
+
+    response = _run(
+        scoring_client.post_json_with_metadata(
+            "http://managed-teacher/generate",
+            {},
+            max_retries=1,
+            trusted_local_response=True,
+        )
+    )
+
+    assert response == scoring_client.ScoringJSONResponse(
+        body={"ok": True},
+        retry_count=1,
+    )
+    assert len(factory.post_calls) == 2
+    assert decoded == [b'{"ok":true}']
+
+
+def test_trusted_local_response_keeps_byte_bound_before_fast_decode(monkeypatch):
+    class UnexpectedFastDecoder:
+        @staticmethod
+        def loads(encoded):
+            raise AssertionError("oversized responses must fail before JSON decode")
+
+    factory = _HTTPFactory((200, b"123456789"))
+    monkeypatch.setattr(scoring_client, "_orjson", UnexpectedFastDecoder)
+    monkeypatch.setattr(scoring_client.aiohttp, "ClientSession", factory)
+
+    with pytest.raises(scoring_client.ScoringProtocolError, match="byte limit"):
+        _run(
+            scoring_client.post_json(
+                "http://managed-teacher/generate",
+                {},
+                max_retries=0,
+                max_response_bytes=8,
+                trusted_local_response=True,
+            )
+        )
+
+    assert len(factory.post_calls) == 1
+
+
+def test_trusted_local_response_keeps_exact_top_level_object_check(monkeypatch):
+    class ListFastDecoder:
+        @staticmethod
+        def loads(encoded):
+            return []
+
+    factory = _HTTPFactory((200, b"[]"))
+    monkeypatch.setattr(scoring_client, "_orjson", ListFastDecoder)
+    monkeypatch.setattr(scoring_client.aiohttp, "ClientSession", factory)
+
+    with pytest.raises(scoring_client.ScoringProtocolError, match="exact object"):
+        _run(
+            scoring_client.post_json(
+                "http://managed-teacher/generate",
+                {},
+                trusted_local_response=True,
+            )
+        )
+
+
+def test_trusted_local_response_falls_back_to_strict_without_orjson(monkeypatch):
+    factory = _HTTPFactory((200, b'{"score":1,"score":2}'))
+    monkeypatch.setattr(scoring_client, "_orjson", None)
+    monkeypatch.setattr(scoring_client.aiohttp, "ClientSession", factory)
+
+    with pytest.raises(scoring_client.ScoringProtocolError):
+        _run(
+            scoring_client.post_json(
+                "http://managed-teacher/generate",
+                {},
+                trusted_local_response=True,
+            )
+        )
+
+
 def test_max_retries_is_keyword_only_on_both_clients():
     assert inspect.signature(scoring_client.post_json).parameters["max_retries"].kind is inspect.Parameter.KEYWORD_ONLY
     assert (
@@ -207,6 +319,22 @@ def test_max_retries_is_keyword_only_on_both_clients():
         inspect.signature(scoring_client.post_chat_completions).parameters["max_retries"].kind
         is inspect.Parameter.KEYWORD_ONLY
     )
+
+
+@pytest.mark.parametrize("value", [1, 1.0, "true", None])
+def test_post_json_rejects_non_boolean_trusted_local_response(monkeypatch, value):
+    async def unexpected(*args, **kwargs):
+        raise AssertionError("invalid trust marker must fail before the request")
+
+    monkeypatch.setattr(scoring_client, "_post_json_once", unexpected)
+    with pytest.raises(TypeError, match="trusted_local_response must be an exact boolean"):
+        _run(
+            scoring_client.post_json(
+                "http://teacher/generate",
+                {},
+                trusted_local_response=value,
+            )
+        )
 
 
 @pytest.mark.parametrize("value", [True, 1.0, "1", None])

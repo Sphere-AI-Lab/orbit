@@ -16,6 +16,11 @@ import aiohttp
 
 from orbit.ultra.strict_json import loads_strict
 
+try:
+    import orjson as _orjson
+except ImportError:  # pragma: no cover - the locked sglang environment provides it
+    _orjson = None
+
 SCORING_MAX_RETRIES = 1
 SCORING_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 _SCORING_MAX_JSON_DEPTH = 32
@@ -54,6 +59,11 @@ def _validate_max_retries(max_retries: int) -> None:
         raise TypeError("max_retries must be an exact integer")
     if max_retries < 0:
         raise ValueError("max_retries must be nonnegative")
+
+
+def _validate_trusted_local_response(trusted_local_response: bool) -> None:
+    if type(trusted_local_response) is not bool:
+        raise TypeError("trusted_local_response must be an exact boolean")
 
 
 def _is_retryable_scoring_error(exc: BaseException) -> bool:
@@ -117,6 +127,7 @@ async def _post_json_once(
     *,
     headers: Mapping[str, str],
     max_response_bytes: int = SCORING_MAX_RESPONSE_BYTES,
+    trusted_local_response: bool = False,
 ) -> dict[str, Any]:
     request_options: dict[str, Any] = {
         "json": payload,
@@ -164,11 +175,20 @@ async def _post_json_once(
                         "scoring response exceeds its byte limit"
                     )
     try:
-        body = loads_strict(
-            bytes(encoded),
-            max_bytes=max_response_bytes,
-            max_depth=_SCORING_MAX_JSON_DEPTH,
-        )
+        # Managed in-job services are trusted producers. Their full-vocab OPD
+        # responses contain tens of MB of base64 hidden states, so running the
+        # strict decoder's Python character-by-character validation on the one
+        # asyncio loop serializes an otherwise concurrent request batch. orjson
+        # retains JSON syntax/UTF-8 validation while avoiding that scan. Keep the
+        # strict decoder as the default for every external scoring endpoint.
+        if trusted_local_response and _orjson is not None:
+            body = _orjson.loads(encoded)
+        else:
+            body = loads_strict(
+                bytes(encoded),
+                max_bytes=max_response_bytes,
+                max_depth=_SCORING_MAX_JSON_DEPTH,
+            )
     except (TypeError, ValueError):
         raise ScoringProtocolError(
             "scoring service returned invalid strict JSON"
@@ -186,21 +206,25 @@ async def post_json_with_metadata(
     max_retries: int = SCORING_MAX_RETRIES,
     headers: Mapping[str, str] | None = None,
     max_response_bytes: int | None = None,
+    trusted_local_response: bool = False,
 ) -> ScoringJSONResponse:
     _validate_max_retries(max_retries)
+    _validate_trusted_local_response(trusted_local_response)
     if max_response_bytes is None:
         max_response_bytes = SCORING_MAX_RESPONSE_BYTES
     safe_headers = _validate_scoring_headers(headers)
     timeout = aiohttp.ClientTimeout(total=timeout_secs)
     for attempt in range(max_retries + 1):
         try:
-            body = await _post_json_once(
-                url,
-                payload,
-                timeout,
-                headers=safe_headers,
-                max_response_bytes=max_response_bytes,
-            )
+            request_options = {
+                "headers": safe_headers,
+                "max_response_bytes": max_response_bytes,
+            }
+            # Preserve compatibility with tests/callers that monkeypatch the
+            # private helper using its original default-path signature.
+            if trusted_local_response:
+                request_options["trusted_local_response"] = True
+            body = await _post_json_once(url, payload, timeout, **request_options)
             return ScoringJSONResponse(body=body, retry_count=attempt)
         except asyncio.CancelledError:
             raise
@@ -222,6 +246,7 @@ async def post_json(
     *,
     max_retries: int = SCORING_MAX_RETRIES,
     max_response_bytes: int | None = None,
+    trusted_local_response: bool = False,
 ) -> dict[str, Any]:
     response = await post_json_with_metadata(
         url,
@@ -229,6 +254,7 @@ async def post_json(
         timeout_secs,
         max_retries=max_retries,
         max_response_bytes=max_response_bytes,
+        trusted_local_response=trusted_local_response,
     )
     return response.body
 

@@ -354,10 +354,17 @@ async def _post_json(
     payload: dict[str, Any],
     timeout_secs: int | float | None = None,
     max_response_bytes: int | None = None,
+    trusted_local_response: bool = False,
 ) -> dict[str, Any]:
     # Thin module-level wrapper around the shared scoring client so tests can
     # monkeypatch opd_sglang._post_json.
-    return await post_json(url, payload, timeout_secs=timeout_secs, max_response_bytes=max_response_bytes)
+    return await post_json(
+        url,
+        payload,
+        timeout_secs=timeout_secs,
+        max_response_bytes=max_response_bytes,
+        trusted_local_response=trusted_local_response,
+    )
 
 
 def _mixture_log_probs(per_teacher: list[torch.Tensor], weights: list[float]) -> torch.Tensor:
@@ -1028,6 +1035,10 @@ async def _score_full_vocab_sample(args, sample: Sample, teacher_targets: list[T
         _full_vocab_payload(sample.tokens),
         timeout_secs=_scoring_timeout(args),
         max_response_bytes=_full_vocab_response_byte_limit(args, len(sample.tokens)),
+        # Only the endpoint launched by --opd-serve-teacher crosses this trust
+        # boundary. Argument validation makes that mode mutually exclusive with
+        # a user-supplied --opd-teacher-url.
+        trusted_local_response=getattr(args, "opd_serve_teacher", False) is True,
     )
 
 

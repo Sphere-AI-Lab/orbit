@@ -101,8 +101,19 @@ def _sample(num_tokens: int = 7, response_length: int = 3) -> Sample:
 def test_reward_func_stashes_full_vocab_response(monkeypatch):
     seen = {}
 
-    async def fake_post_json(url, payload, timeout_secs=None, max_response_bytes=None):
-        seen["url"], seen["payload"], seen["max_response_bytes"] = url, payload, max_response_bytes
+    async def fake_post_json(
+        url,
+        payload,
+        timeout_secs=None,
+        max_response_bytes=None,
+        trusted_local_response=False,
+    ):
+        seen.update(
+            url=url,
+            payload=payload,
+            max_response_bytes=max_response_bytes,
+            trusted_local_response=trusted_local_response,
+        )
         return {"meta_info": {"hidden_states": ["canned"]}}
 
     monkeypatch.setattr(opd_sglang, "_post_json", fake_post_json)
@@ -115,7 +126,59 @@ def test_reward_func_stashes_full_vocab_response(monkeypatch):
     assert seen["url"] == args.opd_teacher_url
     assert seen["payload"]["return_hidden_states"] is True
     assert seen["max_response_bytes"] == 123456
+    assert seen["trusted_local_response"] is False
     assert sample.metadata[TEACHER_RESPONSE_METADATA_KEY] == {"meta_info": {"hidden_states": ["canned"]}}
+
+
+def test_managed_full_vocab_scoring_dispatches_trusted_local_decoder(monkeypatch):
+    seen = {}
+
+    async def fake_post_json(
+        url,
+        payload,
+        timeout_secs=None,
+        max_response_bytes=None,
+        trusted_local_response=False,
+    ):
+        seen["trusted_local_response"] = trusted_local_response
+        return {"meta_info": {"hidden_states": ["canned"]}}
+
+    monkeypatch.setattr(opd_sglang, "_post_json", fake_post_json)
+    monkeypatch.setattr(opd_sglang, "_full_vocab_response_byte_limit", lambda args, n: 123456)
+    args = _full_vocab_args(opd_serve_teacher=True)
+    sample = _sample()
+
+    asyncio.run(opd_sglang._score_full_vocab_sample(args, sample))
+
+    assert seen["trusted_local_response"] is True
+    assert sample.metadata[TEACHER_RESPONSE_METADATA_KEY] == {"meta_info": {"hidden_states": ["canned"]}}
+
+
+def test_managed_full_vocab_fast_decode_keeps_hidden_state_validation(monkeypatch):
+    async def fake_post_json(
+        url,
+        payload,
+        timeout_secs=None,
+        max_response_bytes=None,
+        trusted_local_response=False,
+    ):
+        assert trusted_local_response is True
+        malformed = np.zeros((1, HIDDEN), dtype=np.float32)
+        encoded = pybase64.b64encode(malformed.tobytes()).decode("ascii")
+        return {"meta_info": {"hidden_states": [encoded]}}
+
+    monkeypatch.setattr(opd_sglang, "_post_json", fake_post_json)
+    monkeypatch.setattr(opd_sglang, "_full_vocab_response_byte_limit", lambda args, n: 123456)
+    args = _full_vocab_args(opd_serve_teacher=True)
+    sample = _sample()
+    sample.reward = 1.0
+
+    asyncio.run(opd_sglang._score_full_vocab_sample(args, sample))
+
+    with pytest.raises(ValueError, match="not a whole number"):
+        post_process(args, [sample])
+    # Validation failures retain the payload for debugging/retry.
+    assert TEACHER_RESPONSE_METADATA_KEY in sample.metadata
 
 
 def test_reward_func_rejects_full_vocab_ensembles():
@@ -166,8 +229,15 @@ def test_deferred_full_vocab_scoring_waits_for_batch_phase(monkeypatch):
     active = 0
     peak_active = 0
 
-    async def fake_post_json(url, payload, timeout_secs=None, max_response_bytes=None):
+    async def fake_post_json(
+        url,
+        payload,
+        timeout_secs=None,
+        max_response_bytes=None,
+        trusted_local_response=False,
+    ):
         nonlocal active, peak_active
+        assert trusted_local_response is False
         active += 1
         peak_active = max(peak_active, active)
         await asyncio.sleep(0)
