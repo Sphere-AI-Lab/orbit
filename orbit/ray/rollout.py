@@ -466,6 +466,11 @@ class RolloutManager:
         if self.args.ci_test and self.args.use_fault_tolerance and rollout_id >= 2:
             self._try_ci_fault_injection()
         data, metrics = self._get_rollout_data(rollout_id=rollout_id)
+        if getattr(self.args, "opd_defer_full_vocab_scoring", False):
+            from orbit.rollout.opd_sglang import score_full_vocab_samples
+            from orbit.utils.async_utils import run
+
+            run(score_full_vocab_samples(self.args, data))
         self._save_debug_rollout_data(data, rollout_id=rollout_id, evaluation=False)
         _log_rollout_data(rollout_id, self.args, data, metrics, time.time() - start_time)
         data = self._convert_samples_to_train_data(data)
@@ -1088,7 +1093,11 @@ def _opd_teacher_pool(args):
     return cached
 
 
-def _teacher_server_overrides(mem_fraction: float | None) -> dict:
+def _teacher_server_overrides(
+    mem_fraction: float | None,
+    max_running_requests: int | None = None,
+    max_prefill_tokens: int | None = None,
+) -> dict:
     overrides = {
         "enable_return_hidden_states": True,
         "disable_radix_cache": True,
@@ -1096,6 +1105,10 @@ def _teacher_server_overrides(mem_fraction: float | None) -> dict:
     }
     if mem_fraction is not None:
         overrides["mem_fraction_static"] = mem_fraction
+    if max_running_requests is not None:
+        overrides["max_running_requests"] = max_running_requests
+    if max_prefill_tokens is not None:
+        overrides["max_prefill_tokens"] = max_prefill_tokens
     return overrides
 
 
@@ -1120,7 +1133,11 @@ def _opd_teacher_model_config(args) -> "ModelConfig | None":
             ServerGroupConfig(
                 worker_type="regular",
                 num_gpus=args.opd_teacher_num_gpus,
-                overrides=_teacher_server_overrides(args.opd_teacher_mem_fraction),
+                overrides=_teacher_server_overrides(
+                    args.opd_teacher_mem_fraction,
+                    getattr(args, "opd_teacher_max_running_requests", None),
+                    getattr(args, "opd_teacher_max_prefill_tokens", None),
+                ),
             )
         ],
     )

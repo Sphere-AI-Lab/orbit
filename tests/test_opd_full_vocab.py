@@ -16,6 +16,7 @@ from orbit.rollout.opd_sglang import (
     _teacher_hidden_states_from_payload,
     post_process,
     reward_func,
+    score_full_vocab_samples,
 )
 from orbit.utils.arguments import _validate_opd_args
 from orbit.utils.types import Sample
@@ -85,6 +86,9 @@ def _full_vocab_args(**overrides):
         opd_teacher_key="opd_teacher",
         opd_log_prob_top_k=0,
         opd_scoring_timeout_secs=None,
+        opd_defer_full_vocab_scoring=False,
+        reward_key=None,
+        rm_type="math",
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -105,7 +109,9 @@ def test_reward_func_stashes_full_vocab_response(monkeypatch):
     monkeypatch.setattr(opd_sglang, "_full_vocab_response_byte_limit", lambda args, n: 123456)
     args = _full_vocab_args()
     sample = _sample()
-    assert asyncio.run(reward_func(args, sample)) == 0.0
+    sample.response = "The answer is \\boxed{72}."
+    sample.label = "72"
+    assert asyncio.run(reward_func(args, sample)) == 1
     assert seen["url"] == args.opd_teacher_url
     assert seen["payload"]["return_hidden_states"] is True
     assert seen["max_response_bytes"] == 123456
@@ -122,12 +128,14 @@ def test_post_process_sets_hidden_states_and_trims():
     args = _full_vocab_args()
     payload, _ = _hidden_payload(7)
     scored = _sample()
+    scored.reward = 1.0
     scored.metadata[TEACHER_RESPONSE_METADATA_KEY] = payload
     empty = _sample(num_tokens=4, response_length=0)
+    empty.reward = 0.0
     empty.metadata[TEACHER_RESPONSE_METADATA_KEY] = {"empty_response": True}
 
     raw, rewards = post_process(args, [scored, empty])
-    assert raw == rewards == [0.0, 0.0]
+    assert raw == rewards == [1.0, 0.0]
     assert scored.teacher_hidden_states.shape == (3, HIDDEN)
     assert scored.teacher_hidden_states[:, 0].tolist() == [3.0, 4.0, 5.0]
     assert empty.teacher_hidden_states.shape == (0, 0)
@@ -141,6 +149,58 @@ def test_post_process_sets_hidden_states_and_trims():
     assert scored.teacher_hidden_states.shape == (2, HIDDEN)
     scored.reset_for_retry()
     assert scored.teacher_hidden_states is None
+
+
+def test_reward_func_empty_response_still_computes_task_reward():
+    args = _full_vocab_args()
+    sample = _sample(num_tokens=4, response_length=0)
+    sample.response = ""
+    sample.label = "72"
+
+    assert asyncio.run(reward_func(args, sample)) == 0
+    assert sample.metadata[TEACHER_RESPONSE_METADATA_KEY] == {"empty_response": True}
+
+
+def test_deferred_full_vocab_scoring_waits_for_batch_phase(monkeypatch):
+    calls = []
+    active = 0
+    peak_active = 0
+
+    async def fake_post_json(url, payload, timeout_secs=None, max_response_bytes=None):
+        nonlocal active, peak_active
+        active += 1
+        peak_active = max(peak_active, active)
+        await asyncio.sleep(0)
+        calls.append(payload["input_ids"])
+        active -= 1
+        return {"meta_info": {"hidden_states": ["canned"]}}
+
+    monkeypatch.setattr(opd_sglang, "_post_json", fake_post_json)
+    monkeypatch.setattr(opd_sglang, "_full_vocab_response_byte_limit", lambda args, n: 123456)
+    args = _full_vocab_args(
+        opd_defer_full_vocab_scoring=True,
+        sglang_server_concurrency=1,
+        rollout_num_gpus=1,
+        rollout_num_gpus_per_engine=1,
+    )
+    samples = [_sample(), _sample(num_tokens=8, response_length=2)]
+    for sample in samples:
+        sample.response = "The answer is \\boxed{72}."
+        sample.label = "72"
+
+    # The custom RM now computes only the task reward during student rollout.
+    assert asyncio.run(reward_func(args, samples[0])) == 1
+    assert calls == []
+    assert TEACHER_RESPONSE_METADATA_KEY not in samples[0].metadata
+
+    # Teacher requests are issued only after the complete batch is available.
+    aborted = _sample(num_tokens=9, response_length=2)
+    aborted.status = Sample.Status.ABORTED
+    asyncio.run(score_full_vocab_samples(args, [*samples, aborted]))
+    assert calls == [samples[0].tokens, samples[1].tokens]
+    assert peak_active == 1
+    assert all(TEACHER_RESPONSE_METADATA_KEY in sample.metadata for sample in samples)
+    assert TEACHER_RESPONSE_METADATA_KEY not in aborted.metadata
 
 
 def _validate_args(**overrides):
@@ -166,6 +226,7 @@ def _validate_args(**overrides):
         teacher_score_mode="full_vocab",
         teacher_hf_checkpoint="/fake/teacher",
         compute_advantages_and_returns=True,
+        opd_defer_full_vocab_scoring=False,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -191,6 +252,14 @@ def test_validation_accepts_full_vocab_and_disables_advantages():
         (dict(teacher_hf_checkpoint=None), "requires --teacher-hf-checkpoint"),
         (dict(use_opd=True), "pure distillation loss"),
         (dict(opd_type="megatron"), "requires --opd-type sglang"),
+        (
+            dict(
+                loss_type="policy_loss",
+                teacher_score_mode="sampled_token",
+                opd_defer_full_vocab_scoring=True,
+            ),
+            "requires --teacher-score-mode full_vocab",
+        ),
     ],
 )
 def test_validation_rejects_bad_full_vocab_configs(overrides, match):

@@ -30,10 +30,12 @@ orbit: orbit computes zero-std-reward metrics from ``sample.reward``
 ``round(sample.get_reward_value(args), 1)`` -- which raises on a dict. Orbit's
 own ``--custom-rm-path`` docs also state the contract explicitly: "The
 function should have the signature `def custom_rm(args, sample) -> float`"
-(``orbit/utils/arguments.py``). So ``reward_func`` here keeps ``sample.reward``
-numeric (``0.0`` -- pure distillation has no task reward) and stashes the raw
-teacher response in ``sample.metadata`` instead, for ``post_process`` to read
-back and discard.
+(``orbit/utils/arguments.py``). So ``reward_func`` stashes the raw teacher
+response in ``sample.metadata`` for ``post_process`` to consume while keeping
+``sample.reward`` numeric. Full-vocab OPD additionally computes the ordinary
+task reward for source-recipe-compatible train reward/pass-rate metrics; its
+direct loss does not consume that reward. Sampled-token OPD remains
+task-reward-free and returns ``0.0``.
 """
 
 import asyncio
@@ -972,9 +974,10 @@ async def reward_func(args, sample: Sample, **kwargs) -> float:
     Scores ``sample`` against the external SGLang teacher and stashes the raw
     response (sampled-token path) or the top-k cross-scoring payload
     (``--opd-log-prob-top-k > 0``) on ``sample.metadata`` for ``post_process``
-    to consume. Always returns ``0.0``: pure on-policy distillation has no
-    task reward, and the learning signal comes entirely from the OPD
-    (MOPD/blend) advantage term.
+    to consume. Full-vocab mode also returns the normal task reward so its
+    training metrics match the original full-vocab implementation. The direct
+    ``opd_jsd_loss`` path disables advantages, so this reward is diagnostic
+    only. Other OPD modes return ``0.0`` as before.
     """
     # Evaluation samples want the real task reward, not teacher scoring: this hook
     # occupies the reward slot as a transport, and its 0.0 returns would zero every
@@ -989,27 +992,65 @@ async def reward_func(args, sample: Sample, **kwargs) -> float:
     # back to --opd-teacher-url when --opd-teacher-urls is unset).
     teacher_targets = _teacher_targets_for_sample(args, sample)
     if teacher_score_mode(args) == "full_vocab":
-        if len(teacher_targets) != 1:
-            raise ValueError(
-                "--teacher-score-mode full_vocab supports a single teacher only: mixing "
-                "reconstructed distributions across ensemble members needs per-member LM heads "
-                f"trainer-side, got {len(teacher_targets)} targets."
-            )
-        if sample.response_length == 0:
-            sample.metadata[TEACHER_RESPONSE_METADATA_KEY] = {"empty_response": True}
-            return 0.0
-        url, _ = teacher_targets[0]
-        sample.metadata[TEACHER_RESPONSE_METADATA_KEY] = await _post_json(
-            url,
-            _full_vocab_payload(sample.tokens),
-            timeout_secs=_scoring_timeout(args),
-            max_response_bytes=_full_vocab_response_byte_limit(args, len(sample.tokens)),
-        )
+        if not getattr(args, "opd_defer_full_vocab_scoring", False):
+            await _score_full_vocab_sample(args, sample, teacher_targets)
+
+        # The source full-vocab path computes the ordinary task RM during
+        # rollout, then annotates the samples with teacher hidden states. Keep
+        # that metric behavior here even though opd_jsd_loss never reads the
+        # reward (compute_advantages_and_returns is forced off in validation).
+        from orbit.rollout.rm_hub import default_async_rm
+
+        return await default_async_rm(args, sample)
     elif _get_opd_top_k(args) > 0:
         sample.metadata[TEACHER_RESPONSE_METADATA_KEY] = await _score_top_k(args, sample, teacher_targets)
     else:
         sample.metadata[TEACHER_RESPONSE_METADATA_KEY] = await _score_with_teacher(args, sample, teacher_targets)
     return 0.0
+
+
+async def _score_full_vocab_sample(args, sample: Sample, teacher_targets: list[TeacherTarget] | None = None) -> None:
+    """Fetch and stash one sample's full-vocab teacher hidden states."""
+    teacher_targets = teacher_targets or _teacher_targets_for_sample(args, sample)
+    if len(teacher_targets) != 1:
+        raise ValueError(
+            "--teacher-score-mode full_vocab supports a single teacher only: mixing "
+            "reconstructed distributions across ensemble members needs per-member LM heads "
+            f"trainer-side, got {len(teacher_targets)} targets."
+        )
+    if sample.response_length == 0:
+        sample.metadata[TEACHER_RESPONSE_METADATA_KEY] = {"empty_response": True}
+        return
+
+    url, _ = teacher_targets[0]
+    sample.metadata[TEACHER_RESPONSE_METADATA_KEY] = await _post_json(
+        url,
+        _full_vocab_payload(sample.tokens),
+        timeout_secs=_scoring_timeout(args),
+        max_response_bytes=_full_vocab_response_byte_limit(args, len(sample.tokens)),
+    )
+
+
+async def score_full_vocab_samples(args, samples: list[Sample]) -> None:
+    """Score a completed rollout batch with source-compatible request ordering.
+
+    The original full-vocab implementation generated and task-scored the whole
+    student batch first, then issued teacher scoring requests with a bounded
+    semaphore. This opt-in dev path reproduces that phase boundary.
+    """
+    concurrency = max(
+        1,
+        args.sglang_server_concurrency * args.rollout_num_gpus // args.rollout_num_gpus_per_engine,
+    )
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def score_one(sample: Sample) -> None:
+        if sample.status == Sample.Status.ABORTED:
+            return
+        async with semaphore:
+            await _score_full_vocab_sample(args, sample)
+
+    await asyncio.gather(*(score_one(sample) for sample in samples))
 
 
 def post_process(args, samples: list[Sample], **kwargs):
@@ -1024,9 +1065,10 @@ def post_process(args, samples: list[Sample], **kwargs):
     reverse-KL estimate per response position and stores it on
     ``sample.opd_reverse_kl`` for the trainer to consume directly.
 
-    Returns ``(raw_rewards, rewards)`` -- both all-zero, matching
-    ``reward_func``'s task-reward-free contract -- in the shape expected by
-    ``RolloutManager._convert_samples_to_train_data``.
+    Returns ``(raw_rewards, rewards)`` in the shape expected by
+    ``RolloutManager._convert_samples_to_train_data``. Full-vocab mode
+    preserves the task rewards computed by ``reward_func`` for metrics; other
+    OPD modes keep their task-reward-free all-zero contract.
     """
     top_k = _get_opd_top_k(args)
     full_vocab = teacher_score_mode(args) == "full_vocab"
@@ -1076,5 +1118,8 @@ def post_process(args, samples: list[Sample], **kwargs):
             "OPD sglang post_process: %d/%d samples had no stashed teacher response.", unscored, len(samples)
         )
 
-    scalar_rewards = [0.0] * len(samples)
+    if full_vocab:
+        scalar_rewards = [sample.get_reward_value(args) for sample in samples]
+    else:
+        scalar_rewards = [0.0] * len(samples)
     return scalar_rewards, scalar_rewards

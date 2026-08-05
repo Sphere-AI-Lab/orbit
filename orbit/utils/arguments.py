@@ -269,6 +269,16 @@ def add_on_policy_distillation_arguments(parser):
         ),
     )
     parser.add_argument(
+        "--opd-defer-full-vocab-scoring",
+        action="store_true",
+        default=False,
+        help=(
+            "Score full-vocab teacher hidden states only after the complete student rollout batch "
+            "has finished. This matches the original train_opd.py ordering and prevents colocated "
+            "teacher prefills from perturbing stochastic student-generation scheduling."
+        ),
+    )
+    parser.add_argument(
         "--force-on-policy-ratio",
         action="store_true",
         default=False,
@@ -316,6 +326,18 @@ def add_on_policy_distillation_arguments(parser):
             "mem_fraction_static override for the managed OPD teacher's engine; set a small "
             "value (e.g. 0.25) under --colocate so the teacher fits beside the student engine."
         ),
+    )
+    parser.add_argument(
+        "--opd-teacher-max-running-requests",
+        type=int,
+        default=None,
+        help="Managed OPD teacher-only max_running_requests override.",
+    )
+    parser.add_argument(
+        "--opd-teacher-max-prefill-tokens",
+        type=int,
+        default=None,
+        help="Managed OPD teacher-only max_prefill_tokens override.",
     )
     parser.add_argument(
         "--teacher-score-mode",
@@ -870,10 +892,22 @@ def _validate_opd_args(args) -> None:
             )
         if args.opd_teacher_num_gpus < 1:
             raise ValueError("--opd-teacher-num-gpus must be >= 1.")
+        if (
+            getattr(args, "opd_teacher_max_running_requests", None) is not None
+            and args.opd_teacher_max_running_requests < 1
+        ):
+            raise ValueError("--opd-teacher-max-running-requests must be >= 1.")
+        if (
+            getattr(args, "opd_teacher_max_prefill_tokens", None) is not None
+            and args.opd_teacher_max_prefill_tokens < 1
+        ):
+            raise ValueError("--opd-teacher-max-prefill-tokens must be >= 1.")
 
     # Full-vocab OPD: --loss-type opd_jsd_loss and --teacher-score-mode full_vocab come as a
     # pair, on the external single-URL sglang teacher transport.
     score_mode = getattr(args, "teacher_score_mode", "sampled_token") or "sampled_token"
+    if getattr(args, "opd_defer_full_vocab_scoring", False) and score_mode != "full_vocab":
+        raise ValueError("--opd-defer-full-vocab-scoring requires --teacher-score-mode full_vocab.")
     if (getattr(args, "loss_type", None) == "opd_jsd_loss") != (score_mode == "full_vocab"):
         raise ValueError(
             "--loss-type opd_jsd_loss and --teacher-score-mode full_vocab must be used together, "
@@ -961,10 +995,11 @@ def _validate_opd_args(args) -> None:
             )
 
     # sglang-teacher OPD blend is only safe when the teacher scores through the
-    # local rollout-engine adapter slot (same-base): the external-URL teacher's
-    # reward_func always returns 0.0 and occupies the single --custom-rm-path
+    # local rollout-engine adapter slot (same-base): the external-URL sampled-token
+    # teacher's reward_func returns 0.0 and occupies the single --custom-rm-path
     # slot, so blending it with a reward-based estimator would degrade to a
-    # KL-only signal with ~0 base advantage.
+    # KL-only signal with ~0 base advantage. (The full-vocab direct-loss path is
+    # not eligible for --use-opd and may retain task rewards for metrics.)
     if getattr(args, "use_opd", False) and args.opd_type == "sglang":
         spec_for_blend = parse_teacher_spec(getattr(args, "opd_teacher", None), args.opd_teacher_load)
         external = (
@@ -977,7 +1012,7 @@ def _validate_opd_args(args) -> None:
             raise ValueError(
                 "--use-opd (blend) with --opd-type sglang requires a same-base teacher scored by "
                 "the local engine (--opd-teacher base/adapter:<path>/self:*): the external-URL "
-                "teacher's reward_func occupies the single --custom-rm-path slot and always "
+                "teacher's sampled-token reward_func occupies the single --custom-rm-path slot and "
                 "returns 0.0, so blend would degrade to a KL-only signal. Use --opd-type megatron "
                 "or a same-base local teacher for the blend."
             )

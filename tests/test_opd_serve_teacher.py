@@ -15,6 +15,8 @@ def _serve_args(**overrides):
         opd_serve_teacher=True,
         opd_teacher_num_gpus=1,
         opd_teacher_mem_fraction=None,
+        opd_teacher_max_running_requests=None,
+        opd_teacher_max_prefill_tokens=None,
         teacher_hf_checkpoint="/fake/teacher",
         colocate=False,
     )
@@ -41,6 +43,15 @@ def test_teacher_model_config_mem_fraction_override():
     cfg = _opd_teacher_model_config(_serve_args(opd_teacher_mem_fraction=0.25))
     (group,) = cfg.server_groups
     assert group.overrides["mem_fraction_static"] == 0.25
+
+
+def test_teacher_model_config_request_limit_overrides():
+    cfg = _opd_teacher_model_config(
+        _serve_args(opd_teacher_max_running_requests=8, opd_teacher_max_prefill_tokens=4096)
+    )
+    (group,) = cfg.server_groups
+    assert group.overrides["max_running_requests"] == 8
+    assert group.overrides["max_prefill_tokens"] == 4096
 
 
 def test_teacher_model_config_none_when_not_serving():
@@ -80,6 +91,8 @@ def _validate_args(**overrides):
         opd_serve_teacher=True,
         opd_teacher_num_gpus=1,
         opd_teacher_mem_fraction=None,
+        opd_teacher_max_running_requests=None,
+        opd_teacher_max_prefill_tokens=None,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -104,6 +117,8 @@ def test_validation_accepts_managed_sampled_token():
         (dict(opd_teacher_urls=["default=http://t:1/generate"]), "mutually exclusive"),
         (dict(teacher_hf_checkpoint=None), "serves --teacher-hf-checkpoint"),
         (dict(opd_teacher_num_gpus=0), "must be >= 1"),
+        (dict(opd_teacher_max_running_requests=0), "--opd-teacher-max-running-requests"),
+        (dict(opd_teacher_max_prefill_tokens=0), "--opd-teacher-max-prefill-tokens"),
         (dict(opd_type="megatron"), "requires --opd-type sglang"),
         (dict(custom_rm_path=None), "custom-reward hooks"),
     ],
