@@ -286,24 +286,33 @@ def save_training_state(
     iteration: int | None,
     *,
     active_student_version: str | None = None,
+    no_save_optim: bool = False,
 ) -> None:
     if iteration is not None and not _is_bounded_nonnegative_integer(iteration):
         raise ValueError("PEFT checkpoint iteration must be a bounded nonnegative integer")
     if active_student_version is not None and not _is_canonical_student_version(active_student_version):
         raise ValueError("active student version must be canonical nonnegative decimal text")
-    if optimizer is None:
-        return
-
     rank = dist.get_rank() if dist.is_initialized() else 0
     state_path = Path(adapter_dir) / f"training_state_rank{rank}.pt"
+    parameter_state_path = Path(adapter_dir) / f"{_OPTIMIZER_PARAMETER_STATE_PREFIX}{rank}.pt"
+    if optimizer is None or no_save_optim:
+        # Repeated writes to an existing export directory must not leave a
+        # resumable optimizer sidecar behind when --no-save-optim is active.
+        state_path.unlink(missing_ok=True)
+        parameter_state_path.unlink(missing_ok=True)
+        if no_save_optim:
+            logger.info(f"Skipped optimizer/scheduler state for {adapter_dir} (--no-save-optim)")
+        return
+
     optimizer_state = optimizer.state_dict()
     save_parameter_state = getattr(optimizer, "save_parameter_state", None)
     has_external_parameter_state = not _contains_inline_optimizer_tensor(optimizer_state) and callable(
         save_parameter_state
     )
     if has_external_parameter_state:
-        parameter_state_path = Path(adapter_dir) / f"{_OPTIMIZER_PARAMETER_STATE_PREFIX}{rank}.pt"
         save_parameter_state(str(parameter_state_path))
+    else:
+        parameter_state_path.unlink(missing_ok=True)
     torch.save(
         {
             "iteration": iteration,
@@ -331,9 +340,6 @@ def load_training_state(
         expected_active_student_version
     ):
         raise ValueError("expected active student version must be canonical decimal text")
-    if optimizer is None and expected_iteration is None and expected_active_student_version is None:
-        return None
-
     rank = dist.get_rank() if dist.is_initialized() else 0
     state_path = Path(adapter_dir) / f"training_state_rank{rank}.pt"
     if not state_path.exists():
@@ -346,6 +352,8 @@ def load_training_state(
     if type(training_state) is not dict:
         raise RuntimeError("PEFT checkpoint training state is invalid")
     iteration = training_state.get("iteration")
+    if iteration is not None and not _is_bounded_nonnegative_integer(iteration):
+        raise RuntimeError("PEFT checkpoint iteration is invalid")
     if expected_iteration is not None and (
         not _is_bounded_nonnegative_integer(iteration) or iteration != expected_iteration
     ):
@@ -362,22 +370,65 @@ def load_training_state(
             logger.info(f"Validated PEFT training state at iteration {iteration}")
         return iteration
 
-    optimizer.load_state_dict(training_state["optimizer"])
+    optimizer_state = training_state.get("optimizer")
+    if optimizer_state is None:
+        raise RuntimeError("PEFT checkpoint has no optimizer state; training resume is not possible")
+
     parameter_state_path = Path(adapter_dir) / f"{_OPTIMIZER_PARAMETER_STATE_PREFIX}{rank}.pt"
     load_parameter_state = getattr(optimizer, "load_parameter_state", None)
     if training_state.get("optimizer_parameter_state") is True:
         if not callable(load_parameter_state):
             raise RuntimeError("PEFT checkpoint requires distributed optimizer parameter state")
+
+    scheduler_state = training_state.get("opt_param_scheduler")
+    if opt_param_scheduler is not None and scheduler_state is None:
+        raise RuntimeError("PEFT checkpoint has no optimizer scheduler state; training resume is not possible")
+
+    optimizer.load_state_dict(optimizer_state)
+    if training_state.get("optimizer_parameter_state") is True:
         load_parameter_state(str(parameter_state_path))
     logger.info("Restored optimizer state from PEFT checkpoint")
 
-    if opt_param_scheduler is not None and training_state.get("opt_param_scheduler") is not None:
-        opt_param_scheduler.load_state_dict(training_state["opt_param_scheduler"])
+    if opt_param_scheduler is not None:
+        opt_param_scheduler.load_state_dict(scheduler_state)
         logger.info("Restored LR scheduler state from PEFT checkpoint")
 
     if iteration is not None:
         logger.info(f"Resuming PEFT training from iteration {iteration}")
     return iteration
+
+
+def restore_peft_training_state_after_optimizer_build(
+    args: Namespace,
+    optimizer: Any,
+    opt_param_scheduler: Any,
+    *,
+    expected_iteration: int,
+) -> bool:
+    """Complete the second half of a low-precision PEFT resume.
+
+    Low-precision actors must load base and adapter model tensors before the
+    optimizer exists. ``load_training_state(..., optimizer=None)`` discovers
+    the saved iteration during that first phase; this helper then restores the
+    optimizer, scheduler, and any external distributed-optimizer tensors after
+    construction. Re-reading with ``expected_iteration`` catches a sidecar that
+    is missing, changed, or inconsistent before optimizer state is mutated.
+    """
+    adapter_dir = getattr(args, "_peft_resume_adapter_dir", None)
+    if adapter_dir is None:
+        return False
+
+    restored_iteration = load_training_state(
+        Path(adapter_dir),
+        optimizer,
+        opt_param_scheduler,
+        expected_iteration=expected_iteration,
+    )
+    if restored_iteration != expected_iteration:
+        raise RuntimeError(
+            "PEFT optimizer training-state iteration does not match the model/adapter resume iteration"
+        )
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -911,6 +962,7 @@ def save_peft_adapter_checkpoint(
         opt_param_scheduler,
         iteration,
         active_student_version=active_student_version,
+        no_save_optim=getattr(args, "no_save_optim", False),
     )
 
     if dist.is_initialized():

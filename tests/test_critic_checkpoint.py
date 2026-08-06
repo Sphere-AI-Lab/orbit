@@ -5,6 +5,7 @@ import torch
 
 from orbit.backends.megatron_utils.critic_adapter import (
     _check_resume_iteration,
+    _expected_critic_resume_iteration,
     load_critic_checkpoint,
     save_critic_checkpoint,
 )
@@ -298,7 +299,11 @@ def test_load_uses_critic_load_and_save_uses_critic_save(tmp_path):
 def test_check_resume_iteration_noop_when_unknown():
     _check_resume_iteration(None, None)
     _check_resume_iteration(None, 5)
-    _check_resume_iteration(5, None)
+
+
+def test_check_resume_iteration_rejects_critic_checkpoint_on_fresh_actor():
+    with pytest.raises(RuntimeError, match="actor loaded no training checkpoint"):
+        _check_resume_iteration(0, None)
 
 
 def test_check_resume_iteration_requires_critic_when_actor_resumed():
@@ -313,3 +318,14 @@ def test_check_resume_iteration_noop_on_match():
 def test_check_resume_iteration_raises_on_mismatch():
     with pytest.raises(RuntimeError, match="critic/actor checkpoint iteration mismatch"):
         _check_resume_iteration(3, 5)
+
+
+def test_expected_critic_iteration_ignores_model_only_bootstrap_iteration_zero():
+    args = argparse.Namespace(_orbit_training_checkpoint_loaded=False)
+    assert _expected_critic_resume_iteration(args, 0) is None
+
+
+def test_expected_critic_iteration_preserves_real_resume_including_iteration_zero():
+    args = argparse.Namespace(_orbit_training_checkpoint_loaded=True)
+    assert _expected_critic_resume_iteration(args, 0) == 0
+    assert _expected_critic_resume_iteration(args, 7) == 7

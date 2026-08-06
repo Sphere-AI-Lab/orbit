@@ -48,7 +48,12 @@ from .initialize import is_megatron_main_rank
 from .low_precision_bootstrap import should_preload_low_precision_model_before_optimizer
 from .model_provider import get_model_provider_func
 from .parallel import get_packed_seq_params
-from .peft_utils import is_peft_enabled, is_peft_model, save_peft_checkpoint
+from .peft_utils import (
+    is_peft_enabled,
+    is_peft_model,
+    restore_peft_training_state_after_optimizer_build,
+    save_peft_checkpoint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -966,6 +971,7 @@ def initialize_model_and_optimizer(
     # weights, finalize runtime device placement, and only then create the
     # optimizer. This keeps frozen bridge/OFT base tensors and optimizer-owned
     # trainable adapter tensors in one coherent runtime state.
+    peft_training_state_restored = False
     if should_preload_low_precision_model_before_optimizer(args, role=role):
         model = _build_model(args, role)
         model[0].role = role
@@ -991,6 +997,12 @@ def initialize_model_and_optimizer(
         check_model_hashes(args, model, iteration)
 
         optimizer, opt_param_scheduler = _build_optimizer_and_scheduler(args, model)
+        peft_training_state_restored = restore_peft_training_state_after_optimizer_build(
+            args,
+            optimizer,
+            opt_param_scheduler,
+            expected_iteration=iteration,
+        )
     else:
         model, optimizer, opt_param_scheduler = setup_model_and_optimizer(args, role)
         model[0].role = role
@@ -1021,6 +1033,7 @@ def initialize_model_and_optimizer(
         if args.load is not None:
             check_model_hashes(args, model, iteration)
 
-    opt_param_scheduler.step(increment=iteration * args.global_batch_size)
+    if not peft_training_state_restored:
+        opt_param_scheduler.step(increment=iteration * args.global_batch_size)
 
     return model, optimizer, opt_param_scheduler, iteration

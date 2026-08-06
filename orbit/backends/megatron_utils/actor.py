@@ -40,7 +40,12 @@ from ..training_utils.loss import compute_advantages_and_returns, get_log_probs_
 from ..training_utils.parallel import get_parallel_state
 from ..training_utils.teacher_lm_head import load_teacher_lm_head, offload_teacher_lm_head, onload_teacher_lm_head
 from .checkpoint import load_checkpoint
-from .critic_adapter import build_critic_instance, save_critic_checkpoint, value_loss_phase
+from .critic_adapter import (
+    _expected_critic_resume_iteration,
+    build_critic_instance,
+    save_critic_checkpoint,
+    value_loss_phase,
+)
 from .initialize import init, is_megatron_main_rank
 from .lora_utils import is_lora_enabled
 from .model import forward_only, initialize_model_and_optimizer, save, train
@@ -232,7 +237,11 @@ class MegatronTrainRayActor(TrainRayActor):
                 self.critic_model,
                 self.critic_optimizer,
                 self.critic_opt_param_scheduler,
-            ) = build_critic_instance(self.args, self.model, expected_iteration=loaded_rollout_id)
+            ) = build_critic_instance(
+                self.args,
+                self.model,
+                expected_iteration=_expected_critic_resume_iteration(self.args, loaded_rollout_id),
+            )
 
         if uses_adapter_state(self.args):
 

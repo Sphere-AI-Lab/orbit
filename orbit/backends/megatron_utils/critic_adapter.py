@@ -279,10 +279,16 @@ def _check_resume_iteration(
 ) -> None:
     """Fail loud if the critic and actor resumed at different iterations.
 
-    Raises when an actor resume requires critic state but none was loaded, and
-    when both iterations are known but disagree. Otherwise unknown state means
-    a fresh critic start.
+    Raises when only one role restored training state, or when both restored
+    iterations are known but disagree. Both unknown means a fresh PPO run.
     """
+    if expected is None:
+        if loaded is not None:
+            raise RuntimeError(
+                f"adapter critic checkpoint resumed at iteration {loaded}, but the actor loaded no training "
+                "checkpoint; remove --critic-load for a fresh run"
+            )
+        return
     if loaded is None:
         if require_checkpoint:
             raise RuntimeError(
@@ -290,13 +296,18 @@ def _check_resume_iteration(
                 "set --critic-load to the corresponding critic checkpoint root"
             )
         return
-    if expected is None:
-        return
     if loaded != expected:
         raise RuntimeError(
             f"critic/actor checkpoint iteration mismatch: critic resumed at iteration {loaded}, "
             f"actor resumed at iteration {expected}"
         )
+
+
+def _expected_critic_resume_iteration(args, loaded_iteration: int) -> int | None:
+    """Bind critic resume only to actual actor training state, not model bootstrap."""
+    if getattr(args, "_orbit_training_checkpoint_loaded", False):
+        return loaded_iteration
+    return None
 
 
 @contextmanager
@@ -343,7 +354,7 @@ def build_critic_instance(args, actor_model, expected_iteration: int | None = No
     _check_resume_iteration(
         resumed_iteration,
         expected_iteration,
-        require_checkpoint=getattr(args, "_peft_resume_adapter_dir", None) is not None,
+        require_checkpoint=expected_iteration is not None,
     )
     assert_trunk_aliased(model, actor_model)
     logger.info("adapter critic ready: %d trunk params aliased, resumed_iteration=%s", aliased, resumed_iteration)
