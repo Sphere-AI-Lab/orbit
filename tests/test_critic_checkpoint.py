@@ -1,8 +1,10 @@
 import argparse
+from pathlib import Path
 
 import pytest
 import torch
 
+import orbit.backends.megatron_utils.critic_adapter as critic_adapter
 from orbit.backends.megatron_utils.critic_adapter import (
     _check_resume_iteration,
     _expected_critic_resume_iteration,
@@ -45,6 +47,7 @@ class _ExternalStateOptimizer:
         self.moments = [torch.zeros_like(p) for p in self.model_params]
         self.step = 0
         self.reload_calls = 0
+        self.load_state_calls = 0
         self.load_parameter_state_calls = 0
 
     def state_dict(self):
@@ -53,6 +56,7 @@ class _ExternalStateOptimizer:
         return {"optimizer": {"param_groups": [{"step": self.step}]}}
 
     def load_state_dict(self, state):
+        self.load_state_calls += 1
         self.step = state["optimizer"]["param_groups"][0]["step"]
 
     def reload_model_params(self):
@@ -96,6 +100,30 @@ class _UnsteppedPlainOptimizer:
 
     def load_parameter_state(self, filename):
         raise AssertionError("plain optimizer must not use external parameter state")
+
+
+class _PreparationRequiredOptimizer:
+    def __init__(self):
+        self.prepared = False
+        self.state_dict_calls = 0
+
+    def state_dict(self):
+        assert self.prepared
+        self.state_dict_calls += 1
+        return {
+            "state": {0: {"exp_avg": torch.zeros(1)}},
+            "param_groups": [],
+        }
+
+
+class _DeletingExternalStateOptimizer(_ExternalStateOptimizer):
+    def __init__(self, model, parameter_state_path):
+        super().__init__(model)
+        self.parameter_state_path = parameter_state_path
+
+    def load_state_dict(self, state):
+        super().load_state_dict(state)
+        self.parameter_state_path.unlink()
 
 
 def test_round_trip_restores_trainable_tensors_only(tmp_path):
@@ -166,6 +194,19 @@ def test_unstepped_plain_optimizer_is_not_misclassified_as_distributed(tmp_path)
     assert payload["optimizer_parameter_state"] is False
 
 
+def test_save_prepares_distributed_state_before_optimizer_serialization(monkeypatch, tmp_path):
+    optimizer = _PreparationRequiredOptimizer()
+
+    def prepare(candidate):
+        assert candidate is optimizer
+        candidate.prepared = True
+
+    monkeypatch.setattr(critic_adapter.peft_utils, "prepare_distributed_optimizer_state_for_save", prepare)
+    save_critic_checkpoint(_args(tmp_path), 1, [_Chunk()], optimizer=optimizer)
+
+    assert optimizer.state_dict_calls == 1
+
+
 def test_distributed_optimizer_external_state_and_scheduler_round_trip(tmp_path):
     args = _args(tmp_path)
     model = [_Chunk()]
@@ -227,7 +268,92 @@ def test_missing_distributed_optimizer_external_state_fails_loud(tmp_path):
         )
 
 
-def test_non_writer_dp_rank_does_not_require_local_external_state_file(tmp_path):
+def test_custom_external_state_dispatch_uses_cached_snapshot(tmp_path):
+    args = _args(tmp_path)
+    model = [_Chunk()]
+    source_optimizer = _ExternalStateOptimizer(model)
+    source_optimizer.step = 5
+    save_critic_checkpoint(args, 5, model, optimizer=source_optimizer, opt_param_scheduler=_Scheduler())
+
+    parameter_state_path = tmp_path / "critic" / "iter_0000005" / "optimizer_parameter_state_rank0.pt"
+    target = [_Chunk()]
+    target_optimizer = _DeletingExternalStateOptimizer(target, parameter_state_path)
+
+    assert (
+        load_critic_checkpoint(
+            args,
+            target,
+            optimizer=target_optimizer,
+            opt_param_scheduler=_Scheduler(),
+        )
+        == 5
+    )
+    assert target_optimizer.load_parameter_state_calls == 1
+    assert not parameter_state_path.exists()
+
+
+@pytest.mark.parametrize("replaced_file", ["marker", "payload", "external"])
+def test_load_rejects_checkpoint_file_replacement_before_mutation(monkeypatch, tmp_path, replaced_file):
+    args = _args(tmp_path)
+    source = [_Chunk()]
+    save_critic_checkpoint(
+        args,
+        8,
+        source,
+        optimizer=_ExternalStateOptimizer(source),
+        opt_param_scheduler=_Scheduler(),
+    )
+
+    target_names = {
+        "marker": "latest_checkpointed_iteration.txt",
+        "payload": "critic_rank0.pt",
+        "external": "optimizer_parameter_state_rank0.pt",
+    }
+    target_name = target_names[replaced_file]
+    original_capture = critic_adapter.peft_utils._capture_checkpoint_file_binding
+    replaced = False
+
+    def capture_then_replace(path):
+        nonlocal replaced
+        binding = original_capture(path)
+        path = Path(path)
+        if path.name == target_name and not replaced:
+            replacement = path.with_name(f".{path.name}.replacement")
+            if replaced_file == "marker":
+                replacement.write_text("8")
+            else:
+                torch.save(torch.load(path, map_location="cpu", weights_only=False), replacement)
+            replacement.replace(path)
+            replaced = True
+        return binding
+
+    monkeypatch.setattr(
+        critic_adapter.peft_utils,
+        "_capture_checkpoint_file_binding",
+        capture_then_replace,
+    )
+    target = [_Chunk()]
+    target_before = {name: param.detach().clone() for name, param in target[0].named_parameters()}
+    target_optimizer = _ExternalStateOptimizer(target)
+    target_scheduler = _Scheduler()
+
+    with pytest.raises(RuntimeError, match="checkpoint file changed"):
+        load_critic_checkpoint(
+            args,
+            target,
+            optimizer=target_optimizer,
+            opt_param_scheduler=target_scheduler,
+        )
+
+    assert replaced is True
+    assert all(torch.equal(param, target_before[name]) for name, param in target[0].named_parameters())
+    assert target_optimizer.reload_calls == 0
+    assert target_optimizer.load_state_calls == 0
+    assert target_optimizer.load_parameter_state_calls == 0
+    assert target_scheduler.num_steps == 0
+
+
+def test_custom_external_optimizer_cannot_simulate_non_writer_without_a_process_group(tmp_path):
     args = _args(tmp_path)
     model = [_Chunk()]
     save_critic_checkpoint(
@@ -241,8 +367,9 @@ def test_non_writer_dp_rank_does_not_require_local_external_state_file(tmp_path)
 
     target = [_Chunk()]
     optimizer = _NonWriterExternalStateOptimizer(target)
-    assert load_critic_checkpoint(args, target, optimizer=optimizer, opt_param_scheduler=_Scheduler()) == 2
-    assert optimizer.load_parameter_state_calls == 1
+    with pytest.raises(RuntimeError, match="optimizer parameter state is missing"):
+        load_critic_checkpoint(args, target, optimizer=optimizer, opt_param_scheduler=_Scheduler())
+    assert optimizer.load_parameter_state_calls == 0
 
 
 def test_no_save_optim_omits_all_optimizer_training_state(tmp_path):

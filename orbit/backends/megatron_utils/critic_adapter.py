@@ -8,6 +8,8 @@ docs/superpowers/specs/2026-07-27-one-trunk-ppo-design.md (clthegoat docs).
 """
 
 import logging
+import os
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -15,9 +17,12 @@ from typing import Any
 import torch
 import torch.distributed as dist
 
+from . import peft_utils
+
 logger = logging.getLogger(__name__)
 
 _OPTIMIZER_PARAMETER_STATE_PREFIX = "optimizer_parameter_state_rank"
+_MAX_CHECKPOINT_COUNTER = 2**63 - 1
 
 
 def _named_params(model) -> dict[str, torch.nn.Parameter]:
@@ -77,65 +82,54 @@ def _global_rank() -> int:
     return dist.get_rank() if dist.is_initialized() else 0
 
 
-def _contains_tensor(value: Any) -> bool:
-    pending = [value]
-    while pending:
-        item = pending.pop()
-        if isinstance(item, torch.Tensor):
-            return True
-        if type(item) is dict:
-            pending.extend(item.values())
-        elif type(item) in (list, tuple):
-            pending.extend(item)
-    return False
+def _coordinated_critic_checkpoint_call(label: str, fn):
+    """Coordinate rank-local failures before a later optimizer collective.
 
-
-def _contains_inline_optimizer_tensor(value: Any) -> bool:
-    """Match Megatron's split optimizer-checkpoint convention.
-
-    DistributedOptimizer.state_dict() deliberately excludes parameter-dependent
-    tensors (main parameters and moments); those must be persisted through
-    save_parameter_state()/load_parameter_state(). Other Megatron optimizers
-    carry those tensors inline in their state dict.
+    Keep the original exception type in a single-process job for compatibility
+    with the pre-distributed critic checkpoint implementation.
     """
-    pending = [value]
-    while pending:
-        item = pending.pop()
-        if type(item) is dict:
-            if "state" in item and _contains_tensor(item["state"]):
-                return True
-            if "optimizer" in item:
-                pending.append(item["optimizer"])
-            if "fp32_from_fp16_params" in item and _contains_tensor(item["fp32_from_fp16_params"]):
-                return True
-        elif type(item) in (list, tuple):
-            pending.extend(item)
-    return False
+    if not dist.is_initialized() or dist.get_world_size() == 1:
+        return fn()
+    return peft_utils._coordinated_checkpoint_call(f"adapter critic {label}", fn)
 
 
-def _contains_megatron_optimizer_wrapper(value: Any) -> bool:
-    pending = [value]
-    while pending:
-        item = pending.pop()
-        if type(item) is dict:
-            if "optimizer" in item:
-                return True
-            pending.extend(item.values())
-        elif type(item) in (list, tuple):
-            pending.extend(item)
-    return False
+def _validate_checkpoint_binding(root: str, iteration: int | None = None) -> tuple[str, int | None]:
+    if iteration is not None and (type(iteration) is not int or not 0 <= iteration <= _MAX_CHECKPOINT_COUNTER):
+        raise ValueError("adapter critic checkpoint iteration must be a bounded nonnegative integer")
+    return str(Path(root).expanduser().resolve(strict=False)), iteration
 
 
-def _uses_external_parameter_state(optimizer_state: Any, transfer_fn: Any) -> bool:
-    # The wrapper-key check distinguishes DistributedOptimizer's split state
-    # dict from an unstepped plain/FP32 optimizer whose empty ``state`` also
-    # contains no tensors. ChainedOptimizer exposes the transfer methods even
-    # when its sole child is not distributed.
-    return (
-        not _contains_inline_optimizer_tensor(optimizer_state)
-        and _contains_megatron_optimizer_wrapper(optimizer_state)
-        and callable(transfer_fn)
-    )
+def _require_checkpoint_binding_consensus(binding: tuple[str, int | None], *, operation: str) -> None:
+    bindings = peft_utils._all_gather_checkpoint_object(binding)
+    if len(set(bindings)) != 1:
+        raise RuntimeError(f"adapter critic checkpoint {operation} binding differs across ranks: {bindings}")
+
+
+def _read_bound_checkpoint_text(path: Path, binding) -> str:
+    if binding is None:
+        raise FileNotFoundError(path)
+    absolute_path = peft_utils._absolute_checkpoint_path(path)
+    if str(absolute_path) != binding.path:
+        raise RuntimeError(f"checkpoint binding was for {binding.path}, not {absolute_path}")
+    if binding.fingerprint.size > 64:
+        raise RuntimeError(f"adapter critic checkpoint marker is too large: {absolute_path}")
+    try:
+        checkpoint_file = peft_utils._open_checkpoint_file(absolute_path)
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"checkpoint file disappeared after preflight: {absolute_path}") from exc
+    with checkpoint_file:
+        before = peft_utils._regular_file_fingerprint(os.fstat(checkpoint_file.fileno()))
+        if before != binding.fingerprint:
+            raise RuntimeError(f"checkpoint file changed after preflight: {absolute_path}")
+        raw = checkpoint_file.read(65)
+        after = peft_utils._regular_file_fingerprint(os.fstat(checkpoint_file.fileno()))
+    peft_utils._verify_checkpoint_file_binding(absolute_path, binding)
+    if after != binding.fingerprint or len(raw) > 64:
+        raise RuntimeError(f"checkpoint file changed while it was being loaded: {absolute_path}")
+    try:
+        return raw.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise RuntimeError(f"adapter critic checkpoint marker is invalid: {absolute_path}") from exc
 
 
 def _optimizer_parameter_state_path(checkpoint_dir: Path) -> Path:
@@ -147,6 +141,94 @@ def _reload_optimizer_model_params(optimizer) -> None:
     reload_model_params = getattr(optimizer, "reload_model_params", None)
     if callable(reload_model_params):
         reload_model_params()
+
+
+def _validate_critic_payload(
+    payload: Any,
+    *,
+    iteration: int,
+    critic_model,
+    optimizer: Any | None,
+    opt_param_scheduler: Any | None,
+    optimizer_parameter_state_binding,
+) -> dict[str, Any]:
+    """Validate every rank-local value used before checkpoint mutation."""
+    if type(payload) is not dict:
+        raise RuntimeError("adapter critic checkpoint payload is invalid")
+    if payload.get("iteration") != iteration:
+        raise RuntimeError(
+            f"critic checkpoint iteration mismatch: marker={iteration} payload={payload.get('iteration')}"
+        )
+
+    params = _trainable_named_tensors(critic_model)
+    saved = payload.get("tensors")
+    if not isinstance(saved, Mapping):
+        raise RuntimeError("adapter critic checkpoint tensor payload is invalid")
+    if set(saved) != set(params):
+        raise RuntimeError(
+            "critic checkpoint mismatch: "
+            f"missing={sorted(set(params) - set(saved))} extra={sorted(set(saved) - set(params))}"
+        )
+    for name, param in params.items():
+        tensor = saved[name]
+        if (
+            not isinstance(tensor, torch.Tensor)
+            or tensor.layout != torch.strided
+            or tensor.device.type == "meta"
+            or tensor.is_quantized
+            or not tensor.is_floating_point()
+            or tuple(tensor.shape) != tuple(param.shape)
+        ):
+            raise RuntimeError(f"adapter critic checkpoint tensor {name!r} is incompatible")
+
+    external_parameter_state = payload.get("optimizer_parameter_state", False)
+    if type(external_parameter_state) is not bool:
+        raise RuntimeError("adapter critic checkpoint optimizer-parameter-state marker is invalid")
+    if not external_parameter_state and optimizer_parameter_state_binding is not None:
+        raise RuntimeError(
+            "adapter critic checkpoint has an optimizer parameter-state file but its payload marker is false"
+        )
+    optimizer_state = payload.get("optimizer")
+    if optimizer_state is not None:
+        peft_utils._validate_no_embedded_distributed_parameter_state(optimizer_state)
+
+    if optimizer is not None:
+        if optimizer_state is None:
+            raise RuntimeError(
+                "critic checkpoint has no optimizer state (it may have been saved with --no-save-optim); "
+                "training resume is not possible"
+            )
+        load_parameter_state = getattr(optimizer, "load_parameter_state", None)
+        requires_external_parameter_state = peft_utils._uses_external_parameter_state(
+            optimizer,
+            optimizer_state,
+            load_parameter_state,
+        )
+        if requires_external_parameter_state and not external_parameter_state:
+            raise RuntimeError("critic checkpoint is missing distributed optimizer parameter state")
+        if external_parameter_state and not requires_external_parameter_state:
+            raise RuntimeError("critic checkpoint external optimizer state does not match the current optimizer")
+        if external_parameter_state and not callable(load_parameter_state):
+            raise RuntimeError("critic checkpoint requires distributed optimizer parameter state")
+
+    if opt_param_scheduler is not None and payload.get("opt_param_scheduler") is None:
+        raise RuntimeError("critic checkpoint has no optimizer scheduler state; training resume is not possible")
+    return payload
+
+
+def _build_external_parameter_state_plan(optimizer: Any, parameter_state_path: Path, parameter_state_binding):
+    try:
+        return peft_utils._build_external_parameter_state_plan(
+            optimizer,
+            parameter_state_path,
+            parameter_state_binding,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"critic optimizer parameter state is missing: {parameter_state_path}") from exc
+    except RuntimeError as exc:
+        if "checkpoint file was absent during preflight" in str(exc):
+            raise RuntimeError(f"critic optimizer parameter state is missing: {parameter_state_path}") from exc
+        raise
 
 
 def save_critic_checkpoint(
@@ -164,38 +246,86 @@ def save_critic_checkpoint(
     if not save_root:
         raise ValueError("critic_save is required to save an adapter critic checkpoint")
 
+    binding = _coordinated_critic_checkpoint_call(
+        "save binding validation",
+        lambda: _validate_checkpoint_binding(save_root, iteration),
+    )
+    _require_checkpoint_binding_consensus(binding, operation="save")
+
     ckpt_dir = _critic_checkpoint_dir(save_root, iteration)
-    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    _coordinated_critic_checkpoint_call(
+        "directory creation",
+        lambda: ckpt_dir.mkdir(parents=True, exist_ok=True),
+    )
 
     optimizer_state = None
     optimizer_parameter_state = False
     scheduler_state = None
     parameter_state_path = _optimizer_parameter_state_path(ckpt_dir)
-    if optimizer is not None and not getattr(args, "no_save_optim", False):
-        optimizer_state = optimizer.state_dict()
-        save_parameter_state = getattr(optimizer, "save_parameter_state", None)
-        optimizer_parameter_state = _uses_external_parameter_state(optimizer_state, save_parameter_state)
-        if optimizer_parameter_state:
-            save_parameter_state(str(parameter_state_path))
-        if opt_param_scheduler is not None:
-            scheduler_state = opt_param_scheduler.state_dict()
-    if not optimizer_parameter_state:
-        # A repeated save at the same iteration must not retain stale optimizer
-        # shards when --no-save-optim (or an inline-state optimizer) is used.
-        parameter_state_path.unlink(missing_ok=True)
+    save_optimizer = optimizer is not None and not getattr(args, "no_save_optim", False)
+    _coordinated_critic_checkpoint_call(
+        "distributed optimizer state initialization",
+        lambda: peft_utils.prepare_distributed_optimizer_state_for_save(optimizer) if save_optimizer else None,
+    )
+    optimizer_state = _coordinated_critic_checkpoint_call(
+        "optimizer state serialization",
+        optimizer.state_dict if save_optimizer else lambda: None,
+    )
+    _coordinated_critic_checkpoint_call(
+        "optimizer state validation",
+        lambda: peft_utils._validate_no_embedded_distributed_parameter_state(optimizer_state)
+        if optimizer_state is not None
+        else None,
+    )
+    save_parameter_state = getattr(optimizer, "save_parameter_state", None) if optimizer is not None else None
+    optimizer_parameter_state = _coordinated_critic_checkpoint_call(
+        "external optimizer layout validation",
+        lambda: peft_utils._uses_external_parameter_state(
+            optimizer,
+            optimizer_state,
+            save_parameter_state,
+        )
+        if save_optimizer
+        else False,
+    )
+    _coordinated_critic_checkpoint_call(
+        "distributed optimizer source validation",
+        lambda: peft_utils.validate_distributed_optimizer_sources_for_save(optimizer)
+        if optimizer_parameter_state
+        else None,
+    )
+    _coordinated_critic_checkpoint_call(
+        "optimizer parameter-state materialization",
+        lambda: save_parameter_state(str(parameter_state_path))
+        if optimizer_parameter_state
+        else parameter_state_path.unlink(missing_ok=True),
+    )
+    scheduler_state = _coordinated_critic_checkpoint_call(
+        "optimizer scheduler state serialization",
+        opt_param_scheduler.state_dict if save_optimizer and opt_param_scheduler is not None else lambda: None,
+    )
+    trainable_tensors = _coordinated_critic_checkpoint_call(
+        "model tensor serialization",
+        lambda: {k: v.detach().cpu() for k, v in _trainable_named_tensors(critic_model).items()},
+    )
 
     payload = {
-        "tensors": {k: v.detach().cpu() for k, v in _trainable_named_tensors(critic_model).items()},
+        "tensors": trainable_tensors,
         "optimizer": optimizer_state,
         "optimizer_parameter_state": optimizer_parameter_state,
         "opt_param_scheduler": scheduler_state,
         "iteration": iteration,
     }
-    torch.save(payload, ckpt_dir / f"critic_rank{_global_rank()}.pt")
-    if dist.is_initialized():
-        dist.barrier()
-    if _global_rank() == 0:
-        (Path(save_root) / "latest_checkpointed_iteration.txt").write_text(str(iteration))
+    _coordinated_critic_checkpoint_call(
+        "payload save",
+        lambda: torch.save(payload, ckpt_dir / f"critic_rank{_global_rank()}.pt"),
+    )
+    _coordinated_critic_checkpoint_call(
+        "latest marker publication",
+        lambda: (Path(save_root) / "latest_checkpointed_iteration.txt").write_text(str(iteration))
+        if _global_rank() == 0
+        else None,
+    )
     return str(ckpt_dir)
 
 
@@ -206,68 +336,129 @@ def load_critic_checkpoint(args, critic_model, optimizer=None, opt_param_schedul
     Never touches frozen params, so a load can never materialize a trunk copy.
     """
     load_root = getattr(args, "critic_load", None)
-    if not load_root:
+    normalized_root = _coordinated_critic_checkpoint_call(
+        "load binding validation",
+        lambda: None if not load_root else _validate_checkpoint_binding(load_root)[0],
+    )
+    load_roots = peft_utils._all_gather_checkpoint_object(normalized_root)
+    if len(set(load_roots)) != 1:
+        raise RuntimeError(f"adapter critic checkpoint load roots differ across ranks: {load_roots}")
+    if normalized_root is None:
         return None
+
     latest_path = Path(load_root) / "latest_checkpointed_iteration.txt"
-    if not latest_path.is_file():
-        raise FileNotFoundError(f"--critic-load does not contain a critic checkpoint marker: {latest_path}")
-    iteration = int(latest_path.read_text().strip())
+    latest_binding = _coordinated_critic_checkpoint_call(
+        "latest marker snapshot capture",
+        lambda: peft_utils._capture_checkpoint_file_binding(latest_path),
+    )
+
+    def read_latest_iteration() -> int:
+        if latest_binding is None:
+            raise FileNotFoundError(f"--critic-load does not contain a critic checkpoint marker: {latest_path}")
+        try:
+            loaded_iteration = int(_read_bound_checkpoint_text(latest_path, latest_binding).strip())
+        except ValueError as exc:
+            raise RuntimeError(f"adapter critic checkpoint marker is invalid: {latest_path}") from exc
+        _validate_checkpoint_binding(load_root, loaded_iteration)
+        return loaded_iteration
+
+    iteration = _coordinated_critic_checkpoint_call("latest marker validation", read_latest_iteration)
+    _require_checkpoint_binding_consensus((normalized_root, iteration), operation="load")
     checkpoint_dir = _critic_checkpoint_dir(load_root, iteration)
     path = checkpoint_dir / f"critic_rank{_global_rank()}.pt"
-    payload = torch.load(path, map_location="cpu", weights_only=False)
-    if payload.get("iteration") != iteration:
-        raise RuntimeError(
-            f"critic checkpoint iteration mismatch: marker={iteration} payload={payload.get('iteration')}"
-        )
+    parameter_state_path = _optimizer_parameter_state_path(checkpoint_dir)
+    payload_binding, parameter_state_binding = _coordinated_critic_checkpoint_call(
+        "checkpoint snapshot capture",
+        lambda: (
+            peft_utils._capture_checkpoint_file_binding(path),
+            peft_utils._capture_checkpoint_file_binding(parameter_state_path),
+        ),
+    )
+
+    payload = _coordinated_critic_checkpoint_call(
+        "payload parse/validation",
+        lambda: _validate_critic_payload(
+            peft_utils._load_bound_torch_checkpoint(
+                path,
+                payload_binding,
+                map_location="cpu",
+                weights_only=False,
+            ),
+            iteration=iteration,
+            critic_model=critic_model,
+            optimizer=optimizer,
+            opt_param_scheduler=opt_param_scheduler,
+            optimizer_parameter_state_binding=parameter_state_binding,
+        ),
+    )
     params = _trainable_named_tensors(critic_model)
     saved = payload["tensors"]
-    if set(saved) != set(params):
-        raise RuntimeError(
-            "critic checkpoint mismatch: "
-            f"missing={sorted(set(params) - set(saved))} extra={sorted(set(saved) - set(params))}"
+
+    optimizer_state = payload.get("optimizer")
+    external_parameter_state = payload.get("optimizer_parameter_state") is True
+    external_parameter_state_plan = _coordinated_critic_checkpoint_call(
+        "optimizer parameter-state preflight",
+        lambda: _build_external_parameter_state_plan(
+            optimizer,
+            parameter_state_path,
+            parameter_state_binding,
         )
-    with torch.no_grad():
-        for name, param in params.items():
-            param.copy_(saved[name].to(device=param.device, dtype=param.dtype))
+        if optimizer is not None and external_parameter_state
+        else None,
+    )
+    _coordinated_critic_checkpoint_call(
+        "checkpoint snapshot validation",
+        lambda: (
+            peft_utils._verify_checkpoint_file_binding(path, payload_binding),
+            peft_utils._verify_checkpoint_file_binding(parameter_state_path, parameter_state_binding),
+        ),
+    )
 
-    if optimizer is not None:
-        # The tensors above were copied after optimizer construction. Refresh
-        # optimizer-owned FP32/main parameters before optionally replacing them
-        # with their higher-precision checkpointed values below.
-        _reload_optimizer_model_params(optimizer)
+    def restore_model_tensors() -> None:
+        with torch.no_grad():
+            for name, param in params.items():
+                param.copy_(saved[name].to(device=param.device, dtype=param.dtype))
 
-        optimizer_state = payload.get("optimizer")
-        if optimizer_state is None:
-            raise RuntimeError(
-                "critic checkpoint has no optimizer state (it may have been saved with --no-save-optim); "
-                "training resume is not possible"
-            )
+    _coordinated_critic_checkpoint_call("model tensor restore", restore_model_tensors)
 
-        load_parameter_state = getattr(optimizer, "load_parameter_state", None)
-        external_parameter_state = payload.get("optimizer_parameter_state") is True
-        requires_external_parameter_state = _uses_external_parameter_state(optimizer_state, load_parameter_state)
-        if requires_external_parameter_state and not external_parameter_state:
-            raise RuntimeError("critic checkpoint is missing distributed optimizer parameter state")
-        if external_parameter_state:
-            parameter_state_path = _optimizer_parameter_state_path(checkpoint_dir)
-            if not callable(load_parameter_state):
-                raise RuntimeError("critic checkpoint requires distributed optimizer parameter state")
+    # The tensors above were copied after optimizer construction. Refresh
+    # optimizer-owned FP32/main parameters before optionally replacing them
+    # with their higher-precision checkpointed values below.
+    _coordinated_critic_checkpoint_call(
+        "optimizer model-parameter reload",
+        lambda: _reload_optimizer_model_params(optimizer) if optimizer is not None else None,
+    )
+    _coordinated_critic_checkpoint_call(
+        "optimizer state restore",
+        lambda: optimizer.load_state_dict(optimizer_state) if optimizer is not None else None,
+    )
+    _coordinated_critic_checkpoint_call(
+        "optimizer parameter-state destination validation",
+        lambda: peft_utils._validate_external_parameter_state_destinations(external_parameter_state_plan)
+        if external_parameter_state_plan is not None
+        else None,
+    )
 
-        optimizer.load_state_dict(optimizer_state)
-        if external_parameter_state:
-            # Megatron writes/reads this file only on DP rank zero; other ranks
-            # still participate in load_parameter_state's collectives and do
-            # not have a local file to pre-validate.
-            try:
-                load_parameter_state(str(parameter_state_path))
-            except FileNotFoundError as exc:
-                raise RuntimeError(f"critic optimizer parameter state is missing: {parameter_state_path}") from exc
+    def restore_external_parameter_state() -> None:
+        if optimizer is None or not external_parameter_state:
+            return
+        if external_parameter_state_plan is None:
+            raise RuntimeError("adapter critic external optimizer state has no validated restore plan")
+        peft_utils._dispatch_external_parameter_state(
+            external_parameter_state_plan,
+            custom_load_parameter_state=getattr(optimizer, "load_parameter_state", None),
+        )
 
-    if opt_param_scheduler is not None:
-        scheduler_state = payload.get("opt_param_scheduler")
-        if scheduler_state is None:
-            raise RuntimeError("critic checkpoint has no optimizer scheduler state; training resume is not possible")
-        opt_param_scheduler.load_state_dict(scheduler_state)
+    _coordinated_critic_checkpoint_call(
+        "optimizer parameter-state restore",
+        restore_external_parameter_state,
+    )
+    _coordinated_critic_checkpoint_call(
+        "optimizer scheduler restore",
+        lambda: opt_param_scheduler.load_state_dict(payload["opt_param_scheduler"])
+        if opt_param_scheduler is not None
+        else None,
+    )
     return iteration
 
 
