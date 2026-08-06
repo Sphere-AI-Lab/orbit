@@ -254,12 +254,17 @@ def _make_peft_pre_wrap_hook(
         model_list = _ensure_model_list(model_chunks)
         if load_path and is_distributed_checkpoint(load_path):
             load_dist_checkpoint(model_list, load_path, is_value_model=is_value_model)
+        preloaded_chunks = list(model_list)
         transformed = _ensure_model_list(peft(model_list, training=True))
-        _propagate_preloaded_checkpoint_identity(model_list, transformed)
         for post_peft_hook in post_peft_hooks:
             maybe_transformed = post_peft_hook(transformed)
             if maybe_transformed is not None:
                 transformed = _ensure_model_list(maybe_transformed)
+        # A PEFT transform or any subsequent hook may replace a top-level
+        # model chunk. Attach the preload identity to the final chunks that
+        # Bridge will wrap so the ordinary initialization load sees it after
+        # unwrapping DDP/mixed-precision wrappers.
+        _propagate_preloaded_checkpoint_identity(preloaded_chunks, transformed)
         _assert_peft_wrapped_modules(
             transformed,
             peft_method=peft_method,
