@@ -126,7 +126,12 @@ synchronizes first. If the freed blocks are still pending, `empty_cache()` legit
 skips them and the segments are fully free but unreleased.
 
 The two imply different fixes — `expandable_segments:True` for H1, a synchronizing clear
-for H2 — and are distinguished by a single counter.
+for H2 — so §5 adds a counter for **each**, and §6 reads both directly. An earlier draft of
+this design instrumented H1 alone and inferred H2 from its absence; the final whole-branch
+review rejected that, because a near-zero H1 reading over a partition with invisible terms
+establishes nothing positively. §6 also names a third outcome — fully free segments never
+returned to the driver — which neither hypothesis covers and which was invisible until the
+partition was closed.
 
 ## 5. The change
 
@@ -226,9 +231,19 @@ At the `before update_weights` probe of the failing rollout, where
 
 ## 7. Validation
 
-**CPU, run before the change is called done.** A new `tests/fast/` test — there is no
-existing test for `memory_utils.py` — asserting that `available_memory()` returns the three
-new keys and that it survives an empty `memory_stats()` dict. Executed locally with pytest.
+**CPU, run before the change is called done.** New tests in `tests/fast/` — there was no
+existing test for `memory_utils.py` — asserting that `available_memory()` returns the four
+new keys, that the six pre-existing fields are undisturbed, that `active_GB - allocated_GB`
+states H2 numerically, and that an unknown stat key defaults to `0` rather than raising.
+Executed locally with pytest.
+
+**One CUDA-gated test, on a real device.** `.get(key, 0)` means a *misspelled* key silently
+returns `0`, and per §6 a near-zero reading is evidence against a hypothesis — so a typo
+would not fail loudly, it would point at the wrong fix. That test patches
+`torch.cuda.memory_stats` with a recording proxy, calls `available_memory()`, and asserts
+every key it actually queried exists in the genuine allocator output. It is coupled to what
+the module reads rather than to a copy of the key strings, so drift in `memory_utils.py`
+fails here instead of in a campaign log.
 
 **GPU, user-launched.** Re-run the failing LoRA arm; it reaches the failure at rollout 2 in
 roughly 14 minutes, so no full campaign is needed. The exact command is delivered with the
@@ -246,7 +261,8 @@ the campaign is one comparison across fourteen columns. It must not become node-
 
 ## 9. Follow-up, gated on the measurement
 
-The fix is deliberately left unspecified. Once `inactive_split_GB` is known, §6 selects
-between the two candidate fixes, and that fix is a separate change with its own smoke run.
+The fix is deliberately left unspecified. Once the probe's counters are known, §6's table
+selects among the candidate fixes — one per outcome, including the third case neither
+hypothesis anticipated — and that fix is a separate change with its own smoke run.
 Whichever it is, it is expected to be hardware-independent and to benefit the B200 arms
 as well, since nothing in either hypothesis is specific to an 80 GB card.
