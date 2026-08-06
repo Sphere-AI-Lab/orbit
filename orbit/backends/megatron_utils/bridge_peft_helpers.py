@@ -28,6 +28,35 @@ def _ensure_model_list(model):
     return model if isinstance(model, list) else [model]
 
 
+_PRELOADED_CHECKPOINT_IDENTITY_ATTRS = (
+    "_orbit_loaded_dist_checkpoint_path",
+    "_orbit_loaded_dist_checkpoint_prefix",
+    "_orbit_restored_modelopt_checkpoint_path",
+)
+
+
+def _propagate_preloaded_checkpoint_identity(source_chunks, transformed_chunks) -> None:
+    """Keep a pre-wrap base load attached to the PEFT-wrapped model.
+
+    Some Bridge PEFT transforms return replacement top-level modules. Without
+    copying Orbit's load identity, the ordinary initialization path loads the
+    same model-only checkpoint a second time into the wrapped model and strict
+    distributed-checkpoint loading then rejects the intentionally fresh adapter
+    parameters.
+    """
+    source_chunks = _ensure_model_list(source_chunks)
+    transformed_chunks = _ensure_model_list(transformed_chunks)
+    if len(source_chunks) != len(transformed_chunks):
+        raise RuntimeError(
+            "PEFT wrapping changed the number of model chunks after base checkpoint preload: "
+            f"{len(source_chunks)} -> {len(transformed_chunks)}"
+        )
+    for source, transformed in zip(source_chunks, transformed_chunks, strict=True):
+        for attr_name in _PRELOADED_CHECKPOINT_IDENTITY_ATTRS:
+            if hasattr(source, attr_name):
+                setattr(transformed, attr_name, getattr(source, attr_name))
+
+
 def _materialize_runtime_device(model_chunks):
     from megatron.bridge.models.common.unimodal import to_empty_if_meta_device
 
@@ -226,6 +255,7 @@ def _make_peft_pre_wrap_hook(
         if load_path and is_distributed_checkpoint(load_path):
             load_dist_checkpoint(model_list, load_path, is_value_model=is_value_model)
         transformed = _ensure_model_list(peft(model_list, training=True))
+        _propagate_preloaded_checkpoint_identity(model_list, transformed)
         for post_peft_hook in post_peft_hooks:
             maybe_transformed = post_peft_hook(transformed)
             if maybe_transformed is not None:
