@@ -111,21 +111,57 @@ engine generates -> engine offloads (kv_cache, weights, cuda_graph)
     -> engine resume_memory_occupation()      <-- fails here
 ```
 
-### 3.2 Two different things are called "freeing"
+### 3.2 What a segment is, and why partial occupancy is fatal
+
+PyTorch does not call `cudaMalloc` per tensor — that is far too slow and it synchronizes.
+The caching allocator takes large contiguous chunks from CUDA and sub-allocates tensors out
+of them. `c10/cuda/CUDACachingAllocator.h` names the two levels exactly:
+
+```c
+// Struct containing info of an allocation block (i.e. a fractional part of a cudaMalloc)..
+struct BlockInfo { ... };
+
+// Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).
+struct SegmentInfo { ... };
+```
+
+A **segment is one `cudaMalloc`**; a **block is a slice of one**. Blocks split when you
+allocate and coalesce with their neighbours when you free — but only *within* their own
+segment. Two adjacent segments never merge; they came from separate `cudaMalloc` calls. In
+the failing r1 run there were 15 segments totalling 34.25 GB, averaging ~2.3 GB apiece,
+consistent with the large tensors (base weight shards, activations) that created them.
+
+**`cudaFree` frees the whole `cudaMalloc`.** There is no API to release part of an
+allocation — the same constraint as C's `free()`, where you cannot free the second half of a
+buffer. So you cannot return 2.29 GB of a 2.3 GB segment. That is the hard limit
+`empty_cache()` runs into; its only tool is, again from the header:
+
+```c
+SEGMENT_FREE,  // a call to cudaFree to return memory to the OS (e.g. to
+               // defragment or empty_caches)
+```
+
+For that call to be legal the segment must be one single free block end to end. One
+surviving 5 MB adapter block anywhere inside makes the whole 2.3 GB unreturnable. **The
+effect is binary, not proportional** — the size of the survivor is irrelevant, only its
+existence. A one-page block and a one-gigabyte block have identical holding power.
+
+### 3.3 Two different things are called "freeing"
 
 This distinction is the whole bug.
 
 1. **PyTorch free.** The block goes back on the caching allocator's free list. The segment
    containing it stays mapped in this process.
 2. **Driver release.** `empty_cache()` walks the segment list and `cudaFree`s segments —
-   but **only those that are entirely free.** This is the step another process depends on.
+   but **only those that are entirely free**, per §3.2. This is the step another process
+   depends on.
 
 Offloading the base does (1) and not (2). The memory is simultaneously "free" from PyTorch's
 point of view and "in use" from the driver's. Within a single process nothing is wrong: the
 next rollout reuses those segments with no waste. It is only visible because the engine is a
 *different process*, and a process can only take memory the driver considers unallocated.
 
-### 3.3 The counters
+### 3.4 The counters
 
 Rank 0, LoRA r1, 8×B200, one rollout, before the fix:
 
@@ -152,7 +188,7 @@ On the 80 GB H100 the pool ratchets until resume has nowhere to go:
 
 SGLang's static pool is `mem_fraction_static=0.75 × 79.18 = 59.4 GB`; 13.54 GB is not enough.
 
-### 3.4 Why something so small has so large an effect
+### 3.5 Why something so small has so large an effect
 
 The adapter is tiny and that is exactly the problem. LoRA r1 has 2,228,224 params — bf16
 weights, fp32 master, grads and two Adam moments come to roughly 40 MB, and the measured
@@ -164,16 +200,15 @@ frozen base (15 GB) plus the training step's activations and logits. Peak `reser
 phase boundaries, never inside the forward/backward, so the extra ~50 GB is a transient that
 lives and dies between two samples.
 
-Release is **binary per segment, not proportional**. A one-page block and a one-gigabyte
-block have identical holding power. With ~100 MB live pinning 65.71 GB reserved, the
-leverage is roughly 650×.
+Combine that with §3.2's binary release rule and the leverage is roughly 650×: ~100 MB live
+pinning 65.71 GB reserved.
 
 The adapter's tensors end up spread across segments rather than packed into one because they
 are allocated interleaved with the big transients and outlive them. (That the distribution
 is one-or-more per segment is inferred from the counters — 15 segments, all retained, 100 MB
 live. No per-segment snapshot was taken.)
 
-### 3.5 Why full fine-tuning is immune
+### 3.6 Why full fine-tuning is immune
 
 The mirror image: what stays resident is the same order of magnitude as what leaves, so
 segments refill densely instead of leaving crumbs. `_finalize_train_offload_args` forces the
@@ -198,12 +233,38 @@ if getattr(args, "peft_method", "none") != "none":
     )
 ```
 
-`expandable_segments:True` switches the allocator to CUDA's virtual-memory API. It reserves a
-large *virtual* address range and maps physical pages into it on demand (`cuMemCreate` /
-`cuMemMap`) instead of allocating fixed segments. Pages are mapped and unmapped individually,
-so freeing a block releases its pages even when neighbours are live, and `reserved` tracks
-`allocated` instead of ratcheting to a high-water mark. The granularity of release drops from
-a ~2.3 GB segment to a page, which is what turns "mostly empty" into "mostly returned".
+`expandable_segments:True` splits the single `cudaMalloc` of §3.2 into two independent
+things: **virtual address space**, reserved once and generously (`cuMemAddressReserve` —
+virtual space is not scarce on 64-bit, so over-reserving costs nothing), and **physical
+pages**, created and mapped into that range on demand (`cuMemCreate` + `cuMemMap`).
+
+That gives the allocator a release action it did not previously have. The two enum entries
+following `SEGMENT_FREE` in the same header state the whole fix in four words:
+
+```c
+SEGMENT_MAP,    // a call to cuMemMap (used with expandable_segments)
+SEGMENT_UNMAP,  // unmap part of a segment (used with expandable segments)
+```
+
+`unmap part of a segment` is precisely what `cudaFree` cannot do. When the 15 GB base is
+freed its pages are unmapped and returned to the driver, while the adapter's pages stay
+mapped wherever they happen to sit. The granularity of release drops from a ~2.3 GB segment
+to a page, `reserved` tracks `allocated` instead of ratcheting to a high-water mark, and
+"mostly empty" finally translates into "mostly returned".
+
+**Note what this is not.** Nothing is moved, grouped, or given a dedicated region. The
+adapter's tensors remain exactly as scattered as before; their location simply stops
+mattering once every page is independently releasable.
+
+The alternative — packing long-lived small tensors into their own pool, via
+`torch.cuda.MemPool` or indirectly via `max_split_size_mb`, so they never land inside
+segments carved for transients — was rejected. It requires knowing at every allocation site
+which tensors are long-lived, which means changes inside Megatron's optimizer and the PEFT
+wrappers, and it breaks silently the moment a new persistent allocation is added somewhere
+nobody tagged. Expandable segments solve the same problem at the allocator, with one
+environment variable, no change to any allocation site, and automatic coverage of OFT. The
+cost is a less battle-tested allocator path, which is why the change is scoped to PEFT
+actors rather than applied globally.
 
 Four decisions in those four lines, each of which would be a bug if made the other way:
 
