@@ -56,6 +56,94 @@ class _Scheduler:
         self.num_steps = state["num_steps"]
 
 
+class _FakeGroup:
+    def __init__(self, rank=0, size=1):
+        self._rank = rank
+        self._size = size
+
+    def rank(self):
+        return self._rank
+
+    def size(self):
+        return self._size
+
+
+class _FakeDistributedLeaf:
+    def __init__(self, width=2):
+        self.is_stub_optimizer = False
+        self.data_parallel_group = _FakeGroup()
+        self.data_parallel_group_gloo = _FakeGroup()
+        self.model_param = torch.nn.Parameter(torch.zeros(width))
+        self.main_param = torch.nn.Parameter(torch.zeros(width))
+        self.optimizer = SimpleNamespace(
+            param_groups=[{"params": [self.main_param]}],
+            state={
+                self.main_param: {
+                    "exp_avg": torch.zeros(width),
+                    "exp_avg_sq": torch.zeros(width),
+                }
+            },
+        )
+        self.model_param_group_index_map = {self.model_param: (0, 0)}
+        local_range = SimpleNamespace(start=0, end=width)
+        self.gbuf_ranges = [
+            {
+                torch.float32: [
+                    {
+                        "param_map": {
+                            self.model_param: {"gbuf_local": local_range},
+                        }
+                    }
+                ]
+            }
+        ]
+        self.buffers = [
+            SimpleNamespace(
+                numel_unpadded=width,
+                buckets=[SimpleNamespace(grad_data=torch.zeros(width), numel_unpadded=width)],
+            )
+        ]
+        self.load_state_calls = 0
+        self.lower_loads = []
+
+    def state_dict(self):
+        return {"optimizer": {"param_groups": []}}
+
+    def load_state_dict(self, _state):
+        self.load_state_calls += 1
+
+    def get_parameter_state_dp_zero(self):
+        return _valid_external_leaf_state(self)
+
+    def save_parameter_state(self, filename):
+        torch.save(_valid_external_leaf_state(self), filename)
+
+    def load_parameter_state(self, _filename):
+        raise AssertionError("the pinned Megatron filename loader must not be called")
+
+    def load_parameter_state_from_dp_zero(self, state, *, update_legacy_format=False):
+        assert update_legacy_format is False
+        self.lower_loads.append(state)
+
+    def split_state_dict_if_needed(self, _state):
+        return None
+
+
+def _valid_external_leaf_state(leaf):
+    width = leaf.buffers[0].numel_unpadded
+    return {
+        "buckets_coalesced": True,
+        0: {
+            torch.float32: {
+                "numel_unpadded": width,
+                "param": torch.ones(width),
+                "exp_avg": torch.full((width,), 2.0),
+                "exp_avg_sq": torch.full((width,), 3.0),
+            }
+        },
+    }
+
+
 def test_low_precision_resume_discovers_iteration_then_restores_training_state(tmp_path):
     source_optimizer = _ExternalStateOptimizer(step=7, main=3.5, moment=9.0)
     source_scheduler = _Scheduler(num_steps=224)
@@ -154,6 +242,36 @@ def test_low_precision_weights_only_adapter_keeps_fresh_optimizer(tmp_path):
     assert scheduler.load_calls == 0
 
 
+def test_low_precision_weights_only_adapter_rejects_sidecar_appearing_after_preflight(tmp_path):
+    preflight = peft_utils.preflight_peft_adapter_checkpoint(tmp_path)
+    args = argparse.Namespace(
+        _peft_resume_adapter_dir=str(tmp_path),
+        _peft_adapter_weights_loaded=True,
+        _peft_training_state_found=False,
+        _peft_checkpoint_preflight=preflight,
+    )
+    save_training_state(
+        tmp_path,
+        _ExternalStateOptimizer(step=1),
+        _Scheduler(num_steps=32),
+        iteration=1,
+    )
+    optimizer = _ExternalStateOptimizer()
+    scheduler = _Scheduler()
+
+    with pytest.raises(RuntimeError, match="appeared"):
+        restore_peft_training_state_after_optimizer_build(
+            args,
+            optimizer,
+            scheduler,
+            expected_iteration=0,
+        )
+
+    assert optimizer.load_state_calls == 0
+    assert optimizer.load_parameter_state_calls == 0
+    assert scheduler.load_calls == 0
+
+
 @pytest.mark.parametrize(
     ("training_state_found", "loaded_iteration", "expected_reload_calls"),
     [(False, None, 1), (True, 7, 0)],
@@ -184,10 +302,15 @@ def test_normal_precision_adapter_load_syncs_main_params_only_without_training_s
     monkeypatch.setattr(checkpoint_mod, "_load_checkpoint_dist", lambda **_kwargs: (0, 0))
     monkeypatch.setattr(checkpoint_mod, "is_peft_enabled", lambda _args: True)
     monkeypatch.setattr(checkpoint_mod, "is_peft_model", lambda _model: True, raising=False)
+    checkpoint_preflight = peft_utils.PeftCheckpointPreflight(
+        adapter_dir="/adapter",
+        native_shards_present=True,
+        training_state_present=training_state_found,
+    )
     monkeypatch.setattr(
         checkpoint_mod,
-        "peft_training_state_exists",
-        lambda _path: training_state_found,
+        "preflight_peft_adapter_checkpoint",
+        lambda _path: checkpoint_preflight,
     )
     monkeypatch.setattr(
         checkpoint_mod,
@@ -206,6 +329,7 @@ def test_normal_precision_adapter_load_syncs_main_params_only_without_training_s
     assert iteration == (loaded_iteration if loaded_iteration is not None else 0)
     assert args._peft_adapter_weights_loaded is True
     assert args._peft_training_state_found is training_state_found
+    assert args._peft_checkpoint_preflight is checkpoint_preflight
     assert optimizer.reload_model_params_calls == expected_reload_calls
 
 
@@ -269,3 +393,199 @@ def test_peft_checkpoint_save_threads_no_save_optim_from_args(monkeypatch, tmp_p
 
     assert not (tmp_path / "training_state_rank0.pt").exists()
     assert not (tmp_path / "optimizer_parameter_state_rank0.pt").exists()
+
+
+@pytest.mark.parametrize("files_present", [False, True])
+def test_peft_checkpoint_preflight_all_rank_local_files_present_or_absent(
+    monkeypatch,
+    tmp_path,
+    files_present,
+):
+    monkeypatch.setattr(peft_utils.mpu, "get_tensor_model_parallel_rank", lambda: 0, raising=False)
+    monkeypatch.setattr(peft_utils.mpu, "get_pipeline_model_parallel_rank", lambda: 0, raising=False)
+    if files_present:
+        (tmp_path / "adapter_megatron_tp0_pp0.pt").write_bytes(b"native")
+        (tmp_path / "training_state_rank0.pt").write_bytes(b"training")
+
+    preflight = peft_utils.preflight_peft_adapter_checkpoint(tmp_path)
+
+    assert preflight.adapter_dir == str(tmp_path)
+    assert preflight.native_shards_present is files_present
+    assert preflight.training_state_present is files_present
+
+
+@pytest.mark.parametrize("initially_present", [False, True])
+def test_training_state_race_after_preflight_is_rejected_before_optimizer_mutation(
+    tmp_path,
+    initially_present,
+):
+    source_optimizer = _ExternalStateOptimizer(step=4)
+    source_scheduler = _Scheduler(num_steps=128)
+    if initially_present:
+        save_training_state(tmp_path, source_optimizer, source_scheduler, iteration=4)
+
+    preflight = peft_utils.preflight_peft_adapter_checkpoint(tmp_path)
+    state_path = tmp_path / "training_state_rank0.pt"
+    if initially_present:
+        state_path.unlink()
+        expected_change = "disappeared"
+    else:
+        save_training_state(tmp_path, source_optimizer, source_scheduler, iteration=4)
+        expected_change = "appeared"
+
+    target_optimizer = _ExternalStateOptimizer()
+    target_scheduler = _Scheduler()
+    with pytest.raises(RuntimeError, match=expected_change):
+        load_training_state(
+            tmp_path,
+            target_optimizer,
+            target_scheduler,
+            checkpoint_preflight=preflight,
+        )
+
+    assert target_optimizer.load_state_calls == 0
+    assert target_optimizer.load_parameter_state_calls == 0
+    assert target_scheduler.load_calls == 0
+
+
+def test_corrupt_training_state_is_coordinated_before_optimizer_mutation(tmp_path):
+    torch.save("not a training-state mapping", tmp_path / "training_state_rank0.pt")
+    preflight = peft_utils.preflight_peft_adapter_checkpoint(tmp_path)
+    optimizer = _ExternalStateOptimizer()
+    scheduler = _Scheduler()
+
+    with pytest.raises(RuntimeError, match="training-state parse/validation"):
+        load_training_state(
+            tmp_path,
+            optimizer,
+            scheduler,
+            checkpoint_preflight=preflight,
+        )
+
+    assert optimizer.load_state_calls == 0
+    assert optimizer.load_parameter_state_calls == 0
+    assert scheduler.load_calls == 0
+
+
+@pytest.mark.parametrize("corrupt_external_state", [False, True])
+def test_external_parameter_state_is_preflighted_before_optimizer_mutation(
+    tmp_path,
+    corrupt_external_state,
+):
+    optimizer = _ExternalStateOptimizer(step=5)
+    scheduler = _Scheduler(num_steps=160)
+    torch.save(
+        {
+            "iteration": 5,
+            "active_student_version": None,
+            "optimizer": optimizer.state_dict(),
+            "optimizer_parameter_state": True,
+            "opt_param_scheduler": scheduler.state_dict(),
+        },
+        tmp_path / "training_state_rank0.pt",
+    )
+    if corrupt_external_state:
+        (tmp_path / "optimizer_parameter_state_rank0.pt").write_bytes(b"not a torch checkpoint")
+    preflight = peft_utils.preflight_peft_adapter_checkpoint(tmp_path)
+    target_optimizer = _ExternalStateOptimizer()
+    target_scheduler = _Scheduler()
+
+    with pytest.raises(RuntimeError, match="optimizer parameter-state preflight"):
+        load_training_state(
+            tmp_path,
+            target_optimizer,
+            target_scheduler,
+            checkpoint_preflight=preflight,
+        )
+
+    assert target_optimizer.load_state_calls == 0
+    assert target_optimizer.load_parameter_state_calls == 0
+    assert target_scheduler.load_calls == 0
+
+
+def test_pinned_external_parameter_state_is_cached_before_collective_dispatch(tmp_path):
+    optimizer = _FakeDistributedLeaf()
+    parameter_state_path = tmp_path / "optimizer_parameter_state_rank0.pt"
+    torch.save(_valid_external_leaf_state(optimizer), parameter_state_path)
+
+    plan = peft_utils._build_external_parameter_state_plan(optimizer, parameter_state_path)
+    assert plan is not None
+    # A filename-based second load would now fail. Cached dispatch must not touch
+    # the filesystem again after all-rank validation.
+    parameter_state_path.unlink()
+    peft_utils._validate_external_parameter_state_destinations(plan)
+    peft_utils._dispatch_external_parameter_state(plan)
+
+    assert len(optimizer.lower_loads) == 1
+    assert optimizer.lower_loads[0]["buckets_coalesced"] is True
+
+
+def test_structurally_invalid_external_state_precedes_optimizer_mutation(tmp_path):
+    optimizer = _FakeDistributedLeaf()
+    scheduler = _Scheduler()
+    torch.save(
+        {
+            "iteration": 5,
+            "active_student_version": None,
+            "optimizer": optimizer.state_dict(),
+            "optimizer_parameter_state": True,
+            "opt_param_scheduler": scheduler.state_dict(),
+        },
+        tmp_path / "training_state_rank0.pt",
+    )
+    # Valid pickle, invalid Megatron distributed-optimizer layout.
+    torch.save({}, tmp_path / "optimizer_parameter_state_rank0.pt")
+
+    with pytest.raises(RuntimeError, match="optimizer parameter-state preflight"):
+        load_training_state(tmp_path, optimizer, scheduler)
+
+    assert optimizer.load_state_calls == 0
+    assert scheduler.load_calls == 0
+    assert optimizer.lower_loads == []
+
+
+def test_multi_child_external_state_uses_indexed_cached_dispatch(tmp_path):
+    first = _FakeDistributedLeaf(width=2)
+    second = _FakeDistributedLeaf(width=3)
+    optimizer = SimpleNamespace(chained_optimizers=[first, second])
+    parameter_state_path = tmp_path / "optimizer_parameter_state_rank0.pt"
+    torch.save(
+        [_valid_external_leaf_state(first), _valid_external_leaf_state(second)],
+        parameter_state_path,
+    )
+
+    plan = peft_utils._build_external_parameter_state_plan(optimizer, parameter_state_path)
+    assert plan is not None
+    peft_utils._validate_external_parameter_state_destinations(plan)
+    peft_utils._dispatch_external_parameter_state(plan)
+
+    assert first.lower_loads[0][0][torch.float32]["param"].numel() == 2
+    assert second.lower_loads[0][0][torch.float32]["param"].numel() == 3
+
+
+def test_multi_child_distributed_and_stub_layout_is_rejected():
+    active = _FakeDistributedLeaf()
+    stub = SimpleNamespace(
+        is_stub_optimizer=True,
+        get_parameter_state_dp_zero=lambda: None,
+        load_parameter_state_from_dp_zero=lambda *_args, **_kwargs: None,
+    )
+    optimizer = SimpleNamespace(chained_optimizers=[active, stub])
+
+    with pytest.raises(RuntimeError, match="stub distributed children"):
+        peft_utils._megatron_external_parameter_state_layout(optimizer)
+
+
+def test_training_metadata_consensus_allows_rank_local_external_state_marker(monkeypatch):
+    monkeypatch.setattr(
+        peft_utils,
+        "_all_gather_checkpoint_object",
+        lambda _value: [(7, "3"), (7, "3")],
+    )
+    peft_utils._validate_training_metadata_consensus(
+        {
+            "iteration": 7,
+            "active_student_version": "3",
+            "optimizer_parameter_state": True,
+        }
+    )

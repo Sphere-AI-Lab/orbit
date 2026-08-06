@@ -26,7 +26,7 @@ from .peft_utils import (
     is_peft_enabled,
     is_peft_model,
     load_peft_adapter,
-    peft_training_state_exists,
+    preflight_peft_adapter_checkpoint,
     save_peft_checkpoint,
 )
 
@@ -623,6 +623,7 @@ def load_checkpoint(
     # --no-save-optim), in which case training starts with a fresh optimizer.
     args._peft_adapter_weights_loaded = False
     args._peft_training_state_found = False
+    args._peft_checkpoint_preflight = None
 
     # Load PEFT adapter weights if available
     if is_peft_enabled(args) and is_peft_model(ddp_model):
@@ -632,22 +633,24 @@ def load_checkpoint(
             or getattr(args, "oft_adapter_path", None)
         )
         if adapter_path is not None:
-            training_state_found = peft_training_state_exists(adapter_path)
+            checkpoint_preflight = preflight_peft_adapter_checkpoint(adapter_path)
             loaded, iteration = load_peft_adapter(
                 ddp_model,
                 args,
                 adapter_path,
                 optimizer=optimizer,
                 opt_param_scheduler=opt_param_scheduler,
+                checkpoint_preflight=checkpoint_preflight,
             )
             if loaded:
                 logger.info(f"Successfully loaded PEFT adapter from {adapter_path}")
                 args._peft_adapter_weights_loaded = True
-                args._peft_training_state_found = training_state_found
+                args._peft_training_state_found = checkpoint_preflight.training_state_present
+                args._peft_checkpoint_preflight = checkpoint_preflight
                 # Self-teacher sidecars (and future pool bindings) live beside the
                 # adapter; the actor's restore hook reads this after teacher init.
                 args._peft_resume_adapter_dir = str(adapter_path)
-                if not training_state_found and optimizer is not None and (
+                if not checkpoint_preflight.training_state_present and optimizer is not None and (
                     getattr(args, "fp16", False) or getattr(args, "bf16", False)
                 ):
                     # Adapter tensors were copied after mixed-precision optimizer

@@ -65,9 +65,223 @@ def _contains_inline_optimizer_tensor(value: Any) -> bool:
                 return True
             if "optimizer" in item:
                 pending.append(item["optimizer"])
+            if "fp32_from_fp16_params" in item and _contains_tensor(item["fp32_from_fp16_params"]):
+                return True
         elif type(item) in (list, tuple):
             pending.extend(item)
     return False
+
+
+def _contains_megatron_optimizer_wrapper(value: Any) -> bool:
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if type(item) is dict:
+            if "optimizer" in item:
+                return True
+            pending.extend(item.values())
+        elif type(item) in (list, tuple):
+            pending.extend(item)
+    return False
+
+
+def _is_distributed_optimizer_leaf(optimizer) -> bool:
+    return (
+        not getattr(optimizer, "is_stub_optimizer", False)
+        and callable(getattr(optimizer, "get_parameter_state_dp_zero", None))
+        and callable(getattr(optimizer, "load_parameter_state_from_dp_zero", None))
+        and getattr(optimizer, "data_parallel_group", None) is not None
+    )
+
+
+def _megatron_external_parameter_state_layout(optimizer) -> bool | None:
+    """Describe pinned Megatron's filename-based external-state layout.
+
+    ``None`` means an unknown/custom optimizer, for which the serialized-state
+    compatibility heuristic remains available.
+    """
+    children = getattr(optimizer, "chained_optimizers", None)
+    if children is None:
+        if getattr(optimizer, "is_stub_optimizer", False):
+            return False
+        return True if _is_distributed_optimizer_leaf(optimizer) else None
+    if len(children) == 0:
+        return False
+    if len(children) == 1:
+        return _megatron_external_parameter_state_layout(children[0])
+
+    active_children = [child for child in children if not getattr(child, "is_stub_optimizer", False)]
+    if not active_children:
+        return False
+
+    child_layouts = [_megatron_external_parameter_state_layout(child) for child in active_children]
+    if any(layout is True for layout in child_layouts):
+        # Pinned Megatron's multi-child filename loader iterates every child that
+        # exposes the distributed-optimizer methods. Stub DistributedOptimizers
+        # inherit those methods but do not initialize their process groups, so a
+        # distributed+stub chain fails on only a subset of ranks before scatter.
+        direct_distributed = [_is_distributed_optimizer_leaf(child) for child in active_children]
+        has_stub_children = len(active_children) != len(children)
+        if has_stub_children or not all(direct_distributed):
+            raise RuntimeError(
+                "PEFT checkpointing does not support mixed, nested, or stub distributed children in "
+                "Megatron ChainedOptimizer"
+            )
+        return True
+
+    if any(layout is None for layout in child_layouts):
+        return None
+    if any(_is_distributed_optimizer_leaf(child) for child in active_children):
+        raise RuntimeError(
+            "PEFT checkpointing does not support mixed or nested inline/distributed children in "
+            "Megatron ChainedOptimizer"
+        )
+    return False
+
+
+def _uses_external_parameter_state(optimizer: Any, optimizer_state: Any, transfer_fn: Any) -> bool:
+    layout = _megatron_external_parameter_state_layout(optimizer)
+    if layout is not None:
+        if layout and not callable(transfer_fn):
+            raise RuntimeError("distributed optimizer does not expose save_parameter_state()")
+        return layout
+    detected = (
+        not _contains_inline_optimizer_tensor(optimizer_state)
+        and _contains_megatron_optimizer_wrapper(optimizer_state)
+        and callable(transfer_fn)
+    )
+    if detected and dist.is_initialized() and dist.get_world_size() > 1:
+        raise RuntimeError("custom external optimizer state is unsupported in distributed PEFT checkpointing")
+    return detected
+
+
+def _checkpoint_consensus_group():
+    """Use Orbit's world Gloo group, or the default group in Gloo-only tests."""
+    if not dist.is_initialized() or dist.get_world_size() == 1:
+        return None
+
+    from orbit.utils import distributed_utils
+
+    if distributed_utils.GLOO_GROUP is not None:
+        return distributed_utils.GLOO_GROUP
+    if str(dist.get_backend()).lower().endswith("gloo"):
+        return None
+    raise RuntimeError("PEFT checkpoint consensus requires Orbit's world Gloo process group")
+
+
+def _all_gather_checkpoint_object(value: Any) -> list[Any]:
+    if not dist.is_initialized() or dist.get_world_size() == 1:
+        return [value]
+    group = _checkpoint_consensus_group()
+    gathered: list[Any] = [None] * dist.get_world_size(group=group)
+    dist.all_gather_object(gathered, value, group=group)
+    return gathered
+
+
+def _raise_if_checkpoint_errors(label: str, local_error: str | None) -> None:
+    errors = _all_gather_checkpoint_object(local_error)
+    failures = [f"rank {rank}: {error}" for rank, error in enumerate(errors) if error is not None]
+    if failures:
+        raise RuntimeError(f"{label} failed on one or more ranks; " + "; ".join(failures))
+
+
+def _coordinated_checkpoint_call(label: str, fn):
+    value = None
+    local_error = None
+    try:
+        value = fn()
+    except Exception as exc:
+        local_error = f"{type(exc).__name__}: {exc}"
+    _raise_if_checkpoint_errors(label, local_error)
+    return value
+
+
+def _training_state_path(adapter_dir: str | Path, rank: int | None = None) -> Path:
+    if rank is None:
+        rank = dist.get_rank() if dist.is_initialized() else 0
+    return Path(adapter_dir) / f"training_state_rank{rank}.pt"
+
+
+def _optimizer_parameter_state_path(adapter_dir: str | Path, rank: int | None = None) -> Path:
+    if rank is None:
+        rank = dist.get_rank() if dist.is_initialized() else 0
+    return Path(adapter_dir) / f"{_OPTIMIZER_PARAMETER_STATE_PREFIX}{rank}.pt"
+
+
+@dataclass(frozen=True)
+class PeftCheckpointPreflight:
+    adapter_dir: str
+    native_shards_present: bool
+    training_state_present: bool
+
+
+def preflight_peft_adapter_checkpoint(adapter_path: str | Path) -> PeftCheckpointPreflight:
+    """Reach world consensus on rank-local native and training-state files."""
+    adapter_dir = Path(adapter_path).expanduser().resolve(strict=False)
+    if dist.is_initialized():
+        tp_rank = mpu.get_tensor_model_parallel_rank()
+        pp_rank = mpu.get_pipeline_model_parallel_rank()
+    else:
+        tp_rank = pp_rank = 0
+    native_path = adapter_dir / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt"
+    local_presence = (str(adapter_dir), native_path.is_file(), _training_state_path(adapter_dir).is_file())
+    presence_by_rank = _all_gather_checkpoint_object(local_presence)
+
+    adapter_dirs = [presence[0] for presence in presence_by_rank]
+    native_presence = [presence[1] for presence in presence_by_rank]
+    training_presence = [presence[2] for presence in presence_by_rank]
+    inconsistencies = []
+    if len(set(adapter_dirs)) != 1:
+        inconsistencies.append(f"adapter paths differ across ranks: {adapter_dirs}")
+    if len(set(native_presence)) != 1:
+        inconsistencies.append(
+            "native adapter shards are present on ranks "
+            f"{[rank for rank, present in enumerate(native_presence) if present]} and missing on ranks "
+            f"{[rank for rank, present in enumerate(native_presence) if not present]}"
+        )
+    if len(set(training_presence)) != 1:
+        inconsistencies.append(
+            "training-state sidecars are present on ranks "
+            f"{[rank for rank, present in enumerate(training_presence) if present]} and missing on ranks "
+            f"{[rank for rank, present in enumerate(training_presence) if not present]}"
+        )
+    if inconsistencies:
+        raise RuntimeError("PEFT checkpoint preflight found inconsistent rank-local files: " + "; ".join(inconsistencies))
+
+    return PeftCheckpointPreflight(
+        adapter_dir=str(adapter_dir),
+        native_shards_present=native_presence[0],
+        training_state_present=training_presence[0],
+    )
+
+
+def _validate_preflight_adapter_dir(adapter_dir: str | Path, preflight: PeftCheckpointPreflight) -> None:
+    normalized_adapter_dir = str(Path(adapter_dir).expanduser().resolve(strict=False))
+    normalized_preflight_dir = str(Path(preflight.adapter_dir).expanduser().resolve(strict=False))
+    local_binding = (
+        normalized_adapter_dir,
+        normalized_preflight_dir,
+        preflight.native_shards_present,
+        preflight.training_state_present,
+    )
+    bindings = _all_gather_checkpoint_object(local_binding)
+    local_error = None
+    if normalized_adapter_dir != normalized_preflight_dir:
+        local_error = f"preflight was for {preflight.adapter_dir}, not {adapter_dir}"
+    elif len(set(bindings)) != 1:
+        local_error = f"preflight binding differs across ranks: {bindings}"
+    _raise_if_checkpoint_errors("PEFT checkpoint preflight binding", local_error)
+
+
+def _verify_preflight_presence(path: Path, expected: bool, *, label: str) -> None:
+    actual = path.is_file()
+    local_error = None
+    if actual != expected:
+        local_error = (
+            f"{path} {'appeared' if actual else 'disappeared'} after preflight "
+            f"(expected {'present' if expected else 'absent'})"
+        )
+    _raise_if_checkpoint_errors(label, local_error)
 
 
 @dataclass(frozen=True)
@@ -243,14 +457,23 @@ def load_peft_adapter(
     opt_param_scheduler: Any | None = None,
     expected_iteration: int | None = None,
     expected_active_student_version: str | None = None,
+    checkpoint_preflight: PeftCheckpointPreflight | None = None,
 ) -> tuple[bool, int | None]:
     method = get_peft_method(args)
     adapter_dir = Path(adapter_path)
+    if checkpoint_preflight is None:
+        checkpoint_preflight = preflight_peft_adapter_checkpoint(adapter_dir)
+    else:
+        _validate_preflight_adapter_dir(adapter_dir, checkpoint_preflight)
+
+    _coordinated_checkpoint_call(
+        "PEFT adapter config validation",
+        lambda: validate_peft_checkpoint_type(adapter_dir, expected_method=method),
+    )
 
     if method == "lora":
         from .lora_utils import load_lora_adapter
 
-        validate_peft_checkpoint_type(adapter_dir, expected_method=method)
         return load_lora_adapter(
             model,
             adapter_path,
@@ -258,11 +481,11 @@ def load_peft_adapter(
             opt_param_scheduler=opt_param_scheduler,
             expected_iteration=expected_iteration,
             expected_active_student_version=expected_active_student_version,
+            checkpoint_preflight=checkpoint_preflight,
         )
     if method == "oft":
         from .oft_utils import load_oft_adapter
 
-        validate_peft_checkpoint_type(adapter_dir, expected_method=method)
         return load_oft_adapter(
             model,
             adapter_path,
@@ -270,6 +493,7 @@ def load_peft_adapter(
             opt_param_scheduler=opt_param_scheduler,
             expected_iteration=expected_iteration,
             expected_active_student_version=expected_active_student_version,
+            checkpoint_preflight=checkpoint_preflight,
         )
     raise ValueError(f"Cannot load PEFT adapter when peft_method={method!r}.")
 
@@ -292,44 +516,376 @@ def save_training_state(
         raise ValueError("PEFT checkpoint iteration must be a bounded nonnegative integer")
     if active_student_version is not None and not _is_canonical_student_version(active_student_version):
         raise ValueError("active student version must be canonical nonnegative decimal text")
-    rank = dist.get_rank() if dist.is_initialized() else 0
-    state_path = Path(adapter_dir) / f"training_state_rank{rank}.pt"
-    parameter_state_path = Path(adapter_dir) / f"{_OPTIMIZER_PARAMETER_STATE_PREFIX}{rank}.pt"
+    state_path = _training_state_path(adapter_dir)
+    parameter_state_path = _optimizer_parameter_state_path(adapter_dir)
     if optimizer is None or no_save_optim:
         # Repeated writes to an existing export directory must not leave a
         # resumable optimizer sidecar behind when --no-save-optim is active.
-        state_path.unlink(missing_ok=True)
-        parameter_state_path.unlink(missing_ok=True)
+        _coordinated_checkpoint_call(
+            "PEFT stale training-state cleanup",
+            lambda: (state_path.unlink(missing_ok=True), parameter_state_path.unlink(missing_ok=True)),
+        )
         if no_save_optim:
             logger.info(f"Skipped optimizer/scheduler state for {adapter_dir} (--no-save-optim)")
         return
 
-    optimizer_state = optimizer.state_dict()
-    save_parameter_state = getattr(optimizer, "save_parameter_state", None)
-    has_external_parameter_state = not _contains_inline_optimizer_tensor(optimizer_state) and callable(
-        save_parameter_state
+    optimizer_state = _coordinated_checkpoint_call(
+        "PEFT optimizer state serialization",
+        optimizer.state_dict,
     )
-    if has_external_parameter_state:
-        save_parameter_state(str(parameter_state_path))
-    else:
-        parameter_state_path.unlink(missing_ok=True)
-    torch.save(
-        {
-            "iteration": iteration,
-            "active_student_version": active_student_version,
-            "optimizer": optimizer_state,
-            "optimizer_parameter_state": has_external_parameter_state,
-            "opt_param_scheduler": opt_param_scheduler.state_dict() if opt_param_scheduler else None,
-        },
-        state_path,
+    save_parameter_state = getattr(optimizer, "save_parameter_state", None)
+    has_external_parameter_state = _coordinated_checkpoint_call(
+        "PEFT external optimizer layout validation",
+        lambda: _uses_external_parameter_state(
+            optimizer,
+            optimizer_state,
+            save_parameter_state,
+        ),
+    )
+    _coordinated_checkpoint_call(
+        "PEFT distributed optimizer topology validation",
+        lambda: _validate_external_parameter_state_topology(optimizer)
+        if has_external_parameter_state
+        else None,
+    )
+    _coordinated_checkpoint_call(
+        "PEFT optimizer parameter-state materialization",
+        lambda: save_parameter_state(str(parameter_state_path))
+        if has_external_parameter_state
+        else parameter_state_path.unlink(missing_ok=True),
+    )
+    scheduler_state = _coordinated_checkpoint_call(
+        "PEFT optimizer scheduler state serialization",
+        opt_param_scheduler.state_dict if opt_param_scheduler else lambda: None,
+    )
+    _coordinated_checkpoint_call(
+        "PEFT training-state save",
+        lambda: torch.save(
+            {
+                "iteration": iteration,
+                "active_student_version": active_student_version,
+                "optimizer": optimizer_state,
+                "optimizer_parameter_state": has_external_parameter_state,
+                "opt_param_scheduler": scheduler_state,
+            },
+            state_path,
+        ),
     )
     logger.info(f"Saved optimizer/scheduler state to {state_path.parent}")
 
 
 def peft_training_state_exists(adapter_dir: str | Path) -> bool:
-    """Return whether this rank has a resumable PEFT training-state sidecar."""
-    rank = dist.get_rank() if dist.is_initialized() else 0
-    return (Path(adapter_dir) / f"training_state_rank{rank}.pt").is_file()
+    """Return whether this rank has a resumable PEFT training-state sidecar.
+
+    Callers that will enter optimizer collectives must use
+    :func:`preflight_peft_adapter_checkpoint` instead.
+    """
+    return _training_state_path(adapter_dir).is_file()
+
+
+def _process_group_rank(group: Any) -> int:
+    rank = getattr(group, "rank", None)
+    return int(rank()) if callable(rank) else dist.get_rank(group=group)
+
+
+def _process_group_size(group: Any) -> int:
+    size = getattr(group, "size", None)
+    return int(size()) if callable(size) else dist.get_world_size(group=group)
+
+
+def _validate_distributed_optimizer_leaf_topology(optimizer: Any) -> None:
+    data_parallel_group = getattr(optimizer, "data_parallel_group", None)
+    data_parallel_group_gloo = getattr(optimizer, "data_parallel_group_gloo", None)
+    if data_parallel_group is None or data_parallel_group_gloo is None:
+        raise RuntimeError("distributed optimizer is missing its NCCL or Gloo data-parallel group")
+
+    group_rank = _process_group_rank(data_parallel_group)
+    gloo_rank = _process_group_rank(data_parallel_group_gloo)
+    group_size = _process_group_size(data_parallel_group)
+    gloo_size = _process_group_size(data_parallel_group_gloo)
+    if (group_rank, group_size) != (gloo_rank, gloo_size):
+        raise RuntimeError(
+            "distributed optimizer NCCL/Gloo data-parallel rank layouts differ: "
+            f"NCCL={(group_rank, group_size)}, Gloo={(gloo_rank, gloo_size)}"
+        )
+    if dist.is_initialized():
+        group_ranks = dist.get_process_group_ranks(data_parallel_group)
+        gloo_ranks = dist.get_process_group_ranks(data_parallel_group_gloo)
+        if group_ranks != gloo_ranks:
+            raise RuntimeError(
+                "distributed optimizer NCCL/Gloo data-parallel memberships differ: "
+                f"NCCL={group_ranks}, Gloo={gloo_ranks}"
+            )
+
+    gbuf_ranges = getattr(optimizer, "gbuf_ranges", None)
+    buffers = getattr(optimizer, "buffers", None)
+    if not isinstance(gbuf_ranges, Sequence) or not isinstance(buffers, Sequence):
+        raise RuntimeError("distributed optimizer has no inspectable gradient-buffer layout")
+    if len(gbuf_ranges) != len(buffers):
+        raise RuntimeError("distributed optimizer gradient-buffer layout length is inconsistent")
+
+    for gbuf_idx, gbuf_range_maps in enumerate(gbuf_ranges):
+        if not isinstance(gbuf_range_maps, Mapping) or len(gbuf_range_maps) != 1:
+            raise RuntimeError(f"distributed optimizer gbuf {gbuf_idx} must contain exactly one dtype")
+        range_maps = next(iter(gbuf_range_maps.values()))
+        buckets = getattr(buffers[gbuf_idx], "buckets", None)
+        if not isinstance(range_maps, Sequence) or not isinstance(buckets, Sequence):
+            raise RuntimeError(f"distributed optimizer gbuf {gbuf_idx} has no inspectable buckets")
+        if len(range_maps) != len(buckets):
+            raise RuntimeError(f"distributed optimizer gbuf {gbuf_idx} bucket count is inconsistent")
+        for bucket_idx, (range_map, bucket) in enumerate(zip(range_maps, buckets, strict=True)):
+            padded_numel = int(bucket.grad_data.numel())
+            unpadded_numel = int(bucket.numel_unpadded)
+            if padded_numel <= 0 or padded_numel % gloo_size != 0:
+                raise RuntimeError(
+                    f"distributed optimizer gbuf {gbuf_idx} bucket {bucket_idx} padded size is invalid"
+                )
+            if not 0 < unpadded_numel <= padded_numel:
+                raise RuntimeError(
+                    f"distributed optimizer gbuf {gbuf_idx} bucket {bucket_idx} unpadded size is invalid"
+                )
+            local_numel = padded_numel // gloo_size
+            param_map = range_map.get("param_map") if isinstance(range_map, Mapping) else None
+            if not isinstance(param_map, Mapping):
+                raise RuntimeError(
+                    f"distributed optimizer gbuf {gbuf_idx} bucket {bucket_idx} has no parameter map"
+                )
+            for param_range_map in param_map.values():
+                local_range = param_range_map.get("gbuf_local") if isinstance(param_range_map, Mapping) else None
+                start = getattr(local_range, "start", None)
+                end = getattr(local_range, "end", None)
+                if type(start) is not int or type(end) is not int or not 0 <= start <= end <= local_numel:
+                    raise RuntimeError(
+                        f"distributed optimizer gbuf {gbuf_idx} bucket {bucket_idx} has an invalid local range"
+                    )
+
+
+def _validate_and_normalize_external_leaf_state(optimizer: Any, state: Any) -> dict[Any, Any]:
+    if not isinstance(state, Mapping):
+        raise RuntimeError("distributed optimizer parameter state must be a mapping")
+    normalized = dict(state)
+    split_state_dict_if_needed = getattr(optimizer, "split_state_dict_if_needed", None)
+    if not callable(split_state_dict_if_needed):
+        raise RuntimeError("distributed optimizer does not expose checkpoint layout normalization")
+    split_state_dict_if_needed(normalized)
+    if normalized.get("buckets_coalesced") is not True:
+        raise RuntimeError("distributed optimizer parameter state is not in the coalesced format")
+
+    gloo_size = _process_group_size(optimizer.data_parallel_group_gloo)
+    for gbuf_idx, gbuf_range_maps in enumerate(optimizer.gbuf_ranges):
+        dtype, range_maps = next(iter(gbuf_range_maps.items()))
+        buffer = optimizer.buffers[gbuf_idx]
+        expected_numel = int(buffer.numel_unpadded)
+        bucket_numel = sum(int(bucket.numel_unpadded) for bucket in buffer.buckets)
+        if expected_numel != bucket_numel:
+            raise RuntimeError(f"distributed optimizer gbuf {gbuf_idx} unpadded size is inconsistent")
+        try:
+            dtype_state = normalized[gbuf_idx][dtype]
+        except (KeyError, TypeError) as exc:
+            raise RuntimeError(
+                f"distributed optimizer parameter state is missing gbuf {gbuf_idx} dtype {dtype}"
+            ) from exc
+        if not isinstance(dtype_state, Mapping) or dtype_state.get("numel_unpadded") != expected_numel:
+            raise RuntimeError(f"distributed optimizer gbuf {gbuf_idx} checkpoint size is incompatible")
+        if len(range_maps) != len(buffer.buckets):
+            raise RuntimeError(f"distributed optimizer gbuf {gbuf_idx} checkpoint bucket count is incompatible")
+        for key in ("param", "exp_avg", "exp_avg_sq"):
+            tensor = dtype_state.get(key)
+            if (
+                not isinstance(tensor, torch.Tensor)
+                or tensor.device.type != "cpu"
+                or tensor.layout != torch.strided
+                or tensor.dtype != torch.float32
+                or tensor.ndim != 1
+                or not tensor.is_contiguous()
+                or tensor.numel() != expected_numel
+            ):
+                raise RuntimeError(
+                    f"distributed optimizer gbuf {gbuf_idx} checkpoint tensor {key!r} is incompatible"
+                )
+        for bucket_idx, bucket in enumerate(buffer.buckets):
+            padded_numel = int(bucket.grad_data.numel())
+            if padded_numel <= 0 or padded_numel % gloo_size != 0:
+                raise RuntimeError(
+                    f"distributed optimizer gbuf {gbuf_idx} bucket {bucket_idx} is incompatible"
+                )
+    return normalized
+
+
+def _external_parameter_state_leaves(optimizer: Any) -> tuple[tuple[Any, ...], bool]:
+    if _megatron_external_parameter_state_layout(optimizer) is not True:
+        raise RuntimeError("optimizer does not use a supported distributed external-state layout")
+    children = getattr(optimizer, "chained_optimizers", None)
+    if children is None:
+        return (optimizer,), False
+    if len(children) == 1:
+        return _external_parameter_state_leaves(children[0])
+    # Layout validation above guarantees direct, active distributed leaves.
+    return tuple(children), True
+
+
+def _validate_external_parameter_state_topology(optimizer: Any) -> None:
+    if _megatron_external_parameter_state_layout(optimizer) is not True:
+        return
+    leaves, _ = _external_parameter_state_leaves(optimizer)
+    for leaf in leaves:
+        _validate_distributed_optimizer_leaf_topology(leaf)
+
+
+@dataclass(frozen=True)
+class _ExternalParameterStatePlan:
+    leaves: tuple[Any, ...]
+    cached_states: tuple[dict[Any, Any] | None, ...]
+
+
+def _build_external_parameter_state_plan(
+    optimizer: Any,
+    parameter_state_path: Path,
+) -> _ExternalParameterStatePlan | None:
+    """Load and fully validate external state before any optimizer collective.
+
+    Unknown filename-based optimizer APIs remain supported only in a
+    single-process job, where a rank-local parse failure cannot strand peers.
+    """
+    layout = _megatron_external_parameter_state_layout(optimizer)
+    if layout is not True:
+        world_size = dist.get_world_size() if dist.is_initialized() else 1
+        if layout is False:
+            raise RuntimeError("checkpoint external optimizer state does not match the current optimizer")
+        if world_size != 1:
+            raise RuntimeError("custom external optimizer state is unsupported in distributed PEFT resume")
+        torch.load(parameter_state_path, map_location="cpu", weights_only=False)
+        return None
+
+    leaves, is_multi_child = _external_parameter_state_leaves(optimizer)
+    for leaf in leaves:
+        _validate_distributed_optimizer_leaf_topology(leaf)
+
+    root_flags = tuple(_process_group_rank(leaf.data_parallel_group_gloo) == 0 for leaf in leaves)
+    owns_file = any(root_flags)
+    if owns_file:
+        raw_state = torch.load(parameter_state_path, map_location="cpu", weights_only=False)
+    else:
+        if parameter_state_path.exists():
+            raise RuntimeError(f"unexpected optimizer parameter-state file on non-owner rank: {parameter_state_path}")
+        raw_state = None
+
+    if is_multi_child and owns_file:
+        if type(raw_state) is not list or len(raw_state) != len(leaves):
+            raise RuntimeError("chained optimizer parameter state must contain one slot per child")
+        raw_states = tuple(raw_state)
+    elif is_multi_child:
+        raw_states = (None,) * len(leaves)
+    else:
+        raw_states = (raw_state,)
+
+    cached_states: list[dict[Any, Any] | None] = []
+    for index, (leaf, is_root, leaf_state) in enumerate(zip(leaves, root_flags, raw_states, strict=True)):
+        if is_root:
+            if leaf_state is None:
+                raise RuntimeError(f"optimizer parameter state is missing child {index} on its DP root")
+            cached_states.append(_validate_and_normalize_external_leaf_state(leaf, leaf_state))
+        else:
+            if owns_file and leaf_state is not None:
+                raise RuntimeError(f"optimizer parameter state child {index} must be empty on this non-root rank")
+            cached_states.append(None)
+    return _ExternalParameterStatePlan(leaves=leaves, cached_states=tuple(cached_states))
+
+
+def _validate_external_parameter_state_destinations(plan: _ExternalParameterStatePlan) -> None:
+    for leaf in plan.leaves:
+        for gbuf_idx, gbuf_range_maps in enumerate(leaf.gbuf_ranges):
+            for range_maps in gbuf_range_maps.values():
+                for range_map in range_maps:
+                    for model_param, param_range_map in range_map["param_map"].items():
+                        local_range = param_range_map["gbuf_local"]
+                        expected_numel = local_range.end - local_range.start
+                        group_index, group_order = leaf.model_param_group_index_map[model_param]
+                        main_param = leaf.optimizer.param_groups[group_index]["params"][group_order]
+                        if main_param.numel() != expected_numel:
+                            raise RuntimeError(
+                                f"distributed optimizer gbuf {gbuf_idx} main-parameter destination is incompatible"
+                            )
+                        optimizer_state = leaf.optimizer.state[main_param]
+                        for key in ("exp_avg", "exp_avg_sq"):
+                            tensor = optimizer_state.get(key)
+                            if not isinstance(tensor, torch.Tensor) or tensor.numel() != expected_numel:
+                                raise RuntimeError(
+                                    f"distributed optimizer gbuf {gbuf_idx} destination {key!r} is incompatible"
+                                )
+
+
+def _dispatch_external_parameter_state(plan: _ExternalParameterStatePlan) -> None:
+    for leaf, cached_state in zip(plan.leaves, plan.cached_states, strict=True):
+        leaf.load_parameter_state_from_dp_zero(cached_state, update_legacy_format=False)
+
+
+def _validate_training_state_payload(
+    state_path: Path,
+    *,
+    optimizer: Any | None,
+    opt_param_scheduler: Any | None,
+    expected_iteration: int | None,
+    expected_active_student_version: str | None,
+) -> dict[str, Any]:
+    training_state = torch.load(state_path, map_location="cpu", weights_only=False)
+    if type(training_state) is not dict:
+        raise RuntimeError("PEFT checkpoint training state is invalid")
+
+    iteration = training_state.get("iteration")
+    if iteration is not None and not _is_bounded_nonnegative_integer(iteration):
+        raise RuntimeError("PEFT checkpoint iteration is invalid")
+    if expected_iteration is not None and (
+        not _is_bounded_nonnegative_integer(iteration) or iteration != expected_iteration
+    ):
+        raise RuntimeError("PEFT checkpoint iteration does not match teacher-pool binding")
+
+    active_student_version = training_state.get("active_student_version")
+    if active_student_version is not None and not _is_canonical_student_version(active_student_version):
+        raise RuntimeError("PEFT checkpoint active student version is invalid")
+    if expected_active_student_version is not None and active_student_version != expected_active_student_version:
+        raise RuntimeError("PEFT checkpoint active student version does not match teacher-pool binding")
+
+    external_parameter_state = training_state.get("optimizer_parameter_state", False)
+    if type(external_parameter_state) is not bool:
+        raise RuntimeError("PEFT checkpoint optimizer-parameter-state marker is invalid")
+
+    if optimizer is not None:
+        if training_state.get("optimizer") is None:
+            raise RuntimeError("PEFT checkpoint has no optimizer state; training resume is not possible")
+        current_external_layout = _megatron_external_parameter_state_layout(optimizer)
+        if current_external_layout is True and not external_parameter_state:
+            raise RuntimeError("PEFT checkpoint is missing distributed optimizer parameter state")
+        if current_external_layout is False and external_parameter_state:
+            raise RuntimeError("PEFT checkpoint external optimizer state does not match the current optimizer")
+        if external_parameter_state and not callable(getattr(optimizer, "load_parameter_state", None)):
+            raise RuntimeError("PEFT checkpoint requires distributed optimizer parameter state")
+        if opt_param_scheduler is not None and training_state.get("opt_param_scheduler") is None:
+            raise RuntimeError("PEFT checkpoint has no optimizer scheduler state; training resume is not possible")
+
+    return training_state
+
+
+def _validate_training_metadata_consensus(training_state: dict[str, Any]) -> None:
+    local_metadata = (
+        training_state.get("iteration"),
+        training_state.get("active_student_version"),
+    )
+    metadata_by_rank = _all_gather_checkpoint_object(local_metadata)
+    if len(set(metadata_by_rank)) != 1:
+        raise RuntimeError(f"PEFT checkpoint training metadata differs across ranks: {metadata_by_rank}")
+
+
+def _validate_expected_training_binding(
+    expected_iteration: int | None,
+    expected_active_student_version: str | None,
+) -> None:
+    if expected_iteration is not None and not _is_bounded_nonnegative_integer(expected_iteration):
+        raise ValueError("expected PEFT checkpoint iteration must be bounded and nonnegative")
+    if expected_active_student_version is not None and not _is_canonical_student_version(
+        expected_active_student_version
+    ):
+        raise ValueError("expected active student version must be canonical decimal text")
 
 
 def load_training_state(
@@ -339,64 +895,90 @@ def load_training_state(
     *,
     expected_iteration: int | None = None,
     expected_active_student_version: str | None = None,
+    checkpoint_preflight: PeftCheckpointPreflight | None = None,
 ) -> int | None:
-    if expected_iteration is not None and not _is_bounded_nonnegative_integer(expected_iteration):
-        raise ValueError("expected PEFT checkpoint iteration must be bounded and nonnegative")
-    if expected_active_student_version is not None and not _is_canonical_student_version(
-        expected_active_student_version
-    ):
-        raise ValueError("expected active student version must be canonical decimal text")
-    rank = dist.get_rank() if dist.is_initialized() else 0
-    state_path = Path(adapter_dir) / f"training_state_rank{rank}.pt"
-    if not state_path.exists():
+    _coordinated_checkpoint_call(
+        "PEFT expected checkpoint binding validation",
+        lambda: _validate_expected_training_binding(expected_iteration, expected_active_student_version),
+    )
+    state_path = _training_state_path(adapter_dir)
+    if checkpoint_preflight is None:
+        checkpoint_preflight = preflight_peft_adapter_checkpoint(adapter_dir)
+    else:
+        _validate_preflight_adapter_dir(adapter_dir, checkpoint_preflight)
+    training_state_present = checkpoint_preflight.training_state_present
+    _verify_preflight_presence(
+        state_path,
+        training_state_present,
+        label="PEFT training-state sidecar preflight",
+    )
+
+    if not training_state_present:
         if expected_iteration is not None or expected_active_student_version is not None:
             raise RuntimeError("PEFT checkpoint training state required by binding is missing")
         return None
 
-    training_state = torch.load(state_path, map_location="cpu", weights_only=False)
-
-    if type(training_state) is not dict:
-        raise RuntimeError("PEFT checkpoint training state is invalid")
+    training_state = _coordinated_checkpoint_call(
+        "PEFT training-state parse/validation",
+        lambda: _validate_training_state_payload(
+            state_path,
+            optimizer=optimizer,
+            opt_param_scheduler=opt_param_scheduler,
+            expected_iteration=expected_iteration,
+            expected_active_student_version=expected_active_student_version,
+        ),
+    )
+    _validate_training_metadata_consensus(training_state)
     iteration = training_state.get("iteration")
-    if iteration is not None and not _is_bounded_nonnegative_integer(iteration):
-        raise RuntimeError("PEFT checkpoint iteration is invalid")
-    if expected_iteration is not None and (
-        not _is_bounded_nonnegative_integer(iteration) or iteration != expected_iteration
-    ):
-        raise RuntimeError("PEFT checkpoint iteration does not match teacher-pool binding")
-    active_student_version = training_state.get("active_student_version")
-    if expected_active_student_version is not None and (
-        not _is_canonical_student_version(active_student_version)
-        or active_student_version != expected_active_student_version
-    ):
-        raise RuntimeError("PEFT checkpoint active student version does not match teacher-pool binding")
 
     if optimizer is None:
         if iteration is not None:
             logger.info(f"Validated PEFT training state at iteration {iteration}")
         return iteration
 
-    optimizer_state = training_state.get("optimizer")
-    if optimizer_state is None:
-        raise RuntimeError("PEFT checkpoint has no optimizer state; training resume is not possible")
-
-    parameter_state_path = Path(adapter_dir) / f"{_OPTIMIZER_PARAMETER_STATE_PREFIX}{rank}.pt"
+    optimizer_state = training_state["optimizer"]
+    parameter_state_path = _optimizer_parameter_state_path(adapter_dir)
     load_parameter_state = getattr(optimizer, "load_parameter_state", None)
-    if training_state.get("optimizer_parameter_state") is True:
-        if not callable(load_parameter_state):
-            raise RuntimeError("PEFT checkpoint requires distributed optimizer parameter state")
+    external_parameter_state = training_state.get("optimizer_parameter_state") is True
+    external_parameter_state_plan = _coordinated_checkpoint_call(
+        "PEFT optimizer parameter-state preflight",
+        lambda: _build_external_parameter_state_plan(optimizer, parameter_state_path)
+        if external_parameter_state
+        else None,
+    )
 
-    scheduler_state = training_state.get("opt_param_scheduler")
-    if opt_param_scheduler is not None and scheduler_state is None:
-        raise RuntimeError("PEFT checkpoint has no optimizer scheduler state; training resume is not possible")
+    _coordinated_checkpoint_call(
+        "PEFT optimizer state restore",
+        lambda: optimizer.load_state_dict(optimizer_state),
+    )
+    _coordinated_checkpoint_call(
+        "PEFT optimizer parameter-state destination validation",
+        lambda: _validate_external_parameter_state_destinations(external_parameter_state_plan)
+        if external_parameter_state_plan is not None
+        else None,
+    )
 
-    optimizer.load_state_dict(optimizer_state)
-    if training_state.get("optimizer_parameter_state") is True:
-        load_parameter_state(str(parameter_state_path))
+    def restore_external_parameter_state() -> None:
+        if not external_parameter_state:
+            return
+        if external_parameter_state_plan is None:
+            # Compatibility for single-process custom optimizers only. Pinned
+            # Megatron optimizers always use the validated cached-state path.
+            load_parameter_state(str(parameter_state_path))
+        else:
+            _dispatch_external_parameter_state(external_parameter_state_plan)
+
+    _coordinated_checkpoint_call(
+        "PEFT optimizer parameter-state restore",
+        restore_external_parameter_state,
+    )
     logger.info("Restored optimizer state from PEFT checkpoint")
 
     if opt_param_scheduler is not None:
-        opt_param_scheduler.load_state_dict(scheduler_state)
+        _coordinated_checkpoint_call(
+            "PEFT optimizer scheduler restore",
+            lambda: opt_param_scheduler.load_state_dict(training_state["opt_param_scheduler"]),
+        )
         logger.info("Restored LR scheduler state from PEFT checkpoint")
 
     if iteration is not None:
@@ -421,7 +1003,23 @@ def restore_peft_training_state_after_optimizer_build(
     is missing, changed, or inconsistent before optimizer state is mutated.
     """
     adapter_dir = getattr(args, "_peft_resume_adapter_dir", None)
-    if adapter_dir is None or getattr(args, "_peft_training_state_found", None) is False:
+    if adapter_dir is None:
+        return False
+
+    training_state_found = getattr(args, "_peft_training_state_found", None)
+    checkpoint_preflight = getattr(args, "_peft_checkpoint_preflight", None)
+    if training_state_found is False:
+        # A weights-only adapter intentionally keeps the fresh optimizer, but
+        # still re-check the saved preflight so a sidecar that appeared between
+        # model load and optimizer construction cannot silently change the
+        # resume mode.
+        if checkpoint_preflight is not None:
+            load_training_state(
+                Path(adapter_dir),
+                None,
+                None,
+                checkpoint_preflight=checkpoint_preflight,
+            )
         return False
 
     restored_iteration = load_training_state(
@@ -429,6 +1027,7 @@ def restore_peft_training_state_after_optimizer_build(
         optimizer,
         opt_param_scheduler,
         expected_iteration=expected_iteration,
+        checkpoint_preflight=checkpoint_preflight,
     )
     if restored_iteration != expected_iteration:
         raise RuntimeError(
@@ -977,6 +1576,19 @@ def save_peft_adapter_checkpoint(
     return str(save_path)
 
 
+def _load_and_convert_native_adapter_state(
+    model: Sequence[torch.nn.Module],
+    native_path: Path,
+) -> tuple[dict[AdapterTensorKey, torch.Tensor], dict[AdapterTensorKey, torch.nn.Parameter]]:
+    state_dict = torch.load(native_path, map_location="cpu", weights_only=True)
+    resolved = resolve_native_adapter_state(model, state_dict)
+    params = adapter_named_parameters(model, is_adapter_param_name)
+    converted = {
+        key: resolved[key].to(device=parameter.device, dtype=parameter.dtype) for key, parameter in params.items()
+    }
+    return converted, params
+
+
 def load_peft_adapter_checkpoint(
     model: Sequence[torch.nn.Module],
     adapter_path: str,
@@ -986,6 +1598,7 @@ def load_peft_adapter_checkpoint(
     opt_param_scheduler: Any | None = None,
     expected_iteration: int | None = None,
     expected_active_student_version: str | None = None,
+    checkpoint_preflight: PeftCheckpointPreflight | None = None,
 ) -> tuple[bool, int | None]:
     """Load a PEFT adapter checkpoint from Megatron-native shards.
 
@@ -994,15 +1607,21 @@ def load_peft_adapter_checkpoint(
     and returns ``(False, None)``.
     """
     adapter_dir = Path(adapter_path)
-    if not adapter_dir.exists():
-        logger.warning(f"{label} adapter path does not exist: {adapter_dir}")
-        return False, None
+    if checkpoint_preflight is None:
+        checkpoint_preflight = preflight_peft_adapter_checkpoint(adapter_dir)
+    else:
+        _validate_preflight_adapter_dir(adapter_dir, checkpoint_preflight)
 
     tp_rank = mpu.get_tensor_model_parallel_rank()
     pp_rank = mpu.get_pipeline_model_parallel_rank()
 
     native_path = adapter_dir / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt"
-    if native_path.exists():
+    _verify_preflight_presence(
+        native_path,
+        checkpoint_preflight.native_shards_present,
+        label="PEFT native adapter shard preflight",
+    )
+    if checkpoint_preflight.native_shards_present:
         validated_iteration = None
         binding_metadata_expected = expected_iteration is not None or expected_active_student_version is not None
         if binding_metadata_expected:
@@ -1014,13 +1633,12 @@ def load_peft_adapter_checkpoint(
                 None,
                 expected_iteration=expected_iteration,
                 expected_active_student_version=expected_active_student_version,
+                checkpoint_preflight=checkpoint_preflight,
             )
-        state_dict = torch.load(native_path, map_location="cpu", weights_only=True)
-        resolved = resolve_native_adapter_state(model, state_dict)
-        params = adapter_named_parameters(model, is_adapter_param_name)
-        converted = {
-            key: resolved[key].to(device=parameter.device, dtype=parameter.dtype) for key, parameter in params.items()
-        }
+        converted, params = _coordinated_checkpoint_call(
+            "PEFT native adapter shard parse/validation",
+            lambda: _load_and_convert_native_adapter_state(model, native_path),
+        )
         with torch.no_grad():
             for key, parameter in params.items():
                 parameter.copy_(converted[key])
@@ -1035,9 +1653,14 @@ def load_peft_adapter_checkpoint(
                 opt_param_scheduler,
                 expected_iteration=expected_iteration,
                 expected_active_student_version=expected_active_student_version,
+                checkpoint_preflight=checkpoint_preflight,
             )
         )
         return True, iteration
+
+    if not adapter_dir.exists():
+        logger.warning(f"{label} adapter path does not exist: {adapter_dir}")
+        return False, None
 
     hf_safetensors = adapter_dir / "adapter_model.safetensors"
     hf_bin = adapter_dir / "adapter_model.bin"
