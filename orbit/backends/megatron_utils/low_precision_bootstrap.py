@@ -148,6 +148,13 @@ def validate_low_precision_bootstrap_args(args, *, hf_config=None) -> None:
     if not requires_low_precision_dist_checkpoint(args, hf_config=hf_config):
         return
 
+    if getattr(args, "critic_mode", None) == "adapter":
+        raise ValueError(
+            "--critic-mode adapter does not support low-precision/quantized bridge checkpoints: "
+            "one-trunk aliasing currently shares Parameters only, while quantized trunk weights and scales "
+            "are stored in checkpoint-created buffers. Use --critic-mode full or a high-precision base model."
+        )
+
     load_path = resolve_bridge_load_path(args, hf_config=hf_config)
     if not load_path:
         raise ValueError(

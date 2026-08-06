@@ -65,6 +65,12 @@ def test_adapter_mode_zeroes_critic_gpus_and_skips_load_default():
     assert not uses_separate_critic(args)
 
 
+def test_adapter_mode_preserves_explicit_critic_load_root():
+    args = _base_args(critic_mode="adapter", critic_load="/ckpt/critic-input")
+    _apply_critic_args(args)
+    assert args.critic_load == "/ckpt/critic-input"
+
+
 def test_adapter_mode_rejects_explicit_critic_gpus():
     args = _base_args(critic_mode="adapter", critic_num_gpus_per_node=2)
     with pytest.raises(ValueError, match="critic-num-gpus-per-node"):

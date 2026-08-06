@@ -953,7 +953,13 @@ class MegatronTrainRayActor(TrainRayActor):
         )
 
         if uses_adapter_critic(self.args) and self.args.critic_save:
-            save_critic_checkpoint(self.args, rollout_id, self.critic_model, optimizer=self.critic_optimizer)
+            save_critic_checkpoint(
+                self.args,
+                rollout_id,
+                self.critic_model,
+                optimizer=self.critic_optimizer,
+                opt_param_scheduler=self.critic_opt_param_scheduler,
+            )
 
         if force_sync and self.args.async_save:
             maybe_finalize_async_save(blocking=True)
