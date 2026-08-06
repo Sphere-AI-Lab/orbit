@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Qwen2.5-0.5B-Instruct BF16 + OFT PPO on the math dataset.
+# Qwen2.5-0.5B-Instruct BF16 + LoRA PPO on the math dataset.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,7 +23,7 @@ SAVE_DIR="${ORBIT_ROOT}/orbit_ckpts/Qwen2.5-0.5B-Instruct_math_lora_ppo_adapter_
 TEST_JSONL=${TEST_JSONL:-}
 
 # === Resources ===
-# One-trunk PPO (--critic-mode adapter): critic = OFT adapter + value head on the
+# One-trunk PPO (--critic-mode adapter): critic = LoRA adapter + value head on the
 # actor's trunk. actor=2 GPUs, rollout=6 GPUs, no critic carve-out. PP>1 untested.
 GPUS_PER_NODE="${GPUS_PER_NODE:-2}"
 ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-6}"
