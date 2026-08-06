@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import tempfile
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import torch
@@ -10,10 +11,11 @@ import torch.distributed as dist
 
 # Follow-up: may need to copy those 2 functions and do refactoring.
 from megatron.training.checkpointing import load_checkpoint as _load_checkpoint_megatron
+from megatron.training.checkpointing import get_checkpoint_name as _get_megatron_checkpoint_name
 from megatron.training.checkpointing import save_checkpoint as _save_checkpoint_megatron
 from megatron.training.global_vars import get_args
 
-from orbit.utils import megatron_bridge_utils
+from orbit.utils import distributed_utils, megatron_bridge_utils
 
 from .low_precision_bootstrap import (
     is_distributed_checkpoint,
@@ -128,6 +130,78 @@ class _ExplicitZeroCheckpointStep(int):
 
     def __bool__(self):
         return True
+
+
+@dataclass(frozen=True)
+class _LegacyMegatronCheckpointPreflight:
+    selected_iteration: int | None
+    checkpoint_dir: Path | None
+    marker: dict | None
+    numeric_zero_state_present: bool = False
+    requires_numeric_zero_restore_proof: bool = False
+    force_model_only: bool = False
+
+
+class _RestoreMethodObserver:
+    """Observe successful state restores without replacing the wrapped object.
+
+    Megatron inspects optimizer attributes and some extensions may inspect its
+    exact type. Patching bound methods on the instance preserves both identity
+    and type, unlike a forwarding proxy.
+    """
+
+    def __init__(self, target, method_names: tuple[str, ...]):
+        self.target = target
+        self.method_names = method_names
+        self.restored_methods: set[str] = set()
+        self._original_instance_attributes: dict[str, tuple[bool, object]] = {}
+
+    def install(self) -> bool:
+        if self.target is None:
+            return False
+        instance_attributes = getattr(self.target, "__dict__", None)
+        if not isinstance(instance_attributes, dict):
+            return False
+
+        try:
+            for method_name in self.method_names:
+                method = getattr(self.target, method_name, None)
+                if not callable(method):
+                    continue
+                had_instance_attribute = method_name in instance_attributes
+                original_instance_attribute = instance_attributes.get(method_name)
+
+                def observed_method(*args, __method=method, __method_name=method_name, **kwargs):
+                    result = __method(*args, **kwargs)
+                    self.restored_methods.add(__method_name)
+                    return result
+
+                setattr(self.target, method_name, observed_method)
+                self._original_instance_attributes[method_name] = (
+                    had_instance_attribute,
+                    original_instance_attribute,
+                )
+        except Exception:
+            self.restore()
+            return False
+        return bool(self._original_instance_attributes)
+
+    def restore(self) -> None:
+        for method_name, (had_instance_attribute, original_instance_attribute) in reversed(
+            tuple(self._original_instance_attributes.items())
+        ):
+            if had_instance_attribute:
+                setattr(self.target, method_name, original_instance_attribute)
+            else:
+                try:
+                    delattr(self.target, method_name)
+                except AttributeError:
+                    pass
+        self._original_instance_attributes.clear()
+
+    @property
+    def restored(self) -> bool:
+        return bool(self.restored_methods)
 
 
 def _bounded_nonnegative_integer(value) -> bool:
@@ -499,12 +573,13 @@ def _optimizer_scheduler_state_was_restored(
 
 
 def _selected_legacy_megatron_checkpoint(args) -> tuple[int | None, Path | None]:
-    """Return the explicitly selected numeric checkpoint and its directory.
+    """Return the explicitly selected checkpoint iteration and directory.
 
     Megatron uses the literal tracker value ``release`` for model bootstrap and
     decimal text (including ``0``) for training checkpoints.  Direct iteration
-    paths and ``--ckpt-step`` carry the same distinction without consulting the
-    root tracker.
+    paths and ``--ckpt-step`` carry the same distinction without consulting
+    the root tracker. Release selections return ``(None, release_directory)``
+    so their marker can still be validated before Megatron mutates the model.
     """
     load_path = Path(args.load).expanduser().resolve(strict=True)
     iteration_match = _ITERATION_DIRECTORY_RE.fullmatch(load_path.name)
@@ -517,7 +592,7 @@ def _selected_legacy_megatron_checkpoint(args) -> tuple[int | None, Path | None]
         return selected_iteration, load_path
 
     if load_path.name == "release":
-        return None, None
+        return None, load_path
 
     if checkpoint_step is not None:
         if not _bounded_nonnegative_integer(checkpoint_step):
@@ -528,7 +603,9 @@ def _selected_legacy_megatron_checkpoint(args) -> tuple[int | None, Path | None]
         tracker_value = (load_path / _MEGATRON_TRACKER_FILE).read_text().strip()
     except OSError:
         return None, None
-    if tracker_value == "release" or not tracker_value.isdigit():
+    if tracker_value == "release":
+        return None, load_path / "release"
+    if not tracker_value.isdigit():
         return None, None
 
     selected_iteration = int(tracker_value)
@@ -537,12 +614,270 @@ def _selected_legacy_megatron_checkpoint(args) -> tuple[int | None, Path | None]
     return selected_iteration, _checkpoint_iteration_dir(load_path, selected_iteration)
 
 
+def _legacy_checkpoint_consensus_group():
+    """Use Orbit's world Gloo group, or the default group in Gloo-only tests."""
+    if not dist.is_initialized() or dist.get_world_size() == 1:
+        return None
+    if distributed_utils.GLOO_GROUP is not None:
+        return distributed_utils.GLOO_GROUP
+    if str(dist.get_backend()).lower().endswith("gloo"):
+        return None
+    raise RuntimeError("legacy Megatron checkpoint preflight requires Orbit's world Gloo process group")
+
+
+def _all_gather_legacy_checkpoint_object(value) -> list:
+    if not dist.is_initialized() or dist.get_world_size() == 1:
+        return [value]
+    group = _legacy_checkpoint_consensus_group()
+    gathered = [None] * dist.get_world_size(group=group)
+    dist.all_gather_object(gathered, value, group=group)
+    return gathered
+
+
+def _coordinated_legacy_checkpoint_call(label: str, fn):
+    value = None
+    local_error = None
+    try:
+        value = fn()
+    except Exception as exc:
+        local_error = f"{type(exc).__name__}: {exc}"
+    errors = _all_gather_legacy_checkpoint_object(local_error)
+    failures = [f"rank {rank}: {error}" for rank, error in enumerate(errors) if error is not None]
+    if failures:
+        raise RuntimeError(f"{label} failed on one or more ranks; " + "; ".join(failures))
+    return value
+
+
+def _legacy_megatron_rank_shard(checkpoint_dir: Path, iteration: int) -> Path | None:
+    """Resolve the legacy torch shard that Megatron will read on this rank."""
+    checkpoint_root = _checkpoint_root(checkpoint_dir)
+    if dist.is_initialized():
+        candidate = Path(_get_megatron_checkpoint_name(str(checkpoint_root), iteration, release=False))
+        return candidate if candidate.is_file() else None
+
+    # Unit tests and single-process inspection run before model-parallel groups
+    # exist. There is only one relevant rank shard in that setting.
+    candidates = sorted(checkpoint_dir.glob("mp_rank_*/model_optim_rng.pt"))
+    return candidates[0] if candidates else None
+
+
+def _legacy_rank_shard_has_training_state(checkpoint_dir: Path, iteration: int) -> bool:
+    """Inspect legacy checkpoint keys without allocating tensor storages."""
+    rank_shard = _legacy_megatron_rank_shard(checkpoint_dir, iteration)
+    if rank_shard is None:
+        logger.warning("Legacy checkpoint %s has no rank shard available for training-state preflight", checkpoint_dir)
+        return False
+
+    try:
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            state_dict = torch.load(rank_shard, map_location="cpu", weights_only=False)
+    except Exception as exc:
+        logger.warning("Could not inspect legacy checkpoint training state at %s: %s", rank_shard, exc)
+        return False
+
+    if type(state_dict) is not dict:
+        return False
+    checkpoint_iteration = state_dict.get("iteration", state_dict.get("total_iters"))
+    scheduler_state = state_dict.get("lr_scheduler", state_dict.get("opt_param_scheduler"))
+    return (
+        checkpoint_iteration == iteration
+        and state_dict.get("optimizer") is not None
+        and scheduler_state is not None
+    )
+
+
+def _local_legacy_megatron_preflight(
+    args,
+    *,
+    load_training_state: bool,
+    expected_role: str | None,
+    optimizer,
+    opt_param_scheduler,
+    skip_load_to_model_and_opt: bool,
+) -> _LegacyMegatronCheckpointPreflight:
+    selected_iteration, checkpoint_dir = _selected_legacy_megatron_checkpoint(args)
+    marker = _read_orbit_training_checkpoint_marker(checkpoint_dir) if checkpoint_dir is not None else None
+
+    if marker is not None and selected_iteration is not None and marker["iteration"] != selected_iteration:
+        raise RuntimeError(
+            f"Orbit training checkpoint iteration mismatch at {checkpoint_dir}: "
+            f"marker={marker['iteration']}, selected={selected_iteration}"
+        )
+
+    explicit_model_only = getattr(args, "finetune", False) or getattr(args, "no_load_optim", False)
+    if marker is not None and selected_iteration is not None and load_training_state:
+        if expected_role is not None and marker["role"] != expected_role:
+            raise RuntimeError(
+                f"Orbit checkpoint role mismatch at {checkpoint_dir}: "
+                f"expected {expected_role}, found {marker['role']}"
+            )
+        if not explicit_model_only and not (
+            marker["optimizer_state_saved"] and marker["scheduler_state_saved"]
+        ):
+            raise RuntimeError(
+                f"Orbit {marker['role']} checkpoint at {checkpoint_dir} was saved without complete "
+                "optimizer/scheduler state and cannot resume training. Use --no-load-optim for an explicit "
+                "model-only warm start, or resume from a checkpoint saved without --no-save-optim."
+            )
+
+    restore_requested = (
+        load_training_state
+        and not explicit_model_only
+        and not skip_load_to_model_and_opt
+        and optimizer is not None
+        and not getattr(optimizer, "is_stub_optimizer", False)
+        and opt_param_scheduler is not None
+    )
+    requires_numeric_zero_restore_proof = selected_iteration == 0 and marker is None and load_training_state
+    numeric_zero_state_present = False
+    if requires_numeric_zero_restore_proof and checkpoint_dir is not None:
+        numeric_zero_state_present = _legacy_rank_shard_has_training_state(checkpoint_dir, selected_iteration)
+
+    return _LegacyMegatronCheckpointPreflight(
+        selected_iteration=selected_iteration,
+        checkpoint_dir=checkpoint_dir,
+        marker=marker,
+        numeric_zero_state_present=numeric_zero_state_present,
+        requires_numeric_zero_restore_proof=requires_numeric_zero_restore_proof,
+        force_model_only=requires_numeric_zero_restore_proof
+        and (not restore_requested or not numeric_zero_state_present),
+    )
+
+
+def _preflight_legacy_megatron_checkpoint(
+    args,
+    *,
+    load_training_state: bool,
+    expected_role: str | None,
+    optimizer,
+    opt_param_scheduler,
+    skip_load_to_model_and_opt: bool,
+) -> _LegacyMegatronCheckpointPreflight:
+    preflight = _coordinated_legacy_checkpoint_call(
+        "legacy Megatron checkpoint preflight",
+        lambda: _local_legacy_megatron_preflight(
+            args,
+            load_training_state=load_training_state,
+            expected_role=expected_role,
+            optimizer=optimizer,
+            opt_param_scheduler=opt_param_scheduler,
+            skip_load_to_model_and_opt=skip_load_to_model_and_opt,
+        ),
+    )
+    marker_summary = tuple(sorted(preflight.marker.items())) if preflight.marker is not None else None
+    selection_summary = (
+        preflight.selected_iteration,
+        str(preflight.checkpoint_dir) if preflight.checkpoint_dir is not None else None,
+        marker_summary,
+        preflight.requires_numeric_zero_restore_proof,
+    )
+    selections = _all_gather_legacy_checkpoint_object(selection_summary)
+    if len(set(selections)) != 1:
+        raise RuntimeError(f"legacy Megatron checkpoint selection differs across ranks: {selections}")
+
+    state_presence = _all_gather_legacy_checkpoint_object(preflight.numeric_zero_state_present)
+    globally_present = all(state_presence)
+    force_model_only_by_rank = _all_gather_legacy_checkpoint_object(preflight.force_model_only)
+    force_model_only = any(force_model_only_by_rank) or (
+        preflight.requires_numeric_zero_restore_proof and not globally_present
+    )
+    return replace(
+        preflight,
+        numeric_zero_state_present=globally_present,
+        force_model_only=force_model_only,
+    )
+
+
+def _load_preflighted_legacy_megatron_checkpoint(
+    args,
+    preflight: _LegacyMegatronCheckpointPreflight,
+    *,
+    ddp_model,
+    optimizer,
+    opt_param_scheduler,
+    checkpointing_context,
+    skip_load_to_model_and_opt: bool,
+):
+    """Load a legacy checkpoint and return whether numeric-zero state was proven."""
+    force_model_only = preflight.force_model_only
+    optimizer_observer = None
+    scheduler_observer = None
+
+    if preflight.requires_numeric_zero_restore_proof and not force_model_only:
+        optimizer_observer = _RestoreMethodObserver(
+            optimizer,
+            ("load_state_dict", "load_state_dict_from_file"),
+        )
+        scheduler_observer = _RestoreMethodObserver(opt_param_scheduler, ("load_state_dict",))
+        local_capability = optimizer_observer.install() and scheduler_observer.install()
+        try:
+            capabilities = _all_gather_legacy_checkpoint_object(local_capability)
+        except Exception:
+            optimizer_observer.restore()
+            scheduler_observer.restore()
+            raise
+        if not all(capabilities):
+            force_model_only = True
+            optimizer_observer.restore()
+            scheduler_observer.restore()
+            logger.warning(
+                "Legacy numeric-zero checkpoint restore methods cannot be observed on every rank; "
+                "using a model-only bootstrap"
+            )
+
+    missing = object()
+    original_no_load_optim = getattr(args, "no_load_optim", missing)
+    if force_model_only:
+        args.no_load_optim = True
+        logger.warning(
+            "Legacy numeric-zero checkpoint at %s lacks globally proven optimizer/scheduler state; "
+            "using a model-only bootstrap",
+            preflight.checkpoint_dir,
+        )
+
+    try:
+        result = _load_checkpoint_megatron(
+            ddp_model=ddp_model,
+            optimizer=optimizer,
+            opt_param_scheduler=opt_param_scheduler,
+            checkpointing_context=checkpointing_context,
+            skip_load_to_model_and_opt=skip_load_to_model_and_opt,
+        )
+    finally:
+        if force_model_only:
+            if original_no_load_optim is missing:
+                delattr(args, "no_load_optim")
+            else:
+                args.no_load_optim = original_no_load_optim
+        if optimizer_observer is not None:
+            optimizer_observer.restore()
+        if scheduler_observer is not None:
+            scheduler_observer.restore()
+
+    numeric_zero_restore_proven = False
+    if preflight.requires_numeric_zero_restore_proof and not force_model_only:
+        local_restore = (optimizer_observer.restored, scheduler_observer.restored)
+        restores = _all_gather_legacy_checkpoint_object(local_restore)
+        if not all(optimizer_restored and scheduler_restored for optimizer_restored, scheduler_restored in restores):
+            raise RuntimeError(
+                "legacy numeric-zero checkpoint loader did not prove optimizer and scheduler restoration on every rank"
+            )
+        numeric_zero_restore_proven = True
+
+    if force_model_only and isinstance(result, tuple) and result:
+        result = (0, *result[1:])
+    return result, numeric_zero_restore_proven
+
+
 def _legacy_megatron_load_restored_training_iteration(
     args,
     result,
     *,
     load_training_state: bool,
-    expected_role: str | None,
+    preflight: _LegacyMegatronCheckpointPreflight,
+    numeric_zero_restore_proven: bool,
 ) -> bool:
     """Exclude release/finetune/model-only legacy loads from resume orchestration."""
     if not load_training_state or getattr(args, "finetune", False) or getattr(args, "no_load_optim", False):
@@ -553,24 +888,14 @@ def _legacy_megatron_load_restored_training_iteration(
     if not _bounded_nonnegative_integer(iteration):
         return False
 
-    selected_iteration, checkpoint_dir = _selected_legacy_megatron_checkpoint(args)
-    if selected_iteration != iteration or checkpoint_dir is None:
+    if preflight.selected_iteration != iteration or preflight.checkpoint_dir is None:
         return False
 
-    # New Orbit saves carry stronger provenance than the legacy numeric
-    # tracker.  When present, require the marker to describe a complete
-    # training checkpoint for the model role being restored.
-    marker = _read_orbit_training_checkpoint_marker(checkpoint_dir)
-    if marker is not None:
-        if marker["iteration"] != iteration:
-            raise RuntimeError(
-                f"Orbit training checkpoint iteration mismatch at {checkpoint_dir}: "
-                f"marker={marker['iteration']}, loaded={iteration}"
-            )
-        if expected_role is not None and marker["role"] != expected_role:
-            return False
-        if not (marker["optimizer_state_saved"] and marker["scheduler_state_saved"]):
-            return False
+    # Markers were validated before Megatron could mutate runtime state. An
+    # unmarked zero is ambiguous with a model bootstrap, so it additionally
+    # requires observed optimizer and scheduler restore calls on every rank.
+    if iteration == 0 and preflight.marker is None:
+        return numeric_zero_restore_proven
 
     return True
 
@@ -651,7 +976,18 @@ def load_checkpoint(
                 is_value_model=is_value_model,
             )
     elif _is_megatron_checkpoint(load_path):
-        result = _load_checkpoint_megatron(
+        expected_role = _model_checkpoint_role(ddp_model)
+        legacy_preflight = _preflight_legacy_megatron_checkpoint(
+            args,
+            load_training_state=load_training_state,
+            expected_role=expected_role,
+            optimizer=optimizer,
+            opt_param_scheduler=opt_param_scheduler,
+            skip_load_to_model_and_opt=skip_load_to_model_and_opt,
+        )
+        result, numeric_zero_restore_proven = _load_preflighted_legacy_megatron_checkpoint(
+            args,
+            legacy_preflight,
             ddp_model=ddp_model,
             optimizer=optimizer,
             opt_param_scheduler=opt_param_scheduler,
@@ -666,7 +1002,8 @@ def load_checkpoint(
             args,
             result,
             load_training_state=load_training_state,
-            expected_role=_model_checkpoint_role(ddp_model),
+            preflight=legacy_preflight,
+            numeric_zero_restore_proven=numeric_zero_restore_proven,
         )
         if args._orbit_training_checkpoint_loaded:
             args._orbit_optimizer_scheduler_state_restored = _optimizer_scheduler_state_was_restored(
