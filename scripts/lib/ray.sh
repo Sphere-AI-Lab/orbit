@@ -453,6 +453,12 @@ cleanup_private_ray() {
     done
     PORT_LOCK_FDS=()
 
+    # Leaf launchers may register a narrow cleanup hook for resources whose
+    # lifetime must cover the full Ray job (for example, a shared run lock).
+    if declare -F orbit_launcher_exit_hook >/dev/null 2>&1; then
+        orbit_launcher_exit_hook || true
+    fi
+
     exit "${exit_code}"
 }
 

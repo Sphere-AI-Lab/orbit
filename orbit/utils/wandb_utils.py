@@ -60,6 +60,11 @@ def init_wandb_primary(args):
         "config": _compute_config_for_logging(args),
     }
 
+    wandb_run_id = getattr(args, "wandb_run_id", None)
+    if wandb_run_id is not None:
+        init_kwargs["id"] = wandb_run_id
+        init_kwargs["resume"] = "allow"
+
     # Configure settings based on offline/online mode
     if offline:
         init_kwargs["settings"] = wandb.Settings(mode="offline")
