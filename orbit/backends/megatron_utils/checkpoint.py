@@ -498,17 +498,81 @@ def _optimizer_scheduler_state_was_restored(
     )
 
 
-def _legacy_megatron_load_restored_training_iteration(args, result, *, load_training_state: bool) -> bool:
+def _selected_legacy_megatron_checkpoint(args) -> tuple[int | None, Path | None]:
+    """Return the explicitly selected numeric checkpoint and its directory.
+
+    Megatron uses the literal tracker value ``release`` for model bootstrap and
+    decimal text (including ``0``) for training checkpoints.  Direct iteration
+    paths and ``--ckpt-step`` carry the same distinction without consulting the
+    root tracker.
+    """
+    load_path = Path(args.load).expanduser().resolve(strict=True)
+    iteration_match = _ITERATION_DIRECTORY_RE.fullmatch(load_path.name)
+    checkpoint_step = getattr(args, "ckpt_step", None)
+
+    if iteration_match is not None:
+        selected_iteration = int(iteration_match.group(1))
+        if checkpoint_step is not None and checkpoint_step != selected_iteration:
+            return None, None
+        return selected_iteration, load_path
+
+    if load_path.name == "release":
+        return None, None
+
+    if checkpoint_step is not None:
+        if not _bounded_nonnegative_integer(checkpoint_step):
+            return None, None
+        return checkpoint_step, _checkpoint_iteration_dir(load_path, checkpoint_step)
+
+    try:
+        tracker_value = (load_path / _MEGATRON_TRACKER_FILE).read_text().strip()
+    except OSError:
+        return None, None
+    if tracker_value == "release" or not tracker_value.isdigit():
+        return None, None
+
+    selected_iteration = int(tracker_value)
+    if not _bounded_nonnegative_integer(selected_iteration):
+        return None, None
+    return selected_iteration, _checkpoint_iteration_dir(load_path, selected_iteration)
+
+
+def _legacy_megatron_load_restored_training_iteration(
+    args,
+    result,
+    *,
+    load_training_state: bool,
+    expected_role: str | None,
+) -> bool:
     """Exclude release/finetune/model-only legacy loads from resume orchestration."""
     if not load_training_state or getattr(args, "finetune", False) or getattr(args, "no_load_optim", False):
         return False
     if not isinstance(result, tuple) or not result:
         return False
     iteration = result[0]
-    # Megatron reports zero for release checkpoints and model initialization.
-    # Treat those as bootstrap provenance; there is no completed rollout to
-    # advance past.
-    return _bounded_nonnegative_integer(iteration) and iteration > 0
+    if not _bounded_nonnegative_integer(iteration):
+        return False
+
+    selected_iteration, checkpoint_dir = _selected_legacy_megatron_checkpoint(args)
+    if selected_iteration != iteration or checkpoint_dir is None:
+        return False
+
+    # New Orbit saves carry stronger provenance than the legacy numeric
+    # tracker.  When present, require the marker to describe a complete
+    # training checkpoint for the model role being restored.
+    marker = _read_orbit_training_checkpoint_marker(checkpoint_dir)
+    if marker is not None:
+        if marker["iteration"] != iteration:
+            raise RuntimeError(
+                f"Orbit training checkpoint iteration mismatch at {checkpoint_dir}: "
+                f"marker={marker['iteration']}, loaded={iteration}"
+            )
+        if expected_role is not None and marker["role"] != expected_role:
+            return False
+        if not (marker["optimizer_state_saved"] and marker["scheduler_state_saved"]):
+            return False
+
+    return True
 
 
 def load_checkpoint(
@@ -602,6 +666,7 @@ def load_checkpoint(
             args,
             result,
             load_training_state=load_training_state,
+            expected_role=_model_checkpoint_role(ddp_model),
         )
         if args._orbit_training_checkpoint_loaded:
             args._orbit_optimizer_scheduler_state_restored = _optimizer_scheduler_state_was_restored(

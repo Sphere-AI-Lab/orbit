@@ -22,6 +22,11 @@ def test_training_checkpoint_starts_after_loaded_iteration():
     assert actor_mod._start_rollout_id_from_checkpoint(args, loaded_iteration=7) == 8
 
 
+def test_training_checkpoint_at_iteration_zero_starts_at_rollout_one():
+    args = argparse.Namespace(_orbit_training_checkpoint_loaded=True)
+    assert actor_mod._start_rollout_id_from_checkpoint(args, loaded_iteration=0) == 1
+
+
 def test_all_ranks_must_agree_on_start_rollout_id():
     assert _single_start_rollout_id("actor", [4, 4]) == 4
     with pytest.raises(RuntimeError, match="different rollout ids"):

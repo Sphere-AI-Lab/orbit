@@ -142,21 +142,23 @@ def test_explicit_model_only_load_ignores_training_marker(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize(
-    ("loaded_iteration", "load_training_state", "expected_training_resume"),
+    ("tracker_value", "loaded_iteration", "load_training_state", "expected_training_resume"),
     [
-        (0, True, False),  # Megatron release/base load
-        (7, False, False),  # reference or other explicit model-only load
-        (7, True, True),
+        ("release", 0, True, False),
+        ("0", 0, True, True),
+        ("7", 7, False, False),  # reference or other explicit model-only load
+        ("7", 7, True, True),
     ],
 )
 def test_legacy_megatron_resume_flag_requires_training_iteration_intent(
     tmp_path,
     monkeypatch,
+    tracker_value,
     loaded_iteration,
     load_training_state,
     expected_training_resume,
 ):
-    (tmp_path / "latest_checkpointed_iteration.txt").write_text("release" if loaded_iteration == 0 else "7")
+    (tmp_path / "latest_checkpointed_iteration.txt").write_text(tracker_value)
     args = _args(tmp_path)
     calls = []
     monkeypatch.setattr(checkpoint_module, "get_args", lambda: args)
@@ -182,6 +184,82 @@ def test_legacy_megatron_resume_flag_requires_training_iteration_intent(
     assert len(calls) == 1
     assert args._orbit_training_checkpoint_loaded is expected_training_resume
     assert args._orbit_optimizer_scheduler_state_restored is expected_training_resume
+
+
+@pytest.mark.parametrize(
+    ("marker_role", "optimizer_state_saved", "scheduler_state_saved", "expected_training_resume"),
+    [
+        ("actor", True, True, True),
+        ("actor", False, True, False),
+        ("critic", True, True, False),
+    ],
+)
+def test_legacy_megatron_orbit_marker_controls_numeric_zero_resume(
+    tmp_path,
+    monkeypatch,
+    marker_role,
+    optimizer_state_saved,
+    scheduler_state_saved,
+    expected_training_resume,
+):
+    (tmp_path / "latest_checkpointed_iteration.txt").write_text("0")
+    checkpoint_module._write_orbit_training_checkpoint_marker(
+        tmp_path,
+        0,
+        marker_role,
+        optimizer_state_saved=optimizer_state_saved,
+        scheduler_state_saved=scheduler_state_saved,
+    )
+    args = _args(tmp_path)
+    monkeypatch.setattr(checkpoint_module, "get_args", lambda: args)
+    monkeypatch.setattr(checkpoint_module, "is_distributed_checkpoint", lambda _path: False)
+    monkeypatch.setattr(checkpoint_module, "_is_megatron_checkpoint", lambda _path: True)
+    monkeypatch.setattr(checkpoint_module, "_load_checkpoint_megatron", lambda **_kwargs: (0, 0))
+    monkeypatch.setattr(checkpoint_module, "is_peft_enabled", lambda _args: False)
+
+    result = checkpoint_module.load_checkpoint(
+        _model("actor"),
+        object(),
+        object(),
+        checkpointing_context={},
+        skip_load_to_model_and_opt=False,
+        load_training_state=True,
+    )
+
+    assert result == (0, 0)
+    assert args._orbit_training_checkpoint_loaded is expected_training_resume
+    assert args._orbit_optimizer_scheduler_state_restored is expected_training_resume
+
+
+def test_legacy_megatron_release_marker_remains_model_bootstrap(tmp_path, monkeypatch):
+    (tmp_path / "latest_checkpointed_iteration.txt").write_text("release")
+    checkpoint_module._write_orbit_training_checkpoint_marker(
+        tmp_path,
+        0,
+        "actor",
+        optimizer_state_saved=True,
+        scheduler_state_saved=True,
+        release=True,
+    )
+    args = _args(tmp_path)
+    monkeypatch.setattr(checkpoint_module, "get_args", lambda: args)
+    monkeypatch.setattr(checkpoint_module, "is_distributed_checkpoint", lambda _path: False)
+    monkeypatch.setattr(checkpoint_module, "_is_megatron_checkpoint", lambda _path: True)
+    monkeypatch.setattr(checkpoint_module, "_load_checkpoint_megatron", lambda **_kwargs: (0, 0))
+    monkeypatch.setattr(checkpoint_module, "is_peft_enabled", lambda _args: False)
+
+    result = checkpoint_module.load_checkpoint(
+        _model("actor"),
+        object(),
+        object(),
+        checkpointing_context={},
+        skip_load_to_model_and_opt=False,
+        load_training_state=True,
+    )
+
+    assert result == (0, 0)
+    assert args._orbit_training_checkpoint_loaded is False
+    assert args._orbit_optimizer_scheduler_state_restored is False
 
 
 def test_scalar_head_model_only_critic_checkpoint_is_not_treated_as_resume(tmp_path, monkeypatch):
