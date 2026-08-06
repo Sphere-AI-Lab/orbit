@@ -28,11 +28,15 @@ from orbit.utils import memory_utils
 
 
 def _patch_cuda(monkeypatch, stats):
-    """A plausible 80 GB device, so only the stats dict varies between tests."""
+    """A plausible 80 GB device, so only the stats dict varies between tests.
+
+    `allocated_bytes.all.current` and `reserved_bytes.all.current` live in
+    `stats` itself, not behind separate `torch.cuda.memory_allocated`/
+    `memory_reserved` patches: `available_memory()` reads all four fields off
+    one `memory_stats()` snapshot, the same dict this fixture supplies.
+    """
     monkeypatch.setattr(torch.cuda, "current_device", lambda: 0)
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (13 * 1024**3, 80 * 1024**3))
-    monkeypatch.setattr(torch.cuda, "memory_allocated", lambda device: 1024**3 // 8)
-    monkeypatch.setattr(torch.cuda, "memory_reserved", lambda device: 50 * 1024**3)
     monkeypatch.setattr(torch.cuda, "memory_stats", lambda device: stats)
 
 
@@ -40,7 +44,10 @@ def test_reports_the_non_releasable_bytes_empty_cache_cannot_return(monkeypatch)
     _patch_cuda(
         monkeypatch,
         {
+            "allocated_bytes.all.current": 1024**3 // 8,
+            "reserved_bytes.all.current": 50 * 1024**3,
             "inactive_split_bytes.all.current": 49 * 1024**3,
+            "active_bytes.all.current": 1024**3 // 8,
             "segment.all.current": 812,
             "num_alloc_retries": 17,
         },
@@ -54,25 +61,58 @@ def test_reports_the_non_releasable_bytes_empty_cache_cannot_return(monkeypatch)
 
 
 def test_the_existing_fields_are_not_disturbed(monkeypatch):
-    _patch_cuda(monkeypatch, {})
+    _patch_cuda(
+        monkeypatch,
+        {
+            "allocated_bytes.all.current": 1024**3 // 8,
+            "reserved_bytes.all.current": 50 * 1024**3,
+        },
+    )
 
     info = memory_utils.available_memory()
 
+    assert info["gpu"] == "0"
     assert info["total_GB"] == 80.0
     assert info["free_GB"] == 13.0
     assert info["used_GB"] == 67.0
+    assert info["allocated_GB"] == 0.12
     assert info["reserved_GB"] == 50.0
 
 
-def test_survives_a_device_the_allocator_has_never_served(monkeypatch):
-    """`print_memory` runs during setup, before the first allocation, and
-    `memory_stats()` returns {} for such a device. A bare subscript would raise
-    KeyError at startup, so every lookup must default."""
+def test_active_bytes_states_h2_numerically(monkeypatch):
+    """active_bytes counts blocks allocated OR still pinned by a stream, so
+    active_GB - allocated_GB is the stream-pending term H2 needs -- the same
+    role inactive_split_GB plays for H1."""
+    _patch_cuda(
+        monkeypatch,
+        {
+            "allocated_bytes.all.current": 1024**3 // 8,
+            "reserved_bytes.all.current": 50 * 1024**3,
+            "active_bytes.all.current": 40 * 1024**3,
+        },
+    )
+
+    info = memory_utils.available_memory()
+
+    assert info["active_GB"] == 40.0
+    assert round(info["active_GB"] - info["allocated_GB"], 2) == 39.88
+
+
+def test_unknown_stat_keys_default_to_zero_instead_of_raising(monkeypatch):
+    """`.get(key, 0)` guards against allocator key names drifting across torch
+    versions, not against an empty `memory_stats()` dict -- by the time
+    `available_memory()` reaches `memory_stats()`, `current_device()` has
+    already forced CUDA's lazy init, so a real device never yields `{}`. A
+    dict missing a key `available_memory()` queries (e.g. a renamed stat on a
+    newer/older torch) must still default rather than raise."""
     _patch_cuda(monkeypatch, {})
 
     info = memory_utils.available_memory()
 
+    assert info["allocated_GB"] == 0.0
+    assert info["reserved_GB"] == 0.0
     assert info["inactive_split_GB"] == 0.0
+    assert info["active_GB"] == 0.0
     assert info["segments"] == 0
     assert info["alloc_retries"] == 0
 
