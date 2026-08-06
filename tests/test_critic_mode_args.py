@@ -132,6 +132,13 @@ def test_critic_only_warmup_rejects_reward_level_kl():
         _validate_ppo_args(args)
 
 
+def test_critic_only_warmup_rejects_negative_steps():
+    args = _base_args(num_critic_only_steps=-1)
+    _apply_critic_args(args)
+    with pytest.raises(ValueError, match="must be nonnegative"):
+        _validate_ppo_args(args)
+
+
 def test_critic_only_warmup_allows_zero_reward_level_kl():
     args = _base_args(num_critic_only_steps=1, kl_coef=0.0)
     _apply_critic_args(args)
