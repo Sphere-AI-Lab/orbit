@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -56,10 +57,16 @@ def test_distributed_critic_resume_uses_full_megatron_loader(monkeypatch, tmp_pa
     monkeypatch.setattr(checkpoint_mod, "get_args", lambda: args)
     monkeypatch.setattr(checkpoint_mod, "validate_low_precision_bootstrap_args", lambda _args: None)
     monkeypatch.setattr(checkpoint_mod, "is_distributed_checkpoint", lambda _path: True)
+    monkeypatch.setattr(checkpoint_mod, "_resolve_selected_distributed_checkpoint", lambda _args: tmp_path)
     monkeypatch.setattr(
         checkpoint_mod,
-        "_load_checkpoint_megatron",
-        lambda **kwargs: calls.append("megatron") or (6, 0),
+        "_select_megatron_training_checkpoint",
+        lambda _args, expected_role, checkpoint_dir: checkpoint_dir,
+    )
+    monkeypatch.setattr(
+        checkpoint_mod,
+        "_load_selected_megatron_training_checkpoint",
+        lambda *_args, **_kwargs: calls.append("megatron") or (6, 0),
     )
     monkeypatch.setattr(
         checkpoint_mod,
@@ -69,7 +76,7 @@ def test_distributed_critic_resume_uses_full_megatron_loader(monkeypatch, tmp_pa
     monkeypatch.setattr(checkpoint_mod, "is_peft_enabled", lambda _args: False)
 
     result = checkpoint_mod.load_checkpoint(
-        [],
+        [SimpleNamespace(role="critic")],
         object(),
         object(),
         checkpointing_context={},

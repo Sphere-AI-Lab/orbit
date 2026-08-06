@@ -180,6 +180,7 @@ def test_normal_precision_adapter_load_syncs_main_params_only_without_training_s
 
     monkeypatch.setattr(checkpoint_mod, "get_args", lambda: args)
     monkeypatch.setattr(checkpoint_mod, "is_distributed_checkpoint", lambda _path: True)
+    monkeypatch.setattr(checkpoint_mod, "_resolve_selected_distributed_checkpoint", lambda _args: tmp_path)
     monkeypatch.setattr(checkpoint_mod, "_load_checkpoint_dist", lambda **_kwargs: (0, 0))
     monkeypatch.setattr(checkpoint_mod, "is_peft_enabled", lambda _args: True)
     monkeypatch.setattr(checkpoint_mod, "is_peft_model", lambda _model: True, raising=False)
