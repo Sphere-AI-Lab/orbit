@@ -113,6 +113,20 @@ def _validate_train_offload_role(args: Namespace, role: str) -> None:
         )
 
 
+def _start_rollout_id_from_checkpoint(args: Namespace, loaded_iteration: int) -> int:
+    """Translate checkpoint iteration into the next rollout id.
+
+    Bridge startup commonly loads a model-only HF/distributed base checkpoint,
+    whose synthetic iteration is zero.  That is initialization, not an Orbit
+    training resume, and must start at rollout zero.  The checkpoint loader sets
+    ``_orbit_training_checkpoint_loaded`` only when it restored actual training
+    state (a Megatron actor/critic checkpoint or PEFT training sidecar).
+    """
+    if getattr(args, "_orbit_training_checkpoint_loaded", False):
+        return loaded_iteration + 1
+    return 0
+
+
 class MegatronTrainRayActor(TrainRayActor):
     @with_defer(lambda: Timer().start("train_wait"))
     def init(
@@ -181,6 +195,7 @@ class MegatronTrainRayActor(TrainRayActor):
         (self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id) = initialize_model_and_optimizer(
             args, role
         )
+        start_rollout_id = _start_rollout_id_from_checkpoint(self.args, loaded_rollout_id)
 
         if role != "critic" and getattr(self.args, "use_rollout_routing_replay", False):
             from orbit.backends.megatron_utils.replay_utils import wire_routing_replay_to_models
@@ -207,7 +222,7 @@ class MegatronTrainRayActor(TrainRayActor):
         if role == "critic":
             if self.args.offload_train:
                 self.sleep()
-            return
+            return start_rollout_id
 
         self.critic_model = None
         self.critic_optimizer = None
@@ -218,8 +233,6 @@ class MegatronTrainRayActor(TrainRayActor):
                 self.critic_optimizer,
                 self.critic_opt_param_scheduler,
             ) = build_critic_instance(self.args, self.model, expected_iteration=loaded_rollout_id)
-
-        start_rollout_id = loaded_rollout_id + 1
 
         if uses_adapter_state(self.args):
 

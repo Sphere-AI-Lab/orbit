@@ -57,11 +57,25 @@ _ray_advantage_estimator() {
     printf 'grpo\n'
 }
 
+_ray_critic_mode() {
+    if [[ -n "${CRITIC_MODE:-}" ]]; then
+        printf '%s\n' "${CRITIC_MODE}"
+        return 0
+    fi
+    local mode
+    mode="$(_ray_array_value_after_any --critic-mode CKPT_ARGS ROLLOUT_ARGS OPTIMIZER_ARGS RL_ARGS LOSS_ARGS WANDB_ARGS PERF_ARGS EVAL_ARGS SGLANG_ARGS MISC_ARGS DEBUG_ARGS PEFT_ARGS COLOCATE_ARGS || true)"
+    printf '%s\n' "${mode:-full}"
+}
+
 _ray_critic_num_gpus() {
     local actor_gpus="$1"
     local estimator
     estimator="$(_ray_advantage_estimator)"
     if [[ "${estimator}" != "ppo" ]]; then
+        printf '0\n'
+        return 0
+    fi
+    if [[ "$(_ray_critic_mode)" == "adapter" ]]; then
         printf '0\n'
         return 0
     fi

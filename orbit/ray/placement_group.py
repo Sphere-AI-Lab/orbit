@@ -170,6 +170,15 @@ def allocate_train_group(
     )
 
 
+def _single_start_rollout_id(role: str, start_rollout_ids: list[int]) -> int:
+    if not start_rollout_ids:
+        raise RuntimeError(f"{role} initialization returned no rollout ids")
+    unique_ids = set(start_rollout_ids)
+    if len(unique_ids) != 1:
+        raise RuntimeError(f"{role} ranks resumed at different rollout ids: {sorted(unique_ids)}")
+    return start_rollout_ids[0]
+
+
 async def create_training_models(args, pgs, rollout_manager):
     actor_model = allocate_train_group(
         args=args,
@@ -193,14 +202,17 @@ async def create_training_models(args, pgs, rollout_manager):
     else:
         critic_model = None
 
-    start_rollout_ids = await actor_model.init()
-
-    assert len(set(start_rollout_ids)) == 1
+    actor_start_rollout_id = _single_start_rollout_id("actor", await actor_model.init())
     if args.start_rollout_id is None:
-        args.start_rollout_id = start_rollout_ids[0]
+        args.start_rollout_id = actor_start_rollout_id
 
     if uses_separate_critic(args):
-        await critic_init_task
+        critic_start_rollout_id = _single_start_rollout_id("critic", await critic_init_task)
+        if actor_start_rollout_id != critic_start_rollout_id:
+            raise RuntimeError(
+                "actor and critic checkpoints must resume at the same rollout id; "
+                f"actor={actor_start_rollout_id}, critic={critic_start_rollout_id}"
+            )
         await actor_model.connect(critic_model)
 
     await actor_model.set_rollout_manager(rollout_manager)

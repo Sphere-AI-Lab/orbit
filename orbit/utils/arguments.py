@@ -3437,6 +3437,27 @@ def _apply_critic_args(args) -> None:
 def _validate_ppo_args(args) -> None:
     if not getattr(args, "use_critic", False):
         return
+
+    if getattr(args, "num_critic_only_steps", 0) < 0:
+        raise ValueError("--num-critic-only-steps must be nonnegative.")
+
+    if getattr(args, "num_critic_only_steps", 0) > 0 and getattr(args, "kl_coef", 0.0) != 0:
+        raise ValueError(
+            "--num-critic-only-steps is incompatible with nonzero --kl-coef: "
+            "critic-only rollouts do not run the actor/reference forwards required "
+            "for reward-level KL shaping. Set --kl-coef 0 or disable critic-only warmup."
+        )
+
+    if uses_separate_critic(args):
+        actor_world_size = args.actor_num_nodes * args.actor_num_gpus_per_node
+        critic_world_size = args.critic_num_nodes * args.critic_num_gpus_per_node
+        if actor_world_size != critic_world_size:
+            raise ValueError(
+                "Separate-critic PPO requires equal actor and critic worker counts for "
+                "one-to-one data synchronization; "
+                f"got actor={actor_world_size} and critic={critic_world_size}."
+            )
+
     if getattr(args, "offload_train", False):
         raise ValueError(
             "--advantage-estimator ppo is incompatible with --offload-train in Orbit's "
@@ -3542,7 +3563,6 @@ def _common_orbit_validate_args(args):
             args.load = resolve_bridge_load_path(args, hf_config=hf_config)
         if hf_config is not None:
             validate_low_precision_bootstrap_args(args, hf_config=hf_config)
-        args.start_rollout_id = 0
     else:
         if (
             args.load is None

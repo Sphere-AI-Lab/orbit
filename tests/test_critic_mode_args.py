@@ -4,6 +4,7 @@ import pytest
 
 from orbit.utils.arguments import (
     _apply_critic_args,
+    _validate_ppo_args,
     uses_adapter_critic,
     uses_separate_critic,
 )
@@ -24,6 +25,9 @@ def _base_args(**overrides):
         peft_method="lora",
         train_backend="megatron",
         keep_old_actor=False,
+        num_critic_only_steps=0,
+        kl_coef=0.0,
+        offload_train=False,
     )
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -95,3 +99,34 @@ def test_adapter_mode_rejects_routing_replay():
     args = _base_args(critic_mode="adapter", use_rollout_routing_replay=True)
     with pytest.raises(ValueError, match="routing-replay"):
         _apply_critic_args(args)
+
+
+def test_separate_critic_requires_equal_worker_counts():
+    args = _base_args(critic_num_gpus_per_node=2, critic_num_nodes=1)
+    _apply_critic_args(args)
+    with pytest.raises(ValueError, match="equal actor and critic worker counts"):
+        _validate_ppo_args(args)
+
+
+def test_separate_critic_accepts_equal_total_worker_counts():
+    args = _base_args(
+        actor_num_gpus_per_node=2,
+        actor_num_nodes=2,
+        critic_num_gpus_per_node=4,
+        critic_num_nodes=1,
+    )
+    _apply_critic_args(args)
+    _validate_ppo_args(args)
+
+
+def test_critic_only_warmup_rejects_reward_level_kl():
+    args = _base_args(num_critic_only_steps=1, kl_coef=0.1)
+    _apply_critic_args(args)
+    with pytest.raises(ValueError, match="critic-only rollouts"):
+        _validate_ppo_args(args)
+
+
+def test_critic_only_warmup_allows_zero_reward_level_kl():
+    args = _base_args(num_critic_only_steps=1, kl_coef=0.0)
+    _apply_critic_args(args)
+    _validate_ppo_args(args)

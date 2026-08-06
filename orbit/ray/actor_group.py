@@ -145,9 +145,14 @@ class RayTrainGroup:
         await self._broadcast("clear_memory")
 
     async def connect(self, critic_group):
+        if len(self._actor_handles) != len(critic_group._actor_handles):
+            raise RuntimeError(
+                "actor and critic groups must have equal worker counts; "
+                f"actor={len(self._actor_handles)}, critic={len(critic_group._actor_handles)}"
+            )
         refs = [
             actor.connect_actor_critic.remote(critic)
-            for actor, critic in zip(self._actor_handles, critic_group._actor_handles, strict=False)
+            for actor, critic in zip(self._actor_handles, critic_group._actor_handles, strict=True)
         ]
         await asyncio.gather(*refs)
 

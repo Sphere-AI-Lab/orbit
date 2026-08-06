@@ -110,25 +110,40 @@ def load_checkpoint(
     skip_load_to_model_and_opt,
     *,
     is_value_model: bool = False,
+    load_training_state: bool = False,
 ):
     # ref: how megatron `load_checkpoint` gets directory
     args = get_args()
     if getattr(args, "megatron_to_hf_mode", None) == "bridge":
         validate_low_precision_bootstrap_args(args)
     load_path = args.load
+    # Consumers use this to distinguish a model-only bridge/bootstrap load from
+    # a real Orbit training resume.  A PEFT sidecar with an iteration also flips
+    # it below after the adapter training state is restored.
+    args._orbit_training_checkpoint_loaded = False
 
     assert Path(load_path).exists() and _is_dir_nonempty(
         load_path
     ), f"{args.load=} does not exist or is an empty directory. Did you specify the wrong folder?"
 
     if is_distributed_checkpoint(load_path):
-        result = _load_checkpoint_dist(
-            ddp_model=ddp_model,
-            optimizer=optimizer,
-            args=args,
-            load_path=load_path,
-            is_value_model=is_value_model,
-        )
+        if load_training_state:
+            result = _load_checkpoint_megatron(
+                ddp_model=ddp_model,
+                optimizer=optimizer,
+                opt_param_scheduler=opt_param_scheduler,
+                checkpointing_context=checkpointing_context,
+                skip_load_to_model_and_opt=skip_load_to_model_and_opt,
+            )
+            args._orbit_training_checkpoint_loaded = True
+        else:
+            result = _load_checkpoint_dist(
+                ddp_model=ddp_model,
+                optimizer=optimizer,
+                args=args,
+                load_path=load_path,
+                is_value_model=is_value_model,
+            )
     elif _is_megatron_checkpoint(load_path):
         result = _load_checkpoint_megatron(
             ddp_model=ddp_model,
@@ -137,6 +152,7 @@ def load_checkpoint(
             checkpointing_context=checkpointing_context,
             skip_load_to_model_and_opt=skip_load_to_model_and_opt,
         )
+        args._orbit_training_checkpoint_loaded = True
     else:
         result = _load_checkpoint_hf(
             ddp_model=ddp_model,
@@ -146,7 +162,7 @@ def load_checkpoint(
         )
 
     # Load PEFT adapter weights if available
-    if is_peft_enabled(args):
+    if is_peft_enabled(args) and is_peft_model(ddp_model):
         adapter_path = (
             getattr(args, "peft_adapter_path", None)
             or getattr(args, "lora_adapter_path", None)
@@ -167,6 +183,7 @@ def load_checkpoint(
                 args._peft_resume_adapter_dir = str(adapter_path)
                 if iteration is not None:
                     result = (iteration, result[1])
+                    args._orbit_training_checkpoint_loaded = True
             else:
                 logger.warning(
                     f"PEFT is enabled and adapter_path={adapter_path} was specified, "

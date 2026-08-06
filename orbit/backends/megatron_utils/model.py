@@ -979,6 +979,7 @@ def initialize_model_and_optimizer(
                 checkpointing_context={},
                 skip_load_to_model_and_opt=False,
                 is_value_model=reinit_critic_output_layer,
+                load_training_state=role == "critic" and not reinit_critic_output_layer,
             )
         else:
             iteration = 0
@@ -1003,6 +1004,7 @@ def initialize_model_and_optimizer(
                 checkpointing_context={},
                 skip_load_to_model_and_opt=False,
                 is_value_model=reinit_critic_output_layer,
+                load_training_state=role == "critic" and not reinit_critic_output_layer,
             )
         else:
             iteration = 0
