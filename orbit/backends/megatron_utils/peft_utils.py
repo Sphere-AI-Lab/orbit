@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import stat
+import tempfile
 from argparse import Namespace
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -252,27 +254,195 @@ def _optimizer_parameter_state_path(adapter_dir: str | Path, rank: int | None = 
 
 
 @dataclass(frozen=True)
+class _RegularFileFingerprint:
+    """Identity and mutation-sensitive metadata for one regular file."""
+
+    dev: int
+    ino: int
+    mode: int
+    size: int
+    mtime_ns: int
+    ctime_ns: int
+
+
+@dataclass(frozen=True)
+class _CheckpointFileBinding:
+    """An absolute checkpoint path bound to the exact file seen in preflight."""
+
+    path: str
+    fingerprint: _RegularFileFingerprint
+
+
+def _absolute_checkpoint_path(path: str | Path) -> Path:
+    """Return an absolute lexical path without resolving its final symlink."""
+    return Path(os.path.abspath(os.fspath(Path(path).expanduser())))
+
+
+def _regular_file_fingerprint(stat_result: os.stat_result) -> _RegularFileFingerprint:
+    if not stat.S_ISREG(stat_result.st_mode):
+        raise RuntimeError("checkpoint path is not a regular file")
+    return _RegularFileFingerprint(
+        dev=stat_result.st_dev,
+        ino=stat_result.st_ino,
+        mode=stat_result.st_mode,
+        size=stat_result.st_size,
+        mtime_ns=stat_result.st_mtime_ns,
+        ctime_ns=stat_result.st_ctime_ns,
+    )
+
+
+def _open_checkpoint_file(path: Path):
+    """Open without blocking on a concurrently substituted FIFO/device."""
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+    fd = os.open(path, flags)
+    try:
+        return os.fdopen(fd, "rb")
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _capture_checkpoint_file_binding(path: str | Path) -> _CheckpointFileBinding | None:
+    """Capture a stable regular-file identity, or ``None`` for a missing path.
+
+    The descriptor and final pathname are compared so a concurrent rename
+    cannot make preflight bind a different inode from the one it opened.
+    """
+    path = _absolute_checkpoint_path(path)
+    try:
+        checkpoint_file = _open_checkpoint_file(path)
+    except FileNotFoundError:
+        try:
+            path.stat()
+        except FileNotFoundError:
+            return None
+        raise RuntimeError(f"checkpoint path changed while capturing preflight: {path}") from None
+
+    with checkpoint_file:
+        before = _regular_file_fingerprint(os.fstat(checkpoint_file.fileno()))
+        after = _regular_file_fingerprint(os.fstat(checkpoint_file.fileno()))
+        try:
+            final = _regular_file_fingerprint(path.stat())
+        except FileNotFoundError as exc:
+            raise RuntimeError(f"checkpoint file disappeared while capturing preflight: {path}") from exc
+    if before != after or before != final:
+        raise RuntimeError(f"checkpoint file changed while capturing preflight: {path}")
+    return _CheckpointFileBinding(path=str(path), fingerprint=before)
+
+
+def _verify_checkpoint_file_binding(
+    path: str | Path,
+    binding: _CheckpointFileBinding | None,
+) -> None:
+    """Verify that ``path`` still denotes the exact preflight file (or absence)."""
+    path = _absolute_checkpoint_path(path)
+    if binding is None:
+        try:
+            path.stat()
+        except FileNotFoundError:
+            return
+        raise RuntimeError(f"checkpoint file appeared after preflight: {path}")
+
+    if str(path) != binding.path:
+        raise RuntimeError(f"checkpoint binding was for {binding.path}, not {path}")
+    try:
+        checkpoint_file = _open_checkpoint_file(path)
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"checkpoint file disappeared after preflight: {path}") from exc
+    with checkpoint_file:
+        before = _regular_file_fingerprint(os.fstat(checkpoint_file.fileno()))
+        after = _regular_file_fingerprint(os.fstat(checkpoint_file.fileno()))
+        try:
+            final = _regular_file_fingerprint(path.stat())
+        except FileNotFoundError as exc:
+            raise RuntimeError(f"checkpoint file disappeared after preflight: {path}") from exc
+    if before != binding.fingerprint or after != binding.fingerprint or final != binding.fingerprint:
+        raise RuntimeError(f"checkpoint file changed after preflight: {path}")
+
+
+def _load_bound_torch_checkpoint(
+    path: str | Path,
+    binding: _CheckpointFileBinding | None,
+    *,
+    map_location: str | torch.device = "cpu",
+    weights_only: bool,
+) -> Any:
+    """Load from the bound descriptor and reject mutation or path replacement.
+
+    ``torch.load`` never reopens the pathname. Descriptor metadata is checked
+    both before and after deserialization, followed by a pathname check, so
+    truncation, in-place writes, and rename-based replacement are detected.
+    """
+    path = _absolute_checkpoint_path(path)
+    if binding is None:
+        raise RuntimeError(f"checkpoint file was absent during preflight: {path}")
+    if str(path) != binding.path:
+        raise RuntimeError(f"checkpoint binding was for {binding.path}, not {path}")
+    try:
+        checkpoint_file = _open_checkpoint_file(path)
+    except FileNotFoundError as exc:
+        raise RuntimeError(f"checkpoint file disappeared after preflight: {path}") from exc
+    with checkpoint_file:
+        before = _regular_file_fingerprint(os.fstat(checkpoint_file.fileno()))
+        if before != binding.fingerprint:
+            raise RuntimeError(f"checkpoint file changed after preflight: {path}")
+        payload = torch.load(checkpoint_file, map_location=map_location, weights_only=weights_only)
+        after = _regular_file_fingerprint(os.fstat(checkpoint_file.fileno()))
+        try:
+            final = _regular_file_fingerprint(path.stat())
+        except FileNotFoundError as exc:
+            raise RuntimeError(f"checkpoint file disappeared after preflight: {path}") from exc
+    if after != binding.fingerprint or final != binding.fingerprint:
+        raise RuntimeError(f"checkpoint file changed while it was being loaded: {path}")
+    return payload
+
+
+@dataclass(frozen=True)
 class PeftCheckpointPreflight:
     adapter_dir: str
     native_shards_present: bool
     training_state_present: bool
+    native_shard_binding: _CheckpointFileBinding | None
+    training_state_binding: _CheckpointFileBinding | None
+    optimizer_parameter_state_binding: _CheckpointFileBinding | None
 
 
 def preflight_peft_adapter_checkpoint(adapter_path: str | Path) -> PeftCheckpointPreflight:
-    """Reach world consensus on rank-local native and training-state files."""
-    adapter_dir = Path(adapter_path).expanduser().resolve(strict=False)
-    if dist.is_initialized():
-        tp_rank = mpu.get_tensor_model_parallel_rank()
-        pp_rank = mpu.get_pipeline_model_parallel_rank()
-    else:
-        tp_rank = pp_rank = 0
-    native_path = adapter_dir / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt"
-    local_presence = (str(adapter_dir), native_path.is_file(), _training_state_path(adapter_dir).is_file())
+    """Bind rank-local files and reach consensus on required-file presence."""
+    adapter_dir = _coordinated_checkpoint_call(
+        "PEFT checkpoint path resolution",
+        lambda: Path(adapter_path).expanduser().resolve(strict=False),
+    )
+
+    def capture_local_bindings():
+        if dist.is_initialized():
+            tp_rank = mpu.get_tensor_model_parallel_rank()
+            pp_rank = mpu.get_pipeline_model_parallel_rank()
+        else:
+            tp_rank = pp_rank = 0
+        native_path = adapter_dir / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt"
+        return (
+            _capture_checkpoint_file_binding(native_path),
+            _capture_checkpoint_file_binding(_training_state_path(adapter_dir)),
+            _capture_checkpoint_file_binding(_optimizer_parameter_state_path(adapter_dir)),
+        )
+
+    native_binding, training_binding, optimizer_parameter_binding = _coordinated_checkpoint_call(
+        "PEFT checkpoint snapshot capture",
+        capture_local_bindings,
+    )
+    local_presence = (
+        str(adapter_dir),
+        native_binding is not None,
+        training_binding is not None,
+        optimizer_parameter_binding is not None,
+    )
     presence_by_rank = _all_gather_checkpoint_object(local_presence)
 
     adapter_dirs = [presence[0] for presence in presence_by_rank]
     native_presence = [presence[1] for presence in presence_by_rank]
     training_presence = [presence[2] for presence in presence_by_rank]
+    optimizer_parameter_presence = [presence[3] for presence in presence_by_rank]
     inconsistencies = []
     if len(set(adapter_dirs)) != 1:
         inconsistencies.append(f"adapter paths differ across ranks: {adapter_dirs}")
@@ -288,6 +458,11 @@ def preflight_peft_adapter_checkpoint(adapter_path: str | Path) -> PeftCheckpoin
             f"{[rank for rank, present in enumerate(training_presence) if present]} and missing on ranks "
             f"{[rank for rank, present in enumerate(training_presence) if not present]}"
         )
+    elif not training_presence[0] and any(optimizer_parameter_presence):
+        inconsistencies.append(
+            "optimizer parameter-state sidecars are present without training state on ranks "
+            f"{[rank for rank, present in enumerate(optimizer_parameter_presence) if present]}"
+        )
     if inconsistencies:
         raise RuntimeError("PEFT checkpoint preflight found inconsistent rank-local files: " + "; ".join(inconsistencies))
 
@@ -295,12 +470,38 @@ def preflight_peft_adapter_checkpoint(adapter_path: str | Path) -> PeftCheckpoin
         adapter_dir=str(adapter_dir),
         native_shards_present=native_presence[0],
         training_state_present=training_presence[0],
+        native_shard_binding=native_binding,
+        training_state_binding=training_binding,
+        optimizer_parameter_state_binding=optimizer_parameter_binding,
     )
 
 
 def _validate_preflight_adapter_dir(adapter_dir: str | Path, preflight: PeftCheckpointPreflight) -> None:
-    normalized_adapter_dir = str(Path(adapter_dir).expanduser().resolve(strict=False))
-    normalized_preflight_dir = str(Path(preflight.adapter_dir).expanduser().resolve(strict=False))
+    normalized_adapter_dir, normalized_preflight_dir = _coordinated_checkpoint_call(
+        "PEFT checkpoint preflight directory resolution",
+        lambda: (
+            str(Path(adapter_dir).expanduser().resolve(strict=False)),
+            str(Path(preflight.adapter_dir).expanduser().resolve(strict=False)),
+        ),
+    )
+
+    def resolve_local_paths():
+        if dist.is_initialized():
+            tp_rank = mpu.get_tensor_model_parallel_rank()
+            pp_rank = mpu.get_pipeline_model_parallel_rank()
+            rank = dist.get_rank()
+        else:
+            tp_rank = pp_rank = rank = 0
+        return (
+            str(_absolute_checkpoint_path(Path(normalized_adapter_dir) / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt")),
+            str(_absolute_checkpoint_path(_training_state_path(normalized_adapter_dir, rank))),
+            str(_absolute_checkpoint_path(_optimizer_parameter_state_path(normalized_adapter_dir, rank))),
+        )
+
+    expected_paths = _coordinated_checkpoint_call(
+        "PEFT checkpoint preflight path resolution",
+        resolve_local_paths,
+    )
     local_binding = (
         normalized_adapter_dir,
         normalized_preflight_dir,
@@ -313,18 +514,50 @@ def _validate_preflight_adapter_dir(adapter_dir: str | Path, preflight: PeftChec
         local_error = f"preflight was for {preflight.adapter_dir}, not {adapter_dir}"
     elif len(set(bindings)) != 1:
         local_error = f"preflight binding differs across ranks: {bindings}"
+    elif preflight.native_shards_present != (preflight.native_shard_binding is not None):
+        local_error = "native adapter presence does not match its rank-local preflight binding"
+    elif preflight.training_state_present != (preflight.training_state_binding is not None):
+        local_error = "training-state presence does not match its rank-local preflight binding"
+    elif any(
+        binding is not None and binding.path != path
+        for binding, path in zip(
+            (
+                preflight.native_shard_binding,
+                preflight.training_state_binding,
+                preflight.optimizer_parameter_state_binding,
+            ),
+            expected_paths,
+            strict=True,
+        )
+    ):
+        local_error = "rank-local preflight file binding has an unexpected path"
     _raise_if_checkpoint_errors("PEFT checkpoint preflight binding", local_error)
 
 
-def _verify_preflight_presence(path: Path, expected: bool, *, label: str) -> None:
-    actual = path.is_file()
-    local_error = None
-    if actual != expected:
-        local_error = (
-            f"{path} {'appeared' if actual else 'disappeared'} after preflight "
-            f"(expected {'present' if expected else 'absent'})"
+def _validate_peft_checkpoint_snapshot(preflight: PeftCheckpointPreflight) -> None:
+    """Validate every rank-local path in a saved PEFT snapshot together."""
+    adapter_dir = Path(preflight.adapter_dir)
+
+    def validate_local_snapshot() -> None:
+        if dist.is_initialized():
+            tp_rank = mpu.get_tensor_model_parallel_rank()
+            pp_rank = mpu.get_pipeline_model_parallel_rank()
+        else:
+            tp_rank = pp_rank = 0
+        _verify_checkpoint_file_binding(
+            adapter_dir / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt",
+            preflight.native_shard_binding,
         )
-    _raise_if_checkpoint_errors(label, local_error)
+        _verify_checkpoint_file_binding(
+            _training_state_path(adapter_dir),
+            preflight.training_state_binding,
+        )
+        _verify_checkpoint_file_binding(
+            _optimizer_parameter_state_path(adapter_dir),
+            preflight.optimizer_parameter_state_binding,
+        )
+
+    _coordinated_checkpoint_call("PEFT checkpoint snapshot validation", validate_local_snapshot)
 
 
 @dataclass(frozen=True)
@@ -913,11 +1146,14 @@ def validate_distributed_optimizer_sources_for_save(optimizer: Any) -> None:
 class _ExternalParameterStatePlan:
     leaves: tuple[Any, ...]
     cached_states: tuple[dict[Any, Any] | None, ...]
+    custom_cached_state: Any | None = None
+    is_custom: bool = False
 
 
 def _build_external_parameter_state_plan(
     optimizer: Any,
     parameter_state_path: Path,
+    parameter_state_binding: _CheckpointFileBinding | None,
 ) -> _ExternalParameterStatePlan | None:
     """Load and fully validate external state before any optimizer collective.
 
@@ -931,8 +1167,18 @@ def _build_external_parameter_state_plan(
             raise RuntimeError("checkpoint external optimizer state does not match the current optimizer")
         if world_size != 1:
             raise RuntimeError("custom external optimizer state is unsupported in distributed PEFT resume")
-        torch.load(parameter_state_path, map_location="cpu", weights_only=False)
-        return None
+        raw_state = _load_bound_torch_checkpoint(
+            parameter_state_path,
+            parameter_state_binding,
+            map_location="cpu",
+            weights_only=False,
+        )
+        return _ExternalParameterStatePlan(
+            leaves=(),
+            cached_states=(),
+            custom_cached_state=raw_state,
+            is_custom=True,
+        )
 
     leaves, is_multi_child = _external_parameter_state_leaves(optimizer)
     for leaf in leaves:
@@ -941,9 +1187,14 @@ def _build_external_parameter_state_plan(
     root_flags = tuple(_process_group_rank(leaf.data_parallel_group_gloo) == 0 for leaf in leaves)
     owns_file = any(root_flags)
     if owns_file:
-        raw_state = torch.load(parameter_state_path, map_location="cpu", weights_only=False)
+        raw_state = _load_bound_torch_checkpoint(
+            parameter_state_path,
+            parameter_state_binding,
+            map_location="cpu",
+            weights_only=False,
+        )
     else:
-        if parameter_state_path.exists():
+        if parameter_state_binding is not None:
             raise RuntimeError(f"unexpected optimizer parameter-state file on non-owner rank: {parameter_state_path}")
         raw_state = None
 
@@ -992,20 +1243,41 @@ def _validate_external_parameter_state_destinations(plan: _ExternalParameterStat
                                 )
 
 
-def _dispatch_external_parameter_state(plan: _ExternalParameterStatePlan) -> None:
+def _dispatch_external_parameter_state(
+    plan: _ExternalParameterStatePlan,
+    custom_load_parameter_state=None,
+) -> None:
+    if plan.is_custom:
+        if not callable(custom_load_parameter_state):
+            raise RuntimeError("custom optimizer does not expose load_parameter_state()")
+        # Unknown single-process optimizers only expose a filename API. Feed it
+        # a private serialization of the state already read from the bound fd;
+        # it must never reopen the mutable checkpoint pathname.
+        with tempfile.NamedTemporaryFile(prefix="orbit-peft-optimizer-state-", suffix=".pt") as cached_file:
+            torch.save(plan.custom_cached_state, cached_file)
+            cached_file.flush()
+            custom_load_parameter_state(cached_file.name)
+        return
     for leaf, cached_state in zip(plan.leaves, plan.cached_states, strict=True):
         leaf.load_parameter_state_from_dp_zero(cached_state, update_legacy_format=False)
 
 
 def _validate_training_state_payload(
     state_path: Path,
+    state_binding: _CheckpointFileBinding | None,
+    optimizer_parameter_state_binding: _CheckpointFileBinding | None,
     *,
     optimizer: Any | None,
     opt_param_scheduler: Any | None,
     expected_iteration: int | None,
     expected_active_student_version: str | None,
 ) -> dict[str, Any]:
-    training_state = torch.load(state_path, map_location="cpu", weights_only=False)
+    training_state = _load_bound_torch_checkpoint(
+        state_path,
+        state_binding,
+        map_location="cpu",
+        weights_only=False,
+    )
     if type(training_state) is not dict:
         raise RuntimeError("PEFT checkpoint training state is invalid")
 
@@ -1026,6 +1298,10 @@ def _validate_training_state_payload(
     external_parameter_state = training_state.get("optimizer_parameter_state", False)
     if type(external_parameter_state) is not bool:
         raise RuntimeError("PEFT checkpoint optimizer-parameter-state marker is invalid")
+    if not external_parameter_state and optimizer_parameter_state_binding is not None:
+        raise RuntimeError(
+            "PEFT checkpoint has an optimizer parameter-state file but its training-state marker is false"
+        )
 
     optimizer_state = training_state.get("optimizer")
     if optimizer_state is not None:
@@ -1069,7 +1345,13 @@ def _validate_expected_training_binding(
         raise ValueError("expected active student version must be canonical decimal text")
 
 
-def load_training_state(
+@dataclass(frozen=True)
+class _PreparedPeftTrainingState:
+    training_state: dict[str, Any] | None
+    external_parameter_state_plan: _ExternalParameterStatePlan | None
+
+
+def _prepare_training_state(
     adapter_dir: Path,
     optimizer: Any | None,
     opt_param_scheduler: Any | None,
@@ -1077,7 +1359,8 @@ def load_training_state(
     expected_iteration: int | None = None,
     expected_active_student_version: str | None = None,
     checkpoint_preflight: PeftCheckpointPreflight | None = None,
-) -> int | None:
+) -> _PreparedPeftTrainingState:
+    """Parse and validate all needed state without mutating model/optimizer state."""
     _coordinated_checkpoint_call(
         "PEFT expected checkpoint binding validation",
         lambda: _validate_expected_training_binding(expected_iteration, expected_active_student_version),
@@ -1087,22 +1370,23 @@ def load_training_state(
         checkpoint_preflight = preflight_peft_adapter_checkpoint(adapter_dir)
     else:
         _validate_preflight_adapter_dir(adapter_dir, checkpoint_preflight)
+    _validate_peft_checkpoint_snapshot(checkpoint_preflight)
     training_state_present = checkpoint_preflight.training_state_present
-    _verify_preflight_presence(
-        state_path,
-        training_state_present,
-        label="PEFT training-state sidecar preflight",
-    )
 
     if not training_state_present:
         if expected_iteration is not None or expected_active_student_version is not None:
             raise RuntimeError("PEFT checkpoint training state required by binding is missing")
-        return None
+        return _PreparedPeftTrainingState(
+            training_state=None,
+            external_parameter_state_plan=None,
+        )
 
     training_state = _coordinated_checkpoint_call(
         "PEFT training-state parse/validation",
         lambda: _validate_training_state_payload(
             state_path,
+            checkpoint_preflight.training_state_binding,
+            checkpoint_preflight.optimizer_parameter_state_binding,
             optimizer=optimizer,
             opt_param_scheduler=opt_param_scheduler,
             expected_iteration=expected_iteration,
@@ -1110,23 +1394,47 @@ def load_training_state(
         ),
     )
     _validate_training_metadata_consensus(training_state)
-    iteration = training_state.get("iteration")
+    parameter_state_path = _optimizer_parameter_state_path(adapter_dir)
+    external_parameter_state = training_state.get("optimizer_parameter_state") is True
+    external_parameter_state_plan = (
+        _coordinated_checkpoint_call(
+            "PEFT optimizer parameter-state preflight",
+            lambda: _build_external_parameter_state_plan(
+                optimizer,
+                parameter_state_path,
+                checkpoint_preflight.optimizer_parameter_state_binding,
+            )
+            if external_parameter_state
+            else None,
+        )
+        if optimizer is not None
+        else None
+    )
+    return _PreparedPeftTrainingState(
+        training_state=training_state,
+        external_parameter_state_plan=external_parameter_state_plan,
+    )
 
+
+def _restore_prepared_training_state(
+    prepared: _PreparedPeftTrainingState,
+    optimizer: Any | None,
+    opt_param_scheduler: Any | None,
+) -> int | None:
+    training_state = prepared.training_state
+    if training_state is None:
+        return None
+
+    iteration = training_state.get("iteration")
     if optimizer is None:
         if iteration is not None:
             logger.info(f"Validated PEFT training state at iteration {iteration}")
         return iteration
 
     optimizer_state = training_state["optimizer"]
-    parameter_state_path = _optimizer_parameter_state_path(adapter_dir)
     load_parameter_state = getattr(optimizer, "load_parameter_state", None)
     external_parameter_state = training_state.get("optimizer_parameter_state") is True
-    external_parameter_state_plan = _coordinated_checkpoint_call(
-        "PEFT optimizer parameter-state preflight",
-        lambda: _build_external_parameter_state_plan(optimizer, parameter_state_path)
-        if external_parameter_state
-        else None,
-    )
+    external_parameter_state_plan = prepared.external_parameter_state_plan
 
     _coordinated_checkpoint_call(
         "PEFT optimizer state restore",
@@ -1143,11 +1451,11 @@ def load_training_state(
         if not external_parameter_state:
             return
         if external_parameter_state_plan is None:
-            # Compatibility for single-process custom optimizers only. Pinned
-            # Megatron optimizers always use the validated cached-state path.
-            load_parameter_state(str(parameter_state_path))
-        else:
-            _dispatch_external_parameter_state(external_parameter_state_plan)
+            raise RuntimeError("PEFT external optimizer state has no validated restore plan")
+        _dispatch_external_parameter_state(
+            external_parameter_state_plan,
+            custom_load_parameter_state=load_parameter_state,
+        )
 
     _coordinated_checkpoint_call(
         "PEFT optimizer parameter-state restore",
@@ -1165,6 +1473,26 @@ def load_training_state(
     if iteration is not None:
         logger.info(f"Resuming PEFT training from iteration {iteration}")
     return iteration
+
+
+def load_training_state(
+    adapter_dir: Path,
+    optimizer: Any | None,
+    opt_param_scheduler: Any | None,
+    *,
+    expected_iteration: int | None = None,
+    expected_active_student_version: str | None = None,
+    checkpoint_preflight: PeftCheckpointPreflight | None = None,
+) -> int | None:
+    prepared = _prepare_training_state(
+        adapter_dir,
+        optimizer,
+        opt_param_scheduler,
+        expected_iteration=expected_iteration,
+        expected_active_student_version=expected_active_student_version,
+        checkpoint_preflight=checkpoint_preflight,
+    )
+    return _restore_prepared_training_state(prepared, optimizer, opt_param_scheduler)
 
 
 def restore_peft_training_state_after_optimizer_build(
@@ -1189,18 +1517,23 @@ def restore_peft_training_state_after_optimizer_build(
 
     training_state_found = getattr(args, "_peft_training_state_found", None)
     checkpoint_preflight = getattr(args, "_peft_checkpoint_preflight", None)
+    if checkpoint_preflight is None:
+        raise RuntimeError("PEFT second-phase optimizer restore requires the saved checkpoint preflight")
+    _validate_preflight_adapter_dir(adapter_dir, checkpoint_preflight)
+    # Validate native weights, training state, and rank-local external state as
+    # one saved snapshot before mutating the newly constructed optimizer.
+    _validate_peft_checkpoint_snapshot(checkpoint_preflight)
     if training_state_found is False:
         # A weights-only adapter intentionally keeps the fresh optimizer, but
         # still re-check the saved preflight so a sidecar that appeared between
         # model load and optimizer construction cannot silently change the
         # resume mode.
-        if checkpoint_preflight is not None:
-            load_training_state(
-                Path(adapter_dir),
-                None,
-                None,
-                checkpoint_preflight=checkpoint_preflight,
-            )
+        load_training_state(
+            Path(adapter_dir),
+            None,
+            None,
+            checkpoint_preflight=checkpoint_preflight,
+        )
         return False
 
     restored_iteration = load_training_state(
@@ -1760,8 +2093,14 @@ def save_peft_adapter_checkpoint(
 def _load_and_convert_native_adapter_state(
     model: Sequence[torch.nn.Module],
     native_path: Path,
+    native_binding: _CheckpointFileBinding | None,
 ) -> tuple[dict[AdapterTensorKey, torch.Tensor], dict[AdapterTensorKey, torch.nn.Parameter]]:
-    state_dict = torch.load(native_path, map_location="cpu", weights_only=True)
+    state_dict = _load_bound_torch_checkpoint(
+        native_path,
+        native_binding,
+        map_location="cpu",
+        weights_only=True,
+    )
     resolved = resolve_native_adapter_state(model, state_dict)
     params = adapter_named_parameters(model, is_adapter_param_name)
     converted = {
@@ -1792,50 +2131,41 @@ def load_peft_adapter_checkpoint(
         checkpoint_preflight = preflight_peft_adapter_checkpoint(adapter_dir)
     else:
         _validate_preflight_adapter_dir(adapter_dir, checkpoint_preflight)
+    _validate_peft_checkpoint_snapshot(checkpoint_preflight)
 
-    tp_rank = mpu.get_tensor_model_parallel_rank()
-    pp_rank = mpu.get_pipeline_model_parallel_rank()
-
-    native_path = adapter_dir / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt"
-    _verify_preflight_presence(
-        native_path,
-        checkpoint_preflight.native_shards_present,
-        label="PEFT native adapter shard preflight",
-    )
     if checkpoint_preflight.native_shards_present:
-        validated_iteration = None
-        binding_metadata_expected = expected_iteration is not None or expected_active_student_version is not None
-        if binding_metadata_expected:
-            # Binding metadata must validate before adapter parameters or
-            # optimizer state are mutated.
-            validated_iteration = load_training_state(
-                adapter_dir,
-                None,
-                None,
-                expected_iteration=expected_iteration,
-                expected_active_student_version=expected_active_student_version,
-                checkpoint_preflight=checkpoint_preflight,
-            )
+        native_binding = checkpoint_preflight.native_shard_binding
+        if native_binding is None:  # guarded by _validate_preflight_adapter_dir
+            raise RuntimeError("native adapter preflight binding is missing")
+        native_path = Path(native_binding.path)
+        # Parse training/external payloads before copying adapter parameters so
+        # every rank leaves checkpoint validation together without partial
+        # model or optimizer mutation.
+        prepared_training_state = _prepare_training_state(
+            adapter_dir,
+            optimizer,
+            opt_param_scheduler,
+            expected_iteration=expected_iteration,
+            expected_active_student_version=expected_active_student_version,
+            checkpoint_preflight=checkpoint_preflight,
+        )
         converted, params = _coordinated_checkpoint_call(
             "PEFT native adapter shard parse/validation",
-            lambda: _load_and_convert_native_adapter_state(model, native_path),
+            lambda: _load_and_convert_native_adapter_state(
+                model,
+                native_path,
+                native_binding,
+            ),
         )
         with torch.no_grad():
             for key, parameter in params.items():
                 parameter.copy_(converted[key])
         loaded = len(params)
         logger.info(f"Loaded {loaded} adapter tensors from Megatron-native checkpoint: {native_path}")
-        iteration = (
-            validated_iteration
-            if optimizer is None and binding_metadata_expected
-            else load_training_state(
-                adapter_dir,
-                optimizer,
-                opt_param_scheduler,
-                expected_iteration=expected_iteration,
-                expected_active_student_version=expected_active_student_version,
-                checkpoint_preflight=checkpoint_preflight,
-            )
+        iteration = _restore_prepared_training_state(
+            prepared_training_state,
+            optimizer,
+            opt_param_scheduler,
         )
         return True, iteration
 

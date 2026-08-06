@@ -25,6 +25,61 @@ class _CountingOptimizer:
         self.load_state_calls += 1
 
 
+class _DistributedLeaf:
+    def __init__(self):
+        self.is_stub_optimizer = False
+        self.data_parallel_group = dist.group.WORLD
+        self.data_parallel_group_gloo = dist.group.WORLD
+        self.model_param = torch.nn.Parameter(torch.zeros(1))
+        self.main_param = torch.nn.Parameter(torch.zeros(1))
+        self.optimizer = SimpleNamespace(
+            param_groups=[{"params": [self.main_param]}],
+            state={
+                self.main_param: {
+                    "exp_avg": torch.zeros(1),
+                    "exp_avg_sq": torch.zeros(1),
+                }
+            },
+        )
+        self.model_param_group_index_map = {self.model_param: (0, 0)}
+        local_range = SimpleNamespace(start=0, end=1)
+        self.gbuf_ranges = [
+            {
+                torch.float32: [
+                    {
+                        "param_map": {
+                            self.model_param: {"gbuf_local": local_range},
+                        }
+                    }
+                ]
+            }
+        ]
+        self.buffers = [
+            SimpleNamespace(
+                numel_unpadded=2,
+                buckets=[SimpleNamespace(grad_data=torch.zeros(2), numel_unpadded=2)],
+            )
+        ]
+        self.load_state_calls = 0
+        self.external_loads = []
+
+    def load_state_dict(self, _state):
+        self.load_state_calls += 1
+
+    def get_parameter_state_dp_zero(self):
+        return _external_parameter_state()
+
+    def load_parameter_state(self, _filename):
+        raise AssertionError("bound cached dispatch must bypass the filename loader")
+
+    def load_parameter_state_from_dp_zero(self, state, *, update_legacy_format=False):
+        assert update_legacy_format is False
+        self.external_loads.append(state)
+
+    def split_state_dict_if_needed(self, _state):
+        return None
+
+
 def _native_state() -> dict[tuple[int, str], torch.Tensor]:
     return {(0, "lora_A"): torch.ones(1)}
 
@@ -36,6 +91,20 @@ def _training_state() -> dict:
         "optimizer": {"param_groups": []},
         "optimizer_parameter_state": False,
         "opt_param_scheduler": None,
+    }
+
+
+def _external_parameter_state() -> dict:
+    return {
+        "buckets_coalesced": True,
+        0: {
+            torch.float32: {
+                "numel_unpadded": 2,
+                "param": torch.ones(2),
+                "exp_avg": torch.full((2,), 2.0),
+                "exp_avg_sq": torch.full((2,), 3.0),
+            }
+        },
     }
 
 
@@ -91,6 +160,9 @@ def _distributed_load_worker(
             adapter_dir=common_dir,
             native_shards_present=rank == 0,
             training_state_present=False,
+            native_shard_binding=None,
+            training_state_binding=None,
+            optimizer_parameter_state_binding=None,
         )
         try:
             peft_utils._validate_preflight_adapter_dir(common_dir, divergent_preflight)
@@ -99,6 +171,46 @@ def _distributed_load_worker(
         else:
             outcome = "unexpected success"
         outcomes["divergent_preflight"] = f"optimizer_loads=0|{outcome}"
+        dist.barrier()
+
+        asymmetric_preflight = peft_utils.preflight_peft_adapter_checkpoint(
+            adapter_dirs["rank_local_external"]
+        )
+        asymmetric_optimizer = _DistributedLeaf()
+        restored_iteration = peft_utils.load_training_state(
+            Path(adapter_dirs["rank_local_external"]),
+            asymmetric_optimizer,
+            None,
+            checkpoint_preflight=asymmetric_preflight,
+        )
+        presence = "present" if asymmetric_preflight.optimizer_parameter_state_binding is not None else "absent"
+        outcomes["rank_local_external"] = (
+            f"{presence}|iteration={restored_iteration}|optimizer_loads={asymmetric_optimizer.load_state_calls}"
+            f"|external_loads={len(asymmetric_optimizer.external_loads)}"
+        )
+        dist.barrier()
+
+        replacement_dir = Path(adapter_dirs["rank_divergent_replacement"])
+        replacement_preflight = peft_utils.preflight_peft_adapter_checkpoint(replacement_dir)
+        dist.barrier()
+        if rank == 0:
+            replacement_path = replacement_dir / "training_state_rank0.replacement.pt"
+            torch.save(_training_state(), replacement_path)
+            replacement_path.replace(replacement_dir / "training_state_rank0.pt")
+        dist.barrier()
+        optimizer = _CountingOptimizer()
+        try:
+            peft_utils.load_training_state(
+                replacement_dir,
+                optimizer,
+                None,
+                checkpoint_preflight=replacement_preflight,
+            )
+        except Exception as exc:
+            outcome = f"{type(exc).__name__}: {exc}"
+        else:
+            outcome = "unexpected success"
+        outcomes["rank_divergent_replacement"] = f"optimizer_loads={optimizer.load_state_calls}|{outcome}"
         dist.barrier()
     except Exception as exc:
         outcomes["worker_failure"] = f"{type(exc).__name__}: {exc}"
@@ -122,6 +234,8 @@ def two_process_outcomes(tmp_path_factory) -> dict[str, list[str]]:
         "mixed_sidecar": root / "mixed-sidecar",
         "corrupt_sidecar": root / "corrupt-sidecar",
         "embedded_param_state": root / "embedded-param-state",
+        "rank_local_external": root / "rank-local-external",
+        "rank_divergent_replacement": root / "rank-divergent-replacement",
     }
 
     _save_native_shards(adapter_dirs["mixed_native"], (0,))
@@ -154,6 +268,19 @@ def two_process_outcomes(tmp_path_factory) -> dict[str, list[str]]:
     divergent_preflight_dir.mkdir()
     adapter_dirs["divergent_preflight"] = divergent_preflight_dir
 
+    rank_local_external_dir = adapter_dirs["rank_local_external"]
+    rank_local_external_dir.mkdir()
+    for rank in range(2):
+        state = _training_state()
+        state["optimizer_parameter_state"] = True
+        torch.save(state, rank_local_external_dir / f"training_state_rank{rank}.pt")
+    torch.save(_external_parameter_state(), rank_local_external_dir / "optimizer_parameter_state_rank0.pt")
+
+    rank_divergent_replacement_dir = adapter_dirs["rank_divergent_replacement"]
+    rank_divergent_replacement_dir.mkdir()
+    for rank in range(2):
+        torch.save(_training_state(), rank_divergent_replacement_dir / f"training_state_rank{rank}.pt")
+
     result_dir = root / "results"
     result_dir.mkdir()
     mp.start_processes(
@@ -177,6 +304,8 @@ def two_process_outcomes(tmp_path_factory) -> dict[str, list[str]]:
         "embedded_param_state",
         "divergent_path",
         "divergent_preflight",
+        "rank_local_external",
+        "rank_divergent_replacement",
     )
     return {case: [outcomes[case] for outcomes in rank_outcomes] for case in cases}
 
@@ -209,3 +338,17 @@ def test_two_process_rank_divergent_adapter_paths_fail_together(two_process_outc
 
 def test_two_process_rank_divergent_preflight_flags_fail_together(two_process_outcomes):
     _assert_coordinated_failure(two_process_outcomes["divergent_preflight"], "preflight binding differs across ranks")
+
+
+def test_two_process_rank_local_external_presence_is_not_required_equal(two_process_outcomes):
+    assert two_process_outcomes["rank_local_external"] == [
+        "present|iteration=3|optimizer_loads=1|external_loads=1",
+        "absent|iteration=3|optimizer_loads=1|external_loads=1",
+    ]
+
+
+def test_two_process_rank_divergent_replacement_fails_together_before_mutation(two_process_outcomes):
+    _assert_coordinated_failure(
+        two_process_outcomes["rank_divergent_replacement"],
+        "checkpoint file changed after preflight",
+    )

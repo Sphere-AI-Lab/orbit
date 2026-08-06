@@ -312,7 +312,8 @@ def test_low_precision_resume_discovers_iteration_then_restores_training_state(t
     save_training_state(tmp_path, source_optimizer, source_scheduler, iteration=7)
 
     # Phase one runs while only model/adapter tensors exist.
-    assert load_training_state(tmp_path, None, None) == 7
+    preflight = peft_utils.preflight_peft_adapter_checkpoint(tmp_path)
+    assert load_training_state(tmp_path, None, None, checkpoint_preflight=preflight) == 7
 
     # Phase two runs immediately after optimizer/scheduler construction.
     target_optimizer = _ExternalStateOptimizer()
@@ -320,6 +321,7 @@ def test_low_precision_resume_discovers_iteration_then_restores_training_state(t
     args = argparse.Namespace(
         _peft_resume_adapter_dir=str(tmp_path),
         _peft_training_state_found=True,
+        _peft_checkpoint_preflight=preflight,
     )
     assert restore_peft_training_state_after_optimizer_build(
         args,
@@ -337,33 +339,74 @@ def test_low_precision_resume_discovers_iteration_then_restores_training_state(t
     assert target_scheduler.load_calls == 1
 
 
-def test_second_phase_rejects_training_state_changed_since_model_load(tmp_path):
+def test_second_phase_rejects_same_iteration_training_state_replacement(tmp_path):
     save_training_state(
         tmp_path,
         _ExternalStateOptimizer(step=7),
         _Scheduler(num_steps=224),
         iteration=7,
     )
-    discovered_iteration = load_training_state(tmp_path, None, None)
+    preflight = peft_utils.preflight_peft_adapter_checkpoint(tmp_path)
+    discovered_iteration = load_training_state(
+        tmp_path,
+        None,
+        None,
+        checkpoint_preflight=preflight,
+    )
     assert discovered_iteration == 7
 
     state_path = tmp_path / "training_state_rank0.pt"
     state = torch.load(state_path, weights_only=False)
-    state["iteration"] = 8
-    torch.save(state, state_path)
+    replacement_path = tmp_path / "training_state_replacement.pt"
+    torch.save(state, replacement_path)
+    replacement_path.replace(state_path)
 
     target_optimizer = _ExternalStateOptimizer()
     target_scheduler = _Scheduler()
     args = argparse.Namespace(
         _peft_resume_adapter_dir=str(tmp_path),
         _peft_training_state_found=True,
+        _peft_checkpoint_preflight=preflight,
     )
-    with pytest.raises(RuntimeError, match="checkpoint iteration does not match"):
+    with pytest.raises(RuntimeError, match="checkpoint file changed after preflight"):
         restore_peft_training_state_after_optimizer_build(
             args,
             target_optimizer,
             target_scheduler,
             expected_iteration=discovered_iteration,
+        )
+
+    assert target_optimizer.load_state_calls == 0
+    assert target_optimizer.load_parameter_state_calls == 0
+    assert target_scheduler.load_calls == 0
+
+
+def test_second_phase_rejects_same_payload_external_state_replacement(tmp_path):
+    source_optimizer = _ExternalStateOptimizer(step=7, main=3.5, moment=9.0)
+    source_scheduler = _Scheduler(num_steps=224)
+    save_training_state(tmp_path, source_optimizer, source_scheduler, iteration=7)
+    preflight = peft_utils.preflight_peft_adapter_checkpoint(tmp_path)
+    assert load_training_state(tmp_path, None, None, checkpoint_preflight=preflight) == 7
+
+    state_path = tmp_path / "optimizer_parameter_state_rank0.pt"
+    state = torch.load(state_path, weights_only=False)
+    replacement_path = tmp_path / "optimizer_parameter_state_replacement.pt"
+    torch.save(state, replacement_path)
+    replacement_path.replace(state_path)
+
+    target_optimizer = _ExternalStateOptimizer()
+    target_scheduler = _Scheduler()
+    args = argparse.Namespace(
+        _peft_resume_adapter_dir=str(tmp_path),
+        _peft_training_state_found=True,
+        _peft_checkpoint_preflight=preflight,
+    )
+    with pytest.raises(RuntimeError, match="checkpoint file changed after preflight"):
+        restore_peft_training_state_after_optimizer_build(
+            args,
+            target_optimizer,
+            target_scheduler,
+            expected_iteration=7,
         )
 
     assert target_optimizer.load_state_calls == 0
@@ -384,13 +427,36 @@ def test_second_phase_is_a_noop_without_a_peft_resume_directory():
     assert scheduler.load_calls == 0
 
 
-def test_low_precision_weights_only_adapter_keeps_fresh_optimizer(tmp_path):
+def test_second_phase_requires_saved_preflight_before_optimizer_mutation(tmp_path):
     optimizer = _ExternalStateOptimizer()
     scheduler = _Scheduler()
     args = argparse.Namespace(
         _peft_resume_adapter_dir=str(tmp_path),
+        _peft_training_state_found=False,
+    )
+
+    with pytest.raises(RuntimeError, match="requires the saved checkpoint preflight"):
+        restore_peft_training_state_after_optimizer_build(
+            args,
+            optimizer,
+            scheduler,
+            expected_iteration=0,
+        )
+
+    assert optimizer.load_state_calls == 0
+    assert optimizer.load_parameter_state_calls == 0
+    assert scheduler.load_calls == 0
+
+
+def test_low_precision_weights_only_adapter_keeps_fresh_optimizer(tmp_path):
+    optimizer = _ExternalStateOptimizer()
+    scheduler = _Scheduler()
+    preflight = peft_utils.preflight_peft_adapter_checkpoint(tmp_path)
+    args = argparse.Namespace(
+        _peft_resume_adapter_dir=str(tmp_path),
         _peft_adapter_weights_loaded=True,
         _peft_training_state_found=False,
+        _peft_checkpoint_preflight=preflight,
     )
 
     assert not restore_peft_training_state_after_optimizer_build(
@@ -446,11 +512,16 @@ def test_normal_precision_adapter_load_syncs_main_params_only_without_training_s
     expected_reload_calls,
 ):
     (tmp_path / "payload").write_text("base")
+    adapter_dir = tmp_path / "adapter"
+    adapter_dir.mkdir()
+    (adapter_dir / "adapter_megatron_tp0_pp0.pt").write_bytes(b"native")
+    if training_state_found:
+        (adapter_dir / "training_state_rank0.pt").write_bytes(b"training")
     args = argparse.Namespace(
         load=str(tmp_path),
         megatron_to_hf_mode="raw",
         peft_method="lora",
-        peft_adapter_path="/adapter",
+        peft_adapter_path=str(adapter_dir),
         lora_adapter_path=None,
         oft_adapter_path=None,
         fp16=False,
@@ -464,11 +535,7 @@ def test_normal_precision_adapter_load_syncs_main_params_only_without_training_s
     monkeypatch.setattr(checkpoint_mod, "_load_checkpoint_dist", lambda **_kwargs: (0, 0))
     monkeypatch.setattr(checkpoint_mod, "is_peft_enabled", lambda _args: True)
     monkeypatch.setattr(checkpoint_mod, "is_peft_model", lambda _model: True, raising=False)
-    checkpoint_preflight = peft_utils.PeftCheckpointPreflight(
-        adapter_dir="/adapter",
-        native_shards_present=True,
-        training_state_present=training_state_found,
-    )
+    checkpoint_preflight = peft_utils.preflight_peft_adapter_checkpoint(adapter_dir)
     monkeypatch.setattr(
         checkpoint_mod,
         "preflight_peft_adapter_checkpoint",
@@ -574,6 +641,72 @@ def test_peft_checkpoint_preflight_all_rank_local_files_present_or_absent(
     assert preflight.adapter_dir == str(tmp_path)
     assert preflight.native_shards_present is files_present
     assert preflight.training_state_present is files_present
+    assert (preflight.native_shard_binding is not None) is files_present
+    assert (preflight.training_state_binding is not None) is files_present
+    assert preflight.optimizer_parameter_state_binding is None
+
+
+def test_preflight_rejects_external_state_without_training_sidecar(tmp_path):
+    torch.save({"stale": True}, tmp_path / "optimizer_parameter_state_rank0.pt")
+
+    with pytest.raises(RuntimeError, match="present without training state"):
+        peft_utils.preflight_peft_adapter_checkpoint(tmp_path)
+
+
+def test_false_external_state_marker_rejects_bound_stale_file_before_optimizer_mutation(tmp_path):
+    optimizer = _ExternalStateOptimizer()
+    scheduler = _Scheduler()
+    torch.save(
+        {
+            "iteration": 3,
+            "active_student_version": None,
+            "optimizer": optimizer.state_dict(),
+            "optimizer_parameter_state": False,
+            "opt_param_scheduler": scheduler.state_dict(),
+        },
+        tmp_path / "training_state_rank0.pt",
+    )
+    torch.save({"stale": True}, tmp_path / "optimizer_parameter_state_rank0.pt")
+    preflight = peft_utils.preflight_peft_adapter_checkpoint(tmp_path)
+
+    with pytest.raises(RuntimeError, match="marker is false"):
+        load_training_state(
+            tmp_path,
+            optimizer,
+            scheduler,
+            checkpoint_preflight=preflight,
+        )
+
+    assert optimizer.load_state_calls == 0
+    assert optimizer.load_parameter_state_calls == 0
+    assert scheduler.load_calls == 0
+
+
+def test_native_shard_replacement_is_rejected_before_adapter_mutation(monkeypatch, tmp_path):
+    class _AdapterModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.lora_A = torch.nn.Parameter(torch.zeros(1))
+
+    monkeypatch.setattr(peft_utils.mpu, "get_tensor_model_parallel_rank", lambda: 0, raising=False)
+    monkeypatch.setattr(peft_utils.mpu, "get_pipeline_model_parallel_rank", lambda: 0, raising=False)
+    native_path = tmp_path / "adapter_megatron_tp0_pp0.pt"
+    torch.save({(0, "lora_A"): torch.ones(1)}, native_path)
+    preflight = peft_utils.preflight_peft_adapter_checkpoint(tmp_path)
+    replacement_path = tmp_path / "native_replacement.pt"
+    torch.save({(0, "lora_A"): torch.full((1,), 2.0)}, replacement_path)
+    replacement_path.replace(native_path)
+    model = _AdapterModel()
+
+    with pytest.raises(RuntimeError, match="checkpoint file changed after preflight"):
+        peft_utils.load_peft_adapter_checkpoint(
+            [model],
+            str(tmp_path),
+            label="LoRA",
+            checkpoint_preflight=preflight,
+        )
+
+    assert torch.equal(model.lora_A, torch.zeros(1))
 
 
 @pytest.mark.parametrize("initially_present", [False, True])
@@ -697,7 +830,8 @@ def test_pinned_external_parameter_state_is_cached_before_collective_dispatch(tm
     parameter_state_path = tmp_path / "optimizer_parameter_state_rank0.pt"
     torch.save(_valid_external_leaf_state(optimizer), parameter_state_path)
 
-    plan = peft_utils._build_external_parameter_state_plan(optimizer, parameter_state_path)
+    binding = peft_utils._capture_checkpoint_file_binding(parameter_state_path)
+    plan = peft_utils._build_external_parameter_state_plan(optimizer, parameter_state_path, binding)
     assert plan is not None
     # A filename-based second load would now fail. Cached dispatch must not touch
     # the filesystem again after all-rank validation.
@@ -743,7 +877,8 @@ def test_multi_child_external_state_uses_indexed_cached_dispatch(tmp_path):
         parameter_state_path,
     )
 
-    plan = peft_utils._build_external_parameter_state_plan(optimizer, parameter_state_path)
+    binding = peft_utils._capture_checkpoint_file_binding(parameter_state_path)
+    plan = peft_utils._build_external_parameter_state_plan(optimizer, parameter_state_path, binding)
     assert plan is not None
     peft_utils._validate_external_parameter_state_destinations(plan)
     peft_utils._dispatch_external_parameter_state(plan)
