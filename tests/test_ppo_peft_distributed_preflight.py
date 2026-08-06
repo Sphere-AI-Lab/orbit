@@ -60,7 +60,7 @@ def _distributed_load_worker(
         distributed_utils.GLOO_GROUP = None
         peft_utils.mpu.get_tensor_model_parallel_rank = lambda: rank
         peft_utils.mpu.get_pipeline_model_parallel_rank = lambda: 0
-        for case in ("mixed_native", "mixed_sidecar", "corrupt_sidecar"):
+        for case in ("mixed_native", "mixed_sidecar", "corrupt_sidecar", "embedded_param_state"):
             adapter_dir = adapter_dirs[case]
             optimizer = _CountingOptimizer()
             try:
@@ -121,6 +121,7 @@ def two_process_outcomes(tmp_path_factory) -> dict[str, list[str]]:
         "mixed_native": root / "mixed-native",
         "mixed_sidecar": root / "mixed-sidecar",
         "corrupt_sidecar": root / "corrupt-sidecar",
+        "embedded_param_state": root / "embedded-param-state",
     }
 
     _save_native_shards(adapter_dirs["mixed_native"], (0,))
@@ -133,6 +134,16 @@ def two_process_outcomes(tmp_path_factory) -> dict[str, list[str]]:
     _save_native_shards(corrupt_sidecar_dir, (0, 1))
     torch.save(_training_state(), corrupt_sidecar_dir / "training_state_rank0.pt")
     (corrupt_sidecar_dir / "training_state_rank1.pt").write_bytes(b"not a torch checkpoint")
+
+    embedded_param_state_dir = adapter_dirs["embedded_param_state"]
+    _save_native_shards(embedded_param_state_dir, (0, 1))
+    torch.save(_training_state(), embedded_param_state_dir / "training_state_rank0.pt")
+    foreign_state = _training_state()
+    foreign_state["optimizer"] = {
+        "optimizer": {"param_groups": []},
+        "nested": [{"param_state": {"rank": 1}, "param_state_sharding_type": "dp_zero_gather_scatter"}],
+    }
+    torch.save(foreign_state, embedded_param_state_dir / "training_state_rank1.pt")
 
     for rank in range(2):
         divergent_dir = root / f"divergent-path-rank{rank}"
@@ -159,7 +170,14 @@ def two_process_outcomes(tmp_path_factory) -> dict[str, list[str]]:
     )
     rank_outcomes = [json.loads((result_dir / f"rank{rank}.json").read_text()) for rank in range(2)]
     assert all("worker_failure" not in outcomes for outcomes in rank_outcomes)
-    cases = ("mixed_native", "mixed_sidecar", "corrupt_sidecar", "divergent_path", "divergent_preflight")
+    cases = (
+        "mixed_native",
+        "mixed_sidecar",
+        "corrupt_sidecar",
+        "embedded_param_state",
+        "divergent_path",
+        "divergent_preflight",
+    )
     return {case: [outcomes[case] for outcomes in rank_outcomes] for case in cases}
 
 
@@ -179,6 +197,10 @@ def test_two_process_mixed_training_sidecars_fail_together(two_process_outcomes)
 
 def test_two_process_sidecar_parse_failure_precedes_optimizer_load(two_process_outcomes):
     _assert_coordinated_failure(two_process_outcomes["corrupt_sidecar"], "training-state parse/validation")
+
+
+def test_two_process_embedded_parameter_state_fails_before_optimizer_mutation(two_process_outcomes):
+    _assert_coordinated_failure(two_process_outcomes["embedded_param_state"], "embedded distributed parameter state")
 
 
 def test_two_process_rank_divergent_adapter_paths_fail_together(two_process_outcomes):

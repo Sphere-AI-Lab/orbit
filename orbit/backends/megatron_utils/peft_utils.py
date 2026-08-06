@@ -22,6 +22,15 @@ logger = logging.getLogger(__name__)
 LORA_SYNC_TRANSPORT = "lora_adapter"
 OFT_SYNC_TRANSPORT = "oft_adapter"
 _OPTIMIZER_PARAMETER_STATE_PREFIX = "optimizer_parameter_state_rank"
+_EMBEDDED_DISTRIBUTED_PARAMETER_STATE_KEYS = frozenset(
+    {
+        # Pinned Megatron's DistributedOptimizer.load_state_dict() treats
+        # these as an instruction to enter its parameter-state loaders. Older
+        # pinned checkpoints may contain only ``param_state``.
+        "param_state",
+        "param_state_sharding_type",
+    }
+)
 _MAX_CHECKPOINT_COUNTER = 2**63 - 1
 
 Variant = Literal["standard", "canonical", "mla", "dsv4"]
@@ -83,6 +92,40 @@ def _contains_megatron_optimizer_wrapper(value: Any) -> bool:
         elif type(item) in (list, tuple):
             pending.extend(item)
     return False
+
+
+def _validate_no_embedded_distributed_parameter_state(optimizer_state: Any) -> None:
+    """Reject parameter state that bypasses Orbit's external-state preflight.
+
+    Megatron's distributed optimizer recognizes these keys at any nested
+    chained-optimizer leaf and may enter rank-dependent collectives from
+    ``load_state_dict``. PEFT checkpoints keep that state in separately
+    validated rank-local files, so its presence in the optimizer payload is
+    always incompatible.
+    """
+    pending = [optimizer_state]
+    seen: set[int] = set()
+    found: set[str] = set()
+    while pending:
+        item = pending.pop()
+        if not isinstance(item, Mapping) and type(item) not in (list, tuple):
+            continue
+        item_id = id(item)
+        if item_id in seen:
+            continue
+        seen.add(item_id)
+        if isinstance(item, Mapping):
+            found.update(key for key in item if key in _EMBEDDED_DISTRIBUTED_PARAMETER_STATE_KEYS)
+            pending.extend(item.values())
+        else:
+            pending.extend(item)
+
+    if found:
+        keys = ", ".join(sorted(found))
+        raise RuntimeError(
+            "PEFT checkpoint optimizer payload contains embedded distributed parameter state "
+            f"({keys}); expected validated optimizer_parameter_state_rank*.pt sidecars"
+        )
 
 
 def _is_distributed_optimizer_leaf(optimizer) -> bool:
@@ -850,8 +893,12 @@ def _validate_training_state_payload(
     if type(external_parameter_state) is not bool:
         raise RuntimeError("PEFT checkpoint optimizer-parameter-state marker is invalid")
 
+    optimizer_state = training_state.get("optimizer")
+    if optimizer_state is not None:
+        _validate_no_embedded_distributed_parameter_state(optimizer_state)
+
     if optimizer is not None:
-        if training_state.get("optimizer") is None:
+        if optimizer_state is None:
             raise RuntimeError("PEFT checkpoint has no optimizer state; training resume is not possible")
         current_external_layout = _megatron_external_parameter_state_layout(optimizer)
         if current_external_layout is True and not external_parameter_state:

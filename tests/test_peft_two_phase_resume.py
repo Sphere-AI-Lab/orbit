@@ -467,6 +467,33 @@ def test_corrupt_training_state_is_coordinated_before_optimizer_mutation(tmp_pat
     assert scheduler.load_calls == 0
 
 
+@pytest.mark.parametrize("embedded_key", ["param_state", "param_state_sharding_type"])
+def test_embedded_distributed_parameter_state_precedes_optimizer_mutation(tmp_path, embedded_key):
+    optimizer = _ExternalStateOptimizer()
+    scheduler = _Scheduler()
+    torch.save(
+        {
+            "iteration": 5,
+            "active_student_version": None,
+            "optimizer": {
+                "optimizer": {"param_groups": [{"step": 5}]},
+                "nested": [{embedded_key: {"foreign": torch.ones(1)}}],
+            },
+            "optimizer_parameter_state": True,
+            "opt_param_scheduler": scheduler.state_dict(),
+        },
+        tmp_path / "training_state_rank0.pt",
+    )
+    torch.save({"main": torch.ones(1)}, tmp_path / "optimizer_parameter_state_rank0.pt")
+
+    with pytest.raises(RuntimeError, match="embedded distributed parameter state"):
+        load_training_state(tmp_path, optimizer, scheduler)
+
+    assert optimizer.load_state_calls == 0
+    assert optimizer.load_parameter_state_calls == 0
+    assert scheduler.load_calls == 0
+
+
 @pytest.mark.parametrize("corrupt_external_state", [False, True])
 def test_external_parameter_state_is_preflighted_before_optimizer_mutation(
     tmp_path,
