@@ -602,6 +602,8 @@ def sync_actor_critic_data(
 
     - Values are broadcast from src=1.
     - Log-probs and ref-log-probs are broadcast from src=0 when KL is used.
+    - Values use an fp32 wire representation; log-probs use the configured
+      rollout log-prob dtype so true-on-policy bf16/fp16 parity is preserved.
     Updates `rollout_data` in place with the synchronized tensors.
     """
     log_probs_key = "log_probs" if not args.use_rollout_logprobs else "rollout_log_probs"
@@ -613,16 +615,24 @@ def sync_actor_critic_data(
 
     handles = []
 
-    if not values:
-        values = [torch.empty_like(log_prob) for log_prob in log_probs]
+    value_wire_dtype = torch.float32
+    if values:
+        values = [value.to(dtype=value_wire_dtype) for value in values]
+    else:
+        values = [torch.empty_like(log_prob, dtype=value_wire_dtype) for log_prob in log_probs]
     for value in values:
         handles.append(dist.broadcast(value, src=1, group=group, async_op=True))
 
     if args.kl_coef != 0 or args.use_kl_loss:
-        if not log_probs:
-            log_probs = [torch.empty_like(value) for value in values]
-        if not ref_log_probs:
-            ref_log_probs = [torch.empty_like(value) for value in values]
+        logprob_wire_dtype = _rollout_logprob_dtype(args)
+        if log_probs:
+            log_probs = [log_prob.to(dtype=logprob_wire_dtype) for log_prob in log_probs]
+        else:
+            log_probs = [torch.empty_like(value, dtype=logprob_wire_dtype) for value in values]
+        if ref_log_probs:
+            ref_log_probs = [ref_log_prob.to(dtype=logprob_wire_dtype) for ref_log_prob in ref_log_probs]
+        else:
+            ref_log_probs = [torch.empty_like(value, dtype=logprob_wire_dtype) for value in values]
         for ref_log_prob, log_prob in zip(ref_log_probs, log_probs, strict=False):
             handles.append(dist.broadcast(log_prob, src=0, group=group, async_op=True))
             handles.append(dist.broadcast(ref_log_prob, src=0, group=group, async_op=True))

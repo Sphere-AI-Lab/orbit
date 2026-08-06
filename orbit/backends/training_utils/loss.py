@@ -1691,7 +1691,11 @@ def loss_function(
           "values" (1D tensor: [count, metric1, metric2, ...]).
     """
     parallel_state = get_parallel_state()
-    num_tokens = sum([torch.clamp_min(loss_mask.sum(), 1) for loss_mask in batch["loss_masks"]])
+    # Megatron sums this normalizer across micro-batches and DP/CP ranks before
+    # scaling gradients, and already leaves gradients unscaled when that global
+    # count is zero. Keep the local count exact: a rejected/all-masked sample has
+    # a zero loss numerator and must not add a phantom token to the denominator.
+    num_tokens = sum(loss_mask.sum() for loss_mask in batch["loss_masks"])
     num_samples = len(batch["response_lengths"])
 
     sum_of_sample_mean = get_sum_of_sample_mean(

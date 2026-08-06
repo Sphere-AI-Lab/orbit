@@ -97,7 +97,7 @@ def _make_jsd_inputs() -> tuple[torch.Tensor, dict]:
     loss_masks = [
         torch.randint(0, 2, (response,), generator=generator, dtype=torch.int64) for response in response_lengths
     ]
-    loss_masks[2].zero_()  # Fully masked: its clamped normalizer must remain partition-invariant.
+    loss_masks[2].zero_()  # Fully masked: it must remain partition-invariant.
     logits = torch.randn(1, sum(total_lengths), vocab_size, generator=generator)
     batch = {
         "unconcat_tokens": [torch.randint(0, vocab_size, (total,), generator=generator) for total in total_lengths],
@@ -208,3 +208,61 @@ def test_opd_jsd_loss_function_is_microbatch_loss_and_gradient_invariant(
     assert whole_grad.abs().sum() > 0
     torch.testing.assert_close(split_loss, whole_loss, atol=2e-6, rtol=2e-6)
     torch.testing.assert_close(split_grad, whole_grad, atol=2e-6, rtol=2e-6)
+
+
+def _make_ppo_value_inputs() -> tuple[torch.Tensor, dict]:
+    generator = torch.Generator().manual_seed(2026)
+    response_lengths = [2, 3]
+    total_lengths = [3, 4]
+    logits = torch.randn(1, sum(total_lengths), 1, generator=generator)
+    batch = {
+        "unconcat_tokens": [torch.zeros(total, dtype=torch.long) for total in total_lengths],
+        "total_lengths": total_lengths,
+        "response_lengths": response_lengths,
+        "loss_masks": [torch.ones(response_lengths[0]), torch.zeros(response_lengths[1])],
+        "values": [torch.zeros(response) for response in response_lengths],
+        "returns": [torch.randn(response, generator=generator) for response in response_lengths],
+    }
+    return logits, batch
+
+
+def _ppo_value_args(global_batch_size: int) -> Namespace:
+    return Namespace(
+        loss_type="value_loss",
+        calculate_per_token_loss=True,
+        global_batch_size=global_batch_size,
+        use_dynamic_global_batch_size=False,
+        recompute_loss_function=False,
+        qkv_format="thd",
+        allgather_cp=False,
+        true_on_policy_mode=False,
+        rollout_temperature=1.0,
+        value_clip=0.2,
+    )
+
+
+def test_ppo_value_per_token_gradient_ignores_fully_masked_sample() -> None:
+    logits, batch = _make_ppo_value_inputs()
+    valid_batch = _slice_sample_batch(batch, 0, 1)
+    valid_token_count = batch["total_lengths"][0]
+
+    valid_loss, valid_grad = _run_megatron_scaled_loss(
+        _ppo_value_args(global_batch_size=1),
+        valid_batch,
+        logits[:, :valid_token_count],
+        (1,),
+    )
+    augmented_loss, augmented_grad = _run_megatron_scaled_loss(
+        _ppo_value_args(global_batch_size=2),
+        batch,
+        logits,
+        (1, 1),
+    )
+
+    assert valid_loss > 0
+    torch.testing.assert_close(augmented_loss, valid_loss)
+    torch.testing.assert_close(augmented_grad[:, :valid_token_count], valid_grad)
+    torch.testing.assert_close(
+        augmented_grad[:, valid_token_count:],
+        torch.zeros_like(augmented_grad[:, valid_token_count:]),
+    )
