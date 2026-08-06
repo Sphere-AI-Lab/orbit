@@ -310,10 +310,14 @@ def test_self_teacher_save_synchronizes_remote_rank_failure(monkeypatch, tmp_pat
     monkeypatch.setattr(lora_utils, "save_lora_checkpoint", lambda *args, **kwargs: str(adapter_dir))
     monkeypatch.setattr(peft_utils.dist, "is_initialized", lambda: True)
     monkeypatch.setattr(peft_utils.dist, "get_rank", lambda: 0)
-    monkeypatch.setattr(peft_utils.dist, "get_world_size", lambda: 2)
+    monkeypatch.setattr(peft_utils.dist, "get_world_size", lambda group=None: 2)
+    monkeypatch.setattr(peft_utils.dist, "get_backend", lambda: "gloo")
     monkeypatch.setattr("orbit.utils.distributed_utils.get_gloo_group", lambda: object())
 
     def _gather_errors(output, value, *, group):
+        if group is None:
+            output[:] = [value, value]
+            return
         output[:] = [None, "TeacherCheckpointError: remote disk failure"]
 
     monkeypatch.setattr(peft_utils.dist, "all_gather_object", _gather_errors)

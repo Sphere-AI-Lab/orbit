@@ -664,7 +664,17 @@ def save_peft_checkpoint(
     active_student_version: str | None = None,
     self_teacher: Any | None = None,
 ) -> str:
-    method = get_peft_method(args)
+    def build_local_dispatch() -> tuple[str, bool]:
+        method = get_peft_method(args)
+        if method not in ("lora", "oft"):
+            raise ValueError(f"Cannot save PEFT checkpoint when peft_method={method!r}.")
+        return method, self_teacher is not None
+
+    local_dispatch = _coordinated_checkpoint_call("PEFT save dispatch validation", build_local_dispatch)
+    dispatches = _all_gather_checkpoint_object(local_dispatch)
+    if len(set(dispatches)) != 1:
+        raise RuntimeError(f"PEFT save dispatch differs across ranks: {dispatches}")
+    method = local_dispatch[0]
     if method == "lora":
         from .lora_utils import save_lora_checkpoint
 
@@ -689,8 +699,8 @@ def save_peft_checkpoint(
             iteration=iteration,
             active_student_version=active_student_version,
         )
-    else:
-        raise ValueError(f"Cannot save PEFT checkpoint when peft_method={method!r}.")
+    else:  # pragma: no cover - validated by the coordinated dispatch above
+        raise AssertionError(f"unreachable PEFT save method: {method!r}")
 
     if self_teacher is not None:
         from orbit.utils.self_teacher_checkpoint import TeacherCheckpointError, save_self_teacher_sidecar
@@ -788,10 +798,13 @@ def save_training_state(
     active_student_version: str | None = None,
     no_save_optim: bool = False,
 ) -> None:
-    if iteration is not None and not _is_bounded_nonnegative_integer(iteration):
-        raise ValueError("PEFT checkpoint iteration must be a bounded nonnegative integer")
-    if active_student_version is not None and not _is_canonical_student_version(active_student_version):
-        raise ValueError("active student version must be canonical nonnegative decimal text")
+    def validate_save_request() -> None:
+        if iteration is not None and not _is_bounded_nonnegative_integer(iteration):
+            raise ValueError("PEFT checkpoint iteration must be a bounded nonnegative integer")
+        if active_student_version is not None and not _is_canonical_student_version(active_student_version):
+            raise ValueError("active student version must be canonical nonnegative decimal text")
+
+    _coordinated_checkpoint_call("PEFT training-state save request validation", validate_save_request)
     state_path = _training_state_path(adapter_dir)
     parameter_state_path = _optimizer_parameter_state_path(adapter_dir)
     if optimizer is None or no_save_optim:
@@ -822,6 +835,9 @@ def save_training_state(
             save_parameter_state,
         ),
     )
+    external_layouts = _all_gather_checkpoint_object(has_external_parameter_state)
+    if len(set(external_layouts)) != 1:
+        raise RuntimeError(f"PEFT external optimizer layout differs across ranks: {external_layouts}")
     _coordinated_checkpoint_call(
         "PEFT distributed optimizer source validation",
         lambda: validate_distributed_optimizer_sources_for_save(optimizer)
@@ -2017,6 +2033,111 @@ def _save_peft_hf_artifacts(
     logger.info(f"Saved HF PEFT adapter to {save_path} with {len(serializable)} tensors")
 
 
+@dataclass(frozen=True)
+class _PeftSaveRankRoles:
+    native_writer: bool
+    hf_writer: bool
+    tp_rank: int
+    pp_rank: int
+
+
+def _validate_peft_save_request(
+    save_dir: str,
+    *,
+    method: str,
+    args: Namespace,
+    optimizer: Any | None,
+    opt_param_scheduler: Any | None,
+    iteration: int | None,
+    active_student_version: str | None,
+) -> tuple[Path, bool]:
+    """Validate the branch-defining save request before any rank performs I/O."""
+
+    def build_local_request() -> tuple[Any, ...]:
+        no_save_optim = getattr(args, "no_save_optim", False)
+        if method not in ("lora", "oft"):
+            raise ValueError(f"unsupported PEFT save method: {method!r}")
+        if type(no_save_optim) is not bool:
+            raise TypeError("no_save_optim must be a boolean")
+        if iteration is not None and not _is_bounded_nonnegative_integer(iteration):
+            raise ValueError("PEFT checkpoint iteration must be a bounded nonnegative integer")
+        if active_student_version is not None and not _is_canonical_student_version(active_student_version):
+            raise ValueError("active student version must be canonical nonnegative decimal text")
+        optimizer_present = optimizer is not None
+        optimizer_stub = bool(getattr(optimizer, "is_stub_optimizer", False)) if optimizer_present else False
+        optimizer_layout = _megatron_external_parameter_state_layout(optimizer) if optimizer_present else None
+        return (
+            str(Path(save_dir).expanduser().resolve(strict=False)),
+            method,
+            iteration,
+            active_student_version,
+            no_save_optim,
+            optimizer_present,
+            optimizer_stub,
+            optimizer_layout,
+            opt_param_scheduler is not None,
+            str(getattr(args, "hf_checkpoint", "")),
+        )
+
+    local_request = _coordinated_checkpoint_call("PEFT save request validation", build_local_request)
+    requests = _all_gather_checkpoint_object(local_request)
+    if len(set(requests)) != 1:
+        raise RuntimeError(f"PEFT save request differs across ranks: {requests}")
+    return Path(local_request[0]), local_request[4]
+
+
+def _resolve_peft_save_rank_roles() -> _PeftSaveRankRoles:
+    """Resolve write ownership without excluding ranks from save collectives.
+
+    Native shard names encode TP and PP only.  The combined DP+CP group holds
+    replicas of that same shard, so exactly its rank zero may write.  The HF
+    exporter produces a complete state on every participant and therefore has
+    one global writer.
+    """
+    parallel_state = get_parallel_state()
+    return _PeftSaveRankRoles(
+        native_writer=parallel_state.intra_dp_cp.rank == 0,
+        hf_writer=not dist.is_initialized() or dist.get_rank() == 0,
+        tp_rank=mpu.get_tensor_model_parallel_rank(),
+        pp_rank=mpu.get_pipeline_model_parallel_rank(),
+    )
+
+
+def _save_native_adapter_shard(
+    model: Sequence[torch.nn.Module],
+    save_path: Path,
+    roles: _PeftSaveRankRoles,
+) -> tuple[int, Path] | None:
+    if not roles.native_writer:
+        return None
+    adapter_state = native_adapter_state(model)
+    native_path = save_path / f"adapter_megatron_tp{roles.tp_rank}_pp{roles.pp_rank}.pt"
+    torch.save(adapter_state, native_path)
+    return len(adapter_state), native_path
+
+
+def _export_peft_hf_state(
+    model: Sequence[torch.nn.Module],
+    exporter,
+    patch_megatron_model,
+) -> dict[str, torch.Tensor]:
+    """Consume the distributed exporter on every rank and collect local output.
+
+    The caller coordinates failures before and after this call.  The exporter's
+    own TP/PP/EP collectives still require every participating rank to enter and
+    make matching progress; no outer error gather can repair divergence inside
+    those collectives.
+    """
+    state_dict: dict[str, torch.Tensor] = {}
+    with patch_megatron_model(model):
+        # megatron-bridge >=0.5 yields a 2-tuple (hf_name, tensor); older
+        # versions yielded 3-tuples. Positional access handles both.
+        for item in exporter(model, cpu=True, show_progress=False):
+            hf_name, weight = item[0], item[1]
+            state_dict[hf_name] = weight
+    return state_dict
+
+
 def save_peft_adapter_checkpoint(
     model: Sequence[torch.nn.Module],
     args: Namespace,
@@ -2034,58 +2155,73 @@ def save_peft_adapter_checkpoint(
     Both LoRA and OFT use this helper; the only method-specific pieces are the
     bridge exporter and the ``adapter_config.json`` contents.
     """
+    save_path, no_save_optim = _validate_peft_save_request(
+        save_dir,
+        method=method,
+        args=args,
+        optimizer=optimizer,
+        opt_param_scheduler=opt_param_scheduler,
+        iteration=iteration,
+        active_student_version=active_student_version,
+    )
     from megatron.bridge import AutoBridge
 
     from orbit.utils import megatron_bridge_utils
 
-    save_path = Path(save_dir)
-    is_dp_rank_0 = get_parallel_state().intra_dp.rank == 0
-    tp_rank = mpu.get_tensor_model_parallel_rank()
-    pp_rank = mpu.get_pipeline_model_parallel_rank()
+    roles = _coordinated_checkpoint_call("PEFT save ownership resolution", _resolve_peft_save_rank_roles)
 
-    if is_dp_rank_0:
-        save_path.mkdir(parents=True, exist_ok=True)
-    if dist.is_initialized():
-        dist.barrier()
+    _coordinated_checkpoint_call(
+        "PEFT checkpoint directory creation",
+        lambda: save_path.mkdir(parents=True, exist_ok=True)
+        if roles.native_writer or roles.hf_writer
+        else None,
+    )
 
     # Megatron-native format (per TP/PP rank, fast resume)
-    if is_dp_rank_0:
-        adapter_state = native_adapter_state(model)
-        native_path = save_path / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt"
-        torch.save(adapter_state, native_path)
-        logger.info(f"Saved {len(adapter_state)} adapter tensors (native) to {native_path}")
+    native_result = _coordinated_checkpoint_call(
+        "PEFT native adapter shard save",
+        lambda: _save_native_adapter_shard(model, save_path, roles),
+    )
+    if native_result is not None:
+        native_count, native_path = native_result
+        logger.info(f"Saved {native_count} adapter tensors (native) to {native_path}")
 
     # HF PEFT format — bridge export is TP-collective, so every rank calls it.
-    bridge = AutoBridge.from_hf_pretrained(args.hf_checkpoint, trust_remote_code=True)
-    exporter = bridge.export_oft_adapter_weights if method == "oft" else bridge.export_adapter_weights
+    bridge = _coordinated_checkpoint_call(
+        "PEFT bridge initialization",
+        lambda: AutoBridge.from_hf_pretrained(args.hf_checkpoint, trust_remote_code=True),
+    )
+    exporter = _coordinated_checkpoint_call(
+        "PEFT bridge exporter selection",
+        lambda: bridge.export_oft_adapter_weights if method == "oft" else bridge.export_adapter_weights,
+    )
+    state_dict = _coordinated_checkpoint_call(
+        "PEFT HF adapter export",
+        lambda: _export_peft_hf_state(model, exporter, megatron_bridge_utils.patch_megatron_model),
+    )
 
-    state_dict: dict[str, torch.Tensor] = {}
-    with megatron_bridge_utils.patch_megatron_model(model):
-        # megatron-bridge >=0.5 yields a 2-tuple (hf_name, tensor); older
-        # versions yielded 3-tuples. Positional unpack handles both.
-        for item in exporter(model, cpu=True, show_progress=False):
-            hf_name, weight = item[0], item[1]
-            state_dict[hf_name] = weight
-
-    if is_dp_rank_0 and tp_rank == 0:
-        _save_peft_hf_artifacts(
+    _coordinated_checkpoint_call(
+        "PEFT HF adapter artifact save",
+        lambda: _save_peft_hf_artifacts(
             save_path,
             state_dict,
             config=build_config(),
             base_model_name_or_path=args.hf_checkpoint,
         )
+        if roles.hf_writer
+        else None,
+    )
 
+    # Every rank must participate: distributed optimizers gather parameter
+    # state inside this call before their DP roots write rank-local files.
     save_training_state(
         save_path,
         optimizer,
         opt_param_scheduler,
         iteration,
         active_student_version=active_student_version,
-        no_save_optim=getattr(args, "no_save_optim", False),
+        no_save_optim=no_save_optim,
     )
-
-    if dist.is_initialized():
-        dist.barrier()
 
     return str(save_path)
 
