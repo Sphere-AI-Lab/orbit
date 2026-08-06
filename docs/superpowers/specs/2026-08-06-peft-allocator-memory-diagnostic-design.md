@@ -5,6 +5,11 @@
 - **Repo:** this one (`orbit`, branch `feat/lora-without-regret`)
 - **Trigger:** the three LoRA arms of E4 gsm8k column 4 die at rollout 2 on 8xH100
   while the FullFT arm of the same column completes 149/149 rollouts on the same node.
+- **Amended 2026-08-06** after the final whole-branch code review: added `active_GB` (§5) so
+  H2 is measured directly instead of inferred by elimination, corrected the `.get(key, 0)`
+  rationale (§5) which had misattributed it to an empty `memory_stats()` dict, collapsed
+  three allocator snapshots into one (§5), and rewrote the decision rule (§6) around the
+  now-closed partition with the `cudaMallocAsync` / `expandable_segments` caveats folded in.
 
 ## 1. Purpose
 
@@ -125,24 +130,48 @@ for H2 — and are distinguished by a single counter.
 
 ## 5. The change
 
-`available_memory()` in `orbit/utils/memory_utils.py` returns three additional fields, read
+`available_memory()` in `orbit/utils/memory_utils.py` returns four additional fields, read
 from `torch.cuda.memory_stats(device)`:
 
 | field | source key | role |
 |---|---|---|
-| `inactive_split_GB` | `inactive_split_bytes.all.current` | load-bearing: decides H1 vs H2 |
+| `inactive_split_GB` | `inactive_split_bytes.all.current` | load-bearing: decides H1 |
+| `active_GB` | `active_bytes.all.current` | load-bearing: decides H2 |
 | `segments` | `segment.all.current` | context: how far the pool is split |
 | `alloc_retries` | `num_alloc_retries` | context: allocator distress |
 
 `inactive_split_bytes` is *defined* as bytes that are free but sit inside a segment still
 holding at least one live block. It is H1 stated numerically.
 
+`active_bytes` counts blocks that are allocated *or* still recorded as in-use by a CUDA
+stream. `active_GB - allocated_GB` is therefore the bytes held only because a stream hasn't
+released them yet — H2 stated numerically, the same way `inactive_split_GB` states H1. Before
+this field, H2 was inference by elimination over a partition with an invisible term; now
+every term in `reserved = allocated + (active - allocated) + inactive_split +
+(reserved - active - inactive_split)` is either measured directly or a subtraction of two
+measured fields.
+
 Byte-valued fields go through the existing `_byte_to_gb` and carry the existing `_GB`
 suffix; the two counts are dimensionless and take no suffix.
 
-**Every lookup uses `.get(key, 0)`.** `torch.cuda.memory_stats()` returns `{}` for a device
-with no allocator activity, and `print_memory` is called during setup before the first
-allocation, so a direct subscript raises `KeyError` at startup.
+**Every lookup uses `.get(key, 0)`.** This is not a guard against `torch.cuda.memory_stats()`
+returning `{}`: `available_memory()`'s first line calls `torch.cuda.current_device()`, which
+calls `_lazy_init()` (`torch/cuda/__init__.py:1146-1149`), and
+`memory_stats_as_nested_dict()` (`torch/cuda/memory.py:332-337`) — which `memory_stats()`
+flattens — returns `{}` only `if not is_initialized()`. By the time `memory_stats()` runs,
+CUDA is always initialized, and a device the allocator has never served yields the full
+stats dict populated with zeros, never `{}`. The real reason for `.get(key, 0)` is key-name
+drift across torch versions: it is the same defaulting `torch.cuda.memory_allocated()` and
+`torch.cuda.memory_reserved()` use internally when they read this same dict, and it is what
+keeps this module from raising `KeyError` if a stat is renamed in a future torch release.
+
+**One snapshot, not several.** `torch.cuda.memory_allocated()` and `torch.cuda.memory_reserved()`
+each rebuild the full `memory_stats()` dict under their own mutex acquisition; calling them
+alongside a separate `memory_stats()` call took three snapshots at three instants for numbers
+this function treats as one consistent partition. `available_memory()` now reads
+`allocated_bytes.all.current` and `reserved_bytes.all.current` off the single `stats` dict
+already in hand, matching how `memory_allocated`/`memory_reserved` source these values
+(verified against the installed torch at `torch/cuda/memory.py:513-527,551-563`).
 
 **No new call sites and no new flag.** Every existing `print_memory` picks the fields up,
 including the three in `MegatronTrainRayActor.sleep()` that bracket the offload and those in
@@ -154,16 +183,46 @@ so attaching it to a log line that is already emitted costs nothing measurable.
 
 ## 6. How the result is read
 
-At the `before update_weights` probe of the failing rollout, where
-`reserved - allocated ~ 49.9 GB`:
+The allocator partition read at a probe is now closed:
+`reserved = allocated + (active - allocated) + inactive_split + (reserved - active -
+inactive_split)`. Every term on the right is either a field or a subtraction of two fields
+`available_memory()` returns, so none of it is invisible any more.
 
-- `inactive_split_GB` ≈ 49 → **H1 confirmed.** Fix is
+At the `before update_weights` probe of the failing rollout, where
+`reserved - allocated ~ 49.9 GB`, read the three terms in order:
+
+- **`inactive_split_GB` large (≈ 49)** → **H1 confirmed.** Free bytes are trapped inside
+  segments that still hold a live block. Fix is
   `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` for the Megatron train actors.
-- `inactive_split_GB` ≈ 0 → **H2 indicated.** The bytes are in fully free segments that
-  `empty_cache()` declined to release; fix is a synchronising clear on the PEFT offload
-  path.
-- Anything in between → the pool is mixed; `segments` and `alloc_retries` inform whether to
+- **`active_GB - allocated_GB` large** → **H2 confirmed.** Blocks are still recorded as
+  in-use by a stream and `empty_cache()` cannot touch them regardless of segment occupancy.
+  Fix is a synchronising clear (`torch.cuda.synchronize()` before `empty_cache()`) on the
+  PEFT offload path.
+- **`reserved - active - inactive_split` large, with the other two both small** → a third
+  case that was previously invisible: segments are fully free (not `inactive_split`, not
+  pinned by a stream, i.e. not H1 or H2) but were never returned to the driver. This points
+  at a missed or skipped `empty_cache()` call on the path in question, not at either
+  hypothesis above — check whether `empty_cache()` actually runs on that code path before
+  picking a fix.
+- **Mixed, no single term dominant** → `segments` and `alloc_retries` inform whether to
   escalate to a full `torch.cuda.memory_snapshot()` capture with per-segment occupancy.
+
+**Caveats before trusting a zero:**
+
+- `inactive_split_bytes` is reported as always zero under
+  `PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync` (torch's own `memory_stats()` docstring:
+  "with backend:cudaMallocAsync, some stats are not meaningful, and are always reported as
+  zero"). A zero reading is then structurally indistinguishable from genuine no-fragmentation,
+  and trusting it routes to the wrong fix. Confirm `PYTORCH_CUDA_ALLOC_CONF` is unset (or does
+  not select `cudaMallocAsync`) in the environment the probe ran in before reading
+  `inactive_split_GB` ≈ 0 as evidence against H1. As of this writing the repo sets
+  `PYTORCH_CUDA_ALLOC_CONF` nowhere, so this is latent, not present — worth re-checking if
+  that ever changes.
+- Once `expandable_segments:True` is applied as the H1 fix, `inactive_split_bytes` is no
+  longer measuring the same thing it measured pre-fix (expandable segments change what
+  counts as non-releasable). Do not use `inactive_split_GB` before vs. after as the
+  before/after success metric for that fix; use `reserved - allocated` at the same probe
+  instead.
 
 ## 7. Validation
 

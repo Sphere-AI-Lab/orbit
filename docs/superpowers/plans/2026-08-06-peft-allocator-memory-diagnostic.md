@@ -324,13 +324,22 @@ grep "Rank 0\] Memory-Usage before update_weights" \
     logs/lora_regret/lora-r1-all-gsm8k-lr7e-05-s0.log | tail -3
 ```
 
-Decision rule, from spec §6, at the probe where `reserved - allocated ≈ 49.9 GB`:
+Decision rule, from spec §6, at the probe where `reserved - allocated ≈ 49.9 GB`. The
+partition is now closed — read the three terms in order, not just `inactive_split_GB`:
 
 | reading | conclusion | indicated fix |
 |---|---|---|
-| `inactive_split_GB` ≈ 49 | fragmentation confirmed | `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` for the train actors |
-| `inactive_split_GB` ≈ 0 | fully free segments went unreleased | synchronising clear on the PEFT offload path |
-| in between | mixed pool | escalate to `torch.cuda.memory_snapshot()` per-segment capture |
+| `inactive_split_GB` large (≈ 49) | H1: fragmentation confirmed | `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` for the train actors |
+| `active_GB - allocated_GB` large | H2: blocks pending stream release | synchronising clear (`torch.cuda.synchronize()` before `empty_cache()`) on the PEFT offload path |
+| `reserved - active_GB - inactive_split_GB` large, other two small | fully-free segments never released (previously invisible) | check whether `empty_cache()` actually runs on that path before picking a fix |
+| mixed, no term dominant | ambiguous | escalate to `torch.cuda.memory_snapshot()` per-segment capture |
+
+Before trusting an `inactive_split_GB` ≈ 0 reading as evidence against H1, confirm
+`PYTORCH_CUDA_ALLOC_CONF` is unset in the run's environment: under
+`backend:cudaMallocAsync` torch always reports `inactive_split_bytes` as zero, which looks
+identical to genuine no-fragmentation. If `expandable_segments:True` is later applied as the
+H1 fix, don't use `inactive_split_GB` before-vs-after as the success metric — it stops being
+comparable across that change; use `reserved - allocated` at the same probe instead.
 
 Either fix is a separate change with its own smoke run, and both are expected to be
 hardware-independent — nothing in either hypothesis is specific to an 80 GB card.
