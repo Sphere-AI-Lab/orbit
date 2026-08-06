@@ -326,6 +326,12 @@ def save_training_state(
     logger.info(f"Saved optimizer/scheduler state to {state_path.parent}")
 
 
+def peft_training_state_exists(adapter_dir: str | Path) -> bool:
+    """Return whether this rank has a resumable PEFT training-state sidecar."""
+    rank = dist.get_rank() if dist.is_initialized() else 0
+    return (Path(adapter_dir) / f"training_state_rank{rank}.pt").is_file()
+
+
 def load_training_state(
     adapter_dir: Path,
     optimizer: Any | None,
@@ -415,7 +421,7 @@ def restore_peft_training_state_after_optimizer_build(
     is missing, changed, or inconsistent before optimizer state is mutated.
     """
     adapter_dir = getattr(args, "_peft_resume_adapter_dir", None)
-    if adapter_dir is None:
+    if adapter_dir is None or getattr(args, "_peft_training_state_found", None) is False:
         return False
 
     restored_iteration = load_training_state(

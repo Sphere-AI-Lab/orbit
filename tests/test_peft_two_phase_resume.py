@@ -6,6 +6,7 @@ import pytest
 import torch
 
 import orbit.backends.megatron_utils.peft_utils as peft_utils
+import orbit.backends.megatron_utils.checkpoint as checkpoint_mod
 from orbit.backends.megatron_utils.peft_utils import (
     load_training_state,
     restore_peft_training_state_after_optimizer_build,
@@ -20,6 +21,7 @@ class _ExternalStateOptimizer:
         self.moment = torch.tensor([moment])
         self.load_state_calls = 0
         self.load_parameter_state_calls = 0
+        self.reload_model_params_calls = 0
 
     def state_dict(self):
         return {"optimizer": {"param_groups": [{"step": self.step}]}}
@@ -36,6 +38,9 @@ class _ExternalStateOptimizer:
         state = torch.load(filename, weights_only=False)
         self.main.copy_(state["main"])
         self.moment.copy_(state["moment"])
+
+    def reload_model_params(self):
+        self.reload_model_params_calls += 1
 
 
 class _Scheduler:
@@ -62,7 +67,10 @@ def test_low_precision_resume_discovers_iteration_then_restores_training_state(t
     # Phase two runs immediately after optimizer/scheduler construction.
     target_optimizer = _ExternalStateOptimizer()
     target_scheduler = _Scheduler()
-    args = argparse.Namespace(_peft_resume_adapter_dir=str(tmp_path))
+    args = argparse.Namespace(
+        _peft_resume_adapter_dir=str(tmp_path),
+        _peft_training_state_found=True,
+    )
     assert restore_peft_training_state_after_optimizer_build(
         args,
         target_optimizer,
@@ -96,7 +104,10 @@ def test_second_phase_rejects_training_state_changed_since_model_load(tmp_path):
 
     target_optimizer = _ExternalStateOptimizer()
     target_scheduler = _Scheduler()
-    args = argparse.Namespace(_peft_resume_adapter_dir=str(tmp_path))
+    args = argparse.Namespace(
+        _peft_resume_adapter_dir=str(tmp_path),
+        _peft_training_state_found=True,
+    )
     with pytest.raises(RuntimeError, match="checkpoint iteration does not match"):
         restore_peft_training_state_after_optimizer_build(
             args,
@@ -121,6 +132,80 @@ def test_second_phase_is_a_noop_without_a_peft_resume_directory():
     )
     assert optimizer.load_state_calls == 0
     assert scheduler.load_calls == 0
+
+
+def test_low_precision_weights_only_adapter_keeps_fresh_optimizer(tmp_path):
+    optimizer = _ExternalStateOptimizer()
+    scheduler = _Scheduler()
+    args = argparse.Namespace(
+        _peft_resume_adapter_dir=str(tmp_path),
+        _peft_adapter_weights_loaded=True,
+        _peft_training_state_found=False,
+    )
+
+    assert not restore_peft_training_state_after_optimizer_build(
+        args,
+        optimizer,
+        scheduler,
+        expected_iteration=0,
+    )
+    assert optimizer.load_state_calls == 0
+    assert optimizer.load_parameter_state_calls == 0
+    assert scheduler.load_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("training_state_found", "loaded_iteration", "expected_reload_calls"),
+    [(False, None, 1), (True, 7, 0)],
+)
+def test_normal_precision_adapter_load_syncs_main_params_only_without_training_state(
+    monkeypatch,
+    tmp_path,
+    training_state_found,
+    loaded_iteration,
+    expected_reload_calls,
+):
+    (tmp_path / "payload").write_text("base")
+    args = argparse.Namespace(
+        load=str(tmp_path),
+        megatron_to_hf_mode="raw",
+        peft_method="lora",
+        peft_adapter_path="/adapter",
+        lora_adapter_path=None,
+        oft_adapter_path=None,
+        fp16=False,
+        bf16=True,
+    )
+    optimizer = _ExternalStateOptimizer()
+
+    monkeypatch.setattr(checkpoint_mod, "get_args", lambda: args)
+    monkeypatch.setattr(checkpoint_mod, "is_distributed_checkpoint", lambda _path: True)
+    monkeypatch.setattr(checkpoint_mod, "_load_checkpoint_dist", lambda **_kwargs: (0, 0))
+    monkeypatch.setattr(checkpoint_mod, "is_peft_enabled", lambda _args: True)
+    monkeypatch.setattr(checkpoint_mod, "is_peft_model", lambda _model: True, raising=False)
+    monkeypatch.setattr(
+        checkpoint_mod,
+        "peft_training_state_exists",
+        lambda _path: training_state_found,
+    )
+    monkeypatch.setattr(
+        checkpoint_mod,
+        "load_peft_adapter",
+        lambda *args, **kwargs: (True, loaded_iteration),
+    )
+
+    iteration, _ = checkpoint_mod.load_checkpoint(
+        [object()],
+        optimizer,
+        _Scheduler(),
+        checkpointing_context={},
+        skip_load_to_model_and_opt=False,
+    )
+
+    assert iteration == (loaded_iteration if loaded_iteration is not None else 0)
+    assert args._peft_adapter_weights_loaded is True
+    assert args._peft_training_state_found is training_state_found
+    assert optimizer.reload_model_params_calls == expected_reload_calls
 
 
 def test_no_save_optim_removes_stale_peft_training_state(tmp_path):
