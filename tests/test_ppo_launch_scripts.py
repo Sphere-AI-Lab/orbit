@@ -77,6 +77,31 @@ printf '%s' "${RAY_NUM_GPUS}"
     assert result.stdout == "8"
 
 
+def test_ray_defaults_use_cli_critic_mode_instead_of_unparsed_environment():
+    script = """
+set -euo pipefail
+source scripts/lib/common.sh
+source scripts/lib/ray.sh
+GPUS_PER_NODE=2
+ROLLOUT_NUM_GPUS=6
+CRITIC_MODE=full
+RL_ARGS=(--advantage-estimator ppo --critic-mode adapter)
+COLOCATE_ARGS=()
+apply_ray_defaults
+printf '%s' "${RAY_NUM_GPUS}"
+"""
+
+    result = subprocess.run(
+        ["bash", "-c", script],
+        cwd=REPO_ROOT,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.stdout == "8"
+
+
 def test_ppo_launcher_dry_run_prints_ppo_argv(tmp_path):
     env = os.environ.copy()
     env.update(
