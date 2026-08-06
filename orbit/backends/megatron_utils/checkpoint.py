@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 from pathlib import Path
 
 import torch
@@ -116,6 +117,7 @@ _ORBIT_TRAINING_CHECKPOINT_FORMAT = "orbit.training_checkpoint"
 _ORBIT_TRAINING_CHECKPOINT_VERSION = 1
 _CHECKPOINT_ROLES = frozenset({"actor", "critic"})
 _ITERATION_DIRECTORY_RE = re.compile(r"iter_(\d+)")
+_MEGATRON_TRACKER_FILE = "latest_checkpointed_iteration.txt"
 
 
 class _ExplicitZeroCheckpointStep(int):
@@ -217,20 +219,54 @@ def _resolve_selected_distributed_checkpoint(args) -> Path | None:
     if checkpoint_step is not None:
         if not _bounded_nonnegative_integer(checkpoint_step):
             raise ValueError(f"invalid checkpoint step: {checkpoint_step!r}")
-        direct_iteration = _ITERATION_DIRECTORY_RE.fullmatch(load_path.name)
-        if direct_iteration is not None:
-            requested_iteration = int(direct_iteration.group(1))
+        if (load_path / ".metadata").is_file():
+            candidate = load_path.resolve(strict=True)
+            direct_iteration = _ITERATION_DIRECTORY_RE.fullmatch(candidate.name)
+            if direct_iteration is not None:
+                requested_iteration = int(direct_iteration.group(1))
+            else:
+                marker = _read_orbit_training_checkpoint_marker(candidate)
+                if marker is None:
+                    raise ValueError(
+                        f"cannot validate --ckpt-step={checkpoint_step} against direct checkpoint path {load_path}"
+                    )
+                requested_iteration = marker["iteration"]
             if requested_iteration != checkpoint_step:
                 raise ValueError(
                     f"--ckpt-step={checkpoint_step} does not match direct checkpoint path {load_path.name}"
                 )
-            candidate = load_path
         else:
             candidate = load_path / f"iter_{checkpoint_step:07d}"
         if not (candidate / ".metadata").is_file():
             raise FileNotFoundError(f"distributed checkpoint iteration {checkpoint_step} not found at {candidate}")
-        return candidate
-    return resolve_distributed_checkpoint_dir(load_path)
+        return candidate.resolve(strict=True)
+    checkpoint_dir = resolve_distributed_checkpoint_dir(load_path)
+    return checkpoint_dir.resolve(strict=True) if checkpoint_dir is not None else None
+
+
+def _raise_if_incomplete_direct_distributed_checkpoint(load_path: str | Path) -> None:
+    """Reject partial torch_dist directories before legacy detection can claim them."""
+    direct_path = Path(load_path)
+    try:
+        resolved_path = direct_path.resolve(strict=True)
+    except OSError:
+        return
+    if (resolved_path / ".metadata").is_file():
+        return
+
+    is_iteration_directory = (
+        _ITERATION_DIRECTORY_RE.fullmatch(direct_path.name) is not None
+        or _ITERATION_DIRECTORY_RE.fullmatch(resolved_path.name) is not None
+    )
+    marker_exists = (resolved_path / _ORBIT_TRAINING_CHECKPOINT_MARKER).is_file()
+    has_torch_dist_remnants = (resolved_path / "common.pt").is_file() or any(
+        resolved_path.glob("*.distcp")
+    )
+    if (is_iteration_directory or marker_exists) and (marker_exists or has_torch_dist_remnants):
+        raise RuntimeError(
+            f"incomplete distributed checkpoint at {direct_path}: missing finalized .metadata; "
+            "wait for asynchronous checkpoint finalization or choose a completed iteration"
+        )
 
 
 def _read_orbit_training_checkpoint_marker(checkpoint_dir: Path) -> dict | None:
@@ -413,24 +449,36 @@ def _load_selected_megatron_training_checkpoint(args, checkpoint_dir: Path, **lo
     Megatron's root-oriented loader. The truthy int subclass works around
     upstream's ``if args.ckpt_step`` handling for an explicit step of zero.
     """
+    checkpoint_dir = checkpoint_dir.resolve(strict=True)
     iteration_match = _ITERATION_DIRECTORY_RE.fullmatch(checkpoint_dir.name)
-    if iteration_match is None:
-        raise RuntimeError(f"Orbit training checkpoint must use an iter_<step> directory, got {checkpoint_dir}")
+    if iteration_match is not None:
+        iteration = int(iteration_match.group(1))
+    else:
+        marker = _read_orbit_training_checkpoint_marker(checkpoint_dir)
+        if marker is None:
+            raise RuntimeError(
+                f"Orbit training checkpoint iteration cannot be derived from directory or marker at {checkpoint_dir}"
+            )
+        iteration = marker["iteration"]
 
     original_load = args.load
     missing = object()
     original_checkpoint_step = getattr(args, "ckpt_step", missing)
-    iteration = int(iteration_match.group(1))
-    args.load = str(checkpoint_dir.parent)
-    args.ckpt_step = _ExplicitZeroCheckpointStep() if iteration == 0 else iteration
-    try:
-        return _load_checkpoint_megatron(**load_kwargs)
-    finally:
-        args.load = original_load
-        if original_checkpoint_step is missing:
-            delattr(args, "ckpt_step")
-        else:
-            args.ckpt_step = original_checkpoint_step
+    with tempfile.TemporaryDirectory(prefix="orbit-megatron-load-") as temporary_root:
+        temporary_root_path = Path(temporary_root)
+        selected_name = f"iter_{iteration:07d}"
+        os.symlink(checkpoint_dir, temporary_root_path / selected_name, target_is_directory=True)
+        (temporary_root_path / _MEGATRON_TRACKER_FILE).write_text(f"{iteration}\n")
+        args.load = temporary_root
+        args.ckpt_step = _ExplicitZeroCheckpointStep() if iteration == 0 else iteration
+        try:
+            return _load_checkpoint_megatron(**load_kwargs)
+        finally:
+            args.load = original_load
+            if original_checkpoint_step is missing:
+                delattr(args, "ckpt_step")
+            else:
+                args.ckpt_step = original_checkpoint_step
 
 
 def _optimizer_scheduler_state_was_restored(
@@ -494,6 +542,7 @@ def load_checkpoint(
     assert Path(load_path).exists() and _is_dir_nonempty(load_path), (
         f"{args.load=} does not exist or is an empty directory. Did you specify the wrong folder?"
     )
+    _raise_if_incomplete_direct_distributed_checkpoint(load_path)
 
     if is_distributed_checkpoint(load_path):
         selected_checkpoint_dir = _resolve_selected_distributed_checkpoint(args)

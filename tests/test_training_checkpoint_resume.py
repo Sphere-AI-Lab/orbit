@@ -46,6 +46,11 @@ def _load_with_spies(
         observed_kwargs["_observed_load"] = args.load
         observed_kwargs["_observed_ckpt_step"] = args.ckpt_step
         observed_kwargs["_observed_ckpt_step_truthy"] = bool(args.ckpt_step)
+        observed_root = checkpoint_module.Path(args.load)
+        tracker_path = observed_root / checkpoint_module._MEGATRON_TRACKER_FILE
+        observed_kwargs["_observed_tracker"] = tracker_path.read_text().strip()
+        selected_path = observed_root / f"iter_{int(args.ckpt_step):07d}"
+        observed_kwargs["_observed_selected_path"] = str(selected_path.resolve(strict=True))
         calls.append(("full", observed_kwargs))
         return 17, 23
 
@@ -447,7 +452,9 @@ def test_direct_iteration_training_checkpoint_is_pinned_for_full_load(tmp_path, 
 
     assert result == (17, 23)
     assert [kind for kind, _ in calls] == ["full"]
-    assert calls[0][1]["_observed_load"] == str(checkpoint_root)
+    assert calls[0][1]["_observed_load"] != str(checkpoint_root)
+    assert calls[0][1]["_observed_tracker"] == "17"
+    assert calls[0][1]["_observed_selected_path"] == str(checkpoint_dir.resolve())
     assert calls[0][1]["_observed_ckpt_step"] == 17
     assert args.load == str(checkpoint_dir)
     assert args.ckpt_step is None
@@ -477,7 +484,9 @@ def test_explicit_checkpoint_step_zero_is_selected_and_pinned(tmp_path, monkeypa
 
     assert result == (17, 23)
     assert [kind for kind, _ in calls] == ["full"]
-    assert calls[0][1]["_observed_load"] == str(checkpoint_root)
+    assert calls[0][1]["_observed_load"] != str(checkpoint_root)
+    assert calls[0][1]["_observed_tracker"] == "0"
+    assert calls[0][1]["_observed_selected_path"] == str(checkpoint_dir.resolve())
     assert calls[0][1]["_observed_ckpt_step"] == 0
     assert calls[0][1]["_observed_ckpt_step_truthy"] is True
     assert args.ckpt_step == 0
@@ -525,6 +534,177 @@ def test_unfinalized_async_marker_does_not_override_tracked_checkpoint(tmp_path,
 
     assert result == (0, 0)
     assert [kind for kind, _ in calls] == ["model_only"]
+
+
+@pytest.mark.parametrize("selection", ["direct", "ckpt_step"])
+def test_full_load_ignores_parent_release_tracker(tmp_path, monkeypatch, selection):
+    checkpoint_root, checkpoint_dir = _make_distributed_checkpoint(
+        tmp_path,
+        iteration=17,
+        common_state={"checkpoint_version": 3.0, "iteration": 17},
+    )
+    checkpoint_module._write_orbit_training_checkpoint_marker(
+        checkpoint_root,
+        17,
+        "actor",
+        optimizer_state_saved=True,
+        scheduler_state_saved=True,
+    )
+    release_dir = checkpoint_root / "release"
+    release_dir.mkdir()
+    (release_dir / ".metadata").write_bytes(b"release metadata")
+    (checkpoint_root / "latest_checkpointed_iteration.txt").write_text("release")
+    args = _args(checkpoint_dir if selection == "direct" else checkpoint_root)
+    if selection == "ckpt_step":
+        args.ckpt_step = 17
+
+    result, calls = _load_with_spies(monkeypatch, args, role="actor")
+
+    assert result == (17, 23)
+    assert [kind for kind, _ in calls] == ["full"]
+    assert calls[0][1]["_observed_tracker"] == "17"
+    assert calls[0][1]["_observed_selected_path"] == str(checkpoint_dir.resolve())
+    assert args.load == str(checkpoint_dir if selection == "direct" else checkpoint_root)
+    assert (checkpoint_root / "latest_checkpointed_iteration.txt").read_text() == "release"
+
+
+@pytest.mark.parametrize(
+    ("remnant", "use_alias"),
+    [("marker", False), ("distcp", False), ("common", False), ("marker", True)],
+)
+def test_incomplete_direct_distributed_checkpoint_fails_closed(
+    tmp_path,
+    monkeypatch,
+    remnant,
+    use_alias,
+):
+    checkpoint_dir = tmp_path / "iter_0000003"
+    checkpoint_dir.mkdir()
+    if remnant == "marker":
+        checkpoint_module._write_orbit_training_checkpoint_marker(
+            checkpoint_dir,
+            3,
+            "actor",
+            optimizer_state_saved=True,
+            scheduler_state_saved=True,
+        )
+    else:
+        remnant_name = "__0_0.distcp" if remnant == "distcp" else "common.pt"
+        (checkpoint_dir / remnant_name).write_bytes(b"partial checkpoint state")
+
+    load_path = checkpoint_dir
+    if use_alias:
+        load_path = tmp_path / "unfinished-actor"
+        load_path.symlink_to(checkpoint_dir, target_is_directory=True)
+    args = _args(load_path)
+    monkeypatch.setattr(checkpoint_module, "get_args", lambda: args)
+
+    with pytest.raises(RuntimeError, match=r"incomplete distributed checkpoint.*missing finalized \.metadata"):
+        checkpoint_module.load_checkpoint(
+            _model("actor"),
+            object(),
+            object(),
+            checkpointing_context={},
+            skip_load_to_model_and_opt=False,
+            load_training_state=True,
+        )
+
+
+def test_valid_legacy_direct_iteration_is_not_rejected_as_incomplete(tmp_path, monkeypatch):
+    checkpoint_dir = tmp_path / "iter_0000007"
+    legacy_rank_dir = checkpoint_dir / "mp_rank_00"
+    legacy_rank_dir.mkdir(parents=True)
+    (legacy_rank_dir / "model_optim_rng.pt").write_bytes(b"legacy checkpoint")
+    args = _args(checkpoint_dir)
+    calls = []
+    monkeypatch.setattr(checkpoint_module, "get_args", lambda: args)
+    monkeypatch.setattr(checkpoint_module, "is_distributed_checkpoint", lambda _path: False)
+    monkeypatch.setattr(checkpoint_module, "_is_megatron_checkpoint", lambda _path: True)
+    monkeypatch.setattr(
+        checkpoint_module,
+        "_load_checkpoint_megatron",
+        lambda **kwargs: calls.append(kwargs) or (7, 0),
+    )
+    monkeypatch.setattr(checkpoint_module, "is_peft_enabled", lambda _args: False)
+
+    result = checkpoint_module.load_checkpoint(
+        _model("actor"),
+        object(),
+        object(),
+        checkpointing_context={},
+        skip_load_to_model_and_opt=False,
+        load_training_state=True,
+    )
+
+    assert result == (7, 0)
+    assert len(calls) == 1
+
+
+def test_symlink_alias_to_marked_iteration_resumes(tmp_path, monkeypatch):
+    _, checkpoint_dir = _make_distributed_checkpoint(
+        tmp_path,
+        iteration=17,
+        common_state={"checkpoint_version": 3.0, "iteration": 17},
+    )
+    checkpoint_module._write_orbit_training_checkpoint_marker(
+        checkpoint_dir,
+        17,
+        "actor",
+        optimizer_state_saved=True,
+        scheduler_state_saved=True,
+    )
+    alias_path = tmp_path / "actor-latest"
+    alias_path.symlink_to(checkpoint_dir, target_is_directory=True)
+    args = _args(alias_path)
+
+    result, calls = _load_with_spies(monkeypatch, args, role="actor")
+
+    assert result == (17, 23)
+    assert [kind for kind, _ in calls] == ["full"]
+    assert calls[0][1]["_observed_tracker"] == "17"
+    assert calls[0][1]["_observed_selected_path"] == str(checkpoint_dir.resolve())
+    assert args.load == str(alias_path)
+
+
+def test_failed_full_load_restores_args_and_removes_temporary_tracker(tmp_path, monkeypatch):
+    checkpoint_root, checkpoint_dir = _make_distributed_checkpoint(
+        tmp_path,
+        iteration=17,
+        common_state={"checkpoint_version": 3.0, "iteration": 17},
+    )
+    checkpoint_module._write_orbit_training_checkpoint_marker(
+        checkpoint_root,
+        17,
+        "actor",
+        optimizer_state_saved=True,
+        scheduler_state_saved=True,
+    )
+    args = _args(checkpoint_dir)
+    temporary_roots = []
+
+    def failing_loader(**_kwargs):
+        temporary_roots.append(checkpoint_module.Path(args.load))
+        assert (temporary_roots[-1] / "latest_checkpointed_iteration.txt").read_text().strip() == "17"
+        raise RuntimeError("synthetic load failure")
+
+    monkeypatch.setattr(checkpoint_module, "get_args", lambda: args)
+    monkeypatch.setattr(checkpoint_module, "is_peft_enabled", lambda _args: False)
+    monkeypatch.setattr(checkpoint_module, "_load_checkpoint_megatron", failing_loader)
+
+    with pytest.raises(RuntimeError, match="synthetic load failure"):
+        checkpoint_module.load_checkpoint(
+            _model("actor"),
+            object(),
+            object(),
+            checkpointing_context={},
+            skip_load_to_model_and_opt=False,
+            load_training_state=True,
+        )
+
+    assert args.load == str(checkpoint_dir)
+    assert args.ckpt_step is None
+    assert len(temporary_roots) == 1
+    assert not temporary_roots[0].exists()
 
 
 def test_full_model_actor_resume_does_not_double_advance_restored_scheduler(monkeypatch):
