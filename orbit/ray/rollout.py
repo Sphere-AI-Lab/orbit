@@ -41,7 +41,7 @@ from orbit.utils.iter_utils import group_by
 from orbit.utils.logging_utils import configure_logger
 from orbit.utils.metric_checker import MetricChecker
 from orbit.utils.metric_utils import compute_pass_rate, compute_rollout_step, compute_statistics, dict_add_prefix
-from orbit.utils.misc import load_function
+from orbit.utils.misc import load_function, should_run_periodic_action
 from orbit.utils.ray_utils import Box
 from orbit.utils.reward_normalization import normalize_grouped_rewards
 from orbit.utils.seqlen_balancing import get_seqlen_balanced_partitions
@@ -474,7 +474,20 @@ class RolloutManager:
         self._save_debug_rollout_data(data, rollout_id=rollout_id, evaluation=False)
         _log_rollout_data(rollout_id, self.args, data, metrics, time.time() - start_time)
         data = self._convert_samples_to_train_data(data)
-        return self._split_train_data_by_dp(data, self.train_parallel_config["dp_size"])
+        split_data = self._split_train_data_by_dp(data, self.train_parallel_config["dp_size"])
+        if self.args.rollout_global_dataset:
+            mark_rollout_complete = getattr(self.data_source, "mark_rollout_complete", None)
+            if callable(mark_rollout_complete):
+                mark_rollout_complete(
+                    rollout_id,
+                    snapshot_for_save=should_run_periodic_action(
+                        rollout_id,
+                        self.args.save_interval,
+                        self.get_num_rollout_per_epoch(),
+                        self.args.num_rollout,
+                    ),
+                )
+        return split_data
 
     def eval(self, rollout_id):
         if self.args.debug_train_only:
