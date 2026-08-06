@@ -666,20 +666,22 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch, 
 
             all_masks = torch.cat(mask_chunks)
 
-        if all_masks.numel() > 0:
-            assert (
-                all_advs.size() == all_masks.size()
-            ), f"Shape mismatch before whitening: advantages {all_advs.size()}, masks {all_masks.size()}"
-            dp_group = parallel_state.intra_dp.group
+        assert (
+            all_advs.size() == all_masks.size()
+        ), f"Shape mismatch before whitening: advantages {all_advs.size()}, masks {all_masks.size()}"
 
-            whitened_advs_flat = distributed_masked_whiten(
-                all_advs,
-                all_masks,
-                process_group=dp_group,
-                shift_mean=True,
-            )
-            chunk_lengths = [chunk.size(0) for chunk in advantages]
-            advantages = list(torch.split(whitened_advs_flat, chunk_lengths))
+        # CP ranks own disjoint response-token slices, so whitening over the
+        # DP-only group would normalize each CP shard independently.  Use the
+        # combined DP+CP group and have empty local shards enter the collective
+        # as well; otherwise an uneven response layout can strand its peers.
+        whitened_advs_flat = distributed_masked_whiten(
+            all_advs,
+            all_masks,
+            process_group=parallel_state.intra_dp_cp.group,
+            shift_mean=True,
+        )
+        chunk_lengths = [chunk.size(0) for chunk in advantages]
+        advantages = list(torch.split(whitened_advs_flat, chunk_lengths))
 
     rollout_data["advantages"] = advantages
     rollout_data["returns"] = returns

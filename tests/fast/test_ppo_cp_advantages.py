@@ -9,8 +9,13 @@ from orbit.backends.training_utils.loss import compute_advantages_and_returns
 from orbit.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
 
 
-def _parallel_state(rank: int = 0, world_size: int = 1) -> ParallelState:
-    trivial_group = GroupInfo(rank=0, size=1, group=None)
+def _parallel_state(
+    rank: int = 0,
+    world_size: int = 1,
+    *,
+    intra_dp_group: dist.ProcessGroup | None = None,
+) -> ParallelState:
+    trivial_group = GroupInfo(rank=0, size=1, group=intra_dp_group)
     cp_group = dist.group.WORLD if world_size > 1 else None
     return ParallelState(
         intra_dp=trivial_group,
@@ -119,6 +124,140 @@ def test_ppo_terminal_reward_is_added_to_global_response_tail() -> None:
 
 def test_ppo_terminal_reward_handles_empty_rank_zero_shard() -> None:
     run_multiprocess(_worker_empty_rank_zero)
+
+
+def _run_normalized_advantage_case(
+    rank: int,
+    world_size: int,
+    intra_dp_group: dist.ProcessGroup,
+    *,
+    total_lengths: list[int],
+    response_lengths: list[int],
+    rewards: list[float],
+    full_values: list[torch.Tensor],
+    expected_local_sizes: tuple[list[int], list[int]],
+) -> None:
+    full_log_probs = [torch.zeros(length) for length in response_lengths]
+    loss_masks = [torch.ones(length) for length in response_lengths]
+    args = _ppo_args(gamma=0.0, lambd=0.0)
+    args.kl_coef = 0.0
+    args.normalize_advantages = True
+
+    set_parallel_state(
+        _parallel_state(
+            rank=rank,
+            world_size=world_size,
+            intra_dp_group=intra_dp_group,
+        )
+    )
+    local_log_probs = [
+        slice_log_prob_with_cp(log_probs, total_length, response_length)
+        for log_probs, total_length, response_length in zip(
+            full_log_probs, total_lengths, response_lengths, strict=True
+        )
+    ]
+    local_values = [
+        slice_log_prob_with_cp(values, total_length, response_length)
+        for values, total_length, response_length in zip(
+            full_values, total_lengths, response_lengths, strict=True
+        )
+    ]
+    assert [tensor.numel() for tensor in local_values] == expected_local_sizes[rank]
+
+    rollout_data = _ppo_rollout_data(
+        log_probs=local_log_probs,
+        rewards=rewards,
+        values=local_values,
+        loss_masks=[mask.clone() for mask in loss_masks],
+        total_lengths=total_lengths,
+        response_lengths=response_lengths,
+    )
+    compute_advantages_and_returns(args, rollout_data)
+    cp_advantages = [
+        all_gather_with_cp(advantage, total_length, response_length)
+        for advantage, total_length, response_length in zip(
+            rollout_data["advantages"], total_lengths, response_lengths, strict=True
+        )
+    ]
+    cp_returns = [
+        all_gather_with_cp(ret, total_length, response_length)
+        for ret, total_length, response_length in zip(
+            rollout_data["returns"], total_lengths, response_lengths, strict=True
+        )
+    ]
+
+    # Build the single-rank, unnormalized reference without entering another
+    # distributed collective, then apply the exact global masked-whitening
+    # formula used by distributed_masked_whiten.
+    reference_args = _ppo_args(gamma=0.0, lambd=0.0)
+    reference_args.kl_coef = 0.0
+    set_parallel_state(_parallel_state())
+    reference_data = _ppo_rollout_data(
+        log_probs=[tensor.clone() for tensor in full_log_probs],
+        rewards=rewards,
+        values=[tensor.clone() for tensor in full_values],
+        loss_masks=[mask.clone() for mask in loss_masks],
+        total_lengths=total_lengths,
+        response_lengths=response_lengths,
+    )
+    compute_advantages_and_returns(reference_args, reference_data)
+
+    flat_advantages = torch.cat(reference_data["advantages"])
+    flat_mask = torch.cat(loss_masks)
+    count = flat_mask.sum()
+    mean = (flat_advantages * flat_mask).sum() / count
+    mean_square = (flat_advantages.square() * flat_mask).sum() / count
+    variance = (mean_square - mean.square()) * count / (count - 1)
+    expected_flat = (flat_advantages - mean) * torch.rsqrt(variance + 1e-8)
+    expected_advantages = expected_flat.split(response_lengths)
+
+    for actual, expected in zip(cp_advantages, expected_advantages, strict=True):
+        torch.testing.assert_close(actual, expected)
+    for actual, expected in zip(cp_returns, reference_data["returns"], strict=True):
+        torch.testing.assert_close(actual, expected)
+
+
+def _worker_normalized_advantages_with_empty_cp_rank(rank: int, world_size: int, port: int) -> None:
+    init_gloo(rank, world_size, port=port)
+    try:
+        assert world_size == 2
+        # Model the real topology: DP excludes CP, so each CP rank has its own
+        # singleton intra-DP group while intra_dp_cp and cp span WORLD.
+        singleton_groups = [dist.new_group(ranks=[group_rank], backend="gloo") for group_rank in range(world_size)]
+        intra_dp_group = singleton_groups[rank]
+
+        # Rank 0 has an empty slice for sample 0 and the remaining slices are
+        # uneven.  This distinguishes global DP+CP whitening from the old
+        # per-CP-shard whitening over the singleton intra-DP groups.
+        _run_normalized_advantage_case(
+            rank,
+            world_size,
+            intra_dp_group,
+            total_lengths=[7, 7],
+            response_lengths=[2, 6],
+            rewards=[2.0, -1.0],
+            full_values=[torch.tensor([0.5, -0.5]), torch.tensor([1.0, -2.0, 0.25, 0.75, -1.5, 2.0])],
+            expected_local_sizes=([0, 2], [2, 4]),
+        )
+
+        # Rank 0 has no local response tokens at all.  It must nevertheless
+        # enter the combined-group whitening collective with empty tensors.
+        _run_normalized_advantage_case(
+            rank,
+            world_size,
+            intra_dp_group,
+            total_lengths=[7, 7],
+            response_lengths=[1, 2],
+            rewards=[2.0, -1.0],
+            full_values=[torch.tensor([0.5]), torch.tensor([1.0, -2.0])],
+            expected_local_sizes=([0, 0], [1, 2]),
+        )
+    finally:
+        dist.destroy_process_group()
+
+
+def test_ppo_normalized_advantages_include_empty_cp_ranks_in_global_statistics() -> None:
+    run_multiprocess(_worker_normalized_advantages_with_empty_cp_rank)
 
 
 def _run_layout_case(rank: int, world_size: int, qkv_format: str) -> None:
