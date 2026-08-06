@@ -1016,7 +1016,7 @@ def initialize_model_and_optimizer(
                 checkpointing_context={},
                 skip_load_to_model_and_opt=False,
                 is_value_model=reinit_critic_output_layer,
-                load_training_state=role == "critic" and not reinit_critic_output_layer,
+                load_training_state=True,
             )
         else:
             iteration = 0
@@ -1033,7 +1033,9 @@ def initialize_model_and_optimizer(
         if args.load is not None:
             check_model_hashes(args, model, iteration)
 
-    if not peft_training_state_restored:
+    if not peft_training_state_restored and not getattr(
+        args, "_orbit_optimizer_scheduler_state_restored", False
+    ):
         opt_param_scheduler.step(increment=iteration * args.global_batch_size)
 
     return model, optimizer, opt_param_scheduler, iteration
