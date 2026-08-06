@@ -572,6 +572,10 @@ def save_training_state(
             logger.info(f"Skipped optimizer/scheduler state for {adapter_dir} (--no-save-optim)")
         return
 
+    _coordinated_checkpoint_call(
+        "PEFT distributed optimizer state initialization",
+        lambda: prepare_distributed_optimizer_state_for_save(optimizer),
+    )
     optimizer_state = _coordinated_checkpoint_call(
         "PEFT optimizer state serialization",
         optimizer.state_dict,
@@ -586,8 +590,8 @@ def save_training_state(
         ),
     )
     _coordinated_checkpoint_call(
-        "PEFT distributed optimizer topology validation",
-        lambda: _validate_external_parameter_state_topology(optimizer)
+        "PEFT distributed optimizer source validation",
+        lambda: validate_distributed_optimizer_sources_for_save(optimizer)
         if has_external_parameter_state
         else None,
     )
@@ -773,6 +777,136 @@ def _validate_external_parameter_state_topology(optimizer: Any) -> None:
     leaves, _ = _external_parameter_state_leaves(optimizer)
     for leaf in leaves:
         _validate_distributed_optimizer_leaf_topology(leaf)
+
+
+def _distributed_optimizer_source_params(leaf: Any):
+    """Yield each model parameter's validated optimizer source and local width."""
+    index_map = getattr(leaf, "model_param_group_index_map", None)
+    inner_optimizer = getattr(leaf, "optimizer", None)
+    param_groups = getattr(inner_optimizer, "param_groups", None)
+    if not isinstance(index_map, Mapping):
+        raise RuntimeError("distributed optimizer has no model-parameter group index map")
+    if not isinstance(param_groups, Sequence):
+        raise RuntimeError("distributed optimizer has no inspectable parameter groups")
+
+    for gbuf_idx, gbuf_range_maps in enumerate(leaf.gbuf_ranges):
+        for range_maps in gbuf_range_maps.values():
+            for bucket_idx, range_map in enumerate(range_maps):
+                for model_param, param_range_map in range_map["param_map"].items():
+                    context = f"gbuf {gbuf_idx} bucket {bucket_idx}"
+                    try:
+                        index = index_map[model_param]
+                    except (KeyError, TypeError) as exc:
+                        raise RuntimeError(
+                            f"distributed optimizer {context} model parameter has no group index"
+                        ) from exc
+                    if type(index) not in (tuple, list) or len(index) != 2:
+                        raise RuntimeError(
+                            f"distributed optimizer {context} model-parameter group index is invalid"
+                        )
+                    group_index, group_order = index
+                    if type(group_index) is not int or type(group_order) is not int:
+                        raise RuntimeError(
+                            f"distributed optimizer {context} model-parameter group index is invalid"
+                        )
+                    if not 0 <= group_index < len(param_groups):
+                        raise RuntimeError(
+                            f"distributed optimizer {context} parameter-group index is out of range"
+                        )
+                    param_group = param_groups[group_index]
+                    group_params = param_group.get("params") if isinstance(param_group, Mapping) else None
+                    if not isinstance(group_params, Sequence) or not 0 <= group_order < len(group_params):
+                        raise RuntimeError(
+                            f"distributed optimizer {context} parameter order is out of range"
+                        )
+                    local_range = param_range_map["gbuf_local"]
+                    yield model_param, group_params[group_order], local_range.end - local_range.start, context
+
+
+def _leaf_has_absent_optimizer_state(leaf: Any) -> bool:
+    inner_state = getattr(getattr(leaf, "optimizer", None), "state", None)
+    if not isinstance(inner_state, Mapping):
+        raise RuntimeError("distributed optimizer has no inspectable optimizer state")
+    for _, optimizer_param, _, context in _distributed_optimizer_source_params(leaf):
+        state = inner_state.get(optimizer_param)
+        if state is None:
+            return True
+        if not isinstance(state, Mapping):
+            raise RuntimeError(f"distributed optimizer {context} optimizer state is invalid")
+        if len(state) == 0:
+            return True
+    return False
+
+
+def prepare_distributed_optimizer_state_for_save(optimizer: Any) -> None:
+    """Lazily initialize state for pinned distributed-optimizer save layouts.
+
+    Megatron initializes Adam moments on the first optimizer step. A PEFT
+    checkpoint can precede that step during critic-only warmup, so initialize
+    only missing leaf state through Megatron's own precision-aware hook.
+    """
+    if _megatron_external_parameter_state_layout(optimizer) is not True:
+        return
+    leaves, _ = _external_parameter_state_leaves(optimizer)
+    for leaf in leaves:
+        _validate_distributed_optimizer_leaf_topology(leaf)
+        if not _leaf_has_absent_optimizer_state(leaf):
+            continue
+        init_state_fn = getattr(leaf, "init_state_fn", None)
+        if not callable(init_state_fn):
+            raise RuntimeError("distributed optimizer cannot initialize absent optimizer state")
+        init_state_fn(leaf.optimizer, leaf.config)
+
+
+def _validate_distributed_optimizer_source_tensor(
+    tensor: Any,
+    *,
+    key: str,
+    expected_numel: int,
+    context: str,
+) -> None:
+    if (
+        not isinstance(tensor, torch.Tensor)
+        or tensor.layout != torch.strided
+        or tensor.device.type == "meta"
+        or tensor.is_quantized
+        or not tensor.is_floating_point()
+        or tensor.ndim != 1
+        or tensor.numel() != expected_numel
+    ):
+        raise RuntimeError(
+            f"distributed optimizer {context} source {key!r} is incompatible; "
+            f"expected a dense, non-meta, non-quantized floating 1-D tensor with {expected_numel} elements"
+        )
+
+
+def validate_distributed_optimizer_sources_for_save(optimizer: Any) -> None:
+    """Validate every source dereferenced before Megatron's first save gather."""
+    if _megatron_external_parameter_state_layout(optimizer) is not True:
+        return
+    leaves, _ = _external_parameter_state_leaves(optimizer)
+    for leaf in leaves:
+        _validate_distributed_optimizer_leaf_topology(leaf)
+        get_tensors = getattr(leaf, "_get_main_param_and_optimizer_states", None)
+        if not callable(get_tensors):
+            raise RuntimeError("distributed optimizer does not expose pinned parameter-state sources")
+        for model_param, _, expected_numel, context in _distributed_optimizer_source_params(leaf):
+            try:
+                tensors = get_tensors(model_param)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"distributed optimizer {context} parameter-state source lookup failed: "
+                    f"{type(exc).__name__}: {exc}"
+                ) from exc
+            if not isinstance(tensors, Mapping):
+                raise RuntimeError(f"distributed optimizer {context} parameter-state sources are invalid")
+            for key in ("param", "exp_avg", "exp_avg_sq"):
+                _validate_distributed_optimizer_source_tensor(
+                    tensors.get(key),
+                    key=key,
+                    expected_numel=expected_numel,
+                    context=context,
+                )
 
 
 @dataclass(frozen=True)

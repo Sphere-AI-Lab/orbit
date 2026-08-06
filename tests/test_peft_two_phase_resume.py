@@ -129,6 +129,66 @@ class _FakeDistributedLeaf:
         return None
 
 
+class _WarmupDistributedLeaf(_FakeDistributedLeaf):
+    def __init__(self, width=3, *, empty_state=True):
+        super().__init__(width=width)
+        self.main_param.data.copy_(torch.arange(width, dtype=torch.float32) + 4.0)
+        self.optimizer.state = {}
+        self.config = SimpleNamespace(name="test-config")
+        self.init_state_calls = 0
+        self.state_dict_calls = 0
+        self.save_parameter_state_calls = 0
+        self.source_overrides = {}
+
+        def init_state_fn(inner_optimizer, config):
+            assert config is self.config
+            self.init_state_calls += 1
+            for group in inner_optimizer.param_groups:
+                for param in group["params"]:
+                    state = inner_optimizer.state.setdefault(param, {})
+                    if len(state) == 0:
+                        state["exp_avg"] = torch.zeros_like(param)
+                        state["exp_avg_sq"] = torch.zeros_like(param)
+
+        self.init_state_fn = init_state_fn
+        if not empty_state:
+            self.init_state_fn(self.optimizer, self.config)
+            self.init_state_calls = 0
+
+    def state_dict(self):
+        self.state_dict_calls += 1
+        state = self.optimizer.state[self.main_param]
+        assert "exp_avg" in state
+        assert "exp_avg_sq" in state
+        return {"optimizer": {"param_groups": [{"step": 0}]}}
+
+    def _get_main_param_and_optimizer_states(self, _model_param):
+        state = self.optimizer.state[self.main_param]
+        tensors = {
+            "param": self.main_param,
+            "exp_avg": state.get("exp_avg"),
+            "exp_avg_sq": state.get("exp_avg_sq"),
+        }
+        tensors.update(self.source_overrides)
+        return tensors
+
+    def get_parameter_state_dp_zero(self):
+        tensors = self._get_main_param_and_optimizer_states(self.model_param)
+        return {
+            "buckets_coalesced": True,
+            0: {
+                torch.float32: {
+                    "numel_unpadded": self.main_param.numel(),
+                    **{key: tensor.detach().cpu().clone() for key, tensor in tensors.items()},
+                }
+            },
+        }
+
+    def save_parameter_state(self, filename):
+        self.save_parameter_state_calls += 1
+        torch.save(self.get_parameter_state_dp_zero(), filename)
+
+
 def _valid_external_leaf_state(leaf):
     width = leaf.buffers[0].numel_unpadded
     return {
@@ -142,6 +202,108 @@ def _valid_external_leaf_state(leaf):
             }
         },
     }
+
+
+def test_warmup_save_initializes_zero_adam_state_without_advancing_training(tmp_path):
+    optimizer = _WarmupDistributedLeaf()
+    scheduler = _Scheduler(num_steps=192)
+    original_param = optimizer.main_param.detach().clone()
+    original_scheduler_state = scheduler.state_dict().copy()
+
+    save_training_state(tmp_path, optimizer, scheduler, iteration=0)
+
+    assert optimizer.init_state_calls == 1
+    assert optimizer.state_dict_calls == 1
+    assert optimizer.save_parameter_state_calls == 1
+    assert torch.equal(optimizer.main_param, original_param)
+    assert scheduler.state_dict() == original_scheduler_state
+    assert scheduler.load_calls == 0
+    assert torch.count_nonzero(optimizer.optimizer.state[optimizer.main_param]["exp_avg"]) == 0
+    assert torch.count_nonzero(optimizer.optimizer.state[optimizer.main_param]["exp_avg_sq"]) == 0
+
+    parameter_state = torch.load(
+        tmp_path / "optimizer_parameter_state_rank0.pt",
+        map_location="cpu",
+        weights_only=False,
+    )
+    saved_sources = parameter_state[0][torch.float32]
+    assert torch.equal(saved_sources["param"], original_param)
+    assert torch.count_nonzero(saved_sources["exp_avg"]) == 0
+    assert torch.count_nonzero(saved_sources["exp_avg_sq"]) == 0
+    training_state = torch.load(tmp_path / "training_state_rank0.pt", weights_only=False)
+    assert training_state["iteration"] == 0
+    assert training_state["optimizer_parameter_state"] is True
+    assert training_state["opt_param_scheduler"] == original_scheduler_state
+
+
+@pytest.mark.parametrize(
+    "bad_index",
+    [None, (1, 0), (0, 1), ("0", 0), (0,)],
+)
+def test_save_rejects_invalid_model_parameter_group_indices_before_serialization(tmp_path, bad_index):
+    optimizer = _WarmupDistributedLeaf(empty_state=False)
+    if bad_index is None:
+        optimizer.model_param_group_index_map.clear()
+    else:
+        optimizer.model_param_group_index_map[optimizer.model_param] = bad_index
+
+    with pytest.raises(RuntimeError, match="distributed optimizer state initialization"):
+        save_training_state(tmp_path, optimizer, _Scheduler(), iteration=0)
+
+    assert optimizer.state_dict_calls == 0
+    assert optimizer.save_parameter_state_calls == 0
+    assert not (tmp_path / "optimizer_parameter_state_rank0.pt").exists()
+
+
+@pytest.mark.parametrize(
+    "invalid_source",
+    [
+        "missing_exp_avg",
+        "missing_exp_avg_sq",
+        "wrong_width",
+        "integer",
+        "matrix",
+        "sparse",
+        "meta",
+        "quantized",
+    ],
+)
+def test_save_rejects_incompatible_live_optimizer_sources_before_materialization(
+    tmp_path,
+    invalid_source,
+):
+    optimizer = _WarmupDistributedLeaf(empty_state=False)
+    width = optimizer.main_param.numel()
+    replacements = {
+        "wrong_width": lambda: torch.zeros(width + 1),
+        "integer": lambda: torch.zeros(width, dtype=torch.int64),
+        "matrix": lambda: torch.zeros(1, width),
+        "sparse": lambda: torch.sparse_coo_tensor(
+            torch.tensor([[0]]),
+            torch.tensor([1.0]),
+            (width,),
+        ),
+        "meta": lambda: torch.empty(width, device="meta"),
+        "quantized": lambda: torch.quantize_per_tensor(
+            torch.ones(width),
+            scale=0.1,
+            zero_point=0,
+            dtype=torch.qint8,
+        ),
+    }
+    if invalid_source == "missing_exp_avg":
+        optimizer.source_overrides["exp_avg"] = None
+    elif invalid_source == "missing_exp_avg_sq":
+        optimizer.source_overrides["exp_avg_sq"] = None
+    else:
+        optimizer.source_overrides["exp_avg"] = replacements[invalid_source]()
+
+    with pytest.raises(RuntimeError, match="distributed optimizer source validation"):
+        save_training_state(tmp_path, optimizer, _Scheduler(), iteration=0)
+
+    assert optimizer.state_dict_calls == 1
+    assert optimizer.save_parameter_state_calls == 0
+    assert not (tmp_path / "optimizer_parameter_state_rank0.pt").exists()
 
 
 def test_low_precision_resume_discovers_iteration_then_restores_training_state(tmp_path):
