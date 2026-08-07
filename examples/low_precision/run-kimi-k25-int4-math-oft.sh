@@ -81,7 +81,6 @@ if [[ "${PARITY_CHECK,,}" =~ ^(1|true|yes|y|on)$ ]]; then
     ENABLE_WANDB=${ENABLE_WANDB:-0}
     USE_ROLLOUT_ROUTING_REPLAY=${USE_ROLLOUT_ROUTING_REPLAY:-1}
     DISABLE_SAVE=${DISABLE_SAVE:-1}
-    SGLANG_OFT_PARITY_MODE=${SGLANG_OFT_PARITY_MODE:-1}
     SGLANG_ENABLE_FP32_LM_HEAD=${SGLANG_ENABLE_FP32_LM_HEAD:-1}
     SGLANG_ENABLE_DETERMINISTIC_INFERENCE=${SGLANG_ENABLE_DETERMINISTIC_INFERENCE:-1}
     # Reuse the generic train-vs-rollout logprob diff logger.
@@ -260,11 +259,6 @@ SGLANG_ARGS=(
     --sglang-attention-backend "${SGLANG_ATTENTION_BACKEND}"
     --router-disable-circuit-breaker
 )
-_sglang_oft_parity_mode="${SGLANG_OFT_PARITY_MODE:-0}"
-if [[ "${_sglang_oft_parity_mode,,}" =~ ^(1|true|yes|y|on)$ ]]; then
-    SGLANG_ARGS+=( --sglang-oft-parity-mode )
-fi
-unset _sglang_oft_parity_mode
 if [[ "${SGLANG_DISABLE_CUDA_GRAPH,,}" =~ ^(1|true|yes|y|on)$ ]]; then
     SGLANG_ARGS+=( --sglang-disable-cuda-graph )
 fi

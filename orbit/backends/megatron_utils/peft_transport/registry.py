@@ -24,7 +24,7 @@ class PeftMethodSpec:
 
 
 def _build_oft_payload_shaper():
-    # Late import — _payload imports sglang.srt.oft.streamed_weight_loader, which
+    # Late import — _payload imports sglang.srt.peft.oft.streamed_weight_loader, which
     # is an optional heavy dependency that may not be present at registry-load time.
     from ._payload import build_oft_flattened_payload
     return build_oft_flattened_payload
@@ -35,8 +35,13 @@ PEFT_METHODS: dict[str, PeftMethodSpec] = {
         name="lora",
         sglang_load_format="lora_adapter",
         weight_name_predicate=is_lora_weight_name,
-        dedupe_by_storage=False,
-        payload_shaper=None,
+        # IPC path: single-active peft/lora via update_weights_from_tensor(
+        # load_format="lora_adapter"), symmetric to OFT. The payload_shaper is
+        # method-agnostic (dedupe-by-storage + flatten); the fork's
+        # serialize_flattened_lora_payload / normalize_lora_weight_payload
+        # consume the same deduped flattened-bucket form.
+        dedupe_by_storage=True,
+        payload_shaper=_build_oft_payload_shaper(),
         sample_names="lora_A/lora_B",
         label="LoRA",
     ),

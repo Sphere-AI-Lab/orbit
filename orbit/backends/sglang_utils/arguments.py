@@ -61,26 +61,32 @@ def add_sglang_arguments(parser):
         "nccl_port",
         "skip_server_warmup",
         "enable_return_routed_experts",
+        # sglang v0.5.14 upstream (PR #28919) added --enforce-piecewise-cuda-graph
+        # to ServerArgs; orbit also manually adds --sglang-enforce-piecewise-cuda-graph
+        # below as a colocate override. Skip the auto-mirror so the manual override
+        # wins instead of colliding (argparse conflicting option string).
+        "enforce_piecewise_cuda_graph",
     ]
 
     def new_add_argument_wrapper(*name_or_flags, **kwargs):
         """
         Add arguments to the parser, ensuring that the server arguments are prefixed and skippable.
         """
-        # Determine the canonical name for skip check (e.g., "model_path")
-        canonical_name_for_skip_check = None
-        if "dest" in kwargs:
-            canonical_name_for_skip_check = kwargs["dest"]
-        else:
-            for flag_name_candidate in name_or_flags:
-                if isinstance(flag_name_candidate, str) and flag_name_candidate.startswith("--"):
-                    # Derive from first long flag: --foo-bar -> foo_bar
-                    stem = flag_name_candidate[2:]
-                    canonical_name_for_skip_check = stem.replace("-", "_")
-                    break
-            # If no long flag and no dest, skip logic might not catch it unless short flags imply a dest.
+        # Determine the canonical name(s) for skip check (e.g., "model_path").
+        # Check BOTH the explicit dest AND the flag-derived name: sglang v0.5.14
+        # deprecated-alias args (e.g. --enforce-piecewise-cuda-graph) carry an
+        # explicit dest pointing at the REAL field (cuda_graph_backend_prefill),
+        # so a dest-only check can't skip them by their own flag name.
+        canonical_names_for_skip_check = []
+        if "dest" in kwargs and isinstance(kwargs["dest"], str):
+            canonical_names_for_skip_check.append(kwargs["dest"])
+        for flag_name_candidate in name_or_flags:
+            if isinstance(flag_name_candidate, str) and flag_name_candidate.startswith("--"):
+                # Derive from first long flag: --foo-bar -> foo_bar
+                canonical_names_for_skip_check.append(flag_name_candidate[2:].replace("-", "_"))
+                break
 
-        if canonical_name_for_skip_check and canonical_name_for_skip_check in skipped_args:
+        if any(n in skipped_args for n in canonical_names_for_skip_check):
             return  # Skip this entire argument definition
 
         # If not skipped, proceed to prefix flags and dest
@@ -159,9 +165,10 @@ def validate_args(args):
     if args.true_on_policy_mode:
         args.sglang_enable_deterministic_inference = True
 
-    args.sglang_dp_size = args.sglang_data_parallel_size
-    args.sglang_pp_size = args.sglang_pipeline_parallel_size
-    args.sglang_ep_size = args.sglang_expert_parallel_size
+    # sglang v0.5.14 ServerArgs fields are dp_size/pp_size/ep_size (the old
+    # data_parallel_size/pipeline_parallel_size/expert_parallel_size are CLI
+    # aliases only), so the auto-mirror already produces args.sglang_dp_size /
+    # sglang_pp_size / sglang_ep_size directly -- used as-is below (v0.5.14-only).
     args.sglang_attn_cp_size = getattr(
         args,
         "sglang_attn_cp_size",
