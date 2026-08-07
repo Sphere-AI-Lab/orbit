@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Qwen2.5-0.5B-Instruct BF16 LoRA pure MOPD with an EMA self-teacher
+# Qwen2.5-0.5B-Instruct BF16 OFT pure MOPD with an EMA self-teacher
 # (--opd-teacher self:ema, sglang mode, LOCAL scoring). Smoke config for
 # mean-teacher self-distillation: the teacher is an EMA snapshot of the
 # student's own adapter, promoted into the rollout engine's reserved
@@ -174,8 +174,10 @@ DEBUG_ARGS=(
 )
 
 PEFT_ARGS=(
-    --peft-method lora
-    --lora-rank 16
+    --peft-method oft
+    --peft-distributed-transport ray
+    --oft-type canonical_oft
+    --oft-block-size 32
     --target-modules all-linear
 )
 

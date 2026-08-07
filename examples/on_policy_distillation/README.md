@@ -304,7 +304,13 @@ teacher server are needed — the teacher is a named adapter:
 
 Same-base specs require PEFT (`--peft-method != none`); with full fine-tuning
 use `--opd-teacher load:<ckpt>` (the legacy second-model path,
-`--opd-teacher-load` is equivalent). In sglang local mode (no
+`--opd-teacher-load` is equivalent). Local sglang teachers specifically require
+OFT: unified LoRA is single-active, so it cannot route the student, frozen base,
+and teacher independently. OFT `self:*` teachers also require
+`--adapter-double-buffer` to stay disabled because double buffering has only one
+fixed active adapter slot; use Ray transport for a distributed rollout or IPC
+for a colocated rollout instead. Frozen `base` and `adapter:<path>` teachers
+remain supported with double buffering. In sglang local mode (no
 `--opd-teacher-url`), scoring is a built-in rollout stage: `--custom-rm-path`
 stays free, so real task rewards compose with distillation (`--use-opd`
 blend now works with sglang teachers) and eval accuracy is meaningful again.

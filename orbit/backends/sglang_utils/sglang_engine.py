@@ -971,7 +971,13 @@ def _compute_server_args(
         return parse_teacher_spec(getattr(a, "opd_teacher", None), getattr(a, "opd_teacher_load", None))
 
     opd_teacher_spec = _opd_teacher_spec_from_args(args)
-    opd_teacher_slot = needs_engine_teacher_slot(opd_teacher_spec)
+    external_opd_teacher = bool(
+        getattr(args, "opd_teacher_url", None)
+        or getattr(args, "opd_teacher_urls", None)
+        or getattr(args, "opd_serve_teacher", False)
+        or getattr(args, "opd_teacher_pool", None)
+    )
+    opd_teacher_slot = not external_opd_teacher and needs_engine_teacher_slot(opd_teacher_spec)
 
     peft_method = get_peft_method(args)
     if "enable_weights_cpu_backup" not in kwargs:
@@ -1013,10 +1019,6 @@ def _compute_server_args(
             kwargs["peft_paths"] = {LORA_ADAPTER_NAME: lora_adapter_path}
         else:
             logger.info("No pre-trained LoRA adapter_path provided, will use random initial weights")
-        # Preload the teacher AFTER the student lora_paths assignment above so
-        # the student's dict reassignment cannot clobber the teacher entry.
-        if opd_teacher_slot and opd_teacher_spec.source == "adapter":
-            kwargs.setdefault("lora_paths", {})[OPD_TEACHER_ADAPTER_NAME] = opd_teacher_spec.path
     elif peft_method == "oft":
         # Same BP-7 decline as above; mirror args.offload_rollout until the
         # merge gate is verified for the OFT recovery / offload path too.
@@ -1047,10 +1049,10 @@ def _compute_server_args(
             kwargs["peft_paths"] = {OFT_ADAPTER_NAME: oft_adapter_path}
         else:
             logger.info("No pre-trained OFT adapter_path provided, will use random initial weights")
-        # Preload the teacher AFTER the student oft_paths assignment above so
-        # the student's dict reassignment cannot clobber the teacher entry.
+        # Unified PEFT consumes one shared peft_paths map. Add a frozen teacher
+        # after the student entry so both adapters reach the same OFT manager.
         if opd_teacher_slot and opd_teacher_spec.source == "adapter":
-            kwargs.setdefault("oft_paths", {})[OPD_TEACHER_ADAPTER_NAME] = opd_teacher_spec.path
+            kwargs.setdefault("peft_paths", {})[OPD_TEACHER_ADAPTER_NAME] = opd_teacher_spec.path
 
     server_arg_fields = {field.name for field in dataclasses.fields(ServerArgs)}
     for attr in dataclasses.fields(ServerArgs):

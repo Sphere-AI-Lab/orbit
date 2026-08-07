@@ -1131,6 +1131,32 @@ def _validate_opd_args(args) -> None:
                     "--opd-type sglang local-teacher mode needs PEFT enabled (--peft-method != "
                     "none): the teacher is an adapter over the student's base."
                 )
+            if getattr(args, "peft_method", "none") == "lora":
+                raise ValueError(
+                    "--opd-type sglang local-teacher mode does not support --peft-method lora: "
+                    "SGLang's unified PEFT LoRA path is single-active and applies one adapter "
+                    "to the whole batch, so it cannot independently select the student and "
+                    "--opd-teacher {base,adapter:<path>,self:ema,self:lag}. Use --peft-method "
+                    "oft, --opd-type megatron, or an external SGLang teacher "
+                    "(--opd-teacher-url)."
+                )
+            if (
+                getattr(args, "peft_method", "none") == "oft"
+                and is_self_teacher(spec)
+                and getattr(args, "adapter_double_buffer", False)
+            ):
+                raise ValueError(
+                    "--opd-teacher self:* with local --opd-type sglang is incompatible with "
+                    "--peft-method oft and --adapter-double-buffer: NCCL double-buffering has "
+                    "one fixed active OFT slot, so promoting orbit_teacher would overwrite the "
+                    "student adapter instead of creating an independently routable teacher. "
+                    "Use --opd-teacher base or adapter:<path>, a non-double-buffer Ray/IPC "
+                    "transport, or an external teacher."
+                )
+            if spec.source == "adapter":
+                if not os.path.isdir(spec.path):
+                    raise FileNotFoundError(f"--opd-teacher adapter: {spec.path} does not exist.")
+                _validate_teacher_adapter_config(spec.path, args.peft_method)
             if getattr(args, "custom_rm_path", None) == "orbit.rollout.opd_sglang.reward_func":
                 raise ValueError(
                     "Local-teacher mode scores through the built-in rollout stage; do not set "

@@ -34,6 +34,8 @@ def _base_args(**overrides):
         opd_icepop=False,
         use_rollout_logprobs=False,
         peft_method="none",
+        adapter_double_buffer=False,
+        peft_distributed_transport="nccl",
         opd_teacher=None,
         opd_teacher_urls=None,
         opd_ema_decay=0.999,
@@ -528,7 +530,7 @@ def test_megatron_without_any_teacher_rejected():
 def test_sglang_local_mode_accepted_without_url_or_hooks():
     args = _base_args(
         advantage_estimator="on_policy_distillation", opd_type="sglang",
-        opd_teacher="base", peft_method="lora",
+        opd_teacher="base", peft_method="oft",
     )
     _validate_opd_args(args)
 
@@ -536,9 +538,103 @@ def test_sglang_local_mode_accepted_without_url_or_hooks():
 def test_sglang_local_mode_blend_allowed():
     args = _base_args(
         advantage_estimator="grpo", use_opd=True, opd_type="sglang",
-        opd_teacher="self:ema", peft_method="lora", opd_promote_interval=1,
+        opd_teacher="self:ema", peft_method="oft", opd_promote_interval=1,
     )
     _validate_opd_args(args)  # custom-rm slot is free: real rewards compose
+
+
+@pytest.mark.parametrize(
+    ("teacher", "promote_interval"),
+    (
+        ("base", None),
+        ("adapter:/teacher", None),
+        ("self:ema", 1),
+        ("self:lag", 1),
+    ),
+)
+def test_sglang_local_mode_rejects_lora(teacher, promote_interval):
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher=teacher,
+        peft_method="lora",
+        opd_promote_interval=promote_interval,
+    )
+    with pytest.raises(ValueError, match="single-active"):
+        _validate_opd_args(args)
+
+
+@pytest.mark.parametrize("teacher", ("self:ema", "self:lag"))
+def test_sglang_local_mode_rejects_oft_self_teacher_with_double_buffer(teacher):
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher=teacher,
+        peft_method="oft",
+        opd_promote_interval=1,
+        adapter_double_buffer=True,
+    )
+    with pytest.raises(ValueError, match="fixed active OFT slot"):
+        _validate_opd_args(args)
+
+
+@pytest.mark.parametrize("teacher", ("self:ema", "self:lag"))
+def test_sglang_local_mode_allows_oft_self_teacher_without_double_buffer(teacher):
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher=teacher,
+        peft_method="oft",
+        opd_promote_interval=1,
+        peft_distributed_transport="ray",
+    )
+    _validate_opd_args(args)
+
+
+def test_sglang_local_mode_allows_base_oft_teacher_with_double_buffer():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher="base",
+        peft_method="oft",
+        adapter_double_buffer=True,
+    )
+    _validate_opd_args(args)
+
+
+def test_sglang_local_mode_allows_frozen_oft_teacher_with_double_buffer(tmp_path):
+    adapter = _make_adapter_dir(tmp_path, peft_type="OFT")
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher=f"adapter:{adapter}",
+        peft_method="oft",
+        adapter_double_buffer=True,
+    )
+    _validate_opd_args(args)
+
+
+def test_sglang_local_mode_rejects_missing_frozen_oft_teacher():
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher="adapter:/missing/teacher",
+        peft_method="oft",
+    )
+    with pytest.raises(FileNotFoundError, match="does not exist"):
+        _validate_opd_args(args)
+
+
+def test_sglang_local_mode_rejects_mismatched_frozen_oft_teacher(tmp_path):
+    adapter = _make_adapter_dir(tmp_path, peft_type="LORA")
+    args = _base_args(
+        advantage_estimator="on_policy_distillation",
+        opd_type="sglang",
+        opd_teacher=f"adapter:{adapter}",
+        peft_method="oft",
+    )
+    with pytest.raises(ValueError, match="peft_type"):
+        _validate_opd_args(args)
 
 
 def test_sglang_external_url_blend_still_rejected():
@@ -656,5 +752,3 @@ def test_tis_bounds_accept_finite_ordered_floats_without_opd():
     _validate_opd_args(
         _base_args(use_tis=True, tis_clip_low=0.2, tis_clip=5.0)
     )
-
-
