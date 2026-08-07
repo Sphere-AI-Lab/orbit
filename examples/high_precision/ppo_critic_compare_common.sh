@@ -450,6 +450,11 @@ SGLANG_ARGS=(
     --sglang-force-native-ops
     --sglang-attention-backend triton
     --sglang-sampling-backend pytorch
+    # sglang v0.5.16's prefill CUDA graph captures a warmup forward outside the
+    # normal batch-prep path; the OFT triton backend has no batch_info there and
+    # engine init dies in sgemm_oft_r_fwd. Decode graphs stay on; both critic
+    # modes inherit this identically so controlled parity is unaffected.
+    --sglang-cuda-graph-backend-prefill disabled
     --router-disable-circuit-breaker
     --sglang-router-policy round_robin
 )
