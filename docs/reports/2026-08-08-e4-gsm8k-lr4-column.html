@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E4 gsm8k learning-rate column 4 — FullFT vs LoRA r1/r16/r256</title>
-<script type="application/json" id="report-meta">{"title": "E4 gsm8k learning-rate column 4 \u2014 FullFT vs LoRA r1/r16/r256", "kind": "experiment", "date": "2026-08-08", "tags": ["lora-regret", "e4", "gsm8k", "rl"], "subtitle": "First completed column of the Figure 6 gsm8k panel; one point on each of C5's four curves", "generated": "2026-08-08T03:09:27+02:00", "meta": {"date": "2026-08-08", "commit": "88f40edbe0b9", "branch": "feat/lora-without-regret", "tree": "clean", "host": "i203", "python": "3.10.12", "matrix": "e4", "column": "lr4 of 7", "dataset": "gsm8k", "seed": "0 (single seed)", "hardware": "8\u00d7B200 (178.35 GB); earlier failed attempts on 8\u00d7H100 (79.18 GB)", "ledger": "results/e4_gsm8k_lr4.jsonl", "logs": "logs/lora_regret/", "wandb": "gsm8k-rl-rank-ft (FullFT), gsm8k-rl-rank-lora (LoRA)"}}</script>
+<script type="application/json" id="report-meta">{"title": "E4 gsm8k learning-rate column 4 \u2014 FullFT vs LoRA r1/r16/r256", "kind": "experiment", "date": "2026-08-08", "tags": ["lora-regret", "e4", "gsm8k", "rl"], "subtitle": "First completed column of the Figure 6 gsm8k panel; one point on each of C5's four curves", "generated": "2026-08-08T03:33:13+02:00", "meta": {"date": "2026-08-08", "commit": "0c985b0a62a6", "branch": "feat/lora-without-regret", "tree": "dirty", "host": "i203", "python": "3.10.12", "matrix": "e4", "column": "lr4 of 7", "dataset": "gsm8k", "seed": "0 (single seed)", "hardware": "8\u00d7B200 (178.35 GB)", "ledger": "results/e4_gsm8k_lr4.jsonl", "logs": "logs/lora_regret/", "wandb": "gsm8k-rl-rank-ft (FullFT), gsm8k-rl-rank-lora (LoRA)"}}</script>
 <style>
 /* html-reports stylesheet.
    Modelled closely on the LMSYS blog (lmsys.org/blog) — sticky TOC rail on the
@@ -320,12 +320,12 @@ td.t-kind { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; 
 <button class="theme-toggle" type="button">theme</button>
 <div class="page">
 <div class="doc-layout">
-<details class="toc" open><summary>Contents</summary><ol><li class="lvl-2"><a href="#setup">Setup</a></li><li class="lvl-2"><a href="#results">Results</a></li><li class="lvl-3"><a href="#failed-attempts-9-ledger-rows">Failed attempts (9 ledger rows)</a></li><li class="lvl-2"><a href="#observations">Observations</a></li><li class="lvl-2"><a href="#next-steps">Next steps</a></li></ol></details>
+<details class="toc" open><summary>Contents</summary><ol><li class="lvl-2"><a href="#setup">Setup</a></li><li class="lvl-2"><a href="#results">Results</a></li><li class="lvl-2"><a href="#observations">Observations</a></li><li class="lvl-2"><a href="#next-steps">Next steps</a></li></ol></details>
 <main>
 <header class="doc-header">
 <div class="doc-kind">experiment</div><h1 class="doc-title">E4 gsm8k learning-rate column 4 — FullFT vs LoRA r1/r16/r256</h1>
 <p class="doc-subtitle">First completed column of the Figure 6 gsm8k panel; one point on each of C5's four curves</p><div class="doc-tags"><span>lora-regret</span><span>e4</span><span>gsm8k</span><span>rl</span></div>
-<dl class="meta"><div><dt>date</dt><dd>2026-08-08</dd></div><div><dt>commit</dt><dd>88f40edbe0b9</dd></div><div><dt>branch</dt><dd>feat/lora-without-regret</dd></div><div><dt>tree</dt><dd class="flag-clean">clean</dd></div><div><dt>host</dt><dd>i203</dd></div><div><dt>python</dt><dd>3.10.12</dd></div><div><dt>matrix</dt><dd>e4</dd></div><div><dt>column</dt><dd>lr4 of 7</dd></div><div><dt>dataset</dt><dd>gsm8k</dd></div><div><dt>seed</dt><dd>0 (single seed)</dd></div><div><dt>hardware</dt><dd>8×B200 (178.35 GB); earlier failed attempts on 8×H100 (79.18 GB)</dd></div><div><dt>ledger</dt><dd>results/e4_gsm8k_lr4.jsonl</dd></div><div><dt>logs</dt><dd>logs/lora_regret/</dd></div><div><dt>wandb</dt><dd>gsm8k-rl-rank-ft (FullFT), gsm8k-rl-rank-lora (LoRA)</dd></div></dl>
+<dl class="meta"><div><dt>date</dt><dd>2026-08-08</dd></div><div><dt>commit</dt><dd>0c985b0a62a6</dd></div><div><dt>branch</dt><dd>feat/lora-without-regret</dd></div><div><dt>tree</dt><dd class="flag-dirty">dirty</dd></div><div><dt>host</dt><dd>i203</dd></div><div><dt>python</dt><dd>3.10.12</dd></div><div><dt>matrix</dt><dd>e4</dd></div><div><dt>column</dt><dd>lr4 of 7</dd></div><div><dt>dataset</dt><dd>gsm8k</dd></div><div><dt>seed</dt><dd>0 (single seed)</dd></div><div><dt>hardware</dt><dd>8×B200 (178.35 GB)</dd></div><div><dt>ledger</dt><dd>results/e4_gsm8k_lr4.jsonl</dd></div><div><dt>logs</dt><dd>logs/lora_regret/</dd></div><div><dt>wandb</dt><dd>gsm8k-rl-rank-ft (FullFT), gsm8k-rl-rank-lora (LoRA)</dd></div></dl>
 </header>
 <h2 id="setup">Setup<a class="anchor" href="#setup" aria-hidden="true">#</a></h2>
 <p>RL fine-tuning of <code>llama3.1-8b</code> on <code>gsm8k_train.jsonl</code>, scored once at the end on
@@ -343,31 +343,20 @@ estimate exists for these numbers.</p>
 <div class="codeblock"><div class="lang">bash</div><pre><code>source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
 cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
 bash scripts/lora_regret/run_e4_gsm8k_lr4_8gpu.sh</code></pre></div>
-<p>The script is resumable: arms with <code>status: "ok"</code> in the ledger are skipped on re-run,
-so the failed attempts below were retried by re-running the same command.</p>
+<p>The script is resumable: arms with <code>status: "ok"</code> in the ledger are skipped on re-run.</p>
 <h2 id="results">Results<a class="anchor" href="#results" aria-hidden="true">#</a></h2>
 <p>All four arms completed 150 rollouts with <code>status: "ok"</code> by 2026-08-07 09:11.
 Final-eval accuracy on <code>gsm8k_test</code>:</p>
 <div class="table-wrap"><table><thead><tr><th>arm</th><th>method</th><th class="num">lr</th><th class="num">adapter params</th><th class="num">steps</th><th class="num">accuracy</th><th class="num">wall time</th></tr></thead><tbody><tr><td>full-na-na-gsm8k-lr7e-07-s0</td><td>FullFT</td><td class="num">7e-07</td><td class="num">—</td><td class="num">149</td><td class="num"><strong>0.7870</strong></td><td class="num">2.14 h</td></tr><tr><td>lora-r1-all-gsm8k-lr7e-05-s0</td><td>LoRA r1</td><td class="num">7e-05</td><td class="num">2.2 M</td><td class="num">149</td><td class="num">0.6808</td><td class="num">2.31 h</td></tr><tr><td>lora-r16-all-gsm8k-lr7e-05-s0</td><td>LoRA r16</td><td class="num">7e-05</td><td class="num">35.7 M</td><td class="num">149</td><td class="num">0.6694</td><td class="num">2.85 h</td></tr><tr><td>lora-r256-all-gsm8k-lr7e-05-s0</td><td>LoRA r256</td><td class="num">7e-05</td><td class="num">570.4 M</td><td class="num">149</td><td class="num">0.6513</td><td class="num">3.65 h</td></tr></tbody></table></div>
-<p>The untrained base model scores <strong>0.0326</strong> on <code>gsm8k_test</code> (the rollout-0 eval recorded
-in the failed-attempt rows), so the trained arms span a 0.03 → 0.79 dynamic range.</p>
-<h3 id="failed-attempts-9-ledger-rows">Failed attempts (9 ledger rows)<a class="anchor" href="#failed-attempts-9-ledger-rows" aria-hidden="true">#</a></h3>
-<p>The ledger is append-only; the completed rows above coexist with nine <code>failed</code> rows
-from three distinct causes:</p>
-<div class="table-wrap"><table><thead><tr><th>rows</th><th>arms, steps reached</th><th>cause</th></tr></thead><tbody><tr><td>1</td><td>FullFT 7e-06, all 150 rollouts</td><td>Superseded grid point: ran on the original FullFT grid before commit <code>56ea497</code> shifted the window a decade lower. Obsolete, not missing.</td></tr><tr><td>3</td><td>r1@99, r16@49, r256@24</td><td>Allocator-fragmentation OOM killing the colocated SGLang engine mid-run on B200.</td></tr><tr><td>5</td><td>r16 setup death; r1/r16/r256 at step 0 with identical accuracy 0.0326; r256 at step 0</td><td>The same OOM at rollout ~2 on H100. Identical accuracy across ranks to 16 decimals is the signature: it is the eval of the untrained base.</td></tr></tbody></table></div>
-<p>The OOM was fixed by setting <code>PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True</code> on PEFT
-train actors only (commit <code>1de85f1</code>; mechanism and verification in
-<code>docs/superpowers/specs/2026-08-07-peft-allocator-oom-resolution.md</code>). Across the full
-completed r1 run — 859 rank-0 memory samples — the fragmentation gap
-(reserved − allocated) never exceeded 0.09 GB, with 0 segments, 0 inactive-split bytes,
-and 0 allocation retries; pre-fix the gap ratcheted monotonically to 19–34 GB.</p>
+<p>The untrained base model scores <strong>0.0326</strong> on <code>gsm8k_test</code> (its rollout-0 eval), so the
+trained arms span a 0.03 → 0.79 dynamic range.</p>
 <h2 id="observations">Observations<a class="anchor" href="#observations" aria-hidden="true">#</a></h2>
 <ul><li>At this column the ordering is FullFT > r1 > r16 > r256, and accuracy falls<p>monotonically as rank grows. This is one LR point per method, not a peak comparison:
 every C5 claim is about the shape <strong>across</strong> columns, so no argmin or regret statement
-can be read from this column alone (the column script says exactly this).</p></li><li>All three LoRA ranks sit at the same lr 7e-05; if the per-rank optima differ, the<p>ordering among ranks can change once the full curves exist.</p></li><li>Wall time grows with rank — late-run rollouts take ~50 s (r1), ~60–100 s (r16),<p>~90–140 s (r256) — so r256 costs ~1.6× r1 per column.</p></li><li>The completed runs are all B200 runs. Post-fix memory behaviour is flat on B200;<p>an end-to-end post-fix run on an 80 GB H100 has not yet been observed.</p></li></ul>
+can be read from this column alone (the column script says exactly this).</p></li><li>All three LoRA ranks sit at the same lr 7e-05; if the per-rank optima differ, the<p>ordering among ranks can change once the full curves exist.</p></li><li>Wall time grows with rank — late-run rollouts take ~50 s (r1), ~60–100 s (r16),<p>~90–140 s (r256) — so r256 costs ~1.6× r1 per column.</p></li></ul>
 <h2 id="next-steps">Next steps<a class="anchor" href="#next-steps" aria-hidden="true">#</a></h2>
-<ul><li class="task"><input type="checkbox" disabled>Columns lr5–lr7 (gsm8k): not yet run post-fix; ledgers hold only failed rows.</li><li class="task"><input type="checkbox" disabled>Columns lr1–lr3 (gsm8k): rerun required — their FullFT rows (5e-07, 1e-06, 3e-06)<p>are on the superseded grid.</p></li><li class="task"><input type="checkbox" disabled>Decide on the math panel after the gsm8k panel completes (gsm8k has ~6× math's<p>dynamic range; math's baseline is partly guessing).</p></li><li class="task"><input type="checkbox" disabled>Optionally confirm the OOM fix end-to-end on H100 before scheduling columns there.</li></ul>
-<footer class="doc-footer">Generated 2026-08-08 03:09 CEST by htmlreport</footer>
+<ul><li class="task"><input type="checkbox" disabled>Columns lr5–lr7 (gsm8k): not yet run.</li><li class="task"><input type="checkbox" disabled>Columns lr1–lr3 (gsm8k): rerun required — their FullFT rows (5e-07, 1e-06, 3e-06)<p>are on the superseded grid.</p></li><li class="task"><input type="checkbox" disabled>Decide on the math panel after the gsm8k panel completes (gsm8k has ~6× math's<p>dynamic range; math's baseline is partly guessing).</p></li></ul>
+<footer class="doc-footer">Generated 2026-08-08 03:33 CEST by htmlreport</footer>
 </main>
 </div>
 </div>
