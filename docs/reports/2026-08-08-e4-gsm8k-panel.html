@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>E4 gsm8k panel — FullFT vs LoRA r1/r16/r256 across the RL learning-rate grid</title>
+<script type="application/json" id="report-meta">{"title": "E4 gsm8k panel \u2014 FullFT vs LoRA r1/r16/r256 across the RL learning-rate grid", "kind": "experiment", "date": "2026-08-08", "tags": ["lora-regret", "e4", "gsm8k", "rl"], "subtitle": "Columns 1\u20134 of 7 complete; the four curves of Figure 6's gsm8k panel, as far as they are measured", "generated": "2026-08-08T23:00:31+02:00", "meta": {"date": "2026-08-08", "commit": "ee79a732341e", "branch": "feat/lora-without-regret", "tree": "dirty", "host": "i103", "python": "3.10.12", "matrix": "e4", "columns_done": "lr1, lr2, lr3, lr4 (of 7)", "dataset": "gsm8k", "seed": "0 (single seed, no variance estimate)", "hardware": "8 GPUs per arm; lr1\u2013lr2 on 80 GB cards, lr3\u2013lr4 on 178 GB cards", "ledgers": "results/e4_gsm8k_lr1.jsonl \u2026 lr7.jsonl", "logs": "logs/lora_regret/", "wandb": "gsm8k-rl-rank-ft (FullFT), gsm8k-rl-rank-lora (LoRA)"}}</script>
+<style>
+/* html-reports stylesheet.
+   Modelled closely on the LMSYS blog (lmsys.org/blog) — sticky TOC rail on the
+   left, single measured column of Inter, orange links, bordered tables, quiet
+   captions. Ported from that site's own layout rules, with a dark theme and
+   print styles added.
+
+   The generator inlines this file verbatim into every page, so an edit here
+   lands on the next render. */
+
+/* Light is the default and does not follow the system — these pages are read and
+   printed like paper. Dark is opt-in via the toggle, which sets data-theme on
+   the root element and remembers the choice. */
+:root {
+  color-scheme: light;
+
+  --bg: #ffffff;
+  --ink: rgb(8, 12, 38);
+  --ink-dim: rgba(8, 12, 38, 0.62);
+  --ink-lighter: rgb(100, 104, 122);
+  --border: rgba(8, 12, 38, 0.11);
+  --accent: #ea6a10;
+  --rule-top: rgba(220, 140, 130, 0.4);  /* the hairline across the page top */
+  --wash: rgba(32, 38, 71, 0.04);   /* code blocks, table headers */
+  --wash-strong: rgba(32, 38, 71, 0.06); /* inline code */
+  --wash-hover: rgba(32, 38, 71, 0.02);
+  --shadow: 0 4px 24px rgba(32, 38, 71, 0.1);
+  --ok: #1a7f4b;
+  --warn: #9a6400;
+  --bad: #b02a2a;
+
+  --font-body: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --font-math: "STIX Two Math", "Latin Modern Math", "Cambria Math",
+    "TeX Gyre Termes Math", serif;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0f1216;
+  --ink: rgb(228, 231, 238);
+  --ink-dim: rgba(228, 231, 238, 0.66);
+  --ink-lighter: rgb(150, 156, 170);
+  --border: rgba(228, 231, 238, 0.14);
+  --accent: #f5893c;
+  --rule-top: rgba(220, 140, 130, 0.25);
+  --wash: rgba(228, 231, 238, 0.05);
+  --wash-strong: rgba(228, 231, 238, 0.08);
+  --wash-hover: rgba(228, 231, 238, 0.03);
+  --shadow: none;
+  --ok: #5cbd87;
+  --warn: #d3a34a;
+  --bad: #e07a7a;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  border-top: 3px solid var(--rule-top);
+}
+
+/* ---------- layout ---------- */
+
+.page { max-width: 1280px; margin: 0 auto; padding: 72px 48px 96px; }
+.doc-layout { display: flex; gap: 0; align-items: flex-start; }
+.doc-layout > main { flex: 1 1; min-width: 0; padding-left: 56px; }
+
+/* ---------- table of contents rail ---------- */
+
+.toc {
+  width: 240px; flex-shrink: 0;
+  position: sticky; top: 32px; align-self: flex-start;
+  border-right: 1px solid var(--border);
+  padding-right: 28px; padding-top: 2px;
+}
+.toc > summary {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--ink-dim);
+  margin-bottom: 14px; cursor: pointer; list-style: none;
+}
+.toc > summary::-webkit-details-marker { display: none; }
+.toc ol { list-style: none; margin: 0; padding: 0; }
+.toc li { margin-bottom: 2px; }
+.toc .lvl-3 { padding-left: 12px; }
+.toc a {
+  font-size: 14px; color: var(--ink-dim); text-decoration: none;
+  line-height: 1.625; display: block; padding: 5px 0;
+  transition: color 0.15s; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.toc a:hover { color: var(--ink); }
+
+/* ---------- document header ---------- */
+
+.doc-kind {
+  display: inline-block; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 10px;
+}
+.doc-title {
+  font-size: clamp(30px, 5vw, 36px); font-weight: 700;
+  letter-spacing: -0.025em; line-height: 1.25;
+  margin: 0 0 8px; color: var(--ink);
+}
+.doc-subtitle { font-size: 17px; color: var(--ink-dim); margin: 0 0 16px; line-height: 1.5; }
+.doc-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.doc-tags span { font-size: 12px; color: var(--ink-lighter); }
+.doc-tags span::before { content: "#"; opacity: 0.5; }
+
+.meta {
+  display: flex; flex-wrap: wrap; gap: 6px 24px;
+  font-size: 13px; color: var(--ink-lighter);
+  margin: 0 0 28px; padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.meta div { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.meta dt { margin: 0; opacity: 0.75; }
+.meta dd { margin: 0; font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+.meta dd.flag-dirty { color: var(--warn); font-weight: 600; }
+.meta dd.flag-clean { color: var(--ok); }
+
+/* ---------- prose ---------- */
+
+main { font-size: 16px; font-weight: 400; line-height: 1.625; overflow-wrap: break-word; }
+main > :first-child { margin-top: 0; }
+
+main p { margin: 0 0 1.4em; }
+main a { color: var(--accent); text-decoration: none; }
+main a:hover { text-decoration: underline; text-underline-offset: 2px; }
+main strong { font-weight: 600; color: var(--ink); }
+
+h2, h3, h4, h5, h6 { font-weight: 700; line-height: 1.25; color: var(--ink); scroll-margin-top: 24px; }
+h2 { font-size: 1.5rem; letter-spacing: -0.015em; margin: 2.25em 0 0.65em; }
+h3 { font-size: 1.15rem; margin: 2em 0 0.5em; }
+h4 { font-size: 1rem; margin: 1.5em 0 0.4em; color: var(--ink-lighter); }
+
+.anchor { opacity: 0; text-decoration: none; color: var(--ink-lighter); margin-left: 0.4rem; font-weight: 400; }
+h2:hover .anchor, h3:hover .anchor, h4:hover .anchor { opacity: 1; }
+
+main ul { list-style: disc; margin: 0 0 1.4em 1.5em; padding: 0; }
+main ol { list-style: decimal; margin: 0 0 1.4em 1.5em; padding: 0; }
+main li { margin-bottom: 0.4em; line-height: 1.625; }
+main li > p { margin-bottom: 0.25em; }
+main li > ul, main li > ol { margin-bottom: 0.4em; margin-top: 0.4em; }
+li.task { list-style: none; margin-left: -1.2em; }
+li.task input { margin-right: 0.5em; }
+
+blockquote {
+  border-left: 3px solid var(--border);
+  padding: 0.25em 0 0.25em 1.25em;
+  margin: 1.75em 0; color: var(--ink-lighter); font-style: italic;
+}
+
+hr { border: none; border-top: 1px solid var(--border); margin: 3em 0; }
+
+/* ---------- code ---------- */
+
+code {
+  font-family: var(--font-mono); font-size: 0.85em;
+  background: var(--wash-strong); color: var(--ink);
+  padding: 2px 6px; border-radius: 4px;
+}
+.codeblock {
+  background: var(--wash); border: 1px solid var(--border);
+  border-radius: 8px; margin: 1.75em 0; overflow: hidden;
+}
+.codeblock .lang {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--ink-lighter);
+  padding: 8px 1.25em; border-bottom: 1px solid var(--border);
+}
+.codeblock pre { margin: 0; padding: 1.1em 1.25em; overflow-x: auto; }
+.codeblock pre code {
+  background: none; padding: 0; font-size: 0.875rem; line-height: 1.7; color: var(--ink);
+}
+
+/* ---------- tables ---------- */
+
+.table-wrap { overflow-x: auto; margin: 1.75em 0; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9em; font-variant-numeric: tabular-nums; }
+th, td { border: 1px solid var(--border); padding: 0.6em 1em; text-align: left; word-wrap: break-word; }
+th { background: var(--wash); font-weight: 500; font-size: 0.875em; letter-spacing: 0.01em; white-space: nowrap; }
+tr:hover td { background: var(--wash-hover); }
+td.num, th.num { text-align: right; }
+td.center, th.center { text-align: center; }
+
+/* ---------- figures ---------- */
+
+main img {
+  max-width: 100%; height: auto; display: block;
+  border-radius: 8px; margin: 3em auto 1em; box-shadow: var(--shadow);
+}
+figure { margin: 0; }
+figure img { margin-bottom: 0.75em; }
+figcaption {
+  display: block; text-align: center; font-size: 13px;
+  color: var(--ink-lighter); line-height: 1.625; margin: 0.75em 0 1.5em;
+}
+
+/* ---------- math ---------- */
+
+math { font-family: var(--font-math); font-size: 1.05em; }
+math[display="block"] { font-size: 1.15em; margin: 0; }
+
+/* MathML Core ignores columnspacing/rowspacing, so aligned environments get
+   their spacing here: no horizontal padding, since the relation operator's own
+   lspace already separates the columns. */
+mtable.align > mtr > mtd { padding-left: 0; padding-right: 0; }
+mtable.align > mtr { line-height: 2.2; }
+
+.math-block {
+  margin: 1.75em 0; overflow-x: auto; overflow-y: hidden;
+  text-align: center; padding: 0.25em 0;
+}
+
+/* shown when an expression could not be compiled; the source is legible at least */
+.math-fallback {
+  font-family: var(--font-mono); font-size: 0.85em;
+  background: var(--wash-strong); border: 1px dashed var(--border);
+  padding: 2px 6px; border-radius: 4px;
+}
+.math-block.unparsed { text-align: left; }
+
+/* ---------- details ---------- */
+
+/* scoped to main so the TOC, which is also a <details>, keeps its bare rail */
+main details { margin: 1.75em 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+main details > summary {
+  cursor: pointer; font-weight: 500; padding: 14px 20px;
+  background: var(--wash-hover); border-bottom: 1px solid transparent;
+}
+main details[open] > summary { border-bottom: 1px solid var(--border); margin-bottom: 1em; }
+main details > :not(summary) { padding-left: 20px; padding-right: 20px; }
+main details .codeblock { margin-left: 0; margin-right: 0; }
+
+/* ---------- callouts ---------- */
+
+.callout {
+  border-left: 3px solid var(--accent); background: var(--wash);
+  padding: 0.9em 1.25em; border-radius: 0 8px 8px 0; margin: 1.75em 0;
+}
+.callout.warn { border-left-color: var(--warn); }
+.callout.bad { border-left-color: var(--bad); }
+.callout > :last-child { margin-bottom: 0; }
+
+/* ---------- index page ---------- */
+
+.index-empty { color: var(--ink-lighter); font-style: italic; }
+td.t-title a { font-weight: 500; }
+td.t-date, td.t-commit { font-family: var(--font-mono); font-size: 12px; color: var(--ink-lighter); white-space: nowrap; }
+td.t-kind { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); white-space: nowrap; }
+
+/* ---------- theme toggle ---------- */
+
+.theme-toggle {
+  position: fixed; top: 16px; right: 16px; z-index: 10;
+  font: inherit; font-size: 12px; color: var(--ink-lighter);
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; padding: 5px 10px; cursor: pointer;
+}
+.theme-toggle:hover { color: var(--ink); }
+
+/* ---------- footer ---------- */
+
+.doc-footer {
+  margin-top: 4em; padding-top: 20px; border-top: 1px solid var(--border);
+  color: var(--ink-lighter); font-size: 13px;
+}
+
+/* ---------- narrow screens: TOC collapses above the content ---------- */
+
+@media (max-width: 900px) {
+  .page { padding: 56px 16px 60px; overflow: hidden; }
+  .doc-layout { flex-direction: column; align-items: stretch; }
+  .doc-layout > main { padding-left: 0; min-width: 0; font-size: 15px; }
+  .toc {
+    position: static; width: auto; border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding-right: 0; padding-bottom: 12px; margin-bottom: 28px;
+  }
+  .toc > summary { margin-bottom: 8px; }
+  main img { margin: 1.5em auto; box-shadow: none; }
+  .codeblock pre { font-size: 13px; }
+}
+
+/* ---------- print ---------- */
+
+@media print {
+  :root { --bg: #fff; --ink: #000; --ink-dim: #333; --ink-lighter: #444; --shadow: none; }
+  body { border-top: none; }
+  .toc, .theme-toggle, .anchor { display: none; }
+  .page { padding: 0; max-width: none; }
+  .doc-layout > main { padding-left: 0; }
+  .codeblock, table, figure, details, .math-block { break-inside: avoid; }
+  a { color: inherit; }
+}
+
+</style>
+</head>
+<body>
+<button class="theme-toggle" type="button">theme</button>
+<div class="page">
+<div class="doc-layout">
+<details class="toc" open><summary>Contents</summary><ol><li class="lvl-2"><a href="#setup">Setup</a></li><li class="lvl-3"><a href="#the-two-grids">The two grids</a></li><li class="lvl-2"><a href="#results">Results</a></li><li class="lvl-3"><a href="#accuracy-every-25-rollouts">Accuracy every 25 rollouts</a></li><li class="lvl-2"><a href="#observations">Observations</a></li><li class="lvl-2"><a href="#next-steps">Next steps</a></li></ol></details>
+<main>
+<header class="doc-header">
+<div class="doc-kind">experiment</div><h1 class="doc-title">E4 gsm8k panel — FullFT vs LoRA r1/r16/r256 across the RL learning-rate grid</h1>
+<p class="doc-subtitle">Columns 1–4 of 7 complete; the four curves of Figure 6's gsm8k panel, as far as they are measured</p><div class="doc-tags"><span>lora-regret</span><span>e4</span><span>gsm8k</span><span>rl</span></div>
+<dl class="meta"><div><dt>date</dt><dd>2026-08-08</dd></div><div><dt>commit</dt><dd>ee79a732341e</dd></div><div><dt>branch</dt><dd>feat/lora-without-regret</dd></div><div><dt>tree</dt><dd class="flag-dirty">dirty</dd></div><div><dt>host</dt><dd>i103</dd></div><div><dt>python</dt><dd>3.10.12</dd></div><div><dt>matrix</dt><dd>e4</dd></div><div><dt>columns_done</dt><dd>lr1, lr2, lr3, lr4 (of 7)</dd></div><div><dt>dataset</dt><dd>gsm8k</dd></div><div><dt>seed</dt><dd>0 (single seed, no variance estimate)</dd></div><div><dt>hardware</dt><dd>8 GPUs per arm; lr1–lr2 on 80 GB cards, lr3–lr4 on 178 GB cards</dd></div><div><dt>ledgers</dt><dd>results/e4_gsm8k_lr1.jsonl … lr7.jsonl</dd></div><div><dt>logs</dt><dd>logs/lora_regret/</dd></div><div><dt>wandb</dt><dd>gsm8k-rl-rank-ft (FullFT), gsm8k-rl-rank-lora (LoRA)</dd></div></dl>
+</header>
+<h2 id="setup">Setup<a class="anchor" href="#setup" aria-hidden="true">#</a></h2>
+<p>RL fine-tuning of <code>llama3.1-8b</code> on <code>gsm8k_train.jsonl</code>, scored on <code>gsm8k_test.jsonl</code>
+alone (1,319 problems). The protocol lives in <code>scripts/lora_regret/e4_protocol.sh</code> and is
+shared by all fourteen column scripts: advantage centring <strong>without</strong> std normalisation,
+clipping off, checkpoints off, <code>NUM_ROLLOUT=150</code>, <code>EVAL_INTERVAL=25</code>. Every arm runs on
+8 GPUs; FullFT is TP=4/DP=2, the only configuration it fits in (runbook §22.2).</p>
+<p>Since <code>9a2a2ad</code> the campaign is <strong>on-policy</strong>: <code>GLOBAL_BATCH_SIZE=1024</code> equals
+<code>ROLLOUT_BATCH_SIZE=32 × N_SAMPLES_PER_PROMPT=32</code>, so the learner takes exactly one
+optimizer step per rollout batch and the importance ratio is identically 1. A column is
+therefore <strong>150 optimizer steps</strong>, not the 600 the pre-Aug-4 runs took. Every number
+below comes from a run under that protocol.</p>
+<p>LoRA uses <code>lora_alpha = 32</code> at all three ranks, on all four linear sites
+(<code>linear_qkv, linear_proj, linear_fc1, linear_fc2</code>), so the adapter scaling α/r is 32, 2,
+and 0.125 for r1, r16, r256 — a 256× spread in update magnitude at a fixed learning rate.</p>
+<h3 id="the-two-grids">The two grids<a class="anchor" href="#the-two-grids" aria-hidden="true">#</a></h3>
+<p>FullFT and LoRA sit on their own seven-point windows, two decades apart, sharing one
+point at 1e-05. Both span 200× at 0.384 decades per step; the endpoints and the reasoning
+behind them are in <code>tools/lora_regret/arms.py</code>.</p>
+<div class="table-wrap"><table><thead><tr><th>column</th><th class="num">FullFT lr</th><th class="num">LoRA lr (r1/r16/r256)</th><th>status</th></tr></thead><tbody><tr><td>lr1</td><td class="num">5e-08</td><td class="num">5e-06</td><td>complete</td></tr><tr><td>lr2</td><td class="num">1e-07</td><td class="num">1e-05</td><td>complete</td></tr><tr><td>lr3</td><td class="num">3e-07</td><td class="num">3e-05</td><td>complete</td></tr><tr><td>lr4</td><td class="num">7e-07</td><td class="num">7e-05</td><td>complete</td></tr><tr><td>lr5</td><td class="num">2e-06</td><td class="num">2e-04</td><td>not run</td></tr><tr><td>lr6</td><td class="num">4e-06</td><td class="num">4e-04</td><td>not run</td></tr><tr><td>lr7</td><td class="num">1e-05</td><td class="num">1e-03</td><td>not run</td></tr></tbody></table></div>
+<p>The FullFT window is the original (5e-07, 1e-04) shifted down one decade by <code>56ea497</code>,
+because the Aug-3 pass measured the collapse boundary a decade below the post's reading.
+That measurement was taken under the <strong>old</strong> four-updates-per-rollout protocol, which
+matters for reading the columns below.</p>
+<div class="codeblock"><div class="lang">bash</div><pre><code>source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
+cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
+bash scripts/lora_regret/run_e4_gsm8k_lr1_8gpu.sh   # …lr2, lr3, lr4 likewise</code></pre></div>
+<p>Each script is resumable: arms with <code>status: "ok"</code> in the ledger are skipped on re-run.</p>
+<h2 id="results">Results<a class="anchor" href="#results" aria-hidden="true">#</a></h2>
+<p>Held-out <code>gsm8k_test</code> accuracy after 150 rollouts (step 149), single seed. The untrained
+base model scores <strong>0.033</strong>.</p>
+<div class="table-wrap"><table><thead><tr><th>method</th><th class="num">lr1</th><th class="num">lr2</th><th class="num">lr3</th><th class="num">lr4</th><th class="num">best</th></tr></thead><tbody><tr><td>FullFT</td><td class="num">0.0637</td><td class="num">0.2578</td><td class="num">0.7028</td><td class="num"><strong>0.7870</strong></td><td class="num">0.7870 @ 7e-07</td></tr><tr><td>LoRA r1</td><td class="num">0.6937</td><td class="num">0.6892</td><td class="num"><strong>0.7149</strong></td><td class="num">0.6808</td><td class="num">0.7149 @ 3e-05</td></tr><tr><td>LoRA r16</td><td class="num">0.7051</td><td class="num">0.7346</td><td class="num"><strong>0.7551</strong></td><td class="num">0.6694</td><td class="num">0.7551 @ 3e-05</td></tr><tr><td>LoRA r256</td><td class="num">0.3730</td><td class="num">0.7187</td><td class="num"><strong>0.7415</strong></td><td class="num">0.6513</td><td class="num">0.7415 @ 3e-05</td></tr></tbody></table></div>
+<p>Per-arm detail, with adapter size and wall time (8 GPUs throughout; lr1–lr2 ran on 80 GB
+cards and lr3–lr4 on 178 GB cards, so wall times are not comparable across columns):</p>
+<div class="table-wrap"><table><thead><tr><th>arm</th><th>method</th><th class="num">lr</th><th class="num">adapter params</th><th class="num">accuracy</th><th class="num">wall</th></tr></thead><tbody><tr><td>full-na-na-gsm8k-lr5e-08-s0</td><td>FullFT</td><td class="num">5e-08</td><td class="num">—</td><td class="num">0.0637</td><td class="num">2.71 h</td></tr><tr><td>lora-r1-all-gsm8k-lr5e-06-s0</td><td>LoRA r1</td><td class="num">5e-06</td><td class="num">2.2 M</td><td class="num">0.6937</td><td class="num">3.48 h</td></tr><tr><td>lora-r16-all-gsm8k-lr5e-06-s0</td><td>LoRA r16</td><td class="num">5e-06</td><td class="num">35.7 M</td><td class="num">0.7051</td><td class="num">4.15 h</td></tr><tr><td>lora-r256-all-gsm8k-lr5e-06-s0</td><td>LoRA r256</td><td class="num">5e-06</td><td class="num">570.4 M</td><td class="num">0.3730</td><td class="num">5.10 h</td></tr><tr><td>full-na-na-gsm8k-lr1e-07-s0</td><td>FullFT</td><td class="num">1e-07</td><td class="num">—</td><td class="num">0.2578</td><td class="num">2.72 h</td></tr><tr><td>lora-r1-all-gsm8k-lr1e-05-s0</td><td>LoRA r1</td><td class="num">1e-05</td><td class="num">2.2 M</td><td class="num">0.6892</td><td class="num">3.15 h</td></tr><tr><td>lora-r16-all-gsm8k-lr1e-05-s0</td><td>LoRA r16</td><td class="num">1e-05</td><td class="num">35.7 M</td><td class="num">0.7346</td><td class="num">3.77 h</td></tr><tr><td>lora-r256-all-gsm8k-lr1e-05-s0</td><td>LoRA r256</td><td class="num">1e-05</td><td class="num">570.4 M</td><td class="num">0.7187</td><td class="num">4.62 h</td></tr><tr><td>full-na-na-gsm8k-lr3e-07-s0</td><td>FullFT</td><td class="num">3e-07</td><td class="num">—</td><td class="num">0.7028</td><td class="num">2.26 h</td></tr><tr><td>lora-r1-all-gsm8k-lr3e-05-s0</td><td>LoRA r1</td><td class="num">3e-05</td><td class="num">2.2 M</td><td class="num">0.7149</td><td class="num">2.35 h</td></tr><tr><td>lora-r16-all-gsm8k-lr3e-05-s0</td><td>LoRA r16</td><td class="num">3e-05</td><td class="num">35.7 M</td><td class="num">0.7551</td><td class="num">4.63 h</td></tr><tr><td>lora-r256-all-gsm8k-lr3e-05-s0</td><td>LoRA r256</td><td class="num">3e-05</td><td class="num">570.4 M</td><td class="num">0.7415</td><td class="num">3.40 h</td></tr><tr><td>full-na-na-gsm8k-lr7e-07-s0</td><td>FullFT</td><td class="num">7e-07</td><td class="num">—</td><td class="num">0.7870</td><td class="num">2.14 h</td></tr><tr><td>lora-r1-all-gsm8k-lr7e-05-s0</td><td>LoRA r1</td><td class="num">7e-05</td><td class="num">2.2 M</td><td class="num">0.6808</td><td class="num">2.31 h</td></tr><tr><td>lora-r16-all-gsm8k-lr7e-05-s0</td><td>LoRA r16</td><td class="num">7e-05</td><td class="num">35.7 M</td><td class="num">0.6694</td><td class="num">2.85 h</td></tr><tr><td>lora-r256-all-gsm8k-lr7e-05-s0</td><td>LoRA r256</td><td class="num">7e-05</td><td class="num">570.4 M</td><td class="num">0.6513</td><td class="num">3.65 h</td></tr></tbody></table></div>
+<p>Four columns cost <strong>53.3 wall-hours</strong> on a whole node, plus the discarded attempts.</p>
+<h3 id="accuracy-every-25-rollouts">Accuracy every 25 rollouts<a class="anchor" href="#accuracy-every-25-rollouts" aria-hidden="true">#</a></h3>
+<p><code>EVAL_INTERVAL=25</code> gives a curve per arm rather than an endpoint, which is what makes the
+columns interpretable. Rollout on the top row:</p>
+<div class="codeblock"><pre><code>                        0     24     49     74     99    124    149
+lr1  full  5e-08     0.033  0.036  0.039  0.035  0.042  0.051  0.064
+lr1  r1    5e-06     0.033  0.052  0.161  0.359  0.534  0.647  0.694
+lr1  r16   5e-06     0.034  0.043  0.066  0.211  0.402  0.589  0.705
+lr1  r256  5e-06     0.033  0.034  0.049  0.072  0.147  0.282  0.373
+
+lr2  full  1e-07     0.032  0.042  0.046  0.057  0.093  0.155  0.258
+lr2  r1    1e-05     0.033  0.135  0.404  0.657  0.676  0.686  0.689
+lr2  r16   1e-05     0.033  0.074  0.316  0.621  0.650  0.703  0.735
+lr2  r256  1e-05     0.033  0.039  0.117  0.305  0.511  0.649  0.719
+
+lr3  full  3e-07     0.036  0.074  0.287  0.455  0.616  0.657  0.703
+lr3  r1    3e-05     0.036  0.480  0.729  0.730  0.707  0.770  0.715
+lr3  r16   3e-05     0.035  0.409  0.694  0.651  0.725  0.735  0.755
+lr3  r256  3e-05     0.036  0.168  0.590  0.593  0.675  0.676  0.741
+
+lr4  full  7e-07     0.035  0.309  0.672  0.758  0.752  0.761  0.787
+lr4  r1    7e-05     0.035  0.702  0.663  0.693  0.718  0.738  0.681
+lr4  r16   7e-05     0.035  0.619  0.694  0.746  0.739  0.572  0.669
+lr4  r256  7e-05     0.036  0.583  0.629  0.730  0.739  0.736  0.651</code></pre></div>
+<h2 id="observations">Observations<a class="anchor" href="#observations" aria-hidden="true">#</a></h2>
+<p><strong>Columns 1 and 2 measure the step budget, not a stability limit.</strong> Every arm in those
+two columns is still climbing when the run ends — FullFT at 1e-07 gained ten points
+between rollout 124 and 149 and was accelerating; r256 at 5e-06 gained nine. Nothing
+diverged, nothing collapsed, and no arm plateaued. With one optimizer step per rollout,
+the left half of each curve says how far 150 on-policy steps get you at that step size,
+not whether that step size is stable. Any "LoRA's stable band is narrower" reading taken
+from lr1/lr2 would be wrong.</p>
+<p><strong>The rank ordering at fixed low LR is the α/r scaling, not a capacity effect.</strong> At
+5e-06 the arms finish at 0.694 (r1), 0.705 (r16), 0.373 (r256); by 3e-05 all three land
+within four points of each other. With α pinned at 32 the adapter scaling is 32 / 2 /
+0.125, so r256 at 5e-06 is taking a far smaller effective step than r1 at the same
+nominal learning rate and simply has not arrived. The rank axis and the LR axis are not
+separable under fixed α.</p>
+<p><strong>FullFT's optimum is not yet bracketed; LoRA's appears to be.</strong> FullFT rises
+monotonically across all four columns and its best point, 0.7870 at 7e-07, is also the
+best number in the panel — three points above the best LoRA arm. All three LoRA ranks
+peak at 3e-05 and fall at 7e-05, so their argmax is interior on the measured grid. With
+one seed and no variance estimate, r1's total spread (0.681–0.715 across the whole grid)
+is small enough that calling it peaked would be overreading; r16 and r256 have a clearer
+shape.</p>
+<p><strong>7e-05 is past LoRA's stable point.</strong> The lr4 curves are non-monotone late — r16 goes
+0.739 → 0.572 → 0.669 over its last three evals, r256 0.739 → 0.736 → 0.651, r1
+0.738 → 0.681 — with small truncation upticks at the same points. Nothing collapses
+irrecoverably the way the pre-on-policy runs did, but the arms are no longer improving.</p>
+<div class="callout warn">
+<p><strong>The best LoRA number in the panel comes from a degenerate arm.</strong>
+LoRA r16 at 3e-05 (accuracy 0.7551) flips at rollout 74 from a mean eval response of 239
+tokens with 2% truncation to <strong>2,024 tokens with 98% truncation</strong>, and stays
+pinned at the 2,048-token cap for the rest of the run. It emits its <code>\boxed{}</code>
+answer and then repeats a line until the cap; eval decodes greedily
+(<code>top_k=1</code>), so there is no escape from the loop. The graded answer is still
+the right one and the accuracy is real, but the arm is in a runaway-length state and each
+of its evals burns 2.7 M completion tokens. Every other completed arm converges the other
+way — to 130–470 token responses with truncation under 5% — from a base model that
+truncates 25%.</p>
+</div>
+<p><strong>Eight <code>failed</code> rows in the lr1–lr3 ledgers are stale, not new breakage.</strong> The FullFT
+ones sit at 5e-07/1e-06/3e-06, the grid <code>56ea497</code> superseded, and will never be re-run.
+The LoRA ones share arm names with the <code>ok</code> rows and are the dead-eval-branch runs that
+<code>tools/lora_regret/backfill.py</code> documents: training finished, no post-training eval was
+ever emitted. They cannot reach a figure — <code>analyze</code> filters on <code>status == "ok"</code> and keeps
+the best record per arm — but a hand-read of the ledger will see duplicate arm names.</p>
+<details>
+<summary>Ledger rows for lr1, including the stale failures</summary>
+<div class="codeblock"><pre><code>{'arm': 'full-na-na-gsm8k-lr5e-07-s0',   'lr': 5e-07, 'accuracy': None,   'status': 'failed'}
+{'arm': 'lora-r1-all-gsm8k-lr5e-06-s0',  'lr': 5e-06, 'accuracy': None,   'status': 'failed'}
+{'arm': 'lora-r16-all-gsm8k-lr5e-06-s0', 'lr': 5e-06, 'accuracy': None,   'status': 'failed'}
+{'arm': 'full-na-na-gsm8k-lr5e-08-s0',   'lr': 5e-08, 'accuracy': 0.0637, 'status': 'ok', 'steps': 149}
+{'arm': 'lora-r1-all-gsm8k-lr5e-06-s0',  'lr': 5e-06, 'accuracy': 0.6937, 'status': 'ok', 'steps': 149}
+{'arm': 'lora-r16-all-gsm8k-lr5e-06-s0', 'lr': 5e-06, 'accuracy': 0.7051, 'status': 'ok', 'steps': 149}
+{'arm': 'lora-r256-all-gsm8k-lr5e-06-s0','lr': 5e-06, 'accuracy': 0.3730, 'status': 'ok', 'steps': 149}</code></pre></div>
+</details>
+<p><strong>Training reward is not accuracy.</strong> Training samples at temperature 1 with 32 samples per
+prompt; eval is argmax. The gap is small for a converged arm (r1 at 5e-06: 0.696 train
+reward against 0.694 eval) and large for a struggling one (r256 at 5e-06 near the end:
+~0.08 train reward against 0.37 eval). The backfilled reward traces in
+<code>results/backfill/</code> are useful for diagnosing collapse, never for the figure.</p>
+<h2 id="next-steps">Next steps<a class="anchor" href="#next-steps" aria-hidden="true">#</a></h2>
+<ul><li class="task"><input type="checkbox" disabled>Columns lr5–lr7 (gsm8k): FullFT 2e-06 / 4e-06 / 1e-05 against LoRA 2e-04 / 4e-04 /<p>1e-03. Their ledgers currently hold one stale <code>failed</code> row each, from the superseded
+FullFT grid. These columns decide whether FullFT has a peak or is still rising, which
+is the one thing the panel cannot currently answer.</p></li><li class="task"><input type="checkbox" disabled>Decide whether the FullFT window is still correctly placed. Its endpoints were<p>fixed from a four-updates-per-rollout measurement where 1e-06 collapsed at rollout 84;
+on-policy, 7e-07 is healthy and improving, so the whole band may have moved up and
+1e-05 may no longer be the dead floor it was chosen to be.</p></li><li class="task"><input type="checkbox" disabled>Give eval a stop condition, or a length cap that is reported rather than silently<p>saturated. As it stands a runaway-length arm is invisible in the accuracy column and
+costs ~50 s and 2.7 M tokens per eval.</p></li><li class="task"><input type="checkbox" disabled>Seeds. Every number here is <code>s0</code>. The r1 curve is flat to within its unmeasured<p>noise, so at least that arm needs a variance estimate before any regret claim rests
+on it.</p></li><li class="task"><input type="checkbox" disabled>Decide on the math panel after gsm8k completes (gsm8k has ~6× math's dynamic range;<p>math's baseline is partly guessing).</p></li></ul>
+<footer class="doc-footer">Generated 2026-08-08 23:00 CEST by htmlreport</footer>
+</main>
+</div>
+</div>
+<script>
+(function () {
+  var root = document.documentElement, key = 'htmlreport-theme';
+  try { root.setAttribute('data-theme', localStorage.getItem(key) || 'light'); } catch (e) {}
+  var btn = document.querySelector('.theme-toggle');
+  if (!btn) return;
+  btn.addEventListener('click', function () {
+    var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem(key, next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>
