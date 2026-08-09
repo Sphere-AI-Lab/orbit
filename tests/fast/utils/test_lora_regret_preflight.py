@@ -123,6 +123,7 @@ def test_every_matrix_is_expected_at_its_documented_count():
     assert EXPECTED_ARMS["e1ot"] == 45
     assert EXPECTED_ARMS["e1short"] == 21
     assert EXPECTED_ARMS["e4place"] == 35
+    assert EXPECTED_ARMS["e4lr0"] == 6
 
 
 def test_the_fullft_stages_agree_with_the_registrys_formula():

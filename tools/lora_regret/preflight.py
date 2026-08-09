@@ -42,7 +42,7 @@ EXPECTED_ROWS = {
 # only its learning rates move from the scout span onto a centred grid.
 EXPECTED_ARMS = {
     "e1": 45, "e2": 48, "e3": 35, "e4": 70, "e5scout": 5, "e5": 50, "sft82": 82,
-    "e1ot": 45, "e1short": 21, "e4place": 35, "e5rl": 42,
+    "e1ot": 45, "e1short": 21, "e4lr0": 6, "e4place": 35, "e5rl": 42,
 }
 
 # What each stage needs before it is worth starting. P3 is 2 rather than 1

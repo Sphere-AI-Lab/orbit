@@ -215,6 +215,7 @@ def lr_grid(
 RL_GRID_POINTS = 7
 RL_FULL_LR_RANGE = (5e-8, 1e-5)
 RL_LORA_LR_RANGE = (5e-6, 1e-3)
+E4_LR0 = 2e-6
 RL_STEP_DECADES = math.log10(RL_FULL_LR_RANGE[1] / RL_FULL_LR_RANGE[0]) / (RL_GRID_POINTS - 1)
 RL_FULL_LR_CENTRE = math.sqrt(RL_FULL_LR_RANGE[0] * RL_FULL_LR_RANGE[1])
 RL_LORA_LR_CENTRE = math.sqrt(RL_LORA_LR_RANGE[0] * RL_LORA_LR_RANGE[1])
@@ -835,6 +836,27 @@ def e4_arms(
     return arms
 
 
+def e4lr0_arms(
+    seed: int = 0,
+    datasets: tuple[str, ...] = RL_DATASETS,
+) -> list[Arm]:
+    """The LoRA-only E4 point immediately below the established LR grid."""
+    return [
+        Arm(
+            _name("lora", f"r{rank}", ALL_MODULES, E4_LR0, seed, extra=dataset),
+            "lora",
+            rank,
+            None,
+            ALL_MODULES,
+            E4_LR0,
+            seed,
+            dataset=dataset,
+        )
+        for dataset in datasets
+        for rank in (1, 16, 256)
+    ]
+
+
 def e4place_arms(
     hidden_size: int,
     ffn_size: int,
@@ -1229,6 +1251,9 @@ MATRICES = {
     "e4": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e4_arms(
         seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre,
         qkv_output_size=qkv_output,
+    ),
+    "e4lr0": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e4lr0_arms(
+        seed=seed,
     ),
     "e4place": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e4place_arms(
         hidden, ffn, seed=seed, oft_lr_centre=oft_lr_centre, qkv_output_size=qkv_output

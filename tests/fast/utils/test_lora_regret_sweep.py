@@ -32,6 +32,7 @@ from tools.lora_regret.arms import (
     e2_arms,
     e3_arms,
     e4_arms,
+    e4lr0_arms,
     e5_arms,
     e5_scout_arms,
     OFT_SCOUT_GRID,
@@ -602,6 +603,25 @@ class TestE4Matrix:
         a TEST_JSONL the launcher never reads would just mislead whoever reads
         the dry run."""
         assert "TEST_JSONL" not in arm_env(e4_arms()[0])
+
+
+class TestE4LR0Matrix:
+    """The extra LoRA-only point below E4's established seven-point grid."""
+
+    def test_is_six_lora_arms_at_two_e_minus_six(self):
+        arms = e4lr0_arms()
+
+        assert len(arms) == 6
+        assert {arm.dataset for arm in arms} == {"gsm8k", "math"}
+        assert {arm.rank for arm in arms} == {1, 16, 256}
+        assert {arm.method for arm in arms} == {"lora"}
+        assert {arm.target_modules for arm in arms} == {ALL_MODULES}
+        assert {arm.lr for arm in arms} == {2e-6}
+
+    def test_uses_rl_accuracy_routing(self):
+        assert sweep.MATRIX_LAUNCHERS["e4lr0"] == sweep.RL_LAUNCHER
+        assert sweep.MATRIX_METRICS["e4lr0"] == "accuracy"
+        assert sweep.MATRIX_PROJECTS["e4lr0"] == sweep.MATRIX_PROJECTS["e4"]
 
 
 class TestMatrixLaunchers:

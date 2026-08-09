@@ -22,11 +22,16 @@ file is for.
 import re
 from pathlib import Path
 
-from tools.lora_regret.arms import e4_arms
+from tools.lora_regret.arms import e4_arms, e4lr0_arms
 
+SCRIPT_DIR = Path(__file__).resolve().parents[3] / "scripts" / "lora_regret"
 SCRIPTS = sorted(
-    (Path(__file__).resolve().parents[3] / "scripts" / "lora_regret").glob("run_e4_*_lr*_8gpu.sh")
+    SCRIPT_DIR.glob("run_e4_*_lr[1-7]_8gpu.sh")
 )
+LR0_SCRIPTS = [
+    SCRIPT_DIR / "run_e4_gsm8k_lr0_8gpu.sh",
+    SCRIPT_DIR / "run_e4_math_lr0_8gpu.sh",
+]
 
 
 def _method_re(path: Path) -> str:
@@ -46,6 +51,39 @@ def _pattern(path: Path):
 def _selected(path: Path) -> list[str]:
     """What `sweep.py --only` would select: re.search against the arm name."""
     return [a.name for a in _arms() if _pattern(path).search(a.name)]
+
+
+def _lr0_selected(path: Path) -> list[str]:
+    return [a.name for a in e4lr0_arms() if _pattern(path).search(a.name)]
+
+
+def test_lr0_scripts_exist():
+    assert all(path.is_file() for path in LR0_SCRIPTS)
+
+
+def test_lr0_scripts_partition_the_lr0_matrix():
+    selected = [name for path in LR0_SCRIPTS for name in _lr0_selected(path)]
+
+    assert len(selected) == len(set(selected)) == 6
+    assert set(selected) == {arm.name for arm in e4lr0_arms()}
+
+
+def test_each_lr0_script_selects_one_dataset_and_all_three_ranks():
+    for path in LR0_SCRIPTS:
+        selected = [arm for arm in e4lr0_arms() if _pattern(path).search(arm.name)]
+        assert len(selected) == 3, (path.name, [arm.name for arm in selected])
+        assert {arm.dataset for arm in selected} == {path.name.split("_")[2]}
+        assert {arm.rank for arm in selected} == {1, 16, 256}
+        assert {arm.method for arm in selected} == {"lora"}
+
+
+def test_lr0_scripts_use_separate_ledgers_and_the_shared_protocol():
+    texts = [path.read_text(encoding="utf-8") for path in LR0_SCRIPTS]
+    ledgers = {re.search(r"RESULTS=(\S+)", text).group(1) for text in texts}
+
+    assert ledgers == {"results/e4_gsm8k_lr0.jsonl", "results/e4_math_lr0.jsonl"}
+    assert all("EXPECT_ARMS=3" in text for text in texts)
+    assert all('source "${HERE}/e4_protocol.sh"' in text for text in texts)
 
 
 def test_there_is_one_script_per_grid_point_per_panel():
