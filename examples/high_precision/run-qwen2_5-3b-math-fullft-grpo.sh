@@ -30,6 +30,12 @@ RUN_LOG="${ORBIT_ROOT}/logs/${LAUNCHER_NAME}_$(date +%Y%m%d_%H%M%S).log"
 SAVE_ROOT="${SAVE_ROOT:-${ORBIT_ROOT}/orbit_ckpts/fullft_grpo}"
 SAVE_DIR="${SAVE_DIR:-${SAVE_ROOT}/Qwen2.5-3B-Instruct_fullft_grpo_seed${SEED}}"
 
+# Match the critic benchmark's reward-verification budget. The scorer default
+# is 10s; under the eval burst's CPU-parallel grading that deflates Math500
+# pass@1 by ~16 points via verification timeouts (identical generations,
+# stricter grading). The benchmark recipe exports 60 and manifests it.
+export ORBIT_PEFT_ARENA_REWARD_TIMEOUT_S="${ORBIT_PEFT_ARENA_REWARD_TIMEOUT_S:-60}"
+
 # === Resources: 1 actor + 3 rollout (no critic) ===
 GPUS_PER_NODE="${GPUS_PER_NODE:-1}"
 ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-3}"
