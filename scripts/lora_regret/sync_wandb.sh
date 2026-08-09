@@ -6,6 +6,7 @@
 #
 #   bash scripts/lora_regret/sync_wandb.sh          # sync once
 #   WATCH=300 bash scripts/lora_regret/sync_wandb.sh  # re-sync every 5 minutes
+#   WANDB_ENTITY=some-team bash scripts/lora_regret/sync_wandb.sh  # elsewhere
 #
 # Only STALE directories are uploaded: a directory whose run-*.wandb file is no
 # newer than its .synced marker has nothing new to say, and is skipped.
@@ -47,6 +48,17 @@ fi
 
 # `wandb sync` must not itself be offline, whatever the shell inherited.
 unset WANDB_MODE
+
+# The entity (a "team" in the UI; a personal account is an entity too) is NOT
+# optional here, and leaving it out is how fifteen runs of the E4 gsm8k panel
+# landed in M3TRL on 2026-08-08. An offline run records an EMPTY entity -- the
+# client never reached a server to resolve one -- and `wandb sync` rewrites that
+# field only when `-e` is passed (sync.py: `if self._entity: pb.run.entity =
+# ...`). With the field empty the server fills in the account's default entity,
+# which is whatever team wandb.ai currently defaults to and not necessarily the
+# one that ran the sweep. Passing it explicitly makes the destination a property
+# of this script instead of a property of a web setting someone else can change.
+WANDB_ENTITY="${WANDB_ENTITY:-zeju-qiu}"
 
 # mkdir, NOT flock. `wandb/` is on Lustre, which is mounted without the flock
 # option here -- `flock -n 9` fails with "Function not implemented", which is
@@ -96,14 +108,15 @@ sync_once() {
         stale_files+=("${wandb_file}")
     done
 
-    echo "=== $(date +%H:%M:%S): ${#stale[@]} stale, ${current} already current, ${no_file} empty ==="
+    echo "=== $(date +%H:%M:%S): ${#stale[@]} stale, ${current} already current, ${no_file} empty" \
+         "-> ${WANDB_ENTITY} ==="
     (( ${#stale[@]} > 0 )) || return 0
 
     # No `|| true` here: it would run `true` on failure and overwrite PIPESTATUS
     # before the read below. Without `-e`, a failing pipeline doesn't exit the
     # script, and grep filtering every line (rc 1) must not read as a wandb
     # failure -- hence PIPESTATUS[0], not $?.
-    wandb sync "${stale[@]}" 2>&1 | grep -vE "^wandb: (Loading|Find logs)"
+    wandb sync -e "${WANDB_ENTITY}" "${stale[@]}" 2>&1 | grep -vE "^wandb: (Loading|Find logs)"
     local sync_rc=${PIPESTATUS[0]}
     if (( sync_rc != 0 )); then
         echo "wandb sync exited ${sync_rc}; leaving all markers untouched." >&2

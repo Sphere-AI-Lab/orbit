@@ -162,6 +162,14 @@ MATRIX_PROJECTS = {
 # the post and every plan document call it.
 METHOD_LABELS = {"full": "ft", "lora": "lora", "oft": "oft"}
 
+# The account every run belongs to -- an "entity" in the API, a "team" in the
+# UI, and a personal account is one of these too. Passed explicitly at every
+# upload rather than left to wandb.ai's default entity, which is a per-account
+# web setting: when it flipped to a team on 2026-08-08 the whole gsm8k LR panel
+# uploaded there instead, silently and with the right project and run names.
+# Overridable for anyone not running this out of the author's account.
+WANDB_ENTITY = os.environ.get("WANDB_ENTITY") or "zeju-qiu"
+
 # Where an arm goes when no matrix routed it. Deliberately the launchers' own
 # default rather than any task's name: `run_arm` is callable directly (tests,
 # one-off reruns), and inventing a plausible task would write those runs into a
@@ -279,7 +287,8 @@ def sync_wandb_offline_runs(repo_root: Path) -> None:
     with _WANDB_SYNC_LOCK:
         try:
             proc = subprocess.run(
-                [sys.executable, "-m", "wandb", "sync", "--sync-all", "--include-offline"],
+                [sys.executable, "-m", "wandb", "sync", "--entity", WANDB_ENTITY,
+                 "--sync-all", "--include-offline"],
                 cwd=repo_root, env=env, capture_output=True, text=True, timeout=900,
             )
         except Exception as exc:  # noqa: BLE001  -- a failed sync must not kill a sweep
@@ -517,6 +526,14 @@ def run_arm(
             # FullFT, LoRA and OFT arms separable inside its own dashboard.
             "WANDB_PROJECT": project,
             "WANDB_GROUP": group,
+            # Belt to the sync flag's braces. An offline run records an empty
+            # entity unless one is in the environment at init, and an empty
+            # entity is what lets the server pick. Stamping it here means a
+            # directory synced by a bare `wandb sync` -- by hand, by a future
+            # script, by anyone who does not know about the -e flag -- still
+            # lands in the right account. Verified: with WANDB_ENTITY set, the
+            # run record carries entity='zeju-qiu' instead of ''.
+            "WANDB_ENTITY": WANDB_ENTITY,
             "SAVE_DIR": str(repo_root / "orbit_ckpts" / "lora_regret" / arm.name),
         }
     )
