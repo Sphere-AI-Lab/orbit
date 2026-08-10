@@ -14,7 +14,7 @@ from orbit.utils import train_dump_utils
 from orbit.utils.adapter_swap import swap_adapter_tensors
 from orbit.utils.adapter_tensors import AdapterTensorKey, adapter_named_parameters
 from orbit.utils.arguments import (
-    uses_adapter_critic,
+    uses_one_trunk_critic,
     uses_rollout_engines,
     uses_separate_critic,
     validate_opd_topk_vocab_size,
@@ -232,7 +232,7 @@ class MegatronTrainRayActor(TrainRayActor):
         self.critic_model = None
         self.critic_optimizer = None
         self.critic_opt_param_scheduler = None
-        if uses_adapter_critic(self.args):
+        if uses_one_trunk_critic(self.args):
             (
                 self.critic_model,
                 self.critic_optimizer,
@@ -848,7 +848,7 @@ class MegatronTrainRayActor(TrainRayActor):
                         rollout_data,
                         self._actor_critic_groups,
                     )
-                elif uses_adapter_critic(self.args):
+                elif uses_one_trunk_critic(self.args):
                     critic_data_iterator, critic_num_microbatches = get_data_iterator(
                         self.args, self.critic_model, rollout_data
                     )
@@ -878,7 +878,7 @@ class MegatronTrainRayActor(TrainRayActor):
 
             # Train
             self._set_replay_stage("replay_backward")
-            run_policy_phase = not uses_adapter_critic(self.args) or rollout_id >= self.args.num_critic_only_steps
+            run_policy_phase = not uses_one_trunk_critic(self.args) or rollout_id >= self.args.num_critic_only_steps
             with timer("actor_train"):
                 if run_policy_phase:
                     train(
@@ -894,14 +894,14 @@ class MegatronTrainRayActor(TrainRayActor):
                         # critic-only warmup rollouts must not age the teacher.
                         self._self_teacher.update(self._adapter_named_params())
                         actor_step = rollout_id
-                        if uses_adapter_critic(self.args):
+                        if uses_one_trunk_critic(self.args):
                             actor_step -= self.args.num_critic_only_steps
                         if should_promote_teacher(
                             self._opd_teacher_spec.source, self.args.opd_promote_interval, actor_step
                         ):
                             self._promote_self_teacher()
 
-            if uses_adapter_critic(self.args) and critic_data_iterator is not None:
+            if uses_one_trunk_critic(self.args) and critic_data_iterator is not None:
                 with timer("critic_train"), value_loss_phase(self.args):
                     train(
                         rollout_id,
@@ -961,7 +961,7 @@ class MegatronTrainRayActor(TrainRayActor):
             self_teacher=getattr(self, "_self_teacher", None),
         )
 
-        if uses_adapter_critic(self.args) and self.args.critic_save:
+        if uses_one_trunk_critic(self.args) and self.args.critic_save:
             save_critic_checkpoint(
                 self.args,
                 rollout_id,

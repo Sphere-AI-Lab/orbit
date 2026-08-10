@@ -143,3 +143,59 @@ def test_critic_only_warmup_allows_zero_reward_level_kl():
     args = _base_args(num_critic_only_steps=1, kl_coef=0.0)
     _apply_critic_args(args)
     _validate_ppo_args(args)
+
+
+# --- head mode: value-head-only critic on a detached (read-only aliased) trunk ---
+
+def _head_args(**overrides):
+    return _base_args(critic_mode="head", **overrides)
+
+
+def test_head_mode_allows_full_ft_actor():
+    from orbit.utils.arguments import uses_head_critic, uses_one_trunk_critic
+
+    args = _head_args(peft_method="none")
+    _apply_critic_args(args)
+    assert args.use_critic
+    assert args.critic_num_gpus_per_node == 0
+    assert args.critic_num_nodes == 0
+    assert args.critic_lr == args.lr
+    assert uses_head_critic(args)
+    assert uses_one_trunk_critic(args)
+    assert not uses_adapter_critic(args)
+    assert not uses_separate_critic(args)
+
+
+def test_head_mode_allows_peft_actor():
+    from orbit.utils.arguments import uses_head_critic
+
+    args = _head_args(peft_method="oft")
+    _apply_critic_args(args)
+    assert args.use_critic
+    assert uses_head_critic(args)
+
+
+def test_head_mode_requires_ppo():
+    args = _head_args(advantage_estimator="grpo")
+    with pytest.raises(ValueError, match="requires --advantage-estimator ppo"):
+        _apply_critic_args(args)
+
+
+def test_head_mode_rejects_keep_old_actor():
+    args = _head_args(keep_old_actor=True)
+    with pytest.raises(ValueError, match="keep-old-actor"):
+        _apply_critic_args(args)
+
+
+def test_head_mode_rejects_critic_gpu_request():
+    args = _head_args(critic_num_gpus_per_node=1)
+    with pytest.raises(ValueError, match="critic-num-gpus-per-node"):
+        _apply_critic_args(args)
+
+
+def test_adapter_mode_is_one_trunk_too():
+    from orbit.utils.arguments import uses_one_trunk_critic
+
+    args = _base_args(critic_mode="adapter")
+    _apply_critic_args(args)
+    assert uses_one_trunk_critic(args)
