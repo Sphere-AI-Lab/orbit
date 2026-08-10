@@ -18,12 +18,22 @@ constraint (cross-rack, cross-datacenter, plain Ethernet) and loses where it isn
 
 ```
 examples/disk_delta_weight_sync/
-├── check_delta_roundtrip.py            # CPU-only format check — run this first
-├── _common.sh                          # shared workload; wrappers vary one axis each
-├── 01-qwen3-4B-1node-delta-smoke.sh    # 1 node 4+4, --check-weight-update-equal, correctness
-├── 02-qwen3-4B-2node-delta.sh          # 2 nodes, deltas cross a real host boundary
-└── 03-qwen3-4B-2node-broadcast.sh      # control arm for 02: same workload over NCCL
+├── check_delta_roundtrip.py                  # CPU-only format check — run this first
+├── _common.sh                                # shared workload; wrappers vary one axis each
+├── _model-qwen3-30B-A3B.sh                   # MoE model block (arch, parallelism, layout)
+│
+├── 01-qwen3-4B-1node-delta-smoke.sh          # dense, 1 node 4+4, --check-weight-update-equal
+├── 02-qwen3-4B-2node-delta.sh                # dense, deltas cross a real host boundary
+├── 03-qwen3-4B-2node-broadcast.sh            # control arm for 02
+│
+├── 04-qwen3-30B-A3B-4node-delta-smoke.sh     # MoE correctness — first run of the expert path
+├── 05-qwen3-30B-A3B-4node-delta.sh           # MoE measurement arm
+└── 06-qwen3-30B-A3B-4node-broadcast.sh       # control arm for 05
 ```
+
+`_common.sh` fixes the dataset and the RL hyperparameters; a model block overrides the
+architecture, parallelism, and layout. Within one model, the delta and broadcast arms differ in
+the transport block and nothing else — `diff` the resolved `MILES_ARGS` if you want to confirm it.
 
 ## Start here: the format check
 
@@ -84,6 +94,39 @@ tensors against the trainer's after each sync — the only direct proof that an 
 reconstructed the right bytes on real weights. Then run `02` and `03` back to back; `_common.sh`
 holds the workload fixed so the difference between them is the transport and nothing else.
 
+### The MoE arm
+
+`04`–`06` run Qwen3-30B-A3B: 48 layers, 128 experts, 8 active per token, 57 GB in bf16. Both
+checkpoints are already on slinky, outside `HF_CACHE_DIR`, so `submit.sh` skips the download:
+
+| | |
+|---|---|
+| `--hf-checkpoint` | `/data/shared/models/Qwen3-30B-A3B` (16 shards, 57 GB) |
+| `--ref-load` | `/data/home/zeju/models/Qwen3-30B-A3B_torch_dist` — a user-specific path; override `DD_HF_TORCHDIST_DIR` elsewhere |
+
+Two reasons the MoE arm matters, and the second is the one that justifies running it before any
+measurement:
+
+1. **It is where the mechanism should pay.** Broadcast moves all 57 GB every sync no matter how
+   little the step changed, against ~3B active parameters per token.
+2. **It covers code the dense arm cannot reach.** `_for_each_hf_bucket` runs a TP pass and then a
+   separate EP pass, and `_drop_duplicate_names` exists because an expert tensor can be gathered
+   by more than one rank. At `--expert-model-parallel-size 1` the Qwen3-4B run entered neither.
+   Run `04` first — it is the first exercise of the expert path, and it fails loudly.
+
+Parallelism (TP4, EP8, 2 training + 2 rollout nodes, sglang `--sglang-ep-size 8` with DP
+attention) mirrors [`../p2p_weight_transfer/run-qwen3-30B-A3B-4node-profile.sh`](../p2p_weight_transfer/run-qwen3-30B-A3B-4node-profile.sh),
+the validated shape for this model on 4 nodes. Note the host-local checkpoint is now ~57 GB per
+rollout host.
+
+### Adding another model
+
+Write a `_model-<name>.sh` block setting `DD_MODEL_CONFIG` (a file in `scripts/models/`),
+the checkpoint paths, parallelism, and layout, then a wrapper per transport. Other MoE
+checkpoints already on the cluster: `Qwen3-VL-30B-A3B-Thinking` (58 GB) and
+`Qwen3-Omni-30B-A3B-Instruct` (66 GB) under `/data/shared/models/`, though neither has a
+converted `torch_dist` yet.
+
 ### The two directories
 
 | Flag | What it is |
@@ -113,8 +156,13 @@ All read by `_common.sh` from the environment or the wrapper:
 | `DD_CHECKSUM` | `xxh3-128` | `blake3` for untrusted storage, `adler32` for interop |
 | `DD_DISK_DIR` | `$MILES_REPO/checkpoints/$RUN_NAME/delta-updates` | shared; wiped at baseline |
 | `DD_LOCAL_CKPT_DIR` | `/tmp/miles-delta-local-ckpt/$RUN_NAME` | host-local |
-| `DD_CHECK_EQUAL` | `0` | `1` adds `--check-weight-update-equal`; on for `01` |
-| `DD_NUM_ROLLOUT` | `3000` | `01` uses 5 |
+| `DD_CHECK_EQUAL` | `0` | `1` adds `--check-weight-update-equal`; on for `01` and `04` |
+| `DD_NUM_ROLLOUT` | `3000` | `01` and `04` use 5 |
+| `DD_MODEL_CONFIG` | `qwen3-4B` | names a file in `scripts/models/` |
+| `DD_HF_MODEL_DIR` / `DD_HF_TORCHDIST_DIR` | Qwen3-4B under `HF_CACHE_DIR` | checkpoint paths |
+| `DD_TP` / `DD_PP` / `DD_CP` / `DD_EP` / `DD_ETP` | `2/1/1/1/1` | training parallelism |
+| `DD_GPUS_PER_ENGINE`, `DD_MEM_FRACTION` | `2`, `0.85` | rollout engine shape |
+| `DD_EXTRA_SGLANG_ARGS`, `DD_EXTRA_OPTIMIZER_ARGS` | unset | arrays appended verbatim |
 
 ## Reading the results
 

@@ -56,17 +56,23 @@ RUN_NAME=${SLURM_JOB_NAME:-$DD_RUN_NAME}
 
 # --------------------------------------------------------------- assets ---
 
+# Defaults are Qwen3-4B (dense). A wrapper overrides the model block to test a different
+# architecture; the dataset and the RL hyperparameters stay fixed so the transport arms of
+# any one model remain comparable to each other.
 HF_CACHE_DIR=${HF_CACHE_DIR:-/data/shared/hf_cache}
-HF_MODEL_REPO="Qwen/Qwen3-4B"
+DD_MODEL_CONFIG=${DD_MODEL_CONFIG:-qwen3-4B}
+HF_MODEL_REPO=${DD_HF_MODEL_REPO:-Qwen/Qwen3-4B}
 HF_DATASETS=(
    "zhuzilin/dapo-math-17k"
 )
-HF_MODEL_DIR="$HF_CACHE_DIR/models/Qwen3-4B"
-HF_TORCHDIST_DIR="$HF_CACHE_DIR/models/Qwen3-4B_torch_dist"
+# submit.sh downloads HF_MODEL_REPO only when HF_MODEL_DIR/config.json is absent, so pointing
+# these at an already-present checkpoint outside HF_CACHE_DIR skips the download entirely.
+HF_MODEL_DIR=${DD_HF_MODEL_DIR:-$HF_CACHE_DIR/models/Qwen3-4B}
+HF_TORCHDIST_DIR=${DD_HF_TORCHDIST_DIR:-$HF_CACHE_DIR/models/Qwen3-4B_torch_dist}
 HF_TRAIN_DATA="$HF_CACHE_DIR/data/dapo-math-17k/dapo-math-17k.jsonl"
 
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-4B.sh"
+source "$MILES_REPO/scripts/models/$DD_MODEL_CONFIG.sh"
 
 # ----------------------------------------------------------- delta dirs ---
 
@@ -109,17 +115,17 @@ ROLLOUT_ARGS=(
 )
 
 PERF_ARGS=(
-   --tensor-model-parallel-size 2
+   --tensor-model-parallel-size "${DD_TP:-2}"
    --sequence-parallel
-   --pipeline-model-parallel-size 1
-   --context-parallel-size 1
-   --expert-model-parallel-size 1
-   --expert-tensor-parallel-size 1
+   --pipeline-model-parallel-size "${DD_PP:-1}"
+   --context-parallel-size "${DD_CP:-1}"
+   --expert-model-parallel-size "${DD_EP:-1}"
+   --expert-tensor-parallel-size "${DD_ETP:-1}"
    --recompute-granularity full
    --recompute-method uniform
    --recompute-num-layers 1
    --use-dynamic-batch-size
-   --max-tokens-per-gpu 9216
+   --max-tokens-per-gpu "${DD_MAX_TOKENS_PER_GPU:-9216}"
 )
 
 GRPO_ARGS=(
@@ -140,11 +146,19 @@ OPTIMIZER_ARGS=(
    --adam-beta1 0.9
    --adam-beta2 0.98
 )
+# A large MoE needs the optimizer state off the GPU; a dense 4B does not.
+if [[ -n "${DD_EXTRA_OPTIMIZER_ARGS+x}" ]]; then
+   OPTIMIZER_ARGS+=("${DD_EXTRA_OPTIMIZER_ARGS[@]}")
+fi
 
 SGLANG_ARGS=(
-   --rollout-num-gpus-per-engine 2
-   --sglang-mem-fraction-static  0.85
+   --rollout-num-gpus-per-engine "${DD_GPUS_PER_ENGINE:-2}"
+   --sglang-mem-fraction-static  "${DD_MEM_FRACTION:-0.85}"
 )
+# MoE serving wants expert parallelism and DP attention on the engine side too.
+if [[ -n "${DD_EXTRA_SGLANG_ARGS+x}" ]]; then
+   SGLANG_ARGS+=("${DD_EXTRA_SGLANG_ARGS[@]}")
+fi
 
 # Disaggregated by construction. disk-delta asserts `not colocate`: under
 # colocate the weights cross via CUDA IPC (only a handle moves), so snapshot +
@@ -211,6 +225,6 @@ MILES_ARGS=(
 echo "[disk-delta example] run=$RUN_NAME mode=$DD_TRANSFER_MODE nodes=$EXPERIMENT_NODES"
 if [[ "$DD_TRANSFER_MODE" == "disk-delta" ]]; then
    echo "[disk-delta example]   shared publish dir : $DD_DISK_DIR  (wiped at baseline)"
-   echo "[disk-delta example]   host-local ckpt dir: $DD_LOCAL_CKPT_DIR  (~8 GB per rollout host)"
+   echo "[disk-delta example]   host-local ckpt dir: $DD_LOCAL_CKPT_DIR  (~${DD_CKPT_SIZE_HINT:-8 GB} per rollout host)"
    echo "[disk-delta example]   encoding=$DD_ENCODING checksum=$DD_CHECKSUM"
 fi
