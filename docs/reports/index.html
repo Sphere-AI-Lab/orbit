@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>reports — reports</title>
+<script type="application/json" id="report-meta">{"title": "reports \u2014 reports", "kind": "index", "subtitle": "1 document", "date": "", "tags": [], "generated": "2026-08-10T15:18:10+02:00", "meta": {"directory": "/lustre/fast/fast/zqiu/clthegoat-orbit/orbit/docs/reports"}}</script>
+<style>
+/* html-reports stylesheet.
+   Modelled closely on the LMSYS blog (lmsys.org/blog) — sticky TOC rail on the
+   left, single measured column of Inter, orange links, bordered tables, quiet
+   captions. Ported from that site's own layout rules, with a dark theme and
+   print styles added.
+
+   The generator inlines this file verbatim into every page, so an edit here
+   lands on the next render. */
+
+/* Light is the default and does not follow the system — these pages are read and
+   printed like paper. Dark is opt-in via the toggle, which sets data-theme on
+   the root element and remembers the choice. */
+:root {
+  color-scheme: light;
+
+  --bg: #ffffff;
+  --ink: rgb(8, 12, 38);
+  --ink-dim: rgba(8, 12, 38, 0.62);
+  --ink-lighter: rgb(100, 104, 122);
+  --border: rgba(8, 12, 38, 0.11);
+  --accent: #ea6a10;
+  --rule-top: rgba(220, 140, 130, 0.4);  /* the hairline across the page top */
+  --wash: rgba(32, 38, 71, 0.04);   /* code blocks, table headers */
+  --wash-strong: rgba(32, 38, 71, 0.06); /* inline code */
+  --wash-hover: rgba(32, 38, 71, 0.02);
+  --shadow: 0 4px 24px rgba(32, 38, 71, 0.1);
+  --ok: #1a7f4b;
+  --warn: #9a6400;
+  --bad: #b02a2a;
+
+  --font-body: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --font-math: "STIX Two Math", "Latin Modern Math", "Cambria Math",
+    "TeX Gyre Termes Math", serif;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0f1216;
+  --ink: rgb(228, 231, 238);
+  --ink-dim: rgba(228, 231, 238, 0.66);
+  --ink-lighter: rgb(150, 156, 170);
+  --border: rgba(228, 231, 238, 0.14);
+  --accent: #f5893c;
+  --rule-top: rgba(220, 140, 130, 0.25);
+  --wash: rgba(228, 231, 238, 0.05);
+  --wash-strong: rgba(228, 231, 238, 0.08);
+  --wash-hover: rgba(228, 231, 238, 0.03);
+  --shadow: none;
+  --ok: #5cbd87;
+  --warn: #d3a34a;
+  --bad: #e07a7a;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  border-top: 3px solid var(--rule-top);
+}
+
+/* ---------- layout ---------- */
+
+.page { max-width: 1280px; margin: 0 auto; padding: 72px 48px 96px; }
+.doc-layout { display: flex; gap: 0; align-items: flex-start; }
+.doc-layout > main { flex: 1 1; min-width: 0; padding-left: 56px; }
+
+/* ---------- table of contents rail ---------- */
+
+.toc {
+  width: 240px; flex-shrink: 0;
+  position: sticky; top: 32px; align-self: flex-start;
+  border-right: 1px solid var(--border);
+  padding-right: 28px; padding-top: 2px;
+}
+.toc > summary {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--ink-dim);
+  margin-bottom: 14px; cursor: pointer; list-style: none;
+}
+.toc > summary::-webkit-details-marker { display: none; }
+.toc ol { list-style: none; margin: 0; padding: 0; }
+.toc li { margin-bottom: 2px; }
+.toc .lvl-3 { padding-left: 12px; }
+.toc a {
+  font-size: 14px; color: var(--ink-dim); text-decoration: none;
+  line-height: 1.625; display: block; padding: 5px 0;
+  transition: color 0.15s; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.toc a:hover { color: var(--ink); }
+
+/* ---------- document header ---------- */
+
+.doc-kind {
+  display: inline-block; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 10px;
+}
+.doc-title {
+  font-size: clamp(30px, 5vw, 36px); font-weight: 700;
+  letter-spacing: -0.025em; line-height: 1.25;
+  margin: 0 0 8px; color: var(--ink);
+}
+.doc-subtitle { font-size: 17px; color: var(--ink-dim); margin: 0 0 16px; line-height: 1.5; }
+.doc-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.doc-tags span { font-size: 12px; color: var(--ink-lighter); }
+.doc-tags span::before { content: "#"; opacity: 0.5; }
+
+.meta {
+  display: flex; flex-wrap: wrap; gap: 6px 24px;
+  font-size: 13px; color: var(--ink-lighter);
+  margin: 0 0 28px; padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.meta div { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.meta dt { margin: 0; opacity: 0.75; }
+.meta dd { margin: 0; font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+.meta dd.flag-dirty { color: var(--warn); font-weight: 600; }
+.meta dd.flag-clean { color: var(--ok); }
+
+/* ---------- prose ---------- */
+
+main { font-size: 16px; font-weight: 400; line-height: 1.625; overflow-wrap: break-word; }
+main > :first-child { margin-top: 0; }
+
+main p { margin: 0 0 1.4em; }
+main a { color: var(--accent); text-decoration: none; }
+main a:hover { text-decoration: underline; text-underline-offset: 2px; }
+main strong { font-weight: 600; color: var(--ink); }
+
+h2, h3, h4, h5, h6 { font-weight: 700; line-height: 1.25; color: var(--ink); scroll-margin-top: 24px; }
+h2 { font-size: 1.5rem; letter-spacing: -0.015em; margin: 2.25em 0 0.65em; }
+h3 { font-size: 1.15rem; margin: 2em 0 0.5em; }
+h4 { font-size: 1rem; margin: 1.5em 0 0.4em; color: var(--ink-lighter); }
+
+.anchor { opacity: 0; text-decoration: none; color: var(--ink-lighter); margin-left: 0.4rem; font-weight: 400; }
+h2:hover .anchor, h3:hover .anchor, h4:hover .anchor { opacity: 1; }
+
+main ul { list-style: disc; margin: 0 0 1.4em 1.5em; padding: 0; }
+main ol { list-style: decimal; margin: 0 0 1.4em 1.5em; padding: 0; }
+main li { margin-bottom: 0.4em; line-height: 1.625; }
+main li > p { margin-bottom: 0.25em; }
+main li > ul, main li > ol { margin-bottom: 0.4em; margin-top: 0.4em; }
+li.task { list-style: none; margin-left: -1.2em; }
+li.task input { margin-right: 0.5em; }
+
+blockquote {
+  border-left: 3px solid var(--border);
+  padding: 0.25em 0 0.25em 1.25em;
+  margin: 1.75em 0; color: var(--ink-lighter); font-style: italic;
+}
+
+hr { border: none; border-top: 1px solid var(--border); margin: 3em 0; }
+
+/* ---------- code ---------- */
+
+code {
+  font-family: var(--font-mono); font-size: 0.85em;
+  background: var(--wash-strong); color: var(--ink);
+  padding: 2px 6px; border-radius: 4px;
+}
+.codeblock {
+  background: var(--wash); border: 1px solid var(--border);
+  border-radius: 8px; margin: 1.75em 0; overflow: hidden;
+}
+.codeblock .lang {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--ink-lighter);
+  padding: 8px 1.25em; border-bottom: 1px solid var(--border);
+}
+.codeblock pre { margin: 0; padding: 1.1em 1.25em; overflow-x: auto; }
+.codeblock pre code {
+  background: none; padding: 0; font-size: 0.875rem; line-height: 1.7; color: var(--ink);
+}
+
+/* ---------- tables ---------- */
+
+.table-wrap { overflow-x: auto; margin: 1.75em 0; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9em; font-variant-numeric: tabular-nums; }
+th, td { border: 1px solid var(--border); padding: 0.6em 1em; text-align: left; word-wrap: break-word; }
+th { background: var(--wash); font-weight: 500; font-size: 0.875em; letter-spacing: 0.01em; white-space: nowrap; }
+tr:hover td { background: var(--wash-hover); }
+td.num, th.num { text-align: right; }
+td.center, th.center { text-align: center; }
+
+/* ---------- figures ---------- */
+
+main img {
+  max-width: 100%; height: auto; display: block;
+  border-radius: 8px; margin: 3em auto 1em; box-shadow: var(--shadow);
+}
+figure { margin: 0; }
+figure img { margin-bottom: 0.75em; }
+figcaption {
+  display: block; text-align: center; font-size: 13px;
+  color: var(--ink-lighter); line-height: 1.625; margin: 0.75em 0 1.5em;
+}
+
+/* ---------- math ---------- */
+
+math { font-family: var(--font-math); font-size: 1.05em; }
+math[display="block"] { font-size: 1.15em; margin: 0; }
+
+/* MathML Core ignores columnspacing/rowspacing, so aligned environments get
+   their spacing here: no horizontal padding, since the relation operator's own
+   lspace already separates the columns. */
+mtable.align > mtr > mtd { padding-left: 0; padding-right: 0; }
+mtable.align > mtr { line-height: 2.2; }
+
+.math-block {
+  margin: 1.75em 0; overflow-x: auto; overflow-y: hidden;
+  text-align: center; padding: 0.25em 0;
+}
+
+/* shown when an expression could not be compiled; the source is legible at least */
+.math-fallback {
+  font-family: var(--font-mono); font-size: 0.85em;
+  background: var(--wash-strong); border: 1px dashed var(--border);
+  padding: 2px 6px; border-radius: 4px;
+}
+.math-block.unparsed { text-align: left; }
+
+/* ---------- details ---------- */
+
+/* scoped to main so the TOC, which is also a <details>, keeps its bare rail */
+main details { margin: 1.75em 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+main details > summary {
+  cursor: pointer; font-weight: 500; padding: 14px 20px;
+  background: var(--wash-hover); border-bottom: 1px solid transparent;
+}
+main details[open] > summary { border-bottom: 1px solid var(--border); margin-bottom: 1em; }
+main details > :not(summary) { padding-left: 20px; padding-right: 20px; }
+main details .codeblock { margin-left: 0; margin-right: 0; }
+
+/* ---------- callouts ---------- */
+
+.callout {
+  border-left: 3px solid var(--accent); background: var(--wash);
+  padding: 0.9em 1.25em; border-radius: 0 8px 8px 0; margin: 1.75em 0;
+}
+.callout.warn { border-left-color: var(--warn); }
+.callout.bad { border-left-color: var(--bad); }
+.callout > :last-child { margin-bottom: 0; }
+
+/* ---------- index page ---------- */
+
+.index-empty { color: var(--ink-lighter); font-style: italic; }
+td.t-title a { font-weight: 500; }
+td.t-date, td.t-commit { font-family: var(--font-mono); font-size: 12px; color: var(--ink-lighter); white-space: nowrap; }
+td.t-kind { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); white-space: nowrap; }
+
+/* ---------- theme toggle ---------- */
+
+.theme-toggle {
+  position: fixed; top: 16px; right: 16px; z-index: 10;
+  font: inherit; font-size: 12px; color: var(--ink-lighter);
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; padding: 5px 10px; cursor: pointer;
+}
+.theme-toggle:hover { color: var(--ink); }
+
+/* ---------- footer ---------- */
+
+.doc-footer {
+  margin-top: 4em; padding-top: 20px; border-top: 1px solid var(--border);
+  color: var(--ink-lighter); font-size: 13px;
+}
+
+/* ---------- narrow screens: TOC collapses above the content ---------- */
+
+@media (max-width: 900px) {
+  .page { padding: 56px 16px 60px; overflow: hidden; }
+  .doc-layout { flex-direction: column; align-items: stretch; }
+  .doc-layout > main { padding-left: 0; min-width: 0; font-size: 15px; }
+  .toc {
+    position: static; width: auto; border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding-right: 0; padding-bottom: 12px; margin-bottom: 28px;
+  }
+  .toc > summary { margin-bottom: 8px; }
+  main img { margin: 1.5em auto; box-shadow: none; }
+  .codeblock pre { font-size: 13px; }
+}
+
+/* ---------- print ---------- */
+
+@media print {
+  :root { --bg: #fff; --ink: #000; --ink-dim: #333; --ink-lighter: #444; --shadow: none; }
+  body { border-top: none; }
+  .toc, .theme-toggle, .anchor { display: none; }
+  .page { padding: 0; max-width: none; }
+  .doc-layout > main { padding-left: 0; }
+  .codeblock, table, figure, details, .math-block { break-inside: avoid; }
+  a { color: inherit; }
+}
+
+</style>
+</head>
+<body>
+<button class="theme-toggle" type="button">theme</button>
+<div class="page">
+<div class="doc-layout">
+
+<main>
+<header class="doc-header">
+<div class="doc-kind">index</div><h1 class="doc-title">reports — reports</h1>
+<p class="doc-subtitle">1 document</p>
+<dl class="meta"><div><dt>directory</dt><dd>/lustre/fast/fast/zqiu/clthegoat-orbit/orbit/docs/reports</dd></div></dl>
+</header>
+<div class="table-wrap"><table><thead><tr><th>Date</th><th>Title</th><th>Kind</th><th>Tags</th><th>Commit</th></tr></thead><tbody><tr><td class="t-date">2026-08-10</td><td class="t-title"><a href="2026-08-10-ppo-critic-comparison.html">Full critic vs adapter critic: PPO on Qwen2.5-3B math</a></td><td class="t-kind"><span>benchmark</span></td><td>ppo, grpo, oft, critic, qwen2.5-3b</td><td class="t-commit">d4548eb245d9</td></tr></tbody></table></div>
+<footer class="doc-footer">Index rebuilt 2026-08-10 15:18 CEST by htmlreport</footer>
+</main>
+</div>
+</div>
+<script>
+(function () {
+  var root = document.documentElement, key = 'htmlreport-theme';
+  try { root.setAttribute('data-theme', localStorage.getItem(key) || 'light'); } catch (e) {}
+  var btn = document.querySelector('.theme-toggle');
+  if (!btn) return;
+  btn.addEventListener('click', function () {
+    var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem(key, next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>
