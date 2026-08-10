@@ -36,6 +36,96 @@ examples/disk_delta_weight_sync/
 architecture, parallelism, and layout. Within one model, the delta and broadcast arms differ in
 the transport block and nothing else — `diff` the resolved `MILES_ARGS` if you want to confirm it.
 
+## Sharding config
+
+Every recipe is disaggregated — disk-delta asserts `not colocate` — so the training and rollout
+GPUs below are disjoint sets, and `EXPERIMENT_NODES` covers both.
+
+### Training parallelism
+
+| Recipe | TP | PP | CP | EP | ETP | DP | tokens/GPU | nodes | train GPUs |
+|---|---|---|---|---|---|---|---|---|---|
+| `01` qwen3-4B 1-node | 2 | 1 | 1 | 1 | 1 | 2 | 9216 | 1 | 1 × 4 |
+| `02` qwen3-4B 2-node delta | 2 | 1 | 1 | 1 | 1 | 4 | 9216 | 2 | 1 × 8 |
+| `03` qwen3-4B 2-node broadcast | 2 | 1 | 1 | 1 | 1 | 4 | 9216 | 2 | 1 × 8 |
+| `04` 30B-A3B 4-node smoke | 4 | 1 | 1 | **8** | 1 | 4 | 2048 | 4 | 2 × 8 |
+| `05` 30B-A3B 4-node delta | 4 | 1 | 1 | **8** | 1 | 4 | 2048 | 4 | 2 × 8 |
+| `06` 30B-A3B 4-node broadcast | 4 | 1 | 1 | **8** | 1 | 4 | 2048 | 4 | 2 × 8 |
+| `07` 30B-A3B 1-node smoke | 4 | 1 | 1 | **4** | 1 | 1 | 2048 | 1 | 1 × 4 |
+
+DP is derived, not set: `DP = train_GPUs / (TP × PP × CP)`. EP must divide `train_GPUs / ETP`,
+which is the constraint that forces `07` down to EP4 — eight-way expert parallelism does not fit
+across 4 training GPUs.
+
+### Rollout engine sharding
+
+| Recipe | rollout GPUs | GPUs/engine | engines | `--sglang-ep-size` | mem fraction |
+|---|---|---|---|---|---|
+| `01` | 4 | 2 | 2 | — | 0.85 |
+| `02` / `03` | 8 | 2 | 4 | — | 0.85 |
+| `04` / `05` / `06` | 16 | 8 | 2 | 8 | 0.80 |
+| `07` | 4 | 4 | 1 | 4 | 0.80 |
+
+The MoE arms add `--sglang-enable-dp-attention` and `--sglang-enable-dp-lm-head`; the dense arms
+use neither. Engine-side sharding is independent of the trainer's — the delta is published as
+whole HF tensors and each engine re-shards through its ordinary loader on reload.
+
+### What the sharding costs per recipe
+
+| | qwen3-4B | 30B-A3B (EP8) | 30B-A3B (EP4) |
+|---|---|---|---|
+| Weights, bf16 | 8.04 GB | 57 GB | 57 GB |
+| Experts | — | 128 | 128 |
+| Experts per EP rank | — | 16 | 32 |
+| Weight share per train GPU (÷TP) | ~4 GB | ~14 GB | ~14 GB |
+| Adam state | on GPU | CPU-offloaded (~360 GB) | CPU-offloaded (~360 GB) |
+| **Host-local checkpoint, per rollout host** | **~8 GB** | **~57 GB** | **~57 GB** |
+
+That last row is the one that scales badly and is worth watching: `_reset_checkpoint` copies the
+**entire** checkpoint to every rollout host — it is not sharded across them. 57 GB per host here;
+a 355B-class model would want ~700 GB of node-local disk on each. Nothing in these recipes tests
+that regime.
+
+The trainer side is not sharded either, in the sense that matters: `_for_each_hf_bucket` *gathers*
+the TP/EP-sharded parameters into full HF tensors before diffing, so the delta is computed in HF
+space on whole tensors and never on Megatron shards. Published delta *files* are split one per
+source rank (`model-NNNNN-of-NNNNN.safetensors`) purely for parallel I/O.
+
+## Verified on slinky
+
+Both arms ran with `--check-weight-update-equal`, which compares engine tensors against the
+trainer's after every sync — so a delta that reconstructed even one tensor wrongly would have
+failed the run rather than silently serving bad weights. Neither tripped, and neither logged a
+checksum mismatch or an out-of-order delta.
+
+| | qwen3-4B (dense) | 30B-A3B (MoE) |
+|---|---|---|
+| Job | 38154 `COMPLETED` 45m | 38420 `COMPLETED` 1h03m |
+| Recipe | `01`, 1 node | `04`, 4 nodes |
+| Tensors in baseline | 398 | 18,867 |
+| Expert path (EP gather, dup-drop) | not reached (EP1) | exercised (EP8) |
+| Density per sync | 0.44–0.58% | 0.28–0.36% |
+| Wire per sync | 0.13 GB of 8.04 GB | ~0.6 GB of 57 GB |
+| 5 syncs total | 570 MB vs ~40 GB | 2.7 GB vs ~285 GB |
+| **Reduction** | **~70×** | **~106×** |
+
+The MoE wins by the larger margin, which is what the mechanism predicts: broadcast's cost tracks
+what the model *weighs*, delta's tracks what the step *touched*, and MoE maximizes that gap. Its
+density is also *lower* than the dense model's — with top-8-of-128 routing a smaller slice of the
+weights sees gradient per step. But `v5` carried 18,621 of the 18,867 tensors, so nearly every
+expert changed a little rather than a few changing a lot.
+
+Flat density across all five syncs matters more than any single value: if the trainer's snapshot
+and the engines' base had drifted apart, density would climb toward 100% as the diff stopped
+finding reuse.
+
+**Not yet measured: sync _time_.** Everything above is volume. `05`/`06` are the arms that answer
+whether disk-delta is actually *faster* than broadcast on this cluster.
+
+Off-GPU, `check_delta_roundtrip.py` also passed against real Qwen3-4B (jobs 38111, 38121) driving
+sglang's real receiver, for both encodings and all three checksums — and `--corrupt` confirmed a
+falsified checksum is refused rather than applied.
+
 ## Start here: the format check
 
 No GPU, no cluster, no Ray. It transcribes miles' encoder, then hands the published directory to
