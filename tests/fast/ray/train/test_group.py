@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ from miles.utils.audit_utils.witness.allocator import WitnessIdAllocator
 pytestmark = pytest.mark.asyncio
 
 _DUMMY_DATA_PACK = {"data_ref": "data", "sample_indices": [0]}
+_created_groups: list[RayTrainGroup] = []
 
 
 def _make_mock_args(
@@ -64,16 +66,30 @@ def _patch_actor_alloc():
         yield
 
 
+@pytest.fixture(autouse=True)
+async def _cleanup_groups(_patch_actor_alloc):
+    _created_groups.clear()
+    try:
+        yield
+    finally:
+        cells = [cell for group in _created_groups for cell in group._cells]
+        for cell in cells:
+            cell.health_checker.stop()
+        await asyncio.gather(*(cell._stop_and_confirm_dead() for cell in cells))
+        _created_groups.clear()
+
+
 def _make_group(
     *,
     num_cells: int = 3,
     actor_count_per_cell: int = 1,
+    indep_dp: bool = True,
     rollout_manager: object | None = None,
 ) -> RayTrainGroup:
     """Create a RayTrainGroup through real __init__ with mocked pg and actor factory."""
     total_gpus = num_cells * actor_count_per_cell
-    return RayTrainGroup(
-        args=_make_mock_args(indep_dp=True, gpus_per_cell=actor_count_per_cell),
+    group = RayTrainGroup(
+        args=_make_mock_args(indep_dp=indep_dp, gpus_per_cell=actor_count_per_cell),
         num_nodes=1,
         num_gpus_per_node=total_gpus,
         pg=(MagicMock(), list(range(total_gpus)), list(range(total_gpus))),
@@ -81,6 +97,8 @@ def _make_group(
         with_ref=False,
         rollout_manager=rollout_manager,
     )
+    _created_groups.append(group)
+    return group
 
 
 async def _init_group(group: RayTrainGroup) -> None:
@@ -121,15 +139,7 @@ class TestInit:
     def test_single_cell_no_tcp_store(self):
         # indep_dp=False forces single cell regardless of TP/PP/CP product;
         # the autouse fixture handles allocate_gpus_for_actor.
-        group = RayTrainGroup(
-            args=_make_mock_args(indep_dp=False),
-            num_nodes=1,
-            num_gpus_per_node=1,
-            pg=(MagicMock(), [0], [0]),
-            role="actor",
-            with_ref=False,
-            rollout_manager=None,
-        )
+        group = _make_group(num_cells=1, indep_dp=False)
 
         assert len(group._cells) == 1
         assert group._indep_dp_store is None
