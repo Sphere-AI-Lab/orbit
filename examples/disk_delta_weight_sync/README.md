@@ -28,7 +28,8 @@ examples/disk_delta_weight_sync/
 │
 ├── 04-qwen3-30B-A3B-4node-delta-smoke.sh     # MoE correctness — first run of the expert path
 ├── 05-qwen3-30B-A3B-4node-delta.sh           # MoE measurement arm
-└── 06-qwen3-30B-A3B-4node-broadcast.sh       # control arm for 05
+├── 06-qwen3-30B-A3B-4node-broadcast.sh       # control arm for 05
+└── 07-qwen3-30B-A3B-1node-delta-smoke.sh     # same expert coverage, one node
 ```
 
 `_common.sh` fixes the dataset and the RL hyperparameters; a model block overrides the
@@ -118,6 +119,15 @@ Parallelism (TP4, EP8, 2 training + 2 rollout nodes, sglang `--sglang-ep-size 8`
 attention) mirrors [`../p2p_weight_transfer/run-qwen3-30B-A3B-4node-profile.sh`](../p2p_weight_transfer/run-qwen3-30B-A3B-4node-profile.sh),
 the validated shape for this model on 4 nodes. Note the host-local checkpoint is now ~57 GB per
 rollout host.
+
+**`07` gets the same expert coverage on one node.** The nodes are H200s (141 GB), so 8 GPUs hold
+1128 GB: 57 GB of weights shards to ~14 GB per GPU on both sides of a 4+4 disaggregated split,
+and the 360 GB of Adam state lives in the node's 1.8 TB of host RAM via `--optimizer-cpu-offload`.
+The forced change is EP: eight-way expert parallelism does not fit across 4 training GPUs, so `07`
+runs EP4 — 32 experts per rank instead of 16. The EP gather and the duplicate-name drop still run,
+so it covers the same code. What it does *not* cover is the fabric: with one node the publish dir
+and the host-local checkpoint sit on the same box, so use `04`/`05` when the cross-host path is
+the question.
 
 ### Adding another model
 
