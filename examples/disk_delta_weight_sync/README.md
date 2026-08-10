@@ -57,6 +57,10 @@ DP is derived, not set: `DP = train_GPUs / (TP × PP × CP)`. EP must divide `tr
 which is the constraint that forces `07` down to EP4 — eight-way expert parallelism does not fit
 across 4 training GPUs.
 
+These are the configurations the recipes *specify*. Only `01` and `04` have been run — see
+[which of these configs has actually run](#which-of-these-configs-has-actually-run) before
+relying on any row.
+
 ### Rollout engine sharding
 
 | Recipe | rollout GPUs | GPUs/engine | engines | `--sglang-ep-size` | mem fraction |
@@ -69,6 +73,38 @@ across 4 training GPUs.
 The MoE arms add `--sglang-enable-dp-attention` and `--sglang-enable-dp-lm-head`; the dense arms
 use neither. Engine-side sharding is independent of the trainer's — the delta is published as
 whole HF tensors and each engine re-shards through its ordinary loader on reload.
+
+### Which of these configs has actually run
+
+Two of the seven. The rest are written and their args resolve, but no scheduler has ever
+executed them — treat them as untested until they have a job ID here.
+
+| Recipe | Sharding | Status | Result |
+|---|---|---|---|
+| `01` qwen3-4B 1-node | TP2 EP1, 4+4 | **verified** — job 38154, `COMPLETED` 45m | 5 syncs, density 0.44–0.58%, 0.13 GB/sync, **~70×** |
+| `02` qwen3-4B 2-node delta | TP2 EP1, 8+8 | not run | — |
+| `03` qwen3-4B 2-node broadcast | TP2 EP1, 8+8 | not run | — |
+| `04` 30B-A3B 4-node smoke | TP4 **EP8**, 16+16 | **verified** — job 38420, `COMPLETED` 1h03m | 5 syncs, density 0.28–0.36%, ~0.6 GB/sync, **~106×** |
+| `05` 30B-A3B 4-node delta | TP4 **EP8**, 16+16 | not run | — |
+| `06` 30B-A3B 4-node broadcast | TP4 **EP8**, 16+16 | not run | — |
+| `07` 30B-A3B 1-node smoke | TP4 **EP4**, 4+4 | not run | — |
+
+Both verified runs had `--check-weight-update-equal` on for every sync and logged no checksum
+mismatch and no out-of-order delta.
+
+What that coverage does and does not establish:
+
+- **EP8 works; EP4 has never been exercised.** `07`'s only substantive difference from `04` is
+  expert parallelism — 32 experts per rank instead of 16 — and that path is unverified.
+- **The 8+8 dense shape is unverified.** `01` ran 4+4 on one node. `02`/`03` change both the GPU
+  count and the node count, so they move the engine count from 2 to 4 as well.
+- **Nothing here compares transports.** `03` and `06` are the broadcast controls and neither has
+  run, so no measurement in this document shows disk-delta being *faster* than broadcast — only
+  that it moves less.
+
+Two earlier attempts at `04`'s config (jobs 38414, 38417) failed inside 80 seconds on cluster
+faults — one node failing the InfiniBand probe, one holding 448 GB of leaked GPU memory while
+Slurm reported it idle. Neither reached training, so neither says anything about the config.
 
 ### What the sharding costs per recipe
 
