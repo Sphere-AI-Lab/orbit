@@ -35,6 +35,9 @@
 #                       selects 0 or 20 instead of 12 is the failure this
 #                       catches, and it costs nothing to check before the node
 #                       is spent.
+#   ALLOW_OFT=0         set 1 only for a dedicated OFT ledger. FullFT/LoRA
+#                       wrappers retain the default refusal so OFT scout rows
+#                       cannot enter their comparable result sets.
 #   SEED=0              seed replicate. Ties ROLLOUT_SEED in the launcher, so it
 #                       varies problem order and sampling together.
 #   GPUS_PER_NODE=8
@@ -55,6 +58,7 @@ cd "${ORBIT_ROOT}"
 : "${RESULTS:?set RESULTS}"
 MODEL=${MODEL:-llama3.1-8b}
 EXPECT_ARMS=${EXPECT_ARMS:-}
+ALLOW_OFT=${ALLOW_OFT:-0}
 SEED=${SEED:-0}
 GPUS_PER_NODE=${GPUS_PER_NODE:-8}
 SKIP_PREFLIGHT=${SKIP_PREFLIGHT:-0}
@@ -178,7 +182,7 @@ fi
 # comparable set, and an `oftscout` row carries a learning rate from a different
 # search. The regexes exclude them, and this is the assertion that the regexes
 # did.
-if printf '%s' "${PLAN}" | grep -q "PEFT_METHOD=oft"; then
+if [[ "${ALLOW_OFT}" != "1" ]] && printf '%s' "${PLAN}" | grep -q "PEFT_METHOD=oft"; then
     echo "REFUSING: the selection contains OFT arms; ${METHOD_RE} is wrong." >&2
     exit 1
 fi

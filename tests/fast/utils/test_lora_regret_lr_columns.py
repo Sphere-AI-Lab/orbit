@@ -19,18 +19,28 @@ same 4, or seven scripts of 4 that miss an arm between them. That is what this
 file is for.
 """
 
+import os
 import re
+import subprocess
 from pathlib import Path
 
-from tools.lora_regret.arms import e4_arms, e4lr0_arms
+from tools.lora_regret.arms import ALL_MODULES, e4_arms, e4lr0_arms
 
 SCRIPT_DIR = Path(__file__).resolve().parents[3] / "scripts" / "lora_regret"
-SCRIPTS = sorted(
-    SCRIPT_DIR.glob("run_e4_*_lr[1-7]_8gpu.sh")
-)
+SCRIPTS = [
+    SCRIPT_DIR / f"run_e4_{dataset}_lr{column}_8gpu.sh"
+    for dataset in ("gsm8k", "math")
+    for column in range(1, 8)
+]
 LR0_SCRIPTS = [
     SCRIPT_DIR / "run_e4_gsm8k_lr0_8gpu.sh",
     SCRIPT_DIR / "run_e4_math_lr0_8gpu.sh",
+]
+OFT_LRS = (2e-6, 5e-6, 1e-5, 3e-5, 7e-5, 2e-4, 4e-4)
+OFT_SCRIPTS = [
+    SCRIPT_DIR / f"run_e4_{dataset}_oft_lr{column}_8gpu.sh"
+    for dataset in ("gsm8k", "math")
+    for column in range(7)
 ]
 
 
@@ -55,6 +65,136 @@ def _selected(path: Path) -> list[str]:
 
 def _lr0_selected(path: Path) -> list[str]:
     return [a.name for a in e4lr0_arms() if _pattern(path).search(a.name)]
+
+
+def _oft_selected(path: Path):
+    return [arm for arm in _arms() if arm.method == "oft" and _pattern(path).search(arm.name)]
+
+
+def _fake_python(tmp_path: Path) -> Path:
+    """Stand in only for the unavailable GPU Python stack at campaign's edge."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    python = fake_bin / "python"
+    python.write_text(
+        """#!/usr/bin/env bash
+if [[ "${1:-}" == "-c" ]]; then
+    exit 0
+fi
+if [[ -n "${CAPTURE_FILE:-}" ]]; then
+    printf '%s\t%s\t%s\t%s\t%s\n' \
+        "${MATRIX:-}" "${METHOD_RE:-}" "${RESULTS:-}" \
+        "${EXPECT_ARMS:-}" "${ALLOW_OFT:-}" >> "${CAPTURE_FILE}"
+fi
+printf '%s\n' \
+    'ARM=one PEFT_METHOD=oft' \
+    'ARM=two PEFT_METHOD=oft' \
+    'ARM=three PEFT_METHOD=oft'
+printf '3 arms selected, 0 already done, 3 to run\n' >&2
+""",
+        encoding="utf-8",
+    )
+    python.chmod(0o755)
+    return fake_bin
+
+
+def test_the_fourteen_oft_scripts_exist():
+    assert all(path.is_file() for path in OFT_SCRIPTS)
+
+
+def test_each_oft_script_selects_one_dataset_lr_and_three_blocks():
+    """A regex typo would silently run the wrong column on a booked node."""
+    for path in OFT_SCRIPTS:
+        selected = _oft_selected(path)
+        dataset = path.name.split("_")[2]
+        column = int(re.search(r"_oft_lr(\d)_", path.name).group(1))
+        assert len(selected) == 3, (path.name, [arm.name for arm in selected])
+        assert {arm.dataset for arm in selected} == {dataset}
+        assert {arm.lr for arm in selected} == {OFT_LRS[column]}
+        assert {arm.oft_block_size for arm in selected} == {8, 128, 1024}
+        assert {arm.target_modules for arm in selected} == {ALL_MODULES}
+        assert all(arm.name.startswith("oftscout-") for arm in selected)
+
+
+def test_the_oft_scripts_partition_all_forty_two_arms_once():
+    """No OFT arm may be skipped or run twice across the fourteen ledgers."""
+    selected = [arm.name for path in OFT_SCRIPTS for arm in _oft_selected(path)]
+    expected = {arm.name for arm in _arms() if arm.method == "oft"}
+    assert len(selected) == len(set(selected)) == 42
+    assert set(selected) == expected
+
+
+def test_every_oft_wrapper_dry_runs_through_the_real_campaign(tmp_path):
+    """Dedicated OFT ledgers opt in, while the campaign remains training-free."""
+    fake_bin = _fake_python(tmp_path)
+    capture = tmp_path / "wrapper-env.txt"
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}:{env['PATH']}",
+            "VIRTUAL_ENV": str(tmp_path / "venv"),
+            "CUDA_HOME": str(tmp_path),
+            "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
+            "SKIP_PREFLIGHT": "1",
+            "DRY_RUN": "1",
+            "CAPTURE_FILE": str(capture),
+        }
+    )
+
+    for wrapper in OFT_SCRIPTS:
+        result = subprocess.run(
+            ["bash", str(wrapper)],
+            cwd=SCRIPT_DIR.parents[1],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, (wrapper.name, result.stdout, result.stderr)
+        assert "dry run -- launcher commands only" in result.stdout
+
+    rows = [line.split("\t") for line in capture.read_text(encoding="utf-8").splitlines()]
+    assert len(rows) == 14
+    assert {row[0] for row in rows} == {"e4"}
+    assert {row[3] for row in rows} == {"3"}
+    assert {row[4] for row in rows} == {"1"}
+    assert {row[2] for row in rows} == {
+        f"results/e4_{dataset}_oft_lr{column}.jsonl"
+        for dataset in ("gsm8k", "math")
+        for column in range(7)
+    }
+
+
+def test_campaign_still_refuses_oft_without_a_dedicated_ledger_opt_in(tmp_path):
+    fake_bin = _fake_python(tmp_path)
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}:{env['PATH']}",
+            "VIRTUAL_ENV": str(tmp_path / "venv"),
+            "CUDA_HOME": str(tmp_path),
+            "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
+            "SKIP_PREFLIGHT": "1",
+            "DRY_RUN": "1",
+            "MATRIX": "e4",
+            "METHOD_RE": "^oftscout-",
+            "RESULTS": str(tmp_path / "not-dedicated.jsonl"),
+            "EXPECT_ARMS": "3",
+        }
+    )
+    env.pop("ALLOW_OFT", None)
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT_DIR / "campaign.sh")],
+        cwd=SCRIPT_DIR.parents[1],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "REFUSING: the selection contains OFT arms" in result.stderr
 
 
 def test_lr0_scripts_exist():
