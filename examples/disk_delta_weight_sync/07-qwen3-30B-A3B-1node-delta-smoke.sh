@@ -33,6 +33,15 @@ EXPERIMENT_NODES=1
 
 DD_EP=4
 DD_GPUS_PER_ENGINE=4
+
+# Scale the in-flight request count with the serving capacity. 4 rollout GPUs here against 16 in
+# 04, so quarter the concurrency: job 39267 kept 04's 64x8 and the engine saturated -- 362
+# requests in flight, /health timing out, circuit breaker open, generation dead after 60 retries.
+DD_ROLLOUT_BATCH_SIZE=16
+DD_SAMPLES_PER_PROMPT=8
+# and the training batch with it, or the trainer stalls waiting for 512 samples that a
+# 16x8 rollout never produces.
+DD_GLOBAL_BATCH_SIZE=128
 DD_EXTRA_SGLANG_ARGS=(
    --sglang-ep-size 4
    --sglang-enable-dp-attention

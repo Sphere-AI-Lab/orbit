@@ -98,6 +98,11 @@ CKPT_ARGS=(
    --save-interval 20
 )
 
+# Concurrency is rollout-batch-size x n-samples-per-prompt requests in flight. That has to track
+# the serving capacity: job 39267 kept these at the 4-node values while running on a quarter of
+# the rollout GPUs, and the queue ran away -- 362 requests in flight, /health timing out, the
+# router's circuit breaker opening, and generation dying after 60 retries against a server that
+# was saturated rather than dead.
 ROLLOUT_ARGS=(
    --prompt-data   "$HF_TRAIN_DATA"
    --input-key     prompt
@@ -106,11 +111,11 @@ ROLLOUT_ARGS=(
    --rollout-shuffle
    --rm-type       deepscaler
    --num-rollout   "$DD_NUM_ROLLOUT"
-   --rollout-batch-size       64
-   --n-samples-per-prompt     8
+   --rollout-batch-size       "${DD_ROLLOUT_BATCH_SIZE:-64}"
+   --n-samples-per-prompt     "${DD_SAMPLES_PER_PROMPT:-8}"
    --rollout-max-response-len 8192
    --rollout-temperature      1
-   --global-batch-size        512
+   --global-batch-size        "${DD_GLOBAL_BATCH_SIZE:-512}"
    --balance-data
 )
 
