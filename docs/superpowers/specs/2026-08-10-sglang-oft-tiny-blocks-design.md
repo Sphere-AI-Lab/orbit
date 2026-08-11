@@ -24,6 +24,10 @@ Orbit currently pins `Sphere-AI-Lab/sglang` at
   though the unfused operation is valid there.
 - the two grouped-MoE rotate/project implementations and the gradient-R
   helpers still call `tl.dot` with a 4- or 8-wide matrix dimension.
+- the shared `apply_oft_rotation_triton` helper in the legacy fused-MoE layer
+  also contracts the OFT block with `tl.dot`. It is used by the legacy Triton
+  MoE path, Marlin MoE, and DeepSeek-V4 expert rotation, so it is part of the
+  supported OFT surface even though it lives outside `python/sglang/srt/oft`.
 - the ordinary adapter-loading path already avoids the Triton Cayley kernel
   below 16, but the directly exported Triton Cayley API does not.
 
@@ -163,6 +167,15 @@ The packed variant stores the completed rotated columns and leaves its existing
 batched projection unchanged. Routing, expert padding, non-local-expert zeroing,
 and output scattering do not change.
 
+The shared legacy helper
+`python/sglang/srt/layers/moe/fused_moe_triton/fused_moe_triton_kernels.py::apply_oft_rotation_triton`
+gets the same compile-time split. For block sizes 4 and 8, its Triton program
+loads one input column and one R row per unrolled reduction step and accumulates
+the `(BLOCK_M, BS)` result in FP32. For block size 16 and above, its existing
+tiled `tl.dot` loop is unchanged. This one helper covers the legacy Triton MoE,
+Marlin MoE, and DeepSeek-V4 callers; those callers do not need separate kernel
+changes.
+
 Grouped-MoE down projections that use the generic rotation kernels already
 inherit the existing tiny-block fallback.
 
@@ -215,8 +228,9 @@ The SGLang GPU suite covers:
 2. Dense gate/up fused projection at the same sizes.
 3. Fused gate/up input rotation at the same sizes.
 4. Uniform single-adapter and segmented multi-adapter rotation parity.
-5. Direct and packed-BMM grouped-MoE parity, including multiple routed experts
-   and padded token rows.
+5. Direct, packed-BMM, and shared legacy/Marlin grouped-MoE rotation parity,
+   including multiple routed experts, padded token rows, and BS16 boundary
+   control.
 6. Gradient-input and gradient-R parity.
 7. Cayley-Neumann forward and autograd parity.
 8. `bsv == 0` identity behavior under the 4- and 8-sized compiled buffers.
@@ -262,6 +276,9 @@ Extend the existing grouped-MoE benchmark using its representative synthetic
 shape: hidden size 2048, half-intermediate size 384, 128 experts, and top-k 8.
 Sweep block sizes 4, 8, and 16 across its decode-to-prefill token range, and
 report the direct variant, packed-BMM variant, and legacy baseline separately.
+The legacy row is also the performance exercise for
+`apply_oft_rotation_triton`, so it must report a real BS4/8 timing after the
+patch rather than an unsupported/error row.
 
 ### Acceptance and reporting
 
