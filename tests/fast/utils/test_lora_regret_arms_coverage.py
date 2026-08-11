@@ -161,6 +161,47 @@ class TestE4Place:
         assert len(MATRICES["e4place"](HIDDEN, FFN, QKV, 0, None, None)) == 35
 
 
+class TestE4OftCapacityLadder:
+    EXPECTED_LRS = {2e-6, 5e-6, 1e-5, 3e-5, 7e-5, 2e-4, 4e-4}
+
+    def test_each_dataset_has_three_blocks_on_the_lora_lr0_lr6_window(self):
+        """Dropping a block or drifting an LR leaves a hole in the OFT curves."""
+        from tools.lora_regret.arms import RL_DATASETS, e4_arms
+
+        oft = [arm for arm in e4_arms() if arm.method == "oft"]
+        assert len(oft) == 42
+        for dataset in RL_DATASETS:
+            panel = [arm for arm in oft if arm.dataset == dataset]
+            assert {arm.oft_block_size for arm in panel} == {8, 128, 1024}
+            assert {arm.lr for arm in panel} == self.EXPECTED_LRS
+            assert len(panel) == 21
+
+    def test_every_arm_is_an_all_modules_scout_with_recorded_match(self):
+        """The sweep varies only block, LR, and dataset; capacity stays auditable."""
+        from tools.lora_regret.arms import e4_arms
+
+        oft = [arm for arm in e4_arms() if arm.method == "oft"]
+        assert all(arm.name.startswith("oftscout-") for arm in oft)
+        assert {arm.target_modules for arm in oft} == {ALL_MODULES}
+        assert all(arm.matched_ratio is not None for arm in oft)
+
+    def test_the_capacity_reports_remain_visible_and_stable(self):
+        """A wrong rung changes adapter capacity even when every arm still runs."""
+        from orbit.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
+        from tools.lora_regret.arms import E4_OFT_BLOCK_LADDER
+
+        shapes = megatron_module_shapes(HIDDEN, FFN, QKV)
+        reports = [oft_lora_match_report(block, shapes) for block in E4_OFT_BLOCK_LADDER]
+        assert [(r["block_size"], r["oft_params"], r["lora_rank"]) for r in reports] == [
+            (8, 93184, 1),
+            (128, 1690624, 24),
+            (1024, 13618176, 196),
+        ]
+        assert [r["ratio"] for r in reports] == pytest.approx(
+            [1.3382352941, 1.0116421569, 0.9978241297]
+        )
+
+
 class TestMethodCoverage:
     """Every grid matrix carries FullFT, LoRA and OFT, so each task's wandb
     project shows all three.
@@ -213,7 +254,11 @@ class TestMethodCoverage:
         arms = MATRICES[matrix](HIDDEN, FFN, QKV, 0, None, None)
         oft_lrs = sorted({a.lr for a in arms if a.method == "oft"})
         lora_lrs = sorted({a.lr for a in arms if a.method == "lora"})
-        assert set(oft_lrs) != set(lora_lrs)
+        # E4 deliberately scouts the completed LoRA lr0-lr6 window. Its own
+        # in-matrix LoRA cell is lr1-lr7, so the two overlap at six points but
+        # are not identical; the literal E4 window is pinned separately above.
+        if matrix not in {"e4", "e4place"}:
+            assert set(oft_lrs) != set(lora_lrs)
         span = math.log10(max(oft_lrs) / min(oft_lrs))
         assert span >= 1.0, f"{matrix} OFT scout spans only {span:.2f} decades"
         lora_span = math.log10(max(lora_lrs) / min(lora_lrs))
@@ -338,7 +383,7 @@ class TestMethodCoverage:
 
     def test_the_new_counts(self):
         expected = {"e1": 45, "e1short": 21, "e1ot": 45, "e2": 48,
-                    "e3": 35, "e4": 70, "e4place": 35}
+                    "e3": 35, "e4": 98, "e4place": 35}
         actual = {m: len(MATRICES[m](HIDDEN, FFN, QKV, 0, None, None)) for m in expected}
         assert actual == expected
 
@@ -405,16 +450,16 @@ class TestOftBlockCeilingUnderRl:
         assert seen, "no example pins an OFT block size"
         assert max(seen) <= OFT_MAX_BLOCK_SGLANG, sorted(seen)
 
-    def test_sft_and_rl_now_reach_the_same_block(self):
-        """Before the kernel fix, SFT ran b1024 while RL was capped at 128, so
-        an OFT arm meant something different in each. They agree again."""
+    def test_the_e4_capacity_ladder_stays_within_the_measured_ceiling(self):
+        """Every selected E4 rung must remain launchable by the RL kernel."""
         from tools.lora_regret.arms import OFT_MAX_BLOCK_SGLANG
 
         sft = {a.oft_block_size for a in MATRICES["e1"](HIDDEN, FFN, QKV, 0, None, None)
                if a.method == "oft"}
         rl = {a.oft_block_size for a in MATRICES["e4"](HIDDEN, FFN, QKV, 0, None, None)
               if a.method == "oft"}
-        assert sft == rl == {1024}
+        assert sft == {1024}
+        assert rl == {8, 128, 1024}
         assert max(sft | rl) <= OFT_MAX_BLOCK_SGLANG
 
     def test_the_capped_cell_is_still_matched_to_a_lora_arm(self):

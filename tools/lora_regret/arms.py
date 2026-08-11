@@ -120,17 +120,12 @@ DATASETS_WITHOUT_TEST_SPLIT = frozenset({RL_MIX_DATASET, *RL_DATASETS})
 # `sft82` put 35 of its 40 OFT arms on LoRA's own grid; the module docstring
 # above calls that unjustified, and this is what replaces it.
 OFT_SCOUT_SPAN = (1e-5, 1e-3)
-# RL runs about a decade below SFT for both FullFT and LoRA, and OFT has never
-# been scouted in either regime -- so the RL scout is the SFT span shifted by
-# that decade. That shift is an assumption, which is exactly why these arms are
-# named `oftscout` and not `oft`.
-#
-# Widened from (1e-6, 1e-4) when the RL grid went from 4 points to 7: a scout
-# NARROWER than the grid it will be compared against cannot find an optimum the
-# comparison would care about, and `test_the_oft_grid_is_never_loras_grid`
-# enforces that. Same centre (1e-5), same seven points, half a decade further
-# out on each side -- so it costs no extra arms.
-RL_OFT_SCOUT_SPAN = (3e-7, 3e-4)
+# OFT has never been scouted under this RL protocol. E4 deliberately reuses the
+# completed LoRA lr0-lr6 window as its first OFT scout rather than inventing a
+# narrower prior; `oftscout` in every arm name keeps that uncertainty visible.
+# E4-place follows the same window so its placement cells remain comparable to
+# E4's all-modules cells.
+RL_OFT_SCOUT_SPAN = (2e-6, 4e-4)
 
 
 def lr_grid(
@@ -777,6 +772,11 @@ def e3_arms(
     return arms
 
 
+# E4's explicit low/middle/high OFT capacity ladder. b128 is the selected middle
+# rung; it deliberately replaces the automatically nearest b64 block.
+E4_OFT_BLOCK_LADDER = (8, 128, 1024)
+
+
 def e4_arms(
     seed: int = 0,
     hidden_size: int = LLAMA31_8B_HIDDEN,
@@ -785,11 +785,12 @@ def e4_arms(
     qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
     datasets: tuple[str, ...] = RL_DATASETS,
 ) -> list[Arm]:
-    """E4: RL parity at low rank -- decides C5.
+    """E4: RL parity at low rank plus an OFT capacity scout -- decides C5.
 
-    4 arms x 4 LRs = 16 runs on MATH + GSM8K. Rank 1 is in here because it is
-    the claim ("LoRA matches FullFT under policy gradient **even at rank 1**"),
-    not because it is cheap; it is the last arm to drop, not the first.
+    Per dataset: 4 FullFT/LoRA curves x 7 LRs, plus 3 fixed OFT blocks x 7 LRs.
+    Across MATH and GSM8K that is 56 non-OFT + 42 OFT = 98 arms. Rank 1 is in
+    here because it is the claim ("LoRA matches FullFT under policy gradient
+    **even at rank 1**"), not because it is cheap.
 
     The grid is half-decade rather than E1's 0.3-decade, and that is deliberate.
     C5's second half is about the *width* of the performant LR band, which needs
@@ -820,19 +821,35 @@ def e4_arms(
                         dataset=dataset,
                     )
                 )
-    # RL's own OFT scout: the SFT span shifted down a decade, matching how RL's
-    # FullFT and LoRA centres sit a decade below their SFT counterparts. Nothing
-    # has ever measured OFT under policy gradient, so these are `oftscout` arms
-    # until one of them wins.
-    # Capped: an RL arm's rotation runs inside SGLang, which cannot launch a
-    # block above OFT_MAX_BLOCK_SGLANG. b128 matches LoRA r24 all-modules, which
-    # sits beside this matrix's own r16 arm rather than the r256 the SFT cells
-    # match -- a smaller adapter, but one that runs.
-        arms += _oft_cell(256, ALL_MODULES, hidden_size, ffn_size, seed, dataset,
-                          oft_lr_centre, n=RL_GRID_POINTS, step_decades=RL_STEP_DECADES,
-                          span=RL_OFT_SCOUT_SPAN, sig_figs=RL_SIG_FIGS,
-                          qkv_output_size=qkv_output_size, extra=dataset,
-                          max_block=OFT_MAX_BLOCK_SGLANG)
+    shapes = megatron_module_shapes(hidden_size, ffn_size, qkv_output_size)
+    selected_shapes = {
+        name: shape for name, shape in shapes.items() if name in ALL_MODULES.split(",")
+    }
+    oft_lrs, scouting = oft_lr_values(
+        oft_lr_centre,
+        RL_GRID_POINTS,
+        step_decades=RL_STEP_DECADES,
+        span=RL_OFT_SCOUT_SPAN,
+        sig_figs=RL_SIG_FIGS,
+    )
+    label = "oftscout" if scouting else "oft"
+    for dataset in datasets:
+        for block_size in E4_OFT_BLOCK_LADDER:
+            report = oft_lora_match_report(block_size, selected_shapes)
+            for lr in oft_lrs:
+                arms.append(
+                    Arm(
+                        _name(label, f"b{block_size}", ALL_MODULES, lr, seed, extra=dataset),
+                        "oft",
+                        None,
+                        block_size,
+                        ALL_MODULES,
+                        lr,
+                        seed,
+                        dataset=dataset,
+                        matched_ratio=report["ratio"],
+                    )
+                )
     return arms
 
 

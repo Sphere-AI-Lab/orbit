@@ -73,16 +73,17 @@ class TestE4OftCapacityLadder:
             (8, 1), (128, 24), (1024, 196)
         ]
         assert [r["ratio"] for r in reports] == pytest.approx(
-            [1.3382352941, 1.0116421569, 0.9978235294]
+            [1.3382352941, 1.0116421569, 0.9978241297]
         )
 ```
 
-Change the general different-grid test so the deliberately copied E4 RL scout window is explicit while retaining all span checks:
+Change the general different-grid test so the deliberately copied completed
+E4 lr0-lr6 scout window is exempt while retaining all span checks. The E4
+matrix's LoRA cell itself is lr1-lr7, so this is an exception to the rule, not
+an equality assertion:
 
 ```python
-if matrix in {"e4", "e4place"}:
-    assert set(oft_lrs) == set(lora_lrs)
-else:
+if matrix not in {"e4", "e4place"}:
     assert set(oft_lrs) != set(lora_lrs)
 ```
 
