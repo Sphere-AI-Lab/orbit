@@ -15,6 +15,7 @@
 - Create seven GSM8K wrappers and seven Math wrappers; every wrapper selects three arms and has a unique ledger.
 - Every OFT arm targets `linear_qkv,linear_proj,linear_fc1,linear_fc2`, uses seed 0, and retains the `oftscout-b<block>-all-<dataset>-lr...-s0` identity.
 - Reuse `MATRIX=e4` and `scripts/lora_regret/e4_protocol.sh`; do not change the RL launcher, rollout budget, evaluation cadence, checkpoint policy, W&B entity, or scheduler resources.
+- Keep `campaign.sh`'s OFT rejection as the default for existing FullFT/LoRA wrappers; only the new dedicated OFT ledgers may opt in with `ALLOW_OFT=1`.
 - Preserve the existing fourteen FullFT/LoRA wrappers and their 56-arm partition.
 - This implementation is local campaign tooling only: do not synchronize to a cluster, allocate Condor nodes, or start training.
 
@@ -162,6 +163,7 @@ git commit -m "feat(lora-regret): add e4 oft capacity ladder"
 
 **Files:**
 - Modify: `tests/fast/utils/test_lora_regret_lr_columns.py`
+- Modify: `scripts/lora_regret/campaign.sh`
 - Create: `scripts/lora_regret/run_e4_gsm8k_oft_lr0_8gpu.sh`
 - Create: `scripts/lora_regret/run_e4_gsm8k_oft_lr1_8gpu.sh`
 - Create: `scripts/lora_regret/run_e4_gsm8k_oft_lr2_8gpu.sh`
@@ -179,7 +181,7 @@ git commit -m "feat(lora-regret): add e4 oft capacity ladder"
 
 **Interfaces:**
 - Consumes: E4 arm names `oftscout-b<block>-all-<dataset>-lr<value>-s0`, `e4_protocol.sh`, and `campaign.sh` environment variables.
-- Produces: fourteen executable wrappers that set `MATRIX=e4`, `METHOD_RE`, `RESULTS`, and `EXPECT_ARMS=3` before invoking `campaign.sh`.
+- Produces: `campaign.sh` opt-in variable `ALLOW_OFT` (default `0`) and fourteen executable wrappers that set `MATRIX=e4`, `METHOD_RE`, `RESULTS`, `EXPECT_ARMS=3`, and `ALLOW_OFT=1` before invoking `campaign.sh`.
 
 - [ ] **Step 1: Isolate the original wrapper set and add failing OFT wrapper tests**
 
@@ -235,10 +237,21 @@ def test_oft_scripts_use_unique_ledgers_three_arm_guards_and_shared_protocol():
         for column in range(7)
     }
     assert all("EXPECT_ARMS=3" in text for text in texts)
+    assert all("ALLOW_OFT=1" in text for text in texts)
     assert all('source "${HERE}/e4_protocol.sh"' in text for text in texts)
 ```
 
 Import `ALL_MODULES` with the existing E4 arm functions.
+
+Add an execution-boundary test for the campaign guard. The test creates a fake
+`python` executable under `tmp_path`, puts it first on `PATH`, sets
+`VIRTUAL_ENV`, `SKIP_PREFLIGHT=1`, and `DRY_RUN=1`, then runs one new wrapper.
+The fake reports three selected `PEFT_METHOD=oft` commands. Assert that the
+wrapper exits 0 and reaches the campaign's `dry run -- launcher commands only`
+message. Add a companion invocation of `campaign.sh` without `ALLOW_OFT=1` and
+assert it still exits nonzero with `REFUSING: the selection contains OFT arms`.
+This exercises the real wrapper/campaign control flow without importing the GPU
+stack or starting a training process.
 
 - [ ] **Step 2: Run the LR-column tests and verify wrapper tests fail**
 
@@ -248,9 +261,31 @@ Run:
 pytest -q tests/fast/utils/test_lora_regret_lr_columns.py -k 'oft or seven_scripts_partition_e4_exactly or one_script_per_grid_point_per_panel'
 ```
 
-Expected: OFT existence/coverage tests fail because the fourteen files do not exist, while the original-wrapper enumeration and 56-arm partition continue to pass.
+Expected: OFT existence/coverage tests fail because the fourteen files do not exist; the opt-in campaign test fails because OFT is still unconditionally refused; the original-wrapper enumeration and 56-arm partition continue to pass.
 
-- [ ] **Step 3: Create one wrapper for every dataset/LR column**
+- [ ] **Step 3: Make the campaign's OFT support explicit and opt-in**
+
+In `scripts/lora_regret/campaign.sh`, add the default beside the other wrapper
+knobs:
+
+```bash
+ALLOW_OFT=${ALLOW_OFT:-0}
+```
+
+Narrow the existing refusal so unchanged FullFT/LoRA wrappers retain their
+protection while dedicated OFT wrappers may proceed:
+
+```bash
+if [[ "${ALLOW_OFT}" != "1" ]] && printf '%s' "${PLAN}" | grep -q "PEFT_METHOD=oft"; then
+    echo "REFUSING: the selection contains OFT arms; ${METHOD_RE} is wrong." >&2
+    exit 1
+fi
+```
+
+Document `ALLOW_OFT=0` in the script's knob list as an opt-in restricted to a
+dedicated OFT ledger.
+
+- [ ] **Step 4: Create one wrapper for every dataset/LR column**
 
 Create all fourteen scripts with the same structure, substituting the dataset, zero-based LR column, exact LR token, and ledger. For example, `run_e4_gsm8k_oft_lr0_8gpu.sh` is:
 
@@ -271,7 +306,7 @@ set -uo pipefail
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 source "${HERE}/e4_protocol.sh"
 
-exec env MATRIX=e4 METHOD_RE='^oftscout-b(8|128|1024)-all-gsm8k-lr2e\-06-s' RESULTS=results/e4_gsm8k_oft_lr0.jsonl EXPECT_ARMS=3 \
+exec env MATRIX=e4 METHOD_RE='^oftscout-b(8|128|1024)-all-gsm8k-lr2e\-06-s' RESULTS=results/e4_gsm8k_oft_lr0.jsonl EXPECT_ARMS=3 ALLOW_OFT=1 \
     bash "${HERE}/campaign.sh" "$@"
 ```
 
@@ -289,7 +324,7 @@ lr6 -> 0\.0004
 
 Make every new script executable.
 
-- [ ] **Step 4: Run wrapper tests and shell syntax checks**
+- [ ] **Step 5: Run wrapper tests and shell syntax checks**
 
 Run:
 
@@ -301,10 +336,10 @@ bash -n scripts/lora_regret/run_e4_math_oft_lr{0,1,2,3,4,5,6}_8gpu.sh
 
 Expected: all LR-column tests pass and both `bash -n` commands exit 0.
 
-- [ ] **Step 5: Commit the launch wrappers**
+- [ ] **Step 6: Commit the launch wrappers**
 
 ```bash
-git add tests/fast/utils/test_lora_regret_lr_columns.py scripts/lora_regret/run_e4_*_oft_lr*_8gpu.sh
+git add tests/fast/utils/test_lora_regret_lr_columns.py scripts/lora_regret/campaign.sh scripts/lora_regret/run_e4_*_oft_lr*_8gpu.sh
 git commit -m "feat(lora-regret): add e4 oft lr column scripts"
 ```
 
