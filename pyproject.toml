@@ -179,7 +179,11 @@ nvidia-resiliency-ext = { git = "https://github.com/NVIDIA/nvidia-resiliency-ext
 # with a paused ~20 GB KV arena whose resume runs immediately after, that OOM'd
 # in torch_memory_saver's cuMemCreate on the 4th rollout. Measured on
 # 2026-08-03: 8.8 GB per update before, 0.6 GB after, 10/10 rollouts clean.
-sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "89ea43812ec6fb161fe29902a6c6f1fbefb524dd", subdirectory = "python" }
+# The pinned Python revision also supports power-of-two OFT blocks from 4:
+# BS4/8 rotations use elementwise reductions, fused projections regroup them
+# into 16-column tensor-core micro-tiles, and the BS16+ tl.dot path is unchanged.
+# All changes remain pure Python/Triton; sgl-kernel does not move.
+sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "54f5ee4a208d0ffa8e5201794b125825d5e92316", subdirectory = "python" }
 # TransformerEngine built from source (verified end-to-end). The orbit-build-wheels
 # prebuilt is cu13/torch-2.11-correct too, but swapping it in perturbed libcudart load
 # order and exposed a flaky tilelang<->flashinfer find_loaded_library("libcudart")
@@ -216,7 +220,7 @@ tested-ref = "85c84cbc26d4c983a3d6e46c804f02e2a99af5a2"
 [tool.orbit.release.backend-pins.sglang]
 source = "https://github.com/Sphere-AI-Lab/sglang.git"
 subdirectory = "python"
-tested-ref = "89ea43812ec6fb161fe29902a6c6f1fbefb524dd"
+tested-ref = "54f5ee4a208d0ffa8e5201794b125825d5e92316"
 
 [tool.isort]
 profile = "black"  # black-compatible

@@ -438,8 +438,10 @@ class TestOftBlockCeilingUnderRl:
         config = tomllib.loads((repo / "pyproject.toml").read_text())
         sources = config["tool"]["uv"]["sources"]
         pins = config["tool"]["orbit"]["release"]["backend-pins"]
+        lock = (repo / "uv.lock").read_text()
         assert sources["sglang"]["rev"] == expected_sha
         assert pins["sglang"]["tested-ref"] == expected_sha
+        assert f"rev={expected_sha}#{expected_sha}" in lock
         assert sources["sgl-kernel"]["rev"] == (
             "9c83ae8be07cbb1eb6898ce608ae244e3be375b4"
         )
