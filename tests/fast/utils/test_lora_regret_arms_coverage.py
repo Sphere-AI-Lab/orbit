@@ -308,7 +308,17 @@ class TestMethodCoverage:
                         if n in arm.target_modules.split(",")}
             report = oft_lora_match_report(arm.oft_block_size, selected)
             assert arm.matched_ratio == pytest.approx(report["ratio"]), arm.name
-            assert 0.85 <= arm.matched_ratio <= 1.15, (matrix, arm.name, arm.matched_ratio)
+            if matrix == "e4" and arm.oft_block_size == 8:
+                # The user-selected bottom rung is intentionally below the
+                # rank lattice: b8 is the smallest block and r1 the smallest
+                # rank, so its 1.338 ratio is recorded rather than hidden.
+                assert arm.matched_ratio == pytest.approx(1.3382352941)
+            else:
+                assert 0.85 <= arm.matched_ratio <= 1.15, (
+                    matrix,
+                    arm.name,
+                    arm.matched_ratio,
+                )
 
     @pytest.mark.parametrize("matrix", GRID_MATRICES)
     def test_the_oft_capacity_is_in_the_neighbourhood_of_a_lora_arm_it_sits_beside(
@@ -462,19 +472,20 @@ class TestOftBlockCeilingUnderRl:
         assert rl == {8, 128, 1024}
         assert max(sft | rl) <= OFT_MAX_BLOCK_SGLANG
 
-    def test_the_capped_cell_is_still_matched_to_a_lora_arm(self):
-        """Capping changes which LoRA rank the OFT arm is comparable to -- it
-        must still be matched to something, not left dangling."""
+    def test_every_e4_rung_records_an_implied_lora_partner(self):
+        """Each fixed block stays auditable even where the rank lattice is coarse."""
         from orbit.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
         from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT
 
         shapes = megatron_module_shapes(HIDDEN, FFN, LLAMA31_8B_QKV_OUTPUT)
-        # e4's LoRA ladder includes r16, and the capped block reaches r24 --
-        # within a factor of 2, so this matrix keeps its matched comparison.
         for arm in MATRICES["e4"](HIDDEN, FFN, QKV, 0, None, None):
             if arm.method != "oft":
                 continue
             sel = {n: s for n, s in shapes.items() if n in arm.target_modules.split(",")}
             report = oft_lora_match_report(arm.oft_block_size, sel)
-            assert 0.85 <= report["ratio"] <= 1.15, (arm.name, report)
+            assert report["lora_rank"] >= 1, (arm.name, report)
+            if arm.oft_block_size == 8:
+                assert report["ratio"] == pytest.approx(1.3382352941)
+            else:
+                assert 0.85 <= report["ratio"] <= 1.15, (arm.name, report)
             assert arm.matched_ratio == pytest.approx(report["ratio"])
