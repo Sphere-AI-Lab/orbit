@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>E4 GSM8K + Math — FullFT vs LoRA across the complete RL learning-rate panel</title>
+<script type="application/json" id="report-meta">{"title": "E4 GSM8K + Math \u2014 FullFT vs LoRA across the complete RL learning-rate panel", "kind": "experiment", "date": "2026-08-10", "tags": ["lora-regret", "e4", "gsm8k", "math", "rl", "learning-rate-sweep"], "subtitle": "60 completed single-seed arms at 150 on-policy updates, with the two unstable Math LoRA 1e-3 arms explicitly abandoned", "generated": "2026-08-10T19:08:44-07:00", "meta": {"date": "2026-08-10", "commit": "0a2a25412935", "branch": "codex/e4-final-report", "tree": "dirty", "host": "zejus-mbp", "python": "3.9.6", "scheduler": "HTCondor", "job_ids": "17448192.0,17448193.0", "resources": "8-GPU-whole-node-per-arm", "logs": "logs/lora_regret/", "login_host": "mpi2", "matrix": "e4 and e4lr0", "completion": "GSM8K 31/31; Math 29/31 plus 2 intentional abandonments", "remote_branch": "feat/lora-without-regret", "remote_commit": "46c8e0f6d65a9630d3eff44d2db7c1e9dc38a18a", "remote_state": "tracked files clean; result ledgers and unrelated notes untracked", "hardware": "8 GPUs per arm; mixed H100 80 GB and B200 178 GB nodes", "jobs": "final LR0 allocations 17448192.0 and 17448193.0; earlier job IDs not fully retained", "datasets": "gsm8k_train/gsm8k_test and math_train/math_test", "seed": "0 (single seed, no variance estimate)", "ledgers": "results/e4_gsm8k_lr0..lr7.jsonl and results/e4_math_lr0..lr7.jsonl", "wandb_entity": "zeju-qiu", "wandb_projects": "gsm8k-rl-rank-ft, gsm8k-rl-rank-lora, math-rl-rank-ft, math-rl-rank-lora"}}</script>
+<style>
+/* html-reports stylesheet.
+   Modelled closely on the LMSYS blog (lmsys.org/blog) — sticky TOC rail on the
+   left, single measured column of Inter, orange links, bordered tables, quiet
+   captions. Ported from that site's own layout rules, with a dark theme and
+   print styles added.
+
+   The generator inlines this file verbatim into every page, so an edit here
+   lands on the next render. */
+
+/* Light is the default and does not follow the system — these pages are read and
+   printed like paper. Dark is opt-in via the toggle, which sets data-theme on
+   the root element and remembers the choice. */
+:root {
+  color-scheme: light;
+
+  --bg: #ffffff;
+  --ink: rgb(8, 12, 38);
+  --ink-dim: rgba(8, 12, 38, 0.62);
+  --ink-lighter: rgb(100, 104, 122);
+  --border: rgba(8, 12, 38, 0.11);
+  --accent: #ea6a10;
+  --rule-top: rgba(220, 140, 130, 0.4);  /* the hairline across the page top */
+  --wash: rgba(32, 38, 71, 0.04);   /* code blocks, table headers */
+  --wash-strong: rgba(32, 38, 71, 0.06); /* inline code */
+  --wash-hover: rgba(32, 38, 71, 0.02);
+  --shadow: 0 4px 24px rgba(32, 38, 71, 0.1);
+  --ok: #1a7f4b;
+  --warn: #9a6400;
+  --bad: #b02a2a;
+
+  --font-body: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --font-math: "STIX Two Math", "Latin Modern Math", "Cambria Math",
+    "TeX Gyre Termes Math", serif;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0f1216;
+  --ink: rgb(228, 231, 238);
+  --ink-dim: rgba(228, 231, 238, 0.66);
+  --ink-lighter: rgb(150, 156, 170);
+  --border: rgba(228, 231, 238, 0.14);
+  --accent: #f5893c;
+  --rule-top: rgba(220, 140, 130, 0.25);
+  --wash: rgba(228, 231, 238, 0.05);
+  --wash-strong: rgba(228, 231, 238, 0.08);
+  --wash-hover: rgba(228, 231, 238, 0.03);
+  --shadow: none;
+  --ok: #5cbd87;
+  --warn: #d3a34a;
+  --bad: #e07a7a;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  border-top: 3px solid var(--rule-top);
+}
+
+/* ---------- layout ---------- */
+
+.page { max-width: 1280px; margin: 0 auto; padding: 72px 48px 96px; }
+.doc-layout { display: flex; gap: 0; align-items: flex-start; }
+.doc-layout > main { flex: 1 1; min-width: 0; padding-left: 56px; }
+
+/* ---------- table of contents rail ---------- */
+
+.toc {
+  width: 240px; flex-shrink: 0;
+  position: sticky; top: 32px; align-self: flex-start;
+  border-right: 1px solid var(--border);
+  padding-right: 28px; padding-top: 2px;
+}
+.toc > summary {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--ink-dim);
+  margin-bottom: 14px; cursor: pointer; list-style: none;
+}
+.toc > summary::-webkit-details-marker { display: none; }
+.toc ol { list-style: none; margin: 0; padding: 0; }
+.toc li { margin-bottom: 2px; }
+.toc .lvl-3 { padding-left: 12px; }
+.toc a {
+  font-size: 14px; color: var(--ink-dim); text-decoration: none;
+  line-height: 1.625; display: block; padding: 5px 0;
+  transition: color 0.15s; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.toc a:hover { color: var(--ink); }
+
+/* ---------- document header ---------- */
+
+.doc-kind {
+  display: inline-block; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 10px;
+}
+.doc-title {
+  font-size: clamp(30px, 5vw, 36px); font-weight: 700;
+  letter-spacing: -0.025em; line-height: 1.25;
+  margin: 0 0 8px; color: var(--ink);
+}
+.doc-subtitle { font-size: 17px; color: var(--ink-dim); margin: 0 0 16px; line-height: 1.5; }
+.doc-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.doc-tags span { font-size: 12px; color: var(--ink-lighter); }
+.doc-tags span::before { content: "#"; opacity: 0.5; }
+
+.meta {
+  display: flex; flex-wrap: wrap; gap: 6px 24px;
+  font-size: 13px; color: var(--ink-lighter);
+  margin: 0 0 28px; padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.meta div { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.meta dt { margin: 0; opacity: 0.75; }
+.meta dd { margin: 0; font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+.meta dd.flag-dirty { color: var(--warn); font-weight: 600; }
+.meta dd.flag-clean { color: var(--ok); }
+
+/* ---------- prose ---------- */
+
+main { font-size: 16px; font-weight: 400; line-height: 1.625; overflow-wrap: break-word; }
+main > :first-child { margin-top: 0; }
+
+main p { margin: 0 0 1.4em; }
+main a { color: var(--accent); text-decoration: none; }
+main a:hover { text-decoration: underline; text-underline-offset: 2px; }
+main strong { font-weight: 600; color: var(--ink); }
+
+h2, h3, h4, h5, h6 { font-weight: 700; line-height: 1.25; color: var(--ink); scroll-margin-top: 24px; }
+h2 { font-size: 1.5rem; letter-spacing: -0.015em; margin: 2.25em 0 0.65em; }
+h3 { font-size: 1.15rem; margin: 2em 0 0.5em; }
+h4 { font-size: 1rem; margin: 1.5em 0 0.4em; color: var(--ink-lighter); }
+
+.anchor { opacity: 0; text-decoration: none; color: var(--ink-lighter); margin-left: 0.4rem; font-weight: 400; }
+h2:hover .anchor, h3:hover .anchor, h4:hover .anchor { opacity: 1; }
+
+main ul { list-style: disc; margin: 0 0 1.4em 1.5em; padding: 0; }
+main ol { list-style: decimal; margin: 0 0 1.4em 1.5em; padding: 0; }
+main li { margin-bottom: 0.4em; line-height: 1.625; }
+main li > p { margin-bottom: 0.25em; }
+main li > ul, main li > ol { margin-bottom: 0.4em; margin-top: 0.4em; }
+li.task { list-style: none; margin-left: -1.2em; }
+li.task input { margin-right: 0.5em; }
+
+blockquote {
+  border-left: 3px solid var(--border);
+  padding: 0.25em 0 0.25em 1.25em;
+  margin: 1.75em 0; color: var(--ink-lighter); font-style: italic;
+}
+
+hr { border: none; border-top: 1px solid var(--border); margin: 3em 0; }
+
+/* ---------- code ---------- */
+
+code {
+  font-family: var(--font-mono); font-size: 0.85em;
+  background: var(--wash-strong); color: var(--ink);
+  padding: 2px 6px; border-radius: 4px;
+}
+.codeblock {
+  background: var(--wash); border: 1px solid var(--border);
+  border-radius: 8px; margin: 1.75em 0; overflow: hidden;
+}
+.codeblock .lang {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--ink-lighter);
+  padding: 8px 1.25em; border-bottom: 1px solid var(--border);
+}
+.codeblock pre { margin: 0; padding: 1.1em 1.25em; overflow-x: auto; }
+.codeblock pre code {
+  background: none; padding: 0; font-size: 0.875rem; line-height: 1.7; color: var(--ink);
+}
+
+/* ---------- tables ---------- */
+
+.table-wrap { overflow-x: auto; margin: 1.75em 0; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9em; font-variant-numeric: tabular-nums; }
+th, td { border: 1px solid var(--border); padding: 0.6em 1em; text-align: left; word-wrap: break-word; }
+th { background: var(--wash); font-weight: 500; font-size: 0.875em; letter-spacing: 0.01em; white-space: nowrap; }
+tr:hover td { background: var(--wash-hover); }
+td.num, th.num { text-align: right; }
+td.center, th.center { text-align: center; }
+
+/* ---------- figures ---------- */
+
+main img {
+  max-width: 100%; height: auto; display: block;
+  border-radius: 8px; margin: 3em auto 1em; box-shadow: var(--shadow);
+}
+figure { margin: 0; }
+figure img { margin-bottom: 0.75em; }
+figcaption {
+  display: block; text-align: center; font-size: 13px;
+  color: var(--ink-lighter); line-height: 1.625; margin: 0.75em 0 1.5em;
+}
+
+/* ---------- math ---------- */
+
+math { font-family: var(--font-math); font-size: 1.05em; }
+math[display="block"] { font-size: 1.15em; margin: 0; }
+
+/* MathML Core ignores columnspacing/rowspacing, so aligned environments get
+   their spacing here: no horizontal padding, since the relation operator's own
+   lspace already separates the columns. */
+mtable.align > mtr > mtd { padding-left: 0; padding-right: 0; }
+mtable.align > mtr { line-height: 2.2; }
+
+.math-block {
+  margin: 1.75em 0; overflow-x: auto; overflow-y: hidden;
+  text-align: center; padding: 0.25em 0;
+}
+
+/* shown when an expression could not be compiled; the source is legible at least */
+.math-fallback {
+  font-family: var(--font-mono); font-size: 0.85em;
+  background: var(--wash-strong); border: 1px dashed var(--border);
+  padding: 2px 6px; border-radius: 4px;
+}
+.math-block.unparsed { text-align: left; }
+
+/* ---------- details ---------- */
+
+/* scoped to main so the TOC, which is also a <details>, keeps its bare rail */
+main details { margin: 1.75em 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+main details > summary {
+  cursor: pointer; font-weight: 500; padding: 14px 20px;
+  background: var(--wash-hover); border-bottom: 1px solid transparent;
+}
+main details[open] > summary { border-bottom: 1px solid var(--border); margin-bottom: 1em; }
+main details > :not(summary) { padding-left: 20px; padding-right: 20px; }
+main details .codeblock { margin-left: 0; margin-right: 0; }
+
+/* ---------- callouts ---------- */
+
+.callout {
+  border-left: 3px solid var(--accent); background: var(--wash);
+  padding: 0.9em 1.25em; border-radius: 0 8px 8px 0; margin: 1.75em 0;
+}
+.callout.warn { border-left-color: var(--warn); }
+.callout.bad { border-left-color: var(--bad); }
+.callout > :last-child { margin-bottom: 0; }
+
+/* ---------- index page ---------- */
+
+.index-empty { color: var(--ink-lighter); font-style: italic; }
+td.t-title a { font-weight: 500; }
+td.t-date, td.t-commit { font-family: var(--font-mono); font-size: 12px; color: var(--ink-lighter); white-space: nowrap; }
+td.t-kind { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); white-space: nowrap; }
+
+/* ---------- theme toggle ---------- */
+
+.theme-toggle {
+  position: fixed; top: 16px; right: 16px; z-index: 10;
+  font: inherit; font-size: 12px; color: var(--ink-lighter);
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; padding: 5px 10px; cursor: pointer;
+}
+.theme-toggle:hover { color: var(--ink); }
+
+/* ---------- footer ---------- */
+
+.doc-footer {
+  margin-top: 4em; padding-top: 20px; border-top: 1px solid var(--border);
+  color: var(--ink-lighter); font-size: 13px;
+}
+
+/* ---------- narrow screens: TOC collapses above the content ---------- */
+
+@media (max-width: 900px) {
+  .page { padding: 56px 16px 60px; overflow: hidden; }
+  .doc-layout { flex-direction: column; align-items: stretch; }
+  .doc-layout > main { padding-left: 0; min-width: 0; font-size: 15px; }
+  .toc {
+    position: static; width: auto; border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding-right: 0; padding-bottom: 12px; margin-bottom: 28px;
+  }
+  .toc > summary { margin-bottom: 8px; }
+  main img { margin: 1.5em auto; box-shadow: none; }
+  .codeblock pre { font-size: 13px; }
+}
+
+/* ---------- print ---------- */
+
+@media print {
+  :root { --bg: #fff; --ink: #000; --ink-dim: #333; --ink-lighter: #444; --shadow: none; }
+  body { border-top: none; }
+  .toc, .theme-toggle, .anchor { display: none; }
+  .page { padding: 0; max-width: none; }
+  .doc-layout > main { padding-left: 0; }
+  .codeblock, table, figure, details, .math-block { break-inside: avoid; }
+  a { color: inherit; }
+}
+
+</style>
+</head>
+<body>
+<button class="theme-toggle" type="button">theme</button>
+<div class="page">
+<div class="doc-layout">
+<details class="toc" open><summary>Contents</summary><ol><li class="lvl-2"><a href="#executive-result">Executive result</a></li><li class="lvl-2"><a href="#setup">Setup</a></li><li class="lvl-3"><a href="#learning-rate-grids">Learning-rate grids</a></li><li class="lvl-3"><a href="#reproduction-commands">Reproduction commands</a></li><li class="lvl-2"><a href="#results">Results</a></li><li class="lvl-3"><a href="#gsm8k-endpoint-accuracy">GSM8K endpoint accuracy</a></li><li class="lvl-3"><a href="#math-endpoint-accuracy">Math endpoint accuracy</a></li><li class="lvl-3"><a href="#representative-evaluation-trajectories">Representative evaluation trajectories</a></li><li class="lvl-3"><a href="#per-arm-details">Per-arm details</a></li><li class="lvl-2"><a href="#negative-results-and-run-history">Negative results and run history</a></li><li class="lvl-3"><a href="#math-lr7-was-deliberately-stopped-after-the-result-was-already-decisive">Math LR7 was deliberately stopped after the result was already decisive</a></li><li class="lvl-3"><a href="#collapse-means-runaway-length-not-merely-a-low-endpoint">Collapse means runaway length, not merely a low endpoint</a></li><li class="lvl-3"><a href="#ten-stale-gsm8k-failures-remain-in-the-raw-ledgers">Ten stale GSM8K failures remain in the raw ledgers</a></li><li class="lvl-3"><a href="#wandb-upload-is-not-completion-evidence">WandB upload is not completion evidence</a></li><li class="lvl-2"><a href="#interpretation">Interpretation</a></li><li class="lvl-2"><a href="#limitations-and-next-steps">Limitations and next steps</a></li><li class="lvl-2"><a href="#provenance-and-closure">Provenance and closure</a></li></ol></details>
+<main>
+<header class="doc-header">
+<div class="doc-kind">experiment</div><h1 class="doc-title">E4 GSM8K + Math — FullFT vs LoRA across the complete RL learning-rate panel</h1>
+<p class="doc-subtitle">60 completed single-seed arms at 150 on-policy updates, with the two unstable Math LoRA 1e-3 arms explicitly abandoned</p><div class="doc-tags"><span>lora-regret</span><span>e4</span><span>gsm8k</span><span>math</span><span>rl</span><span>learning-rate-sweep</span></div>
+<dl class="meta"><div><dt>date</dt><dd>2026-08-10</dd></div><div><dt>commit</dt><dd>0a2a25412935</dd></div><div><dt>branch</dt><dd>codex/e4-final-report</dd></div><div><dt>tree</dt><dd class="flag-dirty">dirty</dd></div><div><dt>host</dt><dd>zejus-mbp</dd></div><div><dt>python</dt><dd>3.9.6</dd></div><div><dt>scheduler</dt><dd>HTCondor</dd></div><div><dt>job_ids</dt><dd>17448192.0,17448193.0</dd></div><div><dt>resources</dt><dd>8-GPU-whole-node-per-arm</dd></div><div><dt>logs</dt><dd>logs/lora_regret/</dd></div><div><dt>login_host</dt><dd>mpi2</dd></div><div><dt>matrix</dt><dd>e4 and e4lr0</dd></div><div><dt>completion</dt><dd>GSM8K 31/31; Math 29/31 plus 2 intentional abandonments</dd></div><div><dt>remote_branch</dt><dd>feat/lora-without-regret</dd></div><div><dt>remote_commit</dt><dd>46c8e0f6d65a9630d3eff44d2db7c1e9dc38a18a</dd></div><div><dt>remote_state</dt><dd>tracked files clean; result ledgers and unrelated notes untracked</dd></div><div><dt>hardware</dt><dd>8 GPUs per arm; mixed H100 80 GB and B200 178 GB nodes</dd></div><div><dt>jobs</dt><dd>final LR0 allocations 17448192.0 and 17448193.0; earlier job IDs not fully retained</dd></div><div><dt>datasets</dt><dd>gsm8k_train/gsm8k_test and math_train/math_test</dd></div><div><dt>seed</dt><dd>0 (single seed, no variance estimate)</dd></div><div><dt>ledgers</dt><dd>results/e4_gsm8k_lr0..lr7.jsonl and results/e4_math_lr0..lr7.jsonl</dd></div><div><dt>wandb_entity</dt><dd>zeju-qiu</dd></div><div><dt>wandb_projects</dt><dd>gsm8k-rl-rank-ft, gsm8k-rl-rank-lora, math-rl-rank-ft, math-rl-rank-lora</dd></div></dl>
+</header>
+<h2 id="executive-result">Executive result<a class="anchor" href="#executive-result" aria-hidden="true">#</a></h2>
+<p>The complete short-horizon panel gives a mixed answer to the LoRA-without-regret
+hypothesis. With learning rate tuned separately, LoRA r16 reaches <strong>0.2758</strong> on Math,
+slightly above FullFT's <strong>0.2660</strong>. On GSM8K, FullFT reaches <strong>0.7870</strong> while the best
+LoRA endpoint is <strong>0.7551</strong>. That LoRA endpoint is length-degenerate, however; the best
+non-runaway LoRA endpoint is r256 at <strong>0.7415</strong>.</p>
+<div class="table-wrap"><table><thead><tr><th>dataset</th><th class="num">base</th><th>best FullFT</th><th>best LoRA</th><th class="num">LoRA − FullFT</th><th class="num">LoRA/FullFT LR</th></tr></thead><tbody><tr><td>GSM8K</td><td class="num">0.033</td><td>0.7870 @ 7e-07</td><td>0.7551 @ 3e-05, r16</td><td class="num">-0.0319</td><td class="num">42.9×</td></tr><tr><td>Math</td><td class="num">0.056</td><td>0.2660 @ 7e-07</td><td>0.2758 @ 3e-05, r16</td><td class="num">+0.0098</td><td class="num">42.9×</td></tr></tbody></table></div>
+<div class="callout warn">
+<p><strong>This is not a full reproduction of rank-independent LoRA parity.</strong>
+Math r1 peaks at 0.2536 and r256 at 0.2378, below both r16 and FullFT. GSM8K's three
+LoRA ranks cluster more tightly at their tuned 3e-05 point, but even the best healthy
+LoRA arm trails FullFT by 0.0455. Every number is one seed, so these are measured
+endpoints rather than significance claims.</p>
+</div>
+<h2 id="setup">Setup<a class="anchor" href="#setup" aria-hidden="true">#</a></h2>
+<p>All arms fine-tune <code>llama3.1-8b</code> with the protocol centralized in
+<code>scripts/lora_regret/e4_protocol.sh</code>. GSM8K trains on 7,473 problems and evaluates on
+1,319; Math trains on 7,498 and evaluates on 5,000. Dataset selection is the only
+substantive configuration difference between paired GSM8K and Math scripts.</p>
+<ul><li><code>NUM_ROLLOUT=150</code>: 150 rollout batches and 150 optimizer updates; ledgers store the<p>final zero-based step as <code>149</code>.</p></li><li><code>GLOBAL_BATCH_SIZE=1024</code>: one on-policy update per batch of 32 prompts × 32 samples.</li><li>GRPO-style group-mean centering without standard-deviation normalization.</li><li>PPO clipping disabled with <code>EPS_CLIP=EPS_CLIP_HIGH=1e9</code>.</li><li><code>EVAL_INTERVAL=25</code>: eval before training and after rollouts 24, 49, 74, 99, 124,<p>and 149.</p></li><li>No checkpoints (<code>SAVE_INTERVAL</code> empty); W&amp;B writes offline and syncs from a login<p>host to entity <code>zeju-qiu</code>.</p></li><li>Every arm uses eight GPUs. FullFT is TP=4/DP=2. LoRA targets<p><code>linear_qkv,linear_proj,linear_fc1,linear_fc2</code>.</p></li></ul>
+<p>LoRA uses <code>lora_alpha=32</code> at every rank. Its adapter scaling α/r is therefore 32, 2,
+and 0.125 for r1, r16, and r256. Rank and nominal learning rate are not independent
+axes in this panel: a fixed nominal LR produces a 256× spread in adapter scaling.</p>
+<h3 id="learning-rate-grids">Learning-rate grids<a class="anchor" href="#learning-rate-grids" aria-hidden="true">#</a></h3>
+<p>LR0 is a LoRA-only point added below the original seven-column panel. Every other
+column contains one FullFT arm and the three LoRA ranks.</p>
+<div class="table-wrap"><table><thead><tr><th>column</th><th class="num">FullFT LR</th><th class="num">LoRA LR</th><th>GSM8K</th><th>Math</th></tr></thead><tbody><tr><td>lr0</td><td class="num">—</td><td class="num">2e-06</td><td>3/3 complete</td><td>3/3 complete</td></tr><tr><td>lr1</td><td class="num">5e-08</td><td class="num">5e-06</td><td>4/4 complete</td><td>4/4 complete</td></tr><tr><td>lr2</td><td class="num">1e-07</td><td class="num">1e-05</td><td>4/4 complete</td><td>4/4 complete</td></tr><tr><td>lr3</td><td class="num">3e-07</td><td class="num">3e-05</td><td>4/4 complete</td><td>4/4 complete</td></tr><tr><td>lr4</td><td class="num">7e-07</td><td class="num">7e-05</td><td>4/4 complete</td><td>4/4 complete</td></tr><tr><td>lr5</td><td class="num">2e-06</td><td class="num">2e-04</td><td>4/4 complete</td><td>4/4 complete</td></tr><tr><td>lr6</td><td class="num">4e-06</td><td class="num">4e-04</td><td>4/4 complete</td><td>4/4 complete</td></tr><tr><td>lr7</td><td class="num">1e-05</td><td class="num">1e-03</td><td>4/4 complete</td><td>FullFT + r1 complete; r16 stopped; r256 not launched</td></tr></tbody></table></div>
+<h3 id="reproduction-commands">Reproduction commands<a class="anchor" href="#reproduction-commands" aria-hidden="true">#</a></h3>
+<p>Each wrapper is resumable: an arm already recorded with <code>status: "ok"</code> is skipped.</p>
+<div class="codeblock"><div class="lang">bash</div><pre><code>source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
+cd /fast/zqiu/orbit-iclr/orbit
+
+bash scripts/lora_regret/run_e4_gsm8k_lr0_8gpu.sh  # repeat for lr1 … lr7
+bash scripts/lora_regret/run_e4_math_lr0_8gpu.sh   # repeat for lr1 … lr7</code></pre></div>
+<h2 id="results">Results<a class="anchor" href="#results" aria-hidden="true">#</a></h2>
+<h3 id="gsm8k-endpoint-accuracy">GSM8K endpoint accuracy<a class="anchor" href="#gsm8k-endpoint-accuracy" aria-hidden="true">#</a></h3>
+<p>Held-out <code>gsm8k_test</code> accuracy after rollout 149. LR0 is blank for FullFT because the
+extension deliberately added only LoRA arms.</p>
+<div class="table-wrap"><table><thead><tr><th>method</th><th class="num">lr0</th><th class="num">lr1</th><th class="num">lr2</th><th class="num">lr3</th><th class="num">lr4</th><th class="num">lr5</th><th class="num">lr6</th><th class="num">lr7</th><th>best</th></tr></thead><tbody><tr><td>FullFT</td><td class="num">—</td><td class="num">0.0637</td><td class="num">0.2578</td><td class="num">0.7028</td><td class="num"><strong>0.7870</strong></td><td class="num">0.7854</td><td class="num">0.5459</td><td class="num">0.0000</td><td>0.7870 @ 7e-07</td></tr><tr><td>LoRA r1</td><td class="num">0.2858</td><td class="num">0.6937</td><td class="num">0.6892</td><td class="num"><strong>0.7149</strong></td><td class="num">0.6808</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td>0.7149 @ 3e-05</td></tr><tr><td>LoRA r16</td><td class="num">0.1175</td><td class="num">0.7051</td><td class="num">0.7346</td><td class="num"><strong>0.7551</strong></td><td class="num">0.6694</td><td class="num">0.6217</td><td class="num">0.0000</td><td class="num">0.0000</td><td>0.7551 @ 3e-05</td></tr><tr><td>LoRA r256</td><td class="num">0.0538</td><td class="num">0.3730</td><td class="num">0.7187</td><td class="num"><strong>0.7415</strong></td><td class="num">0.6513</td><td class="num">0.6892</td><td class="num">0.0000</td><td class="num">0.0000</td><td>0.7415 @ 3e-05</td></tr></tbody></table></div>
+<p>FullFT's optimum is bracketed: 0.7870 at 7e-07 and 0.7854 at 2e-06 form a broad top,
+then accuracy falls to 0.5459 at 4e-06 and zero at 1e-05. All three LoRA ranks peak
+at 3e-05. LR0 confirms that 2e-06 is an under-training boundary, especially as rank
+increases: r1/r16/r256 finish at 0.2858/0.1175/0.0538 and are still rising at the end.</p>
+<p>The high-LR endpoint can hide a broken policy. LoRA r16 at 3e-05, the headline best,
+reaches 0.7551 while its response length has already saturated near the 2,048-token
+cap. At 2e-04, r16 and r256 still score 0.6217 and 0.6892 with 100% truncation. These
+are gradeable answers followed by runaway text, not healthy policies. At 4e-04 and
+1e-03 all LoRA ranks finish at zero.</p>
+<h3 id="math-endpoint-accuracy">Math endpoint accuracy<a class="anchor" href="#math-endpoint-accuracy" aria-hidden="true">#</a></h3>
+<p>Held-out <code>math_test</code> accuracy after rollout 149.</p>
+<div class="table-wrap"><table><thead><tr><th>method</th><th class="num">lr0</th><th class="num">lr1</th><th class="num">lr2</th><th class="num">lr3</th><th class="num">lr4</th><th class="num">lr5</th><th class="num">lr6</th><th class="num">lr7</th><th>best</th></tr></thead><tbody><tr><td>FullFT</td><td class="num">—</td><td class="num">0.0734</td><td class="num">0.1228</td><td class="num">0.2250</td><td class="num"><strong>0.2660</strong></td><td class="num">0.1366</td><td class="num">0.0300</td><td class="num">0.0460</td><td>0.2660 @ 7e-07</td></tr><tr><td>LoRA r1</td><td class="num">0.1256</td><td class="num">0.2240</td><td class="num"><strong>0.2536</strong></td><td class="num">0.0000</td><td class="num">0.2002</td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">0.0000</td><td>0.2536 @ 1e-05</td></tr><tr><td>LoRA r16</td><td class="num">0.0776</td><td class="num">0.1864</td><td class="num">0.2690</td><td class="num"><strong>0.2758</strong></td><td class="num">0.2722</td><td class="num">0.1040</td><td class="num">0.0000</td><td class="num">—</td><td>0.2758 @ 3e-05</td></tr><tr><td>LoRA r256</td><td class="num">0.0682</td><td class="num">0.1250</td><td class="num">0.1736</td><td class="num">0.2010</td><td class="num"><strong>0.2378</strong></td><td class="num">0.0000</td><td class="num">0.0000</td><td class="num">—</td><td>0.2378 @ 7e-05</td></tr></tbody></table></div>
+<p>Math brackets the same FullFT optimum at 7e-07, but its LoRA optimum moves with rank:
+r1 prefers 1e-05, r16 prefers 3e-05, and r256 prefers 7e-05. That ordered shift is
+consistent with fixed α/r making the effective update smaller as rank increases.</p>
+<p>The r1 1e-05 arm is not collapsed: its final complete segment rises
+0.0590 → 0.0960 → 0.1680 → 0.1888 → 0.2202 → 0.2366 → 0.2536. The same file
+contains a short earlier attempt ending at rollout 24; the successful ledger row and
+last complete log segment identify the finished run. In contrast, r1 at 3e-05 reaches
+0.2124 at rollout 74, then falls to 0.0006 at 99 and zero thereafter as truncation
+rises to 97.7%.</p>
+<h3 id="representative-evaluation-trajectories">Representative evaluation trajectories<a class="anchor" href="#representative-evaluation-trajectories" aria-hidden="true">#</a></h3>
+<p>These checkpoints come from the last complete segment of each launcher log. They show
+that endpoint zeros are genuine late collapse, not zero accuracy for the entire run.</p>
+<div class="table-wrap"><table><thead><tr><th>dataset / arm</th><th class="num">0</th><th class="num">24</th><th class="num">49</th><th class="num">74</th><th class="num">99</th><th class="num">124</th><th class="num">149</th></tr></thead><tbody><tr><td>GSM8K FullFT 7e-07</td><td class="num">0.035</td><td class="num">0.309</td><td class="num">0.672</td><td class="num">0.758</td><td class="num">0.752</td><td class="num">0.761</td><td class="num">0.787</td></tr><tr><td>GSM8K LoRA r256 3e-05</td><td class="num">0.036</td><td class="num">0.168</td><td class="num">0.590</td><td class="num">0.593</td><td class="num">0.675</td><td class="num">0.676</td><td class="num">0.741</td></tr><tr><td>GSM8K LoRA r1 2e-04</td><td class="num">0.033</td><td class="num">0.582</td><td class="num">0.484</td><td class="num">0.668</td><td class="num">0.475</td><td class="num">0.000</td><td class="num">0.000</td></tr><tr><td>Math FullFT 7e-07</td><td class="num">0.056</td><td class="num">0.161</td><td class="num">0.177</td><td class="num">0.199</td><td class="num">0.225</td><td class="num">0.236</td><td class="num">0.266</td></tr><tr><td>Math LoRA r1 1e-05</td><td class="num">0.059</td><td class="num">0.096</td><td class="num">0.168</td><td class="num">0.189</td><td class="num">0.220</td><td class="num">0.237</td><td class="num">0.254</td></tr><tr><td>Math LoRA r16 3e-05</td><td class="num">0.056</td><td class="num">0.141</td><td class="num">0.202</td><td class="num">0.231</td><td class="num">0.251</td><td class="num">0.255</td><td class="num">0.276</td></tr><tr><td>Math LoRA r256 7e-05</td><td class="num">0.057</td><td class="num">0.168</td><td class="num">0.158</td><td class="num">0.180</td><td class="num">0.208</td><td class="num">0.204</td><td class="num">0.238</td></tr><tr><td>Math LoRA r1 3e-05</td><td class="num">0.058</td><td class="num">0.169</td><td class="num">0.205</td><td class="num">0.212</td><td class="num">0.001</td><td class="num">0.000</td><td class="num">0.000</td></tr></tbody></table></div>
+<div class="table-wrap"><table><thead><tr><th>collapse example</th><th>peak</th><th class="num">final</th><th class="num">final mean response</th><th class="num">final truncated</th></tr></thead><tbody><tr><td>GSM8K LoRA r1, 2e-04</td><td>0.6679 @ 74</td><td class="num">0.0000</td><td class="num">2,047</td><td class="num">99.9%</td></tr><tr><td>GSM8K FullFT, 1e-05</td><td>0.0326 @ 0</td><td class="num">0.0000</td><td class="num">2,048</td><td class="num">100.0%</td></tr><tr><td>Math LoRA r1, 3e-05</td><td>0.2124 @ 74</td><td class="num">0.0000</td><td class="num">2,028</td><td class="num">97.7%</td></tr><tr><td>Math LoRA r256, 2e-04</td><td>0.1986 @ 49</td><td class="num">0.0000</td><td class="num">1,628</td><td class="num">78.8%</td></tr><tr><td>Math FullFT, 4e-06</td><td>0.0772 @ 24</td><td class="num">0.0300</td><td class="num">1,927</td><td class="num">92.9%</td></tr></tbody></table></div>
+<h3 id="per-arm-details">Per-arm details<a class="anchor" href="#per-arm-details" aria-hidden="true">#</a></h3>
+<p>Wall time is the successful arm's elapsed time, not scheduler billing time. Summed over
+successful rows it is 137.9 whole-node hours for GSM8K and 154.4 for Math. Hardware
+varied between H100 and B200 nodes, so wall times are useful operational provenance but
+not a controlled method comparison.</p>
+<details>
+<summary>GSM8K — all 31 successful arms</summary>
+<div class="table-wrap"><table><thead><tr><th>col</th><th>arm</th><th>method</th><th class="num">LR</th><th class="num">adapter params</th><th class="num">accuracy</th><th class="num">wall</th><th class="num">rollouts</th></tr></thead><tbody><tr><td>lr0</td><td>lora-r1-all-gsm8k-lr2e-06-s0</td><td>LoRA r1</td><td class="num">2e-06</td><td class="num">2.2 M</td><td class="num">0.2858</td><td class="num">4.07 h</td><td class="num">150</td></tr><tr><td>lr0</td><td>lora-r16-all-gsm8k-lr2e-06-s0</td><td>LoRA r16</td><td class="num">2e-06</td><td class="num">35.7 M</td><td class="num">0.1175</td><td class="num">4.53 h</td><td class="num">150</td></tr><tr><td>lr0</td><td>lora-r256-all-gsm8k-lr2e-06-s0</td><td>LoRA r256</td><td class="num">2e-06</td><td class="num">570.4 M</td><td class="num">0.0538</td><td class="num">5.17 h</td><td class="num">150</td></tr><tr><td>lr1</td><td>full-na-na-gsm8k-lr5e-08-s0</td><td>FullFT</td><td class="num">5e-08</td><td class="num">—</td><td class="num">0.0637</td><td class="num">2.71 h</td><td class="num">150</td></tr><tr><td>lr1</td><td>lora-r1-all-gsm8k-lr5e-06-s0</td><td>LoRA r1</td><td class="num">5e-06</td><td class="num">2.2 M</td><td class="num">0.6937</td><td class="num">3.48 h</td><td class="num">150</td></tr><tr><td>lr1</td><td>lora-r16-all-gsm8k-lr5e-06-s0</td><td>LoRA r16</td><td class="num">5e-06</td><td class="num">35.7 M</td><td class="num">0.7051</td><td class="num">4.15 h</td><td class="num">150</td></tr><tr><td>lr1</td><td>lora-r256-all-gsm8k-lr5e-06-s0</td><td>LoRA r256</td><td class="num">5e-06</td><td class="num">570.4 M</td><td class="num">0.3730</td><td class="num">5.10 h</td><td class="num">150</td></tr><tr><td>lr2</td><td>full-na-na-gsm8k-lr1e-07-s0</td><td>FullFT</td><td class="num">1e-07</td><td class="num">—</td><td class="num">0.2578</td><td class="num">2.72 h</td><td class="num">150</td></tr><tr><td>lr2</td><td>lora-r1-all-gsm8k-lr1e-05-s0</td><td>LoRA r1</td><td class="num">1e-05</td><td class="num">2.2 M</td><td class="num">0.6892</td><td class="num">3.15 h</td><td class="num">150</td></tr><tr><td>lr2</td><td>lora-r16-all-gsm8k-lr1e-05-s0</td><td>LoRA r16</td><td class="num">1e-05</td><td class="num">35.7 M</td><td class="num">0.7346</td><td class="num">3.77 h</td><td class="num">150</td></tr><tr><td>lr2</td><td>lora-r256-all-gsm8k-lr1e-05-s0</td><td>LoRA r256</td><td class="num">1e-05</td><td class="num">570.4 M</td><td class="num">0.7187</td><td class="num">4.62 h</td><td class="num">150</td></tr><tr><td>lr3</td><td>full-na-na-gsm8k-lr3e-07-s0</td><td>FullFT</td><td class="num">3e-07</td><td class="num">—</td><td class="num">0.7028</td><td class="num">2.26 h</td><td class="num">150</td></tr><tr><td>lr3</td><td>lora-r1-all-gsm8k-lr3e-05-s0</td><td>LoRA r1</td><td class="num">3e-05</td><td class="num">2.2 M</td><td class="num">0.7149</td><td class="num">2.35 h</td><td class="num">150</td></tr><tr><td>lr3</td><td>lora-r16-all-gsm8k-lr3e-05-s0</td><td>LoRA r16</td><td class="num">3e-05</td><td class="num">35.7 M</td><td class="num">0.7551</td><td class="num">4.63 h</td><td class="num">150</td></tr><tr><td>lr3</td><td>lora-r256-all-gsm8k-lr3e-05-s0</td><td>LoRA r256</td><td class="num">3e-05</td><td class="num">570.4 M</td><td class="num">0.7415</td><td class="num">3.40 h</td><td class="num">150</td></tr><tr><td>lr4</td><td>full-na-na-gsm8k-lr7e-07-s0</td><td>FullFT</td><td class="num">7e-07</td><td class="num">—</td><td class="num">0.7870</td><td class="num">2.14 h</td><td class="num">150</td></tr><tr><td>lr4</td><td>lora-r1-all-gsm8k-lr7e-05-s0</td><td>LoRA r1</td><td class="num">7e-05</td><td class="num">2.2 M</td><td class="num">0.6808</td><td class="num">2.31 h</td><td class="num">150</td></tr><tr><td>lr4</td><td>lora-r16-all-gsm8k-lr7e-05-s0</td><td>LoRA r16</td><td class="num">7e-05</td><td class="num">35.7 M</td><td class="num">0.6694</td><td class="num">2.85 h</td><td class="num">150</td></tr><tr><td>lr4</td><td>lora-r256-all-gsm8k-lr7e-05-s0</td><td>LoRA r256</td><td class="num">7e-05</td><td class="num">570.4 M</td><td class="num">0.6513</td><td class="num">3.65 h</td><td class="num">150</td></tr><tr><td>lr5</td><td>full-na-na-gsm8k-lr2e-06-s0</td><td>FullFT</td><td class="num">2e-06</td><td class="num">—</td><td class="num">0.7854</td><td class="num">2.48 h</td><td class="num">150</td></tr><tr><td>lr5</td><td>lora-r1-all-gsm8k-lr0.0002-s0</td><td>LoRA r1</td><td class="num">2e-04</td><td class="num">2.2 M</td><td class="num">0.0000</td><td class="num">5.03 h</td><td class="num">150</td></tr><tr><td>lr5</td><td>lora-r16-all-gsm8k-lr0.0002-s0</td><td>LoRA r16</td><td class="num">2e-04</td><td class="num">35.7 M</td><td class="num">0.6217</td><td class="num">3.69 h</td><td class="num">150</td></tr><tr><td>lr5</td><td>lora-r256-all-gsm8k-lr0.0002-s0</td><td>LoRA r256</td><td class="num">2e-04</td><td class="num">570.4 M</td><td class="num">0.6892</td><td class="num">7.79 h</td><td class="num">150</td></tr><tr><td>lr6</td><td>full-na-na-gsm8k-lr4e-06-s0</td><td>FullFT</td><td class="num">4e-06</td><td class="num">—</td><td class="num">0.5459</td><td class="num">3.15 h</td><td class="num">150</td></tr><tr><td>lr6</td><td>lora-r1-all-gsm8k-lr0.0004-s0</td><td>LoRA r1</td><td class="num">4e-04</td><td class="num">2.2 M</td><td class="num">0.0000</td><td class="num">5.09 h</td><td class="num">150</td></tr><tr><td>lr6</td><td>lora-r16-all-gsm8k-lr0.0004-s0</td><td>LoRA r16</td><td class="num">4e-04</td><td class="num">35.7 M</td><td class="num">0.0000</td><td class="num">5.53 h</td><td class="num">150</td></tr><tr><td>lr6</td><td>lora-r256-all-gsm8k-lr0.0004-s0</td><td>LoRA r256</td><td class="num">4e-04</td><td class="num">570.4 M</td><td class="num">0.0000</td><td class="num">5.69 h</td><td class="num">150</td></tr><tr><td>lr7</td><td>full-na-na-gsm8k-lr1e-05-s0</td><td>FullFT</td><td class="num">1e-05</td><td class="num">—</td><td class="num">0.0000</td><td class="num">5.18 h</td><td class="num">150</td></tr><tr><td>lr7</td><td>lora-r1-all-gsm8k-lr0.001-s0</td><td>LoRA r1</td><td class="num">1e-03</td><td class="num">2.2 M</td><td class="num">0.0000</td><td class="num">8.79 h</td><td class="num">150</td></tr><tr><td>lr7</td><td>lora-r16-all-gsm8k-lr0.001-s0</td><td>LoRA r16</td><td class="num">1e-03</td><td class="num">35.7 M</td><td class="num">0.0000</td><td class="num">7.52 h</td><td class="num">150</td></tr><tr><td>lr7</td><td>lora-r256-all-gsm8k-lr0.001-s0</td><td>LoRA r256</td><td class="num">1e-03</td><td class="num">570.4 M</td><td class="num">0.0000</td><td class="num">10.90 h</td><td class="num">150</td></tr></tbody></table></div>
+</details>
+<details>
+<summary>Math — all 29 successful arms</summary>
+<div class="table-wrap"><table><thead><tr><th>col</th><th>arm</th><th>method</th><th class="num">LR</th><th class="num">adapter params</th><th class="num">accuracy</th><th class="num">wall</th><th class="num">rollouts</th></tr></thead><tbody><tr><td>lr0</td><td>lora-r1-all-math-lr2e-06-s0</td><td>LoRA r1</td><td class="num">2e-06</td><td class="num">2.2 M</td><td class="num">0.1256</td><td class="num">4.50 h</td><td class="num">150</td></tr><tr><td>lr0</td><td>lora-r16-all-math-lr2e-06-s0</td><td>LoRA r16</td><td class="num">2e-06</td><td class="num">35.7 M</td><td class="num">0.0776</td><td class="num">5.00 h</td><td class="num">150</td></tr><tr><td>lr0</td><td>lora-r256-all-math-lr2e-06-s0</td><td>LoRA r256</td><td class="num">2e-06</td><td class="num">570.4 M</td><td class="num">0.0682</td><td class="num">5.74 h</td><td class="num">150</td></tr><tr><td>lr1</td><td>full-na-na-math-lr5e-08-s0</td><td>FullFT</td><td class="num">5e-08</td><td class="num">—</td><td class="num">0.0734</td><td class="num">3.01 h</td><td class="num">150</td></tr><tr><td>lr1</td><td>lora-r1-all-math-lr5e-06-s0</td><td>LoRA r1</td><td class="num">5e-06</td><td class="num">2.2 M</td><td class="num">0.2240</td><td class="num">4.03 h</td><td class="num">150</td></tr><tr><td>lr1</td><td>lora-r16-all-math-lr5e-06-s0</td><td>LoRA r16</td><td class="num">5e-06</td><td class="num">35.7 M</td><td class="num">0.1864</td><td class="num">4.81 h</td><td class="num">150</td></tr><tr><td>lr1</td><td>lora-r256-all-math-lr5e-06-s0</td><td>LoRA r256</td><td class="num">5e-06</td><td class="num">570.4 M</td><td class="num">0.1250</td><td class="num">5.69 h</td><td class="num">150</td></tr><tr><td>lr2</td><td>full-na-na-math-lr1e-07-s0</td><td>FullFT</td><td class="num">1e-07</td><td class="num">—</td><td class="num">0.1228</td><td class="num">3.02 h</td><td class="num">150</td></tr><tr><td>lr2</td><td>lora-r1-all-math-lr1e-05-s0</td><td>LoRA r1</td><td class="num">1e-05</td><td class="num">2.2 M</td><td class="num">0.2536</td><td class="num">3.66 h</td><td class="num">150</td></tr><tr><td>lr2</td><td>lora-r16-all-math-lr1e-05-s0</td><td>LoRA r16</td><td class="num">1e-05</td><td class="num">35.7 M</td><td class="num">0.2690</td><td class="num">4.36 h</td><td class="num">150</td></tr><tr><td>lr2</td><td>lora-r256-all-math-lr1e-05-s0</td><td>LoRA r256</td><td class="num">1e-05</td><td class="num">570.4 M</td><td class="num">0.1736</td><td class="num">5.45 h</td><td class="num">150</td></tr><tr><td>lr3</td><td>full-na-na-math-lr3e-07-s0</td><td>FullFT</td><td class="num">3e-07</td><td class="num">—</td><td class="num">0.2250</td><td class="num">3.39 h</td><td class="num">150</td></tr><tr><td>lr3</td><td>lora-r1-all-math-lr3e-05-s0</td><td>LoRA r1</td><td class="num">3e-05</td><td class="num">2.2 M</td><td class="num">0.0000</td><td class="num">4.68 h</td><td class="num">150</td></tr><tr><td>lr3</td><td>lora-r16-all-math-lr3e-05-s0</td><td>LoRA r16</td><td class="num">3e-05</td><td class="num">35.7 M</td><td class="num">0.2758</td><td class="num">4.22 h</td><td class="num">150</td></tr><tr><td>lr3</td><td>lora-r256-all-math-lr3e-05-s0</td><td>LoRA r256</td><td class="num">3e-05</td><td class="num">570.4 M</td><td class="num">0.2010</td><td class="num">4.54 h</td><td class="num">150</td></tr><tr><td>lr4</td><td>full-na-na-math-lr7e-07-s0</td><td>FullFT</td><td class="num">7e-07</td><td class="num">—</td><td class="num">0.2660</td><td class="num">2.68 h</td><td class="num">150</td></tr><tr><td>lr4</td><td>lora-r1-all-math-lr7e-05-s0</td><td>LoRA r1</td><td class="num">7e-05</td><td class="num">2.2 M</td><td class="num">0.2002</td><td class="num">4.72 h</td><td class="num">150</td></tr><tr><td>lr4</td><td>lora-r16-all-math-lr7e-05-s0</td><td>LoRA r16</td><td class="num">7e-05</td><td class="num">35.7 M</td><td class="num">0.2722</td><td class="num">5.54 h</td><td class="num">150</td></tr><tr><td>lr4</td><td>lora-r256-all-math-lr7e-05-s0</td><td>LoRA r256</td><td class="num">7e-05</td><td class="num">570.4 M</td><td class="num">0.2378</td><td class="num">4.37 h</td><td class="num">150</td></tr><tr><td>lr5</td><td>full-na-na-math-lr2e-06-s0</td><td>FullFT</td><td class="num">2e-06</td><td class="num">—</td><td class="num">0.1366</td><td class="num">3.10 h</td><td class="num">150</td></tr><tr><td>lr5</td><td>lora-r1-all-math-lr0.0002-s0</td><td>LoRA r1</td><td class="num">2e-04</td><td class="num">2.2 M</td><td class="num">0.0000</td><td class="num">7.56 h</td><td class="num">150</td></tr><tr><td>lr5</td><td>lora-r16-all-math-lr0.0002-s0</td><td>LoRA r16</td><td class="num">2e-04</td><td class="num">35.7 M</td><td class="num">0.1040</td><td class="num">8.78 h</td><td class="num">150</td></tr><tr><td>lr5</td><td>lora-r256-all-math-lr0.0002-s0</td><td>LoRA r256</td><td class="num">2e-04</td><td class="num">570.4 M</td><td class="num">0.0000</td><td class="num">5.38 h</td><td class="num">150</td></tr><tr><td>lr6</td><td>full-na-na-math-lr4e-06-s0</td><td>FullFT</td><td class="num">4e-06</td><td class="num">—</td><td class="num">0.0300</td><td class="num">3.58 h</td><td class="num">150</td></tr><tr><td>lr6</td><td>lora-r1-all-math-lr0.0004-s0</td><td>LoRA r1</td><td class="num">4e-04</td><td class="num">2.2 M</td><td class="num">0.0000</td><td class="num">8.85 h</td><td class="num">150</td></tr><tr><td>lr6</td><td>lora-r16-all-math-lr0.0004-s0</td><td>LoRA r16</td><td class="num">4e-04</td><td class="num">35.7 M</td><td class="num">0.0000</td><td class="num">9.35 h</td><td class="num">150</td></tr><tr><td>lr6</td><td>lora-r256-all-math-lr0.0004-s0</td><td>LoRA r256</td><td class="num">4e-04</td><td class="num">570.4 M</td><td class="num">0.0000</td><td class="num">10.02 h</td><td class="num">150</td></tr><tr><td>lr7</td><td>full-na-na-math-lr1e-05-s0</td><td>FullFT</td><td class="num">1e-05</td><td class="num">—</td><td class="num">0.0460</td><td class="num">5.15 h</td><td class="num">150</td></tr><tr><td>lr7</td><td>lora-r1-all-math-lr0.001-s0</td><td>LoRA r1</td><td class="num">1e-03</td><td class="num">2.2 M</td><td class="num">0.0000</td><td class="num">9.21 h</td><td class="num">150</td></tr></tbody></table></div>
+</details>
+<h2 id="negative-results-and-run-history">Negative results and run history<a class="anchor" href="#negative-results-and-run-history" aria-hidden="true">#</a></h2>
+<h3 id="math-lr7-was-deliberately-stopped-after-the-result-was-already-decisive">Math LR7 was deliberately stopped after the result was already decisive<a class="anchor" href="#math-lr7-was-deliberately-stopped-after-the-result-was-already-decisive" aria-hidden="true">#</a></h3>
+<p>The Math LoRA r16 <code>1e-03</code> arm was stopped around rollout 50/150. Its evaluations at
+rollouts 24 and 49 were both zero with mean response length 2,048 and 100% truncation.
+The r256 <code>1e-03</code> arm was not launched. Their absence from the successful ledger is
+intentional; they are not scheduler failures and should not be silently counted as
+unfinished successes.</p>
+<h3 id="collapse-means-runaway-length-not-merely-a-low-endpoint">Collapse means runaway length, not merely a low endpoint<a class="anchor" href="#collapse-means-runaway-length-not-merely-a-low-endpoint" aria-hidden="true">#</a></h3>
+<p>Across both datasets, unstable arms drive generations to the 2,048-token cap. A
+truncated response often loses its final <code>\boxed{}</code> answer and grades zero. Sometimes
+the box appears before repeated text, so accuracy remains nonzero even at 100%
+truncation. This is why accuracy alone cannot label a high-LR arm healthy.</p>
+<h3 id="ten-stale-gsm8k-failures-remain-in-the-raw-ledgers">Ten stale GSM8K failures remain in the raw ledgers<a class="anchor" href="#ten-stale-gsm8k-failures-remain-in-the-raw-ledgers" aria-hidden="true">#</a></h3>
+<p>The GSM8K ledgers contain ten <code>failed</code> rows in addition to the 31 unique successful
+rows: three in lr1, two each in lr2 and lr3, and one each in lr5–lr7. Some use the
+superseded FullFT grid; others are earlier attempts with no post-training evaluation.
+They do not conflict with any successful endpoint. The report filters <code>status == "ok"</code>
+and keeps failed history separate.</p>
+<p>Several launcher logs also contain appended partial attempts before the final complete
+segment. The endpoint matrices come from unique successful ledger rows; trajectory
+tables use the last complete 0–149 segment rather than concatenating attempts.</p>
+<h3 id="wandb-upload-is-not-completion-evidence">WandB upload is not completion evidence<a class="anchor" href="#wandb-upload-is-not-completion-evidence" aria-hidden="true">#</a></h3>
+<p>Training ran with <code>WANDB_MODE=offline</code>, targeting the personal entity <code>zeju-qiu</code> during
+login-node synchronization. This report does not treat W&amp;B availability as evidence
+that training finished: completion is established by the successful ledger rows and
+the final rollout-149 evals. Final server-side synchronization was not re-audited here.</p>
+<h2 id="interpretation">Interpretation<a class="anchor" href="#interpretation" aria-hidden="true">#</a></h2>
+<ol><li><strong>Tuning matters by roughly two orders of magnitude.</strong> Both datasets choose<p>7e-07 for FullFT and 3e-05 for the best r16 LoRA arm, a 42.9× LR ratio. Comparing
+the methods at one shared LR would be badly confounded.</p></li><li><strong>The stable LR window is finite and now bracketed.</strong> Both FullFT curves peak at<p>7e-07; both LoRA panels deteriorate above the 1e-05–7e-05 region. The added LR0
+point verifies the low side rather than improving the optimum.</p></li><li><strong>Rank independence is dataset-dependent at this budget.</strong> GSM8K's tuned LoRA<p>endpoints span 0.7149–0.7551. Math spans 0.2378–0.2758 and selects a different LR
+per rank. Fixed α/r and only 150 updates are plausible contributors, but the sweep
+does not isolate them.</p></li><li><strong>Endpoint accuracy overstates some arms.</strong> GSM8K r16/r256 at 2e-04 and Math r16<p>at 7e-05 retain high accuracy in runaway-length states. A parity claim should use
+both answer accuracy and response-health metrics.</p></li><li><strong>The best defensible result is narrower than the headline.</strong> Math r16 matches<p>FullFT under the measured protocol. GSM8K healthy LoRA comes within 0.0455 of
+FullFT. The broader statement that all three LoRA ranks match FullFT is not supported
+by this single-seed, 150-update panel.</p></li></ol>
+<h2 id="limitations-and-next-steps">Limitations and next steps<a class="anchor" href="#limitations-and-next-steps" aria-hidden="true">#</a></h2>
+<ul><li>Run multiple seeds at the stable optima: FullFT 7e-07; GSM8K LoRA 3e-05; Math<p>LoRA r1/r16/r256 at 1e-05/3e-05/7e-05.</p></li><li>Add an eval stop condition or treat response length and truncation as first-class<p>acceptance metrics so a gradeable box followed by 2,000 repeated tokens cannot look
+healthy.</p></li><li>Extend selected low-LR arms to 234 rollouts (one dataset epoch) to distinguish slow<p>learning from a genuinely poor LR, especially LR0 r16/r256.</p></li><li>Test an α schedule that holds α/r constant across ranks, or retune each rank on a<p>denser local grid, before interpreting rank as adapter capacity.</p></li><li>Check final W&amp;B synchronization separately if the online dashboard is needed; the<p>durable result record is the ledger-backed report, not the dashboard state.</p></li><li>No checkpoints were written, so these exact trained policies cannot be re-evaluated<p>under a new grader or generation policy.</p></li></ul>
+<h2 id="provenance-and-closure">Provenance and closure<a class="anchor" href="#provenance-and-closure" aria-hidden="true">#</a></h2>
+<p>The authoritative runtime checkout was <code>/fast/zqiu/orbit-iclr/orbit</code> on
+<code>feat/lora-without-regret</code> at <code>46c8e0f6d65a9630d3eff44d2db7c1e9dc38a18a</code>.
+Tracked files were clean; the 16 result ledgers and unrelated working notes were
+untracked. A single bounded ledger snapshot was taken through <code>mpi2</code>; supporting
+trajectories were extracted read-only from <code>logs/lora_regret/</code>.</p>
+<p>The final LR0 allocations recovered from Condor history were <code>17448192.0</code> and
+<code>17448193.0</code>; their execution nodes were <code>i101</code> and <code>i108</code>. Earlier interactive job
+IDs were not fully retained, so this report does not invent them. All Codex-managed
+tmux sessions were closed after completion and those allocations were released.</p>
+<p>Successful-row closure:</p>
+<div class="codeblock"><div class="lang">text</div><pre><code>GSM8K  lr0=3, lr1..lr7=4 each  -&gt; 31 unique successes
+Math   lr0=3, lr1..lr6=4 each, lr7=2 -&gt; 29 unique successes
+Math   lr7 LoRA r16 stopped after persistent zero; r256 not launched
+All 60 successful rows: final step=149, accuracy present, status=ok</code></pre></div>
+<footer class="doc-footer">Generated 2026-08-10 19:08 PDT by htmlreport</footer>
+</main>
+</div>
+</div>
+<script>
+(function () {
+  var root = document.documentElement, key = 'htmlreport-theme';
+  try { root.setAttribute('data-theme', localStorage.getItem(key) || 'light'); } catch (e) {}
+  var btn = document.querySelector('.theme-toggle');
+  if (!btn) return;
+  btn.addEventListener('click', function () {
+    var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem(key, next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>

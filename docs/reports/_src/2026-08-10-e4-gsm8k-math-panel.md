@@ -275,7 +275,7 @@ Several launcher logs also contain appended partial attempts before the final co
 segment. The endpoint matrices come from unique successful ledger rows; trajectory
 tables use the last complete 0–149 segment rather than concatenating attempts.
 
-### W&B upload is not completion evidence
+### WandB upload is not completion evidence
 
 Training ran with `WANDB_MODE=offline`, targeting the personal entity `zeju-qiu` during
 login-node synchronization. This report does not treat W&B availability as evidence
