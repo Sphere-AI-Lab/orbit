@@ -41,7 +41,7 @@ EXPECTED_ROWS = {
 # change any count -- every OFT cell keeps the width of the LoRA cell it mirrors,
 # only its learning rates move from the scout span onto a centred grid.
 EXPECTED_ARMS = {
-    "e1": 45, "e2": 48, "e3": 35, "e4": 70, "e5scout": 5, "e5": 50, "sft82": 82,
+    "e1": 45, "e2": 48, "e3": 35, "e4": 98, "e5scout": 5, "e5": 50, "sft82": 82,
     "e1ot": 45, "e1short": 21, "e4lr0": 6, "e4place": 35, "e5rl": 42,
 }
 
