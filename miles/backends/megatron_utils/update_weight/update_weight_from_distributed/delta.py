@@ -22,6 +22,7 @@ from tqdm import tqdm
 from miles.backends.training_utils.parallel import get_parallel_state
 from miles.utils.disk_delta import NUM_WORKERS, checksum, make_tensor_reader, overwrite_encode
 from miles.utils.distributed_utils import get_gloo_group
+from miles.utils.timer import timer
 
 from ..common import _check_weight_sync_results
 from .mixin import DistBucketedWeightUpdateMixin
@@ -112,8 +113,14 @@ class UpdateWeightFromDiskDelta(DistBucketedWeightUpdateMixin):
             return
 
         self.weight_version += 1
-        self._publish()
-        self._reload_engines()
+        # Same two timer names the broadcast/p2p paths report, so a transport A/B compares like
+        # with like. The split differs in where the engines pause: broadcast pauses before its
+        # implementation timer, while the delta pull is disk-only and deliberately overlaps
+        # generation, so only the sum of the two is directly comparable across transports.
+        with timer("update_weights_implementation"):
+            self._publish()
+        with timer("finalize_and_resume_engines"):
+            self._reload_engines()
         self._record_metrics()
 
     def _capture_baseline(self) -> None:
