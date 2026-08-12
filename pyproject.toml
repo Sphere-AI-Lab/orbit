@@ -159,11 +159,12 @@ deep-ep = { git = "https://github.com/deepseek-ai/DeepEP.git", rev = "d4f41e4e93
 megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "85c84cbc26d4c983a3d6e46c804f02e2a99af5a2" }
 megatron-core = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git", rev = "00eb75b0c803b0fc8e5413d736529d9d3b82b6bd" }
 nvidia-resiliency-ext = { git = "https://github.com/NVIDIA/nvidia-resiliency-ext.git", rev = "63154570cea17f8805a7fd15cc3b8cc2919ba575" }
-# Ahead of sgl-kernel below, deliberately. This range tiles the OFT rotation
-# kernels so block sizes above 128 can launch at all -- 893f329a2 did the fused
-# QKV/gate_up kernel, 166041d28 the un-fused `gemm_oft_r`/`sgemm_oft_r` pair
-# that `o_proj` and `down_proj` take -- and 89ea43812 bounds what the streamed
-# adapter LOAD allocates. All change pure-Python files only; nothing under
+# Ahead of sgl-kernel below, deliberately. This pure-Python range supports
+# power-of-two OFT blocks from 4 through 1024, keeps BS16+ on the dot paths,
+# and defaults QKV BS4/8 to the measured legacy path. It also tiles the OFT
+# rotations above 128 -- 893f329a2 did the fused QKV/gate_up kernel, 166041d28
+# the un-fused `gemm_oft_r`/`sgemm_oft_r` pair that `o_proj` and `down_proj`
+# take -- and bounds what the streamed adapter LOAD allocates. Nothing under
 # sgl-kernel/, whose tree hash is identical across all of them. Keeping
 # sgl-kernel pinned to the older rev means a sync reinstalls only sglang and
 # leaves the 852 MB compiled extension cached.
@@ -179,7 +180,7 @@ nvidia-resiliency-ext = { git = "https://github.com/NVIDIA/nvidia-resiliency-ext
 # with a paused ~20 GB KV arena whose resume runs immediately after, that OOM'd
 # in torch_memory_saver's cuMemCreate on the 4th rollout. Measured on
 # 2026-08-03: 8.8 GB per update before, 0.6 GB after, 10/10 rollouts clean.
-sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "89ea43812ec6fb161fe29902a6c6f1fbefb524dd", subdirectory = "python" }
+sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "b52394d22fc4b686016943efc47cce6fb892cef2", subdirectory = "python" }
 # TransformerEngine built from source (verified end-to-end). The orbit-build-wheels
 # prebuilt is cu13/torch-2.11-correct too, but swapping it in perturbed libcudart load
 # order and exposed a flaky tilelang<->flashinfer find_loaded_library("libcudart")
@@ -216,7 +217,7 @@ tested-ref = "85c84cbc26d4c983a3d6e46c804f02e2a99af5a2"
 [tool.orbit.release.backend-pins.sglang]
 source = "https://github.com/Sphere-AI-Lab/sglang.git"
 subdirectory = "python"
-tested-ref = "89ea43812ec6fb161fe29902a6c6f1fbefb524dd"
+tested-ref = "b52394d22fc4b686016943efc47cce6fb892cef2"
 
 [tool.isort]
 profile = "black"  # black-compatible

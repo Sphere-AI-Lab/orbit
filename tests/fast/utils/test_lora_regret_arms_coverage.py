@@ -489,3 +489,52 @@ class TestOftBlockCeilingUnderRl:
             else:
                 assert 0.85 <= report["ratio"] <= 1.15, (arm.name, report)
             assert arm.matched_ratio == pytest.approx(report["ratio"])
+
+    def test_sglang_runtime_supports_power_of_two_blocks_from_four(self):
+        import tomllib
+        from pathlib import Path
+
+        from tools.lora_regret.arms import OFT_MAX_BLOCK_SGLANG
+
+        expected_sha = "b52394d22fc4b686016943efc47cce6fb892cef2"
+        supported = [4, 8, 16, 32, 64, 128, 256, 512, 1024]
+        assert supported[0] == 4
+        assert all(block & (block - 1) == 0 for block in supported)
+        assert supported[-1] == OFT_MAX_BLOCK_SGLANG
+
+        repo = Path(__file__).resolve().parents[3]
+        config = tomllib.loads((repo / "pyproject.toml").read_text())
+        sources = config["tool"]["uv"]["sources"]
+        pins = config["tool"]["orbit"]["release"]["backend-pins"]
+        lock = tomllib.loads((repo / "uv.lock").read_text())
+        packages = {package["name"]: package for package in lock["package"]}
+        orbit_requires = {
+            requirement["name"]: requirement
+            for requirement in packages["orbit"]["metadata"]["requires-dist"]
+        }
+        sglang_git = "https://github.com/Sphere-AI-Lab/sglang.git"
+        kernel_sha = "9c83ae8be07cbb1eb6898ce608ae244e3be375b4"
+        bridge_sha = "85c84cbc26d4c983a3d6e46c804f02e2a99af5a2"
+        assert sources["sglang"]["rev"] == expected_sha
+        assert pins["sglang"]["tested-ref"] == expected_sha
+        assert packages["sglang"]["version"] == "0.0.0.dev9909+gb52394d22"
+        assert packages["sglang"]["source"]["git"] == (
+            f"{sglang_git}?subdirectory=python&rev={expected_sha}#{expected_sha}"
+        )
+        assert orbit_requires["sglang"]["git"] == (
+            f"{sglang_git}?subdirectory=python&rev={expected_sha}"
+        )
+        assert sources["sgl-kernel"]["rev"] == kernel_sha
+        assert packages["sgl-kernel"]["source"]["git"] == (
+            f"{sglang_git}?subdirectory=sgl-kernel&rev={kernel_sha}#{kernel_sha}"
+        )
+        assert orbit_requires["sgl-kernel"]["git"] == (
+            f"{sglang_git}?subdirectory=sgl-kernel&rev={kernel_sha}"
+        )
+        assert sources["megatron-bridge"]["rev"] == bridge_sha
+        assert packages["megatron-bridge"]["source"]["git"].endswith(
+            f"rev={bridge_sha}#{bridge_sha}"
+        )
+        assert orbit_requires["megatron-bridge"]["git"].endswith(
+            f"rev={bridge_sha}"
+        )
