@@ -428,7 +428,7 @@ class TestOftBlockCeilingUnderRl:
 
         from tools.lora_regret.arms import OFT_MAX_BLOCK_SGLANG
 
-        expected_sha = "54f5ee4a208d0ffa8e5201794b125825d5e92316"
+        expected_sha = "b52394d22fc4b686016943efc47cce6fb892cef2"
         supported = [4, 8, 16, 32, 64, 128, 256, 512, 1024]
         assert supported[0] == 4
         assert all(block & (block - 1) == 0 for block in supported)

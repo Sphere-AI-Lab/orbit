@@ -183,7 +183,7 @@ nvidia-resiliency-ext = { git = "https://github.com/NVIDIA/nvidia-resiliency-ext
 # BS4/8 rotations use elementwise reductions, fused projections regroup them
 # into 16-column tensor-core micro-tiles, and the BS16+ tl.dot path is unchanged.
 # All changes remain pure Python/Triton; sgl-kernel does not move.
-sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "54f5ee4a208d0ffa8e5201794b125825d5e92316", subdirectory = "python" }
+sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "b52394d22fc4b686016943efc47cce6fb892cef2", subdirectory = "python" }
 # TransformerEngine built from source (verified end-to-end). The orbit-build-wheels
 # prebuilt is cu13/torch-2.11-correct too, but swapping it in perturbed libcudart load
 # order and exposed a flaky tilelang<->flashinfer find_loaded_library("libcudart")
@@ -220,7 +220,7 @@ tested-ref = "85c84cbc26d4c983a3d6e46c804f02e2a99af5a2"
 [tool.orbit.release.backend-pins.sglang]
 source = "https://github.com/Sphere-AI-Lab/sglang.git"
 subdirectory = "python"
-tested-ref = "54f5ee4a208d0ffa8e5201794b125825d5e92316"
+tested-ref = "b52394d22fc4b686016943efc47cce6fb892cef2"
 
 [tool.isort]
 profile = "black"  # black-compatible
