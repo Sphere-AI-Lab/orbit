@@ -280,6 +280,7 @@ class SGLangEngine(RayActor):
             num_gpus_per_engine=self.num_gpus_per_engine,
         )
 
+        self.nnodes = server_args_dict["nnodes"]
         self.node_rank = server_args_dict["node_rank"]
         self.server_host = server_args_dict["host"]  # with [] if ipv6
         self.server_port = server_args_dict["port"]
@@ -576,6 +577,53 @@ class SGLangEngine(RayActor):
             adapter_config=adapter_config,
             adapter_name=adapter_name,
         )
+
+    def update_oft_adapter_from_rank_tensors(
+        self,
+        *,
+        rank_payloads: list[tuple],
+        load_format: str,
+        adapter_config: dict,
+        adapter_name: str,
+    ):
+        """Serialize colocated OFT TP shards inside the SGLang parent actor.
+
+        Condor and other restricted runtimes can deny ``pidfd_getfd``, making
+        CUDA IPC handles produced by trainer actors impossible for scheduler
+        children to rebuild. CPU copies arrive here through Ray, then named
+        shared-memory serialization gives each TP scheduler a parent-owned
+        payload without crossing the restricted CUDA IPC boundary.
+        """
+        if self.nnodes > 1:
+            raise RuntimeError(
+                "OFT rank-tensor serialization currently supports only a single-host "
+                "SGLang engine."
+            )
+
+        import torch.multiprocessing as torch_mp
+
+        old_strategy = torch_mp.get_sharing_strategy()
+        torch_mp.set_sharing_strategy("file_system")
+        try:
+            serialized_rank_payloads = []
+            for flat_tensor, metadata, entries in rank_payloads:
+                inner = (
+                    "flattened_oft_payload",
+                    MultiprocessingSerializer.serialize(flat_tensor),
+                    metadata,
+                    entries,
+                )
+                serialized_rank_payloads.append(
+                    MultiprocessingSerializer.serialize(inner, output_str=True)
+                )
+            return self.update_weights_from_tensor(
+                serialized_named_tensors=serialized_rank_payloads,
+                load_format=load_format,
+                adapter_config=adapter_config,
+                adapter_name=adapter_name,
+            )
+        finally:
+            torch_mp.set_sharing_strategy(old_strategy)
 
     def flush_cache(self):
         """Flush the cache of the server."""
