@@ -92,11 +92,15 @@ if [[ "${DRY_RUN}" == "1" ]]; then
 fi
 
 IFS=, read -r -a visible_gpus <<< "${CUDA_VISIBLE_DEVICES:-}"
-if (( ${#visible_gpus[@]} != 2 )) || [[ -z "${visible_gpus[0]:-}" || -z "${visible_gpus[1]:-}" ]]; then
-    die 'CUDA_VISIBLE_DEVICES must name exactly two devices'
+if (( ${#visible_gpus[@]} != 2 )) \
+    || [[ -z "${visible_gpus[0]:-}" || -z "${visible_gpus[1]:-}" ]] \
+    || [[ "${visible_gpus[0]}" == "${visible_gpus[1]}" ]]; then
+    die 'CUDA_VISIBLE_DEVICES must name exactly two distinct nonempty devices'
 fi
 
-campaign_exit_code=0
+campaign_launcher_exit_code=0
+campaign_console_exit_code=0
+campaign_verification_exit_code=0
 for block_size in "${BLOCK_SIZES[@]}"; do
     arm_path="${RUN_ROOT}/bs${block_size}"
     console_log="${arm_path}/console.log"
@@ -126,18 +130,13 @@ for block_size in "${BLOCK_SIZES[@]}"; do
 
     started_seconds=${SECONDS}
     if [[ -n "${ARM_TIMEOUT}" ]]; then
-        if timeout --signal=TERM --kill-after=120s "${ARM_TIMEOUT}" bash "${LAUNCHER}" 2>&1 | tee "${console_log}"; then
-            launcher_exit_code=0
-        else
-            launcher_exit_code=${PIPESTATUS[0]}
-        fi
+        timeout --signal=TERM --kill-after=120s "${ARM_TIMEOUT}" bash "${LAUNCHER}" 2>&1 | tee "${console_log}"
     else
-        if bash "${LAUNCHER}" 2>&1 | tee "${console_log}"; then
-            launcher_exit_code=0
-        else
-            launcher_exit_code=${PIPESTATUS[0]}
-        fi
+        bash "${LAUNCHER}" 2>&1 | tee "${console_log}"
     fi
+    pipeline_statuses=("${PIPESTATUS[@]}")
+    launcher_exit_code=${pipeline_statuses[0]}
+    console_exit_code=${pipeline_statuses[1]}
     duration_seconds=$(( SECONDS - started_seconds ))
 
     verification_exit_code=0
@@ -153,12 +152,15 @@ for block_size in "${BLOCK_SIZES[@]}"; do
 
     if (( launcher_exit_code != 0 )); then
         final_exit_code=${launcher_exit_code}
+    elif (( console_exit_code != 0 )); then
+        final_exit_code=${console_exit_code}
     else
         final_exit_code=${verification_exit_code}
     fi
     write_status "${status_file}" \
         "block_size=${block_size}" \
         "launcher_exit_code=${launcher_exit_code}" \
+        "console_exit_code=${console_exit_code}" \
         "verification_exit_code=${verification_exit_code}" \
         "final_exit_code=${final_exit_code}" \
         "duration_seconds=${duration_seconds}" \
@@ -167,18 +169,32 @@ for block_size in "${BLOCK_SIZES[@]}"; do
     if (( final_exit_code == 0 )); then
         printf 'BS%s PASSED (%ss)\n' "${block_size}" "${duration_seconds}"
     else
-        printf 'BS%s FAILED launcher=%s verification=%s final=%s (%ss)\n' \
-            "${block_size}" "${launcher_exit_code}" "${verification_exit_code}" \
+        printf 'BS%s FAILED launcher=%s console=%s verification=%s final=%s (%ss)\n' \
+            "${block_size}" "${launcher_exit_code}" "${console_exit_code}" "${verification_exit_code}" \
             "${final_exit_code}" "${duration_seconds}" >&2
-        if (( campaign_exit_code == 0 )); then
-            campaign_exit_code=${final_exit_code}
-        fi
+    fi
+    if (( campaign_launcher_exit_code == 0 && launcher_exit_code != 0 )); then
+        campaign_launcher_exit_code=${launcher_exit_code}
+    fi
+    if (( campaign_console_exit_code == 0 && console_exit_code != 0 )); then
+        campaign_console_exit_code=${console_exit_code}
+    fi
+    if (( campaign_verification_exit_code == 0 && verification_exit_code != 0 )); then
+        campaign_verification_exit_code=${verification_exit_code}
     fi
 done
 
+if (( campaign_launcher_exit_code != 0 )); then
+    campaign_exit_code=${campaign_launcher_exit_code}
+elif (( campaign_console_exit_code != 0 )); then
+    campaign_exit_code=${campaign_console_exit_code}
+else
+    campaign_exit_code=${campaign_verification_exit_code}
+fi
 write_status "${RUN_ROOT}/completion.status" \
-    "launcher_exit_code=${campaign_exit_code}" \
-    "verification_exit_code=${campaign_exit_code}" \
+    "launcher_exit_code=${campaign_launcher_exit_code}" \
+    "console_exit_code=${campaign_console_exit_code}" \
+    "verification_exit_code=${campaign_verification_exit_code}" \
     "final_exit_code=${campaign_exit_code}" \
     "duration_seconds=${SECONDS}" \
     "completed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"

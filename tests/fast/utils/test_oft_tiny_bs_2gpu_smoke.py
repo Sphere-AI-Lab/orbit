@@ -14,10 +14,12 @@ WRAPPER = REPO_ROOT / "scripts/lora_regret/smoke_oft_tiny_bs_2gpu.sh"
 
 FAKE_SUCCESS = r'''#!/usr/bin/env bash
 set -eu
-printf '%s\t%s\t%s\t%s\t%s\t<%s>\n' \
+printf '%s\t%s\t%s\t%s\t%s\t<%s>\t%s\t%s\t<%s>\t<%s>\t<%s>\t<%s>\n' \
   "${OFT_BLOCK_SIZE}" "${GPUS_PER_NODE}" \
   "${TENSOR_MODEL_PARALLEL_SIZE}" "${ROLLOUT_NUM_GPUS_PER_ENGINE}" \
-  "${NUM_ROLLOUT}" "${SAVE_INTERVAL}" >> "${CALL_LEDGER}"
+  "${NUM_ROLLOUT}" "${SAVE_INTERVAL}" "${EVAL_INTERVAL}" "${ORBIT_RAY_LIFECYCLE}" \
+  "${ORBIT_RAY_ADDRESS-}" "${RAY_ADDRESS-}" "${RAY_HEAD_PORT-}" \
+  "${RAY_DASHBOARD_AGENT_LISTEN_PORT-}" >> "${CALL_LEDGER}"
 printf '%s\n' \
   'weight_sync stage=update_weights_complete rank=0' \
   'progress rollout=2/2 completed=3/3 remaining=0 elapsed=00:00:03' \
@@ -26,10 +28,12 @@ printf '%s\n' \
 
 FAKE_MISSING_ROLLOUT_MARKER = r'''#!/usr/bin/env bash
 set -eu
-printf '%s\t%s\t%s\t%s\t%s\t<%s>\n' \
+printf '%s\t%s\t%s\t%s\t%s\t<%s>\t%s\t%s\t<%s>\t<%s>\t<%s>\t<%s>\n' \
   "${OFT_BLOCK_SIZE}" "${GPUS_PER_NODE}" \
   "${TENSOR_MODEL_PARALLEL_SIZE}" "${ROLLOUT_NUM_GPUS_PER_ENGINE}" \
-  "${NUM_ROLLOUT}" "${SAVE_INTERVAL}" >> "${CALL_LEDGER}"
+  "${NUM_ROLLOUT}" "${SAVE_INTERVAL}" "${EVAL_INTERVAL}" "${ORBIT_RAY_LIFECYCLE}" \
+  "${ORBIT_RAY_ADDRESS-}" "${RAY_ADDRESS-}" "${RAY_HEAD_PORT-}" \
+  "${RAY_DASHBOARD_AGENT_LISTEN_PORT-}" >> "${CALL_LEDGER}"
 printf '%s\n' \
   'weight_sync stage=update_weights_complete rank=0' \
   'Training driver exited with code 0' >> "${RUN_LOG}"
@@ -43,12 +47,27 @@ def _write_launcher(tmp_path: Path, body: str = FAKE_SUCCESS) -> Path:
     return launcher
 
 
+def _write_failing_tee(tmp_path: Path) -> Path:
+    executable = tmp_path / "fake-bin" / "tee"
+    executable.parent.mkdir()
+    executable.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -uo pipefail\n"
+        "/usr/bin/tee \"$@\"\n"
+        "exit 23\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    return executable.parent
+
+
 def _run_wrapper(
     tmp_path: Path,
     run_root: Path,
     launcher: Path,
     *,
     cuda_visible_devices: str = "GPU-a,GPU-b",
+    extra_environment: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = os.environ | {
         "RUN_ROOT": str(run_root),
@@ -57,7 +76,13 @@ def _run_wrapper(
         "OFT_TINY_SMOKE_ARM_TIMEOUT": "",
         "CALL_LEDGER": str(tmp_path / "calls.tsv"),
         "SECRET_SENTINEL": "must-not-reach-environment-record",
+        "ORBIT_RAY_ADDRESS": "inherited-orbit-ray-address",
+        "RAY_ADDRESS": "inherited-ray-address",
+        "RAY_HEAD_PORT": "31001",
+        "RAY_DASHBOARD_AGENT_LISTEN_PORT": "31002",
     }
+    if extra_environment is not None:
+        env |= extra_environment
     return subprocess.run(
         ["bash", str(WRAPPER)],
         cwd=REPO_ROOT,
@@ -91,9 +116,9 @@ class TestOftTinyBsTwoGpuSmoke(unittest.TestCase):
         self.assertEqual(
             [row.split("\t") for row in rows],
             [
-                ["4", "2", "2", "2", "3", "<>"],
-                ["8", "2", "2", "2", "3", "<>"],
-                ["16", "2", "2", "2", "3", "<>"],
+                ["4", "2", "2", "2", "3", "<>", "2", "private", "<>", "<>", "<>", "<>"],
+                ["8", "2", "2", "2", "3", "<>", "2", "private", "<>", "<>", "<>", "<>"],
+                ["16", "2", "2", "2", "3", "<>", "2", "private", "<>", "<>", "<>", "<>"],
             ],
         )
         for block_size in (4, 8, 16):
@@ -121,6 +146,25 @@ class TestOftTinyBsTwoGpuSmoke(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertFalse((self.tmp_path / "calls.tsv").exists())
         self.assertFalse(any(run_root.iterdir()))
+
+    def test_rejects_duplicate_and_empty_edge_gpu_masks_before_launching(self):
+        """A duplicate or empty identifier does not reserve two distinct GPUs."""
+        for cuda_visible_devices in ("GPU-a,GPU-a", ",GPU-a", "GPU-a,", "GPU-a,,GPU-b"):
+            with self.subTest(cuda_visible_devices=cuda_visible_devices):
+                case_path = self.tmp_path / f"case-{cuda_visible_devices.replace(',', '_')}"
+                case_path.mkdir()
+                run_root = case_path / "run-root"
+                run_root.mkdir()
+                result = _run_wrapper(
+                    case_path,
+                    run_root,
+                    _write_launcher(case_path),
+                    cuda_visible_devices=cuda_visible_devices,
+                )
+
+                self.assertEqual(result.returncode, 2)
+                self.assertFalse((case_path / "calls.tsv").exists())
+                self.assertFalse(any(run_root.iterdir()))
 
     def test_rejects_an_existing_arm_directory_before_launching_or_modifying_it(self):
         """Reusing an arm directory would corrupt the evidence from a prior run."""
@@ -154,6 +198,11 @@ class TestOftTinyBsTwoGpuSmoke(unittest.TestCase):
         bs8_status = _status(run_root / "bs8" / "completion.status")
         self.assertEqual(bs8_status["launcher_exit_code"], "7")
         self.assertEqual(bs8_status["final_exit_code"], "7")
+        campaign_status = _status(run_root / "completion.status")
+        self.assertEqual(campaign_status["launcher_exit_code"], "7")
+        self.assertEqual(campaign_status["console_exit_code"], "0")
+        self.assertEqual(campaign_status["verification_exit_code"], "0")
+        self.assertEqual(campaign_status["final_exit_code"], "7")
 
     def test_missing_rollout_marker_fails_verification_after_a_zero_exit_launcher(self):
         """A clean process exit without completed-rollout evidence is not success."""
@@ -167,3 +216,32 @@ class TestOftTinyBsTwoGpuSmoke(unittest.TestCase):
         self.assertEqual(bs4_status["launcher_exit_code"], "0")
         self.assertEqual(bs4_status["verification_exit_code"], "1")
         self.assertEqual(bs4_status["final_exit_code"], "1")
+        campaign_status = _status(run_root / "completion.status")
+        self.assertEqual(campaign_status["launcher_exit_code"], "0")
+        self.assertEqual(campaign_status["console_exit_code"], "0")
+        self.assertEqual(campaign_status["verification_exit_code"], "1")
+        self.assertEqual(campaign_status["final_exit_code"], "1")
+
+    def test_console_write_failure_fails_the_arm_while_preserving_launcher_success(self):
+        """Discarding tee's exit code would falsely mark lost console evidence as success."""
+        run_root = self.tmp_path / "run-root"
+        run_root.mkdir()
+        fake_bin = _write_failing_tee(self.tmp_path)
+        result = _run_wrapper(
+            self.tmp_path,
+            run_root,
+            _write_launcher(self.tmp_path),
+            extra_environment={"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+        )
+
+        self.assertEqual(result.returncode, 23)
+        bs4_status = _status(run_root / "bs4" / "completion.status")
+        self.assertEqual(bs4_status["launcher_exit_code"], "0")
+        self.assertEqual(bs4_status["console_exit_code"], "23")
+        self.assertEqual(bs4_status["verification_exit_code"], "0")
+        self.assertEqual(bs4_status["final_exit_code"], "23")
+        campaign_status = _status(run_root / "completion.status")
+        self.assertEqual(campaign_status["launcher_exit_code"], "0")
+        self.assertEqual(campaign_status["console_exit_code"], "23")
+        self.assertEqual(campaign_status["verification_exit_code"], "0")
+        self.assertEqual(campaign_status["final_exit_code"], "23")
