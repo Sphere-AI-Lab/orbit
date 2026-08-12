@@ -240,15 +240,36 @@ kill_active_launcher() {
     fi
 }
 
+active_launcher_target_is_alive() {
+    if (( active_launcher_group == 1 )); then
+        kill -0 -- "-${active_launcher_pid}" 2>/dev/null \
+            || kill -0 "${active_launcher_pid}" 2>/dev/null
+    else
+        kill -0 "${active_launcher_pid}" 2>/dev/null
+    fi
+}
+
 force_kill_active_launcher_after_grace() {
     local deadline=$(( SECONDS + SIGNAL_GRACE_SECONDS ))
 
-    while kill -0 "${active_launcher_pid}" 2>/dev/null \
-        && (( SECONDS < deadline )); do
+    while active_launcher_target_is_alive && (( SECONDS < deadline )); do
         sleep 0.1
     done
-    if kill -0 "${active_launcher_pid}" 2>/dev/null; then
+    if active_launcher_target_is_alive; then
         kill_active_launcher KILL
+    fi
+}
+
+force_stop_active_tee_after_grace() {
+    local deadline=$(( SECONDS + SIGNAL_GRACE_SECONDS ))
+
+    while kill -0 "${active_tee_pid}" 2>/dev/null && (( SECONDS < deadline )); do
+        sleep 0.1
+    done
+    if kill -0 "${active_tee_pid}" 2>/dev/null; then
+        kill -TERM "${active_tee_pid}" 2>/dev/null || :
+        sleep 0.1
+        kill -KILL "${active_tee_pid}" 2>/dev/null || :
     fi
 }
 
@@ -279,6 +300,7 @@ handle_signal() {
         fi
     fi
     if [[ -n "${active_tee_pid}" ]]; then
+        force_stop_active_tee_after_grace
         wait "${active_tee_pid}" 2>/dev/null
         console_exit_code=$?
     fi
@@ -351,6 +373,22 @@ if [[ ! "${SIGNAL_GRACE_SECONDS}" =~ ^(0|[1-9][0-9]*)$ ]]; then
     die 'OFT_TINY_SMOKE_SIGNAL_GRACE_SECONDS must be a canonical nonnegative integer'
 fi
 
+if command -v setsid >/dev/null 2>&1; then
+    session_launcher=(setsid)
+elif command -v python3 >/dev/null 2>&1; then
+    session_launcher=(
+        python3 -c
+        'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])'
+    )
+elif command -v python >/dev/null 2>&1; then
+    session_launcher=(
+        python -c
+        'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])'
+    )
+else
+    die 'starting an isolated launcher group requires setsid, python3, or python on PATH'
+fi
+
 trap 'handle_signal INT' INT
 trap 'handle_signal TERM' TERM
 
@@ -416,12 +454,8 @@ for block_size in "${BLOCK_SIZES[@]}"; do
             timeout --signal=TERM --kill-after=120s "${ARM_TIMEOUT}" bash "${LAUNCHER}"
         )
     fi
-    if command -v setsid >/dev/null 2>&1; then
-        setsid "${launcher_command[@]}" >"${active_fifo}" 2>&1 &
-        active_launcher_group=1
-    else
-        "${launcher_command[@]}" >"${active_fifo}" 2>&1 &
-    fi
+    "${session_launcher[@]}" "${launcher_command[@]}" >"${active_fifo}" 2>&1 &
+    active_launcher_group=1
     active_launcher_pid=$!
     wait "${active_launcher_pid}"
     launcher_exit_code=$?

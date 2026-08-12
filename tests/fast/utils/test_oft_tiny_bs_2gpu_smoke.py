@@ -505,3 +505,84 @@ time.sleep(30)
         self.assertEqual(arm_status["interrupted"], "TERM")
         self.assertEqual(arm_status["launcher_exit_code"], "137")
         self.assertEqual(arm_status["final_exit_code"], "143")
+
+    def test_term_kills_a_surviving_launcher_group_after_its_leader_exits(self):
+        """A descendant holding the FIFO must not outlive an exited launcher leader."""
+        run_root = self.tmp_path / "run-root"
+        run_root.mkdir()
+        ready_file = self.tmp_path / "launcher.ready"
+        child_pid_file = self.tmp_path / "launcher-child.pid"
+        launcher = _write_launcher(
+            self.tmp_path,
+            r'''#!/usr/bin/env bash
+set -u
+trap 'exit 0' TERM
+"${PYTHON_FOR_TEST}" -c '
+import os
+import signal
+import time
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+with open(os.environ["CHILD_PID_FILE"], "w", encoding="utf-8") as pid_file:
+    pid_file.write(str(os.getpid()))
+with open(os.environ["READY_FILE"], "w", encoding="utf-8") as ready:
+    ready.write("ready\n")
+time.sleep(30)
+' &
+wait
+''',
+        )
+        process = subprocess.Popen(
+            ["bash", str(WRAPPER)],
+            cwd=REPO_ROOT,
+            env=_wrapper_environment(
+                self.tmp_path,
+                run_root,
+                launcher,
+                extra_environment={
+                    "OFT_TINY_SMOKE_SIGNAL_GRACE_SECONDS": "1",
+                    "PYTHON_FOR_TEST": os.sys.executable,
+                    "READY_FILE": str(ready_file),
+                    "CHILD_PID_FILE": str(child_pid_file),
+                },
+            ),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        stdout = ""
+        stderr = ""
+        child_pid = None
+        communicated = False
+        try:
+            deadline = time.monotonic() + 5
+            while not ready_file.exists() and process.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(ready_file.exists(), "launcher descendant did not become ready")
+            child_pid = int(child_pid_file.read_text(encoding="utf-8"))
+            process.terminate()
+            stdout, stderr = process.communicate(timeout=5)
+            communicated = True
+        finally:
+            if process.poll() is None or not communicated:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if child_pid is not None:
+                try:
+                    os.kill(child_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if process.poll() is None:
+                process.kill()
+            try:
+                process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+
+        self.assertEqual(process.returncode, 143, f"stdout={stdout}\nstderr={stderr}")
+        self.assertFalse((run_root / "bs8").exists())
+        arm_status = _status(run_root / "bs4" / "completion.status")
+        self.assertEqual(arm_status["interrupted"], "TERM")
+        self.assertEqual(arm_status["final_exit_code"], "143")
