@@ -76,35 +76,35 @@ whole HF tensors and each engine re-shards through its ordinary loader on reload
 
 ### Which of these configs has actually run
 
-Two of the seven. The rest are written and their args resolve, but no scheduler has ever
-executed them — treat them as untested until they have a job ID here.
+All seven, on slinky (H200s, InfiniBand), in the `miles_zeju` env.
 
-| Recipe | Sharding | Status | Result |
-|---|---|---|---|
-| `01` qwen3-4B 1-node | TP2 EP1, 4+4 | **verified** — job 38154, `COMPLETED` 45m | 5 syncs, density 0.44–0.58%, 0.13 GB/sync, **~70×** |
-| `02` qwen3-4B 2-node delta | TP2 EP1, 8+8 | not run | — |
-| `03` qwen3-4B 2-node broadcast | TP2 EP1, 8+8 | not run | — |
-| `04` 30B-A3B 4-node smoke | TP4 **EP8**, 16+16 | **verified** — job 38420, `COMPLETED` 1h03m | 5 syncs, density 0.28–0.36%, ~0.6 GB/sync, **~106×** |
-| `05` 30B-A3B 4-node delta | TP4 **EP8**, 16+16 | not run | — |
-| `06` 30B-A3B 4-node broadcast | TP4 **EP8**, 16+16 | not run | — |
-| `07` 30B-A3B 1-node smoke | TP4 **EP4**, 4+4 | not run | — |
+| Recipe | Sharding | Job | Sync time (steady) | Density |
+|---|---|---|---|---|
+| `01` qwen3-4B 1-node | TP2 EP1, 4+4 | 38154 ✅ 45m | — | 0.44–0.58% |
+| `02` qwen3-4B 2-node delta | TP2 EP1, 8+8 | 39268 ✅ | **4.9s** (4.6–5.2) | 0.39–0.60% |
+| `03` qwen3-4B 2-node broadcast | TP2 EP1, 8+8 | 39274 ✅ | **0.3s** (0.3–0.5) | n/a |
+| `04` 30B-A3B 4-node smoke | TP4 **EP8**, 16+16 | 38420 ✅ 1h03m | — | 0.28–0.36% |
+| `05` 30B-A3B 4-node delta | TP4 **EP8**, 16+16 | 39277 ✅ 1h47m | **~91s** (54–179) | 0.24–0.35% |
+| `06` 30B-A3B 4-node broadcast | TP4 **EP8**, 16+16 | 39385 ✅ 1h26m | **3.7s** (3.5–4.1) | n/a |
+| `07` 30B-A3B 1-node | TP4 **EP4**, 4+4 | 39386 ✅ 1h30m | ~54–91s | 0.32–0.40% |
 
-Both verified runs had `--check-weight-update-equal` on for every sync and logged no checksum
-mismatch and no out-of-order delta.
+Every arm ran clean: zero checksum mismatches, zero out-of-order deltas, and
+`--check-weight-update-equal` passed on every run that enabled it (`01`, `04`, `07`).
 
-What that coverage does and does not establish:
+Caveats worth carrying:
 
-- **EP8 works; EP4 has never been exercised.** `07`'s only substantive difference from `04` is
-  expert parallelism — 32 experts per rank instead of 16 — and that path is unverified.
-- **The 8+8 dense shape is unverified.** `01` ran 4+4 on one node. `02`/`03` change both the GPU
-  count and the node count, so they move the engine count from 2 to 4 as well.
-- **Nothing here compares transports.** `03` and `06` are the broadcast controls and neither has
-  run, so no measurement in this document shows disk-delta being *faster* than broadcast — only
-  that it moves less.
-
-Two earlier attempts at `04`'s config (jobs 38414, 38417) failed inside 80 seconds on cluster
-faults — one node failing the InfiniBand probe, one holding 448 GB of leaked GPU memory while
-Slurm reported it idle. Neither reached training, so neither says anything about the config.
+- **`05` and `07` show large timing variance** (3.3× spread on `05`). disk-delta's cost depends on
+  a *shared* filesystem, so it inherits cluster-wide I/O load from other tenants. Broadcast's NCCL
+  path does not — hence its 0.5s total spread across ten syncs.
+- **The first sync of every delta run is a warmup outlier** (31.7s vs 4.9s on `02`; 109.6s vs ~91s
+  on `05`), and the *last* sync is sometimes a much larger one (46.7s on `02`, 731.8s on `07`)
+  that coincides with teardown and which we did not diagnose.
+- **`07` failed twice before succeeding.** Once on a config error of ours (concurrency left at the
+  4-node value; see the file header), and once on a baseline `--check-weight-update-equal` failure
+  — 292 tensors, uniform 1-ULP error — that never reproduced across the other two attempts on
+  identical config. Unexplained.
+- Jobs 38414/38417 died inside 80s on cluster faults (an InfiniBand probe failure; a node holding
+  448 GB of leaked GPU memory while Slurm reported it idle). Neither reached training.
 
 ### What the sharding costs per recipe
 
@@ -127,40 +127,60 @@ the TP/EP-sharded parameters into full HF tensors before diffing, so the delta i
 space on whole tensors and never on Megatron shards. Published delta *files* are split one per
 source rank (`model-NNNNN-of-NNNNN.safetensors`) purely for parallel I/O.
 
-## Verified on slinky
+## Verified on slinky — and the answer is: use broadcast here
 
-Both arms ran with `--check-weight-update-equal`, which compares engine tensors against the
-trainer's after every sync — so a delta that reconstructed even one tensor wrongly would have
-failed the run rather than silently serving bad weights. Neither tripped, and neither logged a
-checksum mismatch or an out-of-order delta.
+disk-delta works correctly and moves far less data. On this cluster it is also **substantially
+slower**, at both model scales, and the gap widens with model size.
 
-| | qwen3-4B (dense) | 30B-A3B (MoE) |
+| | qwen3-4B (8.04 GB) | 30B-A3B (57 GB) |
 |---|---|---|
-| Job | 38154 `COMPLETED` 45m | 38420 `COMPLETED` 1h03m |
-| Recipe | `01`, 1 node | `04`, 4 nodes |
+| Data per sync, delta | 0.13 GB | ~0.5 GB |
+| Data per sync, broadcast | 8.04 GB | 57 GB |
+| Volume reduction | ~62× | ~114× |
+| **Sync time, delta** | **4.9s** | **~91s** |
+| **Sync time, broadcast** | **0.3s** | **3.7s** |
+| **Broadcast is faster by** | **16×** | **25×** |
+
+The reason is throughput, not volume. NCCL moves 8.04 GB in 0.3s (~27 GB/s) and 57 GB in 3.7s
+(~15 GB/s). disk-delta must *scan* the entire checkpoint to diff it — memory-bandwidth-bound CPU
+work at roughly 4 GB/s — then compress, write, and have every rollout host reload a full
+checkpoint. Shrinking the payload 114× buys nothing when the fabric was never the bottleneck.
+
+**This is the documented tradeoff, measured rather than assumed.** disk-delta trades interconnect
+bandwidth for CPU; it is built for links where shipping 57 GB per sync genuinely hurts —
+cross-rack, cross-datacenter, plain Ethernet. slinky's InfiniBand is not that. Read this as a
+result about *this cluster*, not about the feature.
+
+What the runs establish about correctness:
+
+| | qwen3-4B | 30B-A3B |
+|---|---|---|
 | Tensors in baseline | 398 | 18,867 |
-| Expert path (EP gather, dup-drop) | not reached (EP1) | exercised (EP8) |
-| Density per sync | 0.44–0.58% | 0.28–0.36% |
-| Wire per sync | 0.13 GB of 8.04 GB | ~0.6 GB of 57 GB |
-| 5 syncs total | 570 MB vs ~40 GB | 2.7 GB vs ~285 GB |
-| **Reduction** | **~70×** | **~106×** |
+| Expert path (EP gather, dup-drop) | not reached (EP1) | exercised at **EP8 and EP4** |
+| Integrity failures | none | none |
+| `--check-weight-update-equal` | passed | passed |
 
-The MoE wins by the larger margin, which is what the mechanism predicts: broadcast's cost tracks
-what the model *weighs*, delta's tracks what the step *touched*, and MoE maximizes that gap. Its
-density is also *lower* than the dense model's — with top-8-of-128 routing a smaller slice of the
-weights sees gradient per step. But `v5` carried 18,621 of the 18,867 tensors, so nearly every
-expert changed a little rather than a few changing a lot.
-
-Flat density across all five syncs matters more than any single value: if the trainer's snapshot
-and the engines' base had drifted apart, density would climb toward 100% as the diff stopped
-finding reuse.
-
-**Not yet measured: sync _time_.** Everything above is volume. `05`/`06` are the arms that answer
-whether disk-delta is actually *faster* than broadcast on this cluster.
+MoE density (0.24–0.40%) runs *lower* than dense (0.39–0.60%): with top-8-of-128 routing a smaller
+slice of the weights sees gradient per step. But `05`'s v5 carried 18,621 of 18,867 tensors, so
+nearly every expert changed a little rather than a few changing a lot. Density stayed flat or
+declined across every run — had the trainer's snapshot drifted from the engines' base, it would
+have climbed toward 100% as the diff stopped finding reuse.
 
 Off-GPU, `check_delta_roundtrip.py` also passed against real Qwen3-4B (jobs 38111, 38121) driving
 sglang's real receiver, for both encodings and all three checksums — and `--corrupt` confirmed a
 falsified checksum is refused rather than applied.
+
+### Still untested
+
+- **No engine has ever spanned more than one host.** Every recipe uses 8 GPUs per engine, which is
+  exactly one node, so `/pull_weights`' multi-host fan-out — the design's central claim — has never
+  executed. It needs `--rollout-num-gpus-per-engine 16`.
+- **`overwrite` encoding and the `blake3`/`adler32` checksums** have only CPU round-trip coverage;
+  every GPU run used `xor` + `xxh3-128`.
+- **The object-store hooks** (`--custom-update-weight-post-write-path`,
+  `--sglang-custom-pull-weights-pre-read-hook`) have never been invoked.
+- **Late-joining hosts / chain reset**, engine restart mid-stream, and the per-host disk ceiling at
+  355B scale (~700 GB/host).
 
 ## Start here: the format check
 
