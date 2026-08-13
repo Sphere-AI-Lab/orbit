@@ -18,6 +18,10 @@ def set_parallel_state(state: "ParallelState") -> None:
     _parallel_state = state
 
 
+def is_parallel_state_initialized() -> bool:
+    return _parallel_state is not None
+
+
 def get_parallel_state() -> "ParallelState":
     assert _parallel_state is not None, "ParallelState not initialized. Call set_parallel_state() first."
     return _parallel_state

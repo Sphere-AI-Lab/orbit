@@ -41,7 +41,7 @@ from ..training_utils.ci_utils import check_grad_norm, check_kl
 from ..training_utils.data import DataIterator, get_batch
 from ..training_utils.log_utils import aggregate_forward_results, aggregate_train_losses, log_train_step
 from ..training_utils.loss import loss_function
-from ..training_utils.parallel import get_parallel_state
+from ..training_utils.parallel import get_parallel_state, is_parallel_state_initialized
 from .checkpoint import load_checkpoint, save_checkpoint, save_checkpoint_with_lora
 from .ci_utils import (
     check_model_hashes,
@@ -148,7 +148,8 @@ def setup_model_and_optimizer(
     else:
         model = get_model(get_model_provider_func(args, role), ModelType.encoder_or_decoder)
 
-    verify_megatron_parallel_state(model, args=args)
+    if is_parallel_state_initialized():
+        verify_megatron_parallel_state(model, args=args)
 
     if args.debug_disable_optimizer:
         if is_first_replica_megatron_main_rank():

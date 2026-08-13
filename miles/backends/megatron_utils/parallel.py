@@ -104,17 +104,14 @@ def verify_megatron_parallel_state(
         if parallel_state.cp.size <= 1:
             continue
 
-        requested = getattr(args, "cp_comm_type_canonical", parallel_state.cp_comm_type)
-        state_transport = canonicalize_cp_comm_type(parallel_state.cp_comm_type, default_to_p2p=False)
+        requested_value = getattr(args, "cp_comm_type_canonical", None)
+        if requested_value is None:
+            requested_value = getattr(args, "cp_comm_type", parallel_state.cp_comm_type)
+        requested = canonicalize_cp_comm_type(requested_value)
+        state_transport = canonicalize_cp_comm_type(parallel_state.cp_comm_type)
         model_value = getattr(config, "cp_comm_type", None)
-        if model_value is None:
-            raise ValueError(
-                "CP contract mismatch: "
-                f"rank={rank}, chunk={chunk_index}, cp_size={parallel_state.cp.size}, "
-                f"requested={requested}, model=None, layout={getattr(args, 'cp_token_layout', None)}"
-            )
         try:
-            model_transport = canonicalize_cp_comm_type(model_value, default_to_p2p=False)
+            model_transport = canonicalize_cp_comm_type(model_value)
         except ValueError as exc:
             raise ValueError(
                 "CP contract mismatch: "

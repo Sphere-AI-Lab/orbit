@@ -17,6 +17,7 @@ from megatron.core.transformer.spec_utils import import_module
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.training.arguments import core_transformer_config_from_args
 
+from miles.backends.megatron_utils.cp_contract import canonicalize_cp_comm_type
 from miles.utils.audit_utils.witness.module import install_witness
 from miles.utils.misc import load_function
 from miles.utils.replay_base import routing_replay_manager
@@ -44,8 +45,11 @@ def _apply_bridge_runtime_config(provider, args: argparse.Namespace) -> None:
     provider.expert_tensor_parallel_size = args.expert_tensor_parallel_size
     provider.sequence_parallel = args.sequence_parallel
     provider.context_parallel_size = args.context_parallel_size
-    provider.cp_comm_type = args.cp_comm_type_canonical
-    provider.hierarchical_context_parallel_sizes = args.hierarchical_context_parallel_sizes
+    cp_comm_type = getattr(args, "cp_comm_type_canonical", None)
+    if cp_comm_type is None:
+        cp_comm_type = canonicalize_cp_comm_type(getattr(args, "cp_comm_type", None))
+    provider.cp_comm_type = cp_comm_type
+    provider.hierarchical_context_parallel_sizes = getattr(args, "hierarchical_context_parallel_sizes", None)
 
     # loss / sequence handling
     provider.calculate_per_token_loss = args.calculate_per_token_loss  # CP>1 VL models assert this
