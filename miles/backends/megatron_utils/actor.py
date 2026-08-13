@@ -53,7 +53,6 @@ from .ft.indep_dp import reconfigure_indep_dp_group
 from .initialize import init, is_first_replica_megatron_main_rank
 from .lora_utils import is_lora_enabled
 from .model import TrainStepOutcome, forward_only, initialize_model_and_optimizer, save, train
-from .parallel import verify_megatron_parallel_state
 from .replay_utils import register_replay_list_moe
 from .update_weight.common import named_params_and_buffers
 from .update_weight.update_weight_from_distributed.broadcast import UpdateWeightFromDistributed
@@ -178,8 +177,6 @@ class MegatronTrainRayActor(TrainRayActor):
                 detect_and_setup_hybrid_cp(
                     model_chunk, parallel_state.cp.group, parallel_state.cp.rank, parallel_state.cp.size
                 )
-
-        verify_megatron_parallel_state(self.model)
 
         if role == "critic":
             if self.args.offload_train:

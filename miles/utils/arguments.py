@@ -2483,6 +2483,15 @@ def parse_args(add_custom_arguments=None):
     miles_validate_args(args)
 
     if backend == "megatron":
+        from miles.backends.megatron_utils.cp_contract import normalize_cp_contract
+
+        # miles_validate_args applies --custom-config-path overrides, so resolve
+        # the CP contract only after it has produced the final runtime args.
+        final_model_type = None
+        if args.hf_checkpoint:
+            final_model_type = getattr(load_hf_config(args.hf_checkpoint), "model_type", None)
+        normalize_cp_contract(args, model_type=final_model_type)
+
         megatron_validate_args(args)
 
         # always use varlen

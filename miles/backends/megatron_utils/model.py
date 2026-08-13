@@ -52,7 +52,7 @@ from .ci_utils import (
 from .initialize import is_first_replica_megatron_main_rank
 from .lora_utils import is_lora_enabled, is_lora_model
 from .model_provider import get_model_provider_func
-from .parallel import get_packed_seq_params
+from .parallel import get_packed_seq_params, verify_megatron_parallel_state
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +147,8 @@ def setup_model_and_optimizer(
         model = _setup_lora_model_via_bridge(args)
     else:
         model = get_model(get_model_provider_func(args, role), ModelType.encoder_or_decoder)
+
+    verify_megatron_parallel_state(model, args=args)
 
     if args.debug_disable_optimizer:
         if is_first_replica_megatron_main_rank():
