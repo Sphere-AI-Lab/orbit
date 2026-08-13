@@ -158,6 +158,10 @@ if [[ "${DRY_RUN}" == "1" ]]; then
    exit 0
 fi
 
+if [[ "${CUDA_VISIBLE_DEVICES+x}" == "x" && -z "${CUDA_VISIBLE_DEVICES}" ]]; then
+   die "CUDA_VISIBLE_DEVICES is set but empty; expected Slurm to assign per-node GPU IDs"
+fi
+
 [[ -n "${SLURM_JOB_ID:-}" && -n "${SLURM_JOB_NODELIST:-}" ]] || \
    die "runtime requires an existing two-node Slurm allocation"
 command -v scontrol >/dev/null 2>&1 || die "scontrol is not available"

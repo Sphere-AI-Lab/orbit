@@ -190,7 +190,7 @@ else
       "CUDA_VISIBLE_DEVICES exposes ${#VISIBLE_GPU_IDS[@]} GPUs but NUM_GPUS=${NUM_GPUS}"
 fi
 export CUDA_VISIBLE_DEVICES
-export PYTHONBUFFERED=16
+export PYTHONUNBUFFERED=1
 
 mkdir -p "${OUTPUT_ROOT}"
 mkdir "${RUN_DIR}" 2>/dev/null || die "run directory already exists: ${RUN_DIR}"
