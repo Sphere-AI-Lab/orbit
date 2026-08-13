@@ -247,7 +247,7 @@ def main() -> int:
             f"\ncannot import sglang's receiver ({e}).\n"
             "Run this in the environment the training job uses — the point of the check is that\n"
             "miles' publisher and sglang's applier agree on the format."
-        )
+        ) from e
     print("  ok   sglang.srt.weight_sync.local_checkpoint.pull")
 
     workdir = args.workdir or tempfile.mkdtemp(prefix="delta-roundtrip-")
