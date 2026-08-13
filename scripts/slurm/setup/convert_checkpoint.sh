@@ -16,6 +16,14 @@
 #   MILES_REPO      this repo                     [$PWD]
 #   MILES_ENV_NAME  conda env                     [miles]
 #   THIRDPARTY_DIR  repo's thirdparty/            [$MILES_REPO/thirdparty]
+#   CONVERT_EXTRA_ARGS  extra flags for the convert tool (word-split), e.g.
+#                   "--megatron-to-hf-mode bridge" — REQUIRED for VLM/bridge
+#                   recipes: raw mode (the default) builds a text-only model
+#                   from MODEL_ARGS, so the artifact would lack the vision
+#                   tower. Bridge recipes append this flag to MODEL_ARGS
+#                   (see e.g. the geo3k VLM recipes), and the launcher's
+#                   auto-convert inherits it from there; this standalone
+#                   wrapper needs it passed explicitly.
 
 set -euo pipefail
 
@@ -43,9 +51,11 @@ mkdir -p "$SAVE_DIR"
 
 export PYTHONPATH="$THIRDPARTY_DIR/Megatron-LM${PYTHONPATH:+:$PYTHONPATH}"
 
-echo "[convert] $HF_DIR -> $SAVE_DIR  (family=$MODEL_FAMILY)"
+echo "[convert] $HF_DIR -> $SAVE_DIR  (family=$MODEL_FAMILY, extra: ${CONVERT_EXTRA_ARGS:-none})"
+# shellcheck disable=SC2086  # CONVERT_EXTRA_ARGS is deliberately word-split
 python "$MILES_REPO/tools/convert_hf_to_torch_dist.py" \
     "${MODEL_ARGS[@]}" \
+    ${CONVERT_EXTRA_ARGS:-} \
     --hf-checkpoint "$HF_DIR" \
     --save "$SAVE_DIR"
 

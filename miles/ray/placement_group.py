@@ -201,13 +201,53 @@ def create_rollout_manager(args, pg):
         args.num_rollout = num_rollout_per_epoch * args.num_epoch
         assert args.num_rollout > 0
 
-    if args.check_weight_update_equal:
-        ray.get(rollout_manager.check_weights.remote(action="snapshot"))
-        ray.get(
-            rollout_manager.check_weights.remote(action="reset_tensors", skip_list=args.check_weight_update_skip_list)
-        )
+    check_weight_update_equal_boot_snapshot(args, rollout_manager)
 
     if args.offload_rollout:
         ray.get(rollout_manager.offload.remote())
 
     return rollout_manager, num_rollout_per_epoch
+
+
+def check_weight_update_equal_boot_snapshot(args, rollout_manager):
+    """Boot-mode reference for --check-weight-update-equal: snapshot the engines'
+    just-loaded weights and poison the checked tensors, before the first sync.
+
+    NOTE: the ray.get blocks until every engine is up, serializing trainer
+    creation behind engine bring-up; after-update mode has no boot-time hook.
+    """
+    if not (args.check_weight_update_equal and args.check_weight_update_equal_mode == "boot"):
+        return
+    selector = args.check_weight_update_selector
+    ray.get(rollout_manager.check_weights.remote(action="snapshot", selector=selector))
+    ray.get(
+        rollout_manager.check_weights.remote(
+            action="reset_tensors", selector=selector, skip_list=args.check_weight_update_skip_list
+        )
+    )
+
+
+async def check_weight_update_equal_after_initial_sync(args, actor_model, rollout_manager):
+    """--check-weight-update-equal compare; call right after the driver's initial
+    update_weights(), before the first rollout.
+
+    boot mode: the boot-time snapshot (poisoned at engine creation) already
+    exists — just compare. after-update mode: snapshot the first broadcast,
+    poison every checked tensor, push a second update_weights, and require a
+    bitwise restore — any mismatch is an uncovered tensor or transport
+    corruption. Every checker action carries the selector so only the compared
+    runners are snapshotted/poisoned.
+    """
+    selector = args.check_weight_update_selector
+    if args.check_weight_update_equal_mode == "after-update":
+        await rollout_manager.check_weights.remote(action="snapshot", selector=selector)
+        await rollout_manager.check_weights.remote(
+            action="reset_tensors", selector=selector, skip_list=args.check_weight_update_skip_list
+        )
+        await actor_model.update_weights()
+    await rollout_manager.check_weights.remote(
+        action="compare",
+        allow_quant_error=args.check_weight_update_allow_quant_error,
+        selector=selector,
+        skip_list=args.check_weight_update_skip_list,
+    )

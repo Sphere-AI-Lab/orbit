@@ -4,7 +4,12 @@ import os
 
 from sglang.srt.constants import GPU_MEMORY_TYPE_CUDA_GRAPH, GPU_MEMORY_TYPE_KV_CACHE, GPU_MEMORY_TYPE_WEIGHTS
 
-from miles.ray.placement_group import create_placement_groups, create_rollout_manager, create_training_models
+from miles.ray.placement_group import (
+    check_weight_update_equal_after_initial_sync,
+    create_placement_groups,
+    create_rollout_manager,
+    create_training_models,
+)
 from miles.utils.arguments import parse_args
 from miles.utils.async_utils import eager_create_task
 from miles.utils.audit_utils.process_identity import MainProcessIdentity
@@ -51,12 +56,7 @@ async def train(args):
     await actor_model.update_weights()
 
     if args.check_weight_update_equal:
-        await rollout_manager.check_weights.remote(
-            action="compare",
-            allow_quant_error=args.check_weight_update_allow_quant_error,
-            selector=args.check_weight_update_selector,
-            skip_list=args.check_weight_update_skip_list,
-        )
+        await check_weight_update_equal_after_initial_sync(args, actor_model, rollout_manager)
 
     if args.offload_rollout:
         await rollout_manager.onload_kv.remote()

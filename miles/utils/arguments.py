@@ -1960,6 +1960,19 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
             )
             parser.add_argument("--check-weight-update-equal", action="store_true")
             parser.add_argument(
+                "--check-weight-update-equal-mode",
+                type=str,
+                default="boot",
+                choices=["boot", "after-update"],
+                help="Reference for the post-update equality check. 'boot': snapshot the "
+                "engines' just-loaded weights at engine creation — anchors to the on-disk "
+                "checkpoint, needs a real-weight boot, and its blocking snapshot "
+                "serializes trainer creation behind engine bring-up. 'after-update': "
+                "snapshot the first broadcast, poison, re-broadcast, compare — proves "
+                "broadcast coverage/determinism, composes with --sglang-load-format "
+                "dummy, but cannot catch wrong-trainer-load / export content bugs.",
+            )
+            parser.add_argument(
                 "--check-weight-update-selector",
                 type=str,
                 default="all",
