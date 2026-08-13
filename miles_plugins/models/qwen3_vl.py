@@ -33,20 +33,14 @@ def install_qwen3_vl_packed_mrope_patch() -> None:
 def _patch_deepstack_output_view() -> None:
     """Keep Qwen3-VL DeepStack activations safe for pipeline pseudo-deallocation."""
     try:
-        block_mod = importlib.import_module(
-            "megatron.bridge.models.qwen_vl.modelling_qwen3_vl.transformer_block"
-        )
+        block_mod = importlib.import_module("megatron.bridge.models.qwen_vl.modelling_qwen3_vl.transformer_block")
         core_utils = importlib.import_module("megatron.core.utils")
     except ImportError:
         return
 
     block_cls = getattr(block_mod, "Qwen3VLTransformerBlock", None)
     make_viewless_tensor = getattr(core_utils, "make_viewless_tensor", None)
-    if (
-        block_cls is None
-        or make_viewless_tensor is None
-        or block_cls.__dict__.get(_DEEPSTACK_VIEWLESS_PATCHED, False)
-    ):
+    if block_cls is None or make_viewless_tensor is None or block_cls.__dict__.get(_DEEPSTACK_VIEWLESS_PATCHED, False):
         return
 
     original = getattr(block_cls, "_deepstack_process", None)
