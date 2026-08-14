@@ -1,8 +1,8 @@
 # Math OFT BS128 Lower-Learning-Rate Sweep Design
 
-**Date:** 2026-08-13  
-**Status:** Approved for implementation planning  
-**Target branch:** `codex/math-oft-b128-lr-sweep`  
+**Date:** 2026-08-13
+**Status:** Approved for implementation planning
+**Target branch:** `codex/math-oft-b128-lr-sweep`
 **Base:** `feat/lora-without-regret@c1ecfdfc6a636fb49c46c3776f2a4709b957ee92`
 
 ## Context
