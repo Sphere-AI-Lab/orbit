@@ -2456,8 +2456,10 @@ def parse_args(add_custom_arguments=None):
         from miles.backends.megatron_utils.arguments import parse_args as megatron_parse_args
         from miles.backends.megatron_utils.arguments import set_default_megatron_args
         from miles.backends.megatron_utils.arguments import validate_args as megatron_validate_args
+        from miles.backends.megatron_utils.cp_contract import cp_comm_type_was_explicit
 
         args = megatron_parse_args(extra_args_provider=add_miles_arguments)
+        args.cp_comm_type_explicit = cp_comm_type_was_explicit(args)
         args.compress_ratios = None
         if args.hf_checkpoint:
             hf_config = load_hf_config(args.hf_checkpoint)
@@ -2496,6 +2498,15 @@ def parse_args(add_custom_arguments=None):
     miles_validate_args(args)
 
     if backend == "megatron":
+        from miles.backends.megatron_utils.cp_contract import normalize_cp_contract
+
+        # miles_validate_args applies --custom-config-path overrides, so resolve
+        # the CP contract only after it has produced the final runtime args.
+        final_model_type = None
+        if args.hf_checkpoint:
+            final_model_type = getattr(load_hf_config(args.hf_checkpoint), "model_type", None)
+        normalize_cp_contract(args, model_type=final_model_type)
+
         megatron_validate_args(args)
 
         # always use varlen
@@ -3155,6 +3166,8 @@ def miles_validate_args(args):
     if args.custom_config_path:
         with open(args.custom_config_path) as f:
             data = yaml.safe_load(f) or {}
+        if "cp_comm_type" in data:
+            args.cp_comm_type_explicit = True
         for k, v in data.items():
             if hasattr(args, k):
                 logger.info(f"Warning: Argument {k} is already set to {getattr(args, k)}, will override with {v}.")

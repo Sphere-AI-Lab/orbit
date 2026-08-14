@@ -46,12 +46,12 @@ def allocate_gpus_for_actor(
         env_vars["DUMPER_SOURCE_PATCHER_CONFIG"] = source_patcher_config
 
     if args.offload_train and args.train_backend == "megatron":
-        import torch_memory_saver
+        # torch_memory_saver ships one .so per GPU runtime (`..._cu12.abi3.so`,
+        # `..._cu13.abi3.so`, unsuffixed for ROCm), so let the package resolve
+        # the variant matching this process' runtime instead of guessing a name.
+        from torch_memory_saver.utils import get_binary_path_from_package
 
-        dynlib_path = os.path.join(
-            os.path.dirname(os.path.dirname(torch_memory_saver.__file__)),
-            "torch_memory_saver_hook_mode_preload.abi3.so",
-        )
+        dynlib_path = str(get_binary_path_from_package("torch_memory_saver_hook_mode_preload"))
         assert os.path.exists(dynlib_path), f"LD_PRELOAD so file {dynlib_path} does not exist."
 
         env_vars["LD_PRELOAD"] = dynlib_path

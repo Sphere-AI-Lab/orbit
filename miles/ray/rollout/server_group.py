@@ -120,6 +120,16 @@ class ServerGroup:
                     "TRITON_CACHE_DIR": (
                         f"/tmp/triton_{os.environ.get('USER', 'unknown')}/{self.worker_type}_rank_{global_rank}"
                     ),
+                    # Input-logprob logits are materialized as one fp32
+                    # [prefill_chunk, vocab] tensor. At the default 8192 prefill
+                    # chunk and a 151936-token vocab that is a single 4.64 GiB
+                    # allocation, which killed both W1 engines (jobs 33456/33457)
+                    # once allocator fragmentation left no contiguous block that
+                    # large. SGLang can compute the same logprobs chunk-by-chunk;
+                    # defaults below match SGLang's own so behaviour is unchanged
+                    # unless a recipe exports these.
+                    "SGLANG_ENABLE_LOGITS_PROCESSER_CHUNK": "false",
+                    "SGLANG_LOGITS_PROCESSER_CHUNK_SIZE": "2048",
                     "SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK": "false",
                     "SGLANG_MEMORY_SAVER_CUDA_GRAPH": "true",
                     "SGLANG_OPT_USE_CUSTOM_ALL_REDUCE_V2": (
