@@ -22,6 +22,7 @@ from tqdm import tqdm
 from miles.backends.training_utils.parallel import get_parallel_state
 from miles.utils.disk_delta import NUM_WORKERS, checksum, make_tensor_reader, overwrite_encode
 from miles.utils.distributed_utils import get_gloo_group
+from miles.utils.timer import timer
 
 from ..common import _check_weight_sync_results
 from .mixin import DistBucketedWeightUpdateMixin
@@ -105,24 +106,39 @@ class UpdateWeightFromDiskDelta(DistBucketedWeightUpdateMixin):
 
     @torch.no_grad()
     def update_weights(self) -> None:
-        # The first call only captures the baseline snapshot the next sync diffs against.
+        # The first call captures the baseline snapshot, then falls through to publish
+        # v1: the delta from the shared base to the trainer's actual current weights.
+        # On a fresh run that delta is (near-)empty; after a --load resume it is the
+        # accumulated training progress. Either way the engines end byte-equal to the
+        # trainer before the first rollout — skipping the publish is how a resumed
+        # run would serve the base model until the second sync.
         if not self._baseline_captured:
             self._capture_baseline()
             self._baseline_captured = True
-            return
 
         self.weight_version += 1
-        self._publish()
-        self._reload_engines()
+        # Stage diagnostics only. These reuse the broadcast/p2p timer names but not their
+        # boundaries: broadcast pauses and flushes the engines *before* its implementation timer,
+        # while here the pull is disk-only and deliberately overlaps generation, so pause/flush
+        # land inside _reload_engines() — neither stage nor their sum compares across transports.
+        # The cross-transport A/B number is the actor-level perf/update_weights_time, whose
+        # boundary (the whole update_weights RPC) is identical for every transport.
+        with timer("update_weights_implementation"):
+            self._publish()
+        with timer("finalize_and_resume_engines"):
+            self._reload_engines()
         self._record_metrics()
 
     def _capture_baseline(self) -> None:
-        """Capture the baseline snapshot the first delta diffs against (no publish), and clear any
-        stale stream from a prior run. Seeds from hf_checkpoint — what each host materializes its
-        base from — so the invariant ``snapshot == engine base`` holds even where the megatron->HF
-        round-trip trims vocab-padding rows (embed/lm_head). A tensor absent there (rare) falls back
-        to the gathered value. pull_weights(0) makes each host materialize its local base now,
-        overlapped with the snapshot gather, so the first real sync only pays the delta apply."""
+        """Capture the baseline snapshot v1 diffs against, and clear any stale stream from a prior
+        run. Seeds from hf_checkpoint — what each host materializes its base from — so the
+        invariant ``snapshot == engine base`` holds even where the megatron->HF round-trip trims
+        vocab-padding rows (embed/lm_head). A tensor absent there (rare) falls back to the gathered
+        value. pull_weights(0) makes each host materialize its local base now (a receiver ahead of
+        version 0 — stale state from a previous run reusing the dir — reseeds itself), overlapped
+        with the snapshot gather. The caller falls through to publish v1 right after, so the first
+        call gathers every tensor twice — once to seed, once to encode; that is startup-only, and
+        merging the passes isn't worth entangling the seeding with the pinned-buffer pipeline."""
         # a prior run's versions would apply against the wrong base; start the dir clean
         pulls = []
         if dist.get_rank() == 0:
@@ -145,22 +161,10 @@ class UpdateWeightFromDiskDelta(DistBucketedWeightUpdateMixin):
 
         self._for_each_hf_bucket(seed_bucket)
         if dist.get_rank() == 0:
+            # No engine reload here even under check_weight_update_equal: the v1 publish
+            # the caller falls through to rewrites every engine tensor (the checker's
+            # expectation) and leaves the engines byte-equal to the trainer.
             _check_weight_sync_results(ray.get(pulls), is_lora=False)
-            if self.args.check_weight_update_equal:
-                # The weights checker resets engine tensors at startup and compares after the
-                # first sync, expecting it to rewrite every tensor. The baseline publishes
-                # nothing, so reload the just-pulled base checkpoint to restore engine state
-                # (and set the engine weight version the CI equality check expects).
-                results = ray.get(
-                    [
-                        engine.update_weights_from_disk.remote(
-                            model_path=self.args.update_weight_local_checkpoint_dir,
-                            weight_version=str(self.weight_version),
-                        )
-                        for engine in self.rollout_engines
-                    ]
-                )
-                _check_weight_sync_results(results, is_lora=False)
             logger.info(
                 "[disk delta] captured baseline snapshot of %d tensors from %s",
                 len(self._snapshot),
