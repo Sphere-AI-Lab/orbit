@@ -81,14 +81,16 @@ source "$MILES_REPO/scripts/models/$DD_MODEL_CONFIG.sh"
 
 # All mutable state — trainer checkpoints, the shared publish dir, each host's
 # local checkpoint — is keyed by the Slurm job id and requeue attempt, so every
-# submission (and every requeue) runs fresh from the base checkpoint. Reuse
-# across submissions is unsafe in two specific ways:
-#   - sglang's pull() never rolls a local checkpoint backward: with a stale
-#     .weight_sync/state.json at version N, pull(0)/pull(1) are no-ops, and a
-#     rerun landing on the same host quietly serves the previous run's weights.
-#   - resume desyncs the baseline: --load restores trainer weights, but the
-#     first update_weights() only seeds its snapshot from --hf-checkpoint and
-#     publishes nothing, so the first rollout samples the *original* model.
+# submission (and every requeue) runs fresh from the base checkpoint. Two
+# reasons:
+#   - a transport A/B is only meaningful when every arm starts from identical
+#     state; a --load that silently picks up a previous submission's checkpoint
+#     would compare different models.
+#   - it makes the recipes safe on environments whose sglang predates the
+#     rerun fix in local_checkpoint.pull(): an old receiver clamps to a stale
+#     .weight_sync/state.json and quietly serves the previous run's weights
+#     (check_delta_roundtrip.py's rerun leg tells you which receiver you have).
+#     With per-job dirs there is no stale state to clamp to.
 # The cost is leftovers: finished jobs leave their dirs behind. Clean
 # checkpoints/dd-* on the shared side and /tmp/miles-delta-local-ckpt/ on the
 # rollout hosts when done with a measurement campaign.

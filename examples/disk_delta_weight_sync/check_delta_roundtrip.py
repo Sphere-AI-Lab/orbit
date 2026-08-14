@@ -15,6 +15,11 @@ find out. Publisher and receiver run in the same process against a directory on 
 proves nothing about whether *another* host can see the shared publish dir; cross-host visibility
 is what the multi-node smoke recipes establish.
 
+Every run ends with a rerun leg: a fresh version stream applied over the local checkpoint dir the
+first stream left behind, which passes only if the receiver reseeds stale local state instead of
+clamping to its applied-version marker (receivers without the rerun fix clamp — and a real rerun
+then serves the previous run's weights).
+
 Usage:
 
     # zero setup: synthesizes a small checkpoint, runs the full round trip
@@ -187,6 +192,62 @@ def encode_version(
     return deltas, checksums, changed_bytes, total_bytes
 
 
+def check_rerun(
+    pull,
+    base: str,
+    published: str,
+    local: str,
+    names: list[str],
+    stale_version: int,
+    encoding: str,
+    algorithm: str,
+    density: float,
+    nudge: int,
+) -> None:
+    """A rerun reusing the local checkpoint dir — the second thing a first bring-up hits.
+
+    The trainer's baseline wipes the publish dir, reseeds its snapshot from base, and
+    publishes a fresh v1; meanwhile the local dir still carries the previous stream's
+    state and applied-version marker. The receiver must treat a marker *ahead* of the
+    requested version as dead state and reseed. A receiver that instead clamps to the
+    marker turns both pulls into no-ops and serves the previous run's weights — the
+    exact failure this leg exists to catch, and what pre-fix receivers silently do.
+    """
+    read = make_tensor_reader(base)
+    base_state = {name: read(name) for name in names}
+    stale = make_tensor_reader(local)
+    stale_state = {name: stale(name) for name in names}
+
+    shutil.rmtree(published)  # what the trainer's baseline rmtree does
+    rng = np.random.default_rng(5678)  # a different training trajectory than the first stream
+    truth = {name: mutate(buf, density, rng, nudge) for name, buf in base_state.items()}
+
+    t0 = time.perf_counter()
+    pull(local_checkpoint_dir=local, base_dir=base, source_dir=published, target_version=0)
+    deltas, checksums, _, _ = encode_version(base_state, truth, encoding, algorithm)
+    publish_version(os.path.join(published, "weight_v000001"), deltas, checksums, 1, encoding, algorithm)
+    pull(local_checkpoint_dir=local, base_dir=base, source_dir=published, target_version=1)
+    elapsed = time.perf_counter() - t0
+
+    applied = make_tensor_reader(local)
+    for name in names:
+        got = applied(name)
+        if np.array_equal(got, truth[name]):
+            continue
+        if np.array_equal(got, stale_state[name]):
+            raise SystemExit(
+                f"FAIL rerun: {name} still holds the previous stream's bytes — the receiver "
+                "clamped to the stale applied-version marker instead of reseeding. This sglang "
+                "predates the rerun fix: reusing a local checkpoint dir across runs will serve "
+                "the previous run's weights."
+            )
+        bad = int(np.count_nonzero(got != truth[name]))
+        raise SystemExit(f"FAIL rerun: {name} differs in {bad} of {got.nbytes} bytes")
+    print(
+        f"rerun: fresh stream over a local dir left at v{stale_version} — applied byte-exactly  ({elapsed:.2f}s)  OK"
+    )
+
+
 def corrupt_last_delta(version_dir: str) -> None:
     """Falsify one tensor's recorded checksum.
 
@@ -331,9 +392,23 @@ def main() -> int:
                 f"({total / max(wire, 1):5.1f}x)  publish {t_publish:5.2f}s  apply {t_apply:5.2f}s  OK"
             )
 
+        if args.versions >= 1:
+            check_rerun(
+                pull,
+                base,
+                published,
+                local,
+                names,
+                stale_version=args.versions,
+                encoding=args.encoding,
+                algorithm=args.checksum,
+                density=args.density,
+                nudge=args.nudge,
+            )
+
         print(
-            f"\nPASS — {args.versions} version(s) published by miles' encoder "
-            "and applied byte-exactly by sglang's receiver."
+            f"\nPASS — {args.versions} version(s) published by miles' encoder and applied "
+            "byte-exactly by sglang's receiver, including a rerun over the stale local dir."
         )
         return 0
     finally:

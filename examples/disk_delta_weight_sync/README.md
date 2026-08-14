@@ -179,8 +179,9 @@ falsified checksum is refused rather than applied.
   every GPU run used `xor` + `xxh3-128`.
 - **The object-store hooks** (`--custom-update-weight-post-write-path`,
   `--sglang-custom-pull-weights-pre-read-hook`) have never been invoked.
-- **Late-joining hosts / chain reset**, engine restart mid-stream, and the per-host disk ceiling at
-  355B scale (~700 GB/host).
+- **Engine restart mid-stream on GPU** — a late-joining host replaying the whole chain, and the
+  per-host disk ceiling at 355B scale (~700 GB/host). (Rerun over a stale local dir and a resumed
+  baseline have CPU coverage via the rerun leg; neither has run multi-GPU.)
 
 ## Start here: the format check
 
@@ -192,13 +193,16 @@ runs) and verifies the patched checkpoint byte-for-byte:
 python examples/disk_delta_weight_sync/check_delta_roundtrip.py
 ```
 
-Run it **in the environment the training job uses**. Its job is catching two of the things that
+Run it **in the environment the training job uses**. Its job is catching three of the things that
 break a first bring-up — a codec or checksum dependency missing from the runtime env
 (`blake3`, `xxhash`, `zstandard` are pinned in `requirements.txt` but easy to miss in an env built
-before disk-delta landed), and an encoding the two sides disagree about. A login-node pass says
-nothing about the compute nodes. And because publisher and receiver run in one process against a
-directory on one host, it says nothing about whether *another* host can see the shared publish
-dir — cross-host visibility is what the multi-node smoke recipes (`02`, `04`) establish.
+before disk-delta landed), an encoding the two sides disagree about, and an sglang whose receiver
+predates the rerun fix (every run ends with a rerun leg: a fresh stream applied over the stale
+local dir the first stream left, which an old receiver silently ignores — meaning a real rerun
+would serve the previous run's weights). A login-node pass says nothing about the compute nodes.
+And because publisher and receiver run in one process against a directory on one host, it says
+nothing about whether *another* host can see the shared publish dir — cross-host visibility is
+what the multi-node smoke recipes (`02`, `04`) establish.
 
 Useful variants:
 
@@ -296,14 +300,14 @@ Four things to get right:
 
 - **Every submission runs fresh.** `_common.sh` keys all mutable state — trainer checkpoints, the
   publish dir, each host's local checkpoint — by the Slurm job id and requeue attempt
-  (`DD_STATE_TAG`), because reuse across submissions is quietly wrong: sglang's `pull()` never
-  rolls a local checkpoint *backward*, so a stale `.weight_sync/state.json` at version N makes
+  (`DD_STATE_TAG`). Partly for the benchmark (an A/B is only meaningful when every arm starts
+  from identical state), partly for robustness: on an environment whose sglang predates the rerun
+  fix in `local_checkpoint.pull()`, a stale `.weight_sync/state.json` at version N makes
   `pull(0)`/`pull(1)` no-ops and a rerun landing on the same host serves the previous run's
-  weights. Resume is wrong for a different reason — `--load` restores trainer weights, but the
-  first `update_weights()` only seeds its snapshot from `--hf-checkpoint` and publishes nothing,
-  so the first rollout samples the *original* model. The flip side: finished jobs leave their
-  dirs behind — clean `checkpoints/dd-*` and the rollout hosts' `/tmp/miles-delta-local-ckpt/`
-  after a measurement campaign.
+  weights — with per-job dirs there is no stale state to clamp to. (Fixed receivers reseed
+  instead; the format check's rerun leg tells you which you have.) The flip side: finished jobs
+  leave their dirs behind — clean `checkpoints/dd-*` and the rollout hosts'
+  `/tmp/miles-delta-local-ckpt/` after a measurement campaign.
 - **The publish dir is wiped at baseline** (the trainer `rmtree`s it — a stale version stream
   would apply against the wrong base) **and then grows for the whole run**: one `weight_v*/` per
   sync, none of which can be pruned mid-run, because a restarted engine host seeds from base and
@@ -368,8 +372,12 @@ most likely the snapshot and the engine base disagree. The snapshot is seeded fr
 `--hf-checkpoint` rather than from current GPU weights precisely so they agree even where the
 Megatron→HF round trip trims vocab padding on `embed`/`lm_head`.
 
-**Sync #1 publishes nothing.** The first `update_weights()` call only captures the baseline; deltas
-start at v1, the second sync. A run of fewer than three syncs measures almost nothing.
+**Sync #1 is not representative.** The first `update_weights()` call captures the baseline
+snapshot and publishes v1: the delta from the shared base to the trainer's actual weights —
+(near-)empty on a fresh run, the accumulated training progress after a `--load` resume. Either
+way the engines are byte-equal to the trainer before the first rollout, but v1's wire size and
+timing reflect startup, not steady state; read from v2 on, and treat a run of fewer than three
+syncs as measuring almost nothing.
 
 ## Constraints
 
@@ -381,13 +389,16 @@ Asserted at startup in [`miles/utils/arguments.py`](../../miles/utils/arguments.
 - **No LoRA** (`--lora-rank > 0`).
 - **`--hf-checkpoint` must be a local directory**; the baseline is seeded from its safetensors bytes.
 
-And one these recipes impose on themselves rather than inherit from the asserts:
+And one the recipes impose on themselves rather than inherit from the asserts:
 
-- **No resume.** disk-delta seeds its baseline from `--hf-checkpoint` and publishes nothing on the
-  first sync, so a run resumed via `--load` would serve the original weights for its first rollout
-  — and a host-local checkpoint left by an earlier run would silently stay stale (see
-  [the two directories](#the-two-directories)). Until the transport gains an explicit local reset
-  and a resumed-weight push, every submission here starts from scratch by construction.
+- **These recipes never resume** — every submission starts from scratch by construction (see
+  [the two directories](#the-two-directories)), because a benchmark wants identical arms. The
+  *transport* does support rerun and resume: the receiver reseeds a local checkpoint whose state
+  is ahead of the requested version instead of clamping to it, and the baseline publishes v1 (the
+  delta from the shared base to the trainer's actual weights), so a `--load`-resumed trainer
+  pushes its progress before the first rollout rather than serving the base model. Rerun-over-
+  stale-state has CPU coverage via the format check's rerun leg; a full multi-GPU resume run has
+  not been exercised.
 
 ## Object-store filesystems
 
