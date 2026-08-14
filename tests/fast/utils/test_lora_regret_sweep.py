@@ -502,11 +502,10 @@ class TestE4Matrix:
     """E4 decides C5 (LoRA matches FullFT under policy gradient even at rank 1,
     with a wider band of performant LRs)."""
 
-    def test_arm_count_is_seventy(self):
-        """Figure 6 is two panels, so every cell runs once per dataset: five
-        cells x seven learning rates x two datasets."""
+    def test_arm_count_is_ninety_eight(self):
+        """Figure 6 is two panels: seven cells x seven LRs x two datasets."""
         arms = e4_arms()
-        assert len(arms) == 70
+        assert len(arms) == 98
         assert sum(1 for a in arms if a.method != "oft") == 56
         assert {a.dataset for a in arms} == {"gsm8k", "math"}
 
@@ -514,13 +513,12 @@ class TestE4Matrix:
         """C5's whole point. Not the arm to drop under budget pressure."""
         assert {a.rank for a in e4_arms() if a.method == "lora"} == {1, 16, 256}
 
-    def test_seven_lrs_per_arm(self):
-        """5 cells: FullFT, LoRA r1/r16/r256, and the RL OFT scout. All seven
-        LRs wide -- the OFT cell mirrors the width it is compared against."""
+    def test_seven_lrs_per_cell(self):
+        """FullFT, three LoRA ranks, and three OFT blocks each span seven LRs."""
         cells = {}
         for arm in e4_arms():
             cells.setdefault((arm.dataset, arm.method, arm.rank, arm.oft_block_size), []).append(arm.lr)
-        assert len(cells) == 10, "five cells on each of two datasets"
+        assert len(cells) == 14, "seven cells on each of two datasets"
         assert all(len(lrs) == 7 for lrs in cells.values())
 
     def test_the_two_grids_sit_two_decades_apart_and_still_overlap(self):
