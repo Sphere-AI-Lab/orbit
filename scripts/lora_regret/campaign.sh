@@ -42,6 +42,8 @@
 #                       varies problem order and sampling together.
 #   GPUS_PER_NODE=8
 #   SKIP_PREFLIGHT=0    set 1 to skip the pre-run audit
+#   PREFLIGHT_STAGE=e4  preflight stage; dedicated wrappers may select a
+#                       stricter matrix-specific stage
 #   DRY_RUN=0           set 1 to print the launcher commands and run nothing
 #
 # Resumable: the sweep appends `status: "ok"` per finished arm and skips those on
@@ -62,6 +64,7 @@ ALLOW_OFT=${ALLOW_OFT:-0}
 SEED=${SEED:-0}
 GPUS_PER_NODE=${GPUS_PER_NODE:-8}
 SKIP_PREFLIGHT=${SKIP_PREFLIGHT:-0}
+PREFLIGHT_STAGE=${PREFLIGHT_STAGE:-e4}
 DRY_RUN=${DRY_RUN:-0}
 : "${DATA_DIR:=/lustre/fast/fast/groups/ei-slm/data/lora_regret}"
 export DATA_DIR GPUS_PER_NODE
@@ -97,13 +100,13 @@ if ! python -c "import megatron.core" >/dev/null 2>&1; then
 fi
 
 # --- preflight -------------------------------------------------------------
-# Stage e4: eight cards, both checkpoints, the splits at their row counts, and
-# every matrix building. Cheap, and it catches the two failures that would
+# The selected stage checks its GPU floor, both checkpoints, the splits at their
+# row counts, and every matrix building. Cheap, and it catches failures that would
 # otherwise waste the node -- a venv of dangling symlinks (which imports
 # *successfully*) and a truncated split.
 if [[ "${SKIP_PREFLIGHT}" != "1" ]]; then
-    say "preflight (stage e4)"
-    if ! python -m tools.lora_regret.preflight --stage e4; then
+    say "preflight (stage ${PREFLIGHT_STAGE})"
+    if ! python -m tools.lora_regret.preflight --stage "${PREFLIGHT_STAGE}"; then
         echo "preflight failed -- fix it before spending the node." >&2
         exit 1
     fi

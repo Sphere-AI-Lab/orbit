@@ -858,10 +858,10 @@ def e4_arms(
 
 
 def e4_math_oft_b128_low_arms(
-    hidden_size: int,
-    ffn_size: int,
-    qkv_output_size: int,
+    hidden_size: int = LLAMA31_8B_HIDDEN,
+    ffn_size: int = LLAMA31_8B_FFN,
     seed: int = 0,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
 ) -> list[Arm]:
     """Math OFT BS128 at five lower learning rates under the E4 protocol."""
     shapes = megatron_module_shapes(hidden_size, ffn_size, qkv_output_size)
@@ -1302,7 +1302,7 @@ MATRICES = {
         qkv_output_size=qkv_output,
     ),
     "e4oftb128low": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: (
-        e4_math_oft_b128_low_arms(hidden, ffn, qkv_output, seed=seed)
+        e4_math_oft_b128_low_arms(hidden, ffn, seed=seed, qkv_output_size=qkv_output)
     ),
     "e4lr0": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e4lr0_arms(
         seed=seed,
