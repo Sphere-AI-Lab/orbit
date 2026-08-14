@@ -17,7 +17,8 @@ from megatron.core.transformer.spec_utils import import_module
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.training.arguments import core_transformer_config_from_args
 
-from miles.backends.megatron_utils.cp_contract import canonicalize_cp_comm_type
+from miles.backends.megatron_utils.cp_contract import canonicalize_cp_comm_type, cp_comm_type_was_explicit
+from miles.backends.training_utils.parallel import get_parallel_state, is_parallel_state_initialized
 from miles.utils.audit_utils.witness.module import install_witness
 from miles.utils.misc import load_function
 from miles.utils.replay_base import routing_replay_manager
@@ -45,10 +46,25 @@ def _apply_bridge_runtime_config(provider, args: argparse.Namespace) -> None:
     provider.expert_tensor_parallel_size = args.expert_tensor_parallel_size
     provider.sequence_parallel = args.sequence_parallel
     provider.context_parallel_size = args.context_parallel_size
-    cp_comm_type = getattr(args, "cp_comm_type_canonical", None)
-    if cp_comm_type is None:
-        cp_comm_type = canonicalize_cp_comm_type(getattr(args, "cp_comm_type", None))
-    provider.cp_comm_type = cp_comm_type
+    requested_cp_comm_type = getattr(args, "cp_comm_type_canonical", None)
+    if requested_cp_comm_type is None:
+        requested_cp_comm_type = canonicalize_cp_comm_type(getattr(args, "cp_comm_type", None))
+    provider_cp_comm_type = canonicalize_cp_comm_type(getattr(provider, "cp_comm_type", None), default_to_p2p=False)
+    if provider_cp_comm_type is not None:
+        if cp_comm_type_was_explicit(args) and requested_cp_comm_type != provider_cp_comm_type:
+            raise ValueError(
+                "Bridge CP transport conflict: "
+                f"explicit cp_comm_type={requested_cp_comm_type}, provider requires {provider_cp_comm_type}"
+            )
+        effective_cp_comm_type = provider_cp_comm_type
+    else:
+        effective_cp_comm_type = requested_cp_comm_type
+
+    provider.cp_comm_type = effective_cp_comm_type
+    args.cp_comm_type = [effective_cp_comm_type]
+    args.cp_comm_type_canonical = effective_cp_comm_type
+    if is_parallel_state_initialized():
+        get_parallel_state().cp_comm_type = effective_cp_comm_type
     provider.hierarchical_context_parallel_sizes = getattr(args, "hierarchical_context_parallel_sizes", None)
 
     # loss / sequence handling

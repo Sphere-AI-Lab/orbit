@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import sys
 from argparse import Namespace
 from collections.abc import Sequence
 
@@ -10,6 +11,17 @@ from collections.abc import Sequence
 _CP_COMM_TYPES = {"p2p", "a2a", "all_gather", "a2a+p2p"}
 _CP_COMM_ALIASES = {"allgather": "all_gather"}
 _QWEN3_VL_MODEL_TYPES = {"qwen3_vl", "qwen3_vl_moe"}
+
+
+def cp_comm_type_was_explicit(args: Namespace, argv: Sequence[str] | None = None) -> bool:
+    """Return whether the runtime CP transport came from an explicit user choice."""
+
+    marker = getattr(args, "cp_comm_type_explicit", None)
+    if marker is not None:
+        return bool(marker)
+
+    tokens = sys.argv[1:] if argv is None else argv
+    return any(token == "--cp-comm-type" or token.startswith("--cp-comm-type=") for token in tokens)
 
 
 def canonicalize_cp_comm_type(value, *, default_to_p2p: bool = True) -> str | None:
