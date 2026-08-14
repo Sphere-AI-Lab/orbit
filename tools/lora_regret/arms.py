@@ -3,7 +3,7 @@
 Two LR grids, because the LoRA and FullFT optima sit a decade apart and one
 shared grid would spend most of its points where nothing happens.
 
-Six matrices, selected by ``sweep.py --matrix``:
+Matrices selected by ``sweep.py --matrix``:
 
 * ``sft82`` (:func:`sft_arms`) -- the original 82-arm LoRA/OFT matrix, on 7-point
   grids that *bracket* the published optima. Kept byte-for-byte because the gate
@@ -18,6 +18,9 @@ Six matrices, selected by ``sweep.py --matrix``:
 * ``e4`` -- RL (C5). Scored by accuracy, not NLL, and driven through the RL
   launcher; two seven-point windows an order of magnitude apart, each spanning
   200x, because C5's second half is about the *width* of the performant band.
+* ``e4oftb128low`` -- a dedicated Math-only BS128 OFT scout below the original
+  E4 learning-rate window. It isolates learning rate while holding capacity,
+  placement, seed, and the full E4 protocol fixed.
 * ``e5scout`` / ``e5`` -- matched-parameter OFT. The scout comes first and the
   refinement grid is centred on its argmin; see :func:`e5_arms` for why the match
   is solved by inverting to a LoRA rank rather than by choosing a block size.
@@ -775,6 +778,7 @@ def e3_arms(
 # E4's explicit low/middle/high OFT capacity ladder. b128 is the selected middle
 # rung; it deliberately replaces the automatically nearest b64 block.
 E4_OFT_BLOCK_LADDER = (8, 128, 1024)
+E4_MATH_OFT_B128_LOW_LRS = (1e-7, 3e-7, 1e-6, 3e-6, 1e-5)
 
 
 def e4_arms(
@@ -851,6 +855,34 @@ def e4_arms(
                     )
                 )
     return arms
+
+
+def e4_math_oft_b128_low_arms(
+    hidden_size: int,
+    ffn_size: int,
+    qkv_output_size: int,
+    seed: int = 0,
+) -> list[Arm]:
+    """Math OFT BS128 at five lower learning rates under the E4 protocol."""
+    shapes = megatron_module_shapes(hidden_size, ffn_size, qkv_output_size)
+    selected_shapes = {
+        name: shape for name, shape in shapes.items() if name in ALL_MODULES.split(",")
+    }
+    report = oft_lora_match_report(128, selected_shapes)
+    return [
+        Arm(
+            _name("oftlow", "b128", ALL_MODULES, lr, seed, extra="math"),
+            "oft",
+            None,
+            128,
+            ALL_MODULES,
+            lr,
+            seed,
+            dataset="math",
+            matched_ratio=report["ratio"],
+        )
+        for lr in E4_MATH_OFT_B128_LOW_LRS
+    ]
 
 
 def e4lr0_arms(
@@ -1268,6 +1300,9 @@ MATRICES = {
     "e4": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e4_arms(
         seed=seed, hidden_size=hidden, ffn_size=ffn, oft_lr_centre=oft_lr_centre,
         qkv_output_size=qkv_output,
+    ),
+    "e4oftb128low": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: (
+        e4_math_oft_b128_low_arms(hidden, ffn, qkv_output, seed=seed)
     ),
     "e4lr0": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e4lr0_arms(
         seed=seed,

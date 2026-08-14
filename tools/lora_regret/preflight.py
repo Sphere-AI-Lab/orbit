@@ -43,6 +43,7 @@ EXPECTED_ROWS = {
 EXPECTED_ARMS = {
     "e1": 45, "e2": 48, "e3": 35, "e4": 98, "e5scout": 5, "e5": 50, "sft82": 82,
     "e1ot": 45, "e1short": 21, "e4lr0": 6, "e4place": 35, "e5rl": 42,
+    "e4oftb128low": 5,
 }
 
 # What each stage needs before it is worth starting. P3 is 2 rather than 1
@@ -57,6 +58,7 @@ STAGE_GPU_REQUIREMENTS = {
     "e1-full": 4,
     "e2-full": 4,
     "e4": 8,
+    "e4oftb128low": 8,
     # e1ot and e1short are LoRA-and-FullFT matrices, but their FullFT arms are
     # selected with --only and run on the e1-full allocation; the stage floor
     # here is the LoRA one, which is what an operator checks before the bulk of
