@@ -113,10 +113,12 @@ class UpdateWeightFromDiskDelta(DistBucketedWeightUpdateMixin):
             return
 
         self.weight_version += 1
-        # Same two timer names the broadcast/p2p paths report, so a transport A/B compares like
-        # with like. The split differs in where the engines pause: broadcast pauses before its
-        # implementation timer, while the delta pull is disk-only and deliberately overlaps
-        # generation, so only the sum of the two is directly comparable across transports.
+        # Stage diagnostics only. These reuse the broadcast/p2p timer names but not their
+        # boundaries: broadcast pauses and flushes the engines *before* its implementation timer,
+        # while here the pull is disk-only and deliberately overlaps generation, so pause/flush
+        # land inside _reload_engines() — neither stage nor their sum compares across transports.
+        # The cross-transport A/B number is the actor-level perf/update_weights_time, whose
+        # boundary (the whole update_weights RPC) is identical for every transport.
         with timer("update_weights_implementation"):
             self._publish()
         with timer("finalize_and_resume_engines"):

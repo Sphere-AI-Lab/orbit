@@ -192,11 +192,13 @@ runs) and verifies the patched checkpoint byte-for-byte:
 python examples/disk_delta_weight_sync/check_delta_roundtrip.py
 ```
 
-Run it **in the environment the training job uses**. Its main job is catching the three things that
+Run it **in the environment the training job uses**. Its job is catching two of the things that
 break a first bring-up — a codec or checksum dependency missing from the runtime env
 (`blake3`, `xxhash`, `zstandard` are pinned in `requirements.txt` but easy to miss in an env built
-before disk-delta landed), an encoding the two sides disagree about, and a shared directory the
-engine can't read. A login-node pass says nothing about the compute nodes.
+before disk-delta landed), and an encoding the two sides disagree about. A login-node pass says
+nothing about the compute nodes. And because publisher and receiver run in one process against a
+directory on one host, it says nothing about whether *another* host can see the shared publish
+dir — cross-host visibility is what the multi-node smoke recipes (`02`, `04`) establish.
 
 Useful variants:
 
@@ -249,7 +251,7 @@ checkpoints are already on slinky, outside `HF_CACHE_DIR`, so `submit.sh` skips 
 | | |
 |---|---|
 | `--hf-checkpoint` | `/data/shared/models/Qwen3-30B-A3B` (16 shards, 57 GB) |
-| `--ref-load` | `/data/home/zeju/models/Qwen3-30B-A3B_torch_dist` — a user-specific path; override `DD_HF_TORCHDIST_DIR` elsewhere |
+| `--ref-load` | **no default — set `DD_HF_TORCHDIST_DIR`** to your own torch_dist conversion (no shared one exists); `scripts/slurm/setup/convert_checkpoint.sh` produces it once |
 
 Two reasons the MoE arm matters, and the second is the one that justifies running it before any
 measurement:
@@ -290,16 +292,32 @@ converted `torch_dist` yet.
 | `--update-weight-disk-dir` | Shared filesystem. Trainer writes one `weight_v{N:06d}/` per sync; every rollout host reads it. |
 | `--update-weight-local-checkpoint-dir` | **Host-local** (NVMe if you have it). A full HF checkpoint each engine patches in place. |
 
-Two things to get right:
+Four things to get right:
 
-- **The publish dir is wiped.** The trainer `rmtree`s it when it captures the baseline — a stale
-  version stream from a previous run would apply against the wrong base. Point it at per-run
-  scratch, never at anything you want to keep. `_common.sh` defaults to
-  `$MILES_REPO/checkpoints/$RUN_NAME/delta-updates`.
+- **Every submission runs fresh.** `_common.sh` keys all mutable state — trainer checkpoints, the
+  publish dir, each host's local checkpoint — by the Slurm job id and requeue attempt
+  (`DD_STATE_TAG`), because reuse across submissions is quietly wrong: sglang's `pull()` never
+  rolls a local checkpoint *backward*, so a stale `.weight_sync/state.json` at version N makes
+  `pull(0)`/`pull(1)` no-ops and a rerun landing on the same host serves the previous run's
+  weights. Resume is wrong for a different reason — `--load` restores trainer weights, but the
+  first `update_weights()` only seeds its snapshot from `--hf-checkpoint` and publishes nothing,
+  so the first rollout samples the *original* model. The flip side: finished jobs leave their
+  dirs behind — clean `checkpoints/dd-*` and the rollout hosts' `/tmp/miles-delta-local-ckpt/`
+  after a measurement campaign.
+- **The publish dir is wiped at baseline** (the trainer `rmtree`s it — a stale version stream
+  would apply against the wrong base) **and then grows for the whole run**: one `weight_v*/` per
+  sync, none of which can be pruned mid-run, because a restarted engine host seeds from base and
+  replays the entire chain. `_common.sh` therefore refuses to start when
+  `DD_NUM_ROLLOUT × DD_DELTA_MB_HINT` exceeds `DD_DISK_BUDGET_GB` (default 25 GB) — at the old
+  3000-rollout default that stream would have been ~390 GB dense / ~1.5 TB MoE. Raise the budget
+  only deliberately.
 - **The local dir holds a whole checkpoint per host**, ~8 GB for Qwen3-4B in bf16. `_common.sh`
-  defaults to `/tmp/miles-delta-local-ckpt/$RUN_NAME`; override `DD_LOCAL_CKPT_DIR` if `/tmp` is
-  small or is not node-local on your nodes. Putting it on the *shared* filesystem defeats the
-  entire mechanism.
+  defaults to `/tmp/miles-delta-local-ckpt/$RUN_NAME-$DD_STATE_TAG`; override `DD_LOCAL_CKPT_DIR`
+  if `/tmp` is small or is not node-local on your nodes. Putting it on the *shared* filesystem
+  defeats the entire mechanism.
+- **Periodic trainer saves are off by default** (`DD_SAVE_INTERVAL` defaults past the bounded
+  run): nothing here resumes, and full Megatron saves would dwarf the delta stream on disk. Set
+  `DD_SAVE_INTERVAL=20` when you need checkpoints to debug.
 
 ### Knobs
 
@@ -310,10 +328,14 @@ All read by `_common.sh` from the environment or the wrapper:
 | `DD_TRANSFER_MODE` | `disk-delta` | `broadcast` for the control arm |
 | `DD_ENCODING` | `xor` | `new ^ old`; smallest and fastest, but an involution — it must land exactly once on the right base. `overwrite` stores positions + absolute values: larger, idempotent. |
 | `DD_CHECKSUM` | `xxh3-128` | `blake3` for untrusted storage, `adler32` for interop |
-| `DD_DISK_DIR` | `$MILES_REPO/checkpoints/$RUN_NAME/delta-updates` | shared; wiped at baseline |
-| `DD_LOCAL_CKPT_DIR` | `/tmp/miles-delta-local-ckpt/$RUN_NAME` | host-local |
+| `DD_STATE_TAG` | `$SLURM_JOB_ID-r$SLURM_RESTART_COUNT` | keys all mutable state; makes every submission fresh |
+| `DD_DISK_DIR` | `$MILES_REPO/checkpoints/$RUN_NAME-$DD_STATE_TAG/delta-updates` | shared; wiped at baseline |
+| `DD_LOCAL_CKPT_DIR` | `/tmp/miles-delta-local-ckpt/$RUN_NAME-$DD_STATE_TAG` | host-local |
 | `DD_CHECK_EQUAL` | `0` | `1` adds `--check-weight-update-equal`; on for `01` and `04` |
-| `DD_NUM_ROLLOUT` | `3000` | `01` and `04` use 5 |
+| `DD_NUM_ROLLOUT` | `40` | one sync per rollout; the smokes use 5 |
+| `DD_DISK_BUDGET_GB` | `25` | refuses to start if the estimated publish stream exceeds it |
+| `DD_DELTA_MB_HINT` | `150` (MoE block: `600`) | measured per-sync publish size feeding the budget check |
+| `DD_SAVE_INTERVAL` | `1000` | periodic trainer saves; default lands past any bounded run |
 | `DD_MODEL_CONFIG` | `qwen3-4B` | names a file in `scripts/models/` |
 | `DD_HF_MODEL_DIR` / `DD_HF_TORCHDIST_DIR` | Qwen3-4B under `HF_CACHE_DIR` | checkpoint paths |
 | `DD_TP` / `DD_PP` / `DD_CP` / `DD_EP` / `DD_ETP` | `2/1/1/1/1` | training parallelism |
@@ -333,6 +355,14 @@ The trainer logs per sync and records two metrics the actor drains onto the step
 | `perf/update_weights_density` | fraction of weight bytes that changed — the premise. ~1–3% is the expected operating point. |
 | `perf/update_weights_wire_bytes` | compressed bytes actually written |
 
+**For a transport A/B, compare `perf/update_weights_time`** — the actor-level timer around the
+whole update, whose boundary is identical for every transport. The per-stage timers
+(`perf/update_weights_implementation_time`, `perf/finalize_and_resume_engines_time`) share names
+across transports but not boundaries: broadcast pauses the engines before its implementation
+timer, while disk-delta's pull overlaps generation and pauses inside the finalize stage. Neither
+the stages nor their sum compares across transports; read them only as stage attribution within
+one transport.
+
 A density near 100% means the diff is finding no reuse and something is wrong with the baseline —
 most likely the snapshot and the engine base disagree. The snapshot is seeded from
 `--hf-checkpoint` rather than from current GPU weights precisely so they agree even where the
@@ -350,6 +380,14 @@ Asserted at startup in [`miles/utils/arguments.py`](../../miles/utils/arguments.
 - **No PD disaggregation** (`--prefill-num-servers`) — untested.
 - **No LoRA** (`--lora-rank > 0`).
 - **`--hf-checkpoint` must be a local directory**; the baseline is seeded from its safetensors bytes.
+
+And one these recipes impose on themselves rather than inherit from the asserts:
+
+- **No resume.** disk-delta seeds its baseline from `--hf-checkpoint` and publishes nothing on the
+  first sync, so a run resumed via `--load` would serve the original weights for its first rollout
+  — and a host-local checkpoint left by an earlier run would silently stay stale (see
+  [the two directories](#the-two-directories)). Until the transport gains an explicit local reset
+  and a resumed-weight push, every submission here starts from scratch by construction.
 
 ## Object-store filesystems
 

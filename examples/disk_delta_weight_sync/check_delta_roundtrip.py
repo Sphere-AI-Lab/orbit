@@ -8,10 +8,12 @@ every rollout host — and verifies the patched checkpoint is byte-identical to 
 intended.
 
 That makes it a genuine cross-implementation check rather than a self-consistency one: the
-publisher here is a transcription of miles' encoder, the applier is sglang's own. It catches the
-three things that actually break a first bring-up — a missing codec/checksum dependency in the
-runtime env, an encoding the two sides disagree about, and a shared directory the engine can't
-read — without burning a multi-GPU allocation to find out.
+publisher here is a transcription of miles' encoder, the applier is sglang's own. It catches two
+of the things that break a first bring-up — a missing codec/checksum dependency in the runtime
+env, and an encoding the two sides disagree about — without burning a multi-GPU allocation to
+find out. Publisher and receiver run in the same process against a directory on this host, so it
+proves nothing about whether *another* host can see the shared publish dir; cross-host visibility
+is what the multi-node smoke recipes establish.
 
 Usage:
 
@@ -296,8 +298,16 @@ def main() -> int:
                 corrupt_last_delta(version_dir)
                 try:
                     pull(local_checkpoint_dir=local, base_dir=base, source_dir=published, target_version=version)
-                except Exception as e:
-                    print(f"v{version}: corrupted delta rejected — {type(e).__name__}: {e}")
+                except RuntimeError as e:
+                    # Only the per-tensor integrity rejection counts as a pass. The receiver
+                    # raises RuntimeError for other reasons too (e.g. an out-of-order delta),
+                    # and a missing version or malformed index raises something else entirely —
+                    # counting any of those as "rejected" would mask a broken checksum layer.
+                    if "checksum mismatch" not in str(e):
+                        raise SystemExit(
+                            f"FAIL v{version}: expected a checksum-mismatch rejection, got {type(e).__name__}: {e}"
+                        ) from e
+                    print(f"v{version}: corrupted delta rejected — {e}")
                     print("\nPASS — the receiver refused a corrupted delta instead of serving bad weights.")
                     return 0
                 raise SystemExit(f"FAIL v{version}: a corrupted delta was applied without complaint")

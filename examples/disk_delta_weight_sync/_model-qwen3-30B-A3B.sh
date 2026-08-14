@@ -17,12 +17,21 @@
 # Parallelism mirrors examples/p2p_weight_transfer/run-qwen3-30B-A3B-4node-profile.sh, which
 # is the validated shape for this model on 4 nodes: 2 training + 2 rollout.
 
-# Checkpoints already on the cluster, outside HF_CACHE_DIR — submit.sh skips the download
-# because HF_MODEL_DIR/config.json is present.
+# The HF checkpoint is already on the cluster, outside HF_CACHE_DIR — submit.sh skips the
+# download because HF_MODEL_DIR/config.json is present.
 DD_MODEL_CONFIG=qwen3-30B-A3B
 DD_HF_MODEL_REPO=Qwen/Qwen3-30B-A3B
 DD_HF_MODEL_DIR=${DD_HF_MODEL_DIR:-/data/shared/models/Qwen3-30B-A3B}
-DD_HF_TORCHDIST_DIR=${DD_HF_TORCHDIST_DIR:-/data/home/zeju/models/Qwen3-30B-A3B_torch_dist}
+
+# No shared torch_dist conversion of this model exists (and the shared HF cache is read-only),
+# so there is no default that works for everyone: point this at your own conversion. Convert
+# once with scripts/slurm/setup/convert_checkpoint.sh — pre-convert rather than relying on the
+# launcher's auto-convert; a 30B conversion is not a 5-minute head-node job.
+if [[ -z "${DD_HF_TORCHDIST_DIR:-}" ]]; then
+   echo "FATAL: set DD_HF_TORCHDIST_DIR to a Megatron torch_dist conversion of Qwen3-30B-A3B" >&2
+   echo "       (scripts/slurm/setup/convert_checkpoint.sh converts one from $DD_HF_MODEL_DIR)" >&2
+   return 1
+fi
 
 # 4 nodes: 16 training GPUs + 16 rollout GPUs.
 DD_TRAINER_NODES=2
@@ -56,3 +65,7 @@ DD_EXTRA_OPTIMIZER_ARGS=(
 
 # Each rollout host patches its own full copy; /tmp on slinky has room (6.5 TB free).
 DD_CKPT_SIZE_HINT="57 GB"
+
+# Measured per-sync publish size for this model (~0.5 GB/sync at EP8, rounded up);
+# feeds the disk-budget guard in _common.sh.
+DD_DELTA_MB_HINT=${DD_DELTA_MB_HINT:-600}

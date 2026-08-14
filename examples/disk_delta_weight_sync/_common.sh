@@ -33,7 +33,10 @@ DD_TRANSFER_MODE=${DD_TRANSFER_MODE:-disk-delta}
 DD_TRAINER_NODES=${DD_TRAINER_NODES:-1}
 DD_TRAINER_GPUS_PER_NODE=${DD_TRAINER_GPUS_PER_NODE:-4}
 DD_ROLLOUT_GPUS=${DD_ROLLOUT_GPUS:-4}
-DD_NUM_ROLLOUT=${DD_NUM_ROLLOUT:-3000}
+# Bounded by default: one sync per rollout, and every sync leaves a version dir
+# on shared disk that is never pruned (see the disk budget below). 40 syncs is
+# plenty for a steady-state timing mean and keeps the stream to a few GB.
+DD_NUM_ROLLOUT=${DD_NUM_ROLLOUT:-40}
 DD_CHECK_EQUAL=${DD_CHECK_EQUAL:-0}
 
 # xor is smaller and faster but must land exactly once on the right base;
@@ -76,26 +79,65 @@ source "$MILES_REPO/scripts/models/$DD_MODEL_CONFIG.sh"
 
 # ----------------------------------------------------------- delta dirs ---
 
+# All mutable state — trainer checkpoints, the shared publish dir, each host's
+# local checkpoint — is keyed by the Slurm job id and requeue attempt, so every
+# submission (and every requeue) runs fresh from the base checkpoint. Reuse
+# across submissions is unsafe in two specific ways:
+#   - sglang's pull() never rolls a local checkpoint backward: with a stale
+#     .weight_sync/state.json at version N, pull(0)/pull(1) are no-ops, and a
+#     rerun landing on the same host quietly serves the previous run's weights.
+#   - resume desyncs the baseline: --load restores trainer weights, but the
+#     first update_weights() only seeds its snapshot from --hf-checkpoint and
+#     publishes nothing, so the first rollout samples the *original* model.
+# The cost is leftovers: finished jobs leave their dirs behind. Clean
+# checkpoints/dd-* on the shared side and /tmp/miles-delta-local-ckpt/ on the
+# rollout hosts when done with a measurement campaign.
+DD_STATE_TAG=${DD_STATE_TAG:-${SLURM_JOB_ID:-nojob}-r${SLURM_RESTART_COUNT:-0}}
+DD_RUN_STATE_DIR=${DD_RUN_STATE_DIR:-$MILES_REPO/checkpoints/$RUN_NAME-$DD_STATE_TAG}
+
 # Published deltas: must be visible to the trainer and to every rollout host.
 # WARNING: the trainer rmtree()s this directory when it captures the baseline —
 # a stale version stream would apply against the wrong base. Point it at a
 # per-run scratch path, never at anything you want to keep.
-DD_DISK_DIR=${DD_DISK_DIR:-$MILES_REPO/checkpoints/$RUN_NAME/delta-updates}
+DD_DISK_DIR=${DD_DISK_DIR:-$DD_RUN_STATE_DIR/delta-updates}
 
 # Host-local full HF checkpoint each engine patches in place and reloads from.
 # Local disk on purpose (NVMe if you have it) — the whole point is that only
 # the changed bytes cross the shared filesystem. Sized for a full checkpoint:
 # Qwen3-4B bf16 is ~8 GB per rollout host, so /tmp needs the room.
-DD_LOCAL_CKPT_DIR=${DD_LOCAL_CKPT_DIR:-/tmp/miles-delta-local-ckpt/$RUN_NAME}
+DD_LOCAL_CKPT_DIR=${DD_LOCAL_CKPT_DIR:-/tmp/miles-delta-local-ckpt/$RUN_NAME-$DD_STATE_TAG}
+
+# The publish dir grows for the whole run: one weight_vNNNNNN/ per sync, about
+# DD_DELTA_MB_HINT MB each, and no version can be pruned while the run lives —
+# a restarted engine host seeds from base and replays the entire chain, so the
+# stream must stay complete. The disk budget is therefore the run length.
+# Refuse configurations whose worst case exceeds DD_DISK_BUDGET_GB rather than
+# let a casual DD_NUM_ROLLOUT override sign up for hundreds of GB of shared disk.
+DD_DELTA_MB_HINT=${DD_DELTA_MB_HINT:-150} # measured ~0.13 GB/sync on Qwen3-4B; the MoE block sets 600
+DD_DISK_BUDGET_GB=${DD_DISK_BUDGET_GB:-25}
+if [[ "$DD_TRANSFER_MODE" == "disk-delta" ]]; then
+   DD_EST_GB=$(((DD_NUM_ROLLOUT * DD_DELTA_MB_HINT + 1023) / 1024))
+   if ((DD_EST_GB > DD_DISK_BUDGET_GB)); then
+      echo "FATAL: ~${DD_EST_GB} GB of published deltas (${DD_NUM_ROLLOUT} syncs x ~${DD_DELTA_MB_HINT} MB)" >&2
+      echo "       exceeds DD_DISK_BUDGET_GB=${DD_DISK_BUDGET_GB}. Versions are never pruned mid-run;" >&2
+      echo "       lower DD_NUM_ROLLOUT, or raise DD_DISK_BUDGET_GB to accept the footprint." >&2
+      return 1
+   fi
+fi
 
 # ----------------------------------------------------------------- args ---
 
+# --load points at the per-job state dir (see the state-tag note above), so it
+# never finds a previous submission's checkpoint and every arm trains from the
+# same base. Periodic saves default off — the interval sits beyond any bounded
+# run — because nothing here resumes and full Megatron saves are the biggest
+# disk item in the whole example; DD_SAVE_INTERVAL=20 restores them to debug.
 CKPT_ARGS=(
    --hf-checkpoint "$HF_MODEL_DIR"
    --ref-load      "$HF_TORCHDIST_DIR"
-   --load          "$MILES_REPO/checkpoints/$RUN_NAME"
-   --save          "$MILES_REPO/checkpoints/$RUN_NAME"
-   --save-interval 20
+   --load          "$DD_RUN_STATE_DIR"
+   --save          "$DD_RUN_STATE_DIR"
+   --save-interval "${DD_SAVE_INTERVAL:-1000}"
 )
 
 # Concurrency is rollout-batch-size x n-samples-per-prompt requests in flight. That has to track
@@ -227,9 +269,10 @@ MILES_ARGS=(
    "${FT_ARGS[@]}"
 )
 
-echo "[disk-delta example] run=$RUN_NAME mode=$DD_TRANSFER_MODE nodes=$EXPERIMENT_NODES"
+echo "[disk-delta example] run=$RUN_NAME state-tag=$DD_STATE_TAG mode=$DD_TRANSFER_MODE nodes=$EXPERIMENT_NODES"
 if [[ "$DD_TRANSFER_MODE" == "disk-delta" ]]; then
    echo "[disk-delta example]   shared publish dir : $DD_DISK_DIR  (wiped at baseline)"
+   echo "[disk-delta example]   publish budget     : ~${DD_EST_GB} GB estimated of ${DD_DISK_BUDGET_GB} GB (${DD_NUM_ROLLOUT} syncs x ~${DD_DELTA_MB_HINT} MB, never pruned)"
    echo "[disk-delta example]   host-local ckpt dir: $DD_LOCAL_CKPT_DIR  (~${DD_CKPT_SIZE_HINT:-8 GB} per rollout host)"
    echo "[disk-delta example]   encoding=$DD_ENCODING checksum=$DD_CHECKSUM"
 fi
