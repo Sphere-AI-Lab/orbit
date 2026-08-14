@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 _PATCHED = "_miles_qwen3_vl_thd_mrope_patched"
 _DEEPSTACK_VIEWLESS_PATCHED = "_miles_qwen3_vl_deepstack_viewless_patched"
+_DEEPSTACK_DRIFT_WARNED = False
 _tls = threading.local()
 
 
@@ -33,18 +34,36 @@ def install_qwen3_vl_packed_mrope_patch() -> None:
 def _patch_deepstack_output_view() -> None:
     """Keep Qwen3-VL DeepStack activations safe for pipeline pseudo-deallocation."""
     try:
-        block_mod = importlib.import_module("megatron.bridge.models.qwen_vl.modelling_qwen3_vl.transformer_block")
-        core_utils = importlib.import_module("megatron.core.utils")
+        importlib.import_module("megatron.bridge")
     except ImportError:
         return
 
+    try:
+        block_mod = importlib.import_module("megatron.bridge.models.qwen_vl.modelling_qwen3_vl.transformer_block")
+    except ImportError:
+        _warn_deepstack_drift("transformer_block module")
+        return
+
     block_cls = getattr(block_mod, "Qwen3VLTransformerBlock", None)
-    make_viewless_tensor = getattr(core_utils, "make_viewless_tensor", None)
-    if block_cls is None or make_viewless_tensor is None or block_cls.__dict__.get(_DEEPSTACK_VIEWLESS_PATCHED, False):
+    if block_cls is None:
+        _warn_deepstack_drift("Qwen3VLTransformerBlock")
+        return
+    if block_cls.__dict__.get(_DEEPSTACK_VIEWLESS_PATCHED, False):
         return
 
     original = getattr(block_cls, "_deepstack_process", None)
     if original is None:
+        _warn_deepstack_drift("_deepstack_process")
+        return
+
+    try:
+        core_utils = importlib.import_module("megatron.core.utils")
+    except ImportError:
+        _warn_deepstack_drift("megatron.core.utils")
+        return
+    make_viewless_tensor = getattr(core_utils, "make_viewless_tensor", None)
+    if make_viewless_tensor is None:
+        _warn_deepstack_drift("make_viewless_tensor")
         return
 
     @functools.wraps(original)
@@ -58,6 +77,19 @@ def _patch_deepstack_output_view() -> None:
 
     block_cls._deepstack_process = viewless_deepstack_process
     setattr(block_cls, _DEEPSTACK_VIEWLESS_PATCHED, True)
+
+
+def _warn_deepstack_drift(missing_component: str) -> None:
+    global _DEEPSTACK_DRIFT_WARNED
+
+    if _DEEPSTACK_DRIFT_WARNED:
+        return
+    logger.warning(
+        "Megatron Bridge is installed but its Qwen3-VL DeepStack API is incompatible: "
+        "%s is missing; pipeline-parallel activation pseudo-deallocation may fail.",
+        missing_component,
+    )
+    _DEEPSTACK_DRIFT_WARNED = True
 
 
 def _patch_allgather_vision_embeddings_kwarg() -> None:
