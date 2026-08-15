@@ -187,3 +187,67 @@ def test_initialize_steps_scheduler_when_checkpoint_did_not_restore_it():
 
     assert result == (model, optimizer, opt_param_scheduler, 100)
     opt_param_scheduler.step.assert_called_once_with(increment=800)
+
+
+@pytest.mark.parametrize("tracker", [None, "release"], ids=["hf-base", "release-base"])
+@pytest.mark.parametrize(
+    ("adapter_result", "expected_start"),
+    [
+        ((True, None), 0),
+        ((False, None), 0),
+        ((True, 0), 1),
+        ((True, 7), 8),
+    ],
+    ids=["weights-only", "load-failed", "iteration-zero", "iteration-seven"],
+)
+def test_bridge_bootstrap_start_id_uses_actual_adapter_state(tmp_path, tracker, adapter_result, expected_start):
+    from miles.backends.megatron_utils import checkpoint as checkpoint_module
+
+    base = tmp_path / "base"
+    base.mkdir()
+    if tracker is None:
+        (base / "config.json").write_text("{}")
+        base_loader = "_load_checkpoint_hf"
+    else:
+        (base / "latest_checkpointed_iteration.txt").write_text(tracker)
+        base_loader = "_load_checkpoint_megatron"
+
+    args = Namespace(
+        load=str(base),
+        lora_adapter_path=str(tmp_path / "adapter"),
+        megatron_to_hf_mode="bridge",
+        start_rollout_id=None,
+    )
+    with (
+        patch.object(checkpoint_module, "get_args", return_value=args),
+        patch.object(checkpoint_module, "is_lora_enabled", return_value=True),
+        patch.object(checkpoint_module, "load_lora_adapter", return_value=adapter_result),
+        patch.object(checkpoint_module, base_loader, return_value=(0, 0)),
+    ):
+        loaded_iteration, _ = checkpoint_module.load_checkpoint([], object(), object(), None, False)
+
+    assert checkpoint_module.resolve_start_rollout_id_after_load(args, loaded_iteration) == expected_start
+
+
+def test_numeric_bridge_checkpoint_uses_loaded_iteration_for_weights_only_adapter(tmp_path):
+    from miles.backends.megatron_utils import checkpoint as checkpoint_module
+
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "latest_checkpointed_iteration.txt").write_text("17")
+    args = Namespace(
+        load=str(base),
+        lora_adapter_path=str(tmp_path / "adapter"),
+        megatron_to_hf_mode="bridge",
+        start_rollout_id=None,
+    )
+    with (
+        patch.object(checkpoint_module, "get_args", return_value=args),
+        patch.object(checkpoint_module, "is_lora_enabled", return_value=True),
+        patch.object(checkpoint_module, "load_lora_adapter", return_value=(True, None)),
+        # The tracker says 17, but --ckpt-step can make Megatron actually load 7.
+        patch.object(checkpoint_module, "_load_checkpoint_megatron", return_value=(7, 0)),
+    ):
+        loaded_iteration, _ = checkpoint_module.load_checkpoint([], object(), object(), None, False)
+
+    assert checkpoint_module.resolve_start_rollout_id_after_load(args, loaded_iteration) == 8

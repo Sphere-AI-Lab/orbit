@@ -45,7 +45,7 @@ from ..training_utils.loss import (
 )
 from ..training_utils.parallel import get_parallel_state
 from ..training_utils.replay_data import fill_replay_data, register_replay_list_sequential
-from .checkpoint import load_checkpoint
+from .checkpoint import load_checkpoint, resolve_start_rollout_id_after_load
 from .ft.checkpoint_transfer import recv_ckpt
 from .ft.checkpoint_transfer import send_ckpt as _send_ckpt
 from .ft.in_memory_checkpoint import InMemoryCheckpointManager
@@ -183,7 +183,7 @@ class MegatronTrainRayActor(TrainRayActor):
                 self.sleep()
             return
 
-        start_rollout_id = loaded_rollout_id + 1
+        start_rollout_id = resolve_start_rollout_id_after_load(self.args, loaded_rollout_id)
 
         self.weights_backuper = TensorBackuper.create(
             source_getter=lambda: named_params_and_buffers(

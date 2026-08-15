@@ -94,7 +94,12 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["save_checkpoint", "save_checkpoint_with_lora", "load_checkpoint"]
+__all__ = [
+    "save_checkpoint",
+    "save_checkpoint_with_lora",
+    "load_checkpoint",
+    "resolve_start_rollout_id_after_load",
+]
 
 
 def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, checkpointing_context, skip_load_to_model_and_opt):
@@ -111,7 +116,14 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, checkpointing_con
             load_path
         ), f"{args.load=} does not exist or is an empty directory. Did you specify the wrong folder?"
 
-    if has_local_checkpoint_manager or _is_megatron_checkpoint(load_path):
+    is_megatron_checkpoint = not has_local_checkpoint_manager and _is_megatron_checkpoint(load_path)
+    is_bridge_bootstrap = (
+        getattr(args, "megatron_to_hf_mode", None) == "bridge"
+        and not has_local_checkpoint_manager
+        and (not is_megatron_checkpoint or _is_release_checkpoint(load_path))
+    )
+
+    if has_local_checkpoint_manager or is_megatron_checkpoint:
         result = _load_checkpoint_megatron(
             ddp_model=ddp_model,
             optimizer=optimizer,
@@ -127,7 +139,9 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, checkpointing_con
             load_path=load_path,
         )
 
-    # Load LoRA adapter weights if available
+    # Load LoRA adapter weights if available. Only a restored training-state
+    # iteration turns an HF/release bootstrap into a resume.
+    adapter_iteration = None
     if is_lora_enabled(args):
         adapter_path = getattr(args, "lora_adapter_path", None)
         if adapter_path is not None:
@@ -140,6 +154,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, checkpointing_con
             if loaded:
                 logger.info(f"Successfully loaded LoRA adapter from {adapter_path}")
                 if iteration is not None:
+                    adapter_iteration = iteration
                     result = (iteration, result[1])
             else:
                 logger.warning(
@@ -148,7 +163,16 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, checkpointing_con
                     f"Training will start with freshly initialized adapter weights."
                 )
 
+    if getattr(args, "start_rollout_id", None) is None and is_bridge_bootstrap and adapter_iteration is None:
+        args.start_rollout_id = 0
+
     return result
+
+
+def resolve_start_rollout_id_after_load(args, loaded_iteration: int) -> int:
+    """Prefer the start ID resolved from the actual load over iteration + 1."""
+    start_rollout_id = getattr(args, "start_rollout_id", None)
+    return loaded_iteration + 1 if start_rollout_id is None else start_rollout_id
 
 
 def save_checkpoint_with_lora(iteration, model, optimizer, opt_param_scheduler):
@@ -174,6 +198,14 @@ def _is_megatron_checkpoint(path: str | Path) -> bool:
     return (Path(path) / "latest_checkpointed_iteration.txt").is_file() or bool(
         re.fullmatch(r"iter_\d{7}", Path(path).name)
     )
+
+
+def _is_release_checkpoint(path: str | Path) -> bool:
+    tracker = Path(path) / "latest_checkpointed_iteration.txt"
+    try:
+        return tracker.read_text().strip() == "release"
+    except FileNotFoundError:
+        return False
 
 
 def _load_checkpoint_hf(ddp_model, optimizer, args, load_path: str):

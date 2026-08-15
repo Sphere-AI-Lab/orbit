@@ -459,6 +459,100 @@ def test_custom_megatron_post_save_hook_path_requires_save():
         miles_validate_args(args)
 
 
+class TestBridgeResumeRolloutId:
+    @staticmethod
+    def _parse(load, extra=None):
+        parser = argparse.ArgumentParser()
+        get_miles_extra_args_provider()(parser)
+        return parser.parse_args(
+            [
+                "--megatron-to-hf-mode",
+                "bridge",
+                "--load",
+                str(load),
+                "--num-rollout",
+                "1",
+            ]
+            + (extra or [])
+            + REQUIRED_ARGS
+        )
+
+    @staticmethod
+    def _checkpoint(tmp_path, tracker):
+        checkpoint = tmp_path / "checkpoint"
+        checkpoint.mkdir()
+        (checkpoint / "latest_checkpointed_iteration.txt").write_text(tracker)
+        return checkpoint
+
+    @pytest.mark.parametrize(
+        ("override", "value"),
+        [
+            (None, None),
+            ("ckpt_step", 7),
+            ("lora_adapter_path", "/adapter/iter_0000007"),
+        ],
+        ids=["latest", "ckpt-step", "lora-adapter"],
+    )
+    def test_numeric_tracker_defers_to_loaded_iteration(self, tmp_path, override, value):
+        args = self._parse(self._checkpoint(tmp_path, "17"))
+        if override is not None:
+            setattr(args, override, value)
+
+        miles_validate_args(args)
+
+        assert args.start_rollout_id is None
+
+    @pytest.mark.parametrize("tracker", [None, "release"], ids=["hf-base", "release-base"])
+    def test_lora_resume_defers_to_adapter_iteration(self, tmp_path, tracker):
+        adapter = tmp_path / "adapter"
+        adapter.mkdir()
+        if tracker is None:
+            checkpoint = tmp_path / "hf"
+            checkpoint.mkdir()
+            base_args = ["--hf-checkpoint", str(checkpoint)]
+        else:
+            checkpoint = self._checkpoint(tmp_path, tracker)
+            base_args = []
+        args = self._parse(
+            checkpoint,
+            base_args + ["--lora-adapter-path", str(adapter)],
+        )
+
+        miles_validate_args(args)
+
+        assert args.start_rollout_id is None
+
+    def test_release_tracker_starts_at_zero(self, tmp_path):
+        args = self._parse(self._checkpoint(tmp_path, "release"))
+
+        miles_validate_args(args)
+
+        assert args.start_rollout_id == 0
+
+    def test_explicit_rollout_id_is_preserved(self, tmp_path):
+        args = self._parse(
+            self._checkpoint(tmp_path, "17"),
+            ["--start-rollout-id", "9"],
+        )
+
+        miles_validate_args(args)
+
+        assert args.start_rollout_id == 9
+
+    def test_missing_checkpoint_falls_back_to_hf_at_zero(self, tmp_path):
+        hf_checkpoint = tmp_path / "hf"
+        hf_checkpoint.mkdir()
+        args = self._parse(
+            tmp_path / "missing",
+            ["--hf-checkpoint", str(hf_checkpoint)],
+        )
+
+        miles_validate_args(args)
+
+        assert args.load == str(hf_checkpoint)
+        assert args.start_rollout_id == 0
+
+
 class TestMultiLoRAValidation:
     def _parse(self, extra):
         parser = argparse.ArgumentParser()
