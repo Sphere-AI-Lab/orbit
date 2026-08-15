@@ -178,3 +178,60 @@ at r403, see incidents).
 - OFT LR middle ground: rerun 3e-6 to completion; consider 5e-6; consider a KL anchor
   for lr ≥ 1e-5 volatility.
 - Peak-VRAM instrumentation (design-doc follow-up) for a precise memory table.
+
+## Follow-up 1 — tuning the one-trunk adapter recipe (2026-08-11..15)
+
+Goal: make the pure PEFT configuration (OFT actor + adapter critic, no full trunk
+anywhere) approach full-FT's 58.6–60. Three benchmark-matched runs (seed 1234; two
+earlier attempts were destroyed mid-run by the silent engine deaths — see incidents):
+
+| Config | Math500 pass@1, last-6-gate | final gate | pass@4 (final) |
+|:--|--:|--:|--:|
+| lr 1e-6, block 32 (baseline) | 52.33 ± 1.26 | 53.6 | 75.4 |
+| lr 3e-6, block 32 | **54.40 ± 2.03** | 52.0 | 71.2 |
+| lr 5e-6, block 32 | 53.09 ± 2.17 | 54.2 | 75.0 |
+| lr 3e-6, block 64 | 53.92 ± 2.05 | 56.5 | 74.2 |
+
+![Tuning sweep and head-critic collapse](figs/fig5_followups.png)
+
+**Verdict: LR buys ~+1.5–2 points and doubles gate volatility (sd 1.3 → ~2.1);
+block-size capacity buys nothing; the ~5-point gap to full-FT is structural.**
+5e-6 is already past the useful range. pass@4 stays at the base model's ~74 in
+every cell — the adapter recipe still only sharpens sampling toward already-known
+solutions, which is why no step-size/capacity knob closes the gap. (The earlier
+full-critic LR probes read ~56.5 at partial horizon; with full 500-rollout
+horizons and the adapter critic, the honest stable estimate is ~54.) Remaining
+untried levers — a KL anchor to tame the volatility, larger adapter surface via
+target modules — have diminishing prospects given the flat pass@4.
+
+## Follow-up 2 — `--critic-mode head` (detached-trunk critic + full-FT actor): negative result
+
+To combine full-FT capacity with the adapter critic's zero-memory profile, a new
+`--critic-mode head` was implemented (branch `feat/detached-trunk-head-critic`,
+TDD, 83 CPU tests + 0.5B GPU smoke): a value-head-only critic whose frozen
+critic-side trunk view aliases the actor's storage — freeze applied inside the
+model provider, before DDP wrap, so a value backward provably produces no trunk
+gradients even while the actor full-finetunes the same bytes.
+
+The mechanics work; **the algorithm does not**: at 3B benchmark settings the run
+peaked at 53.5 (r24), decayed from ~r100, and collapsed to ~1.4 by r250
+(fig. above, right). Critic value loss never converged — stuck at 2–4 versus the
+full critic's 0.13–0.18, a ~20× gap — so advantages were noise, and with no KL
+anchor the policy walked into degenerate max-length outputs (reward → 0,
+response length → the 1024 cap). Conclusion: **a single linear head on detached,
+drifting features cannot supply usable values at this scale**; the full critic's
+dedicated (or the adapter critic's frozen-trunk) representation is load-bearing.
+Untried variants: deeper MLP head, higher critic LR / longer critic-only warmup,
+KL anchor. For full-FT actors, GRPO (no critic, 58.64, cheapest) remains the
+recommended default.
+
+## Incidents, continued
+
+- **Silent engine deaths became the dominant operational cost**: 6 incidents
+  across 6 distinct machines (i305, i301, i403, i303, i401, +1), all the same
+  signature — sglang engine stops responding mid-generation, zero engine-side
+  trace, condor reports normal termination — destroying entire runs under the
+  no-checkpoint policy (two full sweep attempts lost). Cause still unidentified.
+  Mitigation queued for any further long runs: adapter-run sidecar checkpoints
+  are only ~370 MB, so `SAVE_INTERVAL=100` on group storage plus resume plumbing
+  makes runs death-tolerant at negligible cost.
