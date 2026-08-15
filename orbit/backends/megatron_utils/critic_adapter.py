@@ -33,6 +33,30 @@ def _named_params(model) -> dict[str, torch.nn.Parameter]:
     return params
 
 
+def prepare_head_critic(critic_model) -> int:
+    """Freeze every critic parameter except the value head (--critic-mode head).
+
+    The plain (non-PEFT) builder produces an all-trainable model; the head-mode
+    contract is: value head trainable, everything else frozen so
+    ``alias_trunk_storage`` can re-point the trunk at the actor's tensors and a
+    value backward produces no trunk gradients — safe even when the actor
+    full-finetunes the shared storage. The value head is the ``output_layer``
+    module (the same convention ``model._iter_critic_output_layers`` keys on).
+
+    Returns the number of parameters newly frozen.
+    """
+    frozen = 0
+    for chunk in critic_model:
+        head_params = {id(p) for name, p in chunk.named_parameters() if "output_layer" in name}
+        for _name, param in chunk.named_parameters():
+            if id(param) in head_params:
+                continue
+            if param.requires_grad:
+                param.requires_grad_(False)
+                frozen += 1
+    return frozen
+
+
 def alias_trunk_storage(critic_model, actor_model) -> int:
     """Re-point every frozen critic parameter at the actor's tensor.
 
@@ -548,7 +572,7 @@ def build_critic_instance(args, actor_model, expected_iteration: int | None = No
         require_checkpoint=expected_iteration is not None,
     )
     assert_trunk_aliased(model, actor_model)
-    logger.info("adapter critic ready: %d trunk params aliased, resumed_iteration=%s", aliased, resumed_iteration)
+    logger.info("one-trunk critic ready: %d trunk params aliased, resumed_iteration=%s", aliased, resumed_iteration)
     return model, optimizer, opt_param_scheduler
 
 

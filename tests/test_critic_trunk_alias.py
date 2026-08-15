@@ -98,3 +98,62 @@ def test_gradient_isolation_across_roles():
     assert critic[0].adapter.weight.grad is not None
     assert critic[0].output_layer.weight.grad is not None
     assert critic[0].trunk.weight.grad is None
+
+
+# --- head mode: freeze-all-but-value-head, alias against a FULL-FT (trainable) actor ---
+
+class _FullFTActorChunk(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.trunk = torch.nn.Linear(HIDDEN, HIDDEN, bias=False)   # trainable: full FT
+        self.output_layer = torch.nn.Linear(HIDDEN, 8, bias=False)  # trainable LM head
+
+
+class _PlainCriticChunk(torch.nn.Module):
+    """What the plain (non-PEFT) builder produces: everything trainable."""
+
+    def __init__(self):
+        super().__init__()
+        self.trunk = torch.nn.Linear(HIDDEN, HIDDEN, bias=False)
+        self.output_layer = torch.nn.Linear(HIDDEN, 1, bias=False)  # value head
+
+
+def test_prepare_head_critic_freezes_everything_but_value_head():
+    from orbit.backends.megatron_utils.critic_adapter import prepare_head_critic
+
+    critic = [_PlainCriticChunk()]
+    frozen = prepare_head_critic(critic)
+    assert frozen == 1  # trunk.weight
+    assert not critic[0].trunk.weight.requires_grad
+    assert critic[0].output_layer.weight.requires_grad
+
+
+def test_head_critic_aliases_full_ft_actor_trunk():
+    from orbit.backends.megatron_utils.critic_adapter import prepare_head_critic
+
+    critic, actor = [_PlainCriticChunk()], [_FullFTActorChunk()]
+    prepare_head_critic(critic)
+    count = alias_trunk_storage(critic, actor)
+    assert count == 1
+    assert critic[0].trunk.weight.data_ptr() == actor[0].trunk.weight.data_ptr()
+    assert critic[0].output_layer.weight.data_ptr() != actor[0].output_layer.weight.data_ptr()
+    assert_trunk_aliased(critic, actor)
+
+
+def test_head_critic_value_backward_leaves_actor_trunk_gradless():
+    """The safety property of the detached-trunk design: a value-loss backward
+    through the critic view produces NO gradient for the shared trunk storage,
+    even though the actor's Parameter over that storage is trainable."""
+    from orbit.backends.megatron_utils.critic_adapter import prepare_head_critic
+
+    critic, actor = [_PlainCriticChunk()], [_FullFTActorChunk()]
+    prepare_head_critic(critic)
+    alias_trunk_storage(critic, actor)
+
+    x = torch.randn(3, HIDDEN)
+    value = critic[0].output_layer(critic[0].trunk(x))
+    value.pow(2).sum().backward()
+
+    assert critic[0].output_layer.weight.grad is not None   # head learns
+    assert critic[0].trunk.weight.grad is None              # critic view frozen
+    assert actor[0].trunk.weight.grad is None               # actor untouched

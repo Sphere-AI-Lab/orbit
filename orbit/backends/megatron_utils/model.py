@@ -27,7 +27,7 @@ try:
 except ImportError:
     from megatron.core.utils import unwrap_model
 
-from orbit.utils.arguments import uses_adapter_critic
+from orbit.utils.arguments import uses_adapter_critic, uses_head_critic, uses_one_trunk_critic
 from orbit.utils.dumper_utils import DumperMegatronUtil, DumperPhase
 from orbit.utils.memory_utils import clear_memory
 
@@ -192,10 +192,11 @@ def setup_model_and_optimizer(
             - The learning-rate/weight-decay scheduler tied to the optimizer.
     """
     assert not args.moe_use_upcycling
-    # The adapter-mode critic gets trunk weights from the bridge/HF load inside the PEFT
-    # pre-wrap hook and then aliases the actor's tensors — it is the one build with no
-    # Megatron checkpoint source by design.
-    if not (role == "critic" and uses_adapter_critic(args)):
+    # One-trunk critics (adapter and head modes) get trunk weights via aliasing
+    # the actor's tensors — they are the builds with no Megatron checkpoint
+    # source by design (the adapter variant additionally primes via the PEFT
+    # pre-wrap bridge load).
+    if not (role == "critic" and uses_one_trunk_critic(args)):
         assert args.load is not None or args.pretrained_checkpoint is not None
 
     model = _build_model(args, role)
@@ -206,11 +207,29 @@ def setup_model_and_optimizer(
     return model, optimizer, opt_param_scheduler
 
 
+def _head_critic_provider(provider):
+    """Freeze all-but-value-head inside the provider, BEFORE the DDP wrap, so
+    grad buffers and optimizer state cover only the value head (the trunk is
+    later re-pointed at the actor's storage via ``alias_trunk_storage``)."""
+
+    def wrapped(*p_args, **p_kwargs):
+        from .critic_adapter import prepare_head_critic
+
+        module = provider(*p_args, **p_kwargs)
+        prepare_head_critic([module])
+        return module
+
+    return wrapped
+
+
 def _build_model(args: Namespace, role: str = "actor") -> list[DDP]:
     peft_bridge = is_peft_enabled(args) and args.megatron_to_hf_mode == "bridge"
     if peft_bridge and (role == "actor" or (role == "critic" and uses_adapter_critic(args))):
         return _setup_peft_model_via_bridge(args, role=role)
-    return get_model(get_model_provider_func(args, role), ModelType.encoder_or_decoder)
+    provider = get_model_provider_func(args, role)
+    if role == "critic" and uses_head_critic(args):
+        provider = _head_critic_provider(provider)
+    return get_model(provider, ModelType.encoder_or_decoder)
 
 
 def _build_optimizer_and_scheduler(

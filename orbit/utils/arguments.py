@@ -68,6 +68,17 @@ def uses_adapter_critic(args) -> bool:
     return getattr(args, "use_critic", False) and getattr(args, "critic_mode", "full") == "adapter"
 
 
+def uses_head_critic(args) -> bool:
+    """True when PPO runs the one-trunk value-head-only critic (detached trunk)."""
+    return getattr(args, "use_critic", False) and getattr(args, "critic_mode", "full") == "head"
+
+
+def uses_one_trunk_critic(args) -> bool:
+    """True for either one-trunk critic (adapter or head): colocated on the actor
+    workers, trunk storage aliased to the actor's, no separate critic worker."""
+    return uses_adapter_critic(args) or uses_head_critic(args)
+
+
 def validate_async_off_policy_correction(args) -> None:
     """Require an explicit behavior-policy choice for async PPO training.
 
@@ -2289,11 +2300,18 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
             parser.add_argument(
                 "--critic-mode",
                 type=str,
-                choices=["full", "adapter"],
+                choices=["full", "adapter", "head"],
                 default="full",
                 help=(
                     "PPO critic topology: 'full' (default) runs the legacy separate full-model "
-                    "critic workers; 'adapter' runs a one-trunk critic (PEFT adapter + value "
+                    "critic workers; 'head' runs a one-trunk value-head-only critic whose "
+                    "frozen critic-side trunk view aliases the actor's (works with a full-FT "
+                    "actor: the value backward produces no trunk gradients). "
+                    "'head' is EXPERIMENTAL: at 3B benchmark settings the linear head could "
+                    "not track the full-FT trunk (value loss ~20x the full critic's) and the "
+                    "policy collapsed by ~rollout 200 — see docs/reports/2026-08-10-ppo-"
+                    "critic-comparison; expect to need a deeper head or a KL anchor. "
+                    "'adapter' runs a one-trunk critic (PEFT adapter + value "
                     "head aliasing the actor's frozen trunk) inside the actor workers. "
                     "'adapter' requires --advantage-estimator ppo, an enabled --peft-method, "
                     "and the megatron train backend."
@@ -3421,28 +3439,29 @@ def _finalize_train_offload_args(args) -> None:
 
 def _apply_critic_args(args) -> None:
     args.use_critic = args.advantage_estimator == "ppo"
-    if args.critic_mode == "adapter":
+    if args.critic_mode in ("adapter", "head"):
+        mode = args.critic_mode
         if args.advantage_estimator != "ppo":
-            raise ValueError("--critic-mode adapter requires --advantage-estimator ppo.")
-        if args.peft_method == "none":
+            raise ValueError(f"--critic-mode {mode} requires --advantage-estimator ppo.")
+        if mode == "adapter" and args.peft_method == "none":
             raise ValueError("--critic-mode adapter requires an enabled --peft-method: the critic is an adapter.")
         if args.train_backend != "megatron":
-            raise ValueError("--critic-mode adapter requires the megatron train backend.")
+            raise ValueError(f"--critic-mode {mode} requires the megatron train backend.")
         if args.keep_old_actor:
             raise ValueError(
-                "--critic-mode adapter is incompatible with --keep-old-actor: the value "
+                f"--critic-mode {mode} is incompatible with --keep-old-actor: the value "
                 "forward would run under the old-actor trunk (shared via aliasing) while "
                 "the value phase trains under the current trunk."
             )
         if getattr(args, "use_rollout_routing_replay", False):
             raise ValueError(
-                "--critic-mode adapter is incompatible with --use-rollout-routing-replay: "
+                f"--critic-mode {mode} is incompatible with --use-rollout-routing-replay: "
                 "critic forwards would hit the actor's routing-replay buffers."
             )
         for flag in ("critic_num_gpus_per_node", "critic_num_nodes"):
             if getattr(args, flag):
                 raise ValueError(
-                    f"--{flag.replace('_', '-')} is meaningless with --critic-mode adapter: "
+                    f"--{flag.replace('_', '-')} is meaningless with --critic-mode {mode}: "
                     "the critic shares the actor workers' GPUs."
                 )
         args.critic_num_gpus_per_node = 0
