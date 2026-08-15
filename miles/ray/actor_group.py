@@ -4,11 +4,16 @@
 # MILES_EXPERIMENTAL_FT_TRAINER (default off -> v1).
 
 import asyncio
+import logging
 
 from ray.util.placement_group import PlacementGroup
 
 from miles.ray.train.actor_factory import allocate_gpus_for_actor
 from miles.utils.ft_utils.indep_dp import IndepDPInfo
+from miles.utils.tracking_utils.structured_log import log_structured
+
+
+logger = logging.getLogger(__name__)
 
 
 class RayTrainGroup:
@@ -92,6 +97,8 @@ class RayTrainGroup:
         """Broadcast weights from rank 0 to all other ranks."""
         if self.args.debug_train_only or self.args.debug_rollout_only:
             return
+
+        log_structured(logger.info, op="update_weights", phase="start", rollout=rollout_id)
 
         if self.args.use_fault_tolerance:
             await self.rollout_manager.recover_updatable_engines.remote()
