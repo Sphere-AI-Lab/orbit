@@ -21,6 +21,9 @@ Matrices selected by ``sweep.py --matrix``:
 * ``e4oftb128low`` -- a dedicated Math-only BS128 OFT scout below the original
   E4 learning-rate window. It isolates learning rate while holding capacity,
   placement, seed, and the full E4 protocol fixed.
+* ``e4oftb128refine`` -- a dedicated Math-only BS128 OFT learning-rate
+  refinement around the established E4 region, with capacity, placement, seed,
+  and the full E4 protocol held fixed.
 * ``e5scout`` / ``e5`` -- matched-parameter OFT. The scout comes first and the
   refinement grid is centred on its argmin; see :func:`e5_arms` for why the match
   is solved by inverting to a LoRA rank rather than by choosing a block size.
@@ -779,6 +782,7 @@ def e3_arms(
 # rung; it deliberately replaces the automatically nearest b64 block.
 E4_OFT_BLOCK_LADDER = (8, 128, 1024)
 E4_MATH_OFT_B128_LOW_LRS = (1e-7, 3e-7, 1e-6, 3e-6, 1e-5)
+E4_MATH_OFT_B128_REFINE_LRS = (5e-6, 6e-6, 7e-6, 8e-6, 9e-6, 2e-5)
 
 
 def e4_arms(
@@ -882,6 +886,34 @@ def e4_math_oft_b128_low_arms(
             matched_ratio=report["ratio"],
         )
         for lr in E4_MATH_OFT_B128_LOW_LRS
+    ]
+
+
+def e4_math_oft_b128_refine_arms(
+    hidden_size: int = LLAMA31_8B_HIDDEN,
+    ffn_size: int = LLAMA31_8B_FFN,
+    seed: int = 0,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
+) -> list[Arm]:
+    """Math OFT BS128 learning-rate refinement under the E4 protocol."""
+    shapes = megatron_module_shapes(hidden_size, ffn_size, qkv_output_size)
+    selected_shapes = {
+        name: shape for name, shape in shapes.items() if name in ALL_MODULES.split(",")
+    }
+    report = oft_lora_match_report(128, selected_shapes)
+    return [
+        Arm(
+            _name("oftrefine", "b128", ALL_MODULES, lr, seed, extra="math"),
+            "oft",
+            None,
+            128,
+            ALL_MODULES,
+            lr,
+            seed,
+            dataset="math",
+            matched_ratio=report["ratio"],
+        )
+        for lr in E4_MATH_OFT_B128_REFINE_LRS
     ]
 
 
@@ -1303,6 +1335,12 @@ MATRICES = {
     ),
     "e4oftb128low": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: (
         e4_math_oft_b128_low_arms(hidden, ffn, seed=seed, qkv_output_size=qkv_output)
+    ),
+    "e4oftb128refine": (
+        lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None:
+        e4_math_oft_b128_refine_arms(
+            hidden, ffn, seed=seed, qkv_output_size=qkv_output
+        )
     ),
     "e4lr0": lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None: e4lr0_arms(
         seed=seed,
