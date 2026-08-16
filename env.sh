@@ -144,6 +144,34 @@ if [ -n "${CUDA_HOME:-}" ] && [ -x "${CUDA_HOME}/bin/nvcc" ]; then
     FLASHINFER_NVCC="${FLASHINFER_NVCC:-${CUDA_HOME}/bin/nvcc}"
 fi
 
+# --- build: sglang's Rust extension needs a toolchain the exec nodes lack ---
+# From v0.5.16 the sglang Python package declares a Rust extension
+# (sglang.srt.multimodal._core.inkling, used by the Inkling multimodal image
+# processor). Its build backend pulls setuptools-rust and shells out to cargo,
+# so on a host without a Rust toolchain `uv sync` dies with "can't find Rust
+# compiler" -- and it dies on the sglang build, which is early enough to waste
+# the whole allocation. The login nodes have /usr/bin/cargo; the execution nodes
+# do not.
+#
+# A rustup toolchain in the shared cluster home works on every execution node,
+# but $HOME/.cargo/bin is not on PATH under Condor's minimal job environment --
+# put it there first, so the check below sees a toolchain that is actually
+# installed rather than silently opting out.
+if [ -d "${HOME:-/nonexistent}/.cargo/bin" ]; then
+    PATH="${HOME}/.cargo/bin:${PATH}"
+fi
+
+# Only opt out when cargo is genuinely absent, so hosts that can build the
+# extension still get it. Skipping is a real (if narrow) capability loss --
+# Inkling multimodal then falls back to the pure-Python InklingImageProcessor,
+# since SGLANG_INKLING_RS_MM_PREPROCESS defaults on and the import is wrapped in
+# try/except. Nothing else is affected: nothing imports _core.inkling at module
+# load, and orbit's own multimodal path is Qwen-VL. Set SGLANG_BUILD_RUST_EXTS
+# explicitly to override in either direction.
+if ! command -v cargo >/dev/null 2>&1; then
+    SGLANG_BUILD_RUST_EXTS="${SGLANG_BUILD_RUST_EXTS:-none}"
+fi
+
 # --- runtime: PEFT adapter transport (shaped OFT/LoRA payloads) ---
 # The committed default in peft_transport/backends/ipc.py is cuda_ipc, which is
 # right for hosts where the SGLang scheduler children can rebuild a trainer's
