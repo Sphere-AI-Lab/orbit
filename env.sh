@@ -144,5 +144,19 @@ if [ -n "${CUDA_HOME:-}" ] && [ -x "${CUDA_HOME}/bin/nvcc" ]; then
     FLASHINFER_NVCC="${FLASHINFER_NVCC:-${CUDA_HOME}/bin/nvcc}"
 fi
 
+# --- runtime: PEFT adapter transport (shaped OFT/LoRA payloads) ---
+# The committed default in peft_transport/backends/ipc.py is cuda_ipc, which is
+# right for hosts where the SGLang scheduler children can rebuild a trainer's
+# CUDA IPC handle. This cluster is not one of them, on two counts:
+#   - HTCondor's security profile denies pidfd_getfd, so the handle cannot be
+#     reconstructed at all.
+#   - On B200, cudaIpcOpenMemHandle fails with "invalid argument" -- determi-
+#     nistically for raw Megatron param-buffer views, and still intermittently
+#     for fresh clones (one engine in four at the 2026-08-04 smoke).
+# cpu_gather routes the payload through the SGLang parent actor instead, which
+# re-serializes with file_system sharing and never crosses that boundary.
+# Override by exporting a different value before sourcing this file.
+ORBIT_PEFT_ADAPTER_TRANSPORT="${ORBIT_PEFT_ADAPTER_TRANSPORT:-cpu_gather}"
+
 unset _cuda_mod _nccl_mod _c _cc _ram_gb _jobs _ncpu 2>/dev/null || true
 set +a
