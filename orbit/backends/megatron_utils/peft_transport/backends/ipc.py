@@ -3,6 +3,7 @@ update_weight_from_tensor.py. Wire format unchanged from today.
 """
 from __future__ import annotations
 
+import os
 from argparse import Namespace
 from collections.abc import Iterable, Sequence
 
@@ -13,12 +14,30 @@ from ray import ObjectRef
 from ray.actor import ActorHandle
 
 from orbit.backends.megatron_utils.peft_utils import PeftSyncSpec
+from orbit.backends.megatron_utils.sglang import MultiprocessingSerializer
 from orbit.utils.distributed_utils import get_gloo_group
 
 from .._gather import peft_adapter_preloaded, validate_adapter_weight_chunk
 from ..interface import PeftSendResult, PeftWeightTransport
 from ..registry import PeftMethodSpec
 from ..runtime import PeftRuntimeMode, resolve_peft_runtime_mode
+
+
+def _cpu_gather_transport_enabled() -> bool:
+    """Whether to route shaped adapter payloads over CPU instead of CUDA IPC.
+
+    Default is CUDA IPC (zero-copy, and what the shared branch has always done).
+    Set ORBIT_PEFT_ADAPTER_TRANSPORT=cpu_gather on runtimes where trainer-side
+    CUDA IPC handles cannot be rebuilt by the SGLang scheduler children:
+
+      - Schedulers whose security profile denies ``pidfd_getfd`` (HTCondor).
+      - B200, where ``cudaIpcOpenMemHandle`` fails with "invalid argument"
+        deterministically for raw Megatron param-buffer views and
+        intermittently for fresh clones (measured 2026-08-04).
+
+    See IpcBackend._send_shaped_via_cpu_gather for what the fallback does.
+    """
+    return os.environ.get("ORBIT_PEFT_ADAPTER_TRANSPORT", "cuda_ipc").strip().lower() == "cpu_gather"
 
 
 class IpcBackend(PeftWeightTransport):
@@ -68,80 +87,11 @@ class IpcBackend(PeftWeightTransport):
         if self.method_spec.payload_shaper is not None:
             # The registry holds the shaper; use it.
             payload = self.method_spec.payload_shaper(weight_tensors)
-            # CUDA IPC handle reconstruction needs pidfd_getfd, which is blocked
-            # by some schedulers' security profiles. Gather small CPU adapter
-            # payloads instead, then let the SGLang parent actor serialize each
-            # TP shard for its own scheduler child.
-            rank_payload = (
-                payload.flat_tensor.detach().to(device="cpu", copy=True).contiguous(),
-                payload.metadata,
-                payload.extra["entries"],
-            )
-            gathered = [None] * world_size if is_src else None
-            dist.gather_object(
-                rank_payload,
-                object_gather_list=gathered,
-                dst=self.ipc_gather_src,
-                group=self.ipc_gather_group,
-            )
-            source_record = None
-            source_error: Exception | None = None
-            if is_src:
-                try:
-                    engine = self._engines[0]
-                    load_ref = engine.update_oft_adapter_from_rank_tensors.remote(
-                        rank_payloads=gathered,
-                        load_format=self.method_spec.sglang_load_format,
-                        adapter_config=self.sync_spec.adapter_config,
-                        adapter_name=self.sync_spec.adapter_name,
-                    )
-                    send_result = self._record_weight_version_after_load(
-                        engine, load_ref, weight_version
-                    )
-                    source_record = {
-                        "source_rank": rank,
-                        "results": send_result.results,
-                        "error": None,
-                    }
-                except Exception as exc:  # noqa: BLE001 -- synchronized below
-                    source_error = exc
-                    source_record = {
-                        "source_rank": rank,
-                        "results": None,
-                        "error": f"{type(exc).__name__}: {exc}",
-                    }
-
-            # Local gather groups can represent separate colocated engines, so
-            # only the global Gloo group can make source RPC failures and
-            # completed SGLang results visible to every trainer rank.
-            gloo_group = get_gloo_group()
-            source_records = [None] * dist.get_world_size(gloo_group)
-            dist.all_gather_object(source_records, source_record, group=gloo_group)
-
-            error_record = next(
-                (
-                    record
-                    for record in source_records
-                    if record is not None and record["error"] is not None
-                ),
-                None,
-            )
-            if error_record is not None:
-                message = (
-                    "OFT IPC adapter dispatch failed on source rank "
-                    f"{error_record['source_rank']}: {error_record['error']}"
+            if _cpu_gather_transport_enabled():
+                return self._send_shaped_via_cpu_gather(
+                    payload, rank, world_size, is_src, weight_version
                 )
-                if source_error is not None and error_record["source_rank"] == rank:
-                    raise RuntimeError(message) from source_error
-                raise RuntimeError(message)
-
-            results = [
-                result
-                for record in source_records
-                if record is not None
-                for result in record["results"]
-            ]
-            return PeftSendResult(refs=[], results=results)
+            return self._send_shaped_via_cuda_ipc(payload, world_size, is_src, weight_version)
 
         # LoRA path: unload existing adapter before loading new weights so SGLang
         # doesn't layer new tensors on top of stale state.
@@ -190,6 +140,128 @@ class IpcBackend(PeftWeightTransport):
         if send_result is not None:
             return send_result
         return PeftSendResult(refs=[])
+
+    def _send_shaped_via_cuda_ipc(
+        self, payload, world_size: int, is_src: bool, weight_version: int
+    ) -> PeftSendResult:
+        """Ship the flat tensor as a CUDA IPC handle (default transport)."""
+        # The wire format inherited from verl: outer pickle wraps inner
+        # IPC-handle-bearing serialization of the flat tensor. See
+        # update_weight_from_tensor.py:488-525 for provenance. The tag is
+        # per-method: sglang's normalize_{oft,lora}_weight_payload asserts on
+        # "flattened_oft_payload" / "flattened_lora_payload" respectively.
+        inner = (
+            f"flattened_{self.method_spec.name}_payload",
+            MultiprocessingSerializer.serialize(payload.flat_tensor),
+            payload.metadata,
+            payload.extra["entries"],
+        )
+        serialized = MultiprocessingSerializer.serialize(inner, output_str=True)
+        gathered = [None] * world_size if is_src else None
+        dist.gather_object(
+            serialized,
+            object_gather_list=gathered,
+            dst=self.ipc_gather_src,
+            group=self.ipc_gather_group,
+        )
+        send_result: PeftSendResult | None = None
+        load_error: Exception | None = None
+        if is_src:
+            engine = self._engines[0]
+            load_ref = engine.update_weights_from_tensor.remote(
+                serialized_named_tensors=gathered,
+                load_format=self.method_spec.sglang_load_format,
+                adapter_config=self.sync_spec.adapter_config,
+                adapter_name=self.sync_spec.adapter_name,
+            )
+            try:
+                send_result = self._record_weight_version_after_load(engine, load_ref, weight_version)
+            except Exception as exc:
+                load_error = exc
+
+        # Every rank serialized a CUDA IPC handle to its local flat tensor.
+        # Keep those local tensors alive until the source rank has finished
+        # the SGLang load/version RPCs; otherwise peer ranks can return and
+        # free the storage before SGLang deserializes their handles.
+        dist.barrier(group=self.ipc_gather_group)
+        if load_error is not None:
+            raise load_error
+        if send_result is not None:
+            return send_result
+        return PeftSendResult(refs=[])
+
+    def _send_shaped_via_cpu_gather(
+        self, payload, rank: int, world_size: int, is_src: bool, weight_version: int
+    ) -> PeftSendResult:
+        """Ship the flat tensor over CPU, re-serializing in the SGLang parent actor."""
+        # CUDA IPC handle reconstruction needs pidfd_getfd, which is blocked
+        # by some schedulers' security profiles. Gather small CPU adapter
+        # payloads instead, then let the SGLang parent actor serialize each
+        # TP shard for its own scheduler child.
+        rank_payload = (
+            payload.flat_tensor.detach().to(device="cpu", copy=True).contiguous(),
+            payload.metadata,
+            payload.extra["entries"],
+        )
+        gathered = [None] * world_size if is_src else None
+        dist.gather_object(
+            rank_payload,
+            object_gather_list=gathered,
+            dst=self.ipc_gather_src,
+            group=self.ipc_gather_group,
+        )
+        source_record = None
+        source_error: Exception | None = None
+        if is_src:
+            try:
+                engine = self._engines[0]
+                load_ref = engine.update_adapter_from_rank_tensors.remote(
+                    rank_payloads=gathered,
+                    payload_tag=f"flattened_{self.method_spec.name}_payload",
+                    load_format=self.method_spec.sglang_load_format,
+                    adapter_config=self.sync_spec.adapter_config,
+                    adapter_name=self.sync_spec.adapter_name,
+                )
+                send_result = self._record_weight_version_after_load(
+                    engine, load_ref, weight_version
+                )
+                source_record = {
+                    "source_rank": rank,
+                    "results": send_result.results,
+                    "error": None,
+                }
+            except Exception as exc:  # noqa: BLE001 -- synchronized below
+                source_error = exc
+                source_record = {
+                    "source_rank": rank,
+                    "results": None,
+                    "error": f"{type(exc).__name__}: {exc}",
+                }
+
+        # Local gather groups can represent separate colocated engines, so
+        # only the global Gloo group can make source RPC failures and
+        # completed SGLang results visible to every trainer rank.
+        gloo_group = get_gloo_group()
+        source_records = [None] * dist.get_world_size(gloo_group)
+        dist.all_gather_object(source_records, source_record, group=gloo_group)
+
+        error_record = next(
+            (record for record in source_records if record is not None and record["error"] is not None),
+            None,
+        )
+        if error_record is not None:
+            message = (
+                "PEFT adapter dispatch failed on source rank "
+                f"{error_record['source_rank']}: {error_record['error']}"
+            )
+            if source_error is not None and error_record["source_rank"] == rank:
+                raise RuntimeError(message) from source_error
+            raise RuntimeError(message)
+
+        results = [
+            result for record in source_records if record is not None for result in record["results"]
+        ]
+        return PeftSendResult(refs=[], results=results)
 
     def _record_weight_version_after_load(self, engine, load_ref: ObjectRef, weight_version: int) -> PeftSendResult:
         """Wait for the IPC adapter load, then propagate weight_version to SGLang.

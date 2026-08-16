@@ -134,14 +134,22 @@ uv pip install linkify-it-py==2.1.0 mdit-py-plugins==0.5.0 memray==1.19.3 pytest
 uv pip install git+https://github.com/fzyzcjy/torch_memory_saver.git@dc6876905830430b5054325fa4211ff302169c6b --force-reinstall
 ```
 
-### 12. SGLang router + custom sgl-kernel
+### 12. SGLang router + custom kernel package
+
+> The kernel package was renamed when the pin moved to the v0.5.16 sglang line:
+> the `sgl-kernel/` subdirectory now publishes **`sglang-kernel` 0.4.5** (it was
+> `sgl-kernel` 0.3.21 on v0.5.9). Uninstall both names, and note the prebuilt
+> wheel below is the old 0.3.21 build — it does NOT match the current pin. Either
+> publish a matching `sglang_kernel-0.4.5` wheel to `$ORBIT_BUILD_WHEELS`, or drop
+> the last line and let `uv sync --extra allinone` build it from source.
 
 ```bash
-uv pip uninstall sglang_router sgl-kernel
+uv pip uninstall sglang_router sgl-kernel sglang-kernel
 uv pip install https://github.com/zhuzilin/sgl-router/releases/download/v0.3.2-5f8d397/sglang_router-0.3.2-cp38-abi3-manylinux_2_28_x86_64.whl
 
 uv pip install scikit-build-core isort black wheel
 uv pip install -U "cmake>=3.31"
+# stale: 0.3.21 is the v0.5.9-line build. See the note above.
 uv pip install "$ORBIT_BUILD_WHEELS/sgl_kernel-0.3.21-cp310-abi3-linux_x86_64.whl" --no-deps
 ```
 
@@ -203,14 +211,14 @@ also installs the locked DeepEP commit using the build paths exported in step 8.
 cd <workspace>/orbit
 uv sync --inexact \
     --no-install-package transformer-engine \
-    --no-install-package sgl-kernel
+    --no-install-package sglang-kernel
 ```
 
 Use `uv sync --inexact` for metadata refreshes so uv does not prune the
 CUDA/Torch packages installed by this guide. The manifest pins `transformer-engine`
-and `sgl-kernel` to git sources (for the one-command `--extra allinone` build), so
+and `sglang-kernel` to git sources (for the one-command `--extra allinone` build), so
 `--no-install-package` for both keeps the prebuilt TE (step 5) and local cu13
-sgl-kernel (step 12) from being rebuilt from source here.
+kernel package (step 12) from being rebuilt from source here.
 
 # Troubleshooting
 
@@ -221,9 +229,9 @@ Orbit installs the backend forks from immutable public Git refs recorded in
 reachable:
 
 ```bash
-git ls-remote https://github.com/Sphere-AI-Lab/Megatron-Bridge.git 85c84cbc26d4c983a3d6e46c804f02e2a99af5a2
+git ls-remote https://github.com/Sphere-AI-Lab/Megatron-Bridge.git ad26fc46b252e6e53a56052776623499da3dc583
 git ls-remote https://github.com/Sphere-AI-Lab/Megatron-LM.git 00eb75b0c803b0fc8e5413d736529d9d3b82b6bd
-git ls-remote https://github.com/Sphere-AI-Lab/sglang.git 9c83ae8be07cbb1eb6898ce608ae244e3be375b4
+git ls-remote https://github.com/Sphere-AI-Lab/sglang.git 05cd76b4d24aafe9c455c7f68cf055982cbd95f0
 ```
 
 If a command prints no commit, the release ref has not been published.

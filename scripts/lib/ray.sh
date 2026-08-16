@@ -57,11 +57,21 @@ _ray_advantage_estimator() {
     printf 'grpo\n'
 }
 
+_ray_critic_mode() {
+    local mode
+    mode="$(_ray_array_value_after_any --critic-mode CKPT_ARGS ROLLOUT_ARGS OPTIMIZER_ARGS RL_ARGS LOSS_ARGS WANDB_ARGS PERF_ARGS EVAL_ARGS SGLANG_ARGS MISC_ARGS DEBUG_ARGS PEFT_ARGS COLOCATE_ARGS || true)"
+    printf '%s\n' "${mode:-full}"
+}
+
 _ray_critic_num_gpus() {
     local actor_gpus="$1"
     local estimator
     estimator="$(_ray_advantage_estimator)"
     if [[ "${estimator}" != "ppo" ]]; then
+        printf '0\n'
+        return 0
+    fi
+    if [[ "$(_ray_critic_mode)" == "adapter" ]]; then
         printf '0\n'
         return 0
     fi
@@ -186,6 +196,55 @@ _prepare_megatron_pythonpath() {
     fi
 }
 
+_ray_opd_teacher_pool_gpus() {
+    # Sum served-teacher GPUs from an --opd-teacher-pool manifest (yaml/json).
+    local pool_path="$1"
+    python3 - "${pool_path}" <<'PYEOF'
+import json, sys
+
+path = sys.argv[1]
+raw = open(path).read()
+if path.endswith(".json"):
+    data = json.loads(raw)
+else:
+    import yaml
+
+    data = yaml.safe_load(raw)
+total = sum(
+    int(e.get("num_gpus", 1))
+    for e in (data or {}).get("teachers", [])
+    if isinstance(e, dict) and e.get("kind") == "served"
+)
+print(total)
+PYEOF
+}
+
+_ray_opd_teacher_num_gpus() {
+    local pool_path
+    pool_path=$(_ray_array_value_after_any --opd-teacher-pool RL_ARGS ROLLOUT_ARGS MISC_ARGS 2>/dev/null || true)
+    if [[ -n "${pool_path}" ]]; then
+        _ray_opd_teacher_pool_gpus "${pool_path}"
+        return 0
+    fi
+    # Extra GPUs for a managed OPD teacher (--opd-serve-teacher). Zero when the flag is
+    # absent or when colocated (the teacher shares the actor/rollout GPUs there) --
+    # mirrors placement_group.py::_opd_teacher_extra_gpus.
+    local array_name arg
+    for array_name in RL_ARGS ROLLOUT_ARGS MISC_ARGS; do
+        if declare -p "${array_name}" >/dev/null 2>&1; then
+            local -n _teacher_args_ref="${array_name}"
+            for arg in "${_teacher_args_ref[@]}"; do
+                if [[ "${arg}" == "--opd-serve-teacher" ]]; then
+                    _ray_array_value_after_any --opd-teacher-num-gpus RL_ARGS ROLLOUT_ARGS MISC_ARGS && return 0
+                    printf '1\n'
+                    return 0
+                fi
+            done
+        fi
+    done
+    printf '0\n'
+}
+
 apply_ray_defaults() {
     RAY_NUM_CPUS=${RAY_NUM_CPUS:-64}
     if [[ -z "${RAY_NUM_GPUS:-}" ]]; then
@@ -195,9 +254,10 @@ apply_ray_defaults() {
         if _ray_launcher_is_colocated; then
             RAY_NUM_GPUS=$((actor_gpus + critic_gpus))
         else
-            local rollout_gpus
+            local rollout_gpus teacher_gpus
             rollout_gpus="$(_ray_rollout_num_gpus)"
-            RAY_NUM_GPUS=$((actor_gpus + critic_gpus + rollout_gpus))
+            teacher_gpus="$(_ray_opd_teacher_num_gpus)"
+            RAY_NUM_GPUS=$((actor_gpus + critic_gpus + rollout_gpus + teacher_gpus))
         fi
     fi
 }
@@ -392,6 +452,12 @@ cleanup_private_ray() {
         eval "exec ${_fd}>&-" 2>/dev/null || true
     done
     PORT_LOCK_FDS=()
+
+    # Leaf launchers may register a narrow cleanup hook for resources whose
+    # lifetime must cover the full Ray job (for example, a shared run lock).
+    if declare -F orbit_launcher_exit_hook >/dev/null 2>&1; then
+        orbit_launcher_exit_hook || true
+    fi
 
     exit "${exit_code}"
 }

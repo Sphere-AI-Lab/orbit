@@ -6,7 +6,7 @@ import aiohttp
 from orbit.utils.misc import load_function
 from orbit.utils.types import Sample
 
-from .deepscaler import get_deepscaler_rule_based_reward
+from .deepscaler import get_deepscaler_rule_based_reward, get_gemma_math_reward
 from .f1 import f1_score
 from .gpqa import compute_gpqa_reward
 from .math_dapo_utils import compute_score as compute_score_dapo
@@ -32,6 +32,16 @@ async def async_rm(args, sample: Sample, **kwargs):
         rm_function = load_function(args.custom_rm_path)
         return await rm_function(args, sample, **kwargs)
 
+    return await default_async_rm(args, sample)
+
+
+async def default_async_rm(args, sample: Sample):
+    """The rule-based/remote RM dispatch, bypassing any --custom-rm-path.
+
+    Exposed so custom rms that hijack the reward slot for non-reward transports
+    (e.g. OPD teacher scoring) can still hand evaluation samples to the real
+    task reward.
+    """
     metadata = sample.metadata if isinstance(sample.metadata, dict) else {}
     rm_type = (metadata.get("rm_type") or args.rm_type or "").strip()
     response = sample.response
@@ -46,6 +56,8 @@ async def async_rm(args, sample: Sample, **kwargs):
         return await remote_rm(args, sample)
     elif rm_type == "deepscaler":
         return get_deepscaler_rule_based_reward(response, label)
+    elif rm_type == "gemma_math":
+        return get_gemma_math_reward(response, label)
     elif rm_type == "dapo":
         return compute_score_dapo(response, label)
     elif rm_type == "math_alignment":

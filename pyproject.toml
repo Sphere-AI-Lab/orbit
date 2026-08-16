@@ -49,9 +49,9 @@ dependencies = [
     "sglang-router==0.3.2",
     "starlette==0.52.1",
     "tensorboard==2.20.0",
-    "timm==1.0.17",
+    "timm==1.0.16",
     "transformer-engine",
-    "transformers==4.57.1",
+    "transformers==5.12.1",
     "wandb==0.27.0",
 ]
 
@@ -78,10 +78,20 @@ allinone = [
     "flash-linear-attention==0.5.0",
     "fast-hadamard-transform",
     "deep-gemm-official",
-    "sgl-kernel==0.3.21",
-    "torch-memory-saver==0.0.9",
+    "sglang-kernel==0.4.5",
+    # PyPI wheel, not a source build: sglang on the v0.5.16 line needs
+    # >=0.0.9.post1, and upstream's 0.0.9.post1 is exactly the release that ships
+    # cu12 and cu13 .so variants in one abi3 wheel and probes torch.version.cuda
+    # at runtime. Building that rev from source instead demands TMS_CUDA_MAJOR
+    # (see scripts/build_multi_cuda.sh) and fails without it, so the git source /
+    # no-build-isolation entries for this package were dropped.
+    "torch-memory-saver==0.0.9.post1",
     "apex",
-    "tilelang==0.1.9",
+    # 0.1.11, not 0.1.9: sglang on the v0.5.16 line requires ==0.1.11, and uv will
+    # not resolve otherwise. The libcudart stub fix-up in
+    # examples/load_cuda13_2_orbit_env.sh derives its path from the installed
+    # package, so it does not care which of the two is present.
+    "tilelang==0.1.11",
     "tile-kernels==1.0.0",
     # ML libs (CUDA-13-install.md steps 6/11)
     "open-clip-torch==3.3.0",
@@ -121,8 +131,8 @@ override-dependencies = [
     "nvidia-nccl-cu13==2.30.4",
     "nvidia-nvjitlink==13.2.78",
     "nvidia-nvtx==13.2.75",
-    "timm==1.0.17",
-    "transformers==4.57.1",
+    "timm==1.0.16",
+    "transformers==5.12.1",
     "torch==2.11.0",
     "torchvision==0.26.0",
     "torchaudio==2.11.0",
@@ -136,8 +146,7 @@ no-build-isolation-package = [
     "flash-attn",
     "flash-linear-attention",
     "mamba-ssm",
-    "sgl-kernel",
-    "torch-memory-saver",
+    "sglang-kernel",
     "transformer-engine",
     "transformer-engine-torch",
 ]
@@ -150,37 +159,49 @@ mamba-ssm = ["setuptools", "torch", "wheel", "packaging", "ninja"]
 causal-conv1d = ["setuptools", "torch", "wheel", "packaging", "ninja"]
 deep-gemm-official = ["setuptools", "torch", "wheel", "packaging"]
 deep-ep = ["setuptools", "torch", "wheel", "packaging"]
-sgl-kernel = ["setuptools", "torch", "wheel", "scikit-build-core", "cmake", "ninja"]
-torch-memory-saver = ["setuptools", "torch", "wheel", "packaging"]
+sglang-kernel = ["setuptools", "torch", "wheel", "scikit-build-core", "cmake", "ninja"]
 flash-linear-attention = ["setuptools", "torch", "wheel"]
 
 [tool.uv.sources]
 deep-ep = { git = "https://github.com/deepseek-ai/DeepEP.git", rev = "d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb" }
-megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "85c84cbc26d4c983a3d6e46c804f02e2a99af5a2" }
+megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "ad26fc46b252e6e53a56052776623499da3dc583" }
 megatron-core = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git", rev = "00eb75b0c803b0fc8e5413d736529d9d3b82b6bd" }
 nvidia-resiliency-ext = { git = "https://github.com/NVIDIA/nvidia-resiliency-ext.git", rev = "63154570cea17f8805a7fd15cc3b8cc2919ba575" }
-# Ahead of sgl-kernel below, deliberately. This pure-Python range supports
-# power-of-two OFT blocks from 4 through 1024, keeps BS16+ on the dot paths,
-# and defaults QKV BS4/8 to the measured legacy path. It also tiles the OFT
-# rotations above 128 -- 893f329a2 did the fused QKV/gate_up kernel, 166041d28
-# the un-fused `gemm_oft_r`/`sgemm_oft_r` pair that `o_proj` and `down_proj`
-# take -- and bounds what the streamed adapter LOAD allocates. Nothing under
-# sgl-kernel/, whose tree hash is identical across all of them. Keeping
-# sgl-kernel pinned to the older rev means a sync reinstalls only sglang and
-# leaves the 852 MB compiled extension cached.
+# orbit-main-oft-tiny = sglang's orbit-main (v0.5.16 + the modularized OFT/LoRA
+# single-active peft framework) with the tiny-block OFT work ported on top. The
+# tiny-block series previously rode the v0.5.9 line (9c83ae8be + 48 commits);
+# it moved here because orbit's own peft transport speaks the v0.5.16 unified
+# peft_method/adapter_* wire API, which the v0.5.9 line does not have.
 #
-# Do not drop back to 893f329a2: the fused kernel alone is not enough. An OFT
-# arm with --target all reaches gemm_oft_r on every layer and dies there with
-# `OutOfResources ... Required: 2228224` several minutes into a rollout.
+# The kernel package tracks the SAME rev now, and is RENAMED: the sgl-kernel/
+# subdirectory publishes `sgl-kernel` 0.3.21 on the v0.5.9 line but
+# `sglang-kernel` 0.4.5 here, so the dependency name had to change with the pin
+# (uv errors with "metadata name `sglang-kernel` does not match given name
+# `sgl-kernel`" otherwise). The subdirectory= path is still sgl-kernel.
 #
-# Do not drop back to 166041d28 either. Its streamed-load chunk limit was
-# accounted in COMPACT bytes while the allocations are expanded full blocks
-# plus Cayley intermediates (~10x), and row-parallel groups bypassed the limit
-# entirely -- so every OFT adapter update transiently took 7-9 GB. Colocated
-# with a paused ~20 GB KV arena whose resume runs immediately after, that OOM'd
-# in torch_memory_saver's cuMemCreate on the 4th rollout. Measured on
-# 2026-08-03: 8.8 GB per update before, 0.6 GB after, 10/10 rollouts clean.
-sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "b52394d22fc4b686016943efc47cce6fb892cef2", subdirectory = "python" }
+# It no longer lags sglang either. On the v0.5.9 line the two could diverge
+# because that subdirectory's tree was identical across the range, which kept the
+# 852 MB compiled extension cached across syncs. Across the v0.5.9 -> v0.5.16
+# move the tree genuinely differs, so pairing new Python with old kernels would
+# be an ABI mismatch. Expect one rebuild.
+#
+# What this range buys, and must not be given back:
+#
+# * Power-of-two OFT blocks from 4 through 1024, BS16+ on the tensor-core dot
+#   paths, QKV BS4/8 defaulting to the measured legacy path.
+# * Tiled OFT rotations above 128, for BOTH the fused QKV/gate_up kernel and the
+#   un-fused `gemm_oft_r`/`sgemm_oft_r` pair that `o_proj`/`down_proj` take. The
+#   fused kernel alone is not enough: an OFT arm with --target all reaches
+#   gemm_oft_r on every layer and dies with `OutOfResources ... Required:
+#   2228224` several minutes into a rollout.
+# * A streamed-load chunk limit accounted in EXPANDED bytes. Accounting it in
+#   COMPACT bytes understates the real allocation (expanded full blocks plus
+#   Cayley intermediates, ~10x) and row-parallel groups bypassed the limit
+#   entirely -- every OFT adapter update then transiently took 7-9 GB. Colocated
+#   with a paused ~20 GB KV arena whose resume runs immediately after, that OOM'd
+#   in torch_memory_saver's cuMemCreate on the 4th rollout. Measured on
+#   2026-08-03: 8.8 GB per update before, 0.6 GB after, 10/10 rollouts clean.
+sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "05cd76b4d24aafe9c455c7f68cf055982cbd95f0", subdirectory = "python" }
 # TransformerEngine built from source (verified end-to-end). The orbit-build-wheels
 # prebuilt is cu13/torch-2.11-correct too, but swapping it in perturbed libcudart load
 # order and exposed a flaky tilelang<->flashinfer find_loaded_library("libcudart")
@@ -190,8 +211,7 @@ sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "b52394d22
 transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", rev = "71bbefbf153418f943640df0f7373625dc93fa46" }
 fast-hadamard-transform = { git = "https://github.com/Dao-AILab/fast-hadamard-transform.git", rev = "e7706faf8d1c3b9f241e36860640ad1dac644ede" }
 deep-gemm-official = { git = "https://github.com/liulixinkerry/DeepGEMM.git", rev = "18db30e9db9703b906e9ab3803fbbc1a64be1520" }
-sgl-kernel = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "9c83ae8be07cbb1eb6898ce608ae244e3be375b4", subdirectory = "sgl-kernel" }
-torch-memory-saver = { git = "https://github.com/fzyzcjy/torch_memory_saver.git", rev = "dc6876905830430b5054325fa4211ff302169c6b" }
+sglang-kernel = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "05cd76b4d24aafe9c455c7f68cf055982cbd95f0", subdirectory = "sgl-kernel" }
 sglang-router = { url = "https://github.com/zhuzilin/sgl-router/releases/download/v0.3.2-5f8d397/sglang_router-0.3.2-cp38-abi3-manylinux_2_28_x86_64.whl" }
 # apex orbit-build-wheels prebuilt is cu13-clean; source build needs fragile --config-settings, so use the public wheel.
 apex = { url = "https://github.com/liulixinkerry/orbit-build-wheels/releases/download/cu132-torch211-ubuntu2204/apex-0.1-cp312-cp312-linux_x86_64.whl" }
@@ -212,12 +232,12 @@ tested-ref = "00eb75b0c803b0fc8e5413d736529d9d3b82b6bd"
 
 [tool.orbit.release.backend-pins.megatron-bridge]
 source = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git"
-tested-ref = "85c84cbc26d4c983a3d6e46c804f02e2a99af5a2"
+tested-ref = "ad26fc46b252e6e53a56052776623499da3dc583"
 
 [tool.orbit.release.backend-pins.sglang]
 source = "https://github.com/Sphere-AI-Lab/sglang.git"
 subdirectory = "python"
-tested-ref = "b52394d22fc4b686016943efc47cce6fb892cef2"
+tested-ref = "05cd76b4d24aafe9c455c7f68cf055982cbd95f0"
 
 [tool.isort]
 profile = "black"  # black-compatible

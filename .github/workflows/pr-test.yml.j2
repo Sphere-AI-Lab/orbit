@@ -64,6 +64,8 @@
       'test_executor': 'pytest',
       'tests': [
         {'test_file': 'fast', 'num_gpus': 0},
+        {'test_file': 'test_critic_*.py', 'num_gpus': 0},
+        {'test_file': 'test_ppo_*.py', 'num_gpus': 0},
         {'test_file': 'utils/test_sglang_config.py', 'num_gpus': 0},
       ],
     },

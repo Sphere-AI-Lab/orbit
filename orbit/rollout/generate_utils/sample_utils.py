@@ -1,7 +1,11 @@
 from copy import deepcopy
 from dataclasses import fields
 
+import numpy as np
+
 from orbit.utils.types import Sample
+
+_OPD_STUDENT_TOP_LOGPROBS_KEY = "opd_student_top_logprobs"
 
 
 def merge_samples(samples: list[Sample], tokenizer) -> Sample:
@@ -13,6 +17,8 @@ def merge_samples(samples: list[Sample], tokenizer) -> Sample:
 
 def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
     """Merge two samples generated from sibling inference engine calls."""
+    from orbit.rollout.opd_sglang import _TOPK_PAD_LOGPROB, _TOPK_PAD_TOKEN_ID
+
     a, b = deepcopy(a), deepcopy(b)
 
     def _merge_equal_value(field):
@@ -26,6 +32,109 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
             sample.loss_mask = [1] * sample.response_length
         if sample.rollout_log_probs is None:
             sample.rollout_log_probs = [0.0] * sample.response_length
+
+    def _merge_optional_per_token(field):
+        # Optional OPD per-token lists (teacher_log_probs, opd_reverse_kl): merge like
+        # rollout_log_probs when present (zeros over the injected observation span),
+        # else keep None — zero-filling for non-OPD runs would poison batches that
+        # mix merged and unmerged samples.
+        av, bv = getattr(a, field), getattr(b, field)
+        if av is None and bv is None:
+            return None
+        av = av if av is not None else [0.0] * a.response_length
+        bv = bv if bv is not None else [0.0] * b.response_length
+        return av + [0.0] * obs_len + bv
+
+    def _merge_optional_hidden_states():
+        # Full-vocab OPD teacher hidden states are produced by the custom-rm hooks on
+        # the *merged* sample, so both sides are normally still None here. Mirror the
+        # per-token list merge anyway (zero rows over the injected observation span,
+        # which the loss mask zeroes out) so a scored segment survives a late merge
+        # instead of silently vanishing.
+        av, bv = a.teacher_hidden_states, b.teacher_hidden_states
+        if av is None and bv is None:
+            return None
+        hidden_size = av.shape[1] if av is not None else bv.shape[1]
+        if av is not None and bv is not None:
+            assert av.shape[1] == bv.shape[1], f"teacher hidden size mismatch: {av.shape} vs {bv.shape}"
+        av = av if av is not None else np.zeros((a.response_length, hidden_size), dtype=np.float32)
+        bv = bv if bv is not None else np.zeros((b.response_length, hidden_size), dtype=np.float32)
+        return np.concatenate([av, np.zeros((obs_len, hidden_size), dtype=av.dtype), bv], axis=0)
+
+    def _merge_optional_topk_pair():
+        # A missing *response* segment is not equivalent to the loss-masked
+        # observation gap: reverse/mixed direct OPD assigns an all-pad teacher row
+        # a large outside-support loss.  Therefore retained rows must cover both
+        # generated segments, or the merged trajectory must be re-scored as a
+        # whole.  Normal pre-score merging (both pairs None) remains unchanged.
+        a_scored = a.teacher_topk_ids is not None or a.teacher_topk_logprobs is not None
+        b_scored = b.teacher_topk_ids is not None or b.teacher_topk_logprobs is not None
+        if not a_scored and not b_scored:
+            return None, None
+        if a_scored != b_scored:
+            raise ValueError(
+                "cannot merge one direct-OPD-scored segment with one unscored segment; "
+                "merge before teacher scoring or re-score the merged sample"
+            )
+
+        a_top_k = a.validate_teacher_topk()
+        b_top_k = b.validate_teacher_topk()
+        if a_top_k is None and b_top_k is None:
+            raise ValueError(
+                "cannot infer K while merging scored empty direct-OPD segments; "
+                "merge before teacher scoring or re-score the merged sample"
+            )
+        top_k = a_top_k if a_top_k is not None else b_top_k
+        if a_top_k is not None and b_top_k is not None and a_top_k != b_top_k:
+            raise ValueError(f"cannot merge direct-OPD segments with different K: {a_top_k} != {b_top_k}")
+
+        ids_gap = [[_TOPK_PAD_TOKEN_ID] * top_k for _ in range(obs_len)]
+        logprobs_gap = [[_TOPK_PAD_LOGPROB] * top_k for _ in range(obs_len)]
+        return (
+            [list(row) for row in a.teacher_topk_ids] + ids_gap + [list(row) for row in b.teacher_topk_ids],
+            [list(row) for row in a.teacher_topk_logprobs]
+            + logprobs_gap
+            + [list(row) for row in b.teacher_topk_logprobs],
+        )
+
+    def _pop_opd_student_top_logprobs(metadata):
+        if metadata is None:
+            return None, None
+        metadata = deepcopy(metadata)
+        top_logprobs = metadata.pop(_OPD_STUDENT_TOP_LOGPROBS_KEY, None)
+        return metadata, top_logprobs
+
+    def _merge_opd_student_top_logprobs(av, bv):
+        if av is None and bv is None:
+            return None
+        assert av is not None and bv is not None, (
+            f"{_OPD_STUDENT_TOP_LOGPROBS_KEY} must be present on both samples when merging top-k OPD metadata: "
+            f"a has {av is not None}, b has {bv is not None}"
+        )
+        assert len(av) == a.response_length, (
+            f"{_OPD_STUDENT_TOP_LOGPROBS_KEY} length mismatch: "
+            f"a.{_OPD_STUDENT_TOP_LOGPROBS_KEY} has length {len(av)}, "
+            f"a.response_length={a.response_length}"
+        )
+        assert len(bv) == b.response_length, (
+            f"{_OPD_STUDENT_TOP_LOGPROBS_KEY} length mismatch: "
+            f"b.{_OPD_STUDENT_TOP_LOGPROBS_KEY} has length {len(bv)}, "
+            f"b.response_length={b.response_length}"
+        )
+        return av + [[] for _ in range(obs_len)] + bv
+
+    def _merge_metadata():
+        a_metadata, a_top_logprobs = _pop_opd_student_top_logprobs(a.metadata)
+        b_metadata, b_top_logprobs = _pop_opd_student_top_logprobs(b.metadata)
+        assert a_metadata == b_metadata, f"metadata mismatch: a.metadata={a.metadata}, b.metadata={b.metadata}"
+
+        merged_metadata = deepcopy(a_metadata)
+        merged_top_logprobs = _merge_opd_student_top_logprobs(a_top_logprobs, b_top_logprobs)
+        if merged_top_logprobs is not None:
+            if merged_metadata is None:
+                merged_metadata = {}
+            merged_metadata[_OPD_STUDENT_TOP_LOGPROBS_KEY] = merged_top_logprobs
+        return merged_metadata
 
     _fill_defaults(a)
     _fill_defaults(b)
@@ -44,6 +153,7 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
         if a.rollout_routed_experts is not None:
             assert a.rollout_routed_experts.shape[0] <= b.rollout_routed_experts.shape[0]
         assert a.status == Sample.Status.COMPLETED, f"a.status must be COMPLETED, got {a.status}"
+        merged_topk_ids, merged_topk_logprobs = _merge_optional_topk_pair()
 
         return _create_with_all_fields(
             Sample,
@@ -60,10 +170,15 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
             loss_mask=a.loss_mask + [0] * obs_len + b.loss_mask,
             weight_versions=a.weight_versions + b.weight_versions,
             rollout_log_probs=a.rollout_log_probs + [0.0] * obs_len + b.rollout_log_probs,
+            teacher_log_probs=_merge_optional_per_token("teacher_log_probs"),
+            teacher_hidden_states=_merge_optional_hidden_states(),
+            opd_reverse_kl=_merge_optional_per_token("opd_reverse_kl"),
+            teacher_topk_ids=merged_topk_ids,
+            teacher_topk_logprobs=merged_topk_logprobs,
             rollout_routed_experts=b.rollout_routed_experts,
             remove_sample=_merge_equal_value("remove_sample"),
             status=b.status,
-            metadata=_merge_equal_value("metadata"),
+            metadata=_merge_metadata(),
             generate_function_path=_merge_equal_value("generate_function_path"),
             train_metadata=_merge_equal_value("train_metadata"),
             session_id=_merge_equal_value("session_id"),

@@ -68,8 +68,11 @@ def init(args):
 
     set_parallel_state(create_megatron_parallel_state())
 
-    # https://github.com/NVIDIA/Megatron-LM/issues/1563
-    assert np.__version__.startswith("1."), "Megatron does not support numpy 2.x"
+    # numpy 2.x is OK with this (Sphere-patched) Megatron-LM: NVIDIA/Megatron-LM#1563
+    # (np.product in dist_checkpointing/validation.py) is already fixed to np.prod
+    # here, and no other numpy-2.0-removed API is used. The old
+    # `assert np.__version__.startswith("1.")` guard is removed so cu13-env
+    # (numpy 2.x, shared with the sglang rollout / torch / flashinfer) can run.
 
     # Random seeds for reproducibility.
     if args.rank == 0:
@@ -97,6 +100,16 @@ def init(args):
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
         torch.use_deterministic_algorithms(True, warn_only=False)
+
+    # Mirror of megatron.training.initialize (orbit does not call it): the
+    # TransformerConfig field alone only affects config validation; the kernel
+    # overrides are installed by this global switch.
+    if getattr(args, "batch_invariant_mode", False):
+        from megatron.core.transformer.custom_layers.batch_invariant_kernels import enable_batch_invariant_mode
+
+        if args.rank == 0:
+            logger.info("> enabling batch-invariant kernels globally")
+        enable_batch_invariant_mode()
 
     if args.tp_comm_overlap:
         from megatron.training.initialize import _initialize_tp_communicators

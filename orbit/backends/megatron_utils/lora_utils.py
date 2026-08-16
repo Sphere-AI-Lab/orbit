@@ -8,10 +8,9 @@ from typing import Any
 import torch
 
 from .peft_utils import (
-    convert_target_modules_to_hf,
+    PeftCheckpointPreflight,
     convert_target_modules_to_megatron,
     get_peft_method,
-    is_adapter_param_name,
     load_peft_adapter_checkpoint,
     parse_exclude_modules,
     resolve_target_modules_hf,
@@ -89,6 +88,7 @@ def save_lora_checkpoint(
     optimizer: Any | None = None,
     opt_param_scheduler: Any | None = None,
     iteration: int | None = None,
+    active_student_version: str | None = None,
 ) -> str:
     return save_peft_adapter_checkpoint(
         model,
@@ -99,6 +99,7 @@ def save_lora_checkpoint(
         optimizer=optimizer,
         opt_param_scheduler=opt_param_scheduler,
         iteration=iteration,
+        active_student_version=active_student_version,
     )
 
 
@@ -108,6 +109,9 @@ def load_lora_adapter(
     *,
     optimizer: Any | None = None,
     opt_param_scheduler: Any | None = None,
+    expected_iteration: int | None = None,
+    expected_active_student_version: str | None = None,
+    checkpoint_preflight: PeftCheckpointPreflight | None = None,
 ) -> tuple[bool, int | None]:
     return load_peft_adapter_checkpoint(
         model,
@@ -115,4 +119,7 @@ def load_lora_adapter(
         label="LoRA",
         optimizer=optimizer,
         opt_param_scheduler=opt_param_scheduler,
+        expected_iteration=expected_iteration,
+        expected_active_student_version=expected_active_student_version,
+        checkpoint_preflight=checkpoint_preflight,
     )

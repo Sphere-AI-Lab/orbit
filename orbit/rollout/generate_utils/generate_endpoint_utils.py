@@ -10,7 +10,6 @@ from typing import Any
 import numpy as np
 import pybase64
 
-from orbit.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME
 from orbit.backends.megatron_utils.oft_utils import OFT_ADAPTER_NAME
 from orbit.backends.megatron_utils.peft_utils import get_peft_method
 from orbit.utils.processing_utils import encode_image_for_rollout_engine
@@ -75,20 +74,24 @@ def attach_peft_request_payload(args, payload: dict[str, Any]) -> dict[str, Any]
     global _debug_peft_request_count
 
     peft_method = get_peft_method(args)
-    if peft_method == "lora":
-        payload["lora_path"] = LORA_ADAPTER_NAME
-    elif peft_method == "oft" and not os.environ.get("ORBIT_DSV4_DISABLE_OFT_REQUEST"):
-        payload["oft_path"] = OFT_ADAPTER_NAME
+    # LoRA is routed through the fork's SINGLE-ACTIVE peft/lora (peft_method="lora",
+    # see sglang_engine.py) -- NOT upstream's multi-tenant LoRAManager. The
+    # single-active path applies the index-0 adapter unconditionally, so the
+    # generate request must NOT name an adapter (sending lora_path 400s in
+    # upstream's _validate_and_resolve_lora when enable_lora is unset).
+    # OFT runs multi-slot (base slot 0 + adapter slot 1) and selects its trained
+    # slot via the fork's adapter_* wire key (v0.5.16 rename of oft_path).
+    if peft_method == "oft" and not os.environ.get("ORBIT_DSV4_DISABLE_OFT_REQUEST"):
+        payload["adapter_path"] = OFT_ADAPTER_NAME
 
     if os.environ.get("ORBIT_DEBUG_PEFT_REQUEST"):
         limit = int(os.environ.get("ORBIT_DEBUG_PEFT_REQUEST_LIMIT", "16"))
         if _debug_peft_request_count < limit:
             logger.info(
-                "peft_request_payload peft_method=%s has_lora_path=%s has_oft_path=%s "
+                "peft_request_payload peft_method=%s has_adapter_path=%s "
                 "disable_oft_request=%s return_logprob=%s sampling_keys=%s",
                 peft_method,
-                "lora_path" in payload,
-                "oft_path" in payload,
+                "adapter_path" in payload,
                 bool(os.environ.get("ORBIT_DSV4_DISABLE_OFT_REQUEST")),
                 payload.get("return_logprob"),
                 sorted(payload.get("sampling_params", {}).keys()),

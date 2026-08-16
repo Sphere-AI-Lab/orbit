@@ -87,6 +87,21 @@ class TITOTokenizer:
             trim_trailing_ids=self.trailing_token_ids or None,
         )
 
+    def expected_ids_for_finish_reason(
+        self,
+        expected_ids: list[int],
+        finish_reason: str | None,
+    ) -> list[int]:
+        """Adjust canonical IDs for a model-specific incomplete finish.
+
+        A chat template renders a completed assistant message, including its
+        closing control tokens.  A length-truncated generation does not emit
+        those tokens.  Most tokenizer families need no adjustment; subclasses
+        may remove only the canonical suffix that the model could not have
+        produced for the supplied finish reason.
+        """
+        return list(expected_ids)
+
     def tokenize_additional_non_assistant(
         self,
         old_messages: list[dict[str, Any]],
@@ -188,6 +203,22 @@ class Qwen3TITOTokenizer(TITOTokenizer):
         self._newline_id: int = nl_ids[0]
         self._im_end_id: int = tokenizer.convert_tokens_to_ids("<|im_end|>")
         self.trailing_token_ids = frozenset({self._newline_id})
+
+    def expected_ids_for_finish_reason(
+        self,
+        expected_ids: list[int],
+        finish_reason: str | None,
+    ) -> list[int]:
+        ids = list(expected_ids)
+        if finish_reason != "length":
+            return ids
+
+        boundary = len(ids)
+        if boundary and ids[boundary - 1] == self._newline_id:
+            boundary -= 1
+        if boundary and ids[boundary - 1] == self._im_end_id:
+            return ids[: boundary - 1]
+        return ids
 
     def merge_tokens(
         self,

@@ -33,13 +33,13 @@ class _FailingRemoteMethod:
 
 class _FakeEngine:
     def __init__(self):
-        self.update_oft_adapter_from_rank_tensors = _RemoteMethod({"loaded": True})
+        self.update_adapter_from_rank_tensors = _RemoteMethod({"loaded": True})
         self.update_weight_version = _RemoteMethod({"versioned": True})
 
 
 class _FailingEngine:
     def __init__(self):
-        self.update_oft_adapter_from_rank_tensors = _FailingRemoteMethod(
+        self.update_adapter_from_rank_tensors = _FailingRemoteMethod(
             RuntimeError("scheduler load failed")
         )
         self.update_weight_version = _RemoteMethod({"versioned": True})
@@ -89,6 +89,7 @@ def test_ipc_oft_gathers_cpu_rank_tensors_before_calling_engine(monkeypatch):
     def all_gather_object(objects, obj, **_kwargs):
         objects[:] = [obj, None]
 
+    monkeypatch.setenv("ORBIT_PEFT_ADAPTER_TRANSPORT", "cpu_gather")
     monkeypatch.setattr(ipc_backend.dist, "get_rank", lambda: 0)
     monkeypatch.setattr(ipc_backend.dist, "get_world_size", lambda _group: 2)
     monkeypatch.setattr(ipc_backend.dist, "gather_object", gather_object)
@@ -128,9 +129,10 @@ def test_ipc_oft_gathers_cpu_rank_tensors_before_calling_engine(monkeypatch):
     assert flat_tensor.device.type == "cpu"
     assert metadata == {"entries": ["m0"]}
     assert entries == [("m0", 0)]
-    assert engine.update_oft_adapter_from_rank_tensors.calls == [
+    assert engine.update_adapter_from_rank_tensors.calls == [
         {
             "rank_payloads": [gathered_objects[0], gathered_objects[0]],
+            "payload_tag": "flattened_oft_payload",
             "load_format": "oft_adapter",
             "adapter_config": {"peft_type": "OFT"},
             "adapter_name": "orbit_oft",
@@ -166,8 +168,9 @@ def test_engine_serializes_each_oft_rank_tensor_under_file_system(monkeypatch):
         (torch.arange(4, 8), {"rank": 1}, [("m1", 0)]),
     ]
 
-    result = engine.update_oft_adapter_from_rank_tensors(
+    result = engine.update_adapter_from_rank_tensors(
         rank_payloads=rank_payloads,
+        payload_tag="flattened_oft_payload",
         load_format="oft_adapter",
         adapter_config={"peft_type": "OFT"},
         adapter_name="orbit_oft",
@@ -252,8 +255,9 @@ def test_engine_rejects_multi_node_oft_rank_tensor_serialization(monkeypatch):
     engine.update_weights_from_tensor = lambda **_kwargs: {"success": True}
 
     with pytest.raises(RuntimeError, match="single-host"):
-        engine.update_oft_adapter_from_rank_tensors(
+        engine.update_adapter_from_rank_tensors(
             rank_payloads=[(torch.arange(4), {"rank": 0}, [("m0", 0)])],
+            payload_tag="flattened_oft_payload",
             load_format="oft_adapter",
             adapter_config={"peft_type": "OFT"},
             adapter_name="orbit_oft",
@@ -302,6 +306,7 @@ def test_ipc_oft_propagates_source_load_failure_across_engine_groups(
             raise RuntimeError("weight version ray get failed")
         return value
 
+    monkeypatch.setenv("ORBIT_PEFT_ADAPTER_TRANSPORT", "cpu_gather")
     monkeypatch.setattr(ipc_backend.dist, "get_rank", lambda: rank["value"])
     monkeypatch.setattr(ipc_backend.dist, "get_world_size", get_world_size)
     monkeypatch.setattr(ipc_backend.dist, "gather_object", gather_object)
@@ -397,6 +402,7 @@ def test_ipc_oft_propagates_failed_engine_result_to_peer_rank(monkeypatch):
             source_record["value"] = obj
         objects[:] = [source_record["value"], None, second_source_record, None]
 
+    monkeypatch.setenv("ORBIT_PEFT_ADAPTER_TRANSPORT", "cpu_gather")
     monkeypatch.setattr(ipc_backend.dist, "get_rank", lambda: rank["value"])
     monkeypatch.setattr(ipc_backend.dist, "get_world_size", get_world_size)
     monkeypatch.setattr(ipc_backend.dist, "gather_object", gather_object)
@@ -408,7 +414,7 @@ def test_ipc_oft_propagates_failed_engine_result_to_peer_rank(monkeypatch):
     )
 
     failed_engine = _FakeEngine()
-    failed_engine.update_oft_adapter_from_rank_tensors = _RemoteMethod(
+    failed_engine.update_adapter_from_rank_tensors = _RemoteMethod(
         {"success": False, "error": "adapter rejected"}
     )
     source_backend = IpcBackend(

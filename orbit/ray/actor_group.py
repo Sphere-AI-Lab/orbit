@@ -81,12 +81,14 @@ class RayTrainGroup:
         num_gpus_per_actor: float = 1,
         role: str,
         with_ref: bool,
+        with_opd_teacher: bool = False,
     ) -> None:
         self.args = args
         self._num_nodes = num_nodes
         self._num_gpus_per_node = num_gpus_per_node
         self.role = role
         self.with_ref = with_ref
+        self.with_opd_teacher = with_opd_teacher
 
         # Allocate the GPUs for actors w/o instantiating them
         self._actor_handles = self._allocate_gpus_for_actor(pg, num_gpus_per_actor)
@@ -130,7 +132,9 @@ class RayTrainGroup:
         """
         Allocate GPU resourced and initialize model, optimizer, local ckpt, etc.
         """
-        return await self._broadcast("init", self.args, self.role, with_ref=self.with_ref)
+        return await self._broadcast(
+            "init", self.args, self.role, with_ref=self.with_ref, with_opd_teacher=self.with_opd_teacher
+        )
 
     async def train(self, rollout_id, rollout_data_ref):
         """Do one rollout training"""
@@ -177,9 +181,14 @@ class RayTrainGroup:
         await self._broadcast("clear_memory")
 
     async def connect(self, critic_group):
+        if len(self._actor_handles) != len(critic_group._actor_handles):
+            raise RuntimeError(
+                "actor and critic groups must have equal worker counts; "
+                f"actor={len(self._actor_handles)}, critic={len(critic_group._actor_handles)}"
+            )
         refs = [
             actor.connect_actor_critic.remote(critic)
-            for actor, critic in zip(self._actor_handles, critic_group._actor_handles, strict=False)
+            for actor, critic in zip(self._actor_handles, critic_group._actor_handles, strict=True)
         ]
         await asyncio.gather(*refs)
 

@@ -76,7 +76,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        info: [{"num_gpus": 0, "test_file": "fast"}, {"num_gpus": 0, "test_file": "utils/test_sglang_config.py"}]
+        info: [{"num_gpus": 0, "test_file": "fast"}, {"num_gpus": 0, "test_file": "test_critic_*.py"}, {"num_gpus": 0, "test_file": "test_ppo_*.py"}, {"num_gpus": 0, "test_file": "utils/test_sglang_config.py"}]
     defaults:
       run:
         working-directory: ${{ github.workspace }}

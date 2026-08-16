@@ -2,6 +2,7 @@ import logging
 from argparse import Namespace
 from collections.abc import Sequence
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
@@ -139,32 +140,97 @@ def get_rollout_data(args: Namespace, rollout_data_ref: Box) -> RolloutBatch:
                 parallel_state=parallel_state,
             )
 
-    if "rollout_log_probs" in rollout_data:
-        max_seq_lens = rollout_data.get("max_seq_lens")
-        rollout_data["rollout_log_probs"] = [
-            torch.tensor(
-                slice_log_prob_with_cp(
-                    log_prob,
-                    total_length,
-                    response_length,
-                    args.qkv_format,
-                    max_seq_lens[i] if max_seq_lens is not None else None,
-                ),
-                device=torch.cuda.current_device(),
-                dtype=torch.float32,
-            )
-            for i, (log_prob, total_length, response_length) in enumerate(
-                zip(
-                    rollout_data["rollout_log_probs"],
-                    rollout_data["total_lengths"],
-                    rollout_data["response_lengths"],
-                    strict=False,
-                )
-            )
-        ]
+    # rollout_log_probs always arrive as raw list[list[float]]; teacher_log_probs
+    # arrive raw only from the sglang OPD teacher (the megatron OPD teacher
+    # populates tensors *later* via compute_log_prob, so the key is absent here
+    # — and the already-tensor guard keeps that path untouched either way).
+    _tensorize_cp_sliced_log_probs(args, rollout_data, "rollout_log_probs", dtype=_rollout_logprob_dtype(args))
+    _tensorize_cp_sliced_log_probs(args, rollout_data, "teacher_log_probs")
+    _tensorize_cp_sliced_log_probs(args, rollout_data, "opd_reverse_kl")
+    _tensorize_cp_sliced_log_probs(args, rollout_data, "teacher_topk_ids", dtype=torch.long)
+    _tensorize_cp_sliced_log_probs(args, rollout_data, "teacher_topk_logprobs")
+    _tensorize_cp_sliced_teacher_hidden_states(args, rollout_data)
     if "rollout_routed_experts" in rollout_data:
         rollout_data["rollout_routed_experts"] = [torch.from_numpy(r) for r in rollout_data["rollout_routed_experts"]]
     return rollout_data
+
+
+def _rollout_logprob_dtype(args: Namespace) -> torch.dtype:
+    # Parity contract: under true-on-policy the stored rollout log-probs must
+    # be exactly what SGLang computed (bf16/fp16), not an fp32 widening.
+    if getattr(args, "true_on_policy_mode", False):
+        if getattr(args, "bf16", False):
+            return torch.bfloat16
+        if getattr(args, "fp16", False):
+            return torch.float16
+    return torch.float32
+
+
+def _tensorize_cp_sliced_log_probs(
+    args: Namespace, rollout_data: RolloutBatch, key: str, dtype: torch.dtype = torch.float32
+) -> None:
+    """Tensorize + CP-slice a per-sample ``list[list[float]]`` of response-aligned
+    log-probs transferred rollout->train, in place.
+
+    No-op when the key is absent, the list is empty (a DP rank can receive zero
+    samples), or entries are already tensors.
+    """
+    values = rollout_data.get(key)
+    if not values or isinstance(values[0], torch.Tensor):
+        return
+    max_seq_lens = rollout_data.get("max_seq_lens")
+    rollout_data[key] = [
+        torch.tensor(
+            slice_log_prob_with_cp(
+                log_prob,
+                total_length,
+                response_length,
+                args.qkv_format,
+                max_seq_lens[i] if max_seq_lens is not None else None,
+            ),
+            device=torch.cuda.current_device(),
+            dtype=dtype,
+        )
+        for i, (log_prob, total_length, response_length) in enumerate(
+            zip(
+                values,
+                rollout_data["total_lengths"],
+                rollout_data["response_lengths"],
+                strict=False,
+            )
+        )
+    ]
+
+
+def _tensorize_cp_sliced_teacher_hidden_states(args: Namespace, rollout_data: RolloutBatch) -> None:
+    """Tensorize + CP-slice per-sample ``(response_length, hidden)`` teacher hidden states
+    (full-vocab OPD) in place, mirroring ``_tensorize_cp_sliced_log_probs`` --
+    ``slice_log_prob_with_cp`` row-slices a 2D tensor exactly like a 1D one.
+
+    Kept on CPU deliberately: a rollout batch of hidden states is ~hidden_size times larger
+    than its log-probs; ``opd_jsd_loss`` moves one micro-batch chunk to GPU at a time.
+    """
+    values = rollout_data.get("teacher_hidden_states")
+    if not values or isinstance(values[0], torch.Tensor):
+        return
+    max_seq_lens = rollout_data.get("max_seq_lens")
+    rollout_data["teacher_hidden_states"] = [
+        slice_log_prob_with_cp(
+            torch.from_numpy(np.ascontiguousarray(hidden_states)).to(torch.float32),
+            total_length,
+            response_length,
+            args.qkv_format,
+            max_seq_lens[i] if max_seq_lens is not None else None,
+        )
+        for i, (hidden_states, total_length, response_length) in enumerate(
+            zip(
+                values,
+                rollout_data["total_lengths"],
+                rollout_data["response_lengths"],
+                strict=False,
+            )
+        )
+    ]
 
 
 def get_batch(
@@ -536,6 +602,8 @@ def sync_actor_critic_data(
 
     - Values are broadcast from src=1.
     - Log-probs and ref-log-probs are broadcast from src=0 when KL is used.
+    - Values use an fp32 wire representation; log-probs use the configured
+      rollout log-prob dtype so true-on-policy bf16/fp16 parity is preserved.
     Updates `rollout_data` in place with the synchronized tensors.
     """
     log_probs_key = "log_probs" if not args.use_rollout_logprobs else "rollout_log_probs"
@@ -547,16 +615,24 @@ def sync_actor_critic_data(
 
     handles = []
 
-    if not values:
-        values = [torch.empty_like(log_prob) for log_prob in log_probs]
+    value_wire_dtype = torch.float32
+    if values:
+        values = [value.to(dtype=value_wire_dtype) for value in values]
+    else:
+        values = [torch.empty_like(log_prob, dtype=value_wire_dtype) for log_prob in log_probs]
     for value in values:
         handles.append(dist.broadcast(value, src=1, group=group, async_op=True))
 
     if args.kl_coef != 0 or args.use_kl_loss:
-        if not log_probs:
-            log_probs = [torch.empty_like(value) for value in values]
-        if not ref_log_probs:
-            ref_log_probs = [torch.empty_like(value) for value in values]
+        logprob_wire_dtype = _rollout_logprob_dtype(args)
+        if log_probs:
+            log_probs = [log_prob.to(dtype=logprob_wire_dtype) for log_prob in log_probs]
+        else:
+            log_probs = [torch.empty_like(value, dtype=logprob_wire_dtype) for value in values]
+        if ref_log_probs:
+            ref_log_probs = [ref_log_prob.to(dtype=logprob_wire_dtype) for ref_log_prob in ref_log_probs]
+        else:
+            ref_log_probs = [torch.empty_like(value, dtype=logprob_wire_dtype) for value in values]
         for ref_log_prob, log_prob in zip(ref_log_probs, log_probs, strict=False):
             handles.append(dist.broadcast(log_prob, src=0, group=group, async_op=True))
             handles.append(dist.broadcast(ref_log_prob, src=0, group=group, async_op=True))

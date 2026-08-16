@@ -19,7 +19,7 @@ def build_oft_flattened_payload(
     NCCL broadcast for NCCL backend) is the backend's responsibility — this
     helper only shapes the payload.
     """
-    from sglang.srt.oft.streamed_weight_loader import (
+    from sglang.srt.peft.oft.streamed_weight_loader import (
         dedupe_named_tensors_by_storage,
     )
 

@@ -496,7 +496,7 @@ class TestOftBlockCeilingUnderRl:
 
         from tools.lora_regret.arms import OFT_MAX_BLOCK_SGLANG
 
-        expected_sha = "b52394d22fc4b686016943efc47cce6fb892cef2"
+        expected_sha = "05cd76b4d24aafe9c455c7f68cf055982cbd95f0"
         supported = [4, 8, 16, 32, 64, 128, 256, 512, 1024]
         assert supported[0] == 4
         assert all(block & (block - 1) == 0 for block in supported)
@@ -513,22 +513,27 @@ class TestOftBlockCeilingUnderRl:
             for requirement in packages["orbit"]["metadata"]["requires-dist"]
         }
         sglang_git = "https://github.com/Sphere-AI-Lab/sglang.git"
-        kernel_sha = "9c83ae8be07cbb1eb6898ce608ae244e3be375b4"
-        bridge_sha = "85c84cbc26d4c983a3d6e46c804f02e2a99af5a2"
+        # sgl-kernel no longer lags sglang: the v0.5.9 -> v0.5.16 move changes the
+        # sgl-kernel tree, so the two must be built from the same rev.
+        kernel_sha = expected_sha
+        bridge_sha = "ad26fc46b252e6e53a56052776623499da3dc583"
         assert sources["sglang"]["rev"] == expected_sha
         assert pins["sglang"]["tested-ref"] == expected_sha
-        assert packages["sglang"]["version"] == "0.0.0.dev9909+gb52394d22"
+        assert packages["sglang"]["version"] == "0.0.0.dev15479+g05cd76b4d"
         assert packages["sglang"]["source"]["git"] == (
             f"{sglang_git}?subdirectory=python&rev={expected_sha}#{expected_sha}"
         )
         assert orbit_requires["sglang"]["git"] == (
             f"{sglang_git}?subdirectory=python&rev={expected_sha}"
         )
-        assert sources["sgl-kernel"]["rev"] == kernel_sha
-        assert packages["sgl-kernel"]["source"]["git"] == (
+        # The sgl-kernel/ subdirectory publishes `sglang-kernel` on the v0.5.16
+        # line (it was `sgl-kernel` on v0.5.9), so the dependency name follows the
+        # pin even though the subdirectory path does not.
+        assert sources["sglang-kernel"]["rev"] == kernel_sha
+        assert packages["sglang-kernel"]["source"]["git"] == (
             f"{sglang_git}?subdirectory=sgl-kernel&rev={kernel_sha}#{kernel_sha}"
         )
-        assert orbit_requires["sgl-kernel"]["git"] == (
+        assert orbit_requires["sglang-kernel"]["git"] == (
             f"{sglang_git}?subdirectory=sgl-kernel&rev={kernel_sha}"
         )
         assert sources["megatron-bridge"]["rev"] == bridge_sha

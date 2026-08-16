@@ -18,6 +18,7 @@ from packaging.version import parse
 from tqdm import tqdm
 
 from orbit.rollout.base_types import RolloutFnEvalOutput, RolloutFnTrainOutput
+from orbit.rollout.generate_utils.prefill_logprobs import recompute_samples_rollout_logprobs_via_prefill
 from orbit.rollout.filter_hub.base_types import MetricGatherer, call_dynamic_filter
 from orbit.rollout.generate_utils.generate_endpoint_utils import (
     attach_peft_request_payload,
@@ -37,6 +38,7 @@ from orbit.utils.processing_utils import (
 )
 from orbit.utils.types import Sample
 
+from .opd_scoring import local_scoring_enabled, opd_score_sample
 from .rm_hub import async_rm, batched_async_rm
 
 __all__ = ["generate_rollout", "get_model_url"]
@@ -398,6 +400,19 @@ async def generate(
         "return_logprob": should_request_rollout_logprobs(args, evaluation),
     }
 
+    # Top-k OPD (sglang teacher): collect the student's own top-k logprobs during
+    # generation; post_process cross-scores them against the teacher's top-k.
+    _opd_top_k = getattr(args, "opd_log_prob_top_k", 0) or 0
+    _opd_wants_student_top = (
+        not evaluation
+        and _opd_top_k > 0
+        and getattr(args, "opd_type", None) == "sglang"
+        and getattr(args, "opd_top_k_strategy", "only-student") != "only-teacher"
+    )
+    if _opd_wants_student_top:
+        payload["top_logprobs_num"] = _opd_top_k
+        payload["return_logprob"] = True  # sglang returns output_top_logprobs only with logprobs on
+
     attach_peft_request_payload(args, payload)
 
     if args.use_rollout_routing_replay:
@@ -422,6 +437,11 @@ async def generate(
 
     _t_http0 = time.perf_counter()
     output = await post(url, payload, headers=headers)
+    if _opd_wants_student_top:
+        _output_top_logprobs = output.get("meta_info", {}).get("output_top_logprobs")
+        if _output_top_logprobs is not None:
+            sample.metadata.setdefault("opd_student_top_logprobs", [])
+            sample.metadata["opd_student_top_logprobs"].extend(_output_top_logprobs)
     if os.environ.get("ORBIT_DSV4_RESPONSE_DEBUG", "0") == "1":
         dump_dir = os.environ.get("ORBIT_DSV4_RESPONSE_DEBUG_DIR", "/tmp")
         os.makedirs(dump_dir, exist_ok=True)
@@ -536,6 +556,15 @@ async def generate_and_rm(
             else:
                 sample = await generate(args, sample, sampling_params, evaluation=evaluation)
 
+    # score against the local same-engine teacher (adapter-slot or base), once
+    # per generated sample, before any reward computation below; dormant
+    # unless local_scoring_enabled(args) (same-base --opd-teacher, no external
+    # --opd-teacher-url/-urls).
+    if local_scoring_enabled(args):
+        for scored_sample in sample if isinstance(sample, list) else [sample]:
+            if scored_sample.status != Sample.Status.ABORTED:
+                await opd_score_sample(args, scored_sample)
+
     # for the rm that need the whole group, we will not do the rm here
     if args.group_rm:
         return sample
@@ -557,7 +586,9 @@ async def generate_and_rm(
             return sample
         # for multi-turn environment, a reward could be assigned to the agent.
         if sample.reward is None:
-            sample.reward = await async_rm(args, sample)
+            # Custom rms receive the evaluation flag so reward-slot transports
+            # (OPD teacher scoring) can hand eval samples to the real task RM.
+            sample.reward = await async_rm(args, sample, evaluation=evaluation)
 
     return sample
 
@@ -730,6 +761,22 @@ async def generate_rollout_async(
         all_data, key=lambda group: group[0][0].index if isinstance(group[0], list) else group[0].index
     )
 
+    # True-on-policy Phase 1: replace decode-time rollout_log_probs with one
+    # clean prefill re-scoring pass (before state.reset(), which clears
+    # state.sampling_params). Groups may nest one level (multi-turn).
+    flat_samples = [
+        sample
+        for group in data
+        for item in group
+        for sample in (item if isinstance(item, list) else [item])
+    ]
+    await recompute_samples_rollout_logprobs_via_prefill(
+        args,
+        flat_samples,
+        url=get_model_url(args, "default"),
+        sampling_params=state.sampling_params,
+    )
+
     # reset the global state to prevent effects on the next rollout or eval.
     state.reset()
     if args.rollout_sample_filter_path is not None:
@@ -748,7 +795,8 @@ EVAL_PROMPT_DATASET = {}
 
 
 async def eval_rollout(args: Namespace, rollout_id: int) -> tuple[dict[str, dict[str, list[Any]]], list[list[Sample]]]:
-    assert not args.group_rm, "Group RM is not supported for eval rollout"
+    # --group-rm eval is supported via singleton-group grading in
+    # _generate_and_rm_eval (each eval sample becomes its own group).
 
     coros = []
     for dataset_cfg in getattr(args, "eval_datasets", []) or []:
@@ -770,7 +818,8 @@ async def eval_rollout_single_dataset(
         rollout_id: int, the id of the rollout, used for deterministic data generation
         dataset_cfg: configuration of the dataset
     """
-    assert not args.group_rm, "Group RM is not supported for eval rollout"
+    # --group-rm eval is supported via singleton-group grading in
+    # _generate_and_rm_eval (each eval sample becomes its own group).
 
     global EVAL_PROMPT_DATASET
 
@@ -833,22 +882,27 @@ async def eval_rollout_single_dataset(
         else None
     )
 
+    async def _generate_and_rm_eval(sample, sampling_params):
+        sample = await generate_and_rm(
+            args,
+            sample,
+            sampling_params=sampling_params,
+            evaluation=True,
+        )
+        # With --group-rm, generate_and_rm defers rewards to the group hook;
+        # eval samples have no training group, so grade each as a singleton
+        # group (batch hooks handle len-1 groups: router/code/judge stay
+        # meaningful, genrm degenerates to a documented neutral 0.5).
+        if args.group_rm and sample.reward is None and sample.status != Sample.Status.ABORTED:
+            sample.reward = (await batched_async_rm(args, [sample]))[0]
+        return sample
+
     async def generate_eval_sample(sample, sampling_params):
         if eval_generate_semaphore is None:
-            return await generate_and_rm(
-                args,
-                sample,
-                sampling_params=sampling_params,
-                evaluation=True,
-            )
+            return await _generate_and_rm_eval(sample, sampling_params)
 
         async with eval_generate_semaphore:
-            return await generate_and_rm(
-                args,
-                sample,
-                sampling_params=sampling_params,
-                evaluation=True,
-            )
+            return await _generate_and_rm_eval(sample, sampling_params)
 
     _setup_t0 = time.perf_counter()
     tasks = []

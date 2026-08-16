@@ -103,7 +103,15 @@ class OrbitRouter:
             try:
                 await asyncio.sleep(interval)
 
-                urls = [u for u in self.worker_request_counts if u not in self.dead_workers]
+                # SGLang's HTTP health endpoint can be starved while long
+                # generations occupy a worker.  A timeout is therefore only
+                # actionable while the worker is idle; in-flight request
+                # failures are handled by the rollout engine health monitor.
+                urls = [
+                    url
+                    for url, active_requests in self.worker_request_counts.items()
+                    if url not in self.dead_workers and active_requests == 0
+                ]
                 if not urls:
                     continue
 

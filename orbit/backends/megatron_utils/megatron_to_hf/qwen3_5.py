@@ -153,6 +153,8 @@ def convert_qwen3_5_to_hf(args, name, param):
             return [(f"{prefix}.mlp.down_proj.weight", param)]
         elif rest == "self_attention.linear_qkv.layer_norm_weight":
             return [(f"{prefix}.input_layernorm.weight", param)]
+        elif rest == "input_layernorm.weight":
+            return [(f"{prefix}.input_layernorm.weight", param)]
         elif rest == "mlp.linear_fc1.layer_norm_weight":
             return [(f"{prefix}.post_attention_layernorm.weight", param)]
         elif rest == "pre_mlp_layernorm.weight":

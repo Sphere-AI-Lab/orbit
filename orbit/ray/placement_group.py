@@ -6,7 +6,7 @@ from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from orbit.utils.async_utils import eager_create_task
-from orbit.utils.arguments import uses_rollout_engines
+from orbit.utils.arguments import needs_opd_teacher, uses_rollout_engines, uses_separate_critic
 
 from ..utils.ray_utils import compute_ray_pin_head_options
 from .actor_group import RayTrainGroup
@@ -80,6 +80,25 @@ def _create_placement_group(num_gpus):
     return pg, pg_reordered_bundle_indices, pg_reordered_gpu_ids
 
 
+def _opd_teacher_extra_gpus(args) -> int:
+    """Extra PG bundles for a managed OPD teacher (--opd-serve-teacher) on its own GPUs.
+
+    Zero under --colocate: the teacher shares the actor/rollout GPUs there (see
+    start_rollout_servers' bundle-cursor reset), matching how rollout itself colocates.
+    """
+    if args.colocate:
+        return 0
+    total = 0
+    if getattr(args, "opd_serve_teacher", False):
+        total += args.opd_teacher_num_gpus
+    pool_path = getattr(args, "opd_teacher_pool", None)
+    if pool_path is not None:
+        from orbit.ray.rollout import _opd_teacher_pool
+
+        total += _opd_teacher_pool(args).served_num_gpus
+    return total
+
+
 def create_placement_groups(args):
     """Create placement groups for actor and rollout engines."""
 
@@ -91,7 +110,7 @@ def create_placement_groups(args):
             num_gpus += args.critic_num_nodes * args.critic_num_gpus_per_node
             critic_offset = args.actor_num_nodes * args.actor_num_gpus_per_node
     elif args.debug_rollout_only:
-        num_gpus = args.rollout_num_gpus
+        num_gpus = args.rollout_num_gpus + _opd_teacher_extra_gpus(args)
         rollout_offset = 0
     elif args.colocate:
         num_gpus = args.actor_num_nodes * args.actor_num_gpus_per_node
@@ -100,7 +119,11 @@ def create_placement_groups(args):
             num_gpus += args.critic_num_nodes * args.critic_num_gpus_per_node
             critic_offset = args.actor_num_nodes * args.actor_num_gpus_per_node
     else:
-        num_gpus = args.actor_num_nodes * args.actor_num_gpus_per_node + args.rollout_num_gpus
+        num_gpus = (
+            args.actor_num_nodes * args.actor_num_gpus_per_node
+            + args.rollout_num_gpus
+            + _opd_teacher_extra_gpus(args)
+        )
         rollout_offset = args.actor_num_nodes * args.actor_num_gpus_per_node
         if args.use_critic:
             num_gpus += args.critic_num_nodes * args.critic_num_gpus_per_node
@@ -112,13 +135,13 @@ def create_placement_groups(args):
 
     rollout_pg_reordered_bundle_indices = actor_pg_reordered_bundle_indices[rollout_offset:]
     rollout_pg_reordered_gpu_ids = actor_pg_reordered_gpu_ids[rollout_offset:]
-    if args.use_critic:
+    if uses_separate_critic(args):
         critic_pg_reordered_bundle_indices = actor_pg_reordered_bundle_indices[critic_offset:]
         critic_pg_reordered_gpu_ids = actor_pg_reordered_gpu_ids[critic_offset:]
 
     return {
         "actor": (pg, actor_pg_reordered_bundle_indices, actor_pg_reordered_gpu_ids),
-        "critic": (pg, critic_pg_reordered_bundle_indices, critic_pg_reordered_gpu_ids) if args.use_critic else None,
+        "critic": (pg, critic_pg_reordered_bundle_indices, critic_pg_reordered_gpu_ids) if uses_separate_critic(args) else None,
         "rollout": (pg, rollout_pg_reordered_bundle_indices, rollout_pg_reordered_gpu_ids),
     }
 
@@ -132,7 +155,9 @@ def _actor_needs_reference_weights(args) -> bool:
     return (args.kl_coef != 0 or args.use_kl_loss) and getattr(args, "peft_method", "none") == "none"
 
 
-def allocate_train_group(args, num_nodes, num_gpus_per_node, pg, role: str, with_ref: bool):
+def allocate_train_group(
+    args, num_nodes, num_gpus_per_node, pg, role: str, with_ref: bool, with_opd_teacher: bool = False
+):
     return RayTrainGroup(
         args=args,
         num_nodes=num_nodes,
@@ -141,7 +166,17 @@ def allocate_train_group(args, num_nodes, num_gpus_per_node, pg, role: str, with
         num_gpus_per_actor=0.4,
         role=role,
         with_ref=with_ref,
+        with_opd_teacher=with_opd_teacher,
     )
+
+
+def _single_start_rollout_id(role: str, start_rollout_ids: list[int]) -> int:
+    if not start_rollout_ids:
+        raise RuntimeError(f"{role} initialization returned no rollout ids")
+    unique_ids = set(start_rollout_ids)
+    if len(unique_ids) != 1:
+        raise RuntimeError(f"{role} ranks resumed at different rollout ids: {sorted(unique_ids)}")
+    return start_rollout_ids[0]
 
 
 async def create_training_models(args, pgs, rollout_manager):
@@ -152,8 +187,9 @@ async def create_training_models(args, pgs, rollout_manager):
         pg=pgs["actor"],
         role="actor",
         with_ref=_actor_needs_reference_weights(args),
+        with_opd_teacher=needs_opd_teacher(args) and args.opd_type == "megatron",
     )
-    if args.use_critic:
+    if uses_separate_critic(args):
         critic_model = allocate_train_group(
             args=args,
             num_nodes=args.critic_num_nodes,
@@ -166,14 +202,17 @@ async def create_training_models(args, pgs, rollout_manager):
     else:
         critic_model = None
 
-    start_rollout_ids = await actor_model.init()
-
-    assert len(set(start_rollout_ids)) == 1
+    actor_start_rollout_id = _single_start_rollout_id("actor", await actor_model.init())
     if args.start_rollout_id is None:
-        args.start_rollout_id = start_rollout_ids[0]
+        args.start_rollout_id = actor_start_rollout_id
 
-    if args.use_critic:
-        await critic_init_task
+    if uses_separate_critic(args):
+        critic_start_rollout_id = _single_start_rollout_id("critic", await critic_init_task)
+        if actor_start_rollout_id != critic_start_rollout_id:
+            raise RuntimeError(
+                "actor and critic checkpoints must resume at the same rollout id; "
+                f"actor={actor_start_rollout_id}, critic={critic_start_rollout_id}"
+            )
         await actor_model.connect(critic_model)
 
     await actor_model.set_rollout_manager(rollout_manager)

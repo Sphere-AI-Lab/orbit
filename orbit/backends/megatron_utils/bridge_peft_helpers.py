@@ -28,6 +28,35 @@ def _ensure_model_list(model):
     return model if isinstance(model, list) else [model]
 
 
+_PRELOADED_CHECKPOINT_IDENTITY_ATTRS = (
+    "_orbit_loaded_dist_checkpoint_path",
+    "_orbit_loaded_dist_checkpoint_prefix",
+    "_orbit_restored_modelopt_checkpoint_path",
+)
+
+
+def _propagate_preloaded_checkpoint_identity(source_chunks, transformed_chunks) -> None:
+    """Keep a pre-wrap base load attached to the PEFT-wrapped model.
+
+    Some Bridge PEFT transforms return replacement top-level modules. Without
+    copying Orbit's load identity, the ordinary initialization path loads the
+    same model-only checkpoint a second time into the wrapped model and strict
+    distributed-checkpoint loading then rejects the intentionally fresh adapter
+    parameters.
+    """
+    source_chunks = _ensure_model_list(source_chunks)
+    transformed_chunks = _ensure_model_list(transformed_chunks)
+    if len(source_chunks) != len(transformed_chunks):
+        raise RuntimeError(
+            "PEFT wrapping changed the number of model chunks after base checkpoint preload: "
+            f"{len(source_chunks)} -> {len(transformed_chunks)}"
+        )
+    for source, transformed in zip(source_chunks, transformed_chunks, strict=True):
+        for attr_name in _PRELOADED_CHECKPOINT_IDENTITY_ATTRS:
+            if hasattr(source, attr_name):
+                setattr(transformed, attr_name, getattr(source, attr_name))
+
+
 def _materialize_runtime_device(model_chunks):
     from megatron.bridge.models.common.unimodal import to_empty_if_meta_device
 
@@ -225,11 +254,17 @@ def _make_peft_pre_wrap_hook(
         model_list = _ensure_model_list(model_chunks)
         if load_path and is_distributed_checkpoint(load_path):
             load_dist_checkpoint(model_list, load_path, is_value_model=is_value_model)
+        preloaded_chunks = list(model_list)
         transformed = _ensure_model_list(peft(model_list, training=True))
         for post_peft_hook in post_peft_hooks:
             maybe_transformed = post_peft_hook(transformed)
             if maybe_transformed is not None:
                 transformed = _ensure_model_list(maybe_transformed)
+        # A PEFT transform or any subsequent hook may replace a top-level
+        # model chunk. Attach the preload identity to the final chunks that
+        # Bridge will wrap so the ordinary initialization load sees it after
+        # unwrapping DDP/mixed-precision wrappers.
+        _propagate_preloaded_checkpoint_identity(preloaded_chunks, transformed)
         _assert_peft_wrapped_modules(
             transformed,
             peft_method=peft_method,
@@ -264,7 +299,18 @@ def _oft_validator_variant(args: Namespace) -> str:
     return "canonical"
 
 
-def _setup_peft_model_via_bridge(args: Namespace) -> list:
+def _bridge_is_value_model(hf_config, role: str = "actor") -> bool:
+    """The adapter-mode critic reuses the value-model machinery: pre-DDP value-head
+    hook plus is_value_model-aware base-weight loading."""
+    if role == "critic":
+        return True
+    return (
+        "ForTokenClassification" in hf_config.architectures[0]
+        or "ForSequenceClassification" in hf_config.architectures[0]
+    )
+
+
+def _setup_peft_model_via_bridge(args: Namespace, role: str = "actor") -> list:
     """Build Megatron model with PEFT using Megatron-Bridge."""
     from megatron.bridge import AutoBridge
     from megatron.bridge.training.config import DistributedDataParallelConfig
@@ -296,10 +342,7 @@ def _setup_peft_model_via_bridge(args: Namespace) -> list:
             variant=_oft_validator_variant(args),
         )
 
-    is_value_model = (
-        "ForTokenClassification" in hf_config.architectures[0]
-        or "ForSequenceClassification" in hf_config.architectures[0]
-    )
+    is_value_model = _bridge_is_value_model(hf_config, role=role)
     post_peft_hooks = []
     if is_value_model:
         hidden_size = hf_config.text_config.hidden_size if hasattr(hf_config, "text_config") else hf_config.hidden_size
@@ -316,7 +359,8 @@ def _setup_peft_model_via_bridge(args: Namespace) -> list:
         )
     )
 
-    ddp_config = DistributedDataParallelConfig(use_distributed_optimizer=True)
+    use_distributed_optimizer = "muon" not in (getattr(args, "optimizer", None) or "").lower()
+    ddp_config = DistributedDataParallelConfig(use_distributed_optimizer=use_distributed_optimizer)
     ddp_config.finalize()
     extra_kwargs = {}
     if getattr(provider, "experimental_attention_variant", None) == "dsv4":

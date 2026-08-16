@@ -109,9 +109,9 @@ def distributed_masked_whiten(
     """
     Performs whitening on a tensor using global statistics from all participating GPUs.
 
-    It calculates the global mean and variance across all ranks in the default
-    process group (the WORLD) and uses these global statistics to normalize the
-    local data on each rank.
+    It calculates the global mean and variance across all ranks in the selected
+    process group (WORLD by default) and uses these global statistics to
+    normalize the local data on each rank.
 
     Args:
         values (torch.Tensor): The local tensor of values to whiten.
@@ -124,18 +124,19 @@ def distributed_masked_whiten(
     Returns:
         torch.Tensor: The locally whitened tensor using global statistics.
     """
-    # Calculate local intermediate statistics
-    local_sum = (values * mask).sum()
-    local_sum_sq = ((values**2) * mask).sum()
-    local_mask_sum = mask.sum()
+    # Accumulate in fp32 and stack the device scalars directly.  In particular,
+    # ``sum`` on an empty local shard still produces a device scalar, so ranks
+    # with no local tokens can participate in the same all-reduce as their
+    # non-empty CP/DP peers.
+    values_fp32 = values.to(dtype=torch.float32)
+    mask_fp32 = mask.to(device=values.device, dtype=torch.float32)
+    local_sum = (values_fp32 * mask_fp32).sum()
+    local_sum_sq = (values_fp32.square() * mask_fp32).sum()
+    local_mask_sum = mask_fp32.sum()
 
-    stats_tensor = torch.tensor(
-        [local_sum, local_sum_sq, local_mask_sum],
-        device=values.device,
-        dtype=torch.float32,
-    )
+    stats_tensor = torch.stack((local_sum, local_sum_sq, local_mask_sum)).detach()
 
-    # Aggregate via all_reduce within the DP group
+    # Aggregate via all_reduce within the selected group
     dist.all_reduce(stats_tensor, group=process_group)
 
     # Calculate global stats from aggregated results

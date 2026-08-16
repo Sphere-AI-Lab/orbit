@@ -37,6 +37,7 @@ try:
 except ImportError:
     from megatron.core.utils import unwrap_model
 
+from orbit.utils.arguments import uses_adapter_critic, uses_head_critic, uses_one_trunk_critic
 from orbit.utils.dumper_utils import DumperMegatronUtil, DumperPhase
 from orbit.utils.memory_utils import clear_memory
 
@@ -52,11 +53,17 @@ from .ci_utils import (
     compute_model_hashes_by_layer,
     save_model_hashes,
 )
+from .fp32_param_utils import enforce_marked_param_dtypes
 from .initialize import is_megatron_main_rank
 from .low_precision_bootstrap import should_preload_low_precision_model_before_optimizer
 from .model_provider import get_model_provider_func
 from .parallel import get_packed_seq_params
-from .peft_utils import is_peft_enabled, is_peft_model, save_peft_checkpoint
+from .peft_utils import (
+    is_peft_enabled,
+    is_peft_model,
+    restore_peft_training_state_after_optimizer_build,
+    save_peft_checkpoint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -195,17 +202,44 @@ def setup_model_and_optimizer(
             - The learning-rate/weight-decay scheduler tied to the optimizer.
     """
     assert not args.moe_use_upcycling
-    assert args.load is not None or args.pretrained_checkpoint is not None
+    # One-trunk critics (adapter and head modes) get trunk weights via aliasing
+    # the actor's tensors — they are the builds with no Megatron checkpoint
+    # source by design (the adapter variant additionally primes via the PEFT
+    # pre-wrap bridge load).
+    if not (role == "critic" and uses_one_trunk_critic(args)):
+        assert args.load is not None or args.pretrained_checkpoint is not None
 
     model = _build_model(args, role)
+    # Apply parameter-level dtype overrides declared in model definitions
+    # (e.g. Qwen3.5 A_log pinned to fp32) before the optimizer maps params.
+    enforce_marked_param_dtypes(model)
     optimizer, opt_param_scheduler = _build_optimizer_and_scheduler(args, model)
     return model, optimizer, opt_param_scheduler
 
 
+def _head_critic_provider(provider):
+    """Freeze all-but-value-head inside the provider, BEFORE the DDP wrap, so
+    grad buffers and optimizer state cover only the value head (the trunk is
+    later re-pointed at the actor's storage via ``alias_trunk_storage``)."""
+
+    def wrapped(*p_args, **p_kwargs):
+        from .critic_adapter import prepare_head_critic
+
+        module = provider(*p_args, **p_kwargs)
+        prepare_head_critic([module])
+        return module
+
+    return wrapped
+
+
 def _build_model(args: Namespace, role: str = "actor") -> list[DDP]:
-    if is_peft_enabled(args) and role == "actor" and args.megatron_to_hf_mode == "bridge":
-        return _setup_peft_model_via_bridge(args)
-    return get_model(get_model_provider_func(args, role), ModelType.encoder_or_decoder)
+    peft_bridge = is_peft_enabled(args) and args.megatron_to_hf_mode == "bridge"
+    if peft_bridge and (role == "actor" or (role == "critic" and uses_adapter_critic(args))):
+        return _setup_peft_model_via_bridge(args, role=role)
+    provider = get_model_provider_func(args, role)
+    if role == "critic" and uses_head_critic(args):
+        provider = _head_critic_provider(provider)
+    return get_model(provider, ModelType.encoder_or_decoder)
 
 
 def _build_optimizer_and_scheduler(
@@ -217,11 +251,30 @@ def _build_optimizer_and_scheduler(
             kwargs[f.name] = getattr(args, f.name)
     config = OptimizerConfig(**kwargs)
     config.timers = None
-    optimizer = get_megatron_optimizer(
-        config=config,
-        model_chunks=model,
-        use_gloo_process_groups=args.use_gloo_process_groups,
-    )
+    # Pion has its own getters (own sharding; ZeRO already disabled upstream by
+    # the arguments shim). Muon/Adam/SGD are dispatched inside
+    # get_megatron_optimizer, so they fall through here. Mirrors the Sphere-AI
+    # pion fork's training.py dispatch.
+    optimizer_type = (config.optimizer or "").lower()
+    if "pion" in optimizer_type:
+        if optimizer_type == "pion_msign":
+            from megatron.core.optimizer.pion_msign import get_megatron_pion_ortho_exp_optimizer
+
+            optimizer = get_megatron_pion_ortho_exp_optimizer(
+                config, model, use_gloo_process_groups=args.use_gloo_process_groups
+            )
+        else:
+            from megatron.core.optimizer.pion import get_megatron_pion_optimizer
+
+            optimizer = get_megatron_pion_optimizer(
+                config, model, use_gloo_process_groups=args.use_gloo_process_groups
+            )
+    else:
+        optimizer = get_megatron_optimizer(
+            config=config,
+            model_chunks=model,
+            use_gloo_process_groups=args.use_gloo_process_groups,
+        )
     opt_param_scheduler = get_optimizer_param_scheduler(args, optimizer)
     return optimizer, opt_param_scheduler
 
@@ -498,6 +551,9 @@ def train_one_step(
                 "advantages",
                 "returns",
                 "rollout_log_probs",
+                "teacher_hidden_states",
+                "teacher_topk_ids",
+                "teacher_topk_logprobs",
                 "max_seq_lens",
             ],
             args.data_pad_size_multiplier,
@@ -701,11 +757,7 @@ def train(
         # Run training step.
         _mem_snapshot_dir = os.environ.get("ORBIT_MEMORY_SNAPSHOT_DIR")
         _mem_snapshot_step = int(os.environ.get("ORBIT_MEMORY_SNAPSHOT_STEP", "0"))
-        _mem_profile_this_step = (
-            _mem_snapshot_dir is not None
-            and rollout_id == 0
-            and step_id == _mem_snapshot_step
-        )
+        _mem_profile_this_step = _mem_snapshot_dir is not None and rollout_id == 0 and step_id == _mem_snapshot_step
         if _mem_profile_this_step:
             torch.cuda.memory._record_memory_history(
                 enabled="all", context="all", stacks="python", max_entries=2_000_000
@@ -810,7 +862,12 @@ def train(
 
 
 def save(
-    iteration: int, model: Sequence[DDP], optimizer: MegatronOptimizer, opt_param_scheduler: OptimizerParamScheduler
+    iteration: int,
+    model: Sequence[DDP],
+    optimizer: MegatronOptimizer,
+    opt_param_scheduler: OptimizerParamScheduler,
+    *,
+    self_teacher=None,
 ) -> None:
     """Persist a training checkpoint safely with forward hooks disabled.
 
@@ -828,7 +885,13 @@ def save(
         disable_forward_pre_hook(model)
 
     if is_peft_model(model):
-        save_checkpoint_with_peft(iteration, model, optimizer, opt_param_scheduler)
+        save_checkpoint_with_peft(
+            iteration,
+            model,
+            optimizer,
+            opt_param_scheduler,
+            self_teacher=self_teacher,
+        )
     else:
         save_checkpoint(
             iteration,
@@ -847,7 +910,7 @@ def save(
         enable_forward_pre_hook(model)
 
 
-def save_hf_model(args, rollout_id: int, model: Sequence[DDP]) -> None:
+def save_hf_model(args, rollout_id: int, model: Sequence[DDP], *, self_teacher=None) -> None:
     """Save Megatron model in HuggingFace format.
 
     For PEFT models this saves both:
@@ -862,6 +925,8 @@ def save_hf_model(args, rollout_id: int, model: Sequence[DDP]) -> None:
         args: Runtime arguments.
         model (Sequence[DDP]): Sequence of DDP-wrapped model chunks.
         rollout_id (int): Rollout ID for path formatting.
+        self_teacher: Optional per-rank self-teacher state saved beside the
+            adapter checkpoint.
     """
     should_log = get_parallel_state().intra_dp_cp.rank == 0 and mpu.get_tensor_model_parallel_rank() == 0
 
@@ -896,12 +961,18 @@ def save_hf_model(args, rollout_id: int, model: Sequence[DDP]) -> None:
             adapter_path = Path(args.save_hf.format(rollout_id=rollout_id)) / "adapter"
             if should_log:
                 logger.info(f"Saving PEFT adapter checkpoint to {adapter_path}")
-            save_peft_checkpoint(model, args, str(adapter_path))
+            save_peft_checkpoint(model, args, str(adapter_path), self_teacher=self_teacher)
             if should_log:
                 logger.info(f"Successfully saved PEFT adapter to {adapter_path}")
         except Exception as e:
             if should_log:
                 logger.error(f"Failed to save PEFT adapter: {e}")
+            # Preserve the historical best-effort HF export for ordinary PEFT
+            # saves.  A requested self-teacher sidecar is different: silently
+            # dropping it would make the exported checkpoint resume with a
+            # freshly seeded teacher instead of the teacher that produced it.
+            if self_teacher is not None:
+                raise
 
 
 def initialize_model_and_optimizer(
@@ -929,19 +1000,24 @@ def initialize_model_and_optimizer(
     # weights, finalize runtime device placement, and only then create the
     # optimizer. This keeps frozen bridge/OFT base tensors and optimizer-owned
     # trainable adapter tensors in one coherent runtime state.
+    peft_training_state_restored = False
     if should_preload_low_precision_model_before_optimizer(args, role=role):
         model = _build_model(args, role)
         model[0].role = role
         reinit_critic_output_layer = _critic_output_layer_needs_reinit(args, model, role)
         clear_memory()
-        iteration, _ = load_checkpoint(
-            model,
-            None,
-            None,
-            checkpointing_context={},
-            skip_load_to_model_and_opt=False,
-            is_value_model=reinit_critic_output_layer,
-        )
+        if args.load is not None:
+            iteration, _ = load_checkpoint(
+                model,
+                None,
+                None,
+                checkpointing_context={},
+                skip_load_to_model_and_opt=False,
+                is_value_model=reinit_critic_output_layer,
+                load_training_state=role == "critic" and not reinit_critic_output_layer,
+            )
+        else:
+            iteration = 0
         if reinit_critic_output_layer:
             _reinitialize_critic_output_layer(model)
         check_peak_gpu_memory_after_load(args)
@@ -950,19 +1026,29 @@ def initialize_model_and_optimizer(
         check_model_hashes(args, model, iteration)
 
         optimizer, opt_param_scheduler = _build_optimizer_and_scheduler(args, model)
+        peft_training_state_restored = restore_peft_training_state_after_optimizer_build(
+            args,
+            optimizer,
+            opt_param_scheduler,
+            expected_iteration=iteration,
+        )
     else:
         model, optimizer, opt_param_scheduler = setup_model_and_optimizer(args, role)
         model[0].role = role
         reinit_critic_output_layer = _critic_output_layer_needs_reinit(args, model, role)
         clear_memory()
-        iteration, _ = load_checkpoint(
-            model,
-            optimizer,
-            opt_param_scheduler,
-            checkpointing_context={},
-            skip_load_to_model_and_opt=False,
-            is_value_model=reinit_critic_output_layer,
-        )
+        if args.load is not None:
+            iteration, _ = load_checkpoint(
+                model,
+                optimizer,
+                opt_param_scheduler,
+                checkpointing_context={},
+                skip_load_to_model_and_opt=False,
+                is_value_model=reinit_critic_output_layer,
+                load_training_state=True,
+            )
+        else:
+            iteration = 0
         if reinit_critic_output_layer:
             _reinitialize_critic_output_layer(model)
             if (args.fp16 or args.bf16) and optimizer is not None:
@@ -970,8 +1056,15 @@ def initialize_model_and_optimizer(
         check_peak_gpu_memory_after_load(args)
         clear_memory()
 
-        check_model_hashes(args, model, iteration)
+        # check_model_hashes keys its expected-hash lookup on args.load (ci_utils.py's
+        # _hash_file_path does Path(args.load)); with no checkpoint (args.load is None,
+        # e.g. the adapter-mode critic build) there is nothing to validate against.
+        if args.load is not None:
+            check_model_hashes(args, model, iteration)
 
-    opt_param_scheduler.step(increment=iteration * args.global_batch_size)
+    if not peft_training_state_restored and not getattr(
+        args, "_orbit_optimizer_scheduler_state_restored", False
+    ):
+        opt_param_scheduler.step(increment=iteration * args.global_batch_size)
 
     return model, optimizer, opt_param_scheduler, iteration

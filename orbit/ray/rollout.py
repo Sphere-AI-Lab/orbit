@@ -41,12 +41,12 @@ from orbit.utils.iter_utils import group_by
 from orbit.utils.logging_utils import configure_logger
 from orbit.utils.metric_checker import MetricChecker
 from orbit.utils.metric_utils import compute_pass_rate, compute_rollout_step, compute_statistics, dict_add_prefix
-from orbit.utils.misc import load_function
+from orbit.utils.misc import load_function, should_run_periodic_action
 from orbit.utils.ray_utils import Box
 from orbit.utils.reward_normalization import normalize_grouped_rewards
 from orbit.utils.seqlen_balancing import get_seqlen_balanced_partitions
 from orbit.utils.tracking_utils import init_tracking
-from orbit.utils.types import Sample
+from orbit.utils.types import Sample, collect_teacher_topk_data
 
 from ..utils.metric_utils import has_repetition
 from .utils import Lock, build_noset_visible_devices_env_vars
@@ -466,10 +466,28 @@ class RolloutManager:
         if self.args.ci_test and self.args.use_fault_tolerance and rollout_id >= 2:
             self._try_ci_fault_injection()
         data, metrics = self._get_rollout_data(rollout_id=rollout_id)
+        if getattr(self.args, "opd_defer_full_vocab_scoring", False):
+            from orbit.rollout.opd_sglang import score_full_vocab_samples
+            from orbit.utils.async_utils import run
+
+            run(score_full_vocab_samples(self.args, data))
         self._save_debug_rollout_data(data, rollout_id=rollout_id, evaluation=False)
         _log_rollout_data(rollout_id, self.args, data, metrics, time.time() - start_time)
         data = self._convert_samples_to_train_data(data)
-        return self._split_train_data_by_dp(data, self.train_parallel_config["dp_size"])
+        split_data = self._split_train_data_by_dp(data, self.train_parallel_config["dp_size"])
+        if self.args.rollout_global_dataset:
+            mark_rollout_complete = getattr(self.data_source, "mark_rollout_complete", None)
+            if callable(mark_rollout_complete):
+                mark_rollout_complete(
+                    rollout_id,
+                    snapshot_for_save=should_run_periodic_action(
+                        rollout_id,
+                        self.args.save_interval,
+                        self.get_num_rollout_per_epoch(),
+                        self.args.num_rollout,
+                    ),
+                )
+        return split_data
 
     def eval(self, rollout_id):
         if self.args.debug_train_only:
@@ -754,8 +772,41 @@ class RolloutManager:
         if any(sample.weight_versions for sample in samples):
             train_data["weight_versions"] = [sample.weight_versions for sample in samples]
 
-        if "teacher_log_probs" in samples[0].__dict__:
+        if any(sample.teacher_log_probs is not None for sample in samples):
+            missing = sum(1 for sample in samples if sample.teacher_log_probs is None)
+            if missing:
+                raise ValueError(
+                    f"teacher_log_probs is set on some samples but missing on {missing}/{len(samples)}; "
+                    "the teacher producer must score every sample in the batch."
+                )
             train_data["teacher_log_probs"] = [sample.teacher_log_probs for sample in samples]
+
+        if any(sample.opd_reverse_kl is not None for sample in samples):
+            missing = sum(1 for sample in samples if sample.opd_reverse_kl is None)
+            if missing:
+                raise ValueError(
+                    f"opd_reverse_kl is set on some samples but missing on {missing}/{len(samples)}; "
+                    "the top-k OPD scorer must score every sample in the batch."
+                )
+            train_data["opd_reverse_kl"] = [sample.opd_reverse_kl for sample in samples]
+
+        # The retained pair is validated together immediately before assembly:
+        # every sample must carry rectangular [R, K] rows of the configured K.
+        teacher_topk_data = collect_teacher_topk_data(
+            samples,
+            expected_top_k=getattr(self.args, "opd_log_prob_top_k", None),
+        )
+        if teacher_topk_data is not None:
+            train_data.update(teacher_topk_data)
+
+        if any(sample.teacher_hidden_states is not None for sample in samples):
+            missing = sum(1 for sample in samples if sample.teacher_hidden_states is None)
+            if missing:
+                raise ValueError(
+                    f"teacher_hidden_states is set on some samples but missing on {missing}/{len(samples)}; "
+                    "the full-vocab teacher scorer must score every sample in the batch."
+                )
+            train_data["teacher_hidden_states"] = [sample.teacher_hidden_states for sample in samples]
 
         # Pass dynamic global_batch_size to training side
         assert self.args.use_dynamic_global_batch_size == hasattr(self, "_dynamic_global_batch_size")
@@ -801,6 +852,10 @@ class RolloutManager:
                 "rollout_routed_experts",
                 "prompt",
                 "teacher_log_probs",
+                "teacher_hidden_states",
+                "opd_reverse_kl",
+                "teacher_topk_ids",
+                "teacher_topk_logprobs",
                 "weight_versions",
             ]:
                 if key not in data:
@@ -1033,12 +1088,115 @@ def _compute_megatron_num_gpus(args) -> int:
     return num
 
 
+OPD_TEACHER_MODEL_NAME = "opd_teacher"
+
+
+def _opd_teacher_pool(args):
+    """Parsed --opd-teacher-pool manifest, or None. Cached on args: the pool is
+    read by placement sizing, engine injection, and validation."""
+    path = getattr(args, "opd_teacher_pool", None)
+    if path is None:
+        return None
+    cached = getattr(args, "_opd_teacher_pool_parsed", None)
+    if cached is None:
+        from orbit.utils.opd_teacher_pool import parse_teacher_pool
+
+        cached = parse_teacher_pool(path)
+        args._opd_teacher_pool_parsed = cached
+    return cached
+
+
+def _teacher_server_overrides(
+    mem_fraction: float | None,
+    max_running_requests: int | None = None,
+    max_prefill_tokens: int | None = None,
+) -> dict:
+    overrides = {
+        "enable_return_hidden_states": True,
+        "disable_radix_cache": True,
+        "chunked_prefill_size": -1,
+    }
+    if mem_fraction is not None:
+        overrides["mem_fraction_static"] = mem_fraction
+    if max_running_requests is not None:
+        overrides["max_running_requests"] = max_running_requests
+    if max_prefill_tokens is not None:
+        overrides["max_prefill_tokens"] = max_prefill_tokens
+    return overrides
+
+
+def _opd_teacher_model_config(args) -> "ModelConfig | None":
+    """ModelConfig for the managed frozen OPD teacher (--opd-serve-teacher), or None.
+
+    Served like any other sglang_config model -- own router, own ServerGroup, riding the
+    same offload/health machinery -- but never weight-synced (update_weights=False). The
+    scoring-correctness server flags are baked in: radix cache off (a cache hit skips the
+    forward pass, so no hidden states / input logprobs for the matched prefix) and chunked
+    prefill off (only the last chunk of a chunked prefill returns hidden states,
+    sgl-project/sglang#8066).
+    """
+    if not getattr(args, "opd_serve_teacher", False):
+        return None
+    return ModelConfig(
+        name=OPD_TEACHER_MODEL_NAME,
+        model_path=args.teacher_hf_checkpoint,
+        update_weights=False,
+        num_gpus_per_engine=args.opd_teacher_num_gpus,
+        server_groups=[
+            ServerGroupConfig(
+                worker_type="regular",
+                num_gpus=args.opd_teacher_num_gpus,
+                overrides=_teacher_server_overrides(
+                    args.opd_teacher_mem_fraction,
+                    getattr(args, "opd_teacher_max_running_requests", None),
+                    getattr(args, "opd_teacher_max_prefill_tokens", None),
+                ),
+            )
+        ],
+    )
+
+
+def _opd_teacher_pool_model_configs(args) -> "list[ModelConfig]":
+    """One sglang model entry per served pool teacher (--opd-teacher-pool)."""
+    pool = _opd_teacher_pool(args)
+    if pool is None:
+        return []
+    return [
+        ModelConfig(
+            name=entry.served_model_name,
+            model_path=entry.model_path,
+            update_weights=False,
+            num_gpus_per_engine=entry.num_gpus_per_engine or entry.num_gpus,
+            server_groups=[
+                ServerGroupConfig(
+                    worker_type="regular",
+                    num_gpus=entry.num_gpus,
+                    overrides=_teacher_server_overrides(entry.mem_fraction),
+                )
+            ],
+        )
+        for entry in pool.served
+    ]
+
+
 def start_rollout_servers(args, pg) -> dict[str, RolloutServer]:
     """Start rollout servers: one per model, each with its own router.
+
+    With --opd-serve-teacher, the frozen OPD teacher is appended as one more model entry
+    and its endpoint is published into ``args.opd_teacher_url`` -- this runs inside the
+    RolloutManager actor, whose args copy is the one the OPD custom-rm scoring hooks read.
 
     Returns a dict mapping model name -> ``RolloutServer``.
     """
     config = _resolve_sglang_config(args)
+
+    models = list(config.models)
+    teacher_cfg = _opd_teacher_model_config(args)
+    if teacher_cfg is not None:
+        models.append(teacher_cfg)
+    pool_cfgs = _opd_teacher_pool_model_configs(args)
+    models.extend(pool_cfgs)
+    pool_model_names = {cfg.name for cfg in pool_cfgs}
 
     servers: dict[str, RolloutServer] = {}
     gpu_offset = 0
@@ -1047,8 +1205,15 @@ def start_rollout_servers(args, pg) -> dict[str, RolloutServer]:
     rollout_pg_offset = _compute_rollout_offset(args)
     megatron_num_gpus = _compute_megatron_num_gpus(args)
 
-    for model_idx, model_cfg in enumerate(config.models):
+    for model_idx, model_cfg in enumerate(models):
         model_cfg.resolve(args)
+
+        if (model_cfg.name == OPD_TEACHER_MODEL_NAME or model_cfg.name in pool_model_names) and args.colocate:
+            # In --colocate mode the teacher shares the actor/rollout GPUs (bundle 0
+            # onward, relying on the shared offload/onload dance) instead of extending
+            # the bucket -- mirrors how rollout itself colocates. Safe to reset the
+            # shared cursor: the teacher is always the last model in the list.
+            gpu_offset = 0
 
         has_pd = model_cfg.has_pd_disaggregation
         router_ip, router_port = _start_router(args, has_pd_disaggregation=has_pd, force_new=(model_idx > 0))
@@ -1110,6 +1275,21 @@ def start_rollout_servers(args, pg) -> dict[str, RolloutServer]:
         )
 
     args.sglang_model_routers = {name: (srv.router_ip, srv.router_port) for name, srv in servers.items()}
+
+    if teacher_cfg is not None:
+        teacher_srv = servers[OPD_TEACHER_MODEL_NAME]
+        args.opd_teacher_url = f"http://{teacher_srv.router_ip}:{teacher_srv.router_port}/generate"
+        logger.info(f"Managed OPD teacher serving at {args.opd_teacher_url}")
+
+    pool = _opd_teacher_pool(args)
+    if pool is not None:
+        served_urls = {
+            name: f"http://{srv.router_ip}:{srv.router_port}/generate"
+            for name, srv in servers.items()
+            if name in pool_model_names
+        }
+        args.opd_teacher_urls = pool.routing_specs(served_urls)
+        logger.info(f"Managed OPD teacher pool routing: {args.opd_teacher_urls}")
 
     return servers
 

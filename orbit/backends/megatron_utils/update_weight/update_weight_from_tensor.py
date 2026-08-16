@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 import os
 from argparse import Namespace
@@ -13,6 +14,10 @@ from ray.actor import ActorHandle
 
 from orbit.backends.megatron_utils.peft_utils import (
     build_peft_sync_spec,
+)
+from orbit.backends.megatron_utils.peft_transport.slots import (
+    MutationPurpose,
+    authorize_adapter_destination,
 )
 from orbit.backends.training_utils.parallel import get_parallel_state
 from orbit.utils.distributed_utils import get_gloo_group
@@ -101,6 +106,11 @@ class UpdateWeightFromTensor:
         # Transport is constructed in connect_rollout_engines after use_distribute is known.
         self._peft_transport = None
         self._peft_transport_mode = None
+        # Independent loaded-state for the OPD teacher slot (orbit_teacher). The
+        # transport's own _peft_loaded flag tracks the STUDENT adapter; the
+        # teacher slot fills lazily on first promotion, so it must not be
+        # unloaded before it exists.
+        self._teacher_slot_loaded = False
         # Create IPC gather groups within megatron.
         self._ipc_gather_group = None
         self._ipc_gather_src = None
@@ -134,6 +144,11 @@ class UpdateWeightFromTensor:
         Split colocated/distributed engines. Distributed source ranks create NCCL
         groups; colocated ranks map to their local IPC engine.
         """
+        # (Re)connect means the engine set changed: any new/restarted engine's
+        # orbit_teacher slot starts EMPTY (self:* slots are capacity-only, never
+        # preloaded). Reset so the next teacher promotion does not try to unload
+        # a slot that is not there. First connect: flag is already False, no-op.
+        self._teacher_slot_loaded = False
         self._all_rollout_engines = list(rollout_engines)
         self.rollout_engines = list(rollout_engines)
         self.distributed_rollout_engines = []
@@ -467,16 +482,104 @@ class UpdateWeightFromTensor:
 
         return all_refs, long_lived_tensors
 
-    def _send_adapter_params(self, hf_named_tensors) -> tuple[list[ObjectRef], Any, list[Any] | None]:
+    def _send_adapter_params(
+        self,
+        hf_named_tensors,
+        adapter_name: str | None = None,
+        *,
+        purpose: MutationPurpose = MutationPurpose.STUDENT_SYNC,
+    ) -> tuple[list[ObjectRef], Any, list[Any] | None]:
+        authorized_name = authorize_adapter_destination(
+            self._peft_args,
+            requested_name=adapter_name,
+            purpose=purpose,
+        )
         if self.use_distribute and not self._is_distributed_src_rank:
             return [], [], []
         if self._peft_transport is None:
             raise RuntimeError("_send_adapter_params called without a PEFT transport")
-        send_result = self._peft_transport.send_adapter(
-            hf_named_tensors,
-            weight_version=self.weight_version,
+
+        transport = self._peft_transport
+        original_sync_spec = transport.sync_spec
+        transport.sync_spec = dataclasses.replace(
+            original_sync_spec,
+            adapter_name=authorized_name,
         )
+        # The IPC/Ray LoRA transport unloads the previous adapter before
+        # reloading, gated on transport._peft_loaded — which tracks the STUDENT
+        # slot. Point it at the teacher slot's own loaded-state so the first
+        # promotion does not unload an orbit_teacher that is not there yet.
+        # (NcclBackend has no _peft_loaded and stages/activates instead, so the
+        # getattr returns None and this is a no-op there.)
+        student_peft_loaded = (
+            getattr(transport, "_peft_loaded", None)
+            if purpose is MutationPurpose.LEGACY_SELF_TEACHER_PROMOTION
+            else None
+        )
+        if student_peft_loaded is not None:
+            transport._peft_loaded = self._teacher_slot_loaded
+        try:
+            send_result = transport.send_adapter(
+                hf_named_tensors,
+                weight_version=self.weight_version,
+            )
+        finally:
+            if student_peft_loaded is not None:
+                self._teacher_slot_loaded = transport._peft_loaded
+                transport._peft_loaded = student_peft_loaded
+            transport.sync_spec = original_sync_spec
         return send_result.refs, [], send_result.results
+
+    def push_teacher_adapter(self) -> None:
+        """One-shot push of the CURRENT adapter params to the orbit_teacher slot.
+
+        Mirrors ``update_weights``' gather/coalesce/send for a single sync but
+        targets the reserved teacher slot instead of the student adapter, and
+        skips the pause/flush/continue-generation lifecycle (this fills an
+        inactive scoring slot, not the live generation adapter). The caller
+        (``actor._promote_self_teacher``) has swapped the EMA/lag buffer into
+        the live adapter params, so the existing Megatron->HF adapter export
+        picks up the teacher tensors unchanged.
+        """
+        from orbit.utils.opd_teacher_spec import OPD_TEACHER_ADAPTER_NAME
+
+        authorized_name = authorize_adapter_destination(
+            self._peft_args,
+            requested_name=OPD_TEACHER_ADAPTER_NAME,
+            purpose=MutationPurpose.LEGACY_SELF_TEACHER_PROMOTION,
+        )
+        if self._peft_sync_spec is None:
+            raise RuntimeError("push_teacher_adapter requires a PEFT (LoRA/OFT) run.")
+
+        megatron_local_weights = self.weights_getter()
+        weight_chunks = self._hf_weight_iterator.get_hf_weight_chunks(megatron_local_weights)
+        if self._peft_sync_spec.method == "lora":
+            from orbit.backends.megatron_utils.peft_transport._gather import (
+                coalesce_lora_hf_weight_chunks,
+            )
+            _source_chunk_count, weight_chunks = coalesce_lora_hf_weight_chunks(weight_chunks)
+        elif self._peft_sync_spec.method == "oft":
+            from orbit.backends.megatron_utils.peft_transport._gather import (
+                coalesce_oft_hf_weight_chunks,
+            )
+            _source_chunk_count, weight_chunks = coalesce_oft_hf_weight_chunks(weight_chunks)
+
+        sync_chunk_count = 0
+        for hf_named_tensors in weight_chunks:
+            refs, _long_lived, completed_results = self._send_adapter_params(
+                hf_named_tensors,
+                adapter_name=authorized_name,
+                purpose=MutationPurpose.LEGACY_SELF_TEACHER_PROMOTION,
+            )
+            results = completed_results if completed_results is not None else ray.get(refs)
+            _check_weight_sync_results(results, sync_type=_sync_type_label(self.peft_method))
+            sync_chunk_count += 1
+
+        if sync_chunk_count == 0:
+            raise RuntimeError(
+                f"{self._peft_sync_spec.method.upper()} teacher promotion failed: the weight "
+                "iterator produced zero chunks; the orbit_teacher slot was not filled."
+            )
 
     def _send_hf_params(self, hf_named_tensors) -> tuple[list[ObjectRef], Any]:
         if self._peft_sync_spec is not None:

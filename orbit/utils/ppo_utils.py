@@ -1,12 +1,27 @@
 # Adapt from https://github.com/OpenRLHF/OpenRLHF/blob/10c733694ed9fbb78a0a2ff6a05efc7401584d46/openrlhf/models/utils.py
 # and https://github.com/OpenRLHF/OpenRLHF/blob/10c733694ed9fbb78a0a2ff6a05efc7401584d46/openrlhf/trainer/ppo_utils/experience_maker.py
 
-import contextlib
 from argparse import Namespace
 
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
+
+_LOG_RATIO_EXP_CLAMP = 20.0
+
+
+def _safe_clamp_log_ratio(log_ratio: torch.Tensor) -> torch.Tensor:
+    log_ratio = torch.nan_to_num(
+        log_ratio.float(),
+        nan=0.0,
+        posinf=_LOG_RATIO_EXP_CLAMP,
+        neginf=-_LOG_RATIO_EXP_CLAMP,
+    )
+    return torch.clamp(log_ratio, min=-_LOG_RATIO_EXP_CLAMP, max=_LOG_RATIO_EXP_CLAMP)
+
+
+def _safe_exp_neg_ppo_kl(ppo_kl: torch.Tensor) -> torch.Tensor:
+    return _safe_clamp_log_ratio(-ppo_kl).exp()
 
 
 @torch.compile(dynamic=True)
@@ -37,6 +52,8 @@ def compute_approx_kl(
         # http://joschu.net/blog/kl-approx.html
         # Besides non negative, it is also unbiased and have lower variance.
         log_ratio = -log_ratio
+        if kl_loss_type == "low_var_kl":
+            log_ratio = _safe_clamp_log_ratio(log_ratio)
         kl = log_ratio.exp() - 1 - log_ratio
     else:
         raise ValueError(f"Unknown kl_loss_type: {kl_loss_type}")
@@ -130,8 +147,7 @@ def compute_policy_loss(
     eps_clip_high: float,
     eps_clip_c: float | None = None,
 ):
-    negative_approx_kl = (-ppo_kl).clamp(min=-20.0, max=20.0)
-    ratio = negative_approx_kl.exp()
+    ratio = _safe_exp_neg_ppo_kl(ppo_kl)
     pg_losses1 = -ratio * advantages
     pg_losses2 = -ratio.clamp(1 - eps_clip, 1 + eps_clip_high) * advantages
     clip_pg_losses1 = torch.maximum(pg_losses1, pg_losses2)
@@ -315,6 +331,193 @@ def get_reinforce_plus_plus_baseline_advantages(
     return unwhitened_advantages
 
 
+def opd_mopd_advantages(
+    rollout_data: dict,
+    student_log_probs: list[torch.Tensor],
+    response_lengths: list[int],
+) -> list[torch.Tensor]:
+    """Pure on-policy distillation (MOPD) advantage: teacher_logp - student_logp.
+
+    Args:
+        rollout_data: Rollout batch dict; must contain `teacher_log_probs`
+            (list[torch.Tensor], one per sample, aligned to `response_lengths`).
+        student_log_probs: Current policy log-probs per sample.
+        response_lengths: Response length per sample.
+
+    Returns:
+        list[torch.Tensor]: `teacher_i[-L_i:] - student_i` per sample.
+    """
+    precomputed_reverse_kls = rollout_data.get("opd_reverse_kl")
+    if precomputed_reverse_kls is not None:
+        # Top-k OPD: rollout-side scoring already computed the per-token
+        # weighted reverse KL; the MOPD advantage is simply its negation.
+        if len(precomputed_reverse_kls) != len(student_log_probs):
+            raise ValueError(
+                f"OPD length mismatch: opd_reverse_kl={len(precomputed_reverse_kls)} "
+                f"student={len(student_log_probs)}"
+            )
+        device = student_log_probs[0].device
+        out = []
+        for i, reverse_kl in enumerate(precomputed_reverse_kls):
+            if not torch.is_tensor(reverse_kl):
+                reverse_kl = torch.tensor(reverse_kl, dtype=torch.float32)
+            reverse_kl = reverse_kl.to(device=device)
+            if reverse_kl.shape != student_log_probs[i].shape:
+                raise ValueError(
+                    f"OPD shape mismatch at {i}: opd_reverse_kl={tuple(reverse_kl.shape)} "
+                    f"student={tuple(student_log_probs[i].shape)}"
+                )
+            out.append(-reverse_kl)
+        return out
+
+    teacher_log_probs = rollout_data.get("teacher_log_probs")
+    if teacher_log_probs is None:
+        raise ValueError(
+            "advantage_estimator='on_policy_distillation' needs teacher_log_probs. "
+            "Enable a teacher producer with --opd-type {megatron,sglang}."
+        )
+    if len(teacher_log_probs) != len(student_log_probs):
+        raise ValueError(f"OPD length mismatch: teacher={len(teacher_log_probs)} student={len(student_log_probs)}")
+    device = student_log_probs[0].device
+    out = []
+    for i, (t, s, response_length) in enumerate(
+        zip(teacher_log_probs, student_log_probs, response_lengths, strict=False)
+    ):
+        t = t.to(device=device)[-response_length:]
+        if t.shape != s.shape:
+            raise ValueError(f"OPD shape mismatch at {i}: teacher={tuple(t.shape)} student={tuple(s.shape)}")
+        out.append(t - s)
+    return out
+
+
+def apply_opd_kl_to_advantages(
+    opd_kl_coef: float,
+    rollout_data: dict,
+    advantages: list[torch.Tensor],
+    student_log_probs: list[torch.Tensor],
+) -> None:
+    """Blend an on-policy-distillation reverse-KL penalty into base advantages, in place.
+
+    `adv_i -= opd_kl_coef * (student_i - teacher_i)`, i.e. the blend form of OPD
+    (slime/miles): any base estimator's advantage combined with distillation
+    toward the teacher. Also stores the per-sample reverse KL in
+    `rollout_data["opd_reverse_kl"]`.
+
+    Args:
+        opd_kl_coef: Coefficient for the reverse-KL penalty.
+        rollout_data: Rollout batch dict; must contain `teacher_log_probs`
+            (list[torch.Tensor], one per sample, aligned to `student_log_probs`).
+        advantages: Base-estimator advantages per sample; mutated in place.
+        student_log_probs: Current policy log-probs per sample, or None (e.g. on
+            the critic with KL off) — the blend is then a silent no-op.
+    """
+    if student_log_probs is None:
+        return
+
+    precomputed_reverse_kls = rollout_data.get("opd_reverse_kl")
+    if precomputed_reverse_kls is not None:
+        # Top-k OPD: consume the rollout-side precomputed per-token reverse KL.
+        if len(advantages) != len(precomputed_reverse_kls):
+            raise ValueError(
+                f"OPD length mismatch: advantages={len(advantages)}, "
+                f"opd_reverse_kl={len(precomputed_reverse_kls)}."
+            )
+        reverse_kls = []
+        for i, adv in enumerate(advantages):
+            reverse_kl = precomputed_reverse_kls[i]
+            if not torch.is_tensor(reverse_kl):
+                reverse_kl = torch.tensor(reverse_kl, dtype=torch.float32)
+            reverse_kl = reverse_kl.to(device=adv.device)
+            if adv.shape != reverse_kl.shape:
+                raise ValueError(
+                    f"OPD shape mismatch at sample {i}: advantages={tuple(adv.shape)}, "
+                    f"opd_reverse_kl={tuple(reverse_kl.shape)}."
+                )
+            advantages[i] = adv - opd_kl_coef * reverse_kl
+            reverse_kls.append(reverse_kl)
+        rollout_data["opd_reverse_kl"] = reverse_kls
+        return
+
+    teacher_log_probs = rollout_data.get("teacher_log_probs")
+    if teacher_log_probs is None:
+        raise ValueError("--use-opd requires teacher_log_probs; enable a teacher producer (--opd-type).")
+    if not (len(advantages) == len(student_log_probs) == len(teacher_log_probs)):
+        raise ValueError(
+            f"OPD length mismatch: advantages={len(advantages)}, "
+            f"student_log_probs={len(student_log_probs)}, teacher_log_probs={len(teacher_log_probs)}."
+        )
+    device = student_log_probs[0].device
+    reverse_kls = []
+    for i, adv in enumerate(advantages):
+        t = teacher_log_probs[i].to(device=device)
+        s = student_log_probs[i]
+        if t.shape != s.shape:
+            raise ValueError(f"OPD shape mismatch at {i}: teacher={tuple(t.shape)} student={tuple(s.shape)}")
+        reverse_kl = s - t
+        advantages[i] = adv - opd_kl_coef * reverse_kl
+        reverse_kls.append(reverse_kl)
+    rollout_data["opd_reverse_kl"] = reverse_kls
+
+
+def icepop_gate(ratio: torch.Tensor, clip_low: float, clip_high: float) -> torch.Tensor:
+    """ICE-POP hard gate: pass the importance ratio through inside the band, zero outside.
+
+    Shared masking core used by both the policy-gradient ICE-POP path
+    (``icepop_function`` in loss.py) and the OPD advantage gate
+    (``apply_opd_icepop_gate``). Tokens whose ``ratio`` lies in
+    ``[clip_low, clip_high]`` keep ``ratio`` (importance weight); tokens outside
+    the band are zeroed (hard-gated).
+
+    Args:
+        ratio: Per-token importance ratio ``exp(train_logp - rollout_logp)``.
+        clip_low: Lower band edge (``args.tis_clip_low``).
+        clip_high: Upper band edge (``args.tis_clip``).
+
+    Returns:
+        Per-token gate weight, same shape as ``ratio``.
+    """
+    return torch.where(
+        (ratio >= clip_low) & (ratio <= clip_high), ratio, torch.zeros_like(ratio)
+    )
+
+
+def apply_opd_icepop_gate(
+    rollout_data: dict,
+    advantages: list[torch.Tensor],
+    clip_low: float,
+    clip_high: float,
+) -> None:
+    """Hard-gate the OPD advantage by the per-token train/rollout ratio, in place.
+
+    For async / off-policy rollouts the acting (rollout) policy drifts from the
+    current student, biasing the OPD advantage. Following NeMo-RL MOPD, gate each
+    token by the ICE-POP importance ratio ``exp(train_logp - rollout_logp)``:
+    in-band tokens are reweighted by the ratio, out-of-band tokens are zeroed —
+    reusing the exact ratio and gate as orbit's policy-gradient path
+    (``icepop_function``).
+
+    Args:
+        rollout_data: Rollout batch dict; must contain per-sample ``log_probs``
+            (train-recomputed student log-probs) and ``rollout_log_probs``
+            (acting-policy log-probs), aligned to ``advantages``.
+        advantages: OPD advantages per sample; mutated in place.
+        clip_low: Lower band edge (``args.tis_clip_low``).
+        clip_high: Upper band edge (``args.tis_clip``).
+    """
+    train_log_probs = rollout_data.get("log_probs")
+    rollout_log_probs = rollout_data.get("rollout_log_probs")
+    if train_log_probs is None or rollout_log_probs is None:
+        raise ValueError(
+            "--opd-icepop needs train log_probs and rollout_log_probs to form the "
+            "train/rollout importance ratio, but one is missing from rollout_data. "
+            "Ensure --use-rollout-logprobs is off (so student log-probs are recomputed) "
+            "and rollout log-probs are collected."
+        )
+    for i in range(len(advantages)):
+        ratio = torch.exp(train_log_probs[i] - rollout_log_probs[i])
+        advantages[i] = advantages[i] * icepop_gate(ratio, clip_low, clip_high)
+
+
 def get_advantages_and_returns(
     total_len: int,
     response_len: int,
@@ -383,30 +586,75 @@ def get_advantages_and_returns_batch(
     response_lengths,
     values_list,
     rewards_list,
+    terminal_rewards,
+    qkv_format,
+    max_seq_lens,
+    loss_masks,
     gamma,
     lambd,
     chunked: bool = True,
 ):
     """
-    Batched GAE with CP support.
+    Batched GAE with CP support, computed over trainable tokens only.
+
+    Semantics:
+      - Masked tokens (`loss_mask == 0`, e.g. tool/env observations in
+        multi-turn rollouts) are not MDP transitions. GAE runs on the
+        subsequence of trainable tokens, so masked tokens carry no reward
+        (including KL shaping), contribute no value delta, and the GAE carry
+        crosses them without extra `gamma * lambd` decay.
+      - The terminal reward is added at the last trainable token, not the last
+        response token.
+      - Fully masked samples get zero advantages and returns; their terminal
+        reward is dropped.
+      - Truncated sequences use the same zero bootstrap as terminated ones:
+        the value after the last trainable token is taken as 0 and the
+        observed terminal reward is still applied.
+      - This function outputs zero advantages and returns at masked positions.
+        Downstream transforms may still shift these entries to nonzero values
+        (advantage whitening applies its affine transform to every position,
+        and the on-policy distillation KL penalty is added per token), but the
+        whitening statistics themselves are mask-weighted, so the injected
+        zeros do not bias them. Correctness relies on the policy and value
+        losses masking these positions out (the policy loss re-zeros
+        advantages at inactive tokens and all loss reducers weight by
+        `loss_mask`), so masked positions never receive gradient.
+
+    C_i is the length of values_list[i] and rewards_list[i] on the current CP rank.
     Input:
         total_lengths:     list[int], each sample's total_len
         response_lengths:  list[int], each sample's response_len
-        values_list:       list[Tensor], each shape = [resp_len_i]
-        rewards_list:      list[Tensor], same shape
+        values_list:       list[Tensor], each current-CP-rank tensor has shape [C_i]
+        rewards_list:      list[Tensor], same shape as values_list
+        terminal_rewards:  list[float], one scalar sequence reward per sample
+        qkv_format:        str, sequence layout used to split tensors across CP ranks
+        max_seq_lens:      list[int] of padded lengths (BSHD, or padded THD e.g. DSV4), or None
+        loss_masks:        list[Tensor], full-response masks, each has shape [R_i]
     Output:
-        advantages_list:   list[Tensor], each shape = [resp_len_i]
+        advantages_list:   list[Tensor], each current-CP-rank tensor has shape [C_i]
         returns_list:      list[Tensor], same shape
     """
-
-    from megatron.core import mpu
 
     with torch.no_grad():
         B = len(response_lengths)
         assert B == len(values_list)
         assert B == len(rewards_list)
+        assert B == len(terminal_rewards)
+        assert B == len(loss_masks)
 
-        cp_size = mpu.get_context_parallel_world_size()
+        from orbit.backends.training_utils.parallel import get_parallel_state
+
+        cp_size = get_parallel_state().cp.size
+        if cp_size > 1 and qkv_format == "bshd":
+            assert max_seq_lens is not None, "max_seq_lens is required for BSHD with CP"
+            assert B == len(max_seq_lens)
+            max_seq_lens_per_sample = max_seq_lens
+        elif cp_size > 1 and max_seq_lens is not None:  # padded THD (e.g. DSV4)
+            assert B == len(max_seq_lens)
+            max_seq_lens_per_sample = max_seq_lens
+        else:
+            max_seq_lens_per_sample = [None] * B
+
         device = values_list[0].device
         dtype = values_list[0].dtype
 
@@ -416,43 +664,51 @@ def get_advantages_and_returns_batch(
             full_values_list = []
             full_rewards_list = []
 
-            for total_len, resp_len, v, r in zip(
-                total_lengths, response_lengths, values_list, rewards_list, strict=False
+            for total_len, resp_len, v, r, max_seq_len in zip(
+                total_lengths, response_lengths, values_list, rewards_list,
+                max_seq_lens_per_sample, strict=False,
             ):
-                full_v = all_gather_with_cp(v, total_len, resp_len)
-                full_r = all_gather_with_cp(r, total_len, resp_len)
+                full_v = all_gather_with_cp(v, total_len, resp_len, qkv_format=qkv_format, max_seq_len=max_seq_len)
+                full_r = all_gather_with_cp(r, total_len, resp_len, qkv_format=qkv_format, max_seq_len=max_seq_len)
                 full_values_list.append(full_v)
                 full_rewards_list.append(full_r)
 
-            # full_values_list[i].shape = [total_len_i]
+            # full_values_list[i].shape = [resp_len_i]
         else:
             full_values_list = values_list
             full_rewards_list = rewards_list
 
-        # pad to max_len for batched GAE
-        max_len = max(response_lengths)
+        # Compress each sample to its trainable positions so that masked
+        # tokens do not act as MDP transitions in the GAE recursion.
+        trainable_indices = [
+            loss_masks[i][: response_lengths[i]].to(device).nonzero(as_tuple=True)[0] for i in range(B)
+        ]
+        trainable_lengths = [idx.numel() for idx in trainable_indices]
 
-        full_values = torch.zeros(B, max_len, device=device, dtype=dtype)
-        full_rewards = torch.zeros(B, max_len, device=device, dtype=dtype)
+        # pad to max_len for batched GAE
+        max_len = max(trainable_lengths)
+
+        packed_values = torch.zeros(B, max_len, device=device, dtype=dtype)
+        packed_rewards = torch.zeros(B, max_len, device=device, dtype=dtype)
 
         for i in range(B):
-            L = response_lengths[i]
-            full_values[i, :L] = full_values_list[i][:L]
-            full_rewards[i, :L] = full_rewards_list[i][:L]
+            K = trainable_lengths[i]
+            if K > 0:
+                idx = trainable_indices[i]
+                packed_values[i, :K] = full_values_list[i][idx]
+                packed_rewards[i, :K] = full_rewards_list[i][idx]
+                packed_rewards[i, K - 1] += terminal_rewards[i]
 
-        if not chunked:
-            full_advantages, full_returns = vanilla_gae(
-                rewards=full_rewards,
-                values=full_values,
-                gamma=gamma,
-                lambd=lambd,
+        if max_len == 0:
+            packed_advantages = torch.zeros(B, 0, device=device, dtype=dtype)
+            packed_returns = torch.zeros(B, 0, device=device, dtype=dtype)
+        elif not chunked:
+            packed_advantages, packed_returns = vanilla_gae(
+                rewards=packed_rewards, values=packed_values, gamma=gamma, lambd=lambd,
             )
         else:
-            full_advantages, full_returns = chunked_gae(
-                rewards=full_rewards,
-                values=full_values,
-                gamma=gamma,
-                lambd=lambd,
+            packed_advantages, packed_returns = chunked_gae(
+                rewards=packed_rewards, values=packed_values, gamma=gamma, lambd=lambd,
             )
 
         advantages_list = []
@@ -461,27 +717,30 @@ def get_advantages_and_returns_batch(
         if cp_size > 1:
             from orbit.backends.training_utils.cp_utils import slice_log_prob_with_cp
 
-            for total_len, resp_len, adv_row, ret_row in zip(
-                total_lengths,
-                response_lengths,
-                full_advantages,
-                full_returns,
-                strict=False,
-            ):
-                adv_full = adv_row  # shape = [resp_len_i padded to max_len]
-                ret_full = ret_row
+        for i in range(B):
+            resp_len = response_lengths[i]
+            K = trainable_lengths[i]
 
-                adv_sliced = slice_log_prob_with_cp(adv_full[:resp_len], total_len, resp_len)
-                ret_sliced = slice_log_prob_with_cp(ret_full[:resp_len], total_len, resp_len)
+            adv_full = torch.zeros(resp_len, device=device, dtype=dtype)
+            ret_full = torch.zeros(resp_len, device=device, dtype=dtype)
+            if K > 0:
+                idx = trainable_indices[i]
+                adv_full[idx] = packed_advantages[i, :K]
+                ret_full[idx] = packed_returns[i, :K]
 
-                advantages_list.append(adv_sliced)
-                returns_list.append(ret_sliced)
+            if cp_size > 1:
+                max_seq_len = max_seq_lens_per_sample[i]
+                adv_full = slice_log_prob_with_cp(
+                    adv_full, total_lengths[i], resp_len,
+                    qkv_format=qkv_format, max_token_len=max_seq_len,
+                )
+                ret_full = slice_log_prob_with_cp(
+                    ret_full, total_lengths[i], resp_len,
+                    qkv_format=qkv_format, max_token_len=max_seq_len,
+                )
 
-        else:
-            for i in range(B):
-                L = response_lengths[i]
-                advantages_list.append(full_advantages[i, :L])
-                returns_list.append(full_returns[i, :L])
+            advantages_list.append(adv_full)
+            returns_list.append(ret_full)
 
     return advantages_list, returns_list
 
@@ -654,11 +913,23 @@ def chunked_gae(
 
 
 def calculate_log_probs_and_entropy(
-    logits, tokens, tp_group, with_entropy: bool = False, entropy_no_grad: bool = False, chunk_size: int = -1, true_on_policy: bool = False
+    logits,
+    tokens,
+    tp_group,
+    with_entropy: bool = False,
+    entropy_no_grad: bool = False,
+    chunk_size: int = -1,
+    true_on_policy: bool = False,
+    vocab_size: int | None = None,
 ):
     if true_on_policy:
         return _calculate_log_probs_and_entropy_true_on_policy(
-            logits, tokens, with_entropy=with_entropy, entropy_no_grad=entropy_no_grad
+            logits,
+            tokens,
+            tp_group,
+            with_entropy=with_entropy,
+            entropy_no_grad=entropy_no_grad,
+            vocab_size=vocab_size,
         )
 
     logits = logits.contiguous()
@@ -701,19 +972,117 @@ def calculate_log_probs_and_entropy(
     return log_prob, entropy
 
 
+def _prepare_true_on_policy_full_logits(
+    logits_or_shards: torch.Tensor | list[torch.Tensor] | tuple[torch.Tensor, ...],
+    *,
+    vocab_size: int | None = None,
+) -> torch.Tensor:
+    if isinstance(logits_or_shards, (list, tuple)):
+        full_logits = torch.cat([shard.contiguous() for shard in logits_or_shards], dim=-1)
+    else:
+        full_logits = logits_or_shards.contiguous()
+
+    # Truncate Megatron's padded vocab back to the real tokenizer vocab before
+    # log_softmax, matching what SGLang normalizes over.
+    if vocab_size is not None and full_logits.size(-1) > vocab_size:
+        full_logits = full_logits[..., :vocab_size]
+
+    return full_logits
+
+
+def _split_replicated_loss_gather_grad(
+    grad_output: torch.Tensor,
+    *,
+    rank: int,
+    world_size: int,
+    local_last_dim: int,
+) -> torch.Tensor:
+    if world_size <= 1:
+        return grad_output.contiguous()
+
+    expected_last_dim = local_last_dim * world_size
+    if grad_output.size(-1) != expected_last_dim:
+        raise RuntimeError(
+            "True-on-policy replicated-loss gather backward expected the full padded "
+            f"vocab dimension to be {expected_last_dim}, got {grad_output.size(-1)}."
+        )
+    start = rank * local_last_dim
+    return grad_output[..., start : start + local_last_dim].contiguous()
+
+
+class _ReplicatedLossAllGatherLastDim(torch.autograd.Function):
+    """All-gather vocab shards for a loss replicated on every TP rank.
+
+    Megatron's standard all-gather autograd uses reduce-scatter in backward,
+    which is correct when each rank contributes a distinct output gradient. In
+    the true-on-policy logprob path every TP rank computes the same scalar loss
+    from the gathered full vocabulary, so reduce-scatter would sum identical
+    gradients and scale the local logits gradient by TP size.
+    """
+
+    @staticmethod
+    def forward(ctx, input_: torch.Tensor, group: dist.ProcessGroup) -> torch.Tensor:
+        world_size = group.size()
+        ctx.group = group
+        ctx.local_last_dim = input_.shape[-1]
+        ctx.world_size = world_size
+
+        if world_size == 1:
+            return input_.contiguous()
+
+        from megatron.core.tensor_parallel.mappings import dist_all_gather_func
+
+        gather_shape = list(input_.shape)
+        gather_shape[0] *= world_size
+        gathered = torch.empty(gather_shape, dtype=input_.dtype, device=input_.device)
+        dist_all_gather_func(gathered, input_.contiguous(), group=group)
+        return torch.cat(gathered.chunk(world_size, dim=0), dim=-1).contiguous()
+
+    @staticmethod
+    def backward(ctx, grad_output: torch.Tensor):
+        return (
+            _split_replicated_loss_gather_grad(
+                grad_output,
+                rank=ctx.group.rank(),
+                world_size=ctx.world_size,
+                local_last_dim=ctx.local_last_dim,
+            ),
+            None,
+        )
+
+
+def _gather_true_on_policy_full_logits(
+    logits: torch.Tensor,
+    process_group: dist.ProcessGroup | None,
+    *,
+    vocab_size: int | None = None,
+) -> torch.Tensor:
+    if process_group is None or process_group.size() <= 1:
+        return _prepare_true_on_policy_full_logits(logits, vocab_size=vocab_size)
+
+    full_logits = _ReplicatedLossAllGatherLastDim.apply(logits.contiguous(), process_group)
+    return _prepare_true_on_policy_full_logits(full_logits, vocab_size=vocab_size)
+
+
 def _calculate_log_probs_and_entropy_true_on_policy(
     logits: torch.Tensor,
     tokens: torch.Tensor,
+    tp_group: dist.ProcessGroup | None,
     with_entropy: bool = False,
     entropy_no_grad: bool = False,
+    vocab_size: int | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor | None]:
-    """Simple log-prob and entropy computation matching SGLang's inference path.
+    """Log-prob and entropy computation matching SGLang's scoring contract.
 
     Args:
-        logits: Aligned logits of shape ``[R, V]`` (already response-sliced
-            and temperature-scaled by ``get_responses``).
+        logits: Aligned local logits of shape ``[R, V_local]`` (already
+            response-sliced and temperature-scaled by ``get_responses``;
+            a vocab shard under TP>1).
         tokens: Target tokens of shape ``[R]``.
+        tp_group: Tensor-parallel process group for the full-vocab gather.
         with_entropy: If True, also compute entropy.
+        vocab_size: Real tokenizer vocab size. If provided, padded logits are
+            truncated after the full-vocab gather and before ``log_softmax``.
 
     Returns:
         Tuple of ``(log_probs, entropy)`` where *log_probs* has shape ``[R]``
@@ -724,18 +1093,14 @@ def _calculate_log_probs_and_entropy_true_on_policy(
         entropy = logits.new_zeros((0,)) if with_entropy else None
         return log_prob, entropy
 
-    log_probs_full = torch.log_softmax(logits, dim=-1)
+    full_logits = _gather_true_on_policy_full_logits(logits, tp_group, vocab_size=vocab_size)
+    log_probs_full = torch.log_softmax(full_logits, dim=-1)
     log_prob = torch.gather(log_probs_full, dim=-1, index=tokens.unsqueeze(-1)).squeeze(-1)
 
     entropy = None
     if with_entropy:
-        entropy_ctx = torch.no_grad() if entropy_no_grad else contextlib.nullcontext()
-        with entropy_ctx:
-            entropy_logits = logits.detach() if entropy_no_grad else logits
-            probs = torch.softmax(entropy_logits, dim=-1)
-            entropy_log_probs = (
-                log_probs_full.detach() if entropy_no_grad else log_probs_full
-            )
-            entropy = -(probs * entropy_log_probs).sum(dim=-1)
+        entropy_log_probs = log_probs_full.detach() if entropy_no_grad else log_probs_full
+        probs = entropy_log_probs.exp()
+        entropy = -(probs * entropy_log_probs).sum(dim=-1)
 
     return log_prob, entropy
