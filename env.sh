@@ -18,13 +18,15 @@
 #                             empty to skip). ORBIT_NCCL_MODULE likewise (default "nccl").
 #   ORBIT_PYTHON_VERSION      Python X.Y for the site-packages path before the venv
 #                             exists (default "3.12", matching requires-python).
-#   TORCH_CUDA_ARCH_LIST      GPU arch(s). Auto-detected from nvidia-smi; fallback "10.0".
+#   TORCH_CUDA_ARCH_LIST      GPU arch(s). Default "9.0 10.0" = H100 + B200 fat binary.
+#                             NVTE_CUDA_ARCHS / FLASH_ATTN_CUDA_ARCHS / CMAKE_CUDA_ARCHITECTURES
+#                             track it for the builds that ignore it.
 #   MAX_JOBS                  ninja jobs for setup.py-style builds (default 32).
 #   CMAKE_BUILD_PARALLEL_LEVEL ninja jobs for cmake builds (sgl-kernel); RAM-bound since
 #                             cutlass files use 10-30 GB each. Auto: ~RAM/40 GB, capped by
 #                             cores; tune the per-job budget via ORBIT_SGL_KERNEL_JOB_GB.
-#   UV_CACHE_DIR              MUST be on a flock-capable fs (Lustre/NFS break uv build
-#                             locks). Default /tmp/orbit_uv_cache (local).
+#   UV_CACHE_DIR              MUST be flock-capable AND persistent. Default
+#                             $HOME/.cache/uv_cu13_orbit. Never /tmp — see below.
 set -a
 
 # --- CUDA toolkit: try env-modules (if present), then resolve CUDA_HOME ---
@@ -71,23 +73,36 @@ NVCC_THREADS="${NVCC_THREADS:-2}"
 NVTE_BUILD_THREADS_PER_JOB="${NVTE_BUILD_THREADS_PER_JOB:-2}"
 NVTE_FRAMEWORK=pytorch
 
-# --- GPU arch (auto-detect; fallback sm_100 / B200) ---
-if [ -z "${TORCH_CUDA_ARCH_LIST:-}" ]; then
-    _cc="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d '[:space:]')"
-    TORCH_CUDA_ARCH_LIST="${_cc:-10.0}"
-fi
+# --- GPU arch: build fat binaries for BOTH H100 (sm_90) and B200 (sm_100) ---
+# Do NOT auto-detect from nvidia-smi: that silently pins the env to whichever node
+# happened to run the build, and the kernels then fail to load everywhere else.
+# Override with a single arch only if you knowingly want a smaller/faster build.
+TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-9.0 10.0}"
+# Package-specific arch lists — these builds do NOT read TORCH_CUDA_ARCH_LIST.
+NVTE_CUDA_ARCHS="${NVTE_CUDA_ARCHS:-90;100}"
+FLASH_ATTN_CUDA_ARCHS="${FLASH_ATTN_CUDA_ARCHS:-90;100}"
+CMAKE_CUDA_ARCHITECTURES="${CMAKE_CUDA_ARCHITECTURES:-90a;100a}"
 
 # --- force source builds instead of the wrong-ABI auto-downloaded prebuilts ---
 FLASH_ATTENTION_FORCE_BUILD=TRUE
 MAMBA_FORCE_BUILD=TRUE
 CAUSAL_CONV1D_FORCE_BUILD=TRUE
 
-# --- uv cache must be on a flock-capable fs (Lustre returns ENOSYS on flock) ---
-UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/orbit_uv_cache}"
+# --- uv cache: must be flock-capable AND persistent ---
+# Lustre (/lustre/fast) returns ENOSYS on flock, so it cannot hold the cache.
+# /tmp can, but it is node-local and cleared on exit — and under uv's default
+# symlink install mode that silently guts the venv (every package becomes a
+# dangling link, importing as an empty namespace package). Cluster-home is NFS:
+# flock-capable, persistent, and shared across nodes. Keep the default.
+UV_CACHE_DIR="${UV_CACHE_DIR:-${HOME}/.cache/uv_cu13_orbit}"
 mkdir -p "${UV_CACHE_DIR}"
 
 # --- venv + site-packages (derive python version from the venv once it exists) ---
-ORBIT_VENV="${ORBIT_VENV:-${UV_PROJECT_ENVIRONMENT:-$(pwd)/.venv}}"
+# $VIRTUAL_ENV comes before the ./.venv fallback: the documented runtime flow is
+# `source <venv>/bin/activate && source env.sh`, and without this the already-active
+# venv is ignored in favour of a ./.venv that may not exist — SITE_PACKAGES then
+# points at nothing and deep_ep dies with "No libnccl.so found in .../.venv/...".
+ORBIT_VENV="${ORBIT_VENV:-${UV_PROJECT_ENVIRONMENT:-${VIRTUAL_ENV:-$(pwd)/.venv}}}"
 if [ -x "${ORBIT_VENV}/bin/python" ]; then
     SITE_PACKAGES="$("${ORBIT_VENV}/bin/python" -c 'import site; print(site.getsitepackages()[0])')"
 else
@@ -112,6 +127,64 @@ LD_LIBRARY_PATH="${SITE_PACKAGES}/torch/lib:${CUDNN_PATH}/lib:${NCCL_ROOT}/lib:$
 
 # --- runtime: nvidia-modelopt (via megatron.bridge) dlopens libz3.so.4.15 by soname ---
 LD_LIBRARY_PATH="${SITE_PACKAGES}/z3/lib:${LD_LIBRARY_PATH}"
+
+# --- runtime: FlashInfer JIT cache must not be the shared home cache ---
+# ~/.cache/flashinfer carries cached_ops compiled by whatever CUDA toolchain
+# last wrote them. On 2026-08-04 the B200 smoke found a 100a/fmha_gen.so there
+# linked against libcudart.so.12 -- left by the July CUDA-12 sglang experiments
+# -- and this CUDA-13 stack has no libcudart.so.12, so the SGLang server died at
+# cuda-graph capture before serving a single token. H100 runs never load that
+# path (sm_90 attention goes through FA3's flash_ops), which is why the poison
+# sat unnoticed until the first Blackwell run. Same pattern and reasoning as
+# examples/load_cuda13_2_orbit_env.sh: node-local /tmp, per-env namespace --
+# Lustre also lacks the file locks FlashInfer's JIT wants when all TP ranks
+# compile the same op at once.
+FLASHINFER_WORKSPACE_BASE="${FLASHINFER_WORKSPACE_BASE:-/tmp/flashinfer-${USER:-orbit}/orbit-env-cu130}"
+if [ -n "${CUDA_HOME:-}" ] && [ -x "${CUDA_HOME}/bin/nvcc" ]; then
+    FLASHINFER_NVCC="${FLASHINFER_NVCC:-${CUDA_HOME}/bin/nvcc}"
+fi
+
+# --- build: sglang's Rust extension needs a toolchain the exec nodes lack ---
+# From v0.5.16 the sglang Python package declares a Rust extension
+# (sglang.srt.multimodal._core.inkling, used by the Inkling multimodal image
+# processor). Its build backend pulls setuptools-rust and shells out to cargo,
+# so on a host without a Rust toolchain `uv sync` dies with "can't find Rust
+# compiler" -- and it dies on the sglang build, which is early enough to waste
+# the whole allocation. The login nodes have /usr/bin/cargo; the execution nodes
+# do not.
+#
+# A rustup toolchain in the shared cluster home works on every execution node,
+# but $HOME/.cargo/bin is not on PATH under Condor's minimal job environment --
+# put it there first, so the check below sees a toolchain that is actually
+# installed rather than silently opting out.
+if [ -d "${HOME:-/nonexistent}/.cargo/bin" ]; then
+    PATH="${HOME}/.cargo/bin:${PATH}"
+fi
+
+# Only opt out when cargo is genuinely absent, so hosts that can build the
+# extension still get it. Skipping is a real (if narrow) capability loss --
+# Inkling multimodal then falls back to the pure-Python InklingImageProcessor,
+# since SGLANG_INKLING_RS_MM_PREPROCESS defaults on and the import is wrapped in
+# try/except. Nothing else is affected: nothing imports _core.inkling at module
+# load, and orbit's own multimodal path is Qwen-VL. Set SGLANG_BUILD_RUST_EXTS
+# explicitly to override in either direction.
+if ! command -v cargo >/dev/null 2>&1; then
+    SGLANG_BUILD_RUST_EXTS="${SGLANG_BUILD_RUST_EXTS:-none}"
+fi
+
+# --- runtime: PEFT adapter transport (shaped OFT/LoRA payloads) ---
+# The committed default in peft_transport/backends/ipc.py is cuda_ipc, which is
+# right for hosts where the SGLang scheduler children can rebuild a trainer's
+# CUDA IPC handle. This cluster is not one of them, on two counts:
+#   - HTCondor's security profile denies pidfd_getfd, so the handle cannot be
+#     reconstructed at all.
+#   - On B200, cudaIpcOpenMemHandle fails with "invalid argument" -- determi-
+#     nistically for raw Megatron param-buffer views, and still intermittently
+#     for fresh clones (one engine in four at the 2026-08-04 smoke).
+# cpu_gather routes the payload through the SGLang parent actor instead, which
+# re-serializes with file_system sharing and never crosses that boundary.
+# Override by exporting a different value before sourcing this file.
+ORBIT_PEFT_ADAPTER_TRANSPORT="${ORBIT_PEFT_ADAPTER_TRANSPORT:-cpu_gather}"
 
 unset _cuda_mod _nccl_mod _c _cc _ram_gb _jobs _ncpu 2>/dev/null || true
 set +a
