@@ -27,6 +27,27 @@ def _build_train_actor_env(args) -> dict[str, str]:
         env_vars["NCCL_CUMEM_ENABLE"] = "1"
         env_vars["NCCL_NVLS_ENABLE"] = "1"
 
+    # PEFT hands the GPU back to a colocated engine every rollout, and its train
+    # step frees nearly everything: measured on 8xB200, rank 0 held
+    # `allocated 0.09 GB` against `reserved 65.71 GB`, of which 65.62 GB -- the
+    # entire gap -- was non-releasable split memory across just 17 segments. A
+    # few MB of straggler blocks pin ~3.9 GB apiece, `empty_cache()` may only
+    # return a wholly-free segment so it returns nothing, and the engine's
+    # `cuMemCreate` then fails at resume (`func=resume`, fatal at rollout 2 on
+    # an 80 GB H100). Expandable segments map physical pages on demand, so a
+    # live block pins pages instead of its whole segment.
+    #
+    # Full fine-tuning is left alone deliberately: its pool is tight -- reserved
+    # tracks allocated to within 0.07 GB on the same node -- because
+    # `_finalize_train_offload_args` forces the grad-buffer and optimizer
+    # offloads on for it, which return genuinely live state every step. It has
+    # no gap to close.
+    if getattr(args, "peft_method", "none") != "none":
+        env_vars.setdefault(
+            "PYTORCH_CUDA_ALLOC_CONF",
+            os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True"),
+        )
+
     if source_patcher_config := args.dumper_source_patcher_config_train:
         env_vars["DUMPER_SOURCE_PATCHER_CONFIG"] = source_patcher_config
 
@@ -118,6 +139,21 @@ class RayTrainGroup:
     async def train(self, rollout_id, rollout_data_ref):
         """Do one rollout training"""
         await self._broadcast("train", rollout_id, rollout_data_ref)
+
+    async def compute_eval_nll(self, rollout_id) -> dict:
+        """Held-out NLL of the current actor weights, reduced across ranks.
+
+        Unlike :meth:`train`, this returns its result -- the number is the whole
+        point. ``_broadcast`` hands back one entry per actor across the full
+        TP x PP x DP grid, but the actors deduplicate themselves: exactly one
+        returns the DP-reduced statistics and every other returns ``None``.
+        Averaging the per-actor values instead would double-count TP/PP
+        replicas (which hold the same samples) and would mis-weight DP shards
+        (which hold different token counts).
+        """
+        from orbit.utils.eval_nll import select_eval_nll_result
+
+        return select_eval_nll_result(await self._broadcast("compute_eval_nll", rollout_id))
 
     async def save_model(self, rollout_id, force_sync=False):
         """Save actor model"""
