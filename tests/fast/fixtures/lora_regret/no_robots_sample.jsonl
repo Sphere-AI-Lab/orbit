@@ -1,0 +1,4 @@
+{"prompt": [{"role": "user", "content": "What is 2+2?"}, {"role": "assistant", "content": "4"}]}
+{"prompt": [{"role": "user", "content": "Name a color."}, {"role": "assistant", "content": "Blue."}, {"role": "user", "content": "Another?"}, {"role": "assistant", "content": "Green."}]}
+{"prompt": [{"role": "system", "content": "You are terse."}, {"role": "user", "content": "Hi"}, {"role": "assistant", "content": "Hello."}]}
+{"prompt": [{"role": "user", "content": "Write a haiku about a cat."}, {"role": "assistant", "content": "Little kitten grows\nFerocious feline stalking\nShe pounces quickly"}]}
