@@ -21,6 +21,14 @@ from orbit.utils.arguments import (
 )
 from orbit.utils.context_utils import with_defer
 from orbit.utils.distributed_utils import get_gloo_group, init_process_group
+from orbit.utils.eval_nll import (
+    NllStats,
+    accumulate_nll,
+    build_eval_nll_batch,
+    is_eval_nll_reporting_rank,
+    plan_eval_nll_microbatches,
+    plan_eval_nll_shards,
+)
 from orbit.utils.memory_utils import clear_memory, print_memory
 from orbit.utils.opd_teacher_spec import should_promote_teacher, teacher_forward_plan
 from orbit.utils.processing_utils import load_tokenizer
@@ -92,6 +100,22 @@ def _get_weight_updater_kwargs(args: Namespace, update_weight_cls: type) -> dict
     if update_weight_cls is UpdateWeightFromTensor:
         return {"peft_method": get_peft_method(args)}
     return {"is_lora": is_lora_enabled(args)}
+
+
+def _should_offload_frozen_base(args: Namespace) -> bool:
+    """Is there a frozen base to offload at all?
+
+    Only under PEFT. `offload_megatron_frozen_base_to_cpu` selects parameters
+    with `requires_grad == False`; full fine-tuning has none, so calling it
+    plans empty flat groups, allocates nothing, and frees nothing. Skipping it
+    there loses no memory and avoids a misleading "after offload frozen_base"
+    line in the log claiming an offload that did not happen.
+
+    Full fine-tuning frees its train state through `offload_train_grad_buffers`
+    and `offload_train_optimizer` instead, which argument finalisation forces on
+    whenever `--offload-train` is set without PEFT.
+    """
+    return getattr(args, "peft_method", "none") != "none"
 
 
 def _select_update_weight_cls(args: Namespace) -> type:
@@ -387,14 +411,18 @@ class MegatronTrainRayActor(TrainRayActor):
         if self.args.offload_train_optimizer:
             offload_megatron_optimizer(self.optimizer)
             print_memory("after offload optimizer")
-        offload_megatron_frozen_base_to_cpu(self.model)
-        print_memory("after offload frozen_base")
+        if _should_offload_frozen_base(self.args):
+            offload_megatron_frozen_base_to_cpu(self.model)
+            print_memory("after offload frozen_base")
 
         if self.args.loss_type == "opd_jsd_loss":
             offload_teacher_lm_head(self.args.teacher_hf_checkpoint)
             print_memory("after offload teacher_lm_head")
 
         print_memory("after offload model")
+        # Read by compute_eval_nll: it must know whether the training state is
+        # resident before deciding to wake it, and must not leave it awake.
+        self._train_state_awake = False
 
         if self._is_main_rank and hasattr(self, "_last_rollout_id"):
             log_cpu_memory(self._last_rollout_id, self.args, "after_offload_train")
@@ -411,6 +439,12 @@ class MegatronTrainRayActor(TrainRayActor):
         if not getattr(self.args, "offload_train_async", False):
             return
         if self._wake_up_stream is None:
+            return
+        if not _should_offload_frozen_base(self.args):
+            # Nothing was offloaded, so there is nothing to prefetch. Recording
+            # no event leaves wake_up() on its synchronous branch, which is also
+            # a no-op here -- rather than waiting on an event for a copy that
+            # never ran.
             return
         load_megatron_frozen_base_to_gpu(self.model, stream=self._wake_up_stream)
         if self.args.offload_train_adapter:
@@ -429,7 +463,7 @@ class MegatronTrainRayActor(TrainRayActor):
             torch.cuda.current_stream().wait_event(wake_up_event)
             self._wake_up_event = None
             print_memory("after wake_up train_state_prefetch")
-        else:
+        elif _should_offload_frozen_base(self.args):
             load_megatron_frozen_base_to_gpu(self.model)
             print_memory("after wake_up frozen_base")
             if self.args.offload_train_adapter:
@@ -448,6 +482,7 @@ class MegatronTrainRayActor(TrainRayActor):
         clear_memory()
         reload_process_groups()
         print_memory("after wake_up model")
+        self._train_state_awake = True
 
     def _switch_model(self, target_tag: str) -> None:
         if target_tag == self._active_model_tag:
@@ -589,6 +624,177 @@ class MegatronTrainRayActor(TrainRayActor):
         self._set_replay_stage("fallthrough")
         self._switch_model("ref")
         return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="ref_")
+
+    def _build_eval_nll_local_batch(
+        self, rows: list[tuple[int, bool]], full_batch: dict
+    ) -> RolloutBatch:
+        """Materialise this rank's shard of the held-out set on the GPU.
+
+        Mirrors ``get_rollout_data``: token/mask tensors on the current device,
+        plus the ``bshd`` max-sequence-length padding. Deliberately does NOT go
+        through ``process_rollout_data`` -- the held-out set is not a rollout
+        and must not be resharded a second time.
+        """
+        device = torch.cuda.current_device()
+        indices = [index for index, _ in rows]
+        rollout_data: RolloutBatch = {
+            "tokens": [
+                torch.tensor(full_batch["tokens"][i], dtype=torch.long, device=device) for i in indices
+            ],
+            "loss_masks": [
+                torch.tensor(full_batch["loss_masks"][i], dtype=torch.int, device=device) for i in indices
+            ],
+            "total_lengths": [full_batch["total_lengths"][i] for i in indices],
+            "response_lengths": [full_batch["response_lengths"][i] for i in indices],
+        }
+        if self.args.qkv_format == "bshd":
+            pad_size = get_parallel_state().tp.size * self.args.data_pad_size_multiplier
+            max_seq_len = max(rollout_data["total_lengths"])
+            max_seq_len = (max_seq_len + pad_size - 1) // pad_size * pad_size
+            rollout_data["max_seq_lens"] = [max_seq_len] * len(indices)
+        return rollout_data
+
+    def compute_eval_nll(self, rollout_id: int) -> dict[str, float] | None:
+        """Token-weighted held-out NLL of the current (adapted) model.
+
+        Forward-only: no optimizer state is touched and no weights change. Runs
+        through ``compute_log_prob`` so there is exactly one forward path in the
+        actor, and reuses ``sft_rollout``'s masking so train and eval score the
+        identical tokens.
+
+        Two things this method exists to get right:
+
+        * **Coverage.** It bypasses ``get_data_iterator``, whose
+          ``num_local_samples // num_local_gbs`` floor division would silently
+          drop the remainder of the held-out file and make the reported NLL a
+          function of ``--global-batch-size``. The micro-batch schedule here
+          keeps the short final group, and the sample count is asserted against
+          the number of rows read.
+        * **Cross-rank reduction.** ``RayTrainGroup._broadcast`` returns one
+          value per actor across the whole TP x PP x DP grid. TP/PP replicas
+          hold the SAME samples and DP shards hold DIFFERENT token counts, so
+          neither averaging per-actor floats nor summing them is correct. This
+          method sums the *accumulators* over the DP group and then returns a
+          value from exactly one rank; every other rank returns ``None``.
+
+        Returns:
+            On the single reporting rank (DP 0, TP 0, CP 0, last PP stage), the
+            dict from :meth:`NllStats.as_dict`. ``None`` everywhere else.
+        """
+        parallel_state = get_parallel_state()
+
+        # Refusals, not silent approximations. Both would need CP-chunked mask
+        # slicing / VPP-divisible micro-batch counts that cannot be validated
+        # without a multi-GPU run, and a quiet wrong NLL is worse than a stop.
+        assert parallel_state.cp.size == 1, (
+            f"--eval-nll-data does not support context parallelism (cp_size={parallel_state.cp.size}); "
+            "log-probs would be CP-chunked while the loss masks are not."
+        )
+        assert (parallel_state.vpp_size or 1) == 1, (
+            f"--eval-nll-data does not support virtual pipeline parallelism (vpp_size={parallel_state.vpp_size})."
+        )
+        assert self.role != "critic", "--eval-nll-data is an actor-only eval"
+        assert self.args.eval_nll_data, "compute_eval_nll called without --eval-nll-data"
+
+        full_batch = getattr(self, "_eval_nll_batch", None)
+        if full_batch is None:
+            full_batch = build_eval_nll_batch(self.args, tokenizer=self.tokenizer)
+            self._eval_nll_batch = full_batch
+        num_rows = len(full_batch["total_lengths"])
+
+        dp_size = parallel_state.intra_dp.size
+        shards = plan_eval_nll_shards(num_rows, dp_size, pad_index=full_batch["shortest_row_index"])
+        rows = shards[parallel_state.intra_dp.rank]
+        is_padding = [padded for _, padded in rows]
+
+        micro_batch_size = self.args.eval_nll_micro_batch_size or self.args.micro_batch_size or 1
+        micro_batch_indices = plan_eval_nll_microbatches(len(rows), micro_batch_size)
+        num_microbatches = [len(micro_batch_indices)]
+
+        # Both DP collectives below MUST execute between wake_up() and sleep().
+        # sleep() calls destroy_process_groups(), which sets
+        # ReloadableProcessGroup.group = None; the monkeypatched dist.all_reduce
+        # then unwraps `group=parallel_state.intra_dp.group` to `group=None`,
+        # which torch reads as the default WORLD group. No exception is raised,
+        # so a reduction placed outside this window silently reduces over the
+        # wrong communicator (over-counting by tp_size once tp > 1).
+        woke_here = False
+        if self.args.offload_train and not getattr(self, "_train_state_awake", True):
+            self.wake_up()
+            woke_here = True
+
+        # The held-out NLL is defined at temperature 1; args.rollout_temperature
+        # is applied inside get_responses and would otherwise silently rescale
+        # every logit on an RL run.
+        previous_temperature = self.args.rollout_temperature
+        try:
+            if dp_size > 1:
+                # The pipeline schedule is a collective: DP ranks disagreeing on
+                # the micro-batch count would hang rather than fail.
+                # plan_eval_nll_shards equalises shard sizes so this cannot
+                # happen; assert it anyway.
+                counts = torch.tensor(
+                    [len(micro_batch_indices), -len(micro_batch_indices)],
+                    dtype=torch.int64,
+                    device=torch.cuda.current_device(),
+                )
+                dist.all_reduce(counts, op=dist.ReduceOp.MAX, group=parallel_state.intra_dp.group)
+                assert counts[0].item() == -counts[1].item() == len(micro_batch_indices), (
+                    f"DP ranks disagree on eval NLL micro-batch count: local={len(micro_batch_indices)}, "
+                    f"max={counts[0].item()}, min={-counts[1].item()}"
+                )
+
+            self.args.rollout_temperature = 1.0
+            rollout_data = self._build_eval_nll_local_batch(rows, full_batch)
+            data_iterator = [
+                DataIterator(rollout_data, None, micro_batch_indices) for _ in range(parallel_state.vpp_size or 1)
+            ]
+            self._set_replay_stage("fallthrough")
+            with timer("eval_nll"):
+                out = self.compute_log_prob(data_iterator, num_microbatches, store_prefix="eval_")
+
+            log_probs = out.get("eval_log_probs")
+            if log_probs is None:
+                # Not the last pipeline stage: this rank ran the forward but
+                # holds no logits. It still participates in the all-reduce below.
+                local = NllStats.zero()
+            else:
+                assert len(log_probs) == len(rows), (
+                    f"eval NLL scored {len(log_probs)} samples but was given {len(rows)}"
+                )
+                local = accumulate_nll(log_probs, rollout_data["loss_masks"], is_padding=is_padding)
+
+            if dp_size > 1:
+                values = torch.tensor(
+                    local.to_values(), dtype=torch.float64, device=torch.cuda.current_device()
+                )
+                dist.all_reduce(values, op=dist.ReduceOp.SUM, group=parallel_state.intra_dp.group)
+                total = NllStats.from_values(values.tolist())
+            else:
+                total = local
+        finally:
+            # Still a finally: the model must go back to sleep even if the
+            # forward or a collective raises.
+            self.args.rollout_temperature = previous_temperature
+            if woke_here:
+                self.sleep()
+
+        if not is_eval_nll_reporting_rank(parallel_state):
+            return None
+
+        assert total.num_samples == num_rows, (
+            f"eval NLL scored {total.num_samples} samples but the held-out file "
+            f"{self.args.eval_nll_data} has {num_rows} rows"
+        )
+        logger.info(
+            "eval_nll rollout_id=%s nll=%.6f sample_mean_nll=%.6f tokens=%d samples=%d",
+            rollout_id,
+            total.mean_nll,
+            total.sample_mean_nll,
+            total.num_tokens,
+            total.num_samples,
+        )
+        return total.as_dict()
 
     def _restore_checkpoint_teacher_state(self) -> None:
         """Resume the EMA/lag self-teacher from its checkpoint sidecar, if present.

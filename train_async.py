@@ -3,6 +3,7 @@ import asyncio
 from orbit.ray.placement_group import create_placement_groups, create_rollout_manager, create_training_models
 from orbit.utils.arguments import parse_args, uses_separate_critic, validate_async_off_policy_correction
 from orbit.utils.async_utils import eager_create_task
+from orbit.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint
 from orbit.utils.logging_utils import configure_logger
 from orbit.utils.misc import should_run_periodic_action
 from orbit.utils.tracking_utils import init_tracking
@@ -12,6 +13,14 @@ from orbit.utils.tracking_utils import init_tracking
 async def train(args):
     assert not args.colocate, "Colocation is not supported for async training."
     assert args.training_mode != "sft", "SFT mode is supported by train.py; train_async.py is RL rollout-only."
+    # --eval-nll-data is on the shared parser, so this entrypoint would otherwise
+    # accept it and silently emit no metric. Wiring the hook here was considered
+    # and rejected: this loop overlaps the next rollout's generation with the
+    # current rollout's training (rollout_data_next_future), so "the weights at
+    # the moment of measurement" needs its own design pass rather than a copy of
+    # train.py's call sites -- and nothing under scripts/ points ORBIT_ENTRYPOINT
+    # here, so the addition could not be exercised.
+    reject_eval_nll_on_unsupported_entrypoint(args, "train_async.py")
     validate_async_off_policy_correction(args)
     configure_logger()
     # allocate the GPUs

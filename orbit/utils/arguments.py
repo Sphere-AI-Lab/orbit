@@ -26,6 +26,7 @@ _PEFT_LORA_DEFAULTS = {
     "lora_type": "lora",
     "lora_adapter_path": None,
     "lora_sync_from_tensor": False,
+    "lora_a_init_method": "xavier",
 }
 _PEFT_OFT_DEFAULTS = {
     "oft_type": "canonical_oft",
@@ -2250,6 +2251,38 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
                 ),
             )
 
+            parser.add_argument(
+                "--eval-nll-data",
+                type=str,
+                default=None,
+                help=(
+                    "JSONL of held-out examples for forward-only negative-log-likelihood eval. "
+                    "Uses the same chat schema and the same loss masking as --prompt-data under the "
+                    "SFT rollout function, so training and eval score identical tokens. Independent "
+                    "of the generation-based eval above: it needs no rollout engine and works with "
+                    "--eval-interval unset. Unset disables NLL eval (default: None)"
+                ),
+            )
+            parser.add_argument(
+                "--eval-nll-interval",
+                type=int,
+                default=0,
+                help=(
+                    "Run held-out NLL eval every N rollout steps, plus once before training and "
+                    "always on the final rollout. 0 disables (default: 0)"
+                ),
+            )
+            parser.add_argument(
+                "--eval-nll-micro-batch-size",
+                type=int,
+                default=None,
+                help=(
+                    "Rows per micro-batch during held-out NLL eval. Every row of --eval-nll-data is "
+                    "scored regardless of this value; it only controls peak eval memory. "
+                    "Defaults to --micro-batch-size."
+                ),
+            )
+
             return parser
 
         def add_algo_arguments(parser):
@@ -2543,6 +2576,18 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
                 help="LoRA dropout rate (default: 0.0)",
             )
             parser.add_argument(
+                "--lora-a-init-method",
+                type=str,
+                default="xavier",
+                choices=["xavier", "normal", "kaiming", "zero"],
+                help="Initialization for LoRA matrix A, forwarded to Megatron-Bridge's "
+                "ParallelLinearAdapter (the path Orbit's Megatron linears actually take). "
+                "'kaiming' is kaiming_uniform_(a=sqrt(5)), matching HF PEFT and the "
+                "LoRA-without-regret paper; 'xavier' is xavier_normal_ and is Bridge's "
+                "default. These differ by ~2.4x in std, which shifts the optimal learning "
+                "rate (default: xavier)",
+            )
+            parser.add_argument(
                 "--lora-type",
                 type=str,
                 default="lora",
@@ -2710,6 +2755,16 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
             parser.add_argument("--wandb-host", type=str, default=None)
             parser.add_argument("--wandb-team", type=str, default=None)
             parser.add_argument("--wandb-group", type=str, default=None)
+            parser.add_argument(
+                "--wandb-run-name",
+                type=str,
+                default=None,
+                help=(
+                    "Name for this run. Defaults to --wandb-group, which is the historical "
+                    "behaviour. Set it when several runs share a group -- a learning-rate "
+                    "sweep grouped by method otherwise puts every arm under one name."
+                ),
+            )
             reset_arg(parser, "--wandb-project", type=str, default=None)
             parser.add_argument(
                 "--disable-wandb-random-suffix",
@@ -3032,7 +3087,7 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
                 "--loss-mask-type",
                 type=str,
                 default="qwen",
-                choices=["qwen", "qwen3", "distill_qwen"],
+                choices=["qwen", "qwen3", "distill_qwen", "llama3"],
                 help="Loss mask type",
             )
             parser.add_argument(
@@ -3397,6 +3452,41 @@ def _finalize_train_offload_args(args) -> None:
         raise ValueError("--offload-train-frozen-base-mode must be one of: auto, flat, tms")
     if args.offload_train is None:
         args.offload_train = False
+
+    # Full fine-tuning frees train memory by a different route than PEFT, and
+    # the difference is not a preference -- it is the only route that works.
+    #
+    # PEFT's saving comes from `offload_megatron_frozen_base_to_cpu`, whose
+    # selector skips any parameter with `requires_grad`. Under full fine-tuning
+    # that is every parameter, so the frozen-base path plans empty groups, logs
+    # "after offload model", and frees zero bytes. Enabling --offload-train
+    # without these two flags would therefore be a silent no-op that reads as a
+    # success -- which is why this used to raise outright rather than allow it.
+    #
+    # Gradients and optimizer state are what full fine-tuning actually has to
+    # give back. Measured on 8xH100 with Llama-3.1-8B: the FullFT arm sat at
+    # 66.69 GB used / 12.48 GB free against 16.00 GB of paused SGLang K+V, and
+    # died in `torch_memory_saver ... func=resume`; the LoRA arms sat at 43.88 /
+    # 35.30 and resumed. The ~22.8 GB between them is exactly this state.
+    #
+    # Parameters stay resident on purpose. `update_weights` pushes Megatron
+    # weights into the rollout engine every rollout and does not wake the train
+    # state, so a zero-sized `param_data` would surface as corrupt rollouts
+    # rather than an error. Megatron's own `offload_grad_buffers` passes
+    # `move_params=False` for the same reason.
+    #
+    # Scoped to megatron because these two flags drive megatron-specific
+    # primitives; other backends were never refused and are left alone.
+    if args.train_backend == "megatron" and args.offload_train and not _is_peft_enabled(args):
+        for _flag in ("offload_train_grad_buffers", "offload_train_optimizer"):
+            if getattr(args, _flag, None) is False:
+                raise ValueError(
+                    f"--{_flag.replace('_', '-')} cannot be disabled for full fine-tuning "
+                    "with --offload-train: the frozen-base path has nothing to offload when "
+                    "every parameter is trainable, so the offload would free nothing."
+                )
+            setattr(args, _flag, True)
+
     if args.offload_train_grad_buffers is None:
         args.offload_train_grad_buffers = False
     if args.offload_train_optimizer is None:
@@ -3433,8 +3523,11 @@ def _finalize_train_offload_args(args) -> None:
         )
         args.offload_train_adapter = False
 
-    if args.train_backend == "megatron" and args.offload_train and args.peft_method == "none":
-        raise AssertionError(_MEGATRON_FULL_MODEL_OFFLOAD_ERROR)
+    # Full-model train offload used to raise here. It is now supported, by
+    # offloading gradients and optimizer state while parameters stay resident --
+    # see the block above `offload_train_grad_buffers` for why that split is the
+    # only one that works. `_MEGATRON_FULL_MODEL_OFFLOAD_ERROR` is kept as the
+    # record of what the old failure said, since operators will find it in logs.
 
 
 def _apply_critic_args(args) -> None:
@@ -3624,6 +3717,21 @@ def _common_orbit_validate_args(args):
 
     if args.eval_interval is not None:
         assert args.eval_datasets, "Evaluation datasets must be configured when eval_interval is set."
+
+    # getattr, not attribute access: several unit tests call validate_args with a
+    # hand-built Namespace that only carries the fields under test.
+    eval_nll_data = getattr(args, "eval_nll_data", None)
+    if eval_nll_data is not None:
+        eval_nll_interval = getattr(args, "eval_nll_interval", 0)
+        eval_nll_micro_batch_size = getattr(args, "eval_nll_micro_batch_size", None)
+        assert os.path.exists(eval_nll_data), f"--eval-nll-data file does not exist: {eval_nll_data}"
+        assert eval_nll_interval > 0, (
+            "--eval-nll-data was given but --eval-nll-interval is "
+            f"{eval_nll_interval}; set a positive interval or drop --eval-nll-data."
+        )
+        assert eval_nll_micro_batch_size is None or eval_nll_micro_batch_size > 0, (
+            f"--eval-nll-micro-batch-size must be positive, got {eval_nll_micro_batch_size}"
+        )
 
     if args.save_interval is not None:
         assert args.save is not None, "'--save' is required when save_interval is set."
