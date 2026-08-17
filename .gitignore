@@ -200,3 +200,4 @@ logs/
 eval_results/
 eval_subsets/
 run_*.pid
+.worktrees/
