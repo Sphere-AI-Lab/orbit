@@ -6,6 +6,7 @@ from tests.fast.dist_utils import init_gloo, run_multiprocess
 
 from orbit.backends.training_utils import log_utils
 from orbit.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
+from orbit.utils.ppo_utils import VALUE_EV_METRIC_KEY, VALUE_EV_STAT_KEYS
 
 
 def _single_process_state() -> None:
@@ -35,6 +36,40 @@ def test_aggregate_train_losses_preserves_min_and_max_across_microbatches(monkey
         "opd_topk/teacher_mass_min": 0.25,
     }
     assert reduce_ops == [dist.ReduceOp.SUM, dist.ReduceOp.MAX, dist.ReduceOp.MIN]
+
+
+def test_aggregate_train_losses_finalizes_value_explained_var(monkeypatch) -> None:
+    _single_process_state()
+    monkeypatch.setattr(log_utils.dist, "all_reduce", lambda tensor, op, group: None)
+
+    # Token-level ground truth across two micro-batches of unequal token count:
+    # returns r and errors d = r - v over the unmasked tokens.
+    returns = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    errors = torch.tensor([0.5, -0.5, 1.0, 0.0])
+
+    def _stats(token_slice: slice) -> torch.Tensor:
+        r = returns[token_slice]
+        d = errors[token_slice]
+        # values[0] is the per-sample count here (2 samples per micro-batch):
+        # a normalization constant unrelated to the token count, which must
+        # cancel inside the EV finalization.
+        return torch.tensor(
+            [2.0, 0.1, float(r.numel()), r.sum(), (r**2).sum(), d.sum(), (d**2).sum()]
+        )
+
+    keys = ["value_loss", *VALUE_EV_STAT_KEYS]
+    losses = [
+        {"keys": keys, "values": _stats(slice(0, 1))},
+        {"keys": keys, "values": _stats(slice(1, 4))},
+    ]
+
+    result = log_utils.aggregate_train_losses(losses)
+
+    expected_ev = 1.0 - errors.var(unbiased=False).item() / returns.var(unbiased=False).item()
+    assert result[VALUE_EV_METRIC_KEY] == pytest.approx(expected_ev)
+    assert not any(key in result for key in VALUE_EV_STAT_KEYS)
+    # Ordinary metrics keep the existing sum/count normalization (0.2 / 4 samples).
+    assert result["value_loss"] == pytest.approx(0.05)
 
 
 def _worker_remote_extrema(rank: int, world_size: int, port: int) -> None:

@@ -10,6 +10,7 @@ import torch.distributed as dist
 from orbit.utils import train_metric_utils
 from orbit.utils.flops_utils import calculate_fwd_flops
 from orbit.utils.metric_utils import compute_pass_rate, compute_rollout_step
+from orbit.utils.ppo_utils import VALUE_EV_METRIC_KEY, VALUE_EV_STAT_KEYS, compute_value_explained_var
 from orbit.utils.types import RolloutBatch
 
 from ...utils import tracking_utils
@@ -566,6 +567,22 @@ def aggregate_train_losses(
         else:
             loss_reduced[key] = value * parallel_state.cp.size / num_samples_or_tokens
 
+    return _finalize_value_explained_var(loss_reduced)
+
+
+def _finalize_value_explained_var(loss_reduced: dict[str, float]) -> dict[str, float]:
+    """Fold EV sufficient statistics into the value_explained_var metric.
+
+    value_loss_function emits masked token-level sums (VALUE_EV_STAT_KEYS); by
+    this point they have been summed across micro-batches and DP/CP ranks and
+    all carry the same `cp_size / num_samples_or_tokens` normalization factor,
+    which cancels inside compute_value_explained_var. The raw statistics are
+    dropped so only the finished metric reaches the logs.
+    """
+    if not all(key in loss_reduced for key in VALUE_EV_STAT_KEYS):
+        return loss_reduced
+    stats = [loss_reduced.pop(key) for key in VALUE_EV_STAT_KEYS]
+    loss_reduced[VALUE_EV_METRIC_KEY] = compute_value_explained_var(*stats)
     return loss_reduced
 
 
