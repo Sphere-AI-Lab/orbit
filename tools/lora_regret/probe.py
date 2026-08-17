@@ -81,6 +81,11 @@ FULL_RUN_ROLLOUTS = {
     "e3": SFT_SWEEP_ROLLOUTS,
     "e4": RL_LAUNCHER_ROLLOUTS,
     "e4place": RL_LAUNCHER_ROLLOUTS,
+    # The E4 LR column and the two Math BS128 OFT scouts all drive the same RL
+    # launcher as e4, so they cost the same full run.
+    "e4lr0": RL_LAUNCHER_ROLLOUTS,
+    "e4oftb128low": RL_LAUNCHER_ROLLOUTS,
+    "e4oftb128refine": RL_LAUNCHER_ROLLOUTS,
     "e5scout": SFT_SWEEP_ROLLOUTS,
     "e5": SFT_SWEEP_ROLLOUTS,
     "e5rl": RL_LAUNCHER_ROLLOUTS,

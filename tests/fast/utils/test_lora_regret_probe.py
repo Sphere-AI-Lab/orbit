@@ -23,13 +23,18 @@ class TestPlan:
     def test_the_method_level_is_one_run_per_task_per_method(self):
         """Rank, block size, placement and batch size exercise the same code at
         different shapes, so probing them separately re-runs a path that already
-        passed. 26 runs, not 67 -- and `path` collapses further still.
+        passed. 29 runs, not 67 -- and `path` collapses further still, to 23.
 
-        26 rather than 24 since e5rl: it adds an OFT and a LoRA method row on
-        math_gsm8k. `path` is unchanged at 17, because e5rl runs the same
-        (launcher, dataset, method, target) combinations E4 already covers --
-        which is the point of the level."""
-        assert len(probe_plan("method")) == 26
+        24 before e5rl, which adds an OFT and a LoRA method row on math_gsm8k;
+        then 29 once e4lr0, e4oftb128low and e4oftb128refine were given
+        FULL_RUN_ROLLOUTS entries, each contributing one method row. Before that
+        they were in the registry but absent from probe's cost table, so
+        probe_plan raised KeyError instead of planning them.
+
+        The counts are asserted rather than derived because the failure they
+        guard is exactly that -- a matrix added to the registry without being
+        taught to the probe."""
+        assert len(probe_plan("method")) == 29
 
     def test_config_level_launches_every_distinct_configuration_once(self):
         """The opt-in level, for hunting a shape-dependent failure rather than a
