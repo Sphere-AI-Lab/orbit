@@ -212,7 +212,7 @@ def test_actor_save_forwards_teacher_and_separate_critic_stays_teacher_free(monk
         calls.append(("hf", rollout_id, self_teacher))
 
     monkeypatch.setattr(actor_utils, "save", save)
-    monkeypatch.setattr(actor_utils, "uses_adapter_critic", lambda args: False)
+    monkeypatch.setattr(actor_utils, "uses_one_trunk_critic", lambda args: False)
     monkeypatch.setattr(model_utils, "save_hf_model", save_hf_model)
 
     def actor_for(role: str, *, with_teacher: bool):
