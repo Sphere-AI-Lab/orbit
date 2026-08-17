@@ -88,7 +88,7 @@ Costs are order-of-magnitude planning numbers anchored on the completed 3B bench
 
 ### A1 — Sync-cost scaling curve
 
-One figure, model size on x (0.5B → 3B → 4B → 30B-A3B → largest feasible), three arms: full-model broadcast (the `_send_base_params` path, exercised via a full-FT recipe), adapter single-slot, adapter double-buffer. Series: `update_weights` wall time, payload bytes, and engine pause time (all three paths currently dispatch the pause lifecycle — constraint 7 — so pause time is a measured series per arm, not an assumed zero for double-buffer). Expected shape: full-model grows linearly toward tens of seconds; adapter flat ≈ 0.1 s. Timing comes from existing metrics; payload bytes and pause time need I-2. The comparison harness runs paired async single-slot vs double-buffer today and needs a full-FT arm (I-3). At quantized bases the full-model arm is not even well-defined without requantization — state that in the figure caption rather than trying to measure it.
+One figure, model size on x (0.5B → 3B → 4B → 30B-A3B → largest feasible), three arms: full-model broadcast (the `_send_base_params` path, exercised via a full-FT recipe), adapter single-slot, adapter double-buffer. Series: `update_weights` wall time, payload bytes, and engine pause time (all three paths currently dispatch the pause lifecycle — constraint 7 — so pause time is a measured series per arm, not an assumed zero for double-buffer). Expected shape: full-model grows linearly toward tens of seconds; adapter flat ≈ 0.1 s. Timing comes from existing metrics; payload bytes and pause time need I-2. The comparison harness runs paired async single-slot vs double-buffer today and needs a full-FT arm (I-3). Record the **PEFT transport per point**: this cluster's `env.sh` defaults `ORBIT_PEFT_ADAPTER_TRANSPORT=cpu_gather` (the B200 CUDA-IPC workaround), so colocated points measure CPU-gather rather than CUDA-IPC, while async points are NCCL regardless — without a transport column the colocated numbers do not compare across machines. Memory series can reuse the allocator-counter reporting merged in on 2026-08-17. At quantized bases the full-model arm is not even well-defined without requantization — state that in the figure caption rather than trying to measure it.
 
 ### A2 — Rollout-throughput timeline across a weight update
 
@@ -96,7 +96,7 @@ Rollout tokens/s in ~100 ms bins over a window containing 2–3 publications, on
 
 ### A3 — Async parity and speedup
 
-Sync (`run-qwen3-4b-instruct-2507-bf16-math-oft.sh`) vs async + double-buffer (`run-qwen3-4b-instruct-2507-bf16-math-oft-async.sh`, `ADAPTER_DOUBLE_BUFFER=1`), matched recipe and data order, ≥3 seeds. Two figures from the same runs: reward vs samples (curves should coincide — the async off-policy guard enforces a correction; report which one is active) and reward vs wall-clock (curves should shift left ≈3.4× per the measured 8.651 → 2.531 s/step). Report the noise floor across seeds; a parity claim without it is unfalsifiable. Never merge the two figures.
+Sync (`run-qwen3-4b-instruct-2507-bf16-math-oft.sh`) vs async + double-buffer (`run-qwen3-4b-instruct-2507-bf16-math-oft-async.sh`, `ADAPTER_DOUBLE_BUFFER=1`), matched recipe and data order, ≥3 seeds. Two figures from the same runs: reward vs samples (curves should coincide — the async off-policy guard enforces a correction; report which one is active) and reward vs wall-clock (curves should shift left ≈3.4× per the measured 8.651 → 2.531 s/step). Report the noise floor across seeds; a parity claim without it is unfalsifiable. Never merge the two figures. Note: the held-out eval-NLL hook is deliberately unavailable here — `train_async.py` rejects `--eval-nll-data` because the overlap loop makes "weights at the moment of measurement" ill-defined — so A3's parity evidence stays reward curves plus benchmark evals.
 
 ### A4 — Staleness ablation in fully-async mode
 
@@ -104,7 +104,7 @@ Sync (`run-qwen3-4b-instruct-2507-bf16-math-oft.sh`) vs async + double-buffer (`
 
 ### P1 — PPO feasibility frontier
 
-Fixed hardware (8 B200), find the largest model where PPO-with-critic runs per mode. Full critic needs a second trunk + fp32 masters + Adam on its own GPUs; adapter critic adds ~0 trunk bytes (measured 44.6 GB vs 48.8 GB actor-alone at 3B). Figure: bar per model size with the "full-critic wall" marked. Run BF16 now (bracket the wall with e.g. 14B/32B/72B dense); the INT4 trillion-scale version waits on constraint 4. Each point needs only a few steps to demonstrate fit + a stable loss, not a full training run.
+Fixed hardware (8 B200), find the largest model where PPO-with-critic runs per mode. Full critic needs a second trunk + fp32 masters + Adam on its own GPUs; adapter critic adds ~0 trunk bytes (measured 44.6 GB vs 48.8 GB actor-alone at 3B). Figure: bar per model size with the "full-critic wall" marked. **New sub-arm (merged 2026-08-17): adapter critic ± frozen-base offload** — `offload_megatron_frozen_base_to_cpu` (modes auto/flat/tms) is gated on PEFT being active, so only the adapter arm can offload its trunk during training phases; this pushes the adapter arm's wall further out and is itself an adapter-first unlock (full FT has no frozen parameters to offload). Every memory number must state the offload mode. Run BF16 now (bracket the wall with e.g. 14B/32B/72B dense); the INT4 trillion-scale version waits on constraint 4. Each point needs only a few steps to demonstrate fit + a stable loss, not a full training run. Memory series reuse the merged-in allocator counters.
 
 ### P2 — Fixed-budget panel, rollout-bound workload
 
@@ -147,6 +147,14 @@ All of I-0 through I-5 landed on `orbit-main` on 2026-08-17 (five `instr/*` bran
 - **I-6** *(optional, unblocks P1-INT4 and X2-PPO)* — Extend one-trunk aliasing to quantized trunk buffers, or a buffer-sharing equivalent. Not started.
 - **I-7** *(new, from constraint 7)* — Investigate dropping the pause/flush/continue lifecycle for the double-buffer path; the pause-time metric quantifies the prize first.
 
+### Capabilities merged in from origin (2026-08-17, merge `a031b3c`) — reuse, do not rebuild
+
+- **Frozen-base offload** (`offload_megatron_frozen_base_to_cpu`, PEFT-gated) — the P1 sub-arm above.
+- **Held-out eval-NLL hook** (`--eval-nll-data`, `train.py` only; explicitly rejected in `train_async.py`) — cheap secondary learning-quality metric for the sync-driver experiments (P3, M2, M3, X1).
+- **Allocator counters + per-arm W&B run naming** — the memory-series instrumentation A1/P1 planned to add; already present.
+- **`ORBIT_PEFT_ADAPTER_TRANSPORT=cpu_gather` cluster default** in `env.sh` — colocated adapter sync routes over CPU-gather on B200; A1 records transport per point.
+- **`tools/lora_regret/` campaign harness** — measures adapter-vs-full-FT learning quality with NLL probes; overlaps this program's parity tier at the algorithmic level. Cross-reference its results instead of re-measuring that question, and borrow its arms/sweep/analyze structure for the P2/P3 panels where it fits.
+
 ## Methodology standards
 
 - ≥3 matched seeds for any learning-quality claim; single seeds only for qualification and systems timing. Always report the seed noise floor next to the effect size.
@@ -155,6 +163,8 @@ All of I-0 through I-5 landed on `orbit-main` on 2026-08-17 (five `instr/*` bran
 - Headline efficiency metric is GPU-hours to target quality; step time is a diagnostic, not a claim.
 - Pre-register the P2 bottleneck profile before choosing its workload.
 - Reuse the validated 3B assets (model conversion, filtered OpenR1 data, aligned Math500/AIME/AMC evals) recorded in `2026-08-06-ppo-critic-comparison-design.md` wherever the model scale permits.
+- Sync-driver experiments (P3, M2, M3, X1) additionally log held-out eval-NLL (`--eval-nll-data`) as a secondary learning-quality metric; async experiments cannot (by design — see A3 note) and claim parity on reward/benchmarks only.
+- Systems figures state the active PEFT transport (NCCL / CUDA-IPC / cpu_gather) alongside every latency or pause measurement.
 
 ## Phasing
 
