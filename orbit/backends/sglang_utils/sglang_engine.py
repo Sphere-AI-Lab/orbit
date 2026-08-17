@@ -553,19 +553,26 @@ class SGLangEngine(RayActor):
         }
         return self._make_request("load_oft_adapter_from_tensors", payload)
 
-    def update_oft_adapter_from_ray_tensor(
+    def update_adapter_from_ray_tensor(
         self,
         *,
         flat_tensor,
         metadata: dict,
         entries: list,
+        payload_tag: str,
         load_format: str,
         adapter_config: dict,
         adapter_name: str,
     ):
-        """Update OFT tensors received through Ray via SGLang's streamed loader."""
+        """Update PEFT tensors received through Ray via SGLang's streamed loader.
+
+        ``payload_tag`` is the per-method wire tag: sglang's
+        normalize_{oft,lora}_weight_payload asserts on "flattened_oft_payload" /
+        "flattened_lora_payload" respectively, so it must follow the method, not
+        be hardcoded -- LoRA reaches this path too now that it has a shaper.
+        """
         inner = (
-            "flattened_oft_payload",
+            payload_tag,
             MultiprocessingSerializer.serialize(flat_tensor),
             metadata,
             entries,

@@ -66,16 +66,21 @@ class RayObjectBackend(PeftWeightTransport):
             time.sleep(0.1)
         try:
             if self.method_spec.payload_shaper is not None:
-                return self._send_oft_adapter(weight_tensors, weight_version)
-            return self._send_lora_adapter(weight_tensors, weight_version)
+                return self._send_shaped_adapter(weight_tensors, weight_version)
+            return self._send_unshaped_lora_adapter(weight_tensors, weight_version)
         finally:
             ray.get(self._lock.release.remote())
 
-    def _send_lora_adapter(
+    def _send_unshaped_lora_adapter(
         self,
         weight_tensors: list[tuple[str, torch.Tensor]],
         weight_version: int,
     ) -> PeftSendResult:
+        """Per-tensor LoRA load, for a method registered without a payload_shaper.
+
+        Both registry entries currently define one, so this is unreachable today;
+        it is kept as the fallback for any method registered without a shaper.
+        """
         tensors = {name: _cpu_tensor(tensor) for name, tensor in weight_tensors}
         results: list = []
         refs: list[ObjectRef] = []
@@ -104,17 +109,24 @@ class RayObjectBackend(PeftWeightTransport):
         results.extend(version_results)
         return PeftSendResult(refs=refs, results=results)
 
-    def _send_oft_adapter(
+    def _send_shaped_adapter(
         self,
         weight_tensors: list[tuple[str, torch.Tensor]],
         weight_version: int,
     ) -> PeftSendResult:
+        """Flattened-payload load, taken by every method that has a shaper.
+
+        LoRA has one too, so the wire tag must follow method_spec.name: sglang's
+        normalize_lora_weight_payload asserts payload[0] == "flattened_lora_payload"
+        and would reject an OFT-tagged payload outright.
+        """
         payload = self.method_spec.payload_shaper(weight_tensors)
         load_refs = [
-            engine.update_oft_adapter_from_ray_tensor.remote(
+            engine.update_adapter_from_ray_tensor.remote(
                 flat_tensor=_cpu_tensor(payload.flat_tensor),
                 metadata=payload.metadata,
                 entries=payload.extra["entries"],
+                payload_tag=f"flattened_{self.method_spec.name}_payload",
                 load_format=self.method_spec.sglang_load_format,
                 adapter_config=self.sync_spec.adapter_config,
                 adapter_name=self.sync_spec.adapter_name,
