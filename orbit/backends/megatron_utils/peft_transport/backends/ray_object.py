@@ -16,6 +16,7 @@ from ray import ObjectRef
 from ray.actor import ActorHandle
 
 from orbit.backends.megatron_utils.peft_utils import PeftSyncSpec
+from orbit.backends.megatron_utils.update_weight.sync_metrics import get_payload_tracker
 
 from .._gather import peft_adapter_preloaded, validate_adapter_weight_chunk
 from ..interface import PeftSendResult, PeftWeightTransport
@@ -77,6 +78,9 @@ class RayObjectBackend(PeftWeightTransport):
         weight_version: int,
     ) -> PeftSendResult:
         tensors = {name: _cpu_tensor(tensor) for name, tensor in weight_tensors}
+        # Payload accounting: logical adapter payload, counted once per update
+        # (per-engine fan-out is not multiplied).
+        get_payload_tracker().record(list(tensors.values()))
         results: list = []
         refs: list[ObjectRef] = []
 
@@ -110,6 +114,9 @@ class RayObjectBackend(PeftWeightTransport):
         weight_version: int,
     ) -> PeftSendResult:
         payload = self.method_spec.payload_shaper(weight_tensors)
+        # Payload accounting: the ONE flat tensor, counted once per update
+        # (per-engine fan-out is not multiplied).
+        get_payload_tracker().record([payload.flat_tensor])
         load_refs = [
             engine.update_oft_adapter_from_ray_tensor.remote(
                 flat_tensor=_cpu_tensor(payload.flat_tensor),

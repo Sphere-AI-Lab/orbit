@@ -16,11 +16,17 @@ def log_perf_data_raw(
     timer_instance = Timer()
     log_dict_raw = deepcopy(timer_instance.log_dict())
     timer_instance.reset()
+    # Non-time perf scalars staged by instrumentation (e.g. weight-sync payload
+    # bytes from update_weight/sync_metrics.py). Snapshot-and-clear mirrors the
+    # timer handling above so stale values never leak into the next flush.
+    scalar_dict_raw = dict(getattr(timer_instance, "perf_scalars", None) or {})
+    timer_instance.perf_scalars = {}
 
     if not is_primary_rank:
         return
 
     log_dict = {f"perf/{key}_time": val for key, val in log_dict_raw.items()}
+    log_dict |= {f"perf/{key}": val for key, val in scalar_dict_raw.items()}
 
     if ("perf/actor_train_time" in log_dict) and (compute_total_fwd_flops is not None):
         total_fwd_flops = compute_total_fwd_flops(seq_lens=timer_instance.seq_lens)

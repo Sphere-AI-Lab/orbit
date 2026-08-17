@@ -14,6 +14,7 @@ from ray.actor import ActorHandle
 
 from orbit.backends.megatron_utils.peft_utils import PeftSyncSpec
 from orbit.backends.megatron_utils.sglang import MultiprocessingSerializer
+from orbit.backends.megatron_utils.update_weight.sync_metrics import get_payload_tracker
 
 from .._gather import peft_adapter_preloaded, validate_adapter_weight_chunk
 from ..interface import PeftSendResult, PeftWeightTransport
@@ -80,6 +81,9 @@ class IpcBackend(PeftWeightTransport):
                 payload.extra["entries"],
             )
             serialized = MultiprocessingSerializer.serialize(inner, output_str=True)
+            # Payload accounting: the engine deserializes every gather-group
+            # rank's flat tensor, so each rank records its own.
+            get_payload_tracker().record([payload.flat_tensor])
             gathered = [None] * world_size if is_src else None
             dist.gather_object(
                 serialized,
@@ -126,6 +130,10 @@ class IpcBackend(PeftWeightTransport):
             group=self.ipc_gather_group,
         )
         if is_src:
+            # Payload accounting: this path loads only gathered[0] (the source
+            # rank's serialized tensors) into SGLang, so only the source rank
+            # records its payload.
+            get_payload_tracker().record(weight_tensors)
             engine = self._engines[0]
             if self._peft_loaded:
                 ray.get(engine.unload_lora_adapter.remote(lora_name=self.sync_spec.adapter_name))
