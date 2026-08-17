@@ -14,6 +14,7 @@ from tqdm import tqdm
 from orbit.backends.training_utils.parallel import get_parallel_state
 from orbit.utils.distributed_utils import init_process_group
 
+from ..sync_metrics import get_payload_tracker
 from .mixin import DistBucketedWeightUpdateMixin
 
 
@@ -174,6 +175,11 @@ def update_weights_from_distributed(
         )
         for engine in rollout_engines
     ]
+
+    # Payload accounting: only the broadcasting source rank reaches this
+    # function, so the logical payload is counted exactly once per update
+    # (engine fan-out reuses the same broadcast and is not multiplied).
+    get_payload_tracker().record(converted_named_tensors)
 
     handles = []
     for _, param in converted_named_tensors:

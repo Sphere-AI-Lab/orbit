@@ -16,6 +16,7 @@ from ray import ObjectRef
 from ray.actor import ActorHandle
 
 from orbit.backends.megatron_utils.peft_utils import PeftSyncSpec
+from orbit.backends.megatron_utils.update_weight.sync_metrics import get_payload_tracker
 
 from ..interface import PeftSendResult, PeftWeightTransport
 from ..registry import PeftMethodSpec
@@ -181,6 +182,11 @@ class NcclBackend(PeftWeightTransport):
                 names.append(name)
                 dtypes.append(str(tensor.dtype).removeprefix("torch."))
                 shapes.append(list(tensor.shape))
+
+            # Payload accounting: only the broadcast source rank runs
+            # send_adapter, so the wire payload (the ONE flat tensor on the
+            # shaped path) is counted exactly once per update.
+            get_payload_tracker().record(tensors_to_broadcast)
 
             # Engines must allocate staging buffers before the broadcast begins,
             # so dispatch the metadata RPC first; broadcast and engine network
