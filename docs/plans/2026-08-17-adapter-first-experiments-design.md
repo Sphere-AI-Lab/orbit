@@ -19,6 +19,51 @@ Because every adapter-first advantage is O(adapter) vs O(model), experiments eit
 5. **`self:*` OPD teachers are incompatible with `--adapter-double-buffer`** (`orbit/utils/arguments.py:1154-1166`), and sglang-local teacher scoring requires OFT (LoRA is single-active per batch). M2 runs trainer-side (`--opd-type megatron`) or single-slot.
 6. **`train_async.py` never onloads rollout engines**, yet both async launchers pass `--offload-rollout`. Verify or fix before any long async run (Phase 0 item I-0); a silent startup hang here would poison A3/A4 schedules.
 
+## Models and tasks
+
+### Model ladder
+
+Six rungs; each is chosen because its launcher family already exists, so scale points cost no new recipe engineering unless flagged under "Recipe gaps."
+
+| Model | Role | Existing launchers |
+|---|---|---|
+| Qwen2.5-0.5B-Instruct | Phase-0 qualification and OPD smokes only; never reported as results (2026-08-06 rule) | OPD teacher-variant smokes, PPO/adapter-critic smokes, search-r1 0.5B |
+| Qwen2.5-3B-Instruct, BF16 + canonical OFT | PPO workhorse (P2, P3, M1 measured table, M3); fully validated assets: torch_dist conversion, filtered OpenR1-49,990, aligned Math500/AIME/AMC evals | `ppo_critic_compare_common.sh` suite, GRPO/full-FT/head-critic variants, `search_r1/qwen2_5_3b_search_r1_ppo_common.sh` |
+| Qwen3-4B-Instruct-2507, BF16 OFT | Async workhorse (A1–A4, M2); all published async numbers are at this scale, so new figures extend a measured baseline. Also X1 (FP8 twin) and the tau-bench P2 candidate | sync/async/fully-async triple in `examples/high_precision/`, `low_precision/run-qwen3-4b-fp8-math-oft.sh`, `tau_bench/qwen3_4b_tau_bench_ppo_common.sh` |
+| Qwen2.5-7B, BF16 | Optional dense mid-point on the A1 curve; full-FT launchers exist, which A1's full-model-sync arm needs | `run-qwen2_5-7b-bf16-openr1-{full,lora,oft-*}` family |
+| Qwen3-30B-A3B (+ Instruct-2507) | MoE scaling point (A1, P1 frontier, X1 at scale); the one model with BF16 and FP8/INT4 launchers side by side | `run-qwen3-30b-a3b-bf16-openr1-{full,lora,oft}`, `low_precision/run-qwen3-30b-a3b-{fp8,int4}-math-oft.sh` |
+| Kimi-K2.6 INT4 / DSV4 MXFP4 (Flash, Pro) | Flagship X2 and the top of the A1 curve — the rung where no full-model baseline exists | `low_precision/run-kimi-k26-int4-openr1-oft.sh`, `low_precision/dsv4-*` pair |
+
+### Task set
+
+Exact-answer math carries every parity and systems claim (A1–A4, P1, P3, M1, M2, X1, X2): OpenR1-style 50k train JSONL, deterministic exact-match reward, Math500 primary and AIME 2024 / AMC 2023 secondary evals. Systems metrics are task-invariant, so a single task everywhere removes a confound, and math is the only task with validated data, a learned-reward-free grader, and launchers at every rung. Deviating from math requires a reason; there are exactly two:
+
+1. **P2 needs a rollout-bound workload**, which single-turn math is not — that is why the 3B budget panel failed its premise. Candidates: tau-bench (multi-turn agentic tool use, Qwen3-4B, PPO launchers for full/LoRA/OFT) and Search-R1 (retrieval-augmented QA with EM reward, Qwen2.5-3B). The P2 pre-check profiles both and keeps whichever crosses the ~60% rollout fraction.
+2. **M3 needs a domain the RL task does not cover**, to measure retention. The SFT suite ships NuminaMath, Magicoder, CommonsenseQA, and ScienceQA launchers: SFT a NuminaMath expert adapter, run blend-RL on OpenR1 math, evaluate Math500 plus a held-out Numina slice; Magicoder is the stretch variant (code expert preserved through math RL).
+
+GSM8K appears only in the full-vocab OPD launcher and stays smoke-tier; the SWE / swe-agent examples are smoke-only and excluded.
+
+### Assignment
+
+| Experiment | Model(s) | Task |
+|---|---|---|
+| A1 | 0.5B → 3B → 4B → 7B → 30B-A3B → Kimi-K2.6 INT4 | math (task-invariant metric) |
+| A2, A3, A4 | Qwen3-4B-Instruct-2507 | math |
+| P1 | 7B → 30B-A3B (BF16) → R-1 if the wall is higher | math, few steps per point |
+| P2 | Qwen3-4B (tau-bench) or Qwen2.5-3B (Search-R1) | pre-check winner |
+| P3 | Qwen2.5-3B | math (validated suite) |
+| M1 | qualify at 0.5B, measure at 3B (R-2) | math |
+| M2 | Qwen3-4B | math |
+| M3 | Qwen2.5-3B student + NuminaMath expert adapter (R-3) | math + Numina holdout |
+| X1 | Qwen3-4B FP8 first; 30B-A3B FP8/INT4 confirm | math |
+| X2 | Kimi-K2.6 INT4 (DSV4 MXFP4 alternate) | math (OpenR1) |
+
+### Recipe gaps
+
+- **R-1** *(Phase 4)* — If full-critic PPO on 8×B200 still fits at 30B-A3B, bracketing the P1 wall needs one new dense config around Qwen2.5-72B. Mechanical, but no launcher exists today.
+- **R-2** *(Phase 1)* — M1's measured table requires porting the five teacher-variant flag blocks from the 0.5B smokes onto the 3B math recipe; the variants currently exist only as smokes.
+- **R-3** *(Phase 3)* — M3 needs a Qwen2.5-3B SFT config by analogy with the existing 0.5B / Llama-8B SFT launchers; SFT and RL launchers do not currently share a model size above 0.5B.
+
 ## Prioritized matrix
 
 | ID | Experiment | Claim | Tier | Hardware | Est. cost | Entry point | Blockers |
