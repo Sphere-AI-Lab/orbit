@@ -20,6 +20,11 @@ async def train(args):
 
     # create the rollout manager, with sglang engines inside.
     # need to initialize rollout manager first to calculate num_rollout
+    # Note: unlike train.py there is deliberately no offload/onload dance here even
+    # when --offload-rollout is passed. Actor and rollout GPUs are disjoint in async
+    # mode, so start_rollout_servers marks every engine group needs_offload=False and
+    # create_rollout_manager's initial offload() is a no-op: the engines stay resident
+    # for the whole run (see tests/fast/test_async_offload_noop.py).
     rollout_manager, num_rollout_per_epoch = create_rollout_manager(args, pgs["rollout"])
 
     # create the actor and critic models
