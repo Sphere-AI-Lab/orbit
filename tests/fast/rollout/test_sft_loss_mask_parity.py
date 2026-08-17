@@ -90,7 +90,11 @@ def _hf_label_mask(tokenizer, messages: list[dict]) -> tuple[list[int], list[int
     assistant_newline = tokenizer("assistant\n", add_special_tokens=False)["input_ids"]
     header = [im_start, *assistant_newline]
 
-    full = tokenizer.apply_chat_template(messages, tokenize=True, add_generation_prompt=False)
+    # return_dict=False: transformers 5 flipped the default to True, which turns
+    # this into a BatchEncoding; the reference mask below indexes a flat id list.
+    full = tokenizer.apply_chat_template(
+        messages, tokenize=True, return_dict=False, add_generation_prompt=False
+    )
     mask = [0] * len(full)
 
     i = 0

@@ -135,7 +135,9 @@ def test_tools_are_rendered_into_the_token_stream(gen):
     shape of any existing assertion.
     """
     ids, _ = gen.gen_multi_turn_loss_mask_llama3(TOOL_MSGS, tools=TOOLS)
-    expected_ids = gen.tokenizer.apply_chat_template(TOOL_MSGS, tokenize=True, tools=TOOLS)
+    expected_ids = gen.tokenizer.apply_chat_template(
+        TOOL_MSGS, tokenize=True, return_dict=False, tools=TOOLS
+    )
     assert ids == expected_ids
     # Sanity: the tool schema must have actually changed something, or the
     # equality above would hold trivially even with tools dropped everywhere.
@@ -158,7 +160,7 @@ def test_ids_match_single_whole_conversation_tokenization(gen):
     context-sensitive behavior the way Qwen3's did.
     """
     ids, _ = gen.gen_multi_turn_loss_mask_llama3(MULTI)
-    expected_ids = gen.tokenizer.apply_chat_template(MULTI, tokenize=True)
+    expected_ids = gen.tokenizer.apply_chat_template(MULTI, tokenize=True, return_dict=False)
     assert ids == expected_ids
 
 

@@ -75,6 +75,7 @@ def test_exactly_one_bos_and_it_is_first(base_tokenizer):
     ids = base_tokenizer.apply_chat_template(
         [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}],
         tokenize=True,
+        return_dict=False,
     )
     bos = base_tokenizer.convert_tokens_to_ids("<|begin_of_text|>")
     assert ids[0] == bos

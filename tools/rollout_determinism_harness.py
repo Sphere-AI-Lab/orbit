@@ -122,7 +122,11 @@ def _load_prompt_token_ids(args) -> list[list[int]]:
                 except Exception:
                     pass
             if isinstance(prompt, list):
-                ids = tokenizer.apply_chat_template(prompt, add_generation_prompt=True)
+                # return_dict=False: transformers 5 defaults it to True, which
+                # would make list(ids) below a list of dict keys, not token ids.
+                ids = tokenizer.apply_chat_template(
+                    prompt, tokenize=True, return_dict=False, add_generation_prompt=True
+                )
             else:
                 ids = tokenizer.encode(str(prompt))
             prompts.append(list(ids))
