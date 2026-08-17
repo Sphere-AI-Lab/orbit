@@ -14,7 +14,7 @@ This document supersedes it for the from-scratch build.
 | CUDA | 13.2 (`/is/software/nvidia/cuda-13.2`, module `cuda/13.2`) |
 | torch | 2.11.0 + torchvision 0.26.0 + torchaudio 2.11.0 |
 | cuDNN / NCCL | 9.22.0.52 / 2.30.4 (from the venv, not the system) |
-| transformers | 4.57.1 (hard-pinned; sglang requires it) |
+| transformers | 5.12.1 (hard-pinned; sglang requires it) |
 | Built from source | TransformerEngine, flash-attn 2.8.3, sgl-kernel, DeepEP, DeepGEMM, mamba-ssm, causal-conv1d, torch-memory-saver, fast-hadamard-transform |
 | Target GPUs | H100 (sm_90) **and** B200 (sm_100), one fat binary |
 | Build time | ~1–2 h, dominated by sgl-kernel's CUTLASS templates |
@@ -36,9 +36,13 @@ check the build actually did what it claims.
 
 **The 1–2 hour figure is for a cold cache.** `$HOME/.cache/uv_cu13_orbit` already holds built
 wheels for every expensive package at the exact revisions `pyproject.toml` pins — flash-attn
-2.8.3, sgl-kernel 0.3.21, TransformerEngine 2.14.0, DeepEP, DeepGEMM, mamba-ssm,
+2.8.3, sglang-kernel 0.4.5, TransformerEngine 2.14.0, DeepEP, DeepGEMM, mamba-ssm,
 causal-conv1d — so a sync against it skips every source build. Keeping that cache is worth
 roughly two hours per rebuild; this is the second reason not to park it somewhere volatile.
+
+Note the kernel package renamed with the v0.5.16 move: the `sgl-kernel/` subdirectory publishes
+**`sglang-kernel` 0.4.5** (it was `sgl-kernel` 0.3.21 on the v0.5.9 line), so a cache warmed
+before that move has no entry for it and will rebuild it once. The import name stays `sgl_kernel`.
 
 Measured 2026-07-29 with a warm cache: resolution 617 ms, orbit's own build 7.5 s, and
 **68 minutes wall clock** for the whole sync — 330 packages, 12 GB. Nearly all of that hour is
@@ -191,14 +195,15 @@ cuda/13.2` first, but `module` is a no-op when not interactive, and its fallback
 cluster's `/is/software/nvidia/cuda-13.2`. It warns rather than failing silently:
 `env.sh: WARNING — CUDA 13.2 toolkit not found.`
 
-Verified on 2026-07-29 (`i208`, H100 80GB):
+Verified on 2026-08-17 (`i106`, H100 80GB), against the v0.5.16 sglang line:
 
 ```
   torch                2.11.0+cu130        megatron.core   0.18.0rc0
-  transformers         4.57.1              deep_ep         2.0.0
-  sglang               0.0.0.dev9873+g9c83ae8be            deep_gemm       ok
-  transformer_engine   2.14.0+71bbefbf     sgl_kernel      0.3.21
+  transformers         5.12.1              deep_ep         2.0.0
+  sglang               0.0.0.dev15479+g05cd76b4d           deep_gemm       0.1.4.post1
+  transformer_engine   2.14.0+71bbefbf     sgl_kernel      0.4.5
   flash_attn           2.8.3               orbit           ok
+  cuda True NVIDIA H100 80GB HBM3
 ```
 
 No broken links, which is the check that would have caught the 2026-07-29 failure at build time:
