@@ -77,6 +77,7 @@ class Case:
     rollout_gpus_async: int
     target_modules: str | None = None
     lora_backend: str | None = None
+    fullft_script: str | None = None
     extra_env: dict[str, str] = dataclasses.field(default_factory=dict)
 
     @property
@@ -114,6 +115,7 @@ CASES = [
         train_gpus_async=2,
         rollout_gpus_async=2,
         target_modules="linear_qkv,linear_proj,linear_fc1,linear_fc2",
+        fullft_script="examples/high_precision/run-qwen3-4b-instruct-2507-bf16-math-fullft-async.sh",
         extra_env={"REQUIRE_MEGATRON_LOAD": "1"},
     ),
     Case(
@@ -174,7 +176,58 @@ CASES = [
     ),
 ]
 
-MODES = ("sync", "async", "async_db")
+@dataclasses.dataclass(frozen=True)
+class Arm:
+    """A named comparison arm: which launcher a case runs (``script_field``
+    selects the Case attribute holding it) plus the env overrides that pick
+    the entrypoint/topology and the weight-sync path."""
+
+    name: str
+    entrypoint: str  # relative to the branch root
+    colocate: bool
+    script_field: str = "script"
+    env: dict[str, str] = dataclasses.field(default_factory=dict)
+
+
+ARMS = {
+    "sync": Arm(name="sync", entrypoint="train.py", colocate=True, env={"ADAPTER_DOUBLE_BUFFER": "0"}),
+    "async": Arm(name="async", entrypoint="train_async.py", colocate=False, env={"ADAPTER_DOUBLE_BUFFER": "0"}),
+    "async_db": Arm(name="async_db", entrypoint="train_async.py", colocate=False, env={"ADAPTER_DOUBLE_BUFFER": "1"}),
+    # Full-model sync arm: full fine-tuning (--peft-method none) exercising the
+    # legacy full-parameter broadcast in update_weights instead of the PEFT
+    # adapter push. Needs a dedicated launcher (Case.fullft_script) because the
+    # adapter launchers hardcode their PEFT flags.
+    "async_fullft": Arm(
+        name="async_fullft",
+        entrypoint="train_async.py",
+        colocate=False,
+        script_field="fullft_script",
+        env={"ADAPTER_DOUBLE_BUFFER": "0", "PEFT_METHOD": "none"},
+    ),
+}
+
+MODES = tuple(ARMS)
+# Backward-compatible default: async_fullft runs only when selected via --modes.
+DEFAULT_MODES = ("sync", "async", "async_db")
+
+# Case env that only makes sense with a PEFT adapter; scrubbed when an arm
+# forces PEFT_METHOD=none so manifests do not record misleading knobs.
+PEFT_ONLY_ENV_KEYS = (
+    "TARGET_MODULES",
+    "SGLANG_LORA_BACKEND",
+    "OFT_BLOCK_SIZE",
+    "LORA_RANK",
+    "LORA_ALPHA",
+    "LORA_DROPOUT",
+)
+
+
+def arm_script(case: Case, mode: str) -> str | None:
+    return getattr(case, ARMS[mode].script_field)
+
+
+def arm_peft(case: Case, mode: str) -> str:
+    return ARMS[mode].env.get("PEFT_METHOD", case.peft)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -184,6 +237,8 @@ class Job:
     branch: Branch
     case: Case
     mode: str
+    script: str
+    peft: str
     gpu_ids: tuple[int, ...]
     run_dir: Path
     num_rollout: int
@@ -247,7 +302,8 @@ def selected_branches(args: argparse.Namespace) -> list[Branch]:
 
 
 def selected_modes(args: argparse.Namespace) -> list[str]:
-    modes = parse_csv_filter(args.modes, set(MODES), "mode")
+    requested = args.modes or ",".join(DEFAULT_MODES)
+    modes = parse_csv_filter(requested, set(MODES), "mode")
     ordered = [mode for mode in MODES if mode in modes]
     if args.profile == "pilot":
         ordered = [mode for mode in ordered if mode == "async"]
@@ -276,6 +332,13 @@ def build_waves(args: argparse.Namespace) -> list[list[Job]]:
     for repeat in range(args.repeats):
         for case in cases:
             for mode in modes:
+                if arm_script(case, mode) is None:
+                    if repeat == 0:
+                        print(
+                            f"skipping {case.key} mode={mode}: case defines no {ARMS[mode].script_field}",
+                            file=sys.stderr,
+                        )
+                    continue
                 branch_order = branches
                 if repeat % 2 == 1:
                     branch_order = list(reversed(branches))
@@ -323,6 +386,8 @@ def build_waves(args: argparse.Namespace) -> list[list[Job]]:
                         )
                     )
                 waves.append(wave)
+    if not waves:
+        raise SystemExit("No runnable jobs selected (selected modes need launchers on the selected cases)")
     return waves
 
 
@@ -339,13 +404,22 @@ def make_job(
     skip_eval_before_train: bool,
     batch_profile: str,
 ) -> Job:
-    run_id = f"r{repeat:02d}_{branch.name}_{case.key}_{mode}_g{''.join(str(g) for g in gpu_ids)}"
+    script = arm_script(case, mode)
+    if script is None:
+        raise SystemExit(f"Case {case.key} defines no {ARMS[mode].script_field} for mode {mode}")
+    peft = arm_peft(case, mode)
+    run_id = (
+        f"r{repeat:02d}_{branch.name}_{case.model}_{case.precision}_{peft}_{mode}_"
+        f"g{''.join(str(g) for g in gpu_ids)}"
+    )
     return Job(
         run_id=run_id,
         repeat=repeat,
         branch=branch,
         case=case,
         mode=mode,
+        script=script,
+        peft=peft,
         gpu_ids=gpu_ids,
         run_dir=output_root / run_id,
         num_rollout=num_rollout,
@@ -357,7 +431,7 @@ def make_job(
 
 
 def validate_job(job: Job) -> None:
-    script = job.branch.root / job.case.script
+    script = job.branch.root / job.script
     if not script.exists():
         raise SystemExit(f"Missing launcher for {job.run_id}: {script}")
     python = job.branch.venv_bin / "python3"
@@ -389,8 +463,10 @@ def job_env(job: Job) -> dict[str, str]:
     env["DATASET"] = "math"
 
     apply_batch_profile(env, job.batch_profile, job.case)
-    apply_mode_env(env, job)
     apply_case_env(env, job.case)
+    # Mode/arm env is applied last so arm overrides (e.g. PEFT_METHOD=none for
+    # the full-FT arm) win over the case defaults.
+    apply_mode_env(env, job)
     return env
 
 
@@ -417,23 +493,25 @@ def apply_batch_profile(env: dict[str, str], profile: str, case: Case) -> None:
 
 
 def apply_mode_env(env: dict[str, str], job: Job) -> None:
+    arm = ARMS.get(job.mode)
+    if arm is None:
+        raise SystemExit(f"Unknown mode: {job.mode}")
     root = job.branch.root
-    if job.mode == "sync":
-        env["ORBIT_ENTRYPOINT"] = str(root / "train.py")
+    env["ORBIT_ENTRYPOINT"] = str(root / arm.entrypoint)
+    if arm.colocate:
         env["ORBIT_COLOCATE"] = "1"
         env["GPUS_PER_NODE"] = str(job.case.gpu_total)
         env.pop("ROLLOUT_NUM_GPUS", None)
         env.pop("ROLLOUT_NUM_GPUS_PER_ENGINE", None)
-        env["ADAPTER_DOUBLE_BUFFER"] = "0"
-    elif job.mode in {"async", "async_db"}:
-        env["ORBIT_ENTRYPOINT"] = str(root / "train_async.py")
+    else:
         env["ORBIT_COLOCATE"] = "0"
         env["GPUS_PER_NODE"] = str(job.case.train_gpus_async)
         env["ROLLOUT_NUM_GPUS"] = str(job.case.rollout_gpus_async)
         env["ROLLOUT_NUM_GPUS_PER_ENGINE"] = str(job.case.rollout_gpus_async)
-        env["ADAPTER_DOUBLE_BUFFER"] = "1" if job.mode == "async_db" else "0"
-    else:
-        raise SystemExit(f"Unknown mode: {job.mode}")
+    env.update(arm.env)
+    if arm.env.get("PEFT_METHOD") == "none":
+        for key in PEFT_ONLY_ENV_KEYS:
+            env.pop(key, None)
 
 
 def apply_case_env(env: dict[str, str], case: Case) -> None:
@@ -484,9 +562,9 @@ def write_manifest(job: Job, env: dict[str, str]) -> None:
         "env_root": str(job.branch.env_root),
         "model": job.case.model,
         "precision": job.case.precision,
-        "peft": job.case.peft,
+        "peft": job.peft,
         "mode": job.mode,
-        "script": job.case.script,
+        "script": job.script,
         "gpu_ids": list(job.gpu_ids),
         "num_rollout": job.num_rollout,
         "eval_enabled": job.eval_enabled,
@@ -509,7 +587,7 @@ def run_job(job: Job) -> subprocess.Popen[bytes]:
     }
     job.status_path.write_text(json.dumps(status, indent=2, sort_keys=True) + "\n")
     console = job.console_log.open("ab")
-    command = ["bash", str(job.branch.root / job.case.script)]
+    command = ["bash", str(job.branch.root / job.script)]
     return subprocess.Popen(command, env=env, stdout=console, stderr=subprocess.STDOUT, preexec_fn=os.setsid)
 
 
@@ -583,9 +661,9 @@ def print_plan(waves: list[list[Job]]) -> None:
             print(
                 "  "
                 f"{job.run_id} branch={job.branch.name} model={job.case.model} "
-                f"precision={job.case.precision} peft={job.case.peft} mode={job.mode} "
+                f"precision={job.case.precision} peft={job.peft} mode={job.mode} "
                 f"gpus={','.join(map(str, job.gpu_ids))} rollouts={job.num_rollout} "
-                f"eval={int(job.eval_enabled)} script={job.case.script}"
+                f"eval={int(job.eval_enabled)} script={job.script}"
             )
 
 
@@ -842,7 +920,13 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--models", help="Comma-separated model keys")
     parser.add_argument("--precisions", help="Comma-separated precision keys")
     parser.add_argument("--pefts", help="Comma-separated PEFT methods")
-    parser.add_argument("--modes", help="Comma-separated modes: sync,async,async_db")
+    parser.add_argument(
+        "--modes",
+        help=(
+            "Comma-separated modes: sync,async,async_db,async_fullft "
+            "(async_fullft runs only when explicitly selected)"
+        ),
+    )
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--num-rollout", type=int)
     parser.add_argument("--eval", dest="eval", action="store_true", default=None)
