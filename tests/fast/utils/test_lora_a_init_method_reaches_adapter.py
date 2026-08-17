@@ -43,6 +43,16 @@ def _install_stub_peft_utils(monkeypatch):
     # scope, which needs a sourced CUDA env. Fake just the names lora_utils.py
     # imports from it; create_lora_instance only actually calls the first two.
     stub = ModuleType("orbit.backends.megatron_utils.peft_utils")
+
+    # lora_utils imports this for a type annotation only
+    # (checkpoint_preflight: PeftCheckpointPreflight | None). The name still has
+    # to exist at import time, and the stub package's __path__ is empty, so a
+    # miss surfaces as "cannot import name ... (unknown location)" rather than
+    # anything pointing at the annotation.
+    class _PeftCheckpointPreflight:
+        pass
+
+    stub.PeftCheckpointPreflight = _PeftCheckpointPreflight
     stub.convert_target_modules_to_hf = lambda *a, **k: None
     stub.convert_target_modules_to_megatron = lambda target_modules, variant=None: list(target_modules)
     stub.get_peft_method = lambda args: getattr(args, "peft_method", "none")
