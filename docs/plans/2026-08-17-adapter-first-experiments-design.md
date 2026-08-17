@@ -17,7 +17,8 @@ Because every adapter-first advantage is O(adapter) vs O(model), experiments eit
 3. **The fixed-budget panel premise failed at 3B math**: rollout was not the bottleneck, so the freed critic GPU bought nothing. A re-run is only meaningful on a workload whose profiled rollout fraction exceeds ~60% of step time (P2 pre-check).
 4. **Quantized trunk + adapter critic is rejected** (`orbit/backends/megatron_utils/low_precision_bootstrap.py:151-156`): one-trunk aliasing shares `Parameter`s only; quantized trunk weights/scales live in checkpoint-created buffers. INT4/FP4 one-trunk PPO (P1-INT4, X2-PPO) is blocked until this is lifted; the BF16 feasibility frontier is runnable today.
 5. **`self:*` OPD teachers are incompatible with `--adapter-double-buffer`** (`orbit/utils/arguments.py:1154-1166`), and sglang-local teacher scoring requires OFT (LoRA is single-active per batch). M2 runs trainer-side (`--opd-type megatron`) or single-slot.
-6. **`train_async.py` never onloads rollout engines**, yet both async launchers pass `--offload-rollout`. Verify or fix before any long async run (Phase 0 item I-0); a silent startup hang here would poison A3/A4 schedules.
+6. **RESOLVED (I-0, 2026-08-17): `--offload-rollout` is structurally inert in async topologies — not a bug.** `needs_offload` is only set for engine groups whose GPUs overlap the Megatron slots, which happens only under `--colocate`; in every `train_async` run the startup offload releases nothing and engines stay resident, so no onload is needed. Documented in `train_async.py` / `orbit/ray/placement_group.py` and pinned by `tests/fast/test_async_offload_noop.py`. A3/A4 are unblocked.
+7. **The double-buffer path currently pauses generation too** (found during I-2): `update_weights` dispatches the pause/flush/continue lifecycle unconditionally for all three sync paths (`update_weight_from_tensor.py`), so today's double-buffer runs report a real nonzero `perf/update_weights_pause_time`. The A1/A2 "no pause under double-buffer" asymmetry is therefore a *hypothesis about a possible optimization* (dropping the lifecycle when staging into an inactive slot), not current behavior — the instrument measures the actual window either way, and whether the lifecycle can be dropped is a candidate follow-up (I-7).
 
 ## Models and tasks
 
@@ -87,11 +88,11 @@ Costs are order-of-magnitude planning numbers anchored on the completed 3B bench
 
 ### A1 — Sync-cost scaling curve
 
-One figure, model size on x (0.5B → 3B → 4B → 30B-A3B → largest feasible), three arms: full-model broadcast (the `_send_base_params` path, exercised via a full-FT recipe), adapter single-slot, adapter double-buffer. Series: `update_weights` wall time, payload bytes, and engine pause time (full-model requires `pause_generation → flush_cache`; double-buffer requires neither). Expected shape: full-model grows linearly toward tens of seconds; adapter flat ≈ 0.1 s. Timing comes from existing metrics; payload bytes and pause time need I-2. The comparison harness runs paired async single-slot vs double-buffer today and needs a full-FT arm (I-3). At quantized bases the full-model arm is not even well-defined without requantization — state that in the figure caption rather than trying to measure it.
+One figure, model size on x (0.5B → 3B → 4B → 30B-A3B → largest feasible), three arms: full-model broadcast (the `_send_base_params` path, exercised via a full-FT recipe), adapter single-slot, adapter double-buffer. Series: `update_weights` wall time, payload bytes, and engine pause time (all three paths currently dispatch the pause lifecycle — constraint 7 — so pause time is a measured series per arm, not an assumed zero for double-buffer). Expected shape: full-model grows linearly toward tens of seconds; adapter flat ≈ 0.1 s. Timing comes from existing metrics; payload bytes and pause time need I-2. The comparison harness runs paired async single-slot vs double-buffer today and needs a full-FT arm (I-3). At quantized bases the full-model arm is not even well-defined without requantization — state that in the figure caption rather than trying to measure it.
 
 ### A2 — Rollout-throughput timeline across a weight update
 
-Rollout tokens/s in ~100 ms bins over a window containing 2–3 publications, one trace per arm (full-model, single-slot, double-buffer). This is the mechanism figure: the double-buffer trace should be flat because the broadcast lands in the inactive slot while the active slot serves, and it explains the measured +50.2% tok/GPU/s. Needs I-1. Qwen3-4B, 4+4 layout, short run — cheap enough to iterate on until the figure is clean.
+Rollout tokens/s in ~100 ms bins over a window containing 2–3 publications, one trace per arm (full-model, single-slot, double-buffer). This is the mechanism figure: the double-buffer trace is expected to be the shallowest because the broadcast lands in the inactive slot while the active slot serves — though the pause lifecycle currently still runs in all three paths (constraint 7), so the trace measures rather than assumes the asymmetry, quantifies the I-7 prize, and explains the measured +50.2% tok/GPU/s. Needs I-1 (done). Qwen3-4B, 4+4 layout, short run — cheap enough to iterate on until the figure is clean.
 
 ### A3 — Async parity and speedup
 
@@ -135,13 +136,16 @@ One end-to-end run: Kimi-K2.6 or DSV4 at INT4/FP4 on a single 8×B200 node, asyn
 
 ## Instrumentation and engineering pre-work
 
-- **I-0** — Verify (and if needed fix) rollout-engine onload in `train_async.py` under `--offload-rollout` (constraint 6). Gate for A3/A4.
-- **I-1** — Rollout tokens/s time series in ~100 ms bins with weight-publication event markers (A2). Likely engine- or router-side counters aggregated by the rollout manager.
-- **I-2** — Per-update payload bytes and engine pause-time metrics (A1). Verify which already exist before adding.
-- **I-3** — Full-FT (full-model sync) arm in `tools/adapter_runtime_compare/` (A1).
-- **I-4** — Critic explained-variance metric alongside `value_loss` / `value_clipfrac` (P3).
-- **I-5** — Teacher-logprob equivalence harness: fixed batch scored under `alias_ref` / `adapter_off` / external URL (M1). Mostly reuses existing OPD test scaffolding.
-- **I-6** *(optional, unblocks P1-INT4 and X2-PPO)* — Extend one-trunk aliasing to quantized trunk buffers, or a buffer-sharing equivalent.
+All of I-0 through I-5 landed on `orbit-main` on 2026-08-17 (five `instr/*` branches, merged after a green fast suite).
+
+- **I-0 — DONE.** Resolved as not-a-bug (see constraint 6); comments + 9 pinning tests in `tests/fast/test_async_offload_noop.py`.
+- **I-1 — DONE.** `tools/rollout_timeline/`: standalone `probe.py` polling SGLang's `sglang:realtime_tokens_total{mode="decode"}` counter from `/metrics` (engines need `--enable-metrics`; `/server_info` gauge as fallback), pure `binning.py` (counter resets and scrape gaps handled; a scrape gap during an update is itself signal), and trainer-side update markers gated on `ORBIT_TIMELINE_EVENTS_FILE`.
+- **I-2 — DONE.** New per-update metrics through the existing perf flow: `perf/update_weights_payload_bytes`, `perf/update_weights_payload_num_tensors`, `perf/update_weights_num_chunks`, `perf/update_weights_pause_time` (pause dispatch → continue completion; see constraint 7 for the double-buffer finding). Implemented in `update_weight/sync_metrics.py` + transport send sites.
+- **I-3 — DONE.** `tools/adapter_runtime_compare/` arms are now a registry; opt-in `async_fullft` arm (via `--modes`) plus the mechanical launcher `run-qwen3-4b-instruct-2507-bf16-math-fullft-async.sh`. Default arm selection unchanged (regression-tested).
+- **I-4 — DONE.** `value_explained_var` computed exactly from five SUM-reduced token-level sufficient statistics (`value_ev/*`), finalized in `aggregate_train_losses`; NaN/degenerate-guarded; identical across critic modes.
+- **I-5 — DONE.** `orbit/utils/logprob_compare.py` (stdlib-only comparison utility, shared with the future GPU/SGLang leg) + `tests/fast/test_opd_teacher_equivalence.py` pinning: `alias_ref` returns the ref list by identity with no forward run, `adapter_off` == adapter-free twin bitwise, `adapter_swap` == directly-built teacher module bitwise with exact restore — both through the real actor dispatch.
+- **I-6** *(optional, unblocks P1-INT4 and X2-PPO)* — Extend one-trunk aliasing to quantized trunk buffers, or a buffer-sharing equivalent. Not started.
+- **I-7** *(new, from constraint 7)* — Investigate dropping the pause/flush/continue lifecycle for the double-buffer path; the pause-time metric quantifies the prize first.
 
 ## Methodology standards
 
@@ -154,7 +158,7 @@ One end-to-end run: Kimi-K2.6 or DSV4 at INT4/FP4 on a single 8×B200 node, asyn
 
 ## Phasing
 
-- **Phase 0** — I-0 through I-5; smoke-qualify every launcher named above at 0.5B scale.
+- **Phase 0** — I-0 through I-5 (code work DONE 2026-08-17); remaining: smoke-qualify every launcher named above at 0.5B scale (GPU runs).
 - **Phase 1** — A1, A2, M1 (cheap, headline systems figures; no long training).
 - **Phase 2** — A3, A4; P2 pre-check then P2; P3 seed extension.
 - **Phase 3** — X1, M2, M3.
