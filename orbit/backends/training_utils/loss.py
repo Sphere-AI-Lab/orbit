@@ -10,6 +10,7 @@ from torch.utils.checkpoint import checkpoint
 from orbit.utils.distributed_utils import distributed_masked_whiten
 from orbit.utils.misc import load_function
 from orbit.utils.ppo_utils import (
+    VALUE_EV_STAT_KEYS,
     _gather_true_on_policy_full_logits,
     _safe_clamp_log_ratio,
     _safe_exp_neg_ppo_kl,
@@ -1036,9 +1037,45 @@ def value_loss_function(
     if values.numel() == 0:
         loss += 0 * values.sum()
 
+    # Sufficient statistics for the critic explained-variance metric,
+    # EV = 1 - Var(returns - values) / Var(returns) over trainable tokens.
+    # Averaging per-micro-batch EV would be biased when micro-batches differ in
+    # token count or mean, so emit masked token-level sums instead: the metric
+    # pipeline (aggregate_train_losses) SUM-reduces every non-extrema metric
+    # across micro-batches and DP/CP ranks and divides by one count shared by
+    # all keys, which cancels in the ratios taken by compute_value_explained_var
+    # at aggregation time. The token-sum reducer below is the CP-aware masked
+    # sum (`calculate_per_token_loss=True` selects sum-of-token semantics)
+    # regardless of the reduction mode used for the loss itself.
+    sum_of_token = get_sum_of_sample_mean(
+        batch["total_lengths"],
+        batch["response_lengths"],
+        batch["loss_masks"],
+        calculate_per_token_loss=True,
+        qkv_format=args.qkv_format,
+        max_seq_lens=batch.get("max_seq_lens", None),
+    )
+    detached_returns = returns.detach().float()
+    detached_err = detached_returns - values.detach().float()
+
+    ev_stats = dict(
+        zip(
+            VALUE_EV_STAT_KEYS,
+            (
+                sum_of_token(torch.ones_like(detached_returns)),
+                sum_of_token(detached_returns),
+                sum_of_token(detached_returns**2),
+                sum_of_token(detached_err),
+                sum_of_token(detached_err**2),
+            ),
+            strict=True,
+        )
+    )
+
     reported_loss = {
         "value_loss": loss.clone().detach(),
         "value_clipfrac": values_clipfrac.clone().detach(),
+        **ev_stats,
     }
 
     return loss, reported_loss
