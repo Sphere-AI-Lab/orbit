@@ -141,7 +141,17 @@ def test_ppo_applies_critic_defaults():
 
 
 def test_ppo_rejects_train_offload():
-    args = Namespace(use_critic=True, offload_train=True)
+    # critic_mode defaults to "full", so _validate_ppo_args takes the
+    # separate-critic branch and compares actor/critic worker counts before it
+    # reaches the --offload-train rejection under test. Equal counts get us there.
+    args = Namespace(
+        use_critic=True,
+        offload_train=True,
+        actor_num_nodes=1,
+        actor_num_gpus_per_node=1,
+        critic_num_nodes=1,
+        critic_num_gpus_per_node=1,
+    )
 
     with pytest.raises(ValueError, match="incompatible with --offload-train"):
         _validate_ppo_args(args)

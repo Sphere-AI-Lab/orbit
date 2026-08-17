@@ -44,12 +44,18 @@ def init_wandb_primary(args):
 
     # Prepare wandb init parameters
     # add random 6 length string with characters
+    # `--wandb-run-name` separates the run's identity from its group. Without it
+    # the name IS the group, so a sweep that groups by method -- every FullFT
+    # arm in one group, every LoRA arm in another -- lands N runs under one
+    # name, distinguishable only by opening each one's config. The default is
+    # unchanged: no flag, name falls back to the group.
+    explicit_name = getattr(args, "wandb_run_name", None)
     if args.wandb_random_suffix:
         group = args.wandb_group + "_" + wandb.util.generate_id()
-        run_name = f"{group}-RANK_{args.rank}"
+        run_name = f"{explicit_name or group}-RANK_{args.rank}"
     else:
         group = args.wandb_group
-        run_name = args.wandb_group
+        run_name = explicit_name or args.wandb_group
 
     # Prepare wandb init parameters
     init_kwargs = {

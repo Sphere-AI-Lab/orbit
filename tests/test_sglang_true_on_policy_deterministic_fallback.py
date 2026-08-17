@@ -39,9 +39,15 @@ def _import_validate_args(monkeypatch):
 def _args(**overrides):
     values = dict(
         rollout_num_gpus_per_engine=1,
+        # sglang v0.5.14+ ServerArgs fields are dp_size/pp_size/ep_size; the
+        # *_parallel_size spellings are CLI aliases the parser mirrors onto these
+        # names. validate_args is called here directly on a namespace, so it
+        # never sees that mirror and the mirrored names must be supplied.
         sglang_data_parallel_size=1,
         sglang_pipeline_parallel_size=1,
         sglang_expert_parallel_size=1,
+        sglang_dp_size=1,
+        sglang_ep_size=1,
         sglang_enable_dp_attention=False,
         sglang_router_policy=None,
         true_on_policy_mode=True,

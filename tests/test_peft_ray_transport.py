@@ -32,7 +32,7 @@ class _FakeEngine:
     def __init__(self):
         self.unload_lora_adapter = _RemoteMethod({"unloaded": True})
         self.load_lora_adapter_from_ray_tensors = _RemoteMethod({"loaded": True})
-        self.update_oft_adapter_from_ray_tensor = _RemoteMethod({"loaded_oft": True})
+        self.update_adapter_from_ray_tensor = _RemoteMethod({"loaded_shaped": True})
         self.update_weight_version = _RemoteMethod({"versioned": True})
 
 
@@ -91,14 +91,21 @@ def test_ray_backend_sends_lora_adapter_and_weight_version(monkeypatch):
         weight_version=7,
     )
 
-    assert result.results == [{"loaded": True}, {"versioned": True}]
-    assert len(engine.load_lora_adapter_from_ray_tensors.calls) == 1
-    load_call = engine.load_lora_adapter_from_ray_tensors.calls[0]
-    assert load_call["lora_name"] == "orbit_lora"
-    assert load_call["config_dict"] == {"peft_type": "LORA"}
+    # LoRA carries a payload_shaper too, so it takes the shaped path -- not the
+    # per-tensor load_lora_adapter_from_ray_tensors one.
+    assert result.results == [{"loaded_shaped": True}, {"versioned": True}]
+    assert engine.load_lora_adapter_from_ray_tensors.calls == []
+    assert len(engine.update_adapter_from_ray_tensor.calls) == 1
+    load_call = engine.update_adapter_from_ray_tensor.calls[0]
+    # The tag must follow the method. sglang's normalize_lora_weight_payload
+    # asserts payload[0] == "flattened_lora_payload"; sending the OFT tag here
+    # (as this path did when it was hardcoded) fails the adapter load outright.
+    assert load_call["payload_tag"] == "flattened_lora_payload"
+    assert load_call["load_format"] == "lora_adapter"
+    assert load_call["adapter_config"] == {"peft_type": "LORA"}
+    assert load_call["adapter_name"] == "orbit_lora"
+    assert load_call["flat_tensor"].device.type == "cpu"
     assert engine.update_weight_version.calls == [{"weight_version": "7"}]
-    tensor = load_call["tensors"]["model.layers.0.self_attn.q_proj.lora_A.weight"]
-    assert tensor.device.type == "cpu"
 
 
 @dataclass
@@ -140,9 +147,10 @@ def test_ray_backend_sends_oft_adapter_and_weight_version(monkeypatch):
         weight_version=11,
     )
 
-    assert result.results == [{"loaded_oft": True}, {"versioned": True}]
-    assert len(engine.update_oft_adapter_from_ray_tensor.calls) == 1
-    load_call = engine.update_oft_adapter_from_ray_tensor.calls[0]
+    assert result.results == [{"loaded_shaped": True}, {"versioned": True}]
+    assert len(engine.update_adapter_from_ray_tensor.calls) == 1
+    load_call = engine.update_adapter_from_ray_tensor.calls[0]
+    assert load_call["payload_tag"] == "flattened_oft_payload"
     assert load_call["flat_tensor"].device.type == "cpu"
     assert load_call["metadata"] == {"entries": ["m0"]}
     assert load_call["entries"] == [("m0", 0)]

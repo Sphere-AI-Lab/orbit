@@ -1,0 +1,4 @@
+{"style": "completion", "dataset": "gsm8k", "problems": 128, "samples": 1024, "reward": 0.03125, "solvable_groups": 0.0, "any_correct_groups": 0.03125, "boxed": 0.4296875, "truncated": 0.046875, "mean_response_chars": 937.9296875}
+{"style": "chat", "dataset": "gsm8k", "problems": 128, "samples": 1024, "reward": 0.0, "solvable_groups": 0.0, "any_correct_groups": 0.0, "boxed": 0.1171875, "truncated": 0.109375, "mean_response_chars": 964.140625}
+{"style": "completion", "dataset": "math", "problems": 128, "samples": 1024, "reward": 0.021484375, "solvable_groups": 0.125, "any_correct_groups": 0.125, "boxed": 0.4375, "truncated": 0.1142578125, "mean_response_chars": 1097.099609375}
+{"style": "chat", "dataset": "math", "problems": 128, "samples": 1024, "reward": 0.0, "solvable_groups": 0.0, "any_correct_groups": 0.0, "boxed": 0.1025390625, "truncated": 0.1025390625, "mean_response_chars": 898.0126953125}

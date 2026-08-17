@@ -1,0 +1,3 @@
+[2026-07-30 15:16:12] train.py:39 - eval/test_nll rollout_id=0 step=0 phase=before_train nll=1.209810 sample_mean=1.478078 tokens=308760 samples=1000
+[2026-07-30 15:18:08] train.py:39 - eval/test_nll rollout_id=0 step=0 phase=after_train nll=1.199709 sample_mean=1.455645 tokens=308760 samples=1000
+[2026-07-30 15:19:26] train.py:39 - eval/test_nll rollout_id=1 step=1 phase=after_train nll=1.194836 sample_mean=1.421378 tokens=308760 samples=1000

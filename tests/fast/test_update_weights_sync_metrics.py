@@ -74,7 +74,7 @@ class _FakeEngine:
         self.unload_lora_adapter = _RemoteMethod(ok, call_log, "unload_lora_adapter")
         self.load_lora_adapter_from_tensors = _RemoteMethod(ok, call_log, "load_lora_adapter_from_tensors")
         self.load_lora_adapter_from_ray_tensors = _RemoteMethod(ok, call_log, "load_lora_adapter_from_ray_tensors")
-        self.update_oft_adapter_from_ray_tensor = _RemoteMethod(ok, call_log, "update_oft_adapter_from_ray_tensor")
+        self.update_adapter_from_ray_tensor = _RemoteMethod(ok, call_log, "update_adapter_from_ray_tensor")
 
 
 class _FakeLock:

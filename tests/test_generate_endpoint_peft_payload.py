@@ -21,7 +21,12 @@ def test_compute_request_payload_attaches_lora_adapter():
 
     assert halt_status is None
     assert payload is not None
-    assert payload["lora_path"] == "orbit_lora"
+    # LoRA names NO adapter on the wire. It routes through the fork's
+    # single-active peft/lora, which applies the index-0 adapter
+    # unconditionally; sending an adapter key 400s in upstream's
+    # _validate_and_resolve_lora when enable_lora is unset.
+    assert "lora_path" not in payload
+    assert "adapter_path" not in payload
     assert "oft_path" not in payload
 
 
@@ -34,7 +39,10 @@ def test_compute_request_payload_attaches_oft_adapter():
 
     assert halt_status is None
     assert payload is not None
-    assert payload["oft_path"] == "orbit_oft"
+    # OFT runs multi-slot (base slot 0 + adapter slot 1) and selects its trained
+    # slot via adapter_path -- the v0.5.16 rename of oft_path.
+    assert payload["adapter_path"] == "orbit_oft"
+    assert "oft_path" not in payload
     assert "lora_path" not in payload
 
 
