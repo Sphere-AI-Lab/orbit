@@ -543,3 +543,56 @@ class TestOftBlockCeilingUnderRl:
         assert orbit_requires["megatron-bridge"]["git"].endswith(
             f"rev={bridge_sha}"
         )
+
+    def test_flashinfer_override_matches_what_sglang_declares(self):
+        """orbit forces flashinfer through [tool.uv] override-dependencies, and
+        a uv override silently outvotes the requirement a package declares for
+        itself. That is exactly how sglang v0.5.16 -- which declares
+        flashinfer_python[cu13]==0.6.14, aligned with its Dockerfile jit-cache
+        -- ran against 0.6.3 here: the override predated sglang's bump and
+        nothing shouted. flashinfer is the attention backend, so a silent
+        downgrade is a runtime difference, not a packaging nicety.
+
+        Guard: the override must say exactly what the installed sglang
+        declares, and the environment must actually contain that version. The
+        next sglang flashinfer bump then fails here, loudly, instead of being
+        overridden back down."""
+        import importlib.metadata as md
+        import re
+        import tomllib
+        from pathlib import Path
+
+        import pytest
+
+        repo = Path(__file__).resolve().parents[3]
+        config = tomllib.loads((repo / "pyproject.toml").read_text())
+        overrides = [
+            o
+            for o in config["tool"]["uv"]["override-dependencies"]
+            if re.match(r"flashinfer[-_]python\s*==", o)
+        ]
+        assert overrides, (
+            "the flashinfer override vanished from pyproject.toml; if dropping "
+            "it is deliberate (letting sglang's own pin resolve), delete this "
+            "test with it"
+        )
+        override_version = overrides[0].split("==", 1)[1].strip()
+
+        try:
+            declared = [
+                r
+                for r in (md.requires("sglang") or [])
+                if re.match(r"flashinfer[-_]python\b", r)
+            ]
+        except md.PackageNotFoundError:
+            pytest.skip("sglang is not installed in this environment")
+        assert declared, "the installed sglang no longer declares flashinfer"
+        wanted = re.search(r"==\s*([0-9][0-9a-zA-Z.\-]*)", declared[0])
+        assert wanted, f"unparseable flashinfer requirement: {declared[0]!r}"
+        assert override_version == wanted.group(1), (
+            f"orbit overrides flashinfer=={override_version} but the installed "
+            f"sglang declares {declared[0]!r}; the override wins silently, so "
+            f"align the override (and re-lock) instead of running sglang "
+            f"against the wrong attention backend"
+        )
+        assert md.version("flashinfer-python") == override_version
