@@ -42,24 +42,43 @@ Llama-3.1-8B's square attention shape (d_in = d_out = 4096, whose divisors are
 powers of two), the realized ratio is 0.750 at rank 1, 0.938 at rank 4, 0.984 at
 rank 16 and 1.000 at rank 512.
 
+All of the above is the count for ONE rotation, which is what legacy OFT
+(``--oft-type oft``) builds per module. Canonical OFT -- what every RL launcher
+in this tree actually runs -- builds one rotation per **output slice** of a fused
+module, so a module total is ``slices · d_in · (b−1) / 2``. See
+``OFT_ROTATION_SLICES`` for the evidence and for what counting it the other way
+cost; ``oft_param_count`` stays per-rotation, and
+``oft_param_count_for_modules`` applies the slice factor.
+
 **A single global block size cannot match LoRA across mixed shapes**, which is
-the constraint that shapes any matched-parameter OFT experiment. OFT's count is
-``d_in·(b−1)/2`` and does not depend on ``d_out`` at all, while LoRA's is
+the constraint that shapes any matched-parameter OFT experiment. A rotation's
+count is ``d_in·(b−1)/2`` and does not depend on ``d_out`` at all, while LoRA's is
 ``rank·(d_in + d_out)``. So the per-module ratio scales as
-``(b−1) / (2·rank·(1 + d_out/d_in))``, and one shared ``b`` therefore starves
-modules with large ``d_out/d_in`` while overfeeding the rest. On Llama-3.1-8B at
-``b = 64`` the realized per-module ratios are 0.787 (``linear_qkv``), 0.984
-(``linear_proj``), **0.246** (``linear_fc1``, whose fused gate+up makes
-``d_out = 7·d_in``) and **1.531** (``linear_fc2``). Searching every divisor of
-4096 and 14336 cannot fix it: the best achievable all-modules ratio converges to
-0.764 for rank >= 4. Megatron's ``--oft-block-size`` is one integer, so per-module
-block sizes are not expressible through the CLI either.
+``slices · (b−1) / (2·rank·(1 + d_out/d_in))``, and one shared ``b`` therefore
+starves modules with large ``d_out/d_in`` while overfeeding the rest. On
+Llama-3.1-8B at ``b = 64`` against rank 16 the realized per-module ratios are
+**2.362** (``linear_qkv``, three rotations over a shared input), 0.984
+(``linear_proj``), **0.492** (``linear_fc1``, two rotations but ``d_out = 7·d_in``)
+and **1.531** (``linear_fc2``). The two fused modules move in OPPOSITE directions,
+so slice-awareness widens the spread rather than closing it. Searching every
+divisor of 4096 and 14336 cannot fix it: the best achievable all-modules ratio is
+0.996 at rank 4 but drifts to 1.049 at rank 16 and 1.065 by rank 256. Megatron's
+``--oft-block-size`` is one integer, so per-module block sizes are not
+expressible through the CLI either.
 
 The way out is to invert the match: fix the block size and solve for the **LoRA
 rank** with the same parameter count (``oft_matched_lora_rank``). Rank is a much
 finer lattice than the divisors of ``d_in``, so this lands within a few percent
-for ``b >= 32`` -- 0.988 to 1.004 on all-modules -- and it is what lets an OFT arm
+for ``b >= 32`` -- 0.962 to 1.014 on all-modules -- and it is what lets an OFT arm
 and a LoRA arm be compared at genuinely equal capacity.
+
+What this does NOT rescue is matching two OFT *placements* to each other.
+Attention-only carries four rotations (three on ``linear_qkv``) against
+MLP-only's three, and ``linear_fc1`` snaps to a divisor of 4096 while
+``linear_fc2`` snaps to one of 14336, so no single block brings them together:
+the best available lands ~26% high at every attention block size. A placement
+comparison has to quote ``oft_block_size_matching_params``' realized ratio rather
+than describe the pair as matched.
 """
 
 from __future__ import annotations
@@ -187,6 +206,41 @@ def match_report(rank: int, d_in: int, d_out: int) -> dict:
 ATTENTION_MODULES = ("linear_qkv", "linear_proj")
 MLP_MODULES = ("linear_fc1", "linear_fc2")
 
+# How many INDEPENDENT rotations OFT builds on each fused module.
+#
+# `oft_param_count` above mirrors `oft_layers.py`'s `OFTRotationModule`, which is
+# LEGACY OFT (`--oft-type oft`): one shared R per module. Every RL launcher in
+# this tree passes `--oft-type canonical_oft` instead -- and has since 46c8e0f6,
+# so the published E4 numbers are canonical too -- which builds one rotation per
+# OUTPUT SLICE. Megatron-Bridge's R is `(num_slices, num_blocks, block_size,
+# block_size)`, and `canonical_oft.py` says plainly that "one shared R across
+# gate/up halves is mathematically wrong". SGLang consumes it the same way: its
+# dense forward rotates once per slice and splits the result into `num_slices`
+# copies, each of width `d_in`.
+#
+# Counting one rotation per module understated E4's all-modules OFT arms by
+# 1.46x -- 208 blocks per layer against the 304 actually built. That number fed
+# `matched_ratio` and `oft_matched_lora_rank`, so an OFT/LoRA pair recorded as
+# parameter-matched was handing OFT ~46% more capacity than the LoRA arm it was
+# being compared against, in the direction that flatters OFT.
+#
+# Ledgers and reports written before this correction carry the old counts. The
+# arms themselves are unaffected -- only the number written down about them.
+#
+# Unfused names (HF's `q_proj`, `gate_proj`, ...) carry one rotation each, which
+# is what the default returns.
+OFT_ROTATION_SLICES = {
+    "linear_qkv": 3,  # q, k, v
+    "linear_fc1": 2,  # gate, up
+    "linear_proj": 1,
+    "linear_fc2": 1,
+}
+
+
+def oft_rotation_slices(module_name: str) -> int:
+    """Independent canonical-OFT rotations on `module_name` (1 if unfused)."""
+    return OFT_ROTATION_SLICES.get(module_name, 1)
+
 
 def megatron_module_shapes(
     hidden_size: int,
@@ -211,14 +265,22 @@ def megatron_module_shapes(
 
 
 def oft_param_count_for_modules(block_size: int, shapes: dict[str, tuple[int, int]]) -> int:
-    """Realized OFT parameters over a set of modules, after per-layer snapping.
+    """Realized canonical-OFT parameters over a set of modules.
 
-    Bridge snaps `block_size` to a divisor of each module's own `d_in`
-    independently, so a module whose `d_in` does not admit the requested block
-    gets a different one -- and the caller never hears about it. That snap is
-    applied here rather than assumed away.
+    Two things a plain `sum(oft_param_count(...))` gets wrong, both applied here
+    rather than assumed away:
+
+    * Bridge snaps `block_size` to a divisor of each module's own `d_in`
+      independently, so a module whose `d_in` does not admit the requested block
+      gets a different one -- and the caller never hears about it.
+    * A fused module carries one rotation per output slice, not one per module.
+      See `OFT_ROTATION_SLICES` for why, and for what counting it the other way
+      cost.
     """
-    return sum(oft_param_count(nearest_divisor(d_in, block_size), d_in) for d_in, _ in shapes.values())
+    return sum(
+        oft_rotation_slices(name) * oft_param_count(nearest_divisor(d_in, block_size), d_in)
+        for name, (d_in, _) in shapes.items()
+    )
 
 
 def lora_param_count_for_modules(rank: int, shapes: dict[str, tuple[int, int]]) -> int:

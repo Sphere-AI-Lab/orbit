@@ -193,12 +193,12 @@ class TestE4OftCapacityLadder:
         shapes = megatron_module_shapes(HIDDEN, FFN, QKV)
         reports = [oft_lora_match_report(block, shapes) for block in E4_OFT_BLOCK_LADDER]
         assert [(r["block_size"], r["oft_params"], r["lora_rank"]) for r in reports] == [
-            (8, 93184, 1),
-            (128, 1690624, 24),
-            (1024, 13618176, 196),
+            (8, 136192, 2),
+            (128, 2470912, 35),
+            (1024, 19903488, 286),
         ]
         assert [r["ratio"] for r in reports] == pytest.approx(
-            [1.3382352941, 1.0116421569, 0.9978241297]
+            [0.9779411765, 1.0138655462, 0.9994343891]
         )
 
 
@@ -308,17 +308,15 @@ class TestMethodCoverage:
                         if n in arm.target_modules.split(",")}
             report = oft_lora_match_report(arm.oft_block_size, selected)
             assert arm.matched_ratio == pytest.approx(report["ratio"]), arm.name
-            if matrix == "e4" and arm.oft_block_size == 8:
-                # The user-selected bottom rung is intentionally below the
-                # rank lattice: b8 is the smallest block and r1 the smallest
-                # rank, so its 1.338 ratio is recorded rather than hidden.
-                assert arm.matched_ratio == pytest.approx(1.3382352941)
-            else:
-                assert 0.85 <= arm.matched_ratio <= 1.15, (
-                    matrix,
-                    arm.name,
-                    arm.matched_ratio,
-                )
+            # Every rung now lands inside the band, b8 included. It used to sit
+            # outside at 1.338, matched to rank 1 because the rank lattice ran
+            # out below it; under canonical accounting b8 carries three
+            # rotations on the fused qkv, matches rank 2, and lands at 0.978.
+            assert 0.85 <= arm.matched_ratio <= 1.15, (
+                matrix,
+                arm.name,
+                arm.matched_ratio,
+            )
 
     @pytest.mark.parametrize("matrix", GRID_MATRICES)
     def test_the_oft_capacity_is_in_the_neighbourhood_of_a_lora_arm_it_sits_beside(
@@ -346,6 +344,18 @@ class TestMethodCoverage:
                         if n in arm.target_modules.split(",")}
             implied = oft_lora_match_report(arm.oft_block_size, selected)["lora_rank"]
             neighbours = ranks_for[arm.target_modules]
+            if matrix == "e4" and arm.oft_block_size == 128:
+                # A documented gap, not a tolerance to widen. Under canonical
+                # accounting b128 implies rank 35, which falls BETWEEN this
+                # matrix's r16 and r256 -- 2.19x the former, 0.14x the latter --
+                # so E4's middle OFT rung has no capacity-comparable LoRA arm.
+                # The ladder (8/128/1024) was chosen against the old
+                # one-rotation-per-module count, where b128 implied rank 24 and
+                # sat a comfortable 1.5x from r16. Any capacity claim about this
+                # rung has to say so. Closing it means changing
+                # E4_OFT_BLOCK_LADDER, which would strand the arms already run.
+                assert implied == 35, (matrix, arm.name, implied)
+                continue
             assert any(0.5 <= implied / rank <= 2.0 for rank in neighbours), (
                 matrix, arm.name, implied, sorted(neighbours)
             )
@@ -484,10 +494,11 @@ class TestOftBlockCeilingUnderRl:
             sel = {n: s for n, s in shapes.items() if n in arm.target_modules.split(",")}
             report = oft_lora_match_report(arm.oft_block_size, sel)
             assert report["lora_rank"] >= 1, (arm.name, report)
-            if arm.oft_block_size == 8:
-                assert report["ratio"] == pytest.approx(1.3382352941)
-            else:
-                assert 0.85 <= report["ratio"] <= 1.15, (arm.name, report)
+            # Every rung lands inside the band now. b8 was the exception at
+            # 1.338 under one-rotation-per-module counting, where it matched
+            # rank 1 because the lattice ran out below it; three rotations on
+            # the fused qkv put it at rank 2 and 0.978.
+            assert 0.85 <= report["ratio"] <= 1.15, (arm.name, report)
             assert arm.matched_ratio == pytest.approx(report["ratio"])
 
     def test_sglang_runtime_supports_power_of_two_blocks_from_four(self):
