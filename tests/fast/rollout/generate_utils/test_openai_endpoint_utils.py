@@ -1,96 +1,25 @@
-"""Tests for compute_samples_from_openai_records and TITO multi-turn merge workflow.
+"""Tests for OpenAIEndpointTracer (session-server client side).
 
-Validates the contract between session records, sample construction,
-and merge_samples — the core of the TITO (Token In Token Out) pipeline.
+The sample-assembly and TITO multi-turn merge tests live in
+tests/fast/rollout/session/test_samples.py (assembly) and
+test_samples_codec.py (wire codec), next to the functions.
+The collect_samples tests here lock the client's HTTP behavior deltas vs the
+old collect_records path: single POST with no retries, non-2xx raises with the
+body text, timeout raises (instead of silently ABORTing), and the session
+DELETE is attempted on every path.
 """
 
+import asyncio
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 import torch
 
-from miles.rollout.generate_utils.openai_endpoint_utils import (
-    OpenAIEndpointTracer,
-    compute_samples_from_openai_records,
-)
-from miles.rollout.generate_utils.sample_utils import merge_samples
-from miles.rollout.session.types import SessionRecord
+import miles.utils.http_utils as http_utils
+from miles.rollout.generate_utils.openai_endpoint_utils import OpenAIEndpointTracer
+from miles.rollout.session.samples.codec import COMPUTED_FIELDS, COMPUTED_FIELDS_V2, encode_samples
+from miles.utils.http_utils import post_bytes_no_retry
 from miles.utils.types import Sample
-
-# ── helpers ──────────────────────────────────────────────────────────
-
-_ARGS = SimpleNamespace(save_debug_trajectory_data=None)
-_ARGS_RECORDING = SimpleNamespace(save_debug_trajectory_data="/unused/{rollout_id}.jsonl")
-
-
-def _mock_tokenizer():
-    tok = MagicMock()
-    tok.decode = lambda ids: "".join(f"[{i}]" for i in ids)
-    return tok
-
-
-def _make_input_sample(**overrides):
-    defaults = dict(
-        group_index=0,
-        index=0,
-        prompt="test prompt",
-        tokens=[],
-        response="",
-        response_length=0,
-        status=Sample.Status.PENDING,
-        label="test",
-        reward=1.0,
-    )
-    defaults.update(overrides)
-    return Sample(**defaults)
-
-
-def _make_record(
-    prompt_token_ids: list[int],
-    output_token_ids: list[int],
-    output_log_probs: list[float] | None = None,
-    finish_reason: str = "stop",
-    cached_tokens: int | None = None,
-    prompt_tokens: int | None = None,
-) -> SessionRecord:
-    """Build a minimal session record mimicking SGLang's response format.
-
-    Token IDs and logprobs are stored in meta_info.output_token_logprobs
-    as (logprob, token_id) tuples, matching the real SGLang response.
-    """
-    if output_log_probs is None:
-        output_log_probs = [-0.1 * (i + 1) for i in range(len(output_token_ids))]
-
-    output_token_logprobs = [(lp, tid) for tid, lp in zip(output_token_ids, output_log_probs, strict=True)]
-    logprobs_content = [
-        {"logprob": lp, "token": f"t{tid}"} for tid, lp in zip(output_token_ids, output_log_probs, strict=True)
-    ]
-    meta_info = {
-        "output_token_logprobs": output_token_logprobs,
-        "completion_tokens": len(output_token_ids),
-    }
-    if cached_tokens is not None:
-        meta_info["cached_tokens"] = cached_tokens
-    if prompt_tokens is not None:
-        meta_info["prompt_tokens"] = prompt_tokens
-    return SessionRecord(
-        timestamp=0.0,
-        method="POST",
-        path="/v1/chat/completions",
-        status_code=200,
-        request={"messages": [{"role": "user", "content": "hello"}], "input_ids": prompt_token_ids},
-        response={
-            "choices": [
-                {
-                    "message": {"role": "assistant", "content": "response"},
-                    "finish_reason": finish_reason,
-                    "logprobs": {"content": logprobs_content},
-                    "meta_info": meta_info,
-                }
-            ]
-        },
-    )
 
 
 @pytest.mark.asyncio
@@ -135,7 +64,7 @@ async def test_create_without_instance_id_on_args(monkeypatch):
 @pytest.mark.asyncio
 async def test_create_distributes_sessions_across_port_range(monkeypatch):
     """With a multi-port range, sessions land on more than one instance, and every
-    request of a session (create, chat, GET, DELETE) hits the port chosen
+    request of a session (create, samples POST, DELETE) hits the port chosen
     at create time — the URL is the router."""
     calls: list[tuple[str, str]] = []
 
@@ -143,9 +72,14 @@ async def test_create_distributes_sessions_across_port_range(monkeypatch):
         calls.append((action, url))
         if action == "post" and url.endswith("/sessions"):
             return {"session_id": f"session-{len(calls)}"}
-        return {"session_id": url.rsplit("/", 1)[1], "records": [], "metadata": {}}
+        return {}
+
+    async def fake_post_bytes(url, payload, *, timeout):
+        calls.append(("post_bytes", url))
+        return encode_samples([], {}, "no_records")
 
     monkeypatch.setattr("miles.rollout.generate_utils.openai_endpoint_utils.post", fake_post)
+    monkeypatch.setattr("miles.rollout.generate_utils.openai_endpoint_utils.post_bytes_no_retry", fake_post_bytes)
 
     ports = [12345, 12346, 12347, 12348]
     args = SimpleNamespace(session_server_ip="127.0.0.1", session_server_ports=ports)
@@ -158,11 +92,11 @@ async def test_create_distributes_sessions_across_port_range(monkeypatch):
         assert port in ports
         chosen_ports.add(port)
 
-        await tracer.collect_records()
+        await tracer.collect_samples(Sample(), max_seq_len=None)
         prefix = f"http://127.0.0.1:{port}"
         assert [url for _, url in calls] == [
             f"{prefix}/sessions",
-            tracer.base_url,
+            f"{tracer.base_url}/samples",
             tracer.base_url,
         ]
         assert tracer.base_url.startswith(f"{prefix}/sessions/")
@@ -858,3 +792,194 @@ class TestPrefixCacheInfo:
 
         assert samples[0].prefix_cache_info.cached_tokens == 0
         assert samples[0].prefix_cache_info.total_prompt_tokens == 0
+
+# ── collect_samples client behavior ──
+
+
+def _tracer() -> OpenAIEndpointTracer:
+    return OpenAIEndpointTracer(router_url="http://127.0.0.1:12345", session_id="sid-1")
+
+
+def _computed_reply_payload() -> bytes:
+    sample = Sample()
+    sample.tokens = [1, 2, 10]
+    sample.response = "r"
+    sample.response_length = 1
+    sample.loss_mask = [1]
+    sample.rollout_log_probs = [-0.5]
+    sample.status = Sample.Status.COMPLETED
+    return encode_samples([sample], {"max_trim_tokens": 1}, None)
+
+
+class _CollectCalls:
+    """Patches the two HTTP primitives collect_samples uses and records order."""
+
+    def __init__(self, monkeypatch, *, post_outcome, delete_outcome=None):
+        self.calls: list[str] = []
+
+        async def fake_post_bytes(url, payload, *, timeout):
+            self.calls.append(f"POST {url}")
+            assert payload == {"max_seq_len": 7}
+            if isinstance(post_outcome, Exception):
+                raise post_outcome
+            return post_outcome
+
+        async def fake_post(url, payload, action="post"):
+            assert action == "delete"
+            self.calls.append(f"DELETE {url}")
+            if isinstance(delete_outcome, Exception):
+                raise delete_outcome
+            return {}
+
+        monkeypatch.setattr("miles.rollout.generate_utils.openai_endpoint_utils.post_bytes_no_retry", fake_post_bytes)
+        monkeypatch.setattr("miles.rollout.generate_utils.openai_endpoint_utils.post", fake_post)
+
+
+@pytest.mark.asyncio
+async def test_collect_samples_single_post_then_delete(monkeypatch):
+    calls = _CollectCalls(monkeypatch, post_outcome=_computed_reply_payload())
+    result = await _tracer().collect_samples(Sample(), max_seq_len=7)
+
+    assert calls.calls == [
+        "POST http://127.0.0.1:12345/sessions/sid-1/samples",
+        "DELETE http://127.0.0.1:12345/sessions/sid-1",
+    ]
+    (sample,) = result.samples
+    assert sample.tokens == [1, 2, 10] and sample.status == Sample.Status.COMPLETED
+    assert result.session_metadata == {"max_trim_tokens": 1}
+
+
+@pytest.mark.asyncio
+async def test_collect_samples_non_2xx_raises_with_body_and_still_deletes(monkeypatch):
+    calls = _CollectCalls(monkeypatch, post_outcome=RuntimeError("422: trim_count 2 exceeds allowed=1"))
+    with pytest.raises(RuntimeError, match="trim_count 2 exceeds allowed=1"):
+        await _tracer().collect_samples(Sample(), max_seq_len=7)
+    assert calls.calls[-1] == "DELETE http://127.0.0.1:12345/sessions/sid-1"
+
+
+@pytest.mark.asyncio
+async def test_collect_samples_timeout_raises_and_still_deletes(monkeypatch):
+    # The old collect_records swallowed the timeout and returned empty records
+    # (silently ABORTing the sample); the samples path must raise it.
+    calls = _CollectCalls(monkeypatch, post_outcome=asyncio.TimeoutError())
+    with pytest.raises(asyncio.TimeoutError):
+        await _tracer().collect_samples(Sample(), max_seq_len=7)
+    assert calls.calls[-1] == "DELETE http://127.0.0.1:12345/sessions/sid-1"
+
+
+@pytest.mark.asyncio
+async def test_collect_samples_delete_failure_is_tolerated(monkeypatch):
+    _CollectCalls(monkeypatch, post_outcome=_computed_reply_payload(), delete_outcome=RuntimeError("delete boom"))
+    result = await _tracer().collect_samples(Sample(), max_seq_len=7)
+    assert len(result.samples) == 1
+
+
+# ── post_bytes_no_retry primitive ──
+
+
+class _FakeResponse:
+    def __init__(self, status_code: int, content: bytes = b"", text: str = ""):
+        self.status_code = status_code
+        self.content = content
+        self.text = text
+
+
+class _FakeClient:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.post_count = 0
+
+    async def post(self, url, json=None):
+        self.post_count += 1
+        outcome = self.responses.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+@pytest.mark.asyncio
+async def test_post_bytes_no_retry_returns_raw_bytes(monkeypatch):
+    client = _FakeClient([_FakeResponse(200, content=b"\x00\x01binary")])
+    monkeypatch.setattr(http_utils, "_http_client", client)
+    assert await post_bytes_no_retry("http://x/samples", {}, timeout=5) == b"\x00\x01binary"
+    assert client.post_count == 1
+
+
+@pytest.mark.asyncio
+async def test_post_bytes_no_retry_does_not_retry_and_carries_body(monkeypatch):
+    # Two queued outcomes; a retrying client would consume both. It must not.
+    client = _FakeClient([_FakeResponse(422, text="cursor 3 != len(accumulated_token_ids) 4"), RuntimeError("late")])
+    monkeypatch.setattr(http_utils, "_http_client", client)
+    with pytest.raises(RuntimeError, match="422.*cursor 3"):
+        await post_bytes_no_retry("http://x/samples", {}, timeout=5)
+    assert client.post_count == 1
+
+
+@pytest.mark.asyncio
+async def test_post_bytes_no_retry_transport_error_propagates_once(monkeypatch):
+    client = _FakeClient([ConnectionError("boom"), RuntimeError("late")])
+    monkeypatch.setattr(http_utils, "_http_client", client)
+    with pytest.raises(ConnectionError, match="boom"):
+        await post_bytes_no_retry("http://x/samples", {}, timeout=5)
+    assert client.post_count == 1
+
+
+# ── v2 wire (--use-session-server v2): metadata channel + extended fields ──
+
+
+@pytest.mark.asyncio
+async def test_collect_samples_v2_payload_carries_metadata_and_decodes_extras(monkeypatch):
+    """v2 pin: the collect body gains the "metadata" key only when the caller
+    passes agent metadata, and the v2 field tuple overlays reward + merged
+    metadata; the v1 pin above (`payload == {"max_seq_len": 7}`) stays."""
+    from miles.rollout.session.samples.codec import COMPUTED_FIELDS_V2
+
+    sample = Sample()
+    sample.tokens = [1, 2, 10]
+    sample.response = "r"
+    sample.response_length = 1
+    sample.loss_mask = [1]
+    sample.rollout_log_probs = [-0.5]
+    sample.status = Sample.Status.COMPLETED
+    sample.reward = 0.75
+    sample.metadata = {"leaf": {"node_id": 1}}
+    payload = encode_samples([sample], {"max_trim_tokens": 1}, None, fields=COMPUTED_FIELDS_V2)
+
+    seen = []
+
+    async def fake_post_bytes(url, body, *, timeout):
+        seen.append(body)
+        return payload
+
+    async def fake_post(url, body, action="post"):
+        assert action == "delete"
+        return {}
+
+    monkeypatch.setattr("miles.rollout.generate_utils.openai_endpoint_utils.post_bytes_no_retry", fake_post_bytes)
+    monkeypatch.setattr("miles.rollout.generate_utils.openai_endpoint_utils.post", fake_post)
+
+    tracer = OpenAIEndpointTracer(
+        router_url="http://127.0.0.1:12345", session_id="sid-1", samples_wire_fields=COMPUTED_FIELDS_V2
+    )
+    input_sample = Sample()
+    input_sample.metadata = {"env": "keep-me"}
+    result = await tracer.collect_samples(input_sample, max_seq_len=7, agent_metadata={"reward": 0.75})
+
+    assert seen == [{"max_seq_len": 7, "metadata": {"reward": 0.75}}]
+    (decoded,) = result.samples
+    assert decoded.reward == 0.75
+    assert decoded.metadata == {"env": "keep-me", "leaf": {"node_id": 1}}
+
+
+@pytest.mark.asyncio
+async def test_create_selects_wire_fields_by_session_server_version(monkeypatch):
+    async def fake_post(url: str, payload: dict, action: str = "post"):
+        return {"session_id": "sid-x"}
+
+    monkeypatch.setattr("miles.rollout.generate_utils.openai_endpoint_utils.post", fake_post)
+
+    def args(version):
+        return SimpleNamespace(session_server_ip="127.0.0.1", session_server_ports=[7000], use_session_server=version)
+
+    assert (await OpenAIEndpointTracer.create(args(True))).samples_wire_fields == COMPUTED_FIELDS
+    assert (await OpenAIEndpointTracer.create(args("v2"))).samples_wire_fields == COMPUTED_FIELDS_V2

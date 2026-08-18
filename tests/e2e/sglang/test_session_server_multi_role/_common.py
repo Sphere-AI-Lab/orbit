@@ -1,19 +1,22 @@
 """Shared types and runner for multi-role session-server TITO e2e tests.
 
 Each test file in this directory owns a single ``ModelConfig`` and drives it
-through ``run_one(cfg)``.  The runner is a thin wrapper around
-``miles.utils.test_utils.session_verify_runner.run_session_verify`` with the
-4-GPU H200 ``num_gpus`` override applied centrally.
+through ``run_both_versions(cfg)``. The runner applies the model-specific
+GPU topology centrally.
 """
 
 import argparse
 from dataclasses import dataclass
+from typing import Literal
 
 from miles.utils.test_utils.session_verify_runner import (
     ASSISTANT_TEXT_MISMATCH_RATIO_THRESHOLD,
     SESSION_VERIFY_INVARIANT_ARGS,
     run_session_verify,
 )
+
+SessionServerVersion = Literal["v1", "v2"]
+_SESSION_SERVER_VERSIONS: tuple[SessionServerVersion, ...] = ("v1", "v2")
 
 
 @dataclass(frozen=True)
@@ -22,12 +25,15 @@ class ModelConfig:
     reasoning_parser: str
     tool_call_parser: str | None
     tito_model: str
-    allowed_append_roles: tuple[str, ...]
     num_gpus: int = 4
     tp_size: int = 1
+    context_length: int | None = None
+    rollout_max_response_len: int = SESSION_VERIFY_INVARIANT_ARGS["rollout_max_response_len"]
+    cuda_graph_backend_prefill: str | None = None
     # sglang expert-parallel size.  MoE archs like DeepSeek V4 hit a fused-moe
     # shape assert at ep=1; mirror the family's serving recipe (usually =tp).
     ep_size: int = 1
+    enable_spec: bool = False
     cycles: int = 3
     n_samples_per_prompt: int = 4
     # Soft-threshold override for assistant_text mismatch ratio.  Default
@@ -42,13 +48,26 @@ class ModelConfig:
     tool_call_failure_mode: str = "rollback"
 
 
-def run_one(cfg: ModelConfig) -> None:
+def run_one(
+    cfg: ModelConfig,
+    *,
+    session_server_version: SessionServerVersion = "v2",
+    rollout_batch_size: int = SESSION_VERIFY_INVARIANT_ARGS["rollout_batch_size"],
+) -> None:
     invariants = dict(SESSION_VERIFY_INVARIANT_ARGS)
-    invariants["sglang_expert_parallel_size"] = cfg.ep_size
+    invariants["use_session_server"] = session_server_version
+    invariants["rollout_batch_size"] = rollout_batch_size
+    # This harness produces one rollout batch, so its train-side batch divisor
+    # must track the actual sample count when large-model lanes reduce samples.
+    invariants["global_batch_size"] = invariants["rollout_batch_size"] * cfg.n_samples_per_prompt
+    invariants["rollout_max_response_len"] = cfg.rollout_max_response_len
+    invariants["sglang_cuda_graph_backend_prefill"] = cfg.cuda_graph_backend_prefill
+    invariants["sglang_ep_size"] = cfg.ep_size
+    invariants["sglang_context_length"] = cfg.context_length
+    invariants["enable_spec"] = cfg.enable_spec
     args = argparse.Namespace(
         hf_checkpoint=cfg.model_name,
         tito_model=cfg.tito_model,
-        tito_allowed_append_roles=list(cfg.allowed_append_roles),
         sglang_reasoning_parser=cfg.reasoning_parser,
         sglang_tool_call_parser=cfg.tool_call_parser,
         rollout_num_gpus_per_engine=cfg.tp_size,
@@ -61,3 +80,9 @@ def run_one(cfg: ModelConfig) -> None:
         **invariants,
     )
     run_session_verify(args=args)
+
+
+def run_both_versions(cfg: ModelConfig) -> None:
+    rollout_batch_size = SESSION_VERIFY_INVARIANT_ARGS["rollout_batch_size"] // len(_SESSION_SERVER_VERSIONS)
+    for version in _SESSION_SERVER_VERSIONS:
+        run_one(cfg, session_server_version=version, rollout_batch_size=rollout_batch_size)

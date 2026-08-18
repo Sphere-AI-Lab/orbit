@@ -1,10 +1,20 @@
 import os
 
-from scripts.run_deepseek_v4 import ScriptArgs, _prepare_download, _prepare_single, _prepare_spmd, _train
-from tests.ci.ci_register import register_cuda_ci
+if os.getenv("MILES_HARDWARE_PLATFORM") == "rocm":
+    from scripts.amd.run_deepseek_v4 import ScriptArgs, _prepare_download, _prepare_single, _prepare_spmd, _train
+else:
+    from scripts.run_deepseek_v4 import ScriptArgs, _prepare_download, _prepare_single, _prepare_spmd, _train
+
+from tests.ci.ci_register import register_cuda_ci, register_rocm_ci
 from tests.ci.metric_history import register_ci_gate
 
 register_cuda_ci(est_time=1900, suite="stage-c-4-gpu-h200", labels=["megatron", "model-scripts"])
+register_rocm_ci(
+    est_time=1900,
+    suite="stage-c-4-gpu-mi350",
+    labels=["megatron", "model-scripts", "amd"],
+    disabled="FIXME: re-enable once this case passes on the MI350 runners.",
+)
 
 register_ci_gate(metric_key="train/grad_norm")
 register_ci_gate(metric_key="train/ppo_kl")
@@ -23,11 +33,7 @@ def _args() -> ScriptArgs:
         skip_saving=True,
         use_fault_tolerance=False,
         extra_args=(
-            "--ci-test "
-            "--check-weight-update-allow-quant-error "
-            "--ci-disable-logprobs-checker "
-            "--disable-weights-backuper "
-            "--num-rollout 2 "
+            "--ci-test " "--check-weight-update-allow-quant-error " "--ci-disable-logprobs-checker " "--num-rollout 2 "
         ),
     )
 

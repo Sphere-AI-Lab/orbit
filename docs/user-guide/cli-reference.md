@@ -27,8 +27,7 @@ This page has two passes.
 | `--rollout-num-gpus-per-engine` | `1` | TP size of each SGLang engine. |
 | `--colocate` | off | Share GPUs between actor and rollout. |
 
-See [Training Script Walkthrough: Colocation](/user-guide/training-script-walkthrough#colocation-share-gpus-or-dont)
-for what `--colocate` flips on under the hood.
+See [Training Backends](/user-guide/training-backend) for what `--colocate` flips on under the hood.
 
 ### Batch sizing
 
@@ -65,7 +64,7 @@ then push up until you OOM.
 
 | Flag | Default | What |
 |---|---|---|
-| `--advantage-estimator` | `grpo` | `grpo`, `gspo`, `ppo`, `reinforce_plus_plus`, `reinforce_plus_plus_baseline`, `on_policy_distillation` |
+| `--advantage-estimator` | `grpo` | `grpo`, `gspo`, `ppo`, `reinforce_plus_plus`, `reinforce_plus_plus_baseline`. On-policy distillation is not an estimator — enable it with `--use-opd` on top of any of these. |
 | `--use-kl-loss` | off | Compute KL against the reference model. |
 | `--kl-loss-coef` | `0.0` | Weight of KL in the loss (0 means monitor only). |
 | `--kl-loss-type` | `k1` | `k1`, `k2`, `k3`, `low_var_kl`. |
@@ -113,8 +112,8 @@ Any flag accepted by `python -m sglang.launch_server` is accepted by Miles with 
 ```bash
 --sglang-log-level INFO
 --sglang-mem-fraction-static 0.8
---sglang-enable-overlap-schedule
---sglang-enable-ep-moe
+--sglang-ep-size 8
+--sglang-moe-a2a-backend deepep
 --sglang-enable-dp-attention
 ```
 
@@ -201,6 +200,13 @@ Sections mirror the launch-script argument groups.
 | `--eval-max-response-len` | int | – | Max eval response length. Inherits from rollout if unset. |
 | `--eval-temperature` | float | – | Eval temperature. Inherits from rollout if unset. |
 | `--eval-top-p` | float | – | Eval top-p. Inherits from rollout if unset. |
+| `--eval-num-gpus` | int | `0` | Dedicated eval fleet size. `0` = shared-engine eval. Requires `train_async.py`. |
+| `--eval-num-gpus-per-engine` | int | `1` | Eval engine TP, independent of rollout TP. |
+| `--eval-hf-dir` | str | – | Staging dir for per-eval HF snapshots (tmpfs recommended). Unset + `--save-hf` = reuse mode. |
+| `--eval-max-in-flight` | int | `2` | Snapshots the trainer may export ahead of the eval backend. Evals are serialized, so this buys lead time, not concurrency — and one more staged snapshot. |
+| `--eval-overflow-policy` | str | `backpressure` | At the cap: await the oldest eval, or `skip` the new point (logged as `eval/skipped_busy`). |
+| `--eval-keep-snapshots` | int | `2` | Retired snapshots kept under `--eval-hf-dir`; with `--eval-max-in-flight` this bounds the staging dir. `--save-hf` output is never deleted. |
+| `--eval-sglang-*` | – | – | Per-field override of any `--sglang-*` setting for the eval fleet only. Unset = inherit the rollout engines' value. Booleans take a `--no-` form (`--no-eval-sglang-enable-dp-attention`) so an inherited `True` can be turned off. `tp_size` is not exposed — use `--eval-num-gpus-per-engine`. |
 
 ### Performance
 
@@ -221,13 +227,14 @@ Sections mirror the launch-script argument groups.
 | `--gradient-checkpointing` | flag | off | FSDP equivalent of recompute flags. |
 | `--fsdp-cpu-offload` | flag | off | FSDP: offload params, grads, optimizer state to CPU. |
 | `--fsdp-cpu-backend` | str | `gloo` | FSDP: CPU backend for hybrid offload. |
-| `--attn-implementation` | enum | `flash_attention_2` | FSDP only: `flash_attention_2`, `sdpa`, `eager`. |
+| `--dp-replicate-size` | int | `1` | FSDP2 hybrid-shard replica count. |
+| `--attn-implementation` | str | `flash_attention_2` | FSDP only: passed to `transformers`, e.g. `flash_attention_2`, `flash_attention_3`, `sdpa`, `eager`. |
 
 ### RL algorithm
 
 | Flag | Type | Default | Notes |
 |---|---|---|---|
-| `--advantage-estimator` | enum | `grpo` | `grpo`, `gspo`, `ppo`, `reinforce_plus_plus`, `reinforce_plus_plus_baseline`, `on_policy_distillation` |
+| `--advantage-estimator` | enum | `grpo` | `grpo`, `gspo`, `ppo`, `reinforce_plus_plus`, `reinforce_plus_plus_baseline`. |
 | `--use-kl-loss` | flag | off | Compute KL vs. reference. |
 | `--kl-loss-coef` | float | `0.0` | KL weight in loss (0 means monitor). |
 | `--kl-loss-type` | enum | `k1` | `k1`, `k2`, `k3`, `low_var_kl`. |
@@ -263,11 +270,12 @@ Sections mirror the launch-script argument groups.
 
 | Flag | Type | Default | Notes |
 |---|---|---|---|
-| `--rm-type` | enum | – | Built-in reward: `math`, `dapo`, `deepscaler`, `f1`, `gpqa`, `ifbench`, `remote_rm`, `random`. |
+| `--rm-type` | str | – | Built-in reward: `math`, `dapo`, `deepscaler`, `gemma_math`, `f1`, `gpqa`, `ifbench`, `remote_rm`, `random`, `deterministic_random`. A `boxed_` prefix (e.g. `boxed_math`) extracts `\boxed{}` from the response before grading. |
 | `--rm-url` | str | – | Endpoint when `--rm-type remote_rm`. |
 | `--group-rm` | flag | off | Batched reward computation. |
 | `--custom-rm-path` | str | – | Custom reward function (see [Customization](/user-guide/customization)). |
 | `--dynamic-sampling-filter-path` | str | – | Group filter (DAPO-style). |
+| `--rollout-submission-granularity` | enum | driver | `group` or `sample`: what frees rollout submission capacity. Unset means `sample` under `--fully-async`, `group` otherwise. |
 | `--buffer-filter-path` | str | – | Buffer dequeue filter. |
 | `--rollout-sample-filter-path` | str | – | Per-sample filter. |
 
@@ -286,12 +294,33 @@ Common `--sglang-*` flags:
 --sglang-mem-fraction-static 0.8
 --sglang-context-length 32768
 --sglang-log-level INFO
---sglang-enable-ep-moe
+--sglang-ep-size 8
 --sglang-enable-dp-attention
---sglang-enable-deepep
---sglang-enable-overlap-schedule
---sglang-cuda-graph-backend-prefill       # prefill graphs default to disabled in colocate mode
+--sglang-moe-a2a-backend deepep
+--sglang-moe-runner-backend triton
+--sglang-deepep-mode auto
+--sglang-cuda-graph-backend-prefill  # prefill graphs default to disabled in colocate mode
 ```
+
+### Agentic sessions
+
+These flags wire an OpenAI-compatible agent loop through Miles' TITO session
+server. See [Agentic Rollout (TITO)](/user-guide/agentic-rollout) for the request
+contract, session behavior, and model-family selection.
+
+| Flag | Type | Default | Notes |
+|---|---|---|---|
+| `--custom-generate-function-path` | `<module>.<fn>` | – | Set to `miles.rollout.generate_hub.agentic_tool_call.generate` for the built-in agentic wrapper. |
+| `--custom-agent-function-path` | `<module>.<fn>` | – | Async agent-environment loop. Registered after selecting the built-in agentic wrapper. |
+| `--use-session-server` | optional `v1` / `v2` | off | Bare flag (or `v1`) selects the linear append-only server; `v2` selects tree serving. Requires `--hf-checkpoint`. |
+| `--tito-model` | enum | `default` | TITO model family. Named families load their registered fixed template; `default` is best-effort with a checkpoint-native or custom template. |
+| `--max-seq-len` | int | – | Total tokens per session, including prompts, completions, and environment responses. Registered with the agentic wrapper. |
+| `--session-server-ip` | str | router IP | Session-server bind address. |
+| `--session-server-port` | int or start/end | auto | One port, or a half-open port range `[start, end)` for multiple instances. |
+| `--session-sample-picker-path` | `<module>.<fn>` | `drop_retries` | v2 only: selects leaf samples before post-processing. |
+| `--session-sample-postprocessor-path` | `<module>.<fn>` | `default_postprocess` | v2 only: finalizes loss masks and rewards. |
+
+`--use-session-server v2` returns `list[Sample]` and rejects `--group-rm`, `--partial-rollout`, and `--recompute-logprobs-via-prefill`.
 
 ### MTP / speculative decoding
 
