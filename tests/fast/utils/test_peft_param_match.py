@@ -250,6 +250,37 @@ def test_matched_lora_rank_is_never_zero():
     assert oft_matched_lora_rank(2, shapes) >= 1
 
 
+def test_legacy_oft_type_counts_one_rotation_per_module():
+    """`--oft-type oft` (legacy shared-R) builds ONE rotation per module no
+    matter the fusion, so its count must skip the slice factor.
+
+    Pinned to the number E4's ledgers recorded before the canonical correction
+    -- 54,099,968 at b128 all-modules over 32 layers -- because that is exactly
+    what those ledgers were counting: legacy accounting applied to canonical
+    arms. The keyword exists so the two variants can never be silently
+    conflated again, in either direction.
+    """
+    shapes = megatron_module_shapes(**LLAMA31_8B)
+    legacy = oft_param_count_for_modules(128, shapes, oft_type="oft")
+    assert legacy * 32 == 54_099_968
+    canonical = oft_param_count_for_modules(128, shapes)
+    assert canonical * 32 == 79_069_184
+    # Unfused (HF-style) names carry one rotation under BOTH variants.
+    unfused = {"q_proj": (4096, 4096), "gate_proj": (4096, 14336)}
+    assert oft_param_count_for_modules(64, unfused, oft_type="oft") == (
+        oft_param_count_for_modules(64, unfused)
+    )
+    # The report records which accounting produced it.
+    assert oft_lora_match_report(128, shapes, oft_type="oft")["oft_params"] == legacy
+    assert oft_lora_match_report(128, shapes)["oft_type"] == "canonical_oft"
+
+
+def test_unsupported_oft_type_raises():
+    shapes = megatron_module_shapes(**LLAMA31_8B)
+    with pytest.raises(ValueError, match="Unsupported OFT type"):
+        oft_param_count_for_modules(64, shapes, oft_type="dora")
+
+
 def test_oft_placements_cannot_be_matched_by_block_size_alone():
     """attention-only and MLP-only are not equal-capacity at the same block size,
     and under canonical accounting they cannot be BROUGHT to equal capacity by

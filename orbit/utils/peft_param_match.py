@@ -264,8 +264,13 @@ def megatron_module_shapes(
     }
 
 
-def oft_param_count_for_modules(block_size: int, shapes: dict[str, tuple[int, int]]) -> int:
-    """Realized canonical-OFT parameters over a set of modules.
+def oft_param_count_for_modules(
+    block_size: int,
+    shapes: dict[str, tuple[int, int]],
+    *,
+    oft_type: str = "canonical_oft",
+) -> int:
+    """Realized OFT parameters over a set of modules.
 
     Two things a plain `sum(oft_param_count(...))` gets wrong, both applied here
     rather than assumed away:
@@ -273,12 +278,26 @@ def oft_param_count_for_modules(block_size: int, shapes: dict[str, tuple[int, in
     * Bridge snaps `block_size` to a divisor of each module's own `d_in`
       independently, so a module whose `d_in` does not admit the requested block
       gets a different one -- and the caller never hears about it.
-    * A fused module carries one rotation per output slice, not one per module.
-      See `OFT_ROTATION_SLICES` for why, and for what counting it the other way
-      cost.
+    * Under canonical OFT a fused module carries one rotation per output slice,
+      not one per module. See `OFT_ROTATION_SLICES` for why, and for what
+      counting it the other way cost.
+
+    `oft_type` mirrors the launcher's `--oft-type` flag: `"canonical_oft"` (the
+    default, and the only variant any launcher in this tree runs) applies the
+    per-slice factor; `"oft"` -- legacy shared-R, one rotation per module
+    regardless of fusion -- skips it. The keyword exists so a legacy arm can
+    never silently receive canonical accounting, not because anyone should
+    parameter-match against a variant Bridge documents as mathematically wrong
+    on fused modules.
     """
+    if oft_type not in ("oft", "canonical_oft"):
+        raise ValueError(
+            f"Unsupported OFT type: {oft_type!r}. Expected 'oft' or 'canonical_oft'."
+        )
+    canonical = oft_type == "canonical_oft"
     return sum(
-        oft_rotation_slices(name) * oft_param_count(nearest_divisor(d_in, block_size), d_in)
+        (oft_rotation_slices(name) if canonical else 1)
+        * oft_param_count(nearest_divisor(d_in, block_size), d_in)
         for name, (d_in, _) in shapes.items()
     )
 
@@ -288,7 +307,12 @@ def lora_param_count_for_modules(rank: int, shapes: dict[str, tuple[int, int]]) 
     return sum(lora_param_count(rank, d_in, d_out) for d_in, d_out in shapes.values())
 
 
-def oft_matched_lora_rank(block_size: int, shapes: dict[str, tuple[int, int]]) -> int:
+def oft_matched_lora_rank(
+    block_size: int,
+    shapes: dict[str, tuple[int, int]],
+    *,
+    oft_type: str = "canonical_oft",
+) -> int:
     """LoRA rank whose parameter count matches this OFT block size.
 
     The inverse of `matched_oft_block_size`, and the direction that actually
@@ -297,10 +321,16 @@ def oft_matched_lora_rank(block_size: int, shapes: dict[str, tuple[int, int]]) -
     the module docstring). Never returns 0 -- rank 0 is not an adapter.
     """
     per_rank = lora_param_count_for_modules(1, shapes)
-    return max(1, round(oft_param_count_for_modules(block_size, shapes) / per_rank))
+    oft_params = oft_param_count_for_modules(block_size, shapes, oft_type=oft_type)
+    return max(1, round(oft_params / per_rank))
 
 
-def oft_lora_match_report(block_size: int, shapes: dict[str, tuple[int, int]]) -> dict:
+def oft_lora_match_report(
+    block_size: int,
+    shapes: dict[str, tuple[int, int]],
+    *,
+    oft_type: str = "canonical_oft",
+) -> dict:
     """Everything needed to say honestly whether an OFT/LoRA pair is matched.
 
     `ratio` is realized OFT parameters over realized LoRA parameters at the
@@ -309,11 +339,12 @@ def oft_lora_match_report(block_size: int, shapes: dict[str, tuple[int, int]]) -
     parameters that still keeps up strengthens the claim, while one carrying
     fewer and losing is confounded rather than informative.
     """
-    oft_params = oft_param_count_for_modules(block_size, shapes)
-    rank = oft_matched_lora_rank(block_size, shapes)
+    oft_params = oft_param_count_for_modules(block_size, shapes, oft_type=oft_type)
+    rank = oft_matched_lora_rank(block_size, shapes, oft_type=oft_type)
     lora_params = lora_param_count_for_modules(rank, shapes)
     return {
         "block_size": block_size,
+        "oft_type": oft_type,
         "oft_params": oft_params,
         "lora_rank": rank,
         "lora_params": lora_params,
@@ -324,7 +355,12 @@ def oft_lora_match_report(block_size: int, shapes: dict[str, tuple[int, int]]) -
     }
 
 
-def oft_block_size_matching_params(target_params: int, shapes: dict[str, tuple[int, int]]) -> int:
+def oft_block_size_matching_params(
+    target_params: int,
+    shapes: dict[str, tuple[int, int]],
+    *,
+    oft_type: str = "canonical_oft",
+) -> int:
     """Block size whose realized OFT parameter count is closest to `target_params`.
 
     Needed to compare OFT *against itself* across placements at equal capacity --
@@ -341,4 +377,9 @@ def oft_block_size_matching_params(target_params: int, shapes: dict[str, tuple[i
         raise ValueError("target_params must be positive")
     d_ins = {d_in for d_in, _ in shapes.values()}
     candidates = sorted({d for d_in in d_ins for d in range(1, d_in + 1) if d_in % d == 0})
-    return min(candidates, key=lambda b: abs(oft_param_count_for_modules(b, shapes) - target_params))
+    return min(
+        candidates,
+        key=lambda b: abs(
+            oft_param_count_for_modules(b, shapes, oft_type=oft_type) - target_params
+        ),
+    )
