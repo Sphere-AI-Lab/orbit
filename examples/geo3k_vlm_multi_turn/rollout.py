@@ -369,6 +369,7 @@ async def generate(args: Any, sample: Sample, sampling_params) -> Sample:
     """Custom multi-turn rollout that interacts with a pluggable environment."""
     assert not args.partial_rollout, "Partial rollout is not supported for interaction rollouts."
 
+    sample.capture_multimodal_inputs_for_retry()
     env, env_module, config, state, url = _initialize_resources(args, sample)
     sampling_params = sampling_params.copy()
     (
