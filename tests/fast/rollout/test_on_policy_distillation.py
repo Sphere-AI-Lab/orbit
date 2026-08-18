@@ -1032,7 +1032,7 @@ async def test_geo3k_multiturn_rejects_observation_that_exceeds_remaining_budget
     monkeypatch.setattr(
         geo3k_rollout,
         "_process_env_step",
-        lambda *args, **kwargs: ([31, 32, 33], [31, 32, 33], [], None, None, False),
+        lambda *args, **kwargs: ([31, 32, 33], [31, 32, 33], [], None, None, None, False),
     )
 
     sample = Sample(
@@ -1097,8 +1097,8 @@ async def test_geo3k_multiturn_rollout_records_rounds_and_action_observation_mas
     )
     observations = iter(
         [
-            ([31, 32], [31, 32], [], None, None, False),
-            (None, None, None, None, None, True),
+            ([31, 32], [31, 32], [], None, None, None, False),
+            (None, None, None, None, None, None, True),
         ]
     )
     generation_inputs = []
@@ -1208,8 +1208,8 @@ async def test_geo3k_multiturn_generation_preserves_noncanonical_prior_action_id
 
     observations = iter(
         [
-            ([31], [31], [], None, None, False),
-            (None, None, None, None, None, True),
+            ([31], [31], [], None, None, None, False),
+            (None, None, None, None, None, None, True),
         ]
     )
     monkeypatch.setattr(

@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import os
+from string import Formatter
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -1839,6 +1840,29 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 ),
             )
             parser.add_argument(
+                "--save-model-response-log",
+                type=str,
+                default=None,
+                help=(
+                    "Atomically save accepted training model responses as JSONL. "
+                    "The path template must contain the literal {rollout_id} format field."
+                ),
+            )
+            parser.add_argument(
+                "--save-model-response-trace-dir",
+                type=str,
+                default=None,
+                help=("Save a bounded subset of accepted model responses in the " "trace-viewer directory layout."),
+            )
+            parser.add_argument(
+                "--model-response-trace-max-samples-per-step",
+                type=int,
+                default=None,
+                help=(
+                    "Maximum accepted samples saved for each trace step. " "Defaults to saving every accepted sample."
+                ),
+            )
+            parser.add_argument(
                 "--load-debug-rollout-data",
                 type=str,
                 default=None,
@@ -2693,6 +2717,45 @@ def _resolve_ft_components(args: argparse.Namespace) -> list[str]:
     return list(args.ft_components)
 
 
+def _validate_model_response_log_path(args: argparse.Namespace) -> None:
+    template = getattr(args, "save_model_response_log", None)
+    if template is None:
+        return
+
+    message = (
+        "--save-model-response-log must be a valid path template containing "
+        "only the literal {rollout_id} format field"
+    )
+    try:
+        fields = [
+            (field_name, format_spec, conversion)
+            for _, field_name, format_spec, conversion in Formatter().parse(template)
+            if field_name is not None
+        ]
+    except ValueError as exc:
+        raise ValueError(message) from exc
+
+    if not fields or any(
+        field_name != "rollout_id" or format_spec or conversion is not None
+        for field_name, format_spec, conversion in fields
+    ):
+        raise ValueError(message)
+
+    try:
+        template.format(rollout_id=0)
+    except (AttributeError, IndexError, KeyError, ValueError) as exc:
+        raise ValueError(message) from exc
+
+
+def _validate_model_response_trace_args(args: argparse.Namespace) -> None:
+    path = getattr(args, "save_model_response_trace_dir", None)
+    if path is not None and (not isinstance(path, str) or not path):
+        raise ValueError("--save-model-response-trace-dir must be a non-empty path")
+    cap = getattr(args, "model_response_trace_max_samples_per_step", None)
+    if cap is not None and (type(cap) is not int or cap <= 0):
+        raise ValueError("--model-response-trace-max-samples-per-step must be a positive integer")
+
+
 def miles_validate_args(args):
     validate_dashboard_args(args)
 
@@ -3176,6 +3239,9 @@ def miles_validate_args(args):
             if hasattr(args, k):
                 logger.info(f"Warning: Argument {k} is already set to {getattr(args, k)}, will override with {v}.")
             setattr(args, k, v)
+
+    _validate_model_response_log_path(args)
+    _validate_model_response_trace_args(args)
 
     if args.use_rollout_indexer_replay:
         args.use_indexer_replay = True
