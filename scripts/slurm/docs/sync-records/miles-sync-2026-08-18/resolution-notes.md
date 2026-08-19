@@ -22,8 +22,9 @@ contract; fast-forward, 21 commits).
     mode that cost a 15-hour run pre-fork-fix);
   - `_CachedWeightVersion` router polling deleted (upstream #2244 passes the
     trainer weight version straight through);
-  - 18 recipes migrated `--rollout-function-path examples.fully_async...` →
-    `--fully-async`.
+  - 9 fork recipes migrated `--rollout-function-path examples.fully_async...`
+    → `--fully-async` (5 under `scripts/experiments/async/`, 4 under
+    `OPD/multimodal/`), plus both README trees.
 - `examples/geo3k_vlm_multi_turn` → `examples/geo3k_vlm/multi_turn` rename
   followed; 61 references swept.
 - OPD `miles/rollout/on_policy_distillation.py` (7 hunks): fork scoring

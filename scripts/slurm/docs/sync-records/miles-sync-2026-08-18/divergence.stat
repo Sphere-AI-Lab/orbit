@@ -97,7 +97,7 @@
  miles/ray/rollout/server_group.py                  |   27 +-
  miles/ray/rollout/train_data_conversion.py         |   19 +
  miles/ray/train/actor_factory.py                   |    8 +
- miles/rollout/fully_async_rollout.py               |   44 +-
+ miles/rollout/fully_async_rollout.py               |   52 +-
  miles/rollout/generate_utils/prefill_logprobs.py   |   11 +
  miles/rollout/generate_utils/sample_utils.py       |   55 +
  miles/rollout/inference_rollout/compatibility.py   |   24 +
@@ -303,10 +303,11 @@
  .../inference_rollout/test_compatibility.py        |   64 +
  .../inference_rollout/test_live_diagnostics.py     |   69 +
  tests/fast/rollout/session/test_samples.py         |   63 +
+ tests/fast/rollout/test_fully_async_rollout.py     |   37 +
  tests/fast/rollout/test_geo3k_fixed_eval.py        |  586 ++++++++
  tests/fast/rollout/test_on_policy_distillation.py  | 1528 +++++++++++++++++++-
  tests/fast/test_qwen3_vl_cp_mrope.py               |  101 ++
- tests/fast/utils/test_arguments.py                 |  442 +++++-
+ tests/fast/utils/test_arguments.py                 |  450 +++++-
  tests/fast/utils/test_data_filter_long_prompt.py   |   73 +
  tests/fast/utils/test_extract_pins.py              |   80 +
  tests/fast/utils/test_summarize_03p_trace.py       |   96 ++
@@ -318,4 +319,4 @@
  thirdparty/sglang                                  |    1 +
  train.py                                           |   33 +-
  train_async.py                                     |   32 +-
- 320 files changed, 45335 insertions(+), 341 deletions(-)
+ 321 files changed, 45388 insertions(+), 341 deletions(-)
