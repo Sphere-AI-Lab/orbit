@@ -774,13 +774,13 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 type=int,
                 default=2048,
                 help=(
-                    "Soft safety cap for completed prompt groups waiting in the fully async worker "
-                    "output queue. When the queue reaches this size, the worker temporarily stops "
-                    "launching new generation tasks until the trainer consumes queued groups. "
-                    "This prevents unbounded memory growth if training stalls; it is not part of "
-                    "the normal active sampler concurrency target. NOTE: this fixed count is a "
-                    "single-node memory budget placeholder; future work is to derive it from a live "
-                    "memory estimate (see examples/fully_async/README.md 'Scaling limits & roadmap')."
+                    "INERT since the class-based fully-async rewrite: nothing reads it, and "
+                    "validation warns when it is set. It used to be a soft cap that paused the "
+                    "example worker's launches once this many completed groups were queued. The "
+                    "finished-group buffer is now bounded by --async-data-buffer-capacity-factor "
+                    "(floor(F * rollout_batch_size) groups) with a blocking put, so the producer "
+                    "itself stalls rather than the worker throttling submissions. Still parsed so "
+                    "pre-sync recipes keep working; drop it from recipes when convenient."
                 ),
             )
             parser.add_argument(
