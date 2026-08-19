@@ -114,3 +114,35 @@ contract; fast-forward, 21 commits).
 - Test doubles: `ft_components` (v1 group lifecycle) and
   `eval_generate_rollout` (RolloutManager dispose) added to fork doubles that
   predate the synced constructor/dispose contracts.
+
+## Upstream R3 in this window vs the fork R3 series
+
+Four upstream changes; zero collision with and zero absorption of the fork's
+route-plane work (which stays on `feature/moe_multimodal`):
+
+- **#2226 MTP/spec state fix**: spec-model creation forced
+  `routing_replay_manager.enabled = True`, leaking it into the critic role;
+  now save/restore. Same *family* as the fork's C1 Bridge double-decoder bug
+  (model-construction paths corrupting replay-manager global state) but not
+  the same defect — upstream fill is still positional; the fork's
+  identity-based fill remains an upstream candidate.
+- **#2235 FSDP R3**: replay support for the FSDP backend + a large test/fixture
+  base (`tests/fast/fixtures/replay_fixtures.py`) the fork can reuse on rebase.
+- **#2278 session-side incremental R3 rows**: for the session-server path,
+  upstream requests only new rows (`routed_experts_start_len = previous_rows`)
+  and stitches server-side with LCP/stable-prefix assertions. Opposite design
+  to the fork's full-snapshot-per-response contract (start_len=0), which the
+  fork chose after root-causing silent multi-turn prefix drift (the Qwen-VL
+  retokenize hole). Upstream's assertions guard the same hazard — failures
+  will be loud rather than silent — but the root fix remains the fork's sglang
+  patch. Paths coexist: session vs direct /generate.
+- **#2240 configurable replay matching** is session *message* replay
+  equivalence (agent-harness reserialization), unrelated to route replay.
+
+Wire depth check: the v0.5.16 sglang line has only base R3
+(`return_routed_experts` + `start_len`; io_struct has NO `routed_experts_dtype`)
+— the fork's dtype contract, int16 representation, SRB1 binary transport,
+router field-drop hardening, and queue-RSS work have no upstream counterpart
+yet. Upstream is widening R3 (backends, session, MTP); the fork owns the depth
+(representation/transport/exactness/memory). Rebase touchpoints: #2226's
+manager state handling and #2235's fixtures.

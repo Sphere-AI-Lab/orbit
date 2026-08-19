@@ -15,6 +15,20 @@ the previous entries in the same wandb project.
 - Compare on the stable window against the prior baseline entries (see
   `scripts/slurm/docs/sync-records/`'s per-sync notes for reference run ids).
 
+## Observability notes (2026-08-18 onward)
+
+- **`rollout/rollout_train_kl/{k1,k2,k3}/{mean,min,max}`** (rollout panel):
+  training/inference mismatch — q = rollout engine, p = trainer recompute.
+  Emitted on ordinary RL runs (no reference model needed); k-estimator family
+  with true global extrema. Cross-validates the coarser train-panel
+  `train/{train,current}_rollout_kl` (k3 mean only). New curves — no
+  historical baseline entries carry them yet.
+- The fully-async health metrics use upstream names since this sync:
+  `rollout/fully_async/{queue_size, aborted_groups_filtered,
+  stale_groups_filtered, avg_staleness, max_staleness, buffer_*_staleness}`
+  (old fork names `fully_async/accepted_staleness/*` and `over_cap_ratio` are
+  gone — map by semantics when comparing against pre-sync runs).
+
 ## 2026-08-18 sync gate
 
 | run | wraps | status |

@@ -201,6 +201,31 @@ def _get_rollout_kl_log_ratio_groups(
     if sampled_opd_log_ratios and int(getattr(args, "opd_log_prob_top_k", 0) or 0) == 0:
         groups["opd_kl"] = sampled_opd_log_ratios
 
+    # ``rollout_train_kl`` is the inference/training mismatch: q = the rollout
+    # engine that sampled the tokens, p = the trainer's recompute of the same
+    # tokens. Unlike ``kl`` it needs no reference model, so it is the group
+    # ordinary RL runs actually get. Direction matches the train-panel k3
+    # diagnostics (KL(rollout || train)), so the two can cross-validate.
+    rollout_log_probs = rollout_data.get("rollout_log_probs")
+    trainer_log_probs = rollout_data.get("log_probs")
+    if rollout_log_probs and trainer_log_probs:
+        if len(rollout_log_probs) != len(trainer_log_probs):
+            raise ValueError(
+                f"Rollout KL batch mismatch: rollout_log_probs={len(rollout_log_probs)}, "
+                f"log_probs={len(trainer_log_probs)}."
+            )
+        mismatch_log_ratios = []
+        for sample_index, (sampled, recomputed) in enumerate(zip(rollout_log_probs, trainer_log_probs, strict=True)):
+            sampled = torch.as_tensor(sampled)
+            recomputed = torch.as_tensor(recomputed, device=sampled.device)
+            if sampled.shape != recomputed.shape:
+                raise ValueError(
+                    f"Rollout KL shape mismatch at sample {sample_index}: "
+                    f"rollout_log_probs={tuple(sampled.shape)}, log_probs={tuple(recomputed.shape)}."
+                )
+            mismatch_log_ratios.append(sampled - recomputed)
+        groups["rollout_train_kl"] = mismatch_log_ratios
+
     return groups
 
 
@@ -217,9 +242,11 @@ def _compute_rollout_kl_statistics(
       k3 = exp(-d) - 1 + d
 
     Policy/ref log-probs supply q=policy and p=reference under ``kl/*``.
-    Sampled OPD supplies q=student and p=teacher under ``opd_kl/*``. Both are
-    emitted when both pairs are available. Legacy top-k detached scalars are
-    excluded from the sampled OPD group.
+    Sampled OPD supplies q=student and p=teacher under ``opd_kl/*``.
+    ``rollout_train_kl/*`` is q=rollout engine and p=trainer recompute — the
+    training/inference mismatch, available on ordinary RL runs without a
+    reference model. Every available group is emitted. Legacy top-k detached
+    scalars are excluded from the sampled OPD group.
     """
     log_ratio_groups = _get_rollout_kl_log_ratio_groups(args, rollout_data)
     if not log_ratio_groups:

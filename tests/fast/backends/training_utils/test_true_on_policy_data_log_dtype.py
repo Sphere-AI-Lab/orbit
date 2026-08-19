@@ -113,6 +113,39 @@ def test_rollout_opd_kl_statistics_report_k1_k2_k3_min_mean_max(monkeypatch):
     assert not any(key.startswith("kl/") for key in metrics)
 
 
+def test_rollout_train_kl_statistics_report_mismatch_without_a_reference(monkeypatch):
+    """`rollout_train_kl/*` = KL(rollout engine || trainer recompute): the
+    training/inference mismatch, emitted on ordinary RL runs (no ref model)."""
+    parallel_state = SimpleNamespace(cp=SimpleNamespace(size=1))
+    monkeypatch.setattr(cp_utils, "get_parallel_state", lambda: parallel_state)
+
+    rollout_data = {
+        "total_lengths": [4],
+        "response_lengths": [3],
+        "loss_masks": [torch.tensor([1, 1, 0], dtype=torch.int32)],
+        "rollout_log_probs": [torch.tensor([-1.0, -2.0, -9.0], dtype=torch.float32)],
+        "log_probs": [torch.tensor([-1.2, -1.6, -3.0], dtype=torch.float32)],
+    }
+    metrics, reductions = log_utils._compute_rollout_kl_statistics(
+        Namespace(qkv_format="thd", opd_log_prob_top_k=0),
+        rollout_data,
+        cp_size=1,
+    )
+
+    # d = sampled - recomputed over active tokens only
+    k1 = torch.tensor([0.2, -0.4], dtype=torch.float64)
+    k2 = 0.5 * k1.square()
+    k3 = torch.expm1(-k1) + k1
+    for name, values in (("k1", k1), ("k2", k2), ("k3", k3)):
+        assert metrics[f"rollout_train_kl/{name}/mean"] == pytest.approx(values.mean().item(), rel=1e-6)
+        assert metrics[f"rollout_train_kl/{name}/min"] == pytest.approx(values.min().item(), rel=1e-6)
+        assert metrics[f"rollout_train_kl/{name}/max"] == pytest.approx(values.max().item(), rel=1e-6)
+        assert reductions[f"rollout_train_kl/{name}/min"] == "min"
+        assert reductions[f"rollout_train_kl/{name}/max"] == "max"
+    # no reference model -> no policy/ref group; mismatch group must not squat on it
+    assert not any(key.startswith("kl/") for key in metrics)
+
+
 def test_rollout_kl_statistics_do_not_relabel_legacy_topk_scalar(monkeypatch):
     parallel_state = SimpleNamespace(cp=SimpleNamespace(size=1))
     monkeypatch.setattr(cp_utils, "get_parallel_state", lambda: parallel_state)
