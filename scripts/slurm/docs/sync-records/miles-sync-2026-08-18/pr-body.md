@@ -4,9 +4,9 @@ Sync with upstream `radixark/miles` — **274 upstream commits** merged (merge-b
 
 Major upstream content: fully-async rewrite onto the class-based rollout API (#1716/#1717/#2522, sample-granularity submission #1673, unified async data buffer #2030, fully-async eval #1740), session server v2 (trajectory trees #2126/#2128, server-side sample assembly #1758/#1759), TE 2.17 + cuDNN 9.22 + FA3 3.0.0 docker chain, sglang v0.5.16 (#1795), OPD per-position sparse top-k scoring + multi-teacher routing (#1298), NVFP4/Nemotron/Inkling model enablement, variable global batch size (#1927), training log-prob reuse (#2219), PPO fixes (CP terminal rewards, GAE over trainable tokens, critic-save derivation), dashboard series, CI restructure (#2221/#2529/#2530/#2548), scripts/models converted to python model_args, release workflow.
 
-Commit shape: upstream SHAs preserved under merge commit `4c93a4b4`; one fork-adjustments commit `2a080f79`; the sync-record `[docs]` commit lands on approval per the sync skill.
+Commit shape: upstream SHAs preserved under merge commit `4c93a4b4`; fork adjustments in `2a080f79`; the sync record in `720d1a01`. Five further commits then landed on this still-unpublished branch (`14d126a8`, `7c4e8040`, `6bb4af5b`, `a91c2a29`, `b4b13326`), so the sync skill's single-commit shape (HARD RULE 4) does **not** hold here: the review-repair protocol was applied deliberately *before* publication rather than after it. Each follow-up is a focused change carrying its own validation; no history was rewritten, and this body plus `divergence.stat` are kept current so every follow-up is represented.
 
-## Fork-side changes on top of the merge (`2a080f79`)
+## Fork-side changes on top of the merge (`2a080f79` + follow-ups)
 
 | area | what |
 |---|---|
@@ -14,7 +14,7 @@ Commit shape: upstream SHAs preserved under merge commit `4c93a4b4`; one fork-ad
 | fully-async port | fail-closed staleness buffer (`examples/fully_async/fail_closed_data_buffer.py`), 18 recipes → `--fully-async`, OPD scoring-session close re-wired into `dispose_rollout_function` |
 | import tax | `megatron_utils/__init__` side effects → `runtime_hooks.install_runtime_hooks()` (from `initialize.init()`): `import miles.utils.logging_utils` 75s → 0.6s per process on WekaFS (upstream candidate) |
 | scripts/models | five .sh shims delegating to `load_model_args` keep 26 recipes working; **new recipes use `load_model_args` directly** |
-| post-publication repair | `verify_env.py` sglang probe repointed for the v0.5.16 module layout (found by the fresh-env validation) |
+| follow-ups (pre-publication) | `14d126a8` `verify_env.py` sglang deep-import probe repointed for the v0.5.16 module layout (found by the fresh-env validation); `7c4e8040` pre-merge regression-gate wrappers under `scripts/experiments/baseline/`; `6bb4af5b` `rollout_train_kl/{k1,k2,k3}` train-vs-rollout mismatch estimators (no reference model needed) plus the upstream-R3-vs-fork-R3 analysis appended to `resolution-notes.md`; `a91c2a29` OPD baseline teacher repointed at the 2026-08-10 shared-model reorg; `b4b13326` model shims forward unexported recipe knobs to the python child |
 | merge completions | `actor.py` missing import; `actor_factory` assert retired (#1785); geo3k dir-rename sweep (61 refs); examples README/doc mirror; PYTHONUNBUFFERED on two fork launchers; sync-records excluded from hygiene scan; fork test doubles/suites updated to synced contracts |
 
 ## Conflicts resolved (32 files — all reviewed per-file)
@@ -41,12 +41,13 @@ Patch battery on the rebased tip: **52 passed + 13 subtests**.
 - **OPD per-position sparse scoring is dormant**: client payload/helper/flag are merged, but the server capability does not exist on the sglang-miles line. Port ruling recorded: keep the fork's `logprob_start_len = prompt_length - 1` materialization window, keep upstream's absolute-position array convention.
 - **Fully-async prefetch knob**: recipes keep `--fully-async-prefetch-batches`; the arguments-side derivation to `--async-max-concurrent-samples` ships in this PR — verify pacing on the first async run.
 - Multi-turn wandb metrics stay under the fork `interaction/*` namespace (upstream renamed theirs `multi_turn`); dashboards need no change.
+- **Wheels bundle stays on cu129 by design**: ACTIVE `MILES_WHEELS_TAG=cu129-x86_64` (torch 2.11) while `UPSTREAM_WHEELS_TAG` now targets `cu130-x86_64`. The sglang *source* is fully synced (ACTIVE `v0.5.16` == `UPSTREAM_SGLANG_IMAGE_TAG`), so this is a held-back torch-ABI/wheels jump, not a pending source sync — `extract_pins.py --check` stays consistent and `install_env.sh` fails closed on any ABI mismatch meanwhile. Run `/sglang-sync` for the cu130 bundle as its own torch-ABI-scoped change.
 - TE 2.17 requires the Bridge pin in this PR (`7f0fb345`); fresh envs before this PR's install_env.sh will not build TE 2.17 correctly.
 - The rolling `cu129-x86_64` wheels bundle still ships the interface-less FA3, so the guarded hopper fetch stays; delete it together with the hand-owned pin when the bundle moves to FA3 ≥3.0.0.
 
 ## Divergence from upstream after sync
 
-314 files changed, +44,958 / −321 vs `upstream/main` — see [divergence.stat](divergence.stat) (slurm launcher/env tooling, skills, sync records, fork recipes, OPD/multimodal/fully-async fork features, envpack adapter).
+317 files changed, +45,093 / −321 vs the merged upstream tip `fc04f666` — see [divergence.stat](divergence.stat) (slurm launcher/env tooling, skills, sync records, fork recipes, OPD/multimodal/fully-async fork features, envpack adapter).
 
 ## Test plan
 

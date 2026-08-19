@@ -82,7 +82,7 @@
  miles/backends/training_utils/cp_utils.py          |   36 +-
  miles/backends/training_utils/data.py              |   50 +
  miles/backends/training_utils/debug_dump.py        |    7 +
- miles/backends/training_utils/log_utils.py         |  199 ++-
+ miles/backends/training_utils/log_utils.py         |  226 ++-
  .../training_utils/loss_hub/logit_processors.py    |   11 +
  miles/backends/training_utils/loss_hub/losses.py   |   85 +-
  .../backends/training_utils/loss_hub/math_utils.py |  455 ++++++
@@ -172,7 +172,7 @@
  ...urn-2trainer-4sampler-recompute-qold-200step.sh |   17 +
  scripts/experiments/OPD/multimodal/README.md       | 1368 +++++++++++++++++
  .../OPD/multimodal/SERVER_VALIDATION.md            | 1350 +++++++++++++++++
- ...o3k-multimodal-multiturn-fully-async-200step.sh |  256 ++++
+ ...o3k-multimodal-multiturn-fully-async-200step.sh |  259 ++++
  .../OPD/multimodal/geo3k-multiturn-overlay.sh      |   38 +
  .../multimodal/production_image_scoring_smoke.py   |  363 +++++
  .../OPD/multimodal/results/04a-job-26525.json      |   73 +
@@ -203,6 +203,9 @@
  ...k-vlm-multi-turn-fully-async-prefetch2-3node.sh |  261 ++++
  ...k-vlm-multi-turn-fully-async-prefetch2-4node.sh |  244 ++++
  .../geo3k-vlm-single-turn-fully-async-3node.sh     |  240 +++
+ scripts/experiments/baseline/README.md             |   38 +
+ ...c20260818-opd-geo3k-mm-mt-fullyasync-200step.sh |    7 +
+ ...60818-rl-geo3k-mt-fullyasync-prefetch2-3node.sh |   10 +
  .../experiments/geo3k-vlm-8b-disagg-mt-2node.sh    |  174 +++
  .../experiments/geo3k-vlm-8b-disagg-thd-2node.sh   |  167 +++
  scripts/experiments/geo3k-vlm-colocate-1node.sh    |  172 +++
@@ -238,11 +241,11 @@
  ...gen-frozenlake-main-qwen3vl2b-colocate-1node.sh |  199 +++
  ...-main-qwen25vl3b-colocate-1node-global_bsz32.sh |   15 +
  ...vagen-sokoban-main-qwen25vl3b-colocate-1node.sh |  200 +++
- scripts/models/qwen2.5-3B.sh                       |   11 +
- scripts/models/qwen3-1.7B.sh                       |   11 +
- scripts/models/qwen3-30B-A3B.sh                    |   11 +
- scripts/models/qwen3-4B.sh                         |   11 +
- scripts/models/qwen3-8B.sh                         |   11 +
+ scripts/models/qwen2.5-3B.sh                       |   14 +
+ scripts/models/qwen3-1.7B.sh                       |   14 +
+ scripts/models/qwen3-30B-A3B.sh                    |   14 +
+ scripts/models/qwen3-4B.sh                         |   14 +
+ scripts/models/qwen3-8B.sh                         |   14 +
  scripts/run-qwen3-4B-disagg.sh                     |  147 ++
  scripts/slurm/check_run.sh                         |  174 +++
  scripts/slurm/docs/architecture.md                 |  112 ++
@@ -272,7 +275,7 @@
  .../training_utils/loss/test_loss_snapshot.py      |   28 +-
  .../training_utils/loss/test_rkld_dagger.py        |  904 ++++++++++++
  .../test_log_utils_metric_reduction.py             |   11 +-
- .../test_true_on_policy_data_log_dtype.py          |  248 +++-
+ .../test_true_on_policy_data_log_dtype.py          |  281 +++-
  .../test_true_on_policy_loss_metrics.py            |  234 ++-
  .../training_utils/test_ulysses_cp_utils.py        |   11 +
  tests/fast/dashboard/test_core_integration.py      |    2 +-
@@ -312,4 +315,4 @@
  thirdparty/sglang                                  |    1 +
  train.py                                           |   33 +-
  train_async.py                                     |   32 +-
- 314 files changed, 44960 insertions(+), 321 deletions(-)
+ 317 files changed, 45093 insertions(+), 321 deletions(-)

@@ -30,8 +30,8 @@ This keeps sync-records/ tidy as more syncs accumulate. Standalone `/miles-upstr
 Three independent sync axes:
 
 1. **miles**: `radixark/miles → impossible-inc/miles-imp` (this design doc; skill built)
-2. **sglang**: `sgl-project/sglang + radixark/sglang (sglang-miles branch) → impossible-inc/sglang` (most volatile; skill deferred)
-3. **Megatron-LM, Megatron-Bridge**: similar to sglang but lower-frequency (skill deferred; no local changes yet)
+2. **sglang**: `sgl-project/sglang + radixark/sglang (sglang-miles branch) → impossible-inc/sglang` (most volatile; `/sglang-sync` built 2026-06-02, carries re-appliable local patches)
+3. **Megatron-LM, Megatron-Bridge**: similar to sglang but lower-frequency, and they carry **no fork patches** — so an advance is a plain fast-forward, not a patch replay. No skill; done by hand inside the miles sync when an upstream pin demands it (see *Megatron-LM / Megatron-Bridge advances* below). First exercised 2026-08-18 (Bridge `c092daca` → `7f0fb345`).
 
 ---
 
@@ -72,6 +72,38 @@ git checkout --ours -- thirdparty/<name> && git add thirdparty/<name>
 …as the typical fix, but does not run it until the user OKs.
 
 The earlier version of this doc allowed auto-resolve. Changed 2026-05-29 per explicit user preference: "always let me take a look first."
+
+### Megatron-LM / Megatron-Bridge advances
+
+"Upstream syncs never move our submodule pins" holds for the *merge*: nothing upstream
+does can advance a gitlink, because upstream does not track these paths. It is not a ban
+on advancing them deliberately in the same PR. `/sglang-sync` is the sanctioned path for
+`thirdparty/sglang`; Megatron-LM and Megatron-Bridge have no skill because they carry no
+fork patches — advancing them is a fast-forward, so a skill would only wrap `git checkout`.
+
+Trigger: upstream bumps a pin whose contract the current gitlink no longer satisfies.
+The 2026-08-18 sync hit exactly this — TE 2.10 → 2.17 changed the grouped-linear contract,
+and TE 2.17 will not build correctly against Bridge `c092daca`.
+
+Procedure, run inside the miles sync (not as a separate PR — the pin and the gitlink must
+land together or fresh envs break):
+
+1. Read the ref upstream installs from `docker/Dockerfile` / `requirements.txt`
+   (the same pin-source files the Step 5a diff already surfaces).
+2. Fetch in the submodule and confirm the move is a **fast-forward** to that ref:
+   `git -C thirdparty/<name> fetch && git -C thirdparty/<name> merge-base --is-ancestor HEAD <ref>`.
+   If it is not a fast-forward, STOP — that means the mirror has diverged and this has
+   become a patch-replay problem, i.e. it needs a real sync skill modelled on `/sglang-sync`.
+3. Check out the ref and stage the gitlink **by name** into the sync's single
+   fork-adjustments commit (HARD RULE 4/5) — never `git add .`.
+4. Validate through the env path that consumes it: `install_env.sh` in a fresh salloc,
+   then `verify_env.py`. A gitlink bump that is not exercised by a fresh-env build is
+   not validated.
+5. Record it in the PR body: the new SHA, the commit count, why the pin forced it, and an
+   attention item stating that fresh envs built before this PR will not install correctly.
+
+2026-08-18 record: Bridge `c092daca` → `7f0fb345`, 21 commits, clean fast-forward,
+validated in job 42842 (`install_env.sh`) and 42862 (`verify_env.py`).
 
 ---
 
