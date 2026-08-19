@@ -58,6 +58,6 @@ attributing the regression to the sync.
 
 | run | wraps | status |
 |---|---|---|
-| `sync20260818-opd-geo3k-mm-mt-fullyasync-200step` | `OPD/multimodal/baseline/baseline-geo3k-multimodal-multiturn-fully-async-200step.sh` | pending |
-| `sync20260818-rl-geo3k-mt-fullyasync-prefetch2-3node` | `async/geo3k-vlm-multi-turn-fully-async-prefetch2-3node.sh` | pending |
+| `sync20260818-opd-geo3k-mm-mt-fullyasync-200step` | `OPD/multimodal/baseline/baseline-geo3k-multimodal-multiturn-fully-async-200step.sh` | **COMPLETED** — job 42956, 200/200 steps in 1h17m, wandb run `M3TRL/baseline/42956`; compare vs `M3TRL/OPD/27456` |
+| `sync20260818-rl-geo3k-mt-fullyasync-prefetch2-3node` | `async/geo3k-vlm-multi-turn-fully-async-prefetch2-3node.sh` | running — job 42957, wandb run `M3TRL/baseline/42957`; judge on the steps 100-200 stable window vs the 2026-07-24 baseline reruns |
 | `r3moe` slot | — | SKIPPED this round: the R3 route-plane work (int16/binary, MOE recipes) lives on `feature/moe_multimodal`; the sync branch carries only upstream's int32 base R3. Gate it when that branch rebases onto the synced main. |
