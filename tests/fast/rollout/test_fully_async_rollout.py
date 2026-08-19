@@ -537,3 +537,40 @@ async def test_group_granularity_opts_the_worker_out_of_backfill(monkeypatch):
     release.set()
     output = await drain
     assert len(output.samples) == 1
+
+
+async def test_dispose_cancels_in_flight_group_tasks(monkeypatch):
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def hanging_generate(state, group, sampling_params, evaluation=False, sample_done_callback=None):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    fn = make_fn(monkeypatch, make_args(), FakeDataSource(), generate=hanging_generate)
+    drain = asyncio.create_task(fn(RolloutFnTrainInput(rollout_id=0)))
+    await started.wait()
+    drain.cancel()
+    await asyncio.gather(drain, return_exceptions=True)
+
+    await fn.dispose()
+    # Cancelling the worker loop alone does not reach the group tasks it spawned;
+    # they would outlive dispose() and keep calling transports the caller closes.
+    assert cancelled.is_set()
+
+
+async def test_dispose_does_not_raise_a_dead_workers_exception(monkeypatch):
+    async def failing_generate(state, group, sampling_params, evaluation=False, sample_done_callback=None):
+        raise RuntimeError("generation exploded")
+
+    fn = make_fn(monkeypatch, make_args(), FakeDataSource(), generate=failing_generate)
+    with pytest.raises(RuntimeError, match="generation exploded"):
+        await fn(RolloutFnTrainInput(rollout_id=0))
+
+    # train_async awaits rollout_manager.dispose() on the happy path, so a raise
+    # here would report a fully trained run as failed.
+    await fn.dispose()

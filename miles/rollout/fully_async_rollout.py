@@ -120,6 +120,14 @@ class FullyAsyncRolloutFn:
             await worker
         except asyncio.CancelledError:
             pass
+        except Exception:
+            # Never let teardown fail a run that already trained every step and
+            # wrote every checkpoint: `train_async.py` awaits `rollout_manager
+            # .dispose()` on the happy path, not in a `finally`, so a raise here
+            # flips `write_train_status` to "failed" and requeues a completed
+            # run. `cancel()` is a no-op on an already-failed task, and worker
+            # death that matters is raised by `_next_group` during training.
+            logger.exception("Fully-async rollout worker failed before shutdown")
         logger.info("Stopped fully-async rollout worker")
 
     def _max_in_flight_groups(self) -> int:
