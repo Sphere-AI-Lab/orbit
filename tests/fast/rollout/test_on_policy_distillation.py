@@ -2,8 +2,6 @@ import asyncio
 import copy
 import itertools
 import math
-import queue
-import threading
 from argparse import Namespace
 from types import SimpleNamespace
 
@@ -510,7 +508,6 @@ def test_fail_closed_buffer_admits_fully_versioned_groups():
 
     entry = asyncio.run(scenario())
     assert entry.group is group
-
 
 
 async def test_observed_task_reward_uses_builtin_rm_without_mutating_training_args(monkeypatch):

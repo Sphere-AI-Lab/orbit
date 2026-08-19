@@ -14,8 +14,8 @@ from miles.utils.ft_utils.indep_dp import IndepDPInfo
 from miles.utils.hf_config import register_hf_config_aliases
 
 from .ft.indep_dp import create_indep_dp_group
-from .runtime_hooks import install_runtime_hooks
 from .parallel import create_megatron_parallel_state
+from .runtime_hooks import install_runtime_hooks
 
 logger = logging.getLogger(__name__)
 

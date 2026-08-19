@@ -35,7 +35,7 @@
  examples/fully_async/fail_closed_data_buffer.py    |   33 +
  examples/geo3k_vlm/multi_turn/env_geo3k.py         |    4 +-
  examples/geo3k_vlm/multi_turn/fixed_eval.py        |  737 ++++++++++
- examples/geo3k_vlm/multi_turn/rollout.py           |  161 +-
+ examples/geo3k_vlm/multi_turn/rollout.py           |  161 ++-
  examples/muon/README.md                            |  250 ++++
  examples/muon/_run_qwen2_5_0_5b_gsm8k.sh           |  260 ++++
  .../_run_qwen3_30b_a3b_gsm8k_2node_sharding.sh     |  348 +++++
@@ -104,7 +104,7 @@
  .../inference_rollout/inference_rollout_common.py  |   32 +
  .../inference_rollout/inference_rollout_train.py   |   37 +-
  .../rollout/inference_rollout/live_diagnostics.py  |  118 ++
- miles/rollout/on_policy_distillation.py            |  932 +++++++++++-
+ miles/rollout/on_policy_distillation.py            |  933 +++++++++++-
  miles/rollout/sglang_rollout.py                    |   65 +-
  miles/utils/arguments.py                           |  351 ++++-
  miles/utils/data.py                                |   10 +-
@@ -128,6 +128,7 @@
  miles_plugins/envpack_adapter/recipes/common.sh    |  294 ++++
  miles_plugins/envpack_adapter/renderer.py          |   55 +
  miles_plugins/envpack_adapter/runtime.py           |  184 +++
+ miles_plugins/models/inkling/layers.py             |    5 +-
  miles_plugins/models/qwen3_vl.py                   |   65 +
  scripts/experiments/OPD/README.md                  |  158 ++
  scripts/experiments/OPD/archive/README.md          |   17 +
@@ -170,7 +171,7 @@
  .../OPD/multimodal/12-old-policy-scale-common.sh   |  164 +++
  ...iturn-2trainer-4sampler-rollout-qold-200step.sh |   17 +
  ...urn-2trainer-4sampler-recompute-qold-200step.sh |   17 +
- scripts/experiments/OPD/multimodal/README.md       | 1368 +++++++++++++++++
+ scripts/experiments/OPD/multimodal/README.md       | 1368 ++++++++++++++++++
  .../OPD/multimodal/SERVER_VALIDATION.md            | 1350 +++++++++++++++++
  ...o3k-multimodal-multiturn-fully-async-200step.sh |  259 ++++
  .../OPD/multimodal/geo3k-multiturn-overlay.sh      |   38 +
@@ -268,6 +269,7 @@
  scripts/slurm/submit.sh                            |  129 ++
  .../e2e/sglang/test_vlm_multiturn_exact_action.py  |  109 ++
  tests/fast-gpu/test_mxfp8_quantizer.py             |    4 +-
+ tests/fast-gpu/test_nvfp4_quantizer.py             |    4 +-
  .../megatron_utils/test_bridge_runtime_config.py   |  114 ++
  .../megatron_utils/test_model_initialize.py        |   64 +
  .../test_update_weight_from_distributed_bridge.py  |  352 +++++
@@ -301,7 +303,7 @@
  .../inference_rollout/test_live_diagnostics.py     |   69 +
  tests/fast/rollout/session/test_samples.py         |   63 +
  tests/fast/rollout/test_geo3k_fixed_eval.py        |  586 ++++++++
- tests/fast/rollout/test_on_policy_distillation.py  | 1531 +++++++++++++++++++-
+ tests/fast/rollout/test_on_policy_distillation.py  | 1528 +++++++++++++++++++-
  tests/fast/test_qwen3_vl_cp_mrope.py               |  101 ++
  tests/fast/utils/test_arguments.py                 |  381 +++++
  tests/fast/utils/test_data_filter_long_prompt.py   |   73 +
@@ -315,4 +317,4 @@
  thirdparty/sglang                                  |    1 +
  train.py                                           |   33 +-
  train_async.py                                     |   32 +-
- 317 files changed, 45093 insertions(+), 321 deletions(-)
+ 319 files changed, 45098 insertions(+), 323 deletions(-)

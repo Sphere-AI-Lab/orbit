@@ -233,22 +233,22 @@ def test_rollout_kl_statistics_keep_policy_ref_and_opd_separate(monkeypatch):
 
 def test_gathered_metric_reduction_uses_global_min_and_max():
     gathered = [
-            {
-                "kl/k1/mean": 0.2,
-                "kl/k1/min": -0.3,
-                "kl/k1/max": 0.7,
-                "opd_kl/k1/mean": 0.6,
-                "opd_kl/k1/min": -0.9,
-                "opd_kl/k1/max": 1.1,
-            },
-            {
-                "kl/k1/mean": 0.4,
-                "kl/k1/min": -0.8,
-                "kl/k1/max": 0.5,
-                "opd_kl/k1/mean": 0.2,
-                "opd_kl/k1/min": -0.4,
-                "opd_kl/k1/max": 0.8,
-            },
+        {
+            "kl/k1/mean": 0.2,
+            "kl/k1/min": -0.3,
+            "kl/k1/max": 0.7,
+            "opd_kl/k1/mean": 0.6,
+            "opd_kl/k1/min": -0.9,
+            "opd_kl/k1/max": 1.1,
+        },
+        {
+            "kl/k1/mean": 0.4,
+            "kl/k1/min": -0.8,
+            "kl/k1/max": 0.5,
+            "opd_kl/k1/mean": 0.2,
+            "opd_kl/k1/min": -0.4,
+            "opd_kl/k1/max": 0.8,
+        },
     ]
     reduced = log_utils.reduce_gathered_log_dict(
         gathered,

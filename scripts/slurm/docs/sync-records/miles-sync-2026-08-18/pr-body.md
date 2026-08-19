@@ -47,10 +47,11 @@ Patch battery on the rebased tip: **52 passed + 13 subtests**.
 
 ## Divergence from upstream after sync
 
-317 files changed, +45,093 / −321 vs the merged upstream tip `fc04f666` — see [divergence.stat](divergence.stat) (slurm launcher/env tooling, skills, sync records, fork recipes, OPD/multimodal/fully-async fork features, envpack adapter).
+319 files changed, +45,098 / −323 vs the merged upstream tip `fc04f666` — see [divergence.stat](divergence.stat) (slurm launcher/env tooling, skills, sync records, fork recipes, OPD/multimodal/fully-async fork features, envpack adapter).
 
 ## Test plan
 
+- [x] `pre-commit run --all-files`: clean. The first PR CI run caught it failing — the test plan had never claimed it, so it was never run branch-wide. The repair applied ruff/isort/black to five fork files (`initialize.py`, `on_policy_distillation.py`, and three test modules) and two upstream files (`miles_plugins/models/inkling/layers.py`, `tests/fast-gpu/test_nvfp4_quantizer.py`) whose imports do not satisfy this fork's isort line length — a recurring per-sync cost worth expecting.
 - [x] `tests/fast` full suite: **5408 passed, 45 skipped, 0 failed**.
 - [x] SGLang patch battery on the rebased v0.5.16 tip: 52 passed + 13 subtests.
 - [x] `install_env.sh` fresh-env build (job 42842, env `miles_sync0818_test`): TE 2.17 source build + cutlass 4.6.2 + v0.5.16 editable + Bridge 7f0fb345 all installed.

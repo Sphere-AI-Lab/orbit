@@ -64,6 +64,7 @@ class _ScoringLoopState:
     session_scope: AsyncGenerator[aiohttp.ClientSession, None] | None = None
     session_token: object | None = None
 
+
 # Reserved teacher name in --opd-teacher-urls used as the fallback route.
 DEFAULT_TEACHER_NAME = "default"
 

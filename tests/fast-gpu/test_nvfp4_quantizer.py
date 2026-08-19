@@ -23,7 +23,9 @@ from transformer_engine.pytorch.custom_recipes.quantization_ref_nvfp4 import NVF
 from miles.backends.megatron_utils.megatron_to_hf.processors.quantizer_nvfp4 import (
     quantize_nvfp4 as processor_quantize_nvfp4,
 )
-from miles.backends.megatron_utils.megatron_to_hf.processors.quantizer_nvfp4 import quantize_params_nvfp4
+from miles.backends.megatron_utils.megatron_to_hf.processors.quantizer_nvfp4 import (
+    quantize_params_nvfp4,
+)
 from miles.utils.nvfp4 import (
     NVFP4_GROUP_SIZE,
     nvfp4_global_decode_scale_te,
