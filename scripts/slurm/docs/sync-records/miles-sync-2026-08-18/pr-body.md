@@ -14,6 +14,7 @@ Commit shape: upstream SHAs preserved under merge commit `4c93a4b4`; one fork-ad
 | fully-async port | fail-closed staleness buffer (`examples/fully_async/fail_closed_data_buffer.py`), 18 recipes → `--fully-async`, OPD scoring-session close re-wired into `dispose_rollout_function` |
 | import tax | `megatron_utils/__init__` side effects → `runtime_hooks.install_runtime_hooks()` (from `initialize.init()`): `import miles.utils.logging_utils` 75s → 0.6s per process on WekaFS (upstream candidate) |
 | scripts/models | five .sh shims delegating to `load_model_args` keep 26 recipes working; **new recipes use `load_model_args` directly** |
+| post-publication repair | `verify_env.py` sglang probe repointed for the v0.5.16 module layout (found by the fresh-env validation) |
 | merge completions | `actor.py` missing import; `actor_factory` assert retired (#1785); geo3k dir-rename sweep (61 refs); examples README/doc mirror; PYTHONUNBUFFERED on two fork launchers; sync-records excluded from hygiene scan; fork test doubles/suites updated to synced contracts |
 
 ## Conflicts resolved (32 files — all reviewed per-file)
@@ -51,8 +52,8 @@ Patch battery on the rebased tip: **52 passed + 13 subtests**.
 
 - [x] `tests/fast` full suite: **5408 passed, 45 skipped, 0 failed**.
 - [x] SGLang patch battery on the rebased v0.5.16 tip: 52 passed + 13 subtests.
-- [ ] Run `bash scripts/slurm/setup/install_env.sh` in a fresh GPU salloc (validates TE 2.17 + cuDNN + cutlass 4.6.2 + v0.5.16 editable).
-- [ ] Run `python scripts/slurm/setup/verify_env.py` and confirm all checks pass.
+- [x] `install_env.sh` fresh-env build (job 42842, env `miles_sync0818_test`): TE 2.17 source build + cutlass 4.6.2 + v0.5.16 editable + Bridge 7f0fb345 all installed.
+- [x] `verify_env.py`: 38 checks OK, 0 FAIL (job 42862). Follow-up commit updated its sglang deep-import probe to `quantization.fp8` (v0.5.16 removed `fp8_kernel`).
 - [ ] Sanity-launch a recipe (`bash scripts/slurm/submit.sh scripts/experiments/async/geo3k-vlm-multi-turn-fully-async-3node.sh`) to first eval — exercises the class-based fully-async port + prefetch derivation end to end.
 
 ⚠️ **Merge mode**: this PR MUST be merged via "Create a merge commit". Squash or rebase will break future `merge-base` detection.

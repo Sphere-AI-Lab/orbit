@@ -261,7 +261,7 @@
  scripts/slurm/setup/install_env.sh                 |  712 +++++++++
  scripts/slurm/setup/pins.env                       |   61 +
  scripts/slurm/setup/track_submodules.py            |  202 +++
- scripts/slurm/setup/verify_env.py                  |  330 +++++
+ scripts/slurm/setup/verify_env.py                  |  332 +++++
  scripts/slurm/submit.sh                            |  129 ++
  .../e2e/sglang/test_vlm_multiturn_exact_action.py  |  109 ++
  tests/fast-gpu/test_mxfp8_quantizer.py             |    4 +-
@@ -312,4 +312,4 @@
  thirdparty/sglang                                  |    1 +
  train.py                                           |   33 +-
  train_async.py                                     |   32 +-
- 314 files changed, 44958 insertions(+), 321 deletions(-)
+ 314 files changed, 44960 insertions(+), 321 deletions(-)
