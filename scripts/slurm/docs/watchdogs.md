@@ -39,7 +39,7 @@ engine health-monitor and the weight-broadcast cascade matter most here.
 | 13 | slurm preemption (SIGTERM) | outer | scheduler sends `SIGTERM@120` | 120s grace | **INTERRUPTED**, graceful |
 | 14 | OOM detection | outer | oom_kill / exit −9 / OUT_OF_MEMORY | — | **FAILED** (rc 137) |
 | 15 | max_weight_staleness recycle | S5 | group older than current weight by >N | None (off) | **discard work** (not job) |
-| 16 | completed-queue soft cap | S5 | output queue ≥ cap | 2048 | **pause sampler** (backpressure) |
+| 16 | finished-group buffer capacity | S5 | buffer ≥ `floor(F × rollout_batch_size)` | F = 2.0 | **block the producer** (backpressure) |
 
 Stages: S1 startup, S2 assembly, S3 init, S4 warmup, S5 steady state, S5a weight broadcast,
 S7 training compute, "outer" = any time after submit.

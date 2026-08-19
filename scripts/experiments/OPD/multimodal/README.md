@@ -757,9 +757,13 @@ MILES_TRAIN_ENTRY=train_async.py
 ```
 
 With `rollout_batch_size=16`, the worker keeps at most sixteen prompt groups
-actively generating. The completed-queue soft cap allows two additional
-batches to wait in CPU memory; already-running groups can finish beyond the
-cap. Stale groups are reset and returned to the data source, which clears their
+actively generating. `--fully-async-max-completed-queue-groups` no longer does
+anything: the class-based fully-async rewrite bounds the finished-group buffer
+with `--async-data-buffer-capacity-factor` (default 2.0, so
+`floor(2.0 x 16) = 32` groups — coincidentally the old cap) and the producer
+**blocks on put** when it is full, rather than pausing its own launches. The
+flag is still parsed for recipe compatibility and argument validation warns on
+it. Stale groups are reset and returned to the data source, which clears their
 response, rollout log-probs, teacher sampled log-probs and sparse teacher
 targets before regeneration.
 
@@ -784,7 +788,7 @@ algorithmic invariant and additionally show:
 3. exact-suffix alignment, multi-turn masks, total-loss additivity and both
    DAgger identities remain valid;
 4. accepted sample weight versions are finite and bounded, stale groups are
-   recycled rather than trained, and the completed queue remains bounded;
+   recycled rather than trained, and the finished-group buffer remains bounded;
 5. persistent OPD transport closes on the worker's owner event loop; and
 6. gradients, masses, scoring transport and rollout/train/total timing remain
    finite without NaN, OOM, timeout or deadlock.
@@ -892,7 +896,9 @@ HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
 `08c/08d` source the completed async `07` contract, add the same task-reward
 flags, and set `--fully-async-prefetch-batches 2`. With rollout batch size 16
 and four samples per prompt, this allows 32 prompt groups / 128 sample requests
-to be active. The completed queue cap remains 32 groups and the accepted age
+to be active. The finished-group buffer still bounds at 32 groups — now via
+`--async-data-buffer-capacity-factor 2.0 x rollout_batch_size 16` rather than
+the inert `--fully-async-max-completed-queue-groups` — and the accepted age
 bound remains two weight versions. The existing warning contract permits this
 window because `prefetch=2 <= max_weight_staleness+1=3`.
 
