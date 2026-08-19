@@ -29,6 +29,27 @@ the previous entries in the same wandb project.
   (old fork names `fully_async/accepted_staleness/*` and `over_cap_ratio` are
   gone — map by semantics when comparing against pre-sync runs).
 
+## Fully-async knob migration (2026-08-18 sync)
+
+The class-based rewrite (#1716/#1717/#2522) changed how the standing knobs are
+expressed. Same-semantics cheat sheet:
+
+| pre-sync (legacy worker) | post-sync | same semantics |
+|---|---|---|
+| `--rollout-function-path examples.fully_async...generate_rollout_fully_async` | `--fully-async` (requires an empty function path) | recipes migrated |
+| `--fully-async-prefetch-batches N` (window = batch x N groups) | kept: derives `--async-max-concurrent-samples = batch x N x n_samples_per_prompt`; mutually exclusive with the explicit knob; N=1 == upstream default | keep the knob |
+| `--max-weight-staleness N` (+ fork fail-closed filter, router-polled version) | same flag; filtering moved into the data buffer, current version passed from the trainer (#2244), fail-closed via the default `FailClosedDataBuffer` | keep the flag |
+| aborted/stale groups always recycled (hardcoded) | `--async-unused-samples-handler {retry,drop}` — **defaults to `drop`** | **pass `retry` explicitly** (both gate recipes do since `f3aefa8e`; any other fully-async recipe with a staleness bound needs the same treatment) |
+| `--fully-async-max-completed-queue-groups` (soft cap: stop launching) | inert (warns); `--async-data-buffer-capacity-factor F` bounds the finished buffer at F x batch with a **blocking put** (default 2.0) | accept the new mechanism |
+| (fixed group window) | `--rollout-submission-granularity {group,sample}`; fully-async defaults to `sample` (per-sample backfill, better saturation) | accept `sample` (an upgrade); `group` reproduces the old windowing |
+| eval unsupported (raised) | shared-engine pause-the-world or a dedicated eval fleet (#1740) | free upgrade |
+
+Gate-run history note: attempts 1-3 died on infra/bad nodes plus a shim env
+bug; attempt 4 ran with an inert prefetch knob and the fail-open buffer;
+attempt 5 ran without retry semantics. **Attempt 6 (jobs 42956/42957,
+`f3aefa8e`) is the first fully comparable pair** — earlier curves in
+M3TRL/baseline from 2026-08-19 should be ignored.
+
 ## 2026-08-18 sync gate
 
 | run | wraps | status |
