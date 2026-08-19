@@ -103,6 +103,9 @@ MULTIMODAL_ARGS=(
 ASYNC_ROLLOUT_ARGS=(
    --fully-async
    --max-weight-staleness         2
+   # pre-sync worker semantics: aborted/stale groups go back to the data buffer
+   # for regeneration (the class-based rollout's default is drop)
+   --async-unused-samples-handler retry
    # Push fresh weights to engines every step; with staleness=2 the worker keeps
    # up to 2 versions of in-flight work before recycling.
    --update-weights-interval      1

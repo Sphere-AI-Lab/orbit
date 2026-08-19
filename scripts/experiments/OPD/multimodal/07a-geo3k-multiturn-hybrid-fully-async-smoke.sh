@@ -33,6 +33,9 @@ FULLY_ASYNC_ARGS=(
    --fully-async-prefetch-batches "$FULLY_ASYNC_PREFETCH_BATCHES"
    --fully-async-max-completed-queue-groups 32
    --max-weight-staleness 2
+   # pre-sync worker semantics: aborted/stale groups go back to the data buffer
+   # for regeneration (the class-based rollout's default is drop)
+   --async-unused-samples-handler retry
    --update-weights-interval 1
 )
 

@@ -99,7 +99,10 @@ so results stay comparable:
 | optimizer (adam, lr 1e-6, wd 0.1, β 0.9/0.98) | — | example |
 | multi-turn (`max_turns: 3`, `env_geo3k`) | — | `geo3k_vlm_multi_turn_config.yaml` |
 
-Async-specific: `--max-weight-staleness 2`, `--update-weights-interval 1`.
+Async-specific: `--max-weight-staleness 2`, `--update-weights-interval 1`, and
+`--async-unused-samples-handler retry` — the class-based rollout defaults to
+`drop`, while the pre-sync worker always recycled aborted/stale groups back to
+the data buffer, so the flag restores the training-data distribution.
 The prefetch2 recipes also set `--fully-async-prefetch-batches 2`. Since the
 upstream fully-async rewrite the flag no longer drives an example worker: it
 derives `--async-max-concurrent-samples` (`rollout_batch_size * prefetch *

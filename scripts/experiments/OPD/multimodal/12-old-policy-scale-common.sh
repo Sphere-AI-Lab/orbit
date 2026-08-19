@@ -62,6 +62,9 @@ FULLY_ASYNC_ARGS=(
    --fully-async-prefetch-batches 4
    --fully-async-max-completed-queue-groups 32
    --max-weight-staleness 4
+   # pre-sync worker semantics: aborted/stale groups go back to the data buffer
+   # for regeneration (the class-based rollout's default is drop)
+   --async-unused-samples-handler retry
    --update-weights-interval 1
 )
 
@@ -128,6 +131,7 @@ _m12_assert_flag_value --n-samples-per-prompt 4
 _m12_assert_flag_value --num-rollout "$M12_NUM_ROLLOUT"
 _m12_assert_flag_value --fully-async-prefetch-batches 4
 _m12_assert_flag_value --max-weight-staleness 4
+_m12_assert_flag_value --async-unused-samples-handler retry
 _m12_assert_flag_value --eps-clip 0.2
 _m12_assert_flag_value --eps-clip-high 0.2
 _m12_assert_flag_value --opd-kl-coef 1

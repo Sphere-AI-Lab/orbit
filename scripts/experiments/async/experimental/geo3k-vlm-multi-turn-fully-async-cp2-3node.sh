@@ -71,6 +71,9 @@ ASYNC_ROLLOUT_ARGS=(
    --custom-generate-function-path examples.geo3k_vlm.multi_turn.rollout.generate
    --custom-config-path           examples/geo3k_vlm/multi_turn/geo3k_vlm_multi_turn_config.yaml
    --max-weight-staleness         2
+   # pre-sync worker semantics: aborted/stale groups go back to the data buffer
+   # for regeneration (the class-based rollout's default is drop)
+   --async-unused-samples-handler retry
    --update-weights-interval      1
 )
 

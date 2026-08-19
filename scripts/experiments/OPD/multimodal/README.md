@@ -752,6 +752,7 @@ MILES_TRAIN_ENTRY=train_async.py
 --fully-async-prefetch-batches 1
 --fully-async-max-completed-queue-groups 32
 --max-weight-staleness 2
+--async-unused-samples-handler retry
 --update-weights-interval 1
 ```
 
