@@ -38,7 +38,10 @@ HF_TRAIN_DATA="$HF_CACHE_DIR/data/geo3k_imgurl_processed/train.parquet"
 
 # submit.sh downloads only HF_MODEL_REPO, so the fixed teacher is staged and
 # owned separately on the Ray head node.
-OPD_TEACHER_MODEL_DIR=${OPD_TEACHER_MODEL_DIR:-"$HF_CACHE_DIR/models/Qwen3-VL-30B-A3B-Thinking"}
+# Read-only model tree was reorganized 2026-08-10: the big VL checkpoints moved
+# from hf_cache/models to /data/shared/models (same convention as the MoE recipes).
+HF_MODELS_ROOT=${HF_MODELS_ROOT:-/data/shared/models}
+OPD_TEACHER_MODEL_DIR=${OPD_TEACHER_MODEL_DIR:-"$HF_MODELS_ROOT/Qwen3-VL-30B-A3B-Thinking"}
 OPD_TEACHER_PORT=${OPD_TEACHER_PORT:-13141}
 OPD_TEACHER_TP=8
 OPD_TEACHER_GPUS=0,1,2,3,4,5,6,7
