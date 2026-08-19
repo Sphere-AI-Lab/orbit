@@ -1,6 +1,6 @@
 import logging
 from argparse import Namespace
-from math import isclose, isfinite
+from math import isclose
 
 import numpy as np
 import psutil

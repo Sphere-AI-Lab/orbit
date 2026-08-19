@@ -199,9 +199,7 @@ def test_rollout_kl_statistics_keep_policy_ref_and_opd_separate(monkeypatch):
 
 
 def test_gathered_metric_reduction_uses_global_min_and_max():
-    reduced = log_utils._reduce_gathered_log_dicts(
-        "rollout",
-        [
+    gathered = [
             {
                 "kl/k1/mean": 0.2,
                 "kl/k1/min": -0.3,
@@ -218,8 +216,11 @@ def test_gathered_metric_reduction_uses_global_min_and_max():
                 "opd_kl/k1/min": -0.4,
                 "opd_kl/k1/max": 0.8,
             },
-        ],
-        {
+    ]
+    reduced = log_utils.reduce_gathered_log_dict(
+        gathered,
+        dp_size=2,
+        reduction_by_key={
             "kl/k1/min": "min",
             "kl/k1/max": "max",
             "opd_kl/k1/min": "min",
@@ -227,12 +228,12 @@ def test_gathered_metric_reduction_uses_global_min_and_max():
         },
     )
 
-    assert reduced["rollout/kl/k1/mean"] == pytest.approx(0.3)
-    assert reduced["rollout/kl/k1/min"] == -0.8
-    assert reduced["rollout/kl/k1/max"] == 0.7
-    assert reduced["rollout/opd_kl/k1/mean"] == pytest.approx(0.4)
-    assert reduced["rollout/opd_kl/k1/min"] == -0.9
-    assert reduced["rollout/opd_kl/k1/max"] == 1.1
+    assert reduced["kl/k1/mean"] == pytest.approx(0.3)
+    assert reduced["kl/k1/min"] == -0.8
+    assert reduced["kl/k1/max"] == 0.7
+    assert reduced["opd_kl/k1/mean"] == pytest.approx(0.4)
+    assert reduced["opd_kl/k1/min"] == -0.9
+    assert reduced["opd_kl/k1/max"] == 1.1
 
 
 def test_multi_turn_metrics_emit_compact_interaction_section(monkeypatch):
@@ -274,11 +275,13 @@ def test_multi_turn_metrics_emit_compact_interaction_section(monkeypatch):
             "observation_token_ratio": 5 / 12,
             "rounds/mean": 2.0,
             "rounds/max": 3.0,
+            "rounds/min": 1.0,
         }
     )
     assert captured["reduction_by_key"] == {
         "raw_tokens/max": "max",
         "rounds/max": "max",
+        "rounds/min": "min",
     }
 
 

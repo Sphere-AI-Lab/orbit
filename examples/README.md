@@ -6,15 +6,18 @@ These examples are runnable starting points for your own RL workflow. A few are 
 
 End-to-end training workflows — the place to start.
 
+- **[disk_delta_weight_sync](./disk_delta_weight_sync)**: Disk-mediated delta weight sync for trainer→rollout updates without a direct NCCL path.
 - **[geo3k_vlm](./geo3k_vlm)**: Training VLMs with FSDP using GRPO on the GEO3K dataset.
   - **[multi_turn](./geo3k_vlm/multi_turn)**: The same dataset over multiple turns, with the model cropping images through an interactive environment.
 - **[lora](./lora)**: LoRA fine-tuning with the Megatron backend.
 - **[multi_lora](./multi_lora)**: Fully-async multi-adapter LoRA training with a slot-keyed adapter page table.
+- **[muon](./muon)**: Muon optimizer A/B recipes against the Adam production baseline.
 - **[on_policy_distillation](./on_policy_distillation)**: Teacher–student distillation on the student's own rollouts, run inside the on-policy training loop.
   - **[qwen3_5_35b_selfdistill](./on_policy_distillation/qwen3_5_35b_selfdistill)**: Two-phase self-distillation of Qwen3.5-35B-A3B on one 8xH200 node, with an in-process Megatron teacher.
 - **[ppo](./ppo)**: Actor-critic PPO with GAE advantages, where the critic shares the actor's train GPUs.
 - **[retool_v2](./retool_v2)**: Tool-enabled language model generation with sandboxed Python code execution interleaved with thinking.
 - **[swe-agent-harbor-docker](./swe-agent-harbor-docker)**: Trains coding and terminal agents with Harbor-managed local Docker sandboxes and verifier rewards.
+- **[vagen](./vagen)**: Multi-turn visual-game RL (Sokoban/FrozenLake) against VAGEN-style environment servers.
 
 ## [Infra Features](./infra_features)
 

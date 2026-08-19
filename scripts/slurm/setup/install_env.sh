@@ -488,6 +488,9 @@ echo "[deps] transformer_engine==$TE_VERSION + transformer_engine_cu12==$TE_VERS
 # against the torch already installed in this env.
 $UV --no-deps "transformer_engine==$TE_VERSION" "transformer_engine_cu12==$TE_VERSION"
 
+echo "[deps] nvidia-mathdx==25.6.0 (transformer_engine_torch 2.17 build dep, upstream #1789)"
+$UV "nvidia-mathdx==25.6.0"
+
 TE_BUILD_MAX_JOBS=${TE_BUILD_MAX_JOBS:-${MAX_JOBS:-16}}
 echo "[deps] transformer_engine_torch==$TE_VERSION (source build, MAX_JOBS=$TE_BUILD_MAX_JOBS)"
 _prepend_env_cuda_libs
@@ -496,11 +499,12 @@ MAX_JOBS="$TE_BUILD_MAX_JOBS" NVTE_FRAMEWORK=pytorch \
         --reinstall-package transformer_engine_torch \
         "transformer_engine_torch==$TE_VERSION"
 
-echo "[deps] onnx>=1.21.0 + onnxscript (transformer_engine_torch runtime deps)"
+echo "[deps] onnx>=1.21.0 + onnxscript + pydantic + nvdlfw-inspect (transformer_engine_torch runtime deps)"
 # The source-build path intentionally uses --no-deps to avoid PyPI's prebuilt
 # torch-ABI-bound transformer_engine_torch wheel, so restore the pure/runtime
-# deps declared by transformer_engine_torch metadata explicitly.
-$UV "onnx>=1.21.0" onnxscript
+# deps declared by transformer_engine_torch metadata explicitly (upstream #1800;
+# einops arrives via the sglang editable install).
+$UV "onnx>=1.21.0" onnxscript pydantic nvdlfw-inspect
 
 # ---------- prebuilt wheels (flash-attn, flash-attn-3, apex) -------------
 # Source builds for these are 30-60 min each on Hopper. The Dockerfile uses

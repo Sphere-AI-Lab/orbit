@@ -93,7 +93,7 @@ if [[ -f "$OPD_EVAL_SOURCE_TRAIN" && -f "$OPD_EVAL_SOURCE_TEST" ]]; then
          fi
       done
    fi
-   python3 "$MILES_REPO/examples/geo3k_vlm_multi_turn/fixed_eval.py" prepare \
+   python3 "$MILES_REPO/examples/geo3k_vlm/multi_turn/fixed_eval.py" prepare \
       --train "$OPD_EVAL_SOURCE_TRAIN" \
       --test "$OPD_EVAL_SOURCE_TEST" \
       --output "$OPD_FIXED_EVAL_MANIFEST" \
@@ -120,7 +120,7 @@ FOUND_GENERATE_FLAG=0
 if [[ -n "${ROLLOUT_ARGS+x}" ]]; then
    for i in "${!ROLLOUT_ARGS[@]}"; do
       if [[ "${ROLLOUT_ARGS[$i]}" == "--custom-generate-function-path" ]]; then
-         if [[ "${ROLLOUT_ARGS[$((i + 1))]}" == "examples.geo3k_vlm_multi_turn.rollout.generate" ]]; then
+         if [[ "${ROLLOUT_ARGS[$((i + 1))]}" == "examples.geo3k_vlm.multi_turn.rollout.generate" ]]; then
             FOUND_GENERATE_FLAG=1
          fi
          break
@@ -135,8 +135,8 @@ fi
 MILESTONE_11_EVAL_ARGS=(
    --eval-interval "$OPD_EVAL_INTERVAL"
    --eval-config "$OPD_FIXED_EVAL_CONFIG"
-   --custom-eval-rollout-log-function-path examples.geo3k_vlm_multi_turn.fixed_eval.log_eval_rollout_data
-   --rollout-all-samples-process-path examples.geo3k_vlm_multi_turn.fixed_eval.dump_samples
+   --custom-eval-rollout-log-function-path examples.geo3k_vlm.multi_turn.fixed_eval.log_eval_rollout_data
+   --rollout-all-samples-process-path examples.geo3k_vlm.multi_turn.fixed_eval.dump_samples
 )
 MILES_ARGS+=("${MILESTONE_11_EVAL_ARGS[@]}")
 

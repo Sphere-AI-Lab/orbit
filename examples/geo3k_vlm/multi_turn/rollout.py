@@ -411,7 +411,7 @@ async def generate(args: Any, sample: Sample, sampling_params) -> Sample:
             # Record this generation call's engine weight version. SGLang issues one call
             # per turn, so we append each one (weight_versions is a list); the min across
             # turns (Sample.oldest_weight_version) is what the fully-async staleness filter
-            # reads (examples/fully_async/fully_async_rollout.py). Without this the list
+            # reads (miles/rollout/fully_async_data_buffer.py). Without this the list
             # stays empty -> oldest_weight_version is None -> the staleness filter silently
             # never fires. We intentionally do NOT call the full Sample.update_from_meta_info
             # here: its finish_reason->status mapping (incl. "stop" -> COMPLETED) is

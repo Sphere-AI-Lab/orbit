@@ -17,11 +17,11 @@ This is the easy thing to get wrong:
 
 The "fully async" behavior comes from the **rollout function**, not the driver.
 `train_async.py` on its own is only step-overlapped. Fully async needs **both**
-pieces, exactly as `examples/fully_async/run-qwen3-4b-fully_async.sh` pairs them:
+pieces:
 
 ```bash
-MILES_TRAIN_ENTRY=train_async.py                                                   # driver
---rollout-function-path examples.fully_async.fully_async_rollout.generate_rollout_fully_async   # worker
+MILES_TRAIN_ENTRY=train_async.py   # driver
+--fully-async                      # worker (miles.rollout.fully_async_rollout.FullyAsyncRolloutFn)
 ```
 
 ## Runnable multi-turn recipes
@@ -84,7 +84,7 @@ No `--colocate` (train_async.py asserts not colocate).
 
 ## Hyperparameters
 
-Learning-relevant settings are **aligned with `examples/geo3k_vlm_multi_turn`**
+Learning-relevant settings are **aligned with `examples/geo3k_vlm/multi_turn`**
 so results stay comparable:
 
 | Param | Value | Source |

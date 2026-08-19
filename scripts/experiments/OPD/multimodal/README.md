@@ -371,7 +371,7 @@ Milestone `04a` sources the validated `02a` recipe and replaces only its data
 and rollout-sequence arguments:
 
 - data: `VeraIsHere/geo3k_imgurl_processed`;
-- generator: `examples.geo3k_vlm_multi_turn.rollout.generate`;
+- generator: `examples.geo3k_vlm.multi_turn.rollout.generate`;
 - interaction config: `max_turns: 3` with the Geo3K feedback environment;
 - objective: sampled RKLD only (`opd_kl_coef=1`, DAgger disabled);
 - execution: synchronous, CP=1, five optimizer steps, no eval or checkpoint.
@@ -718,8 +718,8 @@ holds this synchronous hybrid contract fixed and changes scheduling only.
 ## 07: Geo3K multi-turn hybrid OPD under fully-async scheduling
 
 Milestone `07` does not change the objective established by `06`. It switches
-the training entry point to `train_async.py` and selects
-`examples.fully_async.fully_async_rollout.generate_rollout_fully_async`. The
+the training entry point to `train_async.py` and selects `--fully-async`
+(`miles.rollout.fully_async_rollout.FullyAsyncRolloutFn` since the 2026-08 sync). The
 persistent background worker continuously performs the existing per-sample
 sequence:
 
@@ -1237,9 +1237,9 @@ optimization reward       = unchanged: task reward remains telemetry-only
 checkpoint saving         = disabled
 ```
 
-The eval dataset selects `examples.geo3k_vlm_multi_turn.fixed_eval.generate`
+The eval dataset selects `examples.geo3k_vlm.multi_turn.fixed_eval.generate`
 through a per-dataset `--eval-config`. Training keeps the original
-`examples.geo3k_vlm_multi_turn.rollout.generate` callback and metadata contract.
+`examples.geo3k_vlm.multi_turn.rollout.generate` callback and metadata contract.
 On eval only, the wrapper assigns the built-in `math` task reward before Miles
 can invoke the OPD custom RM. Student evaluation therefore generates with the
 current Student SGLang weights but issues no teacher-scoring request and cannot

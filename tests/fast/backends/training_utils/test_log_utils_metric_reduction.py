@@ -131,6 +131,13 @@ def test_log_multi_turn_data_passes_explicit_extrema_reductions(monkeypatch):
         },
     )
 
-    assert captured["metric_name"] == "multi_turn"
+    # Fork contract: the multi-turn section keeps the `interaction` namespace
+    # (SERVER_VALIDATION gates and wandb define_metric consume it) and builds
+    # its reduction map locally next to the metrics it emits.
+    assert captured["metric_name"] == "interaction"
     assert captured["rollout_id"] == 7
-    assert captured["reduction_by_key"] == log_utils._MULTI_TURN_REDUCTION_BY_KEY
+    assert captured["reduction_by_key"] == {
+        "raw_tokens/max": "max",
+        "rounds/max": "max",
+        "rounds/min": "min",
+    }

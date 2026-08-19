@@ -1,28 +1,8 @@
 import logging
 
-import torch
-
-try:
-    import deep_ep
-    from torch_memory_saver import torch_memory_saver
-
-    old_init = deep_ep.Buffer.__init__
-
-    def new_init(self, *args, **kwargs):
-        if torch_memory_saver._impl is not None:
-            torch_memory_saver._impl._binary_wrapper.cdll.tms_set_interesting_region(False)
-        old_init(self, *args, **kwargs)
-        torch.cuda.synchronize()
-        if torch_memory_saver._impl is not None:
-            torch_memory_saver._impl._binary_wrapper.cdll.tms_set_interesting_region(True)
-
-    deep_ep.Buffer.__init__ = new_init
-except ImportError:
-    logging.warning("deep_ep is not installed, some functionalities may be limited.")
-
-try:
-    import miles_plugins.megatron_bridge  # noqa: F401
-except Exception as _e:  # best-effort; not every environment uses megatron.bridge
-    logging.warning("miles megatron.bridge plugins failed to load: %s", _e)
+# Import-time side effects (deep_ep TMS patch, bridge plugin registration)
+# moved to runtime_hooks.install_runtime_hooks(), called from initialize.init():
+# they cost a ~75s megatron.bridge+transformers import that non-trainer
+# processes (anything touching ft.types via the audit event models) must not pay.
 
 logging.getLogger("megatron").setLevel(logging.WARNING)

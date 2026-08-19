@@ -14,6 +14,7 @@ from miles.utils.ft_utils.indep_dp import IndepDPInfo
 from miles.utils.hf_config import register_hf_config_aliases
 
 from .ft.indep_dp import create_indep_dp_group
+from .runtime_hooks import install_runtime_hooks
 from .parallel import create_megatron_parallel_state
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,7 @@ def init(
     if indep_dp_info is None:
         indep_dp_info = IndepDPInfo.create_trivial()
 
+    install_runtime_hooks()
     set_args(args)
     if args.enable_experimental:
         logger.info("Enable megatron experimental")

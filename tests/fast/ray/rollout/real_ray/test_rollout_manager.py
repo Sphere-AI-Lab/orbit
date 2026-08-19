@@ -265,6 +265,8 @@ class TestRolloutManagerDispose:
         manager.args = SimpleNamespace(use_opd=False)
         manager.data_source = SimpleNamespace()
         manager.generate_rollout = object()
+        # the synced dispose() also checks the eval fn for checkpoint-eval cleanup
+        manager.eval_generate_rollout = object()
         manager._metric_checker = None
         manager._health_monitors = []
         disposed = []

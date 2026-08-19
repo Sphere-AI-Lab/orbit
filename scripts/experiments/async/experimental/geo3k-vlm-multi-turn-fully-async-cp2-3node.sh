@@ -16,7 +16,7 @@
 # the default THD zigzag path's per-sample chunk-boundary alignment issues.
 #
 # Carries the same fixes as the base recipe:
-#   - C1: examples/geo3k_vlm_multi_turn/rollout.py now records weight_version per turn
+#   - C1: examples/geo3k_vlm/multi_turn/rollout.py now records weight_version per turn
 #     (restores the staleness filter).
 #   - health-check: 300s timeout + 3 consecutive failures before killing an engine
 #     (the base recipe died CLUSTER_DEAD from a single 30s false-positive timeout).
@@ -67,9 +67,9 @@ MULTIMODAL_ARGS=(
 )
 
 ASYNC_ROLLOUT_ARGS=(
-   --rollout-function-path        examples.fully_async.fully_async_rollout.generate_rollout_fully_async
-   --custom-generate-function-path examples.geo3k_vlm_multi_turn.rollout.generate
-   --custom-config-path           examples/geo3k_vlm_multi_turn/geo3k_vlm_multi_turn_config.yaml
+   --fully-async
+   --custom-generate-function-path examples.geo3k_vlm.multi_turn.rollout.generate
+   --custom-config-path           examples/geo3k_vlm/multi_turn/geo3k_vlm_multi_turn_config.yaml
    --max-weight-staleness         2
    --update-weights-interval      1
 )

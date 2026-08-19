@@ -14,7 +14,7 @@
 # (with the default rollout fn) is only step-overlapped async. Fully async needs
 # BOTH of the following — exactly what examples/fully_async/run-*.sh pairs:
 #   - the async driver train_async.py (set via MILES_TRAIN_ENTRY below) — NOT train.py;
-#   - --rollout-function-path examples.fully_async.fully_async_rollout.generate_rollout_fully_async;
+#   - --fully-async;
 #   - disaggregated layout (NO --colocate; train_async.py asserts not colocate);
 #   - --max-weight-staleness 2 (stale groups recycled to the data buffer);
 #   - --fully-async-prefetch-batches 2 (up to 2 rollout batches actively
@@ -24,16 +24,16 @@
 #     all EVAL_ARGS here.
 #
 # Hyperparameters (batch / samples / length / temperature / GRPO / optimizer) are
-# aligned with examples/geo3k_vlm_multi_turn. Compute-level knobs are scaled up
+# aligned with examples/geo3k_vlm/multi_turn. Compute-level knobs are scaled up
 # for 4x H200 (see PERF_ARGS / SGLANG_ARGS comments and async/README.md).
 # No checkpoint saving in this example run (CKPT_ARGS has no --save).
 #
 # Multi-turn (geo3k) is layered on top via the per-sample custom generate fn; the
 # fully-async worker calls generate_and_rm_group, which honors
 # --custom-generate-function-path and multimodal inputs:
-#   - --custom-generate-function-path examples.geo3k_vlm_multi_turn.rollout.generate
-#   - --custom-config-path examples/geo3k_vlm_multi_turn/geo3k_vlm_multi_turn_config.yaml
-#     (sets max_turns: 3 and rollout_interaction_env_path: examples.geo3k_vlm_multi_turn.env_geo3k)
+#   - --custom-generate-function-path examples.geo3k_vlm.multi_turn.rollout.generate
+#   - --custom-config-path examples/geo3k_vlm/multi_turn/geo3k_vlm_multi_turn_config.yaml
+#     (sets max_turns: 3 and rollout_interaction_env_path: examples.geo3k_vlm.multi_turn.env_geo3k)
 #
 # VLM-specific (same as the geo3k disagg recipe):
 #   - MODEL_ARGS_ROTARY_BASE=5000000 before sourcing qwen3-8B.sh;
@@ -98,9 +98,9 @@ MULTIMODAL_ARGS=(
 
 # Fully-async rollout driver + multi-turn per-sample generation.
 ASYNC_ROLLOUT_ARGS=(
-   --rollout-function-path        examples.fully_async.fully_async_rollout.generate_rollout_fully_async
-   --custom-generate-function-path examples.geo3k_vlm_multi_turn.rollout.generate
-   --custom-config-path           examples/geo3k_vlm_multi_turn/geo3k_vlm_multi_turn_config.yaml
+   --fully-async
+   --custom-generate-function-path examples.geo3k_vlm.multi_turn.rollout.generate
+   --custom-config-path           examples/geo3k_vlm/multi_turn/geo3k_vlm_multi_turn_config.yaml
    --max-weight-staleness         2
    --fully-async-prefetch-batches 2
    # Push fresh weights to engines every step; with staleness=2 the worker keeps
@@ -109,7 +109,7 @@ ASYNC_ROLLOUT_ARGS=(
    --update-weights-interval      1
 )
 
-# Aligned with examples/geo3k_vlm_multi_turn (run_geo3k_vlm_multi_turn.py):
+# Aligned with examples/geo3k_vlm/multi_turn (run_geo3k_vlm_multi_turn.py):
 # same batch/sample/length/temperature and GRPO/optimizer settings.
 ROLLOUT_ARGS=(
    --prompt-data   "$HF_TRAIN_DATA"

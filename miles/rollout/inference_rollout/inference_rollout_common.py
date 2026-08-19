@@ -241,7 +241,6 @@ class InferenceRolloutFn:
         # so dump impls can name files by (prompt, rollout-in-group) uniformly.
         args = state.args
         if getattr(args, "rollout_all_samples_process_path", None):
-            from miles.rollout.inference_rollout.hook_utils import call_all_samples_process_fn
             from miles.utils.misc import load_function
 
             if f := load_function(args.rollout_all_samples_process_path):

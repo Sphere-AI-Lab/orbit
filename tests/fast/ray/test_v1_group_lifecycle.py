@@ -58,6 +58,8 @@ def _make_group(events: list, *, debug_flag: str | None = None) -> RayTrainGroup
         debug_train_only=debug_flag == "debug_train_only",
         debug_rollout_only=debug_flag == "debug_rollout_only",
         use_fault_tolerance=True,
+        # the synced update_weights gate checks membership before pausing rollout FT
+        ft_components=["rollout"],
     )
     group.rollout_manager = SimpleNamespace(
         recover_updatable_engines=_RemoteCall(recover_updatable_engines),

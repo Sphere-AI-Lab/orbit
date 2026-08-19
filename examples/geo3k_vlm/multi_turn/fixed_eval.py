@@ -478,7 +478,7 @@ def prepare_eval_config(
                     "input_key": DEFAULT_PROMPT_KEY,
                     "label_key": DEFAULT_LABEL_KEY,
                     "metadata_key": EVAL_METADATA_KEY,
-                    "custom_generate_function_path": "examples.geo3k_vlm_multi_turn.fixed_eval.generate",
+                    "custom_generate_function_path": "examples.geo3k_vlm.multi_turn.fixed_eval.generate",
                 }
             ],
         }
@@ -680,7 +680,7 @@ def dump_samples(
 
 async def generate(args: Any, sample: Any, sampling_params: dict[str, Any], evaluation: bool = False):
     """Delegate train rollout unchanged; make eval use task reward instead of the OPD custom RM."""
-    from examples.geo3k_vlm_multi_turn.rollout import generate as generate_geo3k
+    from examples.geo3k_vlm.multi_turn.rollout import generate as generate_geo3k
 
     sample = await generate_geo3k(args, sample, sampling_params)
     if evaluation:

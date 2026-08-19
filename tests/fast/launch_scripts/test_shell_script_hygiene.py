@@ -18,6 +18,10 @@ class TestShellScriptHygiene:
             path.relative_to(REPO_ROOT).as_posix()
             for root in (REPO_ROOT / "scripts", REPO_ROOT / "examples")
             for path in root.rglob("*.sh")
+            # Fork: sync-records are frozen history (one-off scripts recorded
+            # verbatim in the sync PR that used them), not runnable launchers —
+            # same exclusion the divergence diff applies.
+            if "scripts/slurm/docs/sync-records/" not in path.as_posix()
             for text in [path.read_text(errors="replace")]
             if any(hardcoded in text for hardcoded in _HARDCODED_CHECKOUTS)
         ]

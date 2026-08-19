@@ -239,14 +239,17 @@
      {
       "group": "Recipes",
       "pages": [
+       "examples/disk-delta-weight-sync",
        "examples/geo3k-vlm",
        "examples/geo3k-vlm/multi-turn",
        "examples/multi-lora",
+       "examples/muon",
        "examples/on-policy-distillation",
        "examples/on-policy-distillation/qwen3-5-35b-selfdistill",
        "examples/ppo",
        "examples/retool-v2",
-       "examples/swe-agent-harbor-docker"
+       "examples/swe-agent-harbor-docker",
+       "examples/vagen"
       ]
      },
      {

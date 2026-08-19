@@ -200,9 +200,15 @@ def _score_payload(
     if top_k > 0:
         payload["top_logprobs_num"] = top_k
     if token_ids_positions is not None:
-        # Per-position scoring (patched sglang): one id-list per input position, so the
-        # teacher returns each position's own ids (sparse) instead of the global union
-        # broadcast to every position (dense O(R^2)). Aligned to logprob_start_len=0.
+        # Per-position scoring: one id-list per ABSOLUTE input position, so the
+        # teacher returns each position's own ids (sparse) instead of the global
+        # union broadcast to every position (dense O(R^2)). The array is full
+        # input length with empty prompt slots; combined with this fork's
+        # logprob_start_len = prompt_length - 1 the server only consults slots
+        # inside the materialized response window, so prompt slots stay unread.
+        # Server support does not exist on sglang-miles yet — the port defines
+        # exactly this contract (upstream #1298 assumed start_len=0 only
+        # because its payload builder had no response window at all).
         payload["token_ids_logprob_positions"] = token_ids_positions
     elif token_ids:
         payload["token_ids_logprob"] = token_ids
@@ -1124,10 +1130,7 @@ async def reward_func(args: Namespace, sample: Sample, **kwargs: Any) -> dict[st
     strategy = _get_top_k_strategy(args)
     # Per-position scoring requires a patched teacher/student server that understands
     # token_ids_logprob_positions; default off so an unpatched server keeps working.
-    per_position = getattr(args, "opd_topk_per_position", False)
-    prompt_len = len(sample.tokens) - sample.response_length
 
-    teacher_top_k = top_k if strategy in TEACHER_TOP_STRATEGIES else 0
     if strategy in TEACHER_ON_STUDENT_STRATEGIES:
         student_top = _student_top_logprobs(sample, sample.response_length)
         teacher_token_ids = _unique_ids(student_top)

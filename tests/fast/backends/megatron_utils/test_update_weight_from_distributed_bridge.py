@@ -37,6 +37,8 @@ def _make_args(mode: str) -> Namespace:
         hf_checkpoint="/fake/path",
         update_weight_buffer_size=1,
         pause_generation_mode="default",
+        # the synced mixin asserts PP==1 for LoRA sync before building the config
+        pipeline_model_parallel_size=1,
     )
 
 
@@ -55,18 +57,17 @@ def _noop_timer(_name):  # matches miles.utils.timer.timer's context-manager for
     yield
 
 
-class TestBridgeLoRARejected:
-    """Bridge mode must refuse ``is_lora=True`` at ``update_weights()`` time
-    (not in ``__init__``) so that debug flags which skip real sync
-    (``debug_train_only`` / ``debug_rollout_only`` / ``debug_skip_weight_update``)
-    can still construct the updater. The iterator filters LoRA names out of
-    base chunks, so an actual sync would silently drop adapter weights."""
+class TestLoRASyncModeContract:
+    """The 2026-08 sync flipped the LoRA weight-sync contract: upstream's
+    multi-LoRA series implements LoRA sync ON the bridge path (via
+    ``build_lora_sync_config``) and asserts bridge mode at construction, so
+    raw+LoRA is now the rejected combination. Behavior of the sync itself is
+    covered by upstream's ``test_lora_update_weight.py`` suite."""
 
+    @patch("miles.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin.HfWeightIteratorBase")
     @patch(f"{_BC_MODULE}.HfWeightIteratorBase")
-    def test_bridge_plus_lora_constructs_ok(self, mock_iter_base):
-        """Construction must succeed; reject is deferred to update_weights()
-        so debug-only runs (which never call update_weights) aren't killed
-        at actor init time."""
+    @patch("miles.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin.build_lora_sync_config")
+    def test_bridge_plus_lora_constructs_ok(self, mock_lora_cfg, mock_iter_base, mock_iter_base_mixin):
         from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
             UpdateWeightFromDistributed,
         )
@@ -81,41 +82,24 @@ class TestBridgeLoRARejected:
         )
         assert updater.is_lora is True
         assert updater._bridge_mode is True
-        mock_iter_base.create.assert_called_once()
+        mock_lora_cfg.assert_called_once()
+        assert mock_iter_base.create.called or mock_iter_base_mixin.create.called
 
     @patch(f"{_BC_MODULE}.HfWeightIteratorBase")
-    def test_bridge_plus_lora_update_weights_raises(self, mock_iter_base):
+    def test_raw_plus_lora_rejected(self, mock_iter_base):
         from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
             UpdateWeightFromDistributed,
         )
 
-        updater = UpdateWeightFromDistributed(
-            args=_make_args("bridge"),
-            model=[MagicMock()],
-            weights_getter=lambda: {},
-            model_name="qwen3vlconfig",
-            quantization_config=None,
-            is_lora=True,
-        )
-        with pytest.raises(NotImplementedError, match="bridge \\+ LoRA"):
-            updater.update_weights()
-
-    @patch(f"{_BC_MODULE}.HfWeightIteratorBase")
-    def test_raw_plus_lora_allowed(self, mock_iter_base):
-        """Raw mode handles LoRA via the mixin and convert_to_hf, so it must
-        not be blocked by the bridge-only reject."""
-        from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
-            UpdateWeightFromDistributed,
-        )
-
-        UpdateWeightFromDistributed(
-            args=_make_args("raw"),
-            model=[MagicMock()],
-            weights_getter=lambda: {},
-            model_name="qwen3",
-            quantization_config=None,
-            is_lora=True,
-        )
+        with pytest.raises(AssertionError, match="requires\\s+--megatron-to-hf-mode bridge"):
+            UpdateWeightFromDistributed(
+                args=_make_args("raw"),
+                model=[MagicMock()],
+                weights_getter=lambda: {},
+                model_name="qwen3",
+                quantization_config=None,
+                is_lora=True,
+            )
         mock_iter_base.create.assert_not_called()
 
 
@@ -167,9 +151,10 @@ class TestConnectRolloutEnginesEngineGpuCounts:
     otherwise heterogeneous engines (e.g. prefill TP=2 + decode TP=4) get a
     homogeneous fallback and the NCCL world_size/rank_cursor is wrong."""
 
+    @patch(f"{_BC_MODULE}.disconnect_rollout_engines_from_distributed")
     @patch(f"{_BC_MODULE}.connect_rollout_engines_from_distributed")
     @patch(f"{_BC_MODULE}.get_parallel_state")
-    def test_bridge_passes_engine_gpu_counts_through(self, mock_get_parallel_state, mock_connect):
+    def test_bridge_passes_engine_gpu_counts_through(self, mock_get_parallel_state, mock_connect, mock_disconnect):
         from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
             UpdateWeightFromDistributed,
         )
@@ -197,9 +182,10 @@ class TestConnectRolloutEnginesEngineGpuCounts:
         mock_connect.assert_called_once()
         assert mock_connect.call_args.kwargs.get("engine_gpu_counts") == engine_gpu_counts
 
+    @patch(f"{_BC_MODULE}.disconnect_rollout_engines_from_distributed")
     @patch(f"{_BC_MODULE}.connect_rollout_engines_from_distributed")
     @patch(f"{_BC_MODULE}.get_parallel_state")
-    def test_none_engine_gpu_counts_passes_none(self, mock_get_parallel_state, mock_connect):
+    def test_none_engine_gpu_counts_passes_none(self, mock_get_parallel_state, mock_connect, mock_disconnect):
         """When the caller doesn't know per-engine counts, ``None`` must
         propagate so the helper applies its own ``rollout_num_gpus_per_engine``
         fallback (rather than silently substituting something else)."""
