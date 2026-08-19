@@ -24,9 +24,10 @@
 #   - --max-weight-staleness 2 (stale groups recycled to the data buffer);
 #   - --fully-async-prefetch-batches 2 (up to 2 rollout batches actively
 #     generating in the background worker);
-#   - NO eval: generate_rollout_fully_async raises on evaluation, and train_async.py
-#     would call the rollout fn with evaluation=True on --eval-interval. So we omit
-#     all EVAL_ARGS here.
+#   - No eval configured here: this recipe omits all EVAL_ARGS. (Since the
+#     2026-08-18 sync, fully-async CAN evaluate — upstream #1740 added
+#     shared-engine pause-the-world and dedicated eval fleets — so this is a
+#     recipe choice now, not a hard limitation.)
 #
 # Prefetch sizing (see examples/fully_async/README.md "Prefetch and Staleness"):
 #   max active groups = rollout_batch_size * prefetch_batches = 64 * 2 = 128

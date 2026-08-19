@@ -261,6 +261,14 @@ def test_fully_async_window_knobs_are_mutually_exclusive():
     assert explicit.async_max_concurrent_samples == 99
 
 
+def test_fully_async_prefetch_batches_must_be_at_least_one():
+    """A recipe expanding an unset env var to 0 would derive a zero window and
+    silently fall back to a single group."""
+    for depth in (0, -1):
+        with pytest.raises(ValueError, match=">= 1"):
+            _resolve_rollout_functions(_fully_async_args(fully_async_prefetch_batches=depth))
+
+
 def test_fully_async_defaults_to_the_fail_closed_data_buffer():
     """DefaultDataBuffer admits groups whose staleness it cannot observe — the fail-open
     mode that cost this fork a 15-hour run."""

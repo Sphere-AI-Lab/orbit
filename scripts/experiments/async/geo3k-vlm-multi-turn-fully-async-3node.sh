@@ -16,9 +16,10 @@
 #   - --fully-async;
 #   - disaggregated layout (NO --colocate; train_async.py asserts not colocate);
 #   - --max-weight-staleness 2 (stale groups recycled to the data buffer);
-#   - NO eval: generate_rollout_fully_async raises on evaluation, and train_async.py
-#     would call the rollout fn with evaluation=True on --eval-interval. So we omit
-#     all EVAL_ARGS here.
+#   - No eval configured here: this recipe omits all EVAL_ARGS. (Since the
+#     2026-08-18 sync, fully-async CAN evaluate — upstream #1740 added
+#     shared-engine pause-the-world and dedicated eval fleets — so this is a
+#     recipe choice now, not a hard limitation.)
 #
 # Hyperparameters (batch / samples / length / temperature / GRPO / optimizer) are
 # aligned with examples/geo3k_vlm/multi_turn. Compute-level knobs are scaled up

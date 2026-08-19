@@ -49,16 +49,16 @@ Patch battery on the rebased tip: **52 passed + 13 subtests**.
 
 ## Divergence from upstream after sync
 
-319 files changed, +45,211 / −331 vs the merged upstream tip `fc04f666` — see [divergence.stat](divergence.stat) (slurm launcher/env tooling, skills, sync records, fork recipes, OPD/multimodal/fully-async fork features, envpack adapter).
+320 files changed, +45,335 / −341 vs the merged upstream tip `fc04f666` — see [divergence.stat](divergence.stat) (slurm launcher/env tooling, skills, sync records, fork recipes, OPD/multimodal/fully-async fork features, envpack adapter).
 
 ## Test plan
 
 - [ ] **Re-run the regression gate after the review repairs** — the first baseline attempt was invalid: the prefetch knob was inert and the staleness filter fail-open, so neither arm exercised what its wrapper claimed.
-- [x] `pre-commit run --all-files`: clean. The first PR CI run caught it failing — the test plan had never claimed it, so it was never run branch-wide. The repair applied ruff/isort/black to five fork files (`initialize.py`, `on_policy_distillation.py`, and three test modules) and two upstream files (`miles_plugins/models/inkling/layers.py`, `tests/fast-gpu/test_nvfp4_quantizer.py`) whose imports do not satisfy this fork's isort line length — a recurring per-sync cost worth expecting.
+- [x] `pre-commit run --all-files`: clean. The first PR CI run caught it failing — the test plan had never claimed it, so it was never run branch-wide. The repair applied ruff/isort/black to five fork files (`initialize.py`, `on_policy_distillation.py`, and three test modules) and two upstream files (`miles_plugins/models/inkling/layers.py`, `tests/fast-gpu/test_nvfp4_quantizer.py`). The cause is a hook-version split, not a style setting: `.pre-commit-config.yaml` pins isort `8.0.1` here (fork commit `11ee8ee2`, long predating this sync) against upstream's `5.13.2`, and isort 8 re-wraps `from x import a, b` into parenthesized form where isort 5 left it alone. Expect this class every sync until the two pins converge.
 - [x] `tests/fast` full suite: **5408 passed, 45 skipped, 0 failed**. Note this scope excludes `tests/ci/test/`, where upstream's new discovery-hygiene rule caught the vagen probe filename — CI is the only gate that covers it.
 - [x] SGLang patch battery on the rebased v0.5.16 tip: 52 passed + 13 subtests.
 - [x] `install_env.sh` fresh-env build (job 42842, env `miles_sync0818_test`): TE 2.17 source build + cutlass 4.6.2 + v0.5.16 editable + Bridge 7f0fb345 all installed.
-- [x] `verify_env.py`: 38 checks OK, 0 FAIL (job 42862). Follow-up commit updated its sglang deep-import probe to `quantization.fp8` (v0.5.16 removed `fp8_kernel`).
+- [x] `verify_env.py` (job 42862): the run that found the stale sglang deep-import probe — `fp8_kernel` is gone in v0.5.16. `14d126a8` repointed it at `quantization.fp8` afterwards; the 38-checks-OK/0-FAIL state is the post-fix expectation, not what job 42862 itself reported, and it has not been re-run on the cluster since.
 - [ ] **Pre-merge regression gate** (`scripts/experiments/baseline/`, wandb `M3TRL/baseline`): `sync20260818-opd-geo3k-mm-mt-fullyasync-200step` + `sync20260818-rl-geo3k-mt-fullyasync-prefetch2-3node` — curves manually compared against prior baseline entries; **this PR merges only after both show no regression**. (r3moe slot skipped this round: the R3 route plane lives on `feature/moe_multimodal`.)
 
 ⚠️ **Merge mode**: this PR MUST be merged via "Create a merge commit". Squash or rebase will break future `merge-base` detection.

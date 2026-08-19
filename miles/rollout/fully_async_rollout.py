@@ -103,6 +103,25 @@ class FullyAsyncRolloutFn:
 
     # -------------------------- producer --------------------------
 
+    async def dispose(self) -> None:
+        """Stop the producer before the caller tears down shared transports.
+
+        ``dispose_rollout_function`` closes the OPD persistent scoring session on
+        this same loop immediately after this hook returns. Without stopping the
+        worker first, in-flight groups keep issuing teacher-scoring requests
+        against a session being torn down. The legacy fully-async worker had an
+        equivalent ``stop()``/atexit shutdown that the class-based port dropped.
+        """
+        worker, self._worker = self._worker, None
+        if worker is None:
+            return
+        worker.cancel()
+        try:
+            await worker
+        except asyncio.CancelledError:
+            pass
+        logger.info("Stopped fully-async rollout worker")
+
     def _max_in_flight_groups(self) -> int:
         if (x := self.args.async_max_concurrent_samples) is not None:
             # Whole groups are submitted, so the sample budget floors to a group count.
@@ -127,13 +146,24 @@ class FullyAsyncRolloutFn:
 
     async def _worker_loop(self):
         active: set[asyncio.Task] = set()
-        while True:
-            await self._producer_resumed.wait()
-            while self._scheduler.has_capacity(pending_groups=len(active), group_budget=self._max_in_flight_groups()):
-                active.add(self._submit_one_group())
-            done, active = await self._scheduler.wait_for_progress(active)
-            for task in done:
-                await self._output.put(task.result())
+        try:
+            while True:
+                await self._producer_resumed.wait()
+                while self._scheduler.has_capacity(
+                    pending_groups=len(active), group_budget=self._max_in_flight_groups()
+                ):
+                    active.add(self._submit_one_group())
+                done, active = await self._scheduler.wait_for_progress(active)
+                for task in done:
+                    await self._output.put(task.result())
+        finally:
+            # Cancelling this loop does not reach the group tasks it spawned; without
+            # this they outlive dispose() and keep calling shared transports (the OPD
+            # scoring session) that the caller is about to close.
+            for task in active:
+                task.cancel()
+            if active:
+                await asyncio.gather(*active, return_exceptions=True)
 
     # -------------------------- consumer --------------------------
 

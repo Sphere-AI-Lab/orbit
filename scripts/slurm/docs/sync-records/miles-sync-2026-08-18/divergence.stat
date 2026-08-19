@@ -66,7 +66,7 @@
  examples/vagen/scripts/frozenlake-main.sh          |   75 +
  examples/vagen/scripts/sokoban-main.sh             |   71 +
  examples/vagen/tests/__init__.py                   |    0
- examples/vagen/tests/test_env_dynamics.py          |  183 +++
+ examples/vagen/tests/env_dynamics_probe.py         |  183 +++
  miles/backends/megatron_utils/__init__.py          |   28 +-
  miles/backends/megatron_utils/actor.py             |    4 +-
  miles/backends/megatron_utils/checkpoint.py        |   38 +-
@@ -82,7 +82,7 @@
  miles/backends/training_utils/cp_utils.py          |   36 +-
  miles/backends/training_utils/data.py              |   50 +
  miles/backends/training_utils/debug_dump.py        |    7 +
- miles/backends/training_utils/log_utils.py         |  226 ++-
+ miles/backends/training_utils/log_utils.py         |  232 ++-
  .../training_utils/loss_hub/logit_processors.py    |   11 +
  miles/backends/training_utils/loss_hub/losses.py   |   85 +-
  .../backends/training_utils/loss_hub/math_utils.py |  455 ++++++
@@ -97,6 +97,7 @@
  miles/ray/rollout/server_group.py                  |   27 +-
  miles/ray/rollout/train_data_conversion.py         |   19 +
  miles/ray/train/actor_factory.py                   |    8 +
+ miles/rollout/fully_async_rollout.py               |   44 +-
  miles/rollout/generate_utils/prefill_logprobs.py   |   11 +
  miles/rollout/generate_utils/sample_utils.py       |   55 +
  miles/rollout/inference_rollout/compatibility.py   |   24 +
@@ -106,7 +107,7 @@
  .../rollout/inference_rollout/live_diagnostics.py  |  118 ++
  miles/rollout/on_policy_distillation.py            |  936 +++++++++++-
  miles/rollout/sglang_rollout.py                    |   65 +-
- miles/utils/arguments.py                           |  405 +++++-
+ miles/utils/arguments.py                           |  421 +++++-
  miles/utils/data.py                                |   10 +-
  miles/utils/health_monitor.py                      |   25 +-
  miles/utils/misc.py                                |    2 +
@@ -150,7 +151,7 @@
  .../05b-geo3k-multiturn-topk-rest-gate.sh          |   14 +
  .../multimodal/06a-geo3k-multiturn-hybrid-smoke.sh |   29 +
  .../multimodal/06b-geo3k-multiturn-hybrid-gate.sh  |   14 +
- ...07a-geo3k-multiturn-hybrid-fully-async-smoke.sh |   39 +
+ ...07a-geo3k-multiturn-hybrid-fully-async-smoke.sh |   42 +
  .../07b-geo3k-multiturn-hybrid-fully-async-gate.sh |   14 +
  .../08a-geo3k-multiturn-opd-rl-sync-smoke.sh       |   26 +
  .../08b-geo3k-multiturn-opd-rl-sync-reference.sh   |   14 +
@@ -168,12 +169,12 @@
  .../11b-geo3k-fixed-eval-teacher30b-reference.sh   |   15 +
  ...multiturn-hybrid-sync-eval-teacher8b-200step.sh |   21 +
  ...ultiturn-hybrid-sync-eval-teacher30b-200step.sh |   22 +
- .../OPD/multimodal/12-old-policy-scale-common.sh   |  164 +++
+ .../OPD/multimodal/12-old-policy-scale-common.sh   |  168 +++
  ...iturn-2trainer-4sampler-rollout-qold-200step.sh |   17 +
  ...urn-2trainer-4sampler-recompute-qold-200step.sh |   17 +
- scripts/experiments/OPD/multimodal/README.md       | 1368 ++++++++++++++++++
+ scripts/experiments/OPD/multimodal/README.md       | 1369 ++++++++++++++++++
  .../OPD/multimodal/SERVER_VALIDATION.md            | 1350 +++++++++++++++++
- ...o3k-multimodal-multiturn-fully-async-200step.sh |  259 ++++
+ ...o3k-multimodal-multiturn-fully-async-200step.sh |  262 ++++
  .../OPD/multimodal/geo3k-multiturn-overlay.sh      |   38 +
  .../multimodal/production_image_scoring_smoke.py   |  363 +++++
  .../OPD/multimodal/results/04a-job-26525.json      |   73 +
@@ -195,16 +196,16 @@
  .../OPD/optimize/03p-rkld-topk-rest-profile.sh     |   43 +
  scripts/experiments/OPD/optimize/README.md         |  526 +++++++
  .../OPD/optimize/summarize_03p_trace.py            |  350 +++++
- scripts/experiments/async/README.md                |  151 ++
+ scripts/experiments/async/README.md                |  155 ++
  .../experimental/cp2-calculate-per-token-loss.md   |   82 ++
- .../geo3k-vlm-multi-turn-fully-async-cp2-3node.sh  |  194 +++
- .../geo3k-vlm-multi-turn-fully-async-3node.sh      |  238 +++
+ .../geo3k-vlm-multi-turn-fully-async-cp2-3node.sh  |  197 +++
+ .../geo3k-vlm-multi-turn-fully-async-3node.sh      |  242 ++++
  ...-fully-async-prefetch2-3node-torchdist-dummy.sh |   49 +
  ...i-turn-fully-async-prefetch2-3node-torchdist.sh |   53 +
- ...k-vlm-multi-turn-fully-async-prefetch2-3node.sh |  261 ++++
- ...k-vlm-multi-turn-fully-async-prefetch2-4node.sh |  244 ++++
- .../geo3k-vlm-single-turn-fully-async-3node.sh     |  240 +++
- scripts/experiments/baseline/README.md             |   38 +
+ ...k-vlm-multi-turn-fully-async-prefetch2-3node.sh |  265 ++++
+ ...k-vlm-multi-turn-fully-async-prefetch2-4node.sh |  248 ++++
+ .../geo3k-vlm-single-turn-fully-async-3node.sh     |  244 ++++
+ scripts/experiments/baseline/README.md             |   70 +
  ...c20260818-opd-geo3k-mm-mt-fullyasync-200step.sh |    7 +
  ...60818-rl-geo3k-mt-fullyasync-prefetch2-3node.sh |   10 +
  .../experiments/geo3k-vlm-8b-disagg-mt-2node.sh    |  174 +++
@@ -251,7 +252,7 @@
  scripts/slurm/check_run.sh                         |  174 +++
  scripts/slurm/docs/architecture.md                 |  112 ++
  scripts/slurm/docs/launcher.md                     |  405 ++++++
- scripts/slurm/docs/watchdogs.md                    |  231 +++
+ scripts/slurm/docs/watchdogs.md                    |  233 +++
  scripts/slurm/launch_miles.sbatch                  |  856 +++++++++++
  scripts/slurm/lib/gpu_probe.py                     |   47 +
  scripts/slurm/lib/ib_probe.sh                      |   50 +
@@ -317,4 +318,4 @@
  thirdparty/sglang                                  |    1 +
  train.py                                           |   33 +-
  train_async.py                                     |   32 +-
- 319 files changed, 45211 insertions(+), 331 deletions(-)
+ 320 files changed, 45335 insertions(+), 341 deletions(-)

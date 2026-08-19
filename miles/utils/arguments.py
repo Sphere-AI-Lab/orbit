@@ -80,6 +80,12 @@ def _resolve_rollout_functions(args) -> None:
         # silently ran at upstream's default window. Derive upstream's absolute bound from
         # it instead. prefetch=1 reproduces that default exactly
         # (rollout_batch_size groups in flight), so this is a no-op for unmigrated callers.
+        if args.fully_async_prefetch_batches < 1:
+            raise ValueError(
+                "--fully-async-prefetch-batches multiplies the generation window, so it must be "
+                f">= 1; got {args.fully_async_prefetch_batches}. A recipe expanding an unset env "
+                "var to 0 would otherwise derive a zero window and silently fall back to one group."
+            )
         if args.async_max_concurrent_samples is None:
             args.async_max_concurrent_samples = (
                 args.rollout_batch_size * args.fully_async_prefetch_batches * args.n_samples_per_prompt
@@ -751,9 +757,13 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 default=None,
                 help=(
                     "Maximum allowed gap between a group's oldest weight version and the current "
-                    "engine weight version. Groups exceeding this threshold are recycled back to "
-                    "the data buffer instead of being sent to training. Only effective in fully "
-                    "async mode. None (default) disables staleness filtering."
+                    "engine weight version. Groups exceeding this threshold are not trained on; "
+                    "what happens to them is --async-unused-samples-handler's call, which defaults "
+                    "to dropping them. With `retry` they go back to the prompt data SOURCE for "
+                    "regeneration (not to the finished-group data buffer). Only effective in fully "
+                    "async mode. None (default) disables staleness filtering, and the filter is "
+                    "fail-closed: with a bound set, a group whose staleness cannot be observed is "
+                    "refused rather than admitted."
                 ),
             )
             parser.add_argument(

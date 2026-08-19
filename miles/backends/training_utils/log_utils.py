@@ -206,6 +206,12 @@ def _get_rollout_kl_log_ratio_groups(
     # tokens. Unlike ``kl`` it needs no reference model, so it is the group
     # ordinary RL runs actually get. Direction matches the train-panel k3
     # diagnostics (KL(rollout || train)), so the two can cross-validate.
+    #
+    # PRECONDITION: p comes from the store_prefix="" log-prob forward, which
+    # actor.py skips under --use-rollout-logprobs unless --get-mismatch-metrics
+    # is also set. On such runs rollout_data["log_probs"] is absent and this
+    # group is simply not emitted -- there is no trainer recompute to compare
+    # against, so the metric would have nothing to mean.
     rollout_log_probs = rollout_data.get("rollout_log_probs")
     trainer_log_probs = rollout_data.get("log_probs")
     if rollout_log_probs and trainer_log_probs:
