@@ -115,6 +115,9 @@ ASYNC_ROLLOUT_ARGS=(
    --custom-generate-function-path examples.geo3k_vlm.multi_turn.rollout.generate
    --custom-config-path           examples/geo3k_vlm/multi_turn/geo3k_vlm_multi_turn_config.yaml
    --max-weight-staleness         2
+   # pre-sync worker semantics: aborted/stale groups go back to the data buffer
+   # for regeneration (the class-based rollout's default is drop)
+   --async-unused-samples-handler retry
    # Keep up to rollout_batch_size * 2 = 128 prompt groups generating in the
    # background worker (vs the default 1 batch). Completed groups still count
    # against max_weight_staleness, so 2 <= staleness+1 avoids wasteful recycling.
