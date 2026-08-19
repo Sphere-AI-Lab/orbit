@@ -54,6 +54,6 @@ Patch battery on the rebased tip: **52 passed + 13 subtests**.
 - [x] SGLang patch battery on the rebased v0.5.16 tip: 52 passed + 13 subtests.
 - [x] `install_env.sh` fresh-env build (job 42842, env `miles_sync0818_test`): TE 2.17 source build + cutlass 4.6.2 + v0.5.16 editable + Bridge 7f0fb345 all installed.
 - [x] `verify_env.py`: 38 checks OK, 0 FAIL (job 42862). Follow-up commit updated its sglang deep-import probe to `quantization.fp8` (v0.5.16 removed `fp8_kernel`).
-- [ ] Sanity-launch a recipe (`bash scripts/slurm/submit.sh scripts/experiments/async/geo3k-vlm-multi-turn-fully-async-3node.sh`) to first eval — exercises the class-based fully-async port + prefetch derivation end to end.
+- [ ] **Pre-merge regression gate** (`scripts/experiments/baseline/`, wandb `M3TRL/baseline`): `sync20260818-opd-geo3k-mm-mt-fullyasync-200step` + `sync20260818-rl-geo3k-mt-fullyasync-prefetch2-3node` — curves manually compared against prior baseline entries; **this PR merges only after both show no regression**. (r3moe slot skipped this round: the R3 route plane lives on `feature/moe_multimodal`.)
 
 ⚠️ **Merge mode**: this PR MUST be merged via "Create a merge commit". Squash or rebase will break future `merge-base` detection.
