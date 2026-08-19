@@ -11,4 +11,4 @@
 # Env-assignment prefix: recipes set knobs like MODEL_ARGS_ROTARY_BASE as plain
 # shell vars (the old sourced .sh saw them); the python child only sees exports,
 # so forward them explicitly.
-MODEL_ARGS=($(MODEL_ARGS_ROTARY_BASE="${MODEL_ARGS_ROTARY_BASE:-}" python3 -c "from miles.utils.external_utils.model_args_utils import load_model_args; print(load_model_args('qwen3-30B-A3B'))"))
+MODEL_ARGS=($(MODEL_ARGS_ROTARY_BASE="${MODEL_ARGS_ROTARY_BASE:-}" MODEL_ARGS_NUM_LAYERS="${MODEL_ARGS_NUM_LAYERS:-}" python3 -c "from miles.utils.external_utils.model_args_utils import load_model_args; print(load_model_args('qwen3-30B-A3B'))"))

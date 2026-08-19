@@ -14,6 +14,7 @@ Commit shape: upstream SHAs preserved under merge commit `4c93a4b4`; fork adjust
 | fully-async port | fail-closed staleness buffer (`examples/fully_async/fail_closed_data_buffer.py`), 18 recipes → `--fully-async`, OPD scoring-session close re-wired into `dispose_rollout_function` |
 | import tax | `megatron_utils/__init__` side effects → `runtime_hooks.install_runtime_hooks()` (from `initialize.init()`): `import miles.utils.logging_utils` 75s → 0.6s per process on WekaFS (upstream candidate) |
 | scripts/models | five .sh shims delegating to `load_model_args` keep 26 recipes working; **new recipes use `load_model_args` directly** |
+| review repairs (post-publication) | PR-review findings, all verified against the tree before fixing: `--fully-async-prefetch-batches` was inert after the upstream rewrite (nothing read it) so migrated recipes ran at depth 1 — now derives `--async-max-concurrent-samples`, with the prefetch-vs-staleness sanity warning restored; `FailClosedDataBuffer` was never selected by any recipe, leaving upstream's fail-open staleness admission live — now the `--fully-async` default (no-op unless `--max-weight-staleness` is set, explicit `--custom-async-data-buffer-path` still wins); `--opd-topk-per-position` was a silent no-op — now rejected in validation with matching help text, and the orphaned comment removed; `scripts/models/qwen3-30B-A3B.sh` now also forwards `MODEL_ARGS_NUM_LAYERS` (its `.py` reads it); `--fully-async-max-completed-queue-groups` warns that it is superseded by `--async-data-buffer-capacity-factor` |
 | follow-ups (pre-publication) | `14d126a8` `verify_env.py` sglang deep-import probe repointed for the v0.5.16 module layout (found by the fresh-env validation); `7c4e8040` pre-merge regression-gate wrappers under `scripts/experiments/baseline/`; `6bb4af5b` `rollout_train_kl/{k1,k2,k3}` train-vs-rollout mismatch estimators (no reference model needed) plus the upstream-R3-vs-fork-R3 analysis appended to `resolution-notes.md`; `a91c2a29` OPD baseline teacher repointed at the 2026-08-10 shared-model reorg; `b4b13326` model shims forward unexported recipe knobs to the python child |
 | merge completions | `actor.py` missing import; `actor_factory` assert retired (#1785); geo3k dir-rename sweep (61 refs); examples README/doc mirror; PYTHONUNBUFFERED on two fork launchers; sync-records excluded from hygiene scan; fork test doubles/suites updated to synced contracts |
 
@@ -39,7 +40,7 @@ Patch battery on the rebased tip: **52 passed + 13 subtests**.
 
 - **OPD top-k student-side strategies need `MILES_USE_LEGACY_ROLLOUT_V1=1`** until `opd_student_top_logprobs` is ported to the class-based rollout (upstream gate in arguments.py).
 - **OPD per-position sparse scoring is dormant**: client payload/helper/flag are merged, but the server capability does not exist on the sglang-miles line. Port ruling recorded: keep the fork's `logprob_start_len = prompt_length - 1` materialization window, keep upstream's absolute-position array convention.
-- **Fully-async prefetch knob**: recipes keep `--fully-async-prefetch-batches`; the arguments-side derivation to `--async-max-concurrent-samples` ships in this PR — verify pacing on the first async run.
+- **Fully-async prefetch knob**: recipes keep `--fully-async-prefetch-batches`, and the arguments-side derivation to `--async-max-concurrent-samples` now genuinely ships (it did not in the first published revision — the flag was inert and every migrated recipe silently ran at depth 1; caught by PR review). The two knobs are mutually exclusive, and depth 1 reproduces the upstream default exactly. Verify pacing on the first async run.
 - Multi-turn wandb metrics stay under the fork `interaction/*` namespace (upstream renamed theirs `multi_turn`); dashboards need no change.
 - **Wheels bundle stays on cu129 by design**: ACTIVE `MILES_WHEELS_TAG=cu129-x86_64` (torch 2.11) while `UPSTREAM_WHEELS_TAG` now targets `cu130-x86_64`. The sglang *source* is fully synced (ACTIVE `v0.5.16` == `UPSTREAM_SGLANG_IMAGE_TAG`), so this is a held-back torch-ABI/wheels jump, not a pending source sync — `extract_pins.py --check` stays consistent and `install_env.sh` fails closed on any ABI mismatch meanwhile. Run `/sglang-sync` for the cu130 bundle as its own torch-ABI-scoped change.
 - TE 2.17 requires the Bridge pin in this PR (`7f0fb345`); fresh envs before this PR's install_env.sh will not build TE 2.17 correctly.
@@ -47,10 +48,11 @@ Patch battery on the rebased tip: **52 passed + 13 subtests**.
 
 ## Divergence from upstream after sync
 
-319 files changed, +45,098 / −323 vs the merged upstream tip `fc04f666` — see [divergence.stat](divergence.stat) (slurm launcher/env tooling, skills, sync records, fork recipes, OPD/multimodal/fully-async fork features, envpack adapter).
+319 files changed, +45,211 / −331 vs the merged upstream tip `fc04f666` — see [divergence.stat](divergence.stat) (slurm launcher/env tooling, skills, sync records, fork recipes, OPD/multimodal/fully-async fork features, envpack adapter).
 
 ## Test plan
 
+- [ ] **Re-run the regression gate after the review repairs** — the first baseline attempt was invalid: the prefetch knob was inert and the staleness filter fail-open, so neither arm exercised what its wrapper claimed.
 - [x] `pre-commit run --all-files`: clean. The first PR CI run caught it failing — the test plan had never claimed it, so it was never run branch-wide. The repair applied ruff/isort/black to five fork files (`initialize.py`, `on_policy_distillation.py`, and three test modules) and two upstream files (`miles_plugins/models/inkling/layers.py`, `tests/fast-gpu/test_nvfp4_quantizer.py`) whose imports do not satisfy this fork's isort line length — a recurring per-sync cost worth expecting.
 - [x] `tests/fast` full suite: **5408 passed, 45 skipped, 0 failed**.
 - [x] SGLang patch battery on the rebased v0.5.16 tip: 52 passed + 13 subtests.

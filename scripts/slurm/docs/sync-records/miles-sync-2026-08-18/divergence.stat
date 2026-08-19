@@ -104,9 +104,9 @@
  .../inference_rollout/inference_rollout_common.py  |   32 +
  .../inference_rollout/inference_rollout_train.py   |   37 +-
  .../rollout/inference_rollout/live_diagnostics.py  |  118 ++
- miles/rollout/on_policy_distillation.py            |  933 +++++++++++-
+ miles/rollout/on_policy_distillation.py            |  936 +++++++++++-
  miles/rollout/sglang_rollout.py                    |   65 +-
- miles/utils/arguments.py                           |  351 ++++-
+ miles/utils/arguments.py                           |  405 +++++-
  miles/utils/data.py                                |   10 +-
  miles/utils/health_monitor.py                      |   25 +-
  miles/utils/misc.py                                |    2 +
@@ -195,7 +195,7 @@
  .../OPD/optimize/03p-rkld-topk-rest-profile.sh     |   43 +
  scripts/experiments/OPD/optimize/README.md         |  526 +++++++
  .../OPD/optimize/summarize_03p_trace.py            |  350 +++++
- scripts/experiments/async/README.md                |  148 ++
+ scripts/experiments/async/README.md                |  151 ++
  .../experimental/cp2-calculate-per-token-loss.md   |   82 ++
  .../geo3k-vlm-multi-turn-fully-async-cp2-3node.sh  |  194 +++
  .../geo3k-vlm-multi-turn-fully-async-3node.sh      |  238 +++
@@ -305,7 +305,7 @@
  tests/fast/rollout/test_geo3k_fixed_eval.py        |  586 ++++++++
  tests/fast/rollout/test_on_policy_distillation.py  | 1528 +++++++++++++++++++-
  tests/fast/test_qwen3_vl_cp_mrope.py               |  101 ++
- tests/fast/utils/test_arguments.py                 |  381 +++++
+ tests/fast/utils/test_arguments.py                 |  442 +++++-
  tests/fast/utils/test_data_filter_long_prompt.py   |   73 +
  tests/fast/utils/test_extract_pins.py              |   80 +
  tests/fast/utils/test_summarize_03p_trace.py       |   96 ++
@@ -317,4 +317,4 @@
  thirdparty/sglang                                  |    1 +
  train.py                                           |   33 +-
  train_async.py                                     |   32 +-
- 319 files changed, 45098 insertions(+), 323 deletions(-)
+ 319 files changed, 45211 insertions(+), 331 deletions(-)

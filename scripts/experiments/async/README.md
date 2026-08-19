@@ -100,9 +100,12 @@ so results stay comparable:
 | multi-turn (`max_turns: 3`, `env_geo3k`) | — | `geo3k_vlm_multi_turn_config.yaml` |
 
 Async-specific: `--max-weight-staleness 2`, `--update-weights-interval 1`.
-The prefetch2 recipes also set `--fully-async-prefetch-batches 2`, which means
-the background worker can keep `rollout_batch_size * 2` prompt groups actively
-generating while training consumes finished groups.
+The prefetch2 recipes also set `--fully-async-prefetch-batches 2`. Since the
+upstream fully-async rewrite the flag no longer drives an example worker: it
+derives `--async-max-concurrent-samples` (`rollout_batch_size * prefetch *
+n_samples_per_prompt`), so `rollout_batch_size * 2` prompt groups stay actively
+generating while training consumes finished groups. Pass that absolute bound or
+this depth knob, not both.
 
 ## Scaling for H200 (the compute knobs we opened up)
 

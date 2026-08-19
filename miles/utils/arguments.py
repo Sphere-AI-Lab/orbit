@@ -74,6 +74,47 @@ def _resolve_rollout_functions(args) -> None:
             args.rollout_all_samples_process_path is None
         ), "--fully-async does not support --rollout-all-samples-process-path"
 
+        # The fork's pipeline-depth knob survived the upstream rewrite as a name only:
+        # after #1716/#1717 replaced the example worker with FullyAsyncRolloutFn, nothing
+        # read args.fully_async_prefetch_batches, so every recipe asking for depth 2 or 4
+        # silently ran at upstream's default window. Derive upstream's absolute bound from
+        # it instead. prefetch=1 reproduces that default exactly
+        # (rollout_batch_size groups in flight), so this is a no-op for unmigrated callers.
+        if args.async_max_concurrent_samples is None:
+            args.async_max_concurrent_samples = (
+                args.rollout_batch_size * args.fully_async_prefetch_batches * args.n_samples_per_prompt
+            )
+        elif args.fully_async_prefetch_batches != 1:
+            raise ValueError(
+                "--fully-async-prefetch-batches and --async-max-concurrent-samples both size the "
+                "generation window; pass only one"
+            )
+        if args.max_weight_staleness is not None and (
+            args.fully_async_prefetch_batches > args.max_weight_staleness + 1
+        ):
+            logger.warning(
+                "--fully-async-prefetch-batches=%d exceeds --max-weight-staleness+1=%d: the deepest "
+                "in-flight groups can only finish past the staleness bound, so they are recycled or "
+                "dropped rather than trained.",
+                args.fully_async_prefetch_batches,
+                args.max_weight_staleness + 1,
+            )
+        if args.fully_async_max_completed_queue_groups != 2048:
+            logger.warning(
+                "--fully-async-max-completed-queue-groups=%d is inert: the upstream fully-async "
+                "rewrite bounds the finished-group buffer with --async-data-buffer-capacity-factor "
+                "(currently %.2f x rollout_batch_size) instead.",
+                args.fully_async_max_completed_queue_groups,
+                args.async_data_buffer_capacity_factor,
+            )
+        # DefaultDataBuffer treats unobservable staleness as admissible: a group whose samples
+        # carry no oldest_weight_version skips the --max-weight-staleness filter entirely. That
+        # fail-open mode already cost this fork a 15-hour run, so default to the fail-closed
+        # subclass. It is a no-op unless --max-weight-staleness is set, and an explicit
+        # --custom-async-data-buffer-path still wins.
+        if args.custom_async_data_buffer_path is None:
+            args.custom_async_data_buffer_path = "examples.fully_async.fail_closed_data_buffer.FailClosedDataBuffer"
+
     user_eval_path = args.eval_function_path
     args.rollout_function_path, args.eval_function_path = resolve_rollout_function_paths(args)
     # An inherited eval path is the rollout fn serving eval itself, never a checkpoint
@@ -720,12 +761,12 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 type=int,
                 default=1,
                 help=(
-                    "Number of rollout batches the fully async example worker keeps actively "
-                    "generating. The worker launches at most rollout_batch_size * "
-                    "fully_async_prefetch_batches running prompt-group tasks. Completed queued "
-                    "groups do not count against this active generation window; "
-                    "max_weight_staleness still controls whether completed groups are accepted "
-                    "for training or recycled."
+                    "Depth of the fully-async generation pipeline, in rollout batches. Derives "
+                    "--async-max-concurrent-samples as rollout_batch_size * "
+                    "fully_async_prefetch_batches * n_samples_per_prompt when that flag is unset; "
+                    "pass one or the other, not both. The default 1 reproduces the upstream bound "
+                    "of one training batch worth of trajectories in flight. max_weight_staleness "
+                    "still decides whether a completed group is trained or recycled."
                 ),
             )
             parser.add_argument(
@@ -1833,8 +1874,9 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                     "Send per-position token ids to the teacher/student scoring server "
                     "(token_ids_logprob_positions) instead of the global top-k union, so the "
                     "response is O(response_len * k) instead of O(response_len * |union|). "
-                    "Requires a patched sglang server that supports token_ids_logprob_positions; "
-                    "leave off for an unpatched server."
+                    "NOT SUPPORTED on the current sglang-miles line: the scoring path no longer "
+                    "builds per-position payloads and the server capability is absent, so "
+                    "validation rejects this flag rather than accepting a silent no-op."
                 ),
             )
             parser.add_argument(
@@ -3074,6 +3116,14 @@ def _validate_opd_sglang_scoring_args(args) -> None:
     parsed_url = urlsplit(rm_url)
     if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
         raise ValueError("--opd-type=sglang requires --rm-url to be a valid HTTP(S) teacher scoring endpoint.")
+
+    if getattr(args, "opd_topk_per_position", False):
+        raise ValueError(
+            "--opd-topk-per-position is not supported on this sglang line: the scoring path no "
+            "longer builds per-position payloads and the server capability "
+            "(token_ids_logprob_positions) is absent, so the flag would silently do nothing. "
+            "Drop it and use the global top-k union."
+        )
 
     custom_rm_path = getattr(args, "custom_rm_path", None)
     if not custom_rm_path:

@@ -1129,9 +1129,6 @@ async def reward_func(args: Namespace, sample: Sample, **kwargs: Any) -> dict[st
         return result.response
 
     strategy = _get_top_k_strategy(args)
-    # Per-position scoring requires a patched teacher/student server that understands
-    # token_ids_logprob_positions; default off so an unpatched server keeps working.
-
     if strategy in TEACHER_ON_STUDENT_STRATEGIES:
         student_top = _student_top_logprobs(sample, sample.response_length)
         teacher_token_ids = _unique_ids(student_top)

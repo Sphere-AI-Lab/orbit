@@ -196,8 +196,11 @@ def test_fully_async_eval_resolves_to_the_producer_itself():
     assert resolve_rollout_function_paths(override) == (path, "pkg.CustomEval")
 
 
-def test_fully_async_rejects_abort_pause_mode():
-    """Generation is always in flight, so aborting on every weight update would kill it."""
+FAIL_CLOSED_BUFFER = "examples.fully_async.fail_closed_data_buffer.FailClosedDataBuffer"
+
+
+def _fully_async_args(**overrides):
+    """A fully-async arg namespace that reaches the generation-window derivation."""
     args = SimpleNamespace(
         fully_async=True,
         multi_lora=False,
@@ -205,17 +208,69 @@ def test_fully_async_rejects_abort_pause_mode():
         eval_function_path=None,
         colocate=False,
         partial_rollout=False,
-        pause_generation_mode="abort",
+        pause_generation_mode="retract",
         recompute_logprobs_via_prefill=False,
         rollout_all_samples_process_path=None,
         eval_num_gpus=0,
+        rollout_batch_size=64,
+        n_samples_per_prompt=8,
+        fully_async_prefetch_batches=1,
+        async_max_concurrent_samples=None,
+        max_weight_staleness=None,
+        fully_async_max_completed_queue_groups=2048,
+        async_data_buffer_capacity_factor=2.0,
+        custom_async_data_buffer_path=None,
     )
+    for key, value in overrides.items():
+        setattr(args, key, value)
+    return args
+
+
+def test_fully_async_rejects_abort_pause_mode():
+    """Generation is always in flight, so aborting on every weight update would kill it."""
+    args = _fully_async_args(pause_generation_mode="abort")
 
     with pytest.raises(AssertionError, match="pause-generation-mode abort"):
         _resolve_rollout_functions(args)
 
     args.pause_generation_mode = "retract"
     _resolve_rollout_functions(args)
+
+
+def test_fully_async_prefetch_batches_sizes_the_generation_window():
+    """The knob was inert after the upstream rewrite: nothing read it, so every recipe
+    asking for depth 2 silently ran at depth 1."""
+    args = _fully_async_args(fully_async_prefetch_batches=2)
+    _resolve_rollout_functions(args)
+    assert args.async_max_concurrent_samples == 64 * 2 * 8
+
+    # depth 1 must reproduce upstream's own default bound (rollout_batch_size groups).
+    default = _fully_async_args()
+    _resolve_rollout_functions(default)
+    assert default.async_max_concurrent_samples == 64 * 8
+
+
+def test_fully_async_window_knobs_are_mutually_exclusive():
+    args = _fully_async_args(fully_async_prefetch_batches=2, async_max_concurrent_samples=99)
+    with pytest.raises(ValueError, match="pass only one"):
+        _resolve_rollout_functions(args)
+
+    # An explicit absolute bound alone is honored untouched.
+    explicit = _fully_async_args(async_max_concurrent_samples=99)
+    _resolve_rollout_functions(explicit)
+    assert explicit.async_max_concurrent_samples == 99
+
+
+def test_fully_async_defaults_to_the_fail_closed_data_buffer():
+    """DefaultDataBuffer admits groups whose staleness it cannot observe — the fail-open
+    mode that cost this fork a 15-hour run."""
+    args = _fully_async_args(max_weight_staleness=2)
+    _resolve_rollout_functions(args)
+    assert args.custom_async_data_buffer_path == FAIL_CLOSED_BUFFER
+
+    explicit = _fully_async_args(custom_async_data_buffer_path="pkg.CustomBuffer")
+    _resolve_rollout_functions(explicit)
+    assert explicit.custom_async_data_buffer_path == "pkg.CustomBuffer"
 
 
 def test_recompute_logprobs_via_prefill_flag_is_parsed():
