@@ -21,7 +21,7 @@
 # Environment (in this order -- megatron.core imports deep_ep, which asserts on
 # an unset CUDA_HOME):
 #
-#   source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
+#   source scripts/lora_regret/env_v0516.sh
 #   cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
 #   bash scripts/lora_regret/run_e4_lora_8gpu.sh
 #
@@ -77,7 +77,7 @@ say() { printf '\n=== %s ===\n' "$*"; }
 # survive back to your shell -- but everything after it can be, and is.
 if [[ -z "${VIRTUAL_ENV:-}" ]]; then
     echo "No virtualenv active. Run:" >&2
-    echo "  source /fast/zqiu/orbit-iclr/orbit_env/bin/activate" >&2
+    echo "  source scripts/lora_regret/env_v0516.sh" >&2
     echo "  cd ${ORBIT_ROOT} && bash \$0" >&2
     exit 2
 fi

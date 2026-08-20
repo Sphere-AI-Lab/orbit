@@ -3,7 +3,7 @@
 # Focused E4 Math OFT BS128 lower-learning-rate sweep:
 # 1e-7, 3e-7, 1e-6, 3e-6, 1e-5. Book a whole 8-GPU node.
 #
-#   source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
+#   source scripts/lora_regret/env_v0516.sh
 #   cd /fast/zqiu/orbit-iclr/orbit
 #   bash scripts/lora_regret/run_e4_math_oft_b128_low_lr_8gpu.sh
 #

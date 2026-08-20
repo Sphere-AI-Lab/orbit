@@ -1,5 +1,17 @@
 # Building the orbit environment
 
+> **Status (2026-08-19): `orbit_env` is the PRE-MERGE stack** (sglang `b52394d22`,
+> v0.5.9 line). Merged `orbit-main` code cannot run on it — it dies at argument
+> parsing with `AttributeError: 'Namespace' object has no attribute
+> 'sglang_dp_size'`. The campaign runs on **`orbit_env_v2`** (sglang `05cd76b4d`,
+> v0.5.16 line): `source scripts/lora_regret/env_v0516.sh`, which activates it,
+> sets `CUDA_HOME`, pins `PYTHONPATH` to this checkout, and appends the required
+> `RL_EXTRA_ARGS`. Keep `orbit_env` — it is the reference build for old-stack
+> numerical comparisons (see
+> `docs/reports/2026-08-19-merged-stack-numerical-equivalence.html`, which
+> verified the merged stack against it: bit-identical on H100 end to end).
+> The recipe below is the record of how `orbit_env` was built.
+
 One `uv sync` builds the whole CUDA-13.2 stack from source. This document is the recipe plus
 the three cluster-specific decisions that make the result **survive a node change** — the
 default settings do not, and getting them wrong produces an environment that looks fine and

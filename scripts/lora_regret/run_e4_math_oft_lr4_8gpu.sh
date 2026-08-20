@@ -3,7 +3,7 @@
 # E4 OFT, math panel, learning-rate column 4 of 6:
 # b8/b128/b1024 at 7e-05. Book a WHOLE 8-GPU node.
 #
-#   source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
+#   source scripts/lora_regret/env_v0516.sh
 #   cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
 #   bash scripts/lora_regret/run_e4_math_oft_lr4_8gpu.sh
 #

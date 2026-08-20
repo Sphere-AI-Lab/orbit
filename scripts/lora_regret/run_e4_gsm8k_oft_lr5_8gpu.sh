@@ -3,7 +3,7 @@
 # E4 OFT, gsm8k panel, learning-rate column 5 of 6:
 # b8/b128/b1024 at 0.0002. Book a WHOLE 8-GPU node.
 #
-#   source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
+#   source scripts/lora_regret/env_v0516.sh
 #   cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
 #   bash scripts/lora_regret/run_e4_gsm8k_oft_lr5_8gpu.sh
 #

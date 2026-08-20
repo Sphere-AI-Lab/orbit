@@ -42,7 +42,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
 
 if [[ -z "${VIRTUAL_ENV:-}" ]]; then
     echo "No virtualenv active. Run:" >&2
-    echo "  source /fast/zqiu/orbit-iclr/orbit_env/bin/activate" >&2
+    echo "  source scripts/lora_regret/env_v0516.sh" >&2
     exit 2
 fi
 
