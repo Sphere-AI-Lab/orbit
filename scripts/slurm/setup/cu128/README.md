@@ -140,3 +140,7 @@ Full mode checks the H200 device name, CUDA 12.8 runtime, compute capability 9.0
 BF16 support and a finite CUDA matmul, plus visible cuDNN and NCCL runtimes.
 Every check prints a labeled pass/fail result, and any failure produces a nonzero
 exit status.
+
+## Reusable binary layer
+
+For the experimental cold-build, relocatable archive, and source-overlay workflow, see [`BINARY_LAYER.md`](BINARY_LAYER.md).

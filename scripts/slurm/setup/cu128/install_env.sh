@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+export UV_NO_CONFIG=1
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_ORBIT_ROOT="$(cd -- "${SCRIPT_DIR}/../../../.." && pwd)"

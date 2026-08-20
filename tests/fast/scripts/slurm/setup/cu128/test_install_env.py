@@ -174,3 +174,8 @@ def test_preflight_only_accepts_fake_h200_cuda128_tools(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert "preflight passed for Slurm job 12345" in result.stdout
     assert not (tmp_path / "env").exists()
+
+
+def test_installer_ignores_ambient_uv_project_config() -> None:
+    script = SCRIPT.read_text()
+    assert "export UV_NO_CONFIG=1" in script
