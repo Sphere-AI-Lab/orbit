@@ -180,9 +180,12 @@ class BuildWavesFullftTest(unittest.TestCase):
             self.assertEqual(job.script, job.case.fullft_script)
 
     def test_fullft_without_supporting_case_raises(self) -> None:
+        # qwen25_05b now has a fullft_script on its oft case (Task 2), so pin
+        # this to the lora case, which still has none, to keep testing the
+        # "no supporting case" SystemExit path.
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
-                run_compare.build_waves(make_args(modes="async_fullft", models="qwen25_05b"))
+                run_compare.build_waves(make_args(modes="async_fullft", models="qwen25_05b", pefts="lora"))
 
     def test_default_waves_do_not_include_fullft(self) -> None:
         waves = run_compare.build_waves(make_args())
@@ -201,6 +204,18 @@ def test_case_scripts_exist():
             if rel and not (run_compare.REPO_ROOT / rel).exists():
                 missing.append(f"{case.model}/{case.precision}: {rel}")
     assert not missing, f"CASES reference missing launchers: {missing}"
+
+
+def test_a1_rungs_have_fullft_arms():
+    from tools.adapter_runtime_compare import run_compare
+
+    by_key = {(c.model, c.precision, c.peft): c for c in run_compare.CASES}
+    for key in [("qwen25_05b", "bf16", "oft"), ("qwen25_3b", "bf16", "oft"),
+                ("qwen3_4b", "bf16", "oft"), ("qwen3_30b", "bf16", "oft")]:
+        case = by_key.get(key)
+        assert case is not None, f"missing A1 case {key}"
+        assert case.fullft_script, f"A1 case {key} has no fullft_script"
+        assert (run_compare.REPO_ROOT / case.fullft_script).exists()
 
 
 if __name__ == "__main__":

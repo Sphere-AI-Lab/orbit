@@ -104,7 +104,19 @@ CASES = [
         gpu_total=4,
         train_gpus_async=2,
         rollout_gpus_async=2,
+        fullft_script="examples/high_precision/run-qwen2_5-0_5b-bf16-math-fullft-async.sh",
         extra_env={"OFT_BLOCK_SIZE": "64"},
+    ),
+    Case(
+        model="qwen25_3b",
+        precision="bf16",
+        peft="oft",
+        script="examples/high_precision/run-qwen2_5-3b-bf16-math-oft.sh",
+        gpu_total=4,
+        train_gpus_async=2,
+        rollout_gpus_async=2,
+        fullft_script="examples/high_precision/run-qwen2_5-3b-bf16-math-fullft-async.sh",
+        extra_env={"REQUIRE_MEGATRON_LOAD": "1"},
     ),
     Case(
         model="qwen3_4b",
@@ -162,6 +174,7 @@ CASES = [
         train_gpus_async=4,
         rollout_gpus_async=4,
         target_modules="linear_qkv,linear_proj,linear_fc1,linear_fc2",
+        fullft_script="examples/high_precision/run-qwen3-30b-a3b-bf16-openr1-fullft-async.sh",
     ),
     Case(
         model="qwen3_30b",
