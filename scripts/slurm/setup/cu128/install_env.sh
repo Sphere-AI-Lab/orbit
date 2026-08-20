@@ -297,6 +297,7 @@ output = Path(sys.argv[2])
 controlled = {
     "apex",
     "cuda-python",
+    "deep-ep",
     "flashinfer-cubin",
     "flashinfer-python",
     "megatron-bridge",
@@ -347,9 +348,12 @@ setup_cuda_build_environment() {
     fi
     cache_slug="$(basename -- "${ENV_PREFIX}")"
     export CUDA_ROOT="${CUDA_HOME}"
+    export PATH="${ENV_PREFIX}/bin:${PATH}"
     export NCCL_ROOT="${site_packages}/nvidia/nccl"
+    export EP_NCCL_ROOT_DIR="${NCCL_ROOT}"
     export CUDNN_PATH="${site_packages}/nvidia/cudnn"
     export CUDNN_HOME="${CUDNN_PATH}"
+    export NVSHMEM_DIR="${site_packages}/nvidia/nvshmem"
     export TORCH_CUDA_ARCH_LIST="9.0"
     export NVTE_CUDA_ARCHS="90"
     export FLASH_ATTN_CUDA_ARCHS="90"
@@ -382,6 +386,7 @@ install_environment() {
     local megatron_root="${SOURCE_ROOT}/Megatron-LM"
     local bridge_root="${SOURCE_ROOT}/Megatron-Bridge"
     local te_root="${SOURCE_ROOT}/TransformerEngine"
+    local deep_ep_root="${SOURCE_ROOT}/DeepEP"
     local apex_root="${SOURCE_ROOT}/apex"
     local fast_hadamard_root="${SOURCE_ROOT}/fast-hadamard-transform"
 
@@ -412,6 +417,8 @@ install_environment() {
         "humming-kernels==${HUMMING_KERNELS_VERSION}" \
         "nvidia-cutlass-dsl==${NVIDIA_CUTLASS_DSL_VERSION}" \
         "transformers==${TRANSFORMERS_VERSION}" "timm==${TIMM_VERSION}"
+    run "${UV_EXE}" pip install --python "${python}" --no-deps \
+        "nvidia-nccl-cu12==${NCCL_VERSION}"
 
     stage 6 "materialize immutable external source checkouts"
     ensure_checkout sglang "${SGLANG_SOURCE_URL}" "${SGLANG_COMMIT}" "${sglang_root}"
@@ -419,6 +426,9 @@ install_environment() {
     ensure_checkout megatron-bridge "${MEGATRON_BRIDGE_SOURCE_URL}" "${MEGATRON_BRIDGE_COMMIT}" "${bridge_root}"
     ensure_checkout transformer-engine "${TRANSFORMER_ENGINE_SOURCE_URL}" \
         "${TRANSFORMER_ENGINE_COMMIT}" "${te_root}"
+    ensure_checkout deep-ep "${DEEP_EP_SOURCE_URL}" "${DEEP_EP_COMMIT}" \
+        "${deep_ep_root}"
+    run git -C "${deep_ep_root}" submodule update --init --recursive
     ensure_checkout apex "${APEX_SOURCE_URL}" "${APEX_COMMIT}" "${apex_root}"
     ensure_checkout fast-hadamard "${FAST_HADAMARD_SOURCE_URL}" \
         "${FAST_HADAMARD_COMMIT}" "${fast_hadamard_root}"
@@ -428,7 +438,6 @@ install_environment() {
     run "${UV_EXE}" pip install --python "${python}" --override "${OVERRIDE_FILE}" \
         --extra-index-url "${FLASHINFER_INDEX_URL}" \
         --extra-index-url "${SGLANG_WHEEL_INDEX_URL}" \
-        --no-build-isolation-package deep-ep \
         --requirements "${ENV_PREFIX}/.orbit-cu128-requirements.txt"
 
     stage 8 "build pinned Hopper CUDA extension layer"
@@ -442,6 +451,8 @@ install_environment() {
         "flash-linear-attention==${FLASH_LINEAR_ATTENTION_VERSION}"
     run "${python}" -m pip install --no-build-isolation --no-deps \
         "git+${FAST_HADAMARD_SOURCE_URL}@${FAST_HADAMARD_COMMIT}"
+    run "${python}" -m pip install --no-build-isolation --no-deps --verbose \
+        "${deep_ep_root}"
 
     stage 9 "build pinned Apex CUDA extensions"
     run env CUDA_HOME="${CUDA_HOME}" APEX_CPP_EXT=1 APEX_CUDA_EXT=1 \
@@ -465,6 +476,8 @@ install_environment() {
         "torch==${TORCH_VERSION}+${CUDA_PROFILE}" \
         "torchvision==${TORCHVISION_VERSION}+${CUDA_PROFILE}" \
         "torchaudio==${TORCHAUDIO_VERSION}+${CUDA_PROFILE}"
+    run "${UV_EXE}" pip install --python "${python}" --no-deps \
+        "nvidia-nccl-cu12==${NCCL_VERSION}"
 
     stage 12 "run metadata, imports, H200, BF16, cuDNN, and NCCL verification"
     run "${python}" "${SCRIPT_DIR}/verify_env.py" --pins "${PINS_FILE}" \

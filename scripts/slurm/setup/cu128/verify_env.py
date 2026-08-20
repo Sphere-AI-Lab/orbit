@@ -22,6 +22,7 @@ PACKAGE_VERSION_SPECS = (
     ("orbit", "orbit version", ("ORBIT_VERSION",), "source"),
     ("numpy", "numpy version", ("NUMPY_VERSION",), "exact"),
     ("ninja", "ninja version", ("NINJA_VERSION",), "exact"),
+    ("nvidia-nccl-cu12", "NCCL package version", ("NCCL_VERSION",), "exact"),
     ("pybind11", "pybind11 version", ("PYBIND11_VERSION",), "exact"),
     ("cmake", "cmake version", ("CMAKE_VERSION",), "exact"),
     ("scikit-build-core", "scikit-build-core version", ("SCIKIT_BUILD_CORE_VERSION",), "exact"),
@@ -314,6 +315,7 @@ def source_revision_inputs(
         "megatron-lm": workspace / "Megatron-LM",
         "megatron-bridge": workspace / "Megatron-Bridge",
         "transformer-engine": workspace / "TransformerEngine",
+        "deep-ep": workspace / "DeepEP",
         "apex": workspace / "apex",
         "fast-hadamard": workspace / "fast-hadamard-transform",
     }
@@ -324,6 +326,7 @@ def source_revision_inputs(
         "transformer-engine": _pin(
             pins, "TRANSFORMER_ENGINE_COMMIT", "TRANSFORMER_ENGINE_GIT_COMMIT"
         ),
+        "deep-ep": _pin(pins, "DEEP_EP_COMMIT"),
         "apex": _pin(pins, "APEX_COMMIT"),
         "fast-hadamard": _pin(pins, "FAST_HADAMARD_COMMIT"),
     }

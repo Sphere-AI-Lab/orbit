@@ -59,6 +59,7 @@ CU128_PROFILE = {
     "SGLANG_ROUTER_WHEEL_URL": "https://github.com/zhuzilin/sgl-router/releases/download/v0.3.2-5f8d397/sglang_router-0.3.2-cp38-abi3-manylinux_2_28_x86_64.whl",
     "H200_COMPUTE_CAPABILITY": "9.0",
     "CUDNN_VERSION_POLICY": "torch-metadata",
+    "NCCL_VERSION": "2.30.4",
     "NCCL_VERSION_POLICY": "torch-metadata",
     "APEX_SOURCE_URL": "https://github.com/NVIDIA/apex.git",
     "APEX_COMMIT": "f199212da7234bf9be2244cad5b9bfa2f5fe2675",
@@ -126,6 +127,8 @@ def collect_pins(repo_root: Path, sglang_root: Path) -> dict[str, str]:
             ),
             "TRANSFORMER_ENGINE_SOURCE_URL": str(uv_sources["transformer-engine"]["git"]),
             "TRANSFORMER_ENGINE_COMMIT": str(uv_sources["transformer-engine"]["rev"]),
+            "DEEP_EP_SOURCE_URL": str(uv_sources["deep-ep"]["git"]),
+            "DEEP_EP_COMMIT": str(uv_sources["deep-ep"]["rev"]),
         }
     )
     return pins

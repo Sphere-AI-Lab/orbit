@@ -40,6 +40,7 @@ def write_fixture(tmp_path: Path) -> tuple[Path, Path]:
                 "TIMM_VERSION=1.0.16",
                 "SGLANG_ROUTER_VERSION=0.3.2",
                 "SGLANG_ROUTER_WHEEL_URL=https://example.test/sglang-router.whl",
+                "NCCL_VERSION=2.30.4",
                 "TORCH_VERSION=2.11.0",
                 "TORCHVISION_VERSION=0.26.0",
                 "TORCHAUDIO_VERSION=2.11.0",
@@ -57,6 +58,8 @@ def write_fixture(tmp_path: Path) -> tuple[Path, Path]:
                 f"MEGATRON_BRIDGE_COMMIT={'3' * 40}",
                 "TRANSFORMER_ENGINE_SOURCE_URL=https://example.test/te.git",
                 f"TRANSFORMER_ENGINE_COMMIT={'4' * 40}",
+                "DEEP_EP_SOURCE_URL=https://example.test/deep-ep.git",
+                f"DEEP_EP_COMMIT={'7' * 40}",
                 "APEX_SOURCE_URL=https://example.test/apex.git",
                 f"APEX_COMMIT={'5' * 40}",
             ]
@@ -99,9 +102,11 @@ def test_dry_run_prints_twelve_stage_plan_without_creating_prefix(tmp_path: Path
     assert "[01/12]" in result.stdout
     assert "[12/12]" in result.stdout
     assert "torch==2.11.0+cu128" in result.stdout
+    assert "nvidia-nccl-cu12==2.30.4" in result.stdout
     assert "flash_attn==2.8.3" in result.stdout
     assert "subdirectory=sgl-kernel" in result.stdout
-    assert "--no-build-isolation-package deep-ep" in result.stdout
+    assert "https://example.test/deep-ep.git" in result.stdout
+    assert str(tmp_path / "sources" / "DeepEP") in result.stdout
     assert "--full-h200" in result.stdout
     assert not (tmp_path / "env").exists()
     assert not (tmp_path / "sources").exists()

@@ -32,6 +32,7 @@ sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "51845dc4a
 megatron-core = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git", rev = "00eb75b0c803b0fc8e5413d736529d9d3b82b6bd" }
 megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "ad26fc46b252e6e53a56052776623499da3dc583" }
 transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", rev = "71bbefbf153418f943640df0f7373625dc93fa46" }
+deep-ep = { git = "https://github.com/deepseek-ai/DeepEP.git", rev = "d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb" }
 
 [tool.orbit.release.backend-pins.sglang]
 source = "https://github.com/Sphere-AI-Lab/sglang.git"
@@ -61,6 +62,11 @@ dependencies = ["torch==2.11.0", "flashinfer-python==0.6.14"]
     assert pins["SGLANG_COMMIT"] == "51845dc4acca94507ab184b007c8fcfd656b191f"
     assert pins["MEGATRON_COMMIT"] == "00eb75b0c803b0fc8e5413d736529d9d3b82b6bd"
     assert pins["MEGATRON_BRIDGE_COMMIT"] == "ad26fc46b252e6e53a56052776623499da3dc583"
+    assert pins["NCCL_VERSION"] == "2.30.4"
+    assert pins["DEEP_EP_SOURCE_URL"] == "https://github.com/deepseek-ai/DeepEP.git"
+    assert pins["DEEP_EP_COMMIT"] == "d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb"
+
+
 import pytest
 
 
@@ -82,6 +88,7 @@ sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "bbbbbbbbb
 megatron-core = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git", rev = "00eb75b0c803b0fc8e5413d736529d9d3b82b6bd" }
 megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "ad26fc46b252e6e53a56052776623499da3dc583" }
 transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", rev = "71bbefbf153418f943640df0f7373625dc93fa46" }
+deep-ep = { git = "https://github.com/deepseek-ai/DeepEP.git", rev = "d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb" }
 
 [tool.orbit.release.backend-pins.sglang]
 source = "https://github.com/Sphere-AI-Lab/sglang.git"

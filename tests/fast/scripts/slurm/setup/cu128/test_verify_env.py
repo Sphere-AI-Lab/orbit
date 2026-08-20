@@ -47,16 +47,21 @@ def test_version_check_audits_non_torch_package_pins() -> None:
     pins = {
         "ORBIT_VERSION": "0.1.0",
         "FLASHINFER_VERSION": "0.6.14",
+        "NCCL_VERSION": "2.30.4",
         "TRANSFORMERS_VERSION": "4.57.6",
     }
     installed = {
         "orbit": "0.1.0+editable",
         "flashinfer-python": "0.6.13",
+        "nvidia-nccl-cu12": "2.28.9",
         "transformers": "4.57.6",
     }
     checks = check_versions(pins, installed)
     assert Check(
         "flashinfer-python version", False, "expected 0.6.14, got 0.6.13"
+    ) in checks
+    assert Check(
+        "NCCL package version", False, "expected 2.30.4, got 2.28.9"
     ) in checks
     assert Check("transformers version", True, "4.57.6") in checks
     assert Check("orbit version", True, "0.1.0+editable") in checks
@@ -87,10 +92,14 @@ def test_source_check_reports_commit_mismatch(tmp_path: Path) -> None:
     assert f"expected {'5' * 40}" in checks[0].detail
 
 
-def test_source_revision_inputs_exclude_orbit(tmp_path: Path) -> None:
-    source_paths, expected_commits = source_revision_inputs({}, tmp_path)
+def test_source_revision_inputs_include_deep_ep_and_exclude_orbit(tmp_path: Path) -> None:
+    source_paths, expected_commits = source_revision_inputs(
+        {"DEEP_EP_COMMIT": "7" * 40}, tmp_path
+    )
     assert "orbit" not in source_paths
     assert "orbit" not in expected_commits
+    assert source_paths["deep-ep"] == tmp_path / "DeepEP"
+    assert expected_commits["deep-ep"] == "7" * 40
 
 
 class FakeNccl:
