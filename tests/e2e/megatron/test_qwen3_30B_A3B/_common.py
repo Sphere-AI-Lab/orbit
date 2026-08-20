@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import miles.utils.external_utils.command_utils as U
 
@@ -25,13 +25,20 @@ class CaseConfig:
     use_int4_rollout: bool = False
     use_bridge: bool = False
     use_r3: bool = False
+    use_mooncake: bool = False
     max_tokens_per_gpu: int = 8192
     colocate: bool = True
     rollout_num_gpus: int = None
     update_weight_transfer_mode: str = None
+    num_rollout: int = 2
+    fully_async: bool = False
+    extra_args: str = ""
+    extra_env_vars: dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
         # Validation only — topology values are passed explicitly, not inferred.
+        if self.fully_async and self.colocate:
+            raise ValueError("fully_async requires colocate=False: train_async.py rejects colocation")
         if self.num_gpus_per_node % (self.cp_size * self.pp_size) != 0:
             raise ValueError(
                 "num_gpus_per_node must be divisible by cp_size * pp_size: "
@@ -50,12 +57,12 @@ class CaseConfig:
 
 
 def prepare(case: CaseConfig, *, need_fp8: bool, need_int4: bool, all_bridge: bool) -> None:
-    U.exec_command("mkdir -p /root/models /root/datasets")
-    U.exec_command("hf download Qwen/Qwen3-30B-A3B --local-dir /root/models/Qwen3-30B-A3B")
+    U.exec_command_cpu("mkdir -p /root/models /root/datasets")
+    U.exec_command_cpu("hf download Qwen/Qwen3-30B-A3B --local-dir /root/models/Qwen3-30B-A3B")
     if need_fp8:
-        U.exec_command("hf download Qwen/Qwen3-30B-A3B-FP8 --local-dir /root/models/Qwen3-30B-A3B-FP8")
+        U.exec_command_cpu("hf download Qwen/Qwen3-30B-A3B-FP8 --local-dir /root/models/Qwen3-30B-A3B-FP8")
     if need_int4:
-        U.exec_command(
+        U.exec_command_gpu(
             f"python tools/convert_hf_to_int4_direct.py "
             f"--model-dir /root/models/{MODEL_NAME} "
             f"--save-dir /root/models/{MODEL_NAME}-INT4"
@@ -100,7 +107,7 @@ def build_train_args(case: CaseConfig, *, wandb_file: str) -> str:
         "--apply-chat-template "
         "--rollout-shuffle "
         "--rm-type deepscaler "
-        "--num-rollout 2 "
+        f"--num-rollout {case.num_rollout} "
         "--rollout-batch-size 8 "
         "--n-samples-per-prompt 8 "
         "--rollout-max-response-len 8192 "
@@ -193,6 +200,7 @@ def build_train_args(case: CaseConfig, *, wandb_file: str) -> str:
     )
     if case.colocate:
         misc_args += "--colocate "
+        misc_args += "--rematerialize-param-from-master-weight "
     else:
         misc_args += f"--rollout-num-gpus {case.rollout_num_gpus} "
 
@@ -201,6 +209,12 @@ def build_train_args(case: CaseConfig, *, wandb_file: str) -> str:
 
     if case.use_bridge:
         misc_args += "--megatron-to-hf-mode bridge "
+
+    if case.fully_async:
+        misc_args += "--fully-async "
+
+    if case.use_mooncake:
+        misc_args += U.get_mooncake_object_store_args()
 
     if case.use_deepep:
         misc_args += "--moe-token-dispatcher-type flex --moe-enable-deepep "
@@ -218,6 +232,7 @@ def build_train_args(case: CaseConfig, *, wandb_file: str) -> str:
         f"{sglang_args} "
         f"{ci_args} "
         f"{misc_args} "
+        f"{case.extra_args} "
     )
     return train_args
 
@@ -225,16 +240,19 @@ def build_train_args(case: CaseConfig, *, wandb_file: str) -> str:
 def execute(case: CaseConfig, *, wandb_file: str) -> None:
     train_args = build_train_args(case, wandb_file=wandb_file)
 
-    extra_env_vars = {"MILES_EXPERIMENTAL_ROLLOUT_REFACTOR": "1"}
+    extra_env_vars = {}
     if case.use_int4_rollout:
         extra_env_vars |= {
             "OPEN_TRAINING_INT4_FAKE_QAT_FLAG": "1",
             "OPEN_TRAINING_INT4_GROUP_SIZE": "128",
         }
+    extra_env_vars |= case.extra_env_vars
 
     U.execute_train(
         train_args=train_args,
         num_gpus_per_node=case.num_gpus_per_node + (0 if case.colocate else case.rollout_num_gpus),
         megatron_model_type=MODEL_TYPE,
+        before_ray_job_submit=U.start_mooncake_master if case.use_mooncake else None,
+        train_script="train_async.py" if case.fully_async else "train.py",
         extra_env_vars=extra_env_vars,
     )

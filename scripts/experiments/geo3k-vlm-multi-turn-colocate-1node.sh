@@ -4,7 +4,7 @@
 # geo3k multi-turn, 1-node colocated.
 #
 # Based on geo3k-vlm-colocate-1node, with the multi-turn custom rollout from
-# examples/geo3k_vlm_multi_turn/run_geo3k_vlm_multi_turn.py.
+# examples/geo3k_vlm/multi_turn/run_geo3k_vlm_multi_turn.py.
 #
 # Defaults are full-training sized. For smoke/debug runs, override the rollout
 # sizing from the launcher environment:
@@ -73,8 +73,8 @@ ROLLOUT_ARGS=(
    --input-key     problem
    --label-key     answer
    --apply-chat-template
-   --custom-generate-function-path examples.geo3k_vlm_multi_turn.rollout.generate
-   --custom-config-path examples/geo3k_vlm_multi_turn/geo3k_vlm_multi_turn_config.yaml
+   --custom-generate-function-path examples.geo3k_vlm.multi_turn.rollout.generate
+   --custom-config-path examples/geo3k_vlm/multi_turn/geo3k_vlm_multi_turn_config.yaml
    --rollout-shuffle
    --rm-type       math
    --num-rollout   "$NUM_ROLLOUT"

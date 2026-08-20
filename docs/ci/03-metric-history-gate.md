@@ -1,10 +1,7 @@
 ---
 title: Metric history & regression gate
-description: How CI keeps per-test training metrics across runs, runs a historical gate against that history, and how to add a gate spec or clean a bad data point.
+description: How CI keeps per-test training metrics across runs, gates new numbers against that history, and how to add gate specs or repair hosted history.
 ---
-
-# Metric history & regression gate
-
 CI keeps each test's per-metric numbers from every run in our own store and runs a historical gate against that history — catching the slow drift a single run cannot see. wandb stays a write-only sink; the gate never reads from it. The baseline lives in our DB.
 
 ## Identity: what shares a baseline
@@ -15,6 +12,7 @@ The gate compares a number only against earlier numbers of the same kind, from t
 
 - **Run series** (the "same test"): `(test_path, backend, suite)`. Runs differing on any field never share a baseline. A test-file edit does not reset the series (see Notes).
 - **Value within a run**: `(metric_key, steps_key, constraint_key, step)` — the declaring gate's literal content plus which point. `steps_key` and `step` are not redundant: a fanned-out declaration (`steps=[0, 1]` / `steps="all"`) produces several values in one run — one per selected step — and each must be judged only against its own step's history, so the literals identify the spec while `step` identifies the point:
+  - Session TITO metrics put `/v1/` or `/v2/` directly after `tito_session_mismatch_rate` at the producer, so wandb and both runs' history coordinates stay distinct.
   - `steps_key` / `constraint_key` are canonical JSON of the declaration's raw `steps` / `constraint` literals: no whitespace, dict keys sorted, list order kept as written, a string keyword stored with its JSON quotes — `steps=[0, 1]` → `[0,1]`, `steps="last"` → `"last"` (quotes included). Built from the raw literal, never the normalized form, so a code-side default change can never silently re-key a series; editing the declaration's literals changes these keys, so a declaration edit starts a fresh coordinate history by construction.
   - A field the declaration omitted and the defaults table filled (see Steps & constraint) keys on the **table's** literal — the table entry is the declaration source there, so editing a table entry re-keys every declaration that relied on it: one global reset lever for that standard metric's defaulted baselines, deliberate and heavier than a per-test literal edit.
   - `step` is the point the value came from: step `k` for a per-step value, `-1` for a whole-series reduction (e.g. `steps="last"`) — a reduced value keys on a constant, never the step it happened to land on, or its history would fragment across runs of different lengths.
@@ -30,7 +28,8 @@ A gate declaration composes a step selection and a constraint, both validated at
 
 - `steps` — which value(s) of the metric's series to compare: `"last"` (the series' last point, a whole-series reduction), `"all"` (every step present), or a list of step indices. `"all"` and a step list fan out to one comparison per step, judged against that step's own history.
 - **Constraint** — whether one value passes against a reference: every constraint is two-sided — the value must land in the corridor `[ref − band_down, ref + band_up]`, each side's band written independently as `band = max(rel·|ref|, abs_floor)`; a literal dict of those params (`rel_up` / `abs_floor_up` / `rel_down` / `abs_floor_down`), at least one param per side written. Bands scale from the reference only, so a deviating value cannot widen its own tolerance. There is no unbounded side — a value far from baseline in the "improving" direction is usually a broken metric, and a trusted run's values become future baselines, so admitting it would drag the mean; a side meant to be lenient gets a wide band, not no band.
-- **Defaults for standard metrics** — a per-`metric_key` defaults table beside the parser (`GATE_DEFAULTS` in `register.py`) supplies `steps` and `constraint` for the captured standard metrics, so `register_ci_gate(metric_key="train/ppo_kl")` alone is a complete declaration. Each omitted field is filled from the table at parse time, through the same schema validation; an explicitly written literal always wins over its table default, and a metric with no table entry must write both fields. The table's keys stay within the capture whitelist (test-enforced). Band values in the table are shadow-calibration starting points — tuning one re-keys the defaulted coordinates (see Identity), so retunes cost a cold start.
+- **Defaults for standard metrics** — a per-`metric_key` table beside the parser (`GATE_DEFAULTS` in `register.py`) supplies `steps` and `constraint`, so `register_ci_gate(metric_key="train/ppo_kl")` alone is complete. The standard RL metrics use `steps="all"`, so every captured step is judged and persisted under its own coordinate. Omitted fields pass through the same parser validation; an explicit literal wins, and a metric absent from the table must provide both fields. Table keys stay within the capture whitelist (test-enforced).
+- **Default calibration and resets** — band values are shadow-calibration starting points. Changing a table literal re-keys every declaration that relies on it and cold-starts those coordinates (see Identity).
 
 The authoritative constraint params are the schema table beside the function; the doc does not duplicate them. A missing/empty series, a missing required step, or a non-finite value (`NaN` / `±Inf`) at a selected coordinate is an ERROR verdict, never a skip — non-finite is judged here, not silently dropped (capture records it faithfully as a strict-JSON string marker the gate-side reader decodes; `write_run` refuses it at the DB boundary).
 
@@ -40,7 +39,7 @@ A declaration sits at top level of the test file, next to its CI registration �
 from tests.ci.ci_register import register_cuda_ci
 from tests.ci.metric_history import register_ci_gate
 
-register_cuda_ci(est_time=300, suite="stage-c-8-gpu-h100")
+register_cuda_ci(est_time=300, suite="stage-c-8-gpu-h100", labels=["megatron"])
 
 register_ci_gate(
     metric_key="train/ppo_kl",                     # must be a captured key (whitelist)
@@ -60,7 +59,7 @@ register_ci_gate(metric_key="rollout/raw_reward")  # standard metric: steps + co
 Three roles, connected only by JSONL files and one DB — there is no long-lived "metrics manager"; the pipeline is per-test, driven by the harness:
 
 - **Collector (training process)** — `miles.utils.tracking_utils.TrackingManager` fans every `log()` out to all enabled backends; `WandbBackend` and `CiHistoryBackend` are parallel siblings in that registry, so wandb receives the same data independently and nothing downstream ever reads it back. `CiHistoryBackend` snapshots the fixed metric whitelist into per-process JSONL files under the harness-assigned record dir (`MILES_CI_GATE_RECORD_DIR`, injected by the CI harness; no CLI flag).
-- **Harness / finalizer (CI runner)** — `run_suite.py` builds the store from env (`NEON_DATABASE_URL`, a CI secret), resolves the nightly signal + provenance, and allocates the record dir (CUDA suites only); `ci_utils.run_unittest_files` hands each attempt its own record subdir and merges the PASSING attempt's per-process records into the merged per-run JSONL record (a metric key appearing in several processes gets its series concatenated and sorted by step); `ci_utils.run_gate_hook` then assigns identity, runs the gate, and acts on the verdict.
+- **Harness / finalizer (CI runner)** — `run_suite.py` builds the store from env (`NEON_DATABASE_URL`, a CI secret), resolves the baseline-write signal + provenance, and allocates the record dir (CUDA suites only); `ci_utils.run_unittest_files` hands each attempt its own record subdir and merges the PASSING attempt's per-process records into the merged per-run JSONL record (a metric key appearing in several processes gets its series concatenated and sorted by step); `ci_utils.run_gate_hook` then assigns identity, runs the gate, and acts on the verdict.
 - **Gate library (pure functions, read-only against storage)** — `register.py` parses `register_ci_gate` declarations out of the test file's AST at evaluation time (the call itself is a runtime no-op; nothing registers at runtime), `selection.py` picks comparison coordinates, `constraints.py` judges pass/fail, `gate.py:evaluate_gate` composes them over the store's baseline read.
 
 One CUDA test run, end to end:
@@ -74,7 +73,7 @@ flowchart TD
     end
     ci_history_backend -- "per-process JSONL snapshots<br>(whitelist only; non-finite → string markers)" --> run_unittest_files
     subgraph ci_harness["CI harness (tests/ci)"]
-        run_suite["run_suite.py<br>store from env · nightly signal · provenance · record dir"] --> run_unittest_files["run_unittest_files<br>per-attempt record subdir; merge the PASSING attempt"]
+        run_suite["run_suite.py<br>store from env · baseline-write signal · provenance · record dir"] --> run_unittest_files["run_unittest_files<br>per-attempt record subdir; merge the PASSING attempt"]
         run_unittest_files --> run_gate_hook["run_gate_hook<br>assign identity → run the gate → act on the verdict"]
     end
     gate_specs["register_ci_gate specs in the test file<br>(runtime no-op)"] -. "AST parse" .-> evaluate_gate
@@ -83,7 +82,7 @@ flowchart TD
         evaluate_gate["register → selection → constraints → evaluate_gate"]
     end
     evaluate_gate -- "recent_trusted_values (baseline read)" --> metric_store
-    run_gate_hook -- "nightly: write_run(values + trusted)<br>ordinary PR: shadow verdict → log + GITHUB_STEP_SUMMARY, no write" --> metric_store
+    run_gate_hook -- "nightly or weekly: write_run(values + trusted)<br>non-writing run: shadow verdict → log + GITHUB_STEP_SUMMARY" --> metric_store
     subgraph storage
         metric_store[("MetricHistoryStore<br>SQLite offline · Neon CI/prod")]
     end
@@ -106,7 +105,7 @@ A fanned-out spec (`steps="all"` or a step list) contributes one verdict per ste
 
 The gate's data input is the run's **merged per-run JSONL record**:
 
-- *Merged, per-run*: three processes (the `train.py` driver, the training actor's main rank, the rollout manager) call `init_tracking`, each snapshotting to its own record file. In practice no whitelisted key is logged by more than one of them (today the actor's main rank logs them all), so the merge is a plain union; a key that does appear in several files just gets its series concatenated and step-sorted.
+- *Merged, per-run*: three processes (the `train.py` driver, the training actor's main rank, the rollout manager) call `init_tracking`, each snapshotting to its own record file. In practice each whitelisted key has one logging owner, so the merge is a plain union; a key that does appear in several files just gets its series concatenated and step-sorted.
 - *JSONL* (JSON Lines): one self-contained JSON line per metric — `{"metric": <key>, "series": [[step, value], ...]}` — each line stands alone, so a process killed mid-run still leaves a parseable record. Capture writes the per-process files, the merge produces this one, and the gate only reads it (`parse_merged_record`, decoding the non-finite string markers back to floats).
 
 How one spec flows from declaration to verdict:
@@ -161,7 +160,7 @@ flowchart TD
 
     result --> trust
     store -- "baseline read" --> histq
-    trust -- "a trusted run's values are persisted (write_run) and become<br>future baselines — writer: the harness, on nightly-marked runs only" --> store
+    trust -- "a trusted run's values are persisted (write_run) and become<br>future baselines — writer: the harness, on baseline-writing runs only" --> store
 ```
 
 
@@ -191,14 +190,22 @@ Chart key: rectangle = a step or check; rounded box = a data artifact; diamond =
 
 **Operations** — hosted Postgres setup is out-of-band: the two tables and application role are provisioned outside this repo, and runtime gate code stays DML-only (`NeonMetricHistoryStore` never issues DDL). Old-row cleanup policy is a later operational concern, not part of the M0/M1 substrate.
 
+### Inspect hosted history
+
+Repository writers can use `$neon-access` to query or repair hosted metric history. For example:
+
+```text
+Use $neon-access to show the 10 most recent metric-history runs for tests/e2e/megatron/test_qwen3_5_35B_A3B_mtp/test_mtp1_spec_v2_r3.py and include each run's metric rows.
+```
+
 ## Trust, cleanup, who writes
 
-**Goal:** keep the baseline self-protecting — only nightly-marked runs (with recorded provenance) write at all, a nightly run whose metrics fail the gate is still persisted but flagged `trusted = false` so it never enters the baseline, and a point later found bad is revoked by one flag flip instead of deletion.
+**Goal:** keep the baseline self-protecting — only baseline-writing runs (with recorded provenance) write at all, a run whose metrics fail the gate is still persisted but flagged `trusted = false` so it never enters the baseline, and a point later found bad is revoked by one flag flip instead of deletion.
 
 - A run is `trusted` iff it passed **all** active gates. A drifting run is still recorded, with `trusted = false`, so it can't drag the baseline. A test that fails then passes on **retry** is gated on its passing attempt's metrics and trusted normally — needing a retry is not itself a trust penalty.
 - **Clean a bad point**: `mark_untrusted` = `UPDATE runs SET trusted = false` on the run. The next gate read excludes it immediately — no rebaseline, no row deletion.
-- **Nightly-marked runs write baselines** — either the `schedule` cron (on `main`, post-merge) **or** a PR carrying the `nightly` label (the PR's own pre-merge code). Provenance (`event_name`, `pr_number`) records which, so a label-PR baseline is distinguishable from a post-merge one and can be `mark_untrusted`'d if it turns out bad. Ordinary (unlabeled) PR runs are read-only and only shadow.
-- **What one nightly run writes** — one `runs` row plus one `metric_values` row per value coordinate: two specs sharing a coordinate (identical `steps` + `constraint` literals, differing only in policy metadata) collapse to a single row, so a duplicated declaration cannot double-weight the baseline mean; and a file that declares no gate writes nothing at all — `run_gate_hook` skips the write instead of leaving an empty `runs` row.
+- **Nightly and weekly runs write baselines** — either an explicitly mapped `schedule` cron (on `main`, post-merge) **or** a PR carrying the `nightly` label (the PR's own pre-merge code). Provenance (`event_name`, `pr_number`) records whether a writer was scheduled or PR-triggered, so a label-PR baseline can be `mark_untrusted`'d if it turns out bad. Ordinary PR runs and explicitly called release runs are read-only and only shadow; frozen release dependency SHAs must not enter the rolling baseline.
+- **What one baseline-writing run writes** — one `runs` row plus one `metric_values` row per value coordinate: two specs sharing a coordinate (identical `steps` + `constraint` literals, differing only in policy metadata) collapse to a single row, so a duplicated declaration cannot double-weight the baseline mean; and a file that declares no gate writes nothing at all — `run_gate_hook` skips the write instead of leaving an empty `runs` row.
 
 
 
@@ -213,7 +220,7 @@ Shadow-first: collect, store, and evaluate, but **never block a PR** initially �
 **Goal:** record accepted caveats and open questions beside the behavior they qualify; planned-but-unimplemented work lives in TODO below.
 
 - A test-file edit does not reset the series: `test_file_hash` was dropped from the run-series identity because a tiny edit to a test kept wiping its whole history. A test change that genuinely shifts a metric's expected level surfaces as gate failures instead; the reset levers are manual — `mark_untrusted` the stale runs, or edit the declaration literals (new `steps_key` / `constraint_key` ⇒ fresh coordinate).
-- The nightly trigger (`schedule` cron + `nightly` label) already shipped (#1491); detection here is harness-side via `GITHUB_EVENT_NAME`, so this feature needs **no** `pr-test.yml` **edit**.
+- Baseline writing is selected by the resolved CI policy rather than inferred from `GITHUB_EVENT_NAME`; nightly and weekly write, while regular and release runs stay shadow-only.
 - Open: should a brand-new test's first baselines need human confirmation before counting as trusted? (v1: no.)
 
 

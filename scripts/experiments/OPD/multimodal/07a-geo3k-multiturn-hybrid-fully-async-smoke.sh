@@ -24,15 +24,21 @@ source "$SCRIPT_DIR/06a-geo3k-multiturn-hybrid-smoke.sh"
 
 # The completed 07 gate defaults to one active rollout batch. Later recipes may
 # override the prefetch window without duplicating the fully-async contract.
-# The queue cap allows at most two completed batches to wait in CPU memory, and
-# work more than two rollout-engine weight versions old is recycled. No
+# The finished-group buffer holds at most two batches (--async-data-buffer-
+# capacity-factor 2.0 x rollout_batch_size) and the producer blocks when it is
+# full; --fully-async-max-completed-queue-groups below is inert since the
+# 2026-08-18 sync and kept only for recipe compatibility. Work more than two
+# rollout-engine weight versions old is recycled. No
 # TIS/importance-ratio option is enabled; sampled RKLD and trainer-direct DAgger
 # retain the 06 semantics.
 FULLY_ASYNC_ARGS=(
-   --rollout-function-path examples.fully_async.fully_async_rollout.generate_rollout_fully_async
+   --fully-async
    --fully-async-prefetch-batches "$FULLY_ASYNC_PREFETCH_BATCHES"
    --fully-async-max-completed-queue-groups 32
    --max-weight-staleness 2
+   # pre-sync worker semantics: aborted/stale groups go back to the data buffer
+   # for regeneration (the class-based rollout's default is drop)
+   --async-unused-samples-handler retry
    --update-weights-interval 1
 )
 

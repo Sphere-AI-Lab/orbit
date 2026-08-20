@@ -6,20 +6,19 @@ import miles.utils.external_utils.command_utils as U
 
 register_cuda_ci(
     est_time=600,
-    suite="stage-c-8-gpu-h100",
+    suite="stage-c-2-gpu-h200",
     labels=["fsdp"],
-    disabled="FSDP backend has known issues, not actively maintained",
 )
 
 ENABLE_EVAL = bool(int(os.environ.get("MILES_TEST_ENABLE_EVAL", "1")))
-NUM_GPUS = 8
+NUM_GPUS = 2
 
 MODEL_NAME = "Qwen3-4B"
 
 
 def prepare():
-    U.exec_command("mkdir -p /root/models /root/datasets")
-    U.exec_command(f"hf download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
+    U.exec_command_cpu("mkdir -p /root/models /root/datasets")
+    U.exec_command_cpu(f"hf download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
     U.hf_download_dataset("zhuzilin/dapo-math-17k")
     U.hf_download_dataset("zhuzilin/aime-2024")
 
@@ -76,7 +75,7 @@ def execute():
         "--sglang-decode-log-interval 1000 "
         "--sglang-enable-metrics "
         "--sglang-enable-deterministic-inference "
-        "--sglang-rl-on-policy-target fsdp "
+        "--sglang-true-on-policy-contract qwen3_dense_true_on_policy_v1 "
         "--sglang-attention-backend fa3 "
         "--attn-implementation flash_attention_3 "
         "--deterministic-mode "
@@ -105,7 +104,6 @@ def execute():
         "NVTE_ALLOW_NONDETERMINISTIC_ALGO": "0",
         "CUBLAS_WORKSPACE_CONFIG": ":4096:8",
         "CUDA_DEVICE_MAX_CONNECTIONS": "1",
-        "MILES_EXPERIMENTAL_ROLLOUT_REFACTOR": "1",
     }
 
     U.execute_train(

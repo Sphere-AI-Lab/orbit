@@ -27,9 +27,9 @@ def _get_latest_checkpointed_iteration() -> int:
 
 
 def prepare():
-    U.exec_command("mkdir -p /root/models /root/datasets")
-    U.exec_command(f"hf download zai-org/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
-    U.exec_command(f"rm -rf /root/models/{MODEL_NAME}_miles")
+    U.exec_command_cpu("mkdir -p /root/models /root/datasets")
+    U.exec_command_cpu(f"hf download zai-org/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
+    U.exec_command_cpu(f"rm -rf /root/models/{MODEL_NAME}_miles")
     U.hf_download_dataset("zhuzilin/dapo-math-17k")
     U.hf_download_dataset("zhuzilin/aime-2024")
 
@@ -177,7 +177,6 @@ def execute(mode: str = "", ckpt_step: int | None = None):
         num_gpus_per_node=NUM_GPUS,
         megatron_model_type=MODEL_TYPE,
         extra_env_vars={
-            "MILES_EXPERIMENTAL_ROLLOUT_REFACTOR": "1",
             "MILES_TEST_R3_THRESHOLD": "1.0",
         },
     )

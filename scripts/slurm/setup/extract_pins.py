@@ -65,7 +65,7 @@ PINS_FILE = REPO_ROOT / "scripts" / "slurm" / "setup" / "pins.env"
 # existing row during sglang-sync when that release's binary set changes.
 # ---------------------------------------------------------------------------
 WHEELS_STACK: dict[str, dict[str, str]] = {
-    "cu129-x86_64": {"sglang": "v0.5.15", "torch": "2.11.0", "router": "0.3.2"},
+    "cu129-x86_64": {"sglang": "v0.5.16", "torch": "2.11.0", "router": "0.3.2"},
 }
 
 
@@ -95,13 +95,18 @@ PIN_GROUPS: list[tuple[str, list[Pin]]] = [
     (
         "From docker/Dockerfile (radixark/miles)",
         [
-            Pin("TE_VERSION", DOCKERFILE, r'transformer_engine\[pytorch\]==([^"\s]+)"'),
+            Pin(
+                "TE_VERSION",
+                DOCKERFILE,
+                r"/tmp/wheels/transformer_engine-([0-9][^\s-]+)-py3-none-any\.whl",
+                "Upstream #1796 installs TE from rolling wheels; the version only appears in wheel filenames.",
+            ),
             Pin("MBRIDGE_COMMIT", DOCKERFILE, r"ISEEKYAN/mbridge\.git@([0-9a-f]{7,40})"),
             Pin(
-                "FLASH_ATTN_INTERFACE_COMMIT",
+                "TMS_COMMIT",
                 DOCKERFILE,
-                r"flash-attention/([0-9a-f]{7,40})/hopper",
-                "FA3 ships .so but not the python interface; we drop it in by hand.",
+                r"torch_memory_saver\.git@([0-9a-f]{7,40})",
+                "Re-pinned by upstream #1575 after the unpinned #1773/#1774 era.",
             ),
             Pin("MILES_WHEELS_REPO", DOCKERFILE, r"^ARG\s+WHEELS_REPO=(\S+)"),
         ],
@@ -155,11 +160,13 @@ def read_active_wheels_tag(default: str) -> str:
     return default
 
 
-# torch_memory_saver: upstream's Dockerfile installs the git TIP (unpinned since
-# #1773/#1774, 2026-07) so there is nothing left to extract. Bare-metal rebuilds
-# must stay reproducible, so this is a hand-owned pin instead: preserved from
-# pins.env, bumped by hand during miles-sync when upstream moves.
-TMS_COMMIT_DEFAULT = "6d5bce48"
+# FA3 python interface: upstream #1799 moved to FA3 3.0.0 wheels that bundle
+# flash_attn_interface (fetching it again would double-register the torch custom
+# ops), so the Dockerfile no longer carries the hopper commit. Our ACTIVE wheels
+# bundle still ships the interface-less FA3, so install_env.sh keeps the guarded
+# fetch and this pin is hand-owned until the bundle moves to an FA3 that bundles
+# the interface — then both the fetch and this pin are deleted together.
+FLASH_ATTN_INTERFACE_COMMIT_DEFAULT = "fbf24f67cf7f6442c5cfb2c1057f4bfc57e72d89"
 
 
 def read_preserved(key: str, default: str) -> str:
@@ -196,7 +203,9 @@ def extract() -> dict[str, str]:
         values[pin.key] = search(pin)
 
     # Hand-owned pins (no upstream source to extract from):
-    values["TMS_COMMIT"] = read_preserved("TMS_COMMIT", TMS_COMMIT_DEFAULT)
+    values["FLASH_ATTN_INTERFACE_COMMIT"] = read_preserved(
+        "FLASH_ATTN_INTERFACE_COMMIT", FLASH_ATTN_INTERFACE_COMMIT_DEFAULT
+    )
     values["MILES_SGLANG_SOURCE_VERSION"] = read_preserved(
         "MILES_SGLANG_SOURCE_VERSION", values["UPSTREAM_SGLANG_IMAGE_TAG"]
     )
@@ -279,9 +288,13 @@ def render(values: dict[str, str]) -> str:
     out.append(f"SGL_WHL_INDEX_URL=${{SGL_WHL_INDEX_URL:-{values['SGL_WHL_INDEX_URL']}}}")
 
     out.append("")
-    out.append("# Hand-owned: upstream Dockerfile installs torch_memory_saver from git TIP")
-    out.append("# (unpinned since 2026-07 #1773); we keep a pin for reproducible rebuilds.")
-    out.append(f"TMS_COMMIT=${{TMS_COMMIT:-{values['TMS_COMMIT']}}}")
+    out.append("# Hand-owned: upstream #1799 moved to FA3 3.0.0 wheels that bundle the python")
+    out.append("# interface, so the hopper commit left the Dockerfile. Our ACTIVE wheels bundle")
+    out.append("# still ships an interface-less FA3; install_env.sh keeps the guarded fetch and")
+    out.append("# this pin until the bundle's FA3 bundles the interface (then delete both).")
+    out.append(
+        f"FLASH_ATTN_INTERFACE_COMMIT=${{FLASH_ATTN_INTERFACE_COMMIT:-{values['FLASH_ATTN_INTERFACE_COMMIT']}}}"
+    )
     out.append("")
     return "\n".join(out)
 

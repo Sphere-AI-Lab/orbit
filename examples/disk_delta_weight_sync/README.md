@@ -10,7 +10,7 @@ from it through the ordinary `update_weights_from_disk` path. miles only ever ta
 per engine — the engine fans the apply out to every host it spans — so multi-node serving and
 external rollout engines need nothing extra.
 
-Compare with [`../p2p_weight_transfer/`](../p2p_weight_transfer/), which moves the *full* weights
+Compare with [`../infra_features/p2p_weight_transfer/`](../infra_features/p2p_weight_transfer/), which moves the *full* weights
 over RDMA. disk-delta trades interconnect bandwidth for CPU: it wins where the fabric is the
 constraint (cross-rack, cross-datacenter, plain Ethernet) and loses where it isn't.
 
@@ -268,7 +268,7 @@ measurement:
    Run `04` first — it is the first exercise of the expert path, and it fails loudly.
 
 Parallelism (TP4, EP8, 2 training + 2 rollout nodes, sglang `--sglang-ep-size 8` with DP
-attention) mirrors [`../p2p_weight_transfer/run-qwen3-30B-A3B-4node-profile.sh`](../p2p_weight_transfer/run-qwen3-30B-A3B-4node-profile.sh),
+attention) mirrors [`../infra_features/p2p_weight_transfer/run-qwen3-30B-A3B-4node-profile.sh`](../infra_features/p2p_weight_transfer/run-qwen3-30B-A3B-4node-profile.sh),
 the validated shape for this model on 4 nodes. Note the host-local checkpoint is now ~57 GB per
 rollout host.
 

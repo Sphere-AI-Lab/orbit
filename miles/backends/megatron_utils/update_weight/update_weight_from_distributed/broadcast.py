@@ -144,30 +144,25 @@ class UpdateWeightFromDistributed(DistBucketedWeightUpdateMixin):
                 self.weight_version,
                 self.rollout_engines,
                 converted_named_tensors,
+                selector=self._weight_update_selector,
             )
             ray.get(refs)
             converted_named_tensors.clear()
         finally:
+            # Leaking this lock makes the next weight sync poll forever, so the
+            # release must run after both successful and failed broadcasts.
             ray.get(self.rollout_engine_lock.release.remote())
         if pbar:
             pbar.update(1)
 
     @torch.no_grad()
     def update_weights(self) -> None:
-        """Run bridge-mode export + NCCL broadcast, or delegate raw mode to the mixin."""
-        if not self._bridge_mode:
+        """Run the local full-weight bridge export or delegate to the synced mixin."""
+        # The synced mixin owns both single- and multi-adapter LoRA updates.
+        # Keep this override only for the fork's full-weight AutoBridge export.
+        if self.is_lora or not self._bridge_mode:
             super().update_weights()
             return
-
-        # Delay rejection so debug/skip-sync runs can still construct the updater.
-        if self.is_lora:
-            raise NotImplementedError(
-                "bridge + LoRA is not supported on the non-colocated "
-                "broadcast path. Adapter sync would be silently dropped "
-                "(hf_weight_iterator_bridge filters LoRA out of base chunks). "
-                "Use the colocated UpdateWeightFromTensor path, or implement "
-                "a weight_type='lora' pass in UpdateWeightFromDistributed."
-            )
 
         self.weight_version += 1
 
@@ -327,6 +322,7 @@ def update_weights_from_distributed(
     weight_version: int,
     rollout_engines: Sequence[ActorHandle],
     converted_named_tensors: Sequence[tuple[str, torch.Tensor]],
+    selector: str = "all",
 ) -> list[ObjectRef]:
     """
     Send metadata (Ray), broadcast tensors (NCCL rank 0 → engines).
@@ -336,6 +332,7 @@ def update_weights_from_distributed(
             names=[name for name, _ in converted_named_tensors],
             dtypes=[param.dtype for _, param in converted_named_tensors],
             shapes=[param.shape for _, param in converted_named_tensors],
+            selector=selector,
             group_name=group_name,
             weight_version=str(weight_version),
         )
