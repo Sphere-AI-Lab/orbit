@@ -119,9 +119,6 @@ echo "[3/10] install official prebuilt SGLang CUDA 13 baseline"
 uv_install --force-reinstall --no-deps "$SGLANG_KERNEL_WHEEL_URL"
 uv_install --prerelease=allow --only-binary=:all: "sglang==$SGLANG_BASE_VERSION"
 uv_install --only-binary=:all: "sgl-deep-gemm==$SGL_DEEP_GEMM_VERSION"
-if "$PYTHON" -c 'import importlib.metadata as m; m.version("nvidia-cutlass-dsl-libs-cu12")' >/dev/null 2>&1; then
-    "$UV_EXE" pip uninstall --python "$PYTHON" nvidia-cutlass-dsl-libs-cu12
-fi
 
 echo "[4/10] download RadixArk Miles release assets"
 "$PYTHON" - "$MILES_WHEELS_REPO" "$MILES_WHEELS_TAG" "$WHEEL_DIR" <<'PY'
@@ -220,6 +217,7 @@ uv_install --force-reinstall --no-deps \
     "nvidia-cutlass-dsl==$CUTLASS_DSL_VERSION" \
     "nvidia-cutlass-dsl-libs-base==$CUTLASS_DSL_VERSION" \
     "nvidia-cutlass-dsl-libs-core==$CUTLASS_DSL_VERSION" \
+    "nvidia-cutlass-dsl-libs-cu12==$CUTLASS_DSL_VERSION" \
     "nvidia-cutlass-dsl-libs-cu13==$CUTLASS_DSL_VERSION" \
     "nvidia-cudnn-cu13==$CUDNN_CU13_VERSION"
 

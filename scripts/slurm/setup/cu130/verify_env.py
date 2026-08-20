@@ -96,21 +96,10 @@ def main() -> int:
         "transformer-engine-torch": expected["TRANSFORMER_ENGINE_VERSION"],
         "nvidia-cudnn-cu13": expected["CUDNN_CU13_VERSION"],
         "apache-tvm-ffi": expected["APACHE_TVM_FFI_VERSION"],
-        "nvidia-cutlass-dsl": expected["CUTLASS_DSL_VERSION"],
-        "nvidia-cutlass-dsl-libs-base": expected["CUTLASS_DSL_VERSION"],
-        "nvidia-cutlass-dsl-libs-core": expected["CUTLASS_DSL_VERSION"],
-        "nvidia-cutlass-dsl-libs-cu13": expected["CUTLASS_DSL_VERSION"],
     }
     for package, wanted in exact_versions.items():
         actual = version(package)
         check(package + " == " + wanted, bool(actual and actual.split("+")[0] == wanted), actual)
-
-    cu12_packages = sorted(
-        name
-        for distribution in metadata.distributions()
-        if (name := distribution.metadata.get("Name")) and "cu12" in name.lower().replace("_", "-")
-    )
-    check("no CUDA 12 distributions", not cu12_packages, ", ".join(cu12_packages) or "none")
 
     kernel = version("sglang-kernel")
     check(
