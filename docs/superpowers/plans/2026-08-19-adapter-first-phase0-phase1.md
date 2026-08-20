@@ -812,8 +812,9 @@ codexlog phase0-opd-free    bash examples/on_policy_distillation/run-qwen2_5-0_5
 codexlog phase0-opd-ema     bash examples/on_policy_distillation/run-qwen2_5-0_5b-opd-ema-smoke.sh
 codexlog phase0-opd-mopd    env OPD_TEACHER_LOAD=${MEGATRON_LOAD} bash examples/on_policy_distillation/run-qwen2_5-0_5b-opd-mopd-smoke.sh
 codexlog phase0-opd-served  bash examples/on_policy_distillation/run-qwen2_5-0_5b-opd-full-vocab-smoke.sh
-# adapter-swap needs an OFT adapter ckpt: use one saved by (a) under tmp_ckpts/adapter_runtime_compare/
-codexlog phase0-opd-adapter env OPD_TEACHER_ADAPTER=<adapter dir from (a)> \
+# adapter-swap needs a MATCHING LoRA rank-16 all-linear adapter (the smoke's student config) —
+# run phase0-opd-free FIRST and use its saved actor adapter; harness-pilot adapters are rank-32 and fail shape checks
+codexlog phase0-opd-adapter env OPD_TEACHER_ADAPTER=<phase0-opd-free SAVE_DIR>/actor \
   bash examples/on_policy_distillation/run-qwen2_5-0_5b-opd-adapter-swap-smoke.sh
 
 # (e) 30B qualification, 8 GPUs, one arm each (oft async_db + fullft async), ~30 min
@@ -851,7 +852,7 @@ for MODELS in qwen25_05b qwen25_3b qwen3_4b qwen3_30b; do
 done
 ```
 
-(GPU counts come from the case registry: 0.5B = 2, 3B = 4 [Task 2], 4B = 4 [2+2 async], 30B = 8; total ≈ 40 GPU-h, matching the spec's ~10 GPU-h/point.)
+(GPU counts come from the case registry: 0.5B = 2, 3B = 4 [Task 2], 4B = 4 [2+2 async], 30B = 8; total ≈ 40 GPU-h, matching the spec's ~10 GPU-h/point. Caption note from review: launcher-pinned topologies can differ from the case declaration — e.g. the 0.5B fullft-async launcher runs 1+1 inside the case's 4-GPU slice — so A1 figures state the actual per-point topology, read from each run's log, not the registry.)
 
 - [ ] **Step 2 (executor): Summarize.** `python tools/adapter_runtime_compare/analyze_a1.py logs/adapter_runtime_compare --link-gbps <nominal, ask user: NVLink vs IB per layout> --csv docs/reports/_src/a1_sync_cost.csv`. Sanity-check the spec's expected shape: full-FT `update_s` grows with model size toward seconds; adapter arms flat ≈0.1 s; pause time nonzero in ALL arms (constraint 7). Verify the standing guard: each adapter-sync run's log-probability-mismatch metric stays at its baseline (grep the log for the rollout/train logprob-diff key and eyeball the series; a jump after an update event indicates a corrupted push — stop and report, do not average over it).
 
@@ -928,7 +929,14 @@ for v in base load served; do
 done
 ```
 
-(If the recipe does not accept `SEED` env, take the seed flag name from `run-qwen2_5-3b-math-oft-grpo.sh` and thread it through the common recipe in Task 7 — matched seeds are what make the first batch comparable.)
+(SEED is threaded through the common recipe — default 1234 preserved from the base GRPO recipe.)
+
+Operational notes accumulated from the implementation reviews — apply to Step 1's commands:
+- The three `m1-eq-*` runs additionally set `OPD_COST_EQUIVALENCE=1` (recipe knob, affects only the `served` arm: swaps its full-vocab config for the sampled-token external-teacher mode that actually sets `teacher_log_probs`; without it the served dump is structurally empty). Cost-table runs keep the default.
+- `served` runs require `OPD_TEACHER_HF_CKPT=${HF_CKPT}` and occupy 5 GPUs (1 actor + 3 rollout + 1 teacher); the other four arms occupy 4.
+- The adapter arm's teacher must match the recipe's student PEFT config (canonical OFT, block 32) — do NOT reuse an A1 harness adapter (block 128, shape mismatch). Produce one from a short cost-base run's save, or any block-32 3B OFT checkpoint.
+- Delete/rotate `logs/m1_eq_*.jsonl` between runs (the dump appends; the CLI resolves duplicate keys last-wins) and keep the recipe's default single-actor-GPU layout for the equivalence runs (`sample_index` alignment is proven at dp_size=1).
+- M1 table captions (required by review findings): the `load` row's student is full-FT (the only non-PEFT arm — orbit rejects PEFT students with `load:` teachers), so its memory/step-time columns are not directly comparable; `served` uses the full-vocab GKD estimator and the rule-based math grader (estimator cost + grader difference in that row); `ema` uses ray transport without double-buffer (adapter-sync transport differs).
 
 - [ ] **Step 2 (executor): Correctness verdicts**
 
