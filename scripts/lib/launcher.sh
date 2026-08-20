@@ -19,6 +19,8 @@
 #   PARITY_CHECK           1 enables parity-check summary capture.
 #   STAGE_HF_CKPT_TO       Local path to rsync HF_CKPT into before training.
 #   STAGE_MEGATRON_CKPT_TO Same for MEGATRON_LOAD.
+#   EXTRA_TRAIN_ARGS       Extra CLI args appended to every launcher's argv
+#                          (word-split; e.g. "--sglang-enable-metrics").
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "Source this from a launcher; do not run directly." >&2
@@ -45,6 +47,9 @@ for _name in MODEL_ARGS CKPT_ARGS ROLLOUT_ARGS EVAL_ARGS PERF_ARGS \
     fi
 done
 unset _name
+
+# Optional cross-cutting extra args (string env, deliberately word-split).
+read -r -a ORBIT_EXTRA_TRAIN_ARGS <<< "${EXTRA_TRAIN_ARGS:-}"
 
 # === Internal helpers ===
 _LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
