@@ -141,7 +141,8 @@ Two things start automatically on every PR: the `pre-commit` workflow, and `PR T
 CPU stages, and then the GPU stages, which are gated on `stage-a-cpu` succeeding so a
 formatting or import error does not burn GPU time. A PR that touches `docker/Dockerfile`,
 `docker/build.py`, `docker/verify_transformer_engine.py`, `docker/patch/**` or
-`requirements.txt` additionally builds the image first and runs every GPU suite inside it.
+`requirements.txt` may additionally build the image first and run GPU suites inside it,
+depending on the repository's CI configuration and available runners.
 
 ### Registering a test
 
