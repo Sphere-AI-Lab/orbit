@@ -439,6 +439,8 @@ install_environment() {
         --extra-index-url "${FLASHINFER_INDEX_URL}" \
         --extra-index-url "${SGLANG_WHEEL_INDEX_URL}" \
         --requirements "${ENV_PREFIX}/.orbit-cu128-requirements.txt"
+    run "${UV_EXE}" pip install --python "${python}" --no-deps \
+        "nvidia-nccl-cu12==${NCCL_VERSION}"
 
     stage 8 "build pinned Hopper CUDA extension layer"
     run "${python}" -m pip install --no-build-isolation --no-deps --verbose \

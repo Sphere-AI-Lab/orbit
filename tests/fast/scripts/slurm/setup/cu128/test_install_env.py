@@ -103,6 +103,12 @@ def test_dry_run_prints_twelve_stage_plan_without_creating_prefix(tmp_path: Path
     assert "[12/12]" in result.stdout
     assert "torch==2.11.0+cu128" in result.stdout
     assert "nvidia-nccl-cu12==2.30.4" in result.stdout
+    nccl_install = "nvidia-nccl-cu12==2.30.4"
+    runtime_stage = result.stdout.index("== [07/12]")
+    extension_stage = result.stdout.index("== [08/12]")
+    runtime_nccl = result.stdout.index(nccl_install, runtime_stage)
+    assert runtime_stage < runtime_nccl < extension_stage
+    assert result.stdout.count(nccl_install) == 3
     assert "flash_attn==2.8.3" in result.stdout
     assert "subdirectory=sgl-kernel" in result.stdout
     assert "https://example.test/deep-ep.git" in result.stdout
