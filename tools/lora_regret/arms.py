@@ -784,6 +784,14 @@ E4_OFT_BLOCK_LADDER = (8, 128, 1024)
 E4_MATH_OFT_B128_LOW_LRS = (1e-7, 3e-7, 1e-6, 3e-6, 1e-5)
 E4_MATH_OFT_B128_REFINE_LRS = (5e-6, 6e-6, 7e-6, 8e-6, 9e-6, 2e-5)
 
+# The one LR the whole ladder is re-run at. 7e-06 is b128's measured argmax from
+# `e4oftb128refine` -- 0.2742 against 0.2636 at 8e-06 and 0.2624 at 6e-06 -- and
+# it is the only OFT point on math backed by a curve rather than a single row.
+# b8 and b1024 take it too: neither has a tuned LR of its own (b8 was measured
+# once, at 3e-05; b1024 has no successful math row), so a shared point that is
+# known-healthy for the middle rung beats a per-block guess.
+E4_MATH_OFT_VERIFY_LR = 7e-6
+
 
 def e4_arms(
     seed: int = 0,
@@ -914,6 +922,51 @@ def e4_math_oft_b128_refine_arms(
             matched_ratio=report["ratio"],
         )
         for lr in E4_MATH_OFT_B128_REFINE_LRS
+    ]
+
+
+def e4_math_oft_verify_arms(
+    hidden_size: int = LLAMA31_8B_HIDDEN,
+    ffn_size: int = LLAMA31_8B_FFN,
+    seed: int = 0,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
+) -> list[Arm]:
+    """E4's OFT block ladder at one fixed LR -- a reproducibility check.
+
+    Three arms, one per rung of `E4_OFT_BLOCK_LADDER`, all at
+    `E4_MATH_OFT_VERIFY_LR`. Nothing here searches: the LR is pinned so that the
+    only difference between the three arms is the block size, which is the axis
+    the ladder is about.
+
+    The ladder has never been measured at one shared LR. `e4`'s scout grid put
+    b8 at 3e-05 and left b1024 with no math row at all, and the only real curve
+    -- `e4oftb128refine` on b128 -- lives on a grid the scout does not contain.
+    A regex over `e4` therefore cannot select this selection, which is why it is
+    its own matrix rather than another `--only`.
+
+    Arm names carry the `oftverify` label so these rows cannot be confused with
+    the `oftscout`/`oftlow`/`oftrefine` history they are checked against; the
+    b128 arm is a re-run of `oftrefine-b128-all-math-lr7e-06-s0` (0.2742) under
+    a different name, which is what makes it a reproduction rather than a resume.
+    """
+    shapes = megatron_module_shapes(hidden_size, ffn_size, qkv_output_size)
+    selected_shapes = {
+        name: shape for name, shape in shapes.items() if name in ALL_MODULES.split(",")
+    }
+    return [
+        Arm(
+            _name("oftverify", f"b{block_size}", ALL_MODULES, E4_MATH_OFT_VERIFY_LR,
+                 seed, extra="math"),
+            "oft",
+            None,
+            block_size,
+            ALL_MODULES,
+            E4_MATH_OFT_VERIFY_LR,
+            seed,
+            dataset="math",
+            matched_ratio=oft_lora_match_report(block_size, selected_shapes)["ratio"],
+        )
+        for block_size in E4_OFT_BLOCK_LADDER
     ]
 
 
@@ -1339,6 +1392,12 @@ MATRICES = {
     "e4oftb128refine": (
         lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None:
         e4_math_oft_b128_refine_arms(
+            hidden, ffn, seed=seed, qkv_output_size=qkv_output
+        )
+    ),
+    "e4oftverify": (
+        lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None:
+        e4_math_oft_verify_arms(
             hidden, ffn, seed=seed, qkv_output_size=qkv_output
         )
     ),
