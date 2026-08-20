@@ -206,7 +206,26 @@ nvidia-resiliency-ext = { git = "https://github.com/NVIDIA/nvidia-resiliency-ext
 #   with a paused ~20 GB KV arena whose resume runs immediately after, that OOM'd
 #   in torch_memory_saver's cuMemCreate on the 4th rollout. Measured on
 #   2026-08-03: 8.8 GB per update before, 0.6 GB after, 10/10 rollouts clean.
-sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "05cd76b4d24aafe9c455c7f68cf055982cbd95f0", subdirectory = "python" }
+#
+# Moved 05cd76b4d -> 51845dc4a (2026-08-20) so the manifest names the build that
+# was actually validated. The numerical-equivalence report's reproducibility
+# block records `orbit_env_v2` as "05cd76b4d + fixes 40784883e, 51845dc4a
+# deployed": every Stage A/B verdict was measured on an env that already carried
+# both fixes on top of the old pin, but a fresh `uv sync` against that pin did
+# NOT reproduce it. The two fixes are the whole reason to move:
+#
+# * 40784883e -- propagate resolved adapter ids into cached request sub-objects.
+#   Without it a disk-loaded OFT adapter silently served BASE-model weights, so
+#   an eval that read like a trained-adapter number was not one.
+# * 51845dc4a -- key the radix cache by OFT adapter id. Without it a cached
+#   prefix from one adapter can be reused for another (the `extra_key`
+#   contamination path). RL is protected by its rollout shape; serving is not.
+#
+# The other three commits in the range (2406bf248, 4ca61eea9, a5def08d0) are test
+# repointing and a chore -- no kernel change. That is why the older note in
+# scripts/lora_regret/env_v0516.sh calls the gap equivalent: it was written when
+# the tip was a5def08d0, and it is no longer true of the current tip.
+sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "51845dc4acca94507ab184b007c8fcfd656b191f", subdirectory = "python" }
 # TransformerEngine built from source (verified end-to-end). The orbit-build-wheels
 # prebuilt is cu13/torch-2.11-correct too, but swapping it in perturbed libcudart load
 # order and exposed a flaky tilelang<->flashinfer find_loaded_library("libcudart")
@@ -216,7 +235,7 @@ sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "05cd76b4d
 transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", rev = "71bbefbf153418f943640df0f7373625dc93fa46" }
 fast-hadamard-transform = { git = "https://github.com/Dao-AILab/fast-hadamard-transform.git", rev = "e7706faf8d1c3b9f241e36860640ad1dac644ede" }
 deep-gemm-official = { git = "https://github.com/liulixinkerry/DeepGEMM.git", rev = "18db30e9db9703b906e9ab3803fbbc1a64be1520" }
-sglang-kernel = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "05cd76b4d24aafe9c455c7f68cf055982cbd95f0", subdirectory = "sgl-kernel" }
+sglang-kernel = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "51845dc4acca94507ab184b007c8fcfd656b191f", subdirectory = "sgl-kernel" }
 sglang-router = { url = "https://github.com/zhuzilin/sgl-router/releases/download/v0.3.2-5f8d397/sglang_router-0.3.2-cp38-abi3-manylinux_2_28_x86_64.whl" }
 # apex orbit-build-wheels prebuilt is cu13-clean; source build needs fragile --config-settings, so use the public wheel.
 apex = { url = "https://github.com/liulixinkerry/orbit-build-wheels/releases/download/cu132-torch211-ubuntu2204/apex-0.1-cp312-cp312-linux_x86_64.whl" }
@@ -242,7 +261,7 @@ tested-ref = "ad26fc46b252e6e53a56052776623499da3dc583"
 [tool.orbit.release.backend-pins.sglang]
 source = "https://github.com/Sphere-AI-Lab/sglang.git"
 subdirectory = "python"
-tested-ref = "05cd76b4d24aafe9c455c7f68cf055982cbd95f0"
+tested-ref = "51845dc4acca94507ab184b007c8fcfd656b191f"
 
 [tool.isort]
 profile = "black"  # black-compatible

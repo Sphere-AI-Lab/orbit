@@ -3282,8 +3282,8 @@ requires-dist = [
     { name = "ray", extras = ["default"], specifier = "==2.55.1" },
     { name = "ring-flash-attn" },
     { name = "scikit-build-core", marker = "extra == 'allinone'" },
-    { name = "sglang", git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=05cd76b4d24aafe9c455c7f68cf055982cbd95f0" },
-    { name = "sglang-kernel", marker = "extra == 'allinone'", git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=sgl-kernel&rev=05cd76b4d24aafe9c455c7f68cf055982cbd95f0" },
+    { name = "sglang", git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=51845dc4acca94507ab184b007c8fcfd656b191f" },
+    { name = "sglang-kernel", marker = "extra == 'allinone'", git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=sgl-kernel&rev=51845dc4acca94507ab184b007c8fcfd656b191f" },
     { name = "sglang-router", url = "https://github.com/zhuzilin/sgl-router/releases/download/v0.3.2-5f8d397/sglang_router-0.3.2-cp38-abi3-manylinux_2_28_x86_64.whl" },
     { name = "starlette", specifier = "==0.52.1" },
     { name = "tensorboard", specifier = "==2.20.0" },
@@ -4360,8 +4360,8 @@ wheels = [
 
 [[package]]
 name = "sglang"
-version = "0.0.0.dev15479+g05cd76b4d"
-source = { git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=05cd76b4d24aafe9c455c7f68cf055982cbd95f0#05cd76b4d24aafe9c455c7f68cf055982cbd95f0" }
+version = "0.0.0.dev15484+g51845dc4a"
+source = { git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=51845dc4acca94507ab184b007c8fcfd656b191f#51845dc4acca94507ab184b007c8fcfd656b191f" }
 dependencies = [
     { name = "aiohttp" },
     { name = "anthropic" },
@@ -4440,7 +4440,7 @@ dependencies = [
 [[package]]
 name = "sglang-kernel"
 version = "0.4.5"
-source = { git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=sgl-kernel&rev=05cd76b4d24aafe9c455c7f68cf055982cbd95f0#05cd76b4d24aafe9c455c7f68cf055982cbd95f0" }
+source = { git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=sgl-kernel&rev=51845dc4acca94507ab184b007c8fcfd656b191f#51845dc4acca94507ab184b007c8fcfd656b191f" }
 
 [[package]]
 name = "sglang-router"
