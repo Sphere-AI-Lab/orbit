@@ -1,0 +1,308 @@
+#!/usr/bin/env bash
+# Install Orbit on CUDA 13 from prebuilt wheels plus editable Sphere-Lab sources.
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/../../../.." && pwd)"
+source "$SCRIPT_DIR/pins.env"
+
+ENV_PREFIX=${ENV_PREFIX:-/fast/zqiu/orbit-iclr/orbit/envs/orbit-cu130-v1}
+SOURCE_ROOT=${SOURCE_ROOT:-/fast/zqiu/orbit-iclr/orbit/sources/orbit-cu130-v1}
+CACHE_DIR=${CACHE_DIR:-/fast/zqiu/orbit-iclr/orbit/cache/orbit-cu130-v1}
+CONDA_EXE=${CONDA_EXE:-/home/zqiu/anaconda3/bin/conda}
+UV_EXE=${UV_EXE:-/home/zqiu/.local/bin/uv}
+TOOL_PYTHON=${TOOL_PYTHON:-/home/zqiu/anaconda3/bin/python}
+JOBS=${JOBS:-32}
+DRY_RUN=0
+PREFLIGHT_ONLY=0
+
+usage() {
+    cat <<EOF
+Usage: $0 [options]
+  --env-prefix PATH
+  --source-root PATH
+  --cache-dir PATH
+  --conda-exe PATH
+  --uv-exe PATH
+  --tool-python PATH
+  --jobs N
+  --preflight-only
+  --dry-run
+EOF
+}
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --env-prefix) ENV_PREFIX=$2; shift 2 ;;
+        --source-root) SOURCE_ROOT=$2; shift 2 ;;
+        --cache-dir) CACHE_DIR=$2; shift 2 ;;
+        --conda-exe) CONDA_EXE=$2; shift 2 ;;
+        --uv-exe) UV_EXE=$2; shift 2 ;;
+        --tool-python) TOOL_PYTHON=$2; shift 2 ;;
+        --jobs) JOBS=$2; shift 2 ;;
+        --preflight-only) PREFLIGHT_ONLY=1; shift ;;
+        --dry-run) DRY_RUN=1; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "FATAL: unknown argument: $1" >&2; exit 2 ;;
+    esac
+done
+
+WHEEL_DIR="$CACHE_DIR/miles-wheels/$MILES_WHEELS_TAG"
+LOCK_DIR="$ENV_PREFIX.install.lock"
+
+cat <<EOF
+[plan] Orbit root:       $REPO_ROOT
+[plan] Conda prefix:     $ENV_PREFIX
+[plan] Sources:          $SOURCE_ROOT
+[plan] Cache:            $CACHE_DIR
+[plan] Miles recipe:     $RADIXARK_MILES_COMMIT
+[plan] Miles wheels:     $MILES_WHEELS_REPO@$MILES_WHEELS_TAG
+[plan] SGLang baseline:  $SGLANG_BASE_VERSION with sglang-kernel $SGLANG_KERNEL_VERSION+cu130
+[plan] Sphere SGLang:    $ORBIT_SGLANG_COMMIT
+[plan] Megatron-Core:    $ORBIT_MEGATRON_COMMIT
+[plan] Megatron-Bridge:  $ORBIT_MEGATRON_BRIDGE_COMMIT
+EOF
+[ "$DRY_RUN" -eq 1 ] && exit 0
+
+for executable in "$CONDA_EXE" "$UV_EXE" "$TOOL_PYTHON" git nvidia-smi; do
+    command -v "$executable" >/dev/null 2>&1 || [ -x "$executable" ] || {
+        echo "FATAL: missing executable: $executable" >&2
+        exit 1
+    }
+done
+"$TOOL_PYTHON" "$SCRIPT_DIR/extract_pins.py" --check
+gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+case "$gpu_name" in
+    *H100*) ;;
+    *) echo "FATAL: expected H100, got $gpu_name" >&2; exit 1 ;;
+esac
+echo "[preflight] GPU=$gpu_name"
+[ "$PREFLIGHT_ONLY" -eq 1 ] && exit 0
+
+if [ -e "$LOCK_DIR" ]; then
+    echo "FATAL: installer lock exists: $LOCK_DIR" >&2
+    exit 1
+fi
+mkdir -p "$(dirname "$ENV_PREFIX")" "$SOURCE_ROOT" "$CACHE_DIR" "$WHEEL_DIR"
+mkdir "$LOCK_DIR"
+trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
+
+export UV_CACHE_DIR="$CACHE_DIR/uv"
+export PIP_CACHE_DIR="$CACHE_DIR/pip"
+export MAX_JOBS="$JOBS"
+
+if [ ! -x "$ENV_PREFIX/bin/python" ]; then
+    if [ -e "$ENV_PREFIX" ] && [ -n "$(find "$ENV_PREFIX" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+        echo "FATAL: target is not a recognizable Conda prefix: $ENV_PREFIX" >&2
+        exit 1
+    fi
+    echo "[1/10] create Conda Python $PYTHON_VERSION prefix"
+    "$CONDA_EXE" create -y -p "$ENV_PREFIX" "python=$PYTHON_VERSION" pip
+else
+    echo "[1/10] resume $ENV_PREFIX"
+fi
+
+PYTHON="$ENV_PREFIX/bin/python"
+uv_install() {
+    "$UV_EXE" pip install --python "$PYTHON" "$@"
+}
+
+echo "[2/10] install pinned PyTorch CUDA 13 foundation"
+uv_install --upgrade \
+    "torch==$TORCH_VERSION" \
+    "torchvision==$TORCHVISION_VERSION" \
+    "torchaudio==$TORCHAUDIO_VERSION" \
+    "triton==$TRITON_VERSION" \
+    "cuda-python==$CUDA_PYTHON_VERSION"
+
+echo "[3/10] install official prebuilt SGLang CUDA 13 baseline"
+uv_install --force-reinstall --no-deps "$SGLANG_KERNEL_WHEEL_URL"
+uv_install --only-binary=:all: "sglang==$SGLANG_BASE_VERSION"
+uv_install --only-binary=:all: "sgl-deep-gemm==$SGL_DEEP_GEMM_VERSION"
+
+echo "[4/10] download RadixArk Miles release assets"
+"$PYTHON" - "$MILES_WHEELS_REPO" "$MILES_WHEELS_TAG" "$WHEEL_DIR" <<'PY'
+import json
+import os
+import sys
+import urllib.request
+from pathlib import Path
+
+repo, tag, output = sys.argv[1], sys.argv[2], Path(sys.argv[3])
+output.mkdir(parents=True, exist_ok=True)
+request = urllib.request.Request(
+    f"https://api.github.com/repos/{repo}/releases/tags/{tag}",
+    headers={"User-Agent": "orbit-cu130-installer"},
+)
+with urllib.request.urlopen(request, timeout=30) as response:
+    assets = json.load(response).get("assets", [])
+assets = [item for item in assets if item["name"].endswith((".whl", ".tar.gz"))]
+if not assets:
+    raise SystemExit(f"no assets found for {repo}@{tag}")
+for asset in assets:
+    target = output / asset["name"]
+    if target.exists() and target.stat().st_size == asset.get("size"):
+        print("[cache] reuse " + target.name)
+        continue
+    temporary = Path(str(target) + ".part")
+    download = urllib.request.Request(
+        asset["browser_download_url"],
+        headers={"User-Agent": "orbit-cu130-installer"},
+    )
+    print("[cache] download " + target.name)
+    with urllib.request.urlopen(download, timeout=120) as source, temporary.open("wb") as sink:
+        while True:
+            chunk = source.read(8 * 1024 * 1024)
+            if not chunk:
+                break
+            sink.write(chunk)
+    if asset.get("size") and temporary.stat().st_size != asset["size"]:
+        raise SystemExit("size mismatch for " + target.name)
+    os.replace(temporary, target)
+PY
+
+pick_one() {
+    matches=$(compgen -G "$1" || true)
+    count=$(printf '%s\n' "$matches" | sed '/^$/d' | wc -l | tr -d ' ')
+    if [ "$count" -ne 1 ]; then
+        echo "FATAL: expected one prebuilt wheel matching $1; found $count" >&2
+        return 1
+    fi
+    printf '%s\n' "$matches"
+}
+
+pick_optional() {
+    matches=$(compgen -G "$1" || true)
+    count=$(printf '%s\n' "$matches" | sed '/^$/d' | wc -l | tr -d ' ')
+    if [ "$count" -gt 1 ]; then
+        echo "FATAL: multiple wheels match $1" >&2
+        return 1
+    fi
+    [ "$count" -eq 0 ] || printf '%s\n' "$matches"
+}
+
+install_optional() {
+    wheel=$(pick_optional "$1")
+    if [ -n "$wheel" ]; then
+        uv_install --force-reinstall --no-deps "$wheel"
+    fi
+}
+
+echo "[5/10] install prebuilt Miles Hopper wheels"
+uv_install --force-reinstall --no-deps "$(pick_one "$WHEEL_DIR/flash_attn-*cp312*linux_x86_64.whl")"
+uv_install --force-reinstall --no-deps "$(pick_one "$WHEEL_DIR/flash_attn_3-*cp312*linux_x86_64.whl")"
+uv_install --force-reinstall --no-deps \
+    "$(pick_one "$WHEEL_DIR/transformer_engine-$TRANSFORMER_ENGINE_VERSION-py3-none-any.whl")" \
+    "$(pick_one "$WHEEL_DIR/transformer_engine_cu13-$TRANSFORMER_ENGINE_VERSION-py3-none-manylinux_2_28_*.whl")" \
+    "$(pick_one "$WHEEL_DIR/transformer_engine_torch-$TRANSFORMER_ENGINE_VERSION-cp312-cp312-linux_*.whl")"
+uv_install einops onnx onnxscript pydantic nvdlfw-inspect
+uv_install --force-reinstall --no-deps "$(pick_one "$WHEEL_DIR/apex-*cp312*linux_x86_64.whl")"
+install_optional "$WHEEL_DIR/fast_hadamard_transform-*cp312*linux_x86_64.whl"
+install_optional "$WHEEL_DIR/causal_conv1d-*cp312*linux_x86_64.whl"
+install_optional "$WHEEL_DIR/mamba_ssm-*cp312*linux_x86_64.whl"
+install_optional "$WHEEL_DIR/deep_ep-*cp312*linux_x86_64.whl"
+install_optional "$WHEEL_DIR/ring_flash_attn-*cp312*linux_x86_64.whl"
+install_optional "$WHEEL_DIR/sglang_router-*cp38-abi3-manylinux_2_28_x86_64.whl"
+install_optional "$WHEEL_DIR/mooncake_transfer_engine-*cp312*linux_x86_64.whl"
+
+echo "[6/10] reconcile SGLang CUDA runtime pins"
+uv_install --force-reinstall --no-deps \
+    --extra-index-url https://flashinfer.ai/whl \
+    --extra-index-url https://flashinfer.ai/whl/cu130 \
+    "flashinfer-python==$FLASHINFER_VERSION" \
+    "flashinfer-cubin==$FLASHINFER_VERSION" \
+    "flashinfer-jit-cache==$FLASHINFER_VERSION"
+uv_install --force-reinstall --no-deps \
+    "apache-tvm-ffi==$APACHE_TVM_FFI_VERSION" \
+    "nvidia-cutlass-dsl==$CUTLASS_DSL_VERSION" \
+    "nvidia-cutlass-dsl-libs-base==$CUTLASS_DSL_VERSION" \
+    "nvidia-cutlass-dsl-libs-core==$CUTLASS_DSL_VERSION" \
+    "nvidia-cutlass-dsl-libs-cu12==$CUTLASS_DSL_VERSION" \
+    "nvidia-cutlass-dsl-libs-cu13==$CUTLASS_DSL_VERSION" \
+    "nvidia-cudnn-cu13==$CUDNN_CU13_VERSION"
+
+ensure_checkout() {
+    url=$1
+    commit=$2
+    destination=$3
+    if [ -e "$destination" ]; then
+        [ -d "$destination/.git" ] || { echo "FATAL: non-git source path: $destination" >&2; return 1; }
+        [ -z "$(git -C "$destination" status --porcelain)" ] || {
+            echo "FATAL: dirty source checkout: $destination" >&2
+            return 1
+        }
+        [ "$(git -C "$destination" rev-parse HEAD)" = "$commit" ] || {
+            echo "FATAL: source checkout at wrong commit: $destination" >&2
+            return 1
+        }
+        return
+    fi
+    git clone --filter=blob:none --no-checkout "$url" "$destination"
+    git -C "$destination" fetch --depth 1 origin "$commit"
+    git -C "$destination" checkout --detach "$commit"
+}
+
+echo "[7/10] materialize exact Sphere-Lab sources"
+SGLANG_SRC="$SOURCE_ROOT/sglang"
+MEGATRON_SRC="$SOURCE_ROOT/Megatron-LM"
+BRIDGE_SRC="$SOURCE_ROOT/Megatron-Bridge"
+ensure_checkout "$ORBIT_SGLANG_REPO" "$ORBIT_SGLANG_COMMIT" "$SGLANG_SRC"
+ensure_checkout "$ORBIT_MEGATRON_REPO" "$ORBIT_MEGATRON_COMMIT" "$MEGATRON_SRC"
+ensure_checkout "$ORBIT_MEGATRON_BRIDGE_REPO" "$ORBIT_MEGATRON_BRIDGE_COMMIT" "$BRIDGE_SRC"
+
+echo "[compat] compare Sphere-Lab sgl-kernel with upstream $SGLANG_IMAGE_TAG"
+git -C "$SGLANG_SRC" fetch --depth 1 https://github.com/sgl-project/sglang.git "refs/tags/$SGLANG_IMAGE_TAG"
+if ! git -C "$SGLANG_SRC" diff --quiet FETCH_HEAD "$ORBIT_SGLANG_COMMIT" -- sgl-kernel; then
+    echo "FATAL: Sphere-Lab sgl-kernel differs from upstream $SGLANG_IMAGE_TAG; refusing the prebuilt wheel" >&2
+    exit 1
+fi
+echo "[compat] sgl-kernel subtree matches the prebuilt $SGLANG_KERNEL_VERSION+cu130 wheel"
+
+echo "[8/10] install Orbit runtime dependencies"
+RUNTIME_REQUIREMENTS="$CACHE_DIR/orbit-runtime-requirements.txt"
+"$PYTHON" - "$REPO_ROOT/pyproject.toml" "$RUNTIME_REQUIREMENTS" <<'PY'
+import re
+import sys
+import tomllib
+from pathlib import Path
+
+controlled = {
+    "deep-ep",
+    "megatron-bridge",
+    "megatron-core",
+    "nvidia-resiliency-ext",
+    "ring-flash-attn",
+    "sglang",
+    "sglang-router",
+    "transformer-engine",
+}
+data = tomllib.loads(Path(sys.argv[1]).read_text())
+requirements = []
+for requirement in data["project"]["dependencies"]:
+    name = re.split(r"[<>=!~ \[]", requirement, maxsplit=1)[0].lower().replace("_", "-")
+    if name not in controlled:
+        requirements.append(requirement)
+Path(sys.argv[2]).write_text("\n".join(requirements) + "\n")
+PY
+uv_install -r "$RUNTIME_REQUIREMENTS"
+uv_install "nvidia-modelopt==0.44.0" "torch-memory-saver==0.0.9.post1"
+
+echo "[9/10] install editable Sphere-Lab and Orbit overlays"
+uv_install -e "$MEGATRON_SRC" --no-deps
+uv_install -e "$BRIDGE_SRC" --no-deps --no-build-isolation
+uv_install -e "$SGLANG_SRC/$ORBIT_SGLANG_SUBDIRECTORY" --no-deps
+uv_install -e "$REPO_ROOT" --no-deps
+
+echo "[10/10] reassert ABI pins and verify"
+uv_install --no-deps \
+    "torch==$TORCH_VERSION" \
+    "torchvision==$TORCHVISION_VERSION" \
+    "torchaudio==$TORCHAUDIO_VERSION" \
+    "triton==$TRITON_VERSION" \
+    "cuda-python==$CUDA_PYTHON_VERSION" \
+    "nvidia-cudnn-cu13==$CUDNN_CU13_VERSION"
+"$PYTHON" "$SCRIPT_DIR/verify_env.py" --source-root "$SOURCE_ROOT" --full-h100
+
+echo "[done] activate with:"
+echo "source /home/zqiu/anaconda3/etc/profile.d/conda.sh"
+echo "conda activate $ENV_PREFIX"
