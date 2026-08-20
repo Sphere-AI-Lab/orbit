@@ -428,6 +428,7 @@ install_environment() {
     run "${UV_EXE}" pip install --python "${python}" --override "${OVERRIDE_FILE}" \
         --extra-index-url "${FLASHINFER_INDEX_URL}" \
         --extra-index-url "${SGLANG_WHEEL_INDEX_URL}" \
+        --no-build-isolation-package deep-ep \
         --requirements "${ENV_PREFIX}/.orbit-cu128-requirements.txt"
 
     stage 8 "build pinned Hopper CUDA extension layer"

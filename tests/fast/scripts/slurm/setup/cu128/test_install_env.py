@@ -101,6 +101,7 @@ def test_dry_run_prints_twelve_stage_plan_without_creating_prefix(tmp_path: Path
     assert "torch==2.11.0+cu128" in result.stdout
     assert "flash_attn==2.8.3" in result.stdout
     assert "subdirectory=sgl-kernel" in result.stdout
+    assert "--no-build-isolation-package deep-ep" in result.stdout
     assert "--full-h200" in result.stdout
     assert not (tmp_path / "env").exists()
     assert not (tmp_path / "sources").exists()
