@@ -157,20 +157,12 @@ class UpdateWeightFromDistributed(DistBucketedWeightUpdateMixin):
 
     @torch.no_grad()
     def update_weights(self) -> None:
-        """Run bridge-mode export + NCCL broadcast, or delegate raw mode to the mixin."""
-        if not self._bridge_mode:
+        """Run the local full-weight bridge export or delegate to the synced mixin."""
+        # The synced mixin owns both single- and multi-adapter LoRA updates.
+        # Keep this override only for the fork's full-weight AutoBridge export.
+        if self.is_lora or not self._bridge_mode:
             super().update_weights()
             return
-
-        # Delay rejection so debug/skip-sync runs can still construct the updater.
-        if self.is_lora:
-            raise NotImplementedError(
-                "bridge + LoRA is not supported on the non-colocated "
-                "broadcast path. Adapter sync would be silently dropped "
-                "(hf_weight_iterator_bridge filters LoRA out of base chunks). "
-                "Use the colocated UpdateWeightFromTensor path, or implement "
-                "a weight_type='lora' pass in UpdateWeightFromDistributed."
-            )
 
         self.weight_version += 1
 

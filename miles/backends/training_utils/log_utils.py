@@ -239,7 +239,8 @@ def _compute_rollout_kl_statistics(
     args: Namespace,
     rollout_data: RolloutBatch,
     cp_size: int,
-) -> tuple[dict[str, float], dict[str, str]]:
+    rollout_count_share: float | None = None,
+) -> tuple[dict[str, float | tuple[float, float]], dict[str, str]]:
     """Compute sampled KL estimators over active response tokens.
 
     For d = log q(a|h) - log p(a|h), sampled under q:
@@ -275,9 +276,11 @@ def _compute_rollout_kl_statistics(
         loss_masks,
         qkv_format=args.qkv_format,
         max_seq_lens=max_seq_lens,
+        denominators=rollout_data.get("rollout_mask_sums", None),
     )
-    metrics: dict[str, float] = {}
+    metrics: dict[str, float | tuple[float, float]] = {}
     reduction_by_key: dict[str, str] = {}
+    rollout_count = rollout_count_share if rollout_count_share is not None else len(loss_masks)
     for metric_group, log_ratios in log_ratio_groups.items():
         if len(log_ratios) != len(local_masks):
             raise ValueError(
@@ -314,9 +317,12 @@ def _compute_rollout_kl_statistics(
                 [chunk[mask] for chunk, mask in zip(chunks, bool_masks, strict=True)],
                 dim=0,
             )
-            mean = cp_size * sample_mean(values) / len(loss_masks)
+            local_sum = cp_size * sample_mean(values)
             prefix = f"{metric_group}/{estimator}"
-            metrics[f"{prefix}/mean"] = mean.item()
+            # Preserve the numerator and rollout count until DP/CP gather. This
+            # keeps compacted siblings token-weighted within one rollout and
+            # avoids equal-weighting ranks that hold different rollout counts.
+            metrics[f"{prefix}/mean"] = (local_sum.item(), rollout_count)
             if active_values.numel() == 0:
                 metrics[f"{prefix}/min"] = float("inf")
                 metrics[f"{prefix}/max"] = float("-inf")
@@ -428,7 +434,12 @@ def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatc
             else:
                 raise ValueError(f"Unsupported type: {type(val)} for key: {key}")
 
-        kl_metrics, reduction_by_key = _compute_rollout_kl_statistics(args, rollout_data, cp_size)
+        kl_metrics, reduction_by_key = _compute_rollout_kl_statistics(
+            args,
+            rollout_data,
+            cp_size,
+            rollout_count_share=rollout_count_share,
+        )
         log_dict.update(kl_metrics)
         reduced_log_dict = gather_log_data(
             "rollout",

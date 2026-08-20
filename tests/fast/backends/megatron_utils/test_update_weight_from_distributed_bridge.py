@@ -1,8 +1,7 @@
 """Behavior tests for the bridge-mode path in UpdateWeightFromDistributed.
 
 Covers the contracts a refactor must not regress on:
-- Bridge mode rejects ``is_lora=True`` (the iterator filters LoRA out of
-  base chunks, so silently no-syncing would be worse than failing).
+- Bridge-mode LoRA delegates to the synced mixin's adapter update path.
 - Bridge mode broadcasts only from the global source rank (DP=TP=PP=0).
 - Bridge ``update_weights`` drains the iterator on every rank but only the
   source rank invokes the broadcast implementation, and ``convert_to_hf``
@@ -84,6 +83,33 @@ class TestLoRASyncModeContract:
         assert updater._bridge_mode is True
         mock_lora_cfg.assert_called_once()
         assert mock_iter_base.create.called or mock_iter_base_mixin.create.called
+
+    def test_bridge_lora_update_delegates_to_synced_mixin(self):
+        from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
+            UpdateWeightFromDistributed,
+        )
+        from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin import (
+            DistBucketedWeightUpdateMixin,
+        )
+
+        with (
+            patch(f"{_MX_MODULE}.build_lora_sync_config"),
+            patch(f"{_BC_MODULE}.HfWeightIteratorBase"),
+            patch(f"{_MX_MODULE}.HfWeightIteratorBase"),
+        ):
+            updater = UpdateWeightFromDistributed(
+                args=_make_args("bridge"),
+                model=[MagicMock()],
+                weights_getter=lambda: {},
+                model_name="qwen3vlconfig",
+                quantization_config=None,
+                is_lora=True,
+            )
+
+        with patch.object(DistBucketedWeightUpdateMixin, "update_weights") as mock_super:
+            updater.update_weights()
+
+        mock_super.assert_called_once()
 
     @patch(f"{_BC_MODULE}.HfWeightIteratorBase")
     def test_raw_plus_lora_rejected(self, mock_iter_base):

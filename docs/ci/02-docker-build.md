@@ -57,17 +57,17 @@ A multi-arch build (`cu13`) needs Buildx's `docker-container` driver and is push
 
 ## PR build check (in `pr-test.yml`)
 
-Dockerfile changes are build-tested on the PR itself, before merge — `docker-build.yml` only runs after a push to `main`, so without this breakage lands on `main` first.
+Docker-relevant changes are detected on the PR itself. A same-repo PR builds and pushes a PR-scoped image only when a maintainer adds `run-ci-image`; without that explicit opt-in, the workflow completes on `ubuntu-latest` and the GPU suites use the released `dev` image. Fork PRs cannot push PR-scoped images and also use `dev`.
 
 `pr-test.yml` calls `_build-pr-ci-image.yml` after `stage-a-cpu` satisfies its success/bypass gate, while both CPU stages run without waiting for it. The reusable workflow owns `docker-paths` and `docker-build`; for changes to `docker/Dockerfile`, `docker/build.py`, `docker/install-kube-tools.sh`, `docker/verify_transformer_engine.py`, `docker/patch/**`, or `requirements.txt`, it inserts a build before the GPU matrix:
 
 | Job | What it does |
 | --- | --- |
-| `docker-build` | builds `cu13` for `linux/amd64` and `linux/arm64`, then pushes one multi-arch PR-scoped `radixark/miles:pr-<num>` tag (same-repo PRs; fork PRs skip it and test on `dev`) |
-| `resolve-ci-image` | waits for the build and resolves the CI image to `pr-<num>`, so **every GPU suite runs inside the freshly built image**; a failed build stops the matrix instead of testing the stale image. The fresh build outranks a `ci-image-tag:` PR-body directive — the directive applies only when no PR image was built (non-docker or fork PRs) |
+| `docker-build` | with `run-ci-image` on a same-repo PR, builds `cu13` for `linux/amd64` and `linux/arm64`, then pushes one multi-arch PR-scoped `radixark/miles:pr-<num>` tag; otherwise it is a hosted no-op and tests use `dev` |
+| `resolve-ci-image` | waits for the build and resolves the CI image to `pr-<num>`, so **every GPU suite runs inside the freshly built image**; a failed build stops the matrix instead of testing the stale image. The fresh build outranks a `ci-image-tag:` PR-body directive — the directive applies only when no PR image was built (non-docker, non-opted-in, or fork PRs) |
 | `delete-pr-tag` (`docker-pr-tag-cleanup.yml`) | removes the `pr-<num>` tag when the PR closes; the tag stays available for re-runs while the PR is open |
 
-Non-docker PRs are untouched: `docker-paths` reports no change, `docker-build` skips, and the matrix runs on `dev` as before.
+Non-docker PRs are untouched: `docker-paths` reports no change, `docker-build` is a hosted no-op, and the matrix runs on `dev` as before. For a Docker-relevant PR, add `run-ci-image` only when a `docker-build` runner is available and the fresh image is required for GPU validation.
 
 ## Rolling Docker build (`docker-build.yml`)
 

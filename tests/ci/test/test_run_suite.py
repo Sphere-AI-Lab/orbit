@@ -332,6 +332,8 @@ class TestWorkflowScopeSeam:
         assert "if ! CHANGED_PATHS=$(git diff --name-only HEAD^1 HEAD); then" in reusable
         assert "::error::Failed to determine docker-relevant changes." in reusable
         assert "github.event.pull_request.head.repo.full_name == github.repository" in reusable
+        assert reusable.count("contains(github.event.pull_request.labels.*.name, 'run-ci-image')") == 2
+        assert "No opt-in PR image build; suites use the released dev image." in reusable
         assert "python3 docker/build.py --variant cu13 --image-tag custom" in reusable
 
     def test_policy_job_is_a_thin_python_adapter(self):
