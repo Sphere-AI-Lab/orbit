@@ -1,0 +1,1331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Merged-stack numerical equivalence — sglang v0.5.16 line and merged orbit vs the published E4 stack</title>
+<script type="application/json" id="report-meta">{"title": "Merged-stack numerical equivalence — sglang v0.5.16 line and merged orbit vs the published E4 stack", "kind": "investigation", "date": "2026-08-19", "tags": ["lora-regret", "numerics", "sglang", "megatron", "oft", "lora", "verification"], "subtitle": "", "generated": "2026-08-19T17:33:16-07:00", "meta": {"date": "2026-08-19", "commit": "ef2c6510a894", "branch": "orbit-main", "tree": "dirty", "host": "Zejus-MacBook-Pro.local", "python": "3.9.6", "old_stack": "sglang b52394d22 (orbit_env), orbit 46c8e0f6", "new_stack": "sglang 05cd76b4d (orbit_env_v2), orbit orbit-main", "fixes": "sglang 40784883e + 51845dc4a, orbit 89ea48c + badab95", "jobs": "17466992 (i305), 17467160 (i201), 17467161 (i305), 17467303 (g102), 17468719 (g198), 17463137 (i407, OFT b8)", "evidence": "remote-cluster-runs mpi4 stage-a-inference-compare, mpi1/mpi2 backend-matrix, mpi4 stageb-trainer-equivalence"}, "profile": "development-log", "status": "final", "source": {"path": "docs/reports/_src/2026-08-19-merged-stack-numerical-equivalence.md", "sha256": "0bab4b59391cb803ddadcea233b7f0d3a96f1f7a2b9be3265603ac3fec3db621", "assets": []}}</script>
+<style>
+/* html-reports visual system.
+   One offline, dependency-free shell with three reading modes:
+   analytical training evidence, compact development status, and editorial
+   scientific narrative. The renderer inlines this file into every report. */
+
+:root {
+  color-scheme: light;
+
+  --canvas: #f3f5f7;
+  --paper: #ffffff;
+  --ink: #18212b;
+  --ink-strong: #0b1320;
+  --ink-dim: #556170;
+  --ink-faint: #778391;
+  --line: #dce1e7;
+  --line-strong: #cbd2da;
+  --surface: #f7f8fa;
+  --surface-strong: #eef1f4;
+  --accent: #1f6f68;
+  --accent-ink: #13514c;
+  --accent-soft: #e7f3f1;
+  --accent-line: #9bcac5;
+  --positive: #187454;
+  --positive-soft: #e6f4ee;
+  --warning: #946316;
+  --warning-soft: #fbf1dc;
+  --negative: #a4403b;
+  --negative-soft: #f9e9e7;
+  --neutral: #536474;
+  --neutral-soft: #edf1f4;
+  --focus: #1667c5;
+  --shadow-paper: 0 16px 42px rgba(20, 31, 44, 0.08);
+
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+    Arial, sans-serif;
+  --font-editorial: Charter, "Bitstream Charter", "Iowan Old Style",
+    "Palatino Linotype", Palatino, Georgia, serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --font-math: "STIX Two Math", "Latin Modern Math", "Cambria Math",
+    "TeX Gyre Termes Math", serif;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --canvas: #0d1218;
+  --paper: #131a22;
+  --ink: #dce3eb;
+  --ink-strong: #f4f7fa;
+  --ink-dim: #aab5c1;
+  --ink-faint: #8794a3;
+  --line: #2b3541;
+  --line-strong: #3a4654;
+  --surface: #18212b;
+  --surface-strong: #202b36;
+  --accent: #70bcb4;
+  --accent-ink: #9dd7d1;
+  --accent-soft: #17332f;
+  --accent-line: #386d67;
+  --positive: #72c6a2;
+  --positive-soft: #16372b;
+  --warning: #dfb260;
+  --warning-soft: #3a2d16;
+  --negative: #e4938e;
+  --negative-soft: #3d2323;
+  --neutral: #a8b7c6;
+  --neutral-soft: #26313c;
+  --focus: #78b8ff;
+  --shadow-paper: none;
+}
+
+body[data-profile="training-experiment"] {
+  --accent: #137b72;
+  --accent-ink: #0f5f58;
+  --accent-soft: #e3f3f0;
+  --accent-line: #8ccac4;
+}
+
+:root[data-theme="dark"] body[data-profile="training-experiment"] {
+  --accent: #69c6bb;
+  --accent-ink: #9ddbd4;
+  --accent-soft: #143631;
+  --accent-line: #36766e;
+}
+
+body[data-profile="development-log"] {
+  --accent: #3868aa;
+  --accent-ink: #28518a;
+  --accent-soft: #e9eff8;
+  --accent-line: #a8bedf;
+}
+
+:root[data-theme="dark"] body[data-profile="development-log"] {
+  --accent: #8cb5ee;
+  --accent-ink: #b4d0f5;
+  --accent-soft: #1b2d46;
+  --accent-line: #405f89;
+}
+
+body[data-profile="scientific-narrative"] {
+  --canvas: #f5f0e7;
+  --paper: #fffdf8;
+  --ink: #332d27;
+  --ink-strong: #201c18;
+  --ink-dim: #655d54;
+  --ink-faint: #70685f;
+  --line: #e2d9cc;
+  --line-strong: #cec2b3;
+  --control-line: #95887a;
+  --accent: #a0523c;
+  --accent-ink: #7e3c2d;
+  --accent-soft: #f6e9e1;
+  --accent-line: #dbb7a7;
+  --surface: #faf6ef;
+  --surface-strong: #f2ebe1;
+  --shadow-paper: 0 14px 36px rgba(61, 48, 37, 0.08);
+}
+
+:root[data-theme="dark"] body[data-profile="scientific-narrative"] {
+  --canvas: #121317;
+  --paper: #181a1f;
+  --ink: #e9e4dc;
+  --ink-strong: #fffaf2;
+  --ink-dim: #bcb4aa;
+  --ink-faint: #9a948b;
+  --line: #333238;
+  --line-strong: #48464c;
+  --control-line: #77736f;
+  --accent: #dc8e72;
+  --accent-ink: #efb39c;
+  --accent-soft: #3a2822;
+  --accent-line: #734a3d;
+  --surface: #202126;
+  --surface-strong: #28292f;
+  --shadow-paper: none;
+}
+
+* { box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 0;
+  min-height: 100vh;
+  overflow-x: hidden;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+  border-top: 4px solid var(--accent);
+}
+
+::selection { background: var(--accent-soft); color: var(--ink-strong); }
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+/* ---------- page and table of contents ---------- */
+
+.page {
+  width: min(100%, 1500px);
+  margin: 0 auto;
+  padding: 48px 44px 88px;
+}
+
+.doc-layout {
+  display: grid;
+  grid-template-columns: 218px minmax(0, 1fr);
+  gap: 34px;
+  align-items: start;
+}
+
+.doc-layout > main {
+  min-width: 0;
+  padding: 48px 58px 64px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-paper);
+}
+
+/* A page with fewer than two headings gets no table of contents, which would
+   otherwise drop main into the narrow sidebar column and squeeze it. Indexes
+   are the common case. */
+.doc-layout > main:only-child { grid-column: 1 / -1; }
+
+.toc {
+  position: sticky;
+  top: 28px;
+  width: 100%;
+  max-height: calc(100vh - 56px);
+  overflow-y: auto;
+  padding: 13px 20px 18px 4px;
+  border-right: 1px solid var(--line-strong);
+}
+
+.toc > summary {
+  margin: 0 0 12px;
+  color: var(--ink-faint);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  list-style: none;
+  text-transform: uppercase;
+}
+
+.toc > summary::-webkit-details-marker { display: none; }
+.toc ol { margin: 0; padding: 0; list-style: none; }
+.toc li { margin: 0; }
+.toc .lvl-3 { padding-left: 12px; }
+
+.toc a {
+  display: block;
+  overflow: hidden;
+  padding: 6px 0;
+  color: var(--ink-dim);
+  font-size: 13px;
+  line-height: 1.42;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toc a:hover { color: var(--accent-ink); }
+
+/* ---------- identity header ---------- */
+
+.doc-header {
+  margin-bottom: 28px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid var(--line);
+}
+
+.doc-state {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  margin: 0 10px 13px 0;
+}
+
+.doc-profile,
+.doc-status,
+.doc-kind {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  font-size: 10px;
+  font-weight: 780;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.doc-profile {
+  color: var(--accent-ink);
+}
+
+.doc-status {
+  padding: 5px 8px;
+  color: var(--neutral);
+  background: var(--neutral-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.doc-status.status-draft {
+  color: var(--warning);
+  background: var(--warning-soft);
+  border-color: color-mix(in srgb, var(--warning) 35%, var(--line));
+}
+
+.doc-status.status-final {
+  color: var(--positive);
+  background: var(--positive-soft);
+  border-color: color-mix(in srgb, var(--positive) 35%, var(--line));
+}
+
+.doc-kind {
+  margin: 0 0 13px;
+  color: var(--ink-faint);
+}
+
+.doc-title {
+  max-width: 24ch;
+  margin: 0 0 10px;
+  color: var(--ink-strong);
+  font-size: clamp(34px, 4.5vw, 50px);
+  font-weight: 760;
+  letter-spacing: -0.035em;
+  line-height: 1.06;
+}
+
+.doc-subtitle {
+  max-width: 66ch;
+  margin: 0 0 17px;
+  color: var(--ink-dim);
+  font-size: 17px;
+  line-height: 1.48;
+}
+
+.doc-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 0 0 18px;
+}
+
+.doc-tags span {
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.doc-tags span::before { content: "#"; color: var(--accent); }
+
+.meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, max-content));
+  gap: 10px 24px;
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.meta div { min-width: 0; }
+.meta dt { margin: 0 0 2px; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+.meta dd { margin: 0; overflow-wrap: anywhere; color: var(--ink-dim); font-family: var(--font-mono); font-size: 11px; }
+.meta dd.flag-dirty { color: var(--warning); font-weight: 700; }
+.meta dd.flag-clean { color: var(--positive); font-weight: 700; }
+
+/* ---------- answer-first summary ---------- */
+
+.report-summary {
+  position: relative;
+  margin: 0 0 24px;
+  padding: 23px 26px 24px;
+  overflow: hidden;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-left: 5px solid var(--accent);
+  border-radius: 8px;
+}
+
+.report-summary::after {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: color-mix(in srgb, var(--paper) 70%, transparent);
+  content: "";
+}
+
+.summary-label,
+.block-label {
+  margin: 0 0 8px;
+  color: var(--accent-ink);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.summary-title {
+  max-width: 42ch;
+  margin: 0 0 7px;
+  color: var(--ink-strong);
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 720;
+  letter-spacing: -0.025em;
+  line-height: 1.16;
+}
+
+.summary-detail {
+  max-width: 78ch;
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 14px;
+  line-height: 1.58;
+}
+
+/* ---------- semantic evidence components ---------- */
+
+.metric-grid,
+.status-grid {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 32px;
+}
+
+.metric-grid { grid-template-columns: repeat(auto-fit, minmax(205px, 1fr)); }
+.status-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.metric-card {
+  position: relative;
+  min-width: 0;
+  padding: 18px 18px 16px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--neutral);
+  border-radius: 7px;
+}
+
+.metric-card[data-status="improved"] { border-top-color: var(--positive); }
+.metric-card[data-status="regressed"] { border-top-color: var(--negative); }
+.metric-card[data-status="no-clear-change"],
+.metric-card[data-status="not-comparable"] { border-top-color: var(--warning); }
+
+.metric-label {
+  min-height: 2.7em;
+  margin: 0 0 8px;
+  color: var(--ink-dim);
+  font-size: 12px;
+  font-weight: 680;
+  line-height: 1.35;
+}
+
+.metric-value {
+  margin: 0 0 9px;
+  color: var(--ink-strong);
+  font-size: clamp(29px, 4vw, 39px);
+  font-variant-numeric: tabular-nums;
+  font-weight: 740;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.metric-unit { margin-left: 2px; color: var(--ink-dim); font-size: 0.48em; font-weight: 650; letter-spacing: 0; }
+.metric-compare { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0 0 8px; color: var(--ink-dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+.metric-delta { color: var(--ink-strong); font-weight: 700; }
+.metric-context { min-height: 3em; margin: 0 0 12px; color: var(--ink-faint); font-size: 11px; line-height: 1.45; }
+.metric-status { margin: 0; color: var(--neutral); font-size: 10px; font-weight: 780; letter-spacing: 0.06em; text-transform: uppercase; }
+.metric-card[data-status="improved"] .metric-status { color: var(--positive); }
+.metric-card[data-status="regressed"] .metric-status { color: var(--negative); }
+.metric-card[data-status="no-clear-change"] .metric-status,
+.metric-card[data-status="not-comparable"] .metric-status { color: var(--warning); }
+
+.status-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  align-items: baseline;
+  min-width: 0;
+  padding: 14px 15px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.status-value { color: var(--ink-strong); font-size: 24px; font-variant-numeric: tabular-nums; line-height: 1; }
+.status-label { color: var(--ink-dim); font-size: 11px; font-weight: 680; line-height: 1.3; }
+.status-item[data-status="complete"] { border-left: 3px solid var(--positive); }
+.status-item[data-status="blocked"] { border-left: 3px solid var(--negative); }
+.status-item[data-status="in-progress"] { border-left: 3px solid var(--accent); }
+.status-item[data-status="open"] { border-left: 3px solid var(--warning); }
+
+.finding,
+.decision,
+.risk,
+.next-action {
+  margin: 24px 0;
+  padding: 17px 20px 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--neutral);
+  border-radius: 0 7px 7px 0;
+}
+
+.finding[data-tone="positive"] { background: var(--positive-soft); border-left-color: var(--positive); }
+.risk, [data-tone="warning"] { border-left-color: var(--warning); }
+.risk { background: var(--warning-soft); }
+.decision, .next-action { border-left-color: var(--accent); }
+.finding > :last-child, .decision > :last-child, .risk > :last-child, .next-action > :last-child { margin-bottom: 0; }
+
+.evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin: 28px 0;
+}
+
+.evidence-grid > figure { min-width: 0; }
+.figure-wide { width: 100%; margin: 30px 0; }
+
+.timeline { position: relative; margin-left: 0; padding-left: 24px; list-style: none; }
+.timeline::before { position: absolute; top: 7px; bottom: 8px; left: 5px; width: 1px; background: var(--line-strong); content: ""; }
+.timeline-item { position: relative; padding: 0 0 15px 8px; }
+.timeline-item::before { position: absolute; top: 8px; left: -23px; width: 8px; height: 8px; background: var(--paper); border: 2px solid var(--accent); border-radius: 50%; content: ""; }
+
+.reproducibility {
+  margin: 8px 0 18px;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.reproducibility > :last-child { margin-bottom: 0; }
+
+/* ---------- prose ---------- */
+
+main {
+  overflow-wrap: break-word;
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.66;
+}
+
+main > :first-child { margin-top: 0; }
+main p { margin: 0 0 1.35em; }
+main a { color: var(--accent-ink); text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent); text-underline-offset: 3px; }
+main a:hover { text-decoration-thickness: 2px; }
+main strong { color: var(--ink-strong); font-weight: 700; }
+
+h2, h3, h4, h5, h6 {
+  color: var(--ink-strong);
+  font-weight: 740;
+  line-height: 1.22;
+  scroll-margin-top: 24px;
+}
+
+h2 { margin: 2.35em 0 0.7em; font-size: 1.55rem; letter-spacing: -0.025em; }
+h3 { margin: 2em 0 0.55em; font-size: 1.17rem; letter-spacing: -0.01em; }
+h4 { margin: 1.6em 0 0.45em; color: var(--ink-dim); font-size: 1rem; }
+
+.anchor { margin-left: 0.4rem; color: var(--ink-faint); font-weight: 400; opacity: 0; text-decoration: none; }
+h2:hover .anchor, h3:hover .anchor, h4:hover .anchor, .anchor:focus-visible { opacity: 1; }
+
+main ul { margin: 0 0 1.4em 1.3em; padding: 0; }
+main ol { margin: 0 0 1.4em 1.4em; padding: 0; }
+main li { margin-bottom: 0.42em; padding-left: 0.12em; }
+main li::marker { color: var(--ink-faint); }
+main li > p { margin-bottom: 0.3em; }
+main li > ul, main li > ol { margin-top: 0.35em; margin-bottom: 0.5em; }
+li.task { margin-left: -1.15em; list-style: none; }
+li.task input { margin-right: 0.5em; accent-color: var(--accent); }
+
+blockquote {
+  margin: 1.8em 0;
+  padding: 0.2em 0 0.2em 1.2em;
+  color: var(--ink-dim);
+  border-left: 3px solid var(--line-strong);
+}
+
+hr { margin: 3em 0; border: 0; border-top: 1px solid var(--line); }
+
+/* ---------- code ---------- */
+
+code {
+  padding: 2px 5px;
+  color: var(--ink-strong);
+  background: var(--surface-strong);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+}
+
+.codeblock {
+  margin: 1.8em 0;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.codeblock .lang {
+  padding: 8px 16px;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.codeblock pre { margin: 0; padding: 16px 18px; overflow-x: auto; }
+.codeblock pre code { padding: 0; color: var(--ink); background: none; font-size: 0.83rem; line-height: 1.65; }
+
+/* ---------- tables ---------- */
+
+.table-wrap {
+  max-width: 100%;
+  margin: 1.8em 0;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+table { width: 100%; border-collapse: collapse; font-size: 0.86em; font-variant-numeric: tabular-nums; }
+th, td { padding: 10px 13px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+th { color: var(--ink-dim); background: var(--surface); font-size: 0.78rem; font-weight: 720; letter-spacing: 0.015em; white-space: nowrap; }
+tbody tr:last-child td { border-bottom: 0; }
+tbody tr:hover td { background: color-mix(in srgb, var(--surface) 65%, transparent); }
+td.num, th.num { text-align: right; }
+td.center, th.center { text-align: center; }
+
+/* ---------- figures and math ---------- */
+
+figure { min-width: 0; margin: 0; }
+
+main img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+figcaption {
+  max-width: 78ch;
+  margin: 10px auto 0;
+  color: var(--ink-faint);
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: left;
+}
+
+math { font-family: var(--font-math); font-size: 1.06em; }
+math[display="block"] { margin: 0; font-size: 1.18em; }
+mtable.align > mtr > mtd { padding-right: 0; padding-left: 0; }
+mtable.align > mtr { line-height: 2.2; }
+
+.math-block {
+  max-width: 100%;
+  margin: 1.9em 0;
+  padding: 0.4em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  text-align: center;
+}
+
+.math-fallback { padding: 3px 6px; border: 1px dashed var(--line-strong); font-family: var(--font-mono); font-size: 0.84em; }
+.math-block.unparsed { text-align: left; }
+
+/* ---------- details and legacy callouts ---------- */
+
+main details {
+  margin: 1.8em 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+main details > summary {
+  padding: 13px 17px;
+  color: var(--ink-dim);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+main details[open] > summary { margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+main details > :not(summary) { margin-right: 17px; margin-left: 17px; }
+main details .codeblock { margin-right: 17px; margin-left: 17px; }
+
+.callout {
+  margin: 1.8em 0;
+  padding: 15px 18px;
+  background: var(--surface);
+  border-left: 4px solid var(--accent);
+  border-radius: 0 7px 7px 0;
+}
+
+.callout.warn { background: var(--warning-soft); border-left-color: var(--warning); }
+.callout.bad { background: var(--negative-soft); border-left-color: var(--negative); }
+.callout > :last-child { margin-bottom: 0; }
+
+/* ---------- profile modifiers ---------- */
+
+body[data-profile="training-experiment"] .page { width: min(100%, 1580px); }
+body[data-profile="training-experiment"] .doc-layout { grid-template-columns: 220px minmax(0, 1fr); }
+body[data-profile="training-experiment"] .doc-layout > main { padding-right: 52px; padding-left: 52px; }
+body[data-profile="training-experiment"] .doc-title { max-width: 28ch; }
+body[data-profile="training-experiment"] .report-summary { padding-right: 32px; padding-left: 32px; }
+body[data-profile="training-experiment"] .metric-grid { margin-top: -2px; }
+body[data-profile="training-experiment"] .table-wrap { font-size: 0.95em; }
+
+body[data-profile="development-log"] .page { width: min(100%, 1260px); }
+body[data-profile="development-log"] .doc-layout { grid-template-columns: 198px minmax(0, 1fr); gap: 28px; }
+body[data-profile="development-log"] .doc-layout > main { padding: 42px 48px 58px; }
+body[data-profile="development-log"] .doc-title { max-width: 22ch; font-size: clamp(32px, 4vw, 43px); }
+body[data-profile="development-log"] .doc-header { margin-bottom: 22px; padding-bottom: 20px; }
+body[data-profile="development-log"] .report-summary { margin-bottom: 16px; padding: 19px 22px 20px; }
+body[data-profile="development-log"] .summary-title { font-size: clamp(21px, 2.6vw, 27px); }
+body[data-profile="development-log"] .status-grid { margin-bottom: 26px; }
+body[data-profile="development-log"] h2 { margin-top: 1.9em; font-size: 1.35rem; }
+body[data-profile="development-log"] .finding,
+body[data-profile="development-log"] .decision,
+body[data-profile="development-log"] .risk,
+body[data-profile="development-log"] .next-action { margin: 18px 0; }
+
+body[data-profile="scientific-narrative"] .page { width: min(100%, 1420px); }
+body[data-profile="scientific-narrative"] .doc-layout { grid-template-columns: 210px minmax(0, 1fr); gap: 30px; }
+body[data-profile="scientific-narrative"] .doc-layout > main {
+  padding: clamp(44px, 7.7vw, 56px) clamp(44px, 6vw, 64px)
+    clamp(56px, 9.7vw, 70px);
+  border-color: var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-paper);
+}
+body[data-profile="scientific-narrative"] main > * {
+  max-width: 70ch;
+  margin-right: auto;
+  margin-left: auto;
+}
+body[data-profile="scientific-narrative"] main > .figure-wide,
+body[data-profile="scientific-narrative"] main > .evidence-grid,
+body[data-profile="scientific-narrative"] main > .doc-footer { max-width: none; }
+body[data-profile="scientific-narrative"] .doc-header {
+  margin-bottom: 36px;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+body[data-profile="scientific-narrative"] .doc-title {
+  max-width: 20ch;
+  font-family: var(--font-editorial);
+  font-size: clamp(40px, 5vw, 54px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.08;
+}
+body[data-profile="scientific-narrative"] .doc-subtitle {
+  max-width: 58ch;
+  color: var(--ink-dim);
+  font-family: var(--font-editorial);
+  font-size: 19px;
+  font-style: italic;
+  line-height: 1.52;
+}
+body[data-profile="scientific-narrative"] .doc-profile,
+body[data-profile="scientific-narrative"] .doc-kind { color: var(--accent-ink); }
+body[data-profile="scientific-narrative"] .doc-status { border-color: var(--accent-line); }
+body[data-profile="scientific-narrative"] .theme-toggle,
+body[data-profile="scientific-narrative"] .theme-toggle:hover {
+  border-color: var(--control-line);
+}
+body[data-profile="scientific-narrative"] .doc-state,
+body[data-profile="scientific-narrative"] .doc-kind,
+body[data-profile="scientific-narrative"] .doc-tags,
+body[data-profile="scientific-narrative"] .meta,
+body[data-profile="scientific-narrative"] .summary-label,
+body[data-profile="scientific-narrative"] .block-label,
+body[data-profile="scientific-narrative"] figcaption,
+body[data-profile="scientific-narrative"] .codeblock,
+body[data-profile="scientific-narrative"] table,
+body[data-profile="scientific-narrative"] main details > summary,
+body[data-profile="scientific-narrative"] .doc-footer { font-family: var(--font-ui); }
+body[data-profile="scientific-narrative"] .meta {
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 10px 22px;
+  margin-top: 20px;
+  padding: 14px 0;
+  border-block: 1px solid var(--line);
+}
+body[data-profile="scientific-narrative"] main {
+  font-family: var(--font-editorial);
+  font-size: 18px;
+  line-height: 1.68;
+}
+body[data-profile="scientific-narrative"] .report-summary {
+  max-width: 70ch;
+  margin-bottom: 42px;
+  padding: 24px 28px 25px;
+  border-left-width: 1px;
+  border-radius: 10px;
+}
+body[data-profile="scientific-narrative"] .report-summary::after { display: none; }
+body[data-profile="scientific-narrative"] .summary-title {
+  max-width: 46ch;
+  font-family: var(--font-editorial);
+  font-size: clamp(19px, 1.9vw, 23px);
+  font-weight: 600;
+  line-height: 1.36;
+}
+body[data-profile="scientific-narrative"] .summary-detail {
+  font-family: var(--font-editorial);
+  font-size: 15px;
+}
+body[data-profile="scientific-narrative"] h2,
+body[data-profile="scientific-narrative"] h3,
+body[data-profile="scientific-narrative"] h4 {
+  font-family: var(--font-editorial);
+  font-weight: 600;
+}
+body[data-profile="scientific-narrative"] h2 {
+  margin-top: 3.1em;
+  padding-top: 1.05em;
+  border-top: 1px solid var(--line);
+  font-size: 1.68rem;
+}
+body[data-profile="scientific-narrative"] h3 { margin-top: 2.35em; font-size: 1.25rem; }
+body[data-profile="scientific-narrative"] .figure-wide { width: min(1040px, 100%); margin: 38px auto; }
+body[data-profile="scientific-narrative"] main img {
+  padding: 18px;
+  background: var(--surface);
+  border-color: var(--line);
+  border-radius: 6px;
+}
+body[data-profile="scientific-narrative"] figcaption { text-align: center; }
+body[data-profile="scientific-narrative"] .table-wrap {
+  border: 0;
+  border-top: 1px solid var(--line-strong);
+  border-right: 0;
+  border-bottom: 1px solid var(--line);
+  border-left: 0;
+  border-radius: 0;
+  font-family: var(--font-ui);
+}
+body[data-profile="scientific-narrative"] th {
+  background: transparent;
+  border-bottom-color: var(--line-strong);
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+body[data-profile="scientific-narrative"] td { border-bottom-color: var(--line); }
+body[data-profile="scientific-narrative"] tbody tr:hover td { background: var(--surface); }
+body[data-profile="scientific-narrative"] .math-block {
+  margin-top: 2.2em;
+  margin-bottom: 2.2em;
+  padding: 1.1em 1em;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+body[data-profile="scientific-narrative"] .codeblock {
+  background: var(--surface);
+  border-color: var(--line);
+  border-radius: 6px;
+}
+body[data-profile="scientific-narrative"] .codeblock .lang { background: var(--surface-strong); }
+body[data-profile="scientific-narrative"] .finding,
+body[data-profile="scientific-narrative"] .decision,
+body[data-profile="scientific-narrative"] .risk,
+body[data-profile="scientific-narrative"] .next-action,
+body[data-profile="scientific-narrative"] .callout {
+  border: 1px solid var(--line);
+  border-left-width: 1px;
+  border-radius: 6px;
+}
+body[data-profile="scientific-narrative"] .finding[data-tone="positive"] {
+  border-color: color-mix(in srgb, var(--positive) 35%, var(--line));
+}
+body[data-profile="scientific-narrative"] .risk,
+body[data-profile="scientific-narrative"] [data-tone="warning"],
+body[data-profile="scientific-narrative"] .callout.warn {
+  border-color: color-mix(in srgb, var(--warning) 35%, var(--line));
+}
+body[data-profile="scientific-narrative"] .callout.bad {
+  border-color: color-mix(in srgb, var(--negative) 35%, var(--line));
+}
+body[data-profile="scientific-narrative"] .decision,
+body[data-profile="scientific-narrative"] .next-action {
+  border-color: var(--accent-line);
+}
+body[data-profile="scientific-narrative"] .reproducibility,
+body[data-profile="scientific-narrative"] main details {
+  background: var(--surface);
+  border-color: var(--line);
+  border-radius: 6px;
+}
+
+
+/* ---------- report index ---------- */
+
+.index-empty { color: var(--ink-faint); font-style: italic; }
+td.t-title a { color: var(--ink-strong); font-weight: 700; }
+td.t-date, td.t-commit { color: var(--ink-faint); font-family: var(--font-mono); font-size: 11px; white-space: nowrap; }
+td.t-profile, td.t-kind { color: var(--ink-dim); font-size: 11px; white-space: nowrap; }
+td.t-kind { letter-spacing: 0.04em; text-transform: uppercase; }
+td.t-status { font-size: 11px; font-weight: 700; white-space: nowrap; }
+td.t-status.status-draft { color: var(--warning); }
+td.t-status.status-final { color: var(--positive); }
+
+/* ---------- controls and footer ---------- */
+
+.theme-toggle {
+  position: fixed;
+  z-index: 20;
+  top: 15px;
+  right: 16px;
+  padding: 7px 10px;
+  color: var(--ink-dim);
+  background: color-mix(in srgb, var(--paper) 92%, transparent);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  cursor: pointer;
+  font: 650 11px/1 var(--font-ui);
+  letter-spacing: 0.03em;
+}
+
+.theme-toggle:hover { color: var(--ink-strong); border-color: var(--accent-line); }
+
+.doc-footer {
+  margin-top: 64px;
+  padding-top: 18px;
+  color: var(--ink-faint);
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+}
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 1050px) {
+  .page { padding: 38px 28px 72px; }
+  .doc-layout { grid-template-columns: 1fr !important; gap: 20px !important; }
+  .toc {
+    position: static;
+    max-height: none;
+    padding: 12px 0 14px;
+    overflow: visible;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-strong);
+  }
+  .toc:not([open]) { padding-bottom: 10px; }
+  .toc ol { columns: 2; column-gap: 28px; }
+  .toc li { break-inside: avoid; }
+}
+
+@media (max-width: 720px) {
+  .page { padding: 30px 14px 48px; }
+  .doc-layout > main,
+  body[data-profile="training-experiment"] .doc-layout > main,
+  body[data-profile="development-log"] .doc-layout > main,
+  body[data-profile="scientific-narrative"] .doc-layout > main {
+    padding: 30px 22px 42px;
+    border-radius: 8px;
+  }
+  .doc-title { font-size: clamp(31px, 10vw, 42px); }
+  .doc-subtitle { font-size: 15px; }
+  .meta { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px 16px; }
+  .report-summary,
+  body[data-profile="training-experiment"] .report-summary,
+  body[data-profile="development-log"] .report-summary,
+  body[data-profile="scientific-narrative"] .report-summary { padding: 20px 20px 21px; }
+  .metric-grid { grid-template-columns: 1fr; }
+  .metric-label, .metric-context { min-height: 0; }
+  .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .evidence-grid { grid-template-columns: 1fr; }
+  .toc ol { columns: 1; }
+  main { font-size: 14px; }
+  body[data-profile="scientific-narrative"] main { font-size: 16px; }
+  .theme-toggle { top: 10px; right: 9px; }
+  body[data-profile="scientific-narrative"] .page {
+    padding-right: clamp(14px, 3.9vw, 28px);
+    padding-left: clamp(14px, 3.9vw, 28px);
+  }
+  body[data-profile="scientific-narrative"] .doc-layout > main {
+    padding: clamp(30px, 7.7vw, 56px) clamp(22px, 6vw, 44px)
+      clamp(42px, 9.7vw, 70px);
+    border-radius: 6px;
+    box-shadow: none;
+  }
+  body[data-profile="scientific-narrative"] main > * { max-width: 100%; }
+  body[data-profile="scientific-narrative"] main { font-size: 16px; }
+  body[data-profile="scientific-narrative"] .doc-title { font-size: clamp(32px, 7.5vw, 40px); }
+  body[data-profile="scientific-narrative"] h2 { margin-top: 2.6em; padding-top: 0.9em; }
+  body[data-profile="scientific-narrative"] main img { padding: 10px; }
+}
+
+@media (max-width: 430px) {
+  .page { padding-right: 8px; padding-left: 8px; }
+  .doc-layout > main,
+  body[data-profile="training-experiment"] .doc-layout > main,
+  body[data-profile="development-log"] .doc-layout > main,
+  body[data-profile="scientific-narrative"] .doc-layout > main { padding-right: 17px; padding-left: 17px; }
+  .doc-state { display: flex; width: max-content; max-width: 100%; margin-bottom: 8px; }
+  .doc-kind { display: flex; margin: 0 0 11px; }
+  .doc-title, body[data-profile="scientific-narrative"] .doc-title { font-size: 31px; }
+  .summary-title { font-size: 22px; }
+  .status-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .status-item { grid-template-columns: 1fr; gap: 5px; }
+  .meta { grid-template-columns: 1fr; }
+  th, td { padding: 9px 10px; }
+  body[data-profile="scientific-narrative"] .page {
+    padding-right: clamp(8px, 3.5vw, 15px);
+    padding-left: clamp(8px, 3.5vw, 15px);
+  }
+  body[data-profile="scientific-narrative"] .doc-layout > main {
+    padding-right: clamp(17px, 5.5vw, 24px);
+    padding-left: clamp(17px, 5.5vw, 24px);
+    border-radius: 4px;
+  }
+  body[data-profile="scientific-narrative"] .doc-title { font-size: clamp(30px, 7.5vw, 32px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.001ms !important; animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
+}
+
+/* ---------- print ---------- */
+
+@media print {
+  :root {
+    --canvas: #fff;
+    --paper: #fff;
+    --ink: #111;
+    --ink-strong: #000;
+    --ink-dim: #333;
+    --ink-faint: #555;
+    --line: #bbb;
+    --line-strong: #999;
+    --surface: #f5f5f5;
+    --surface-strong: #eee;
+    --shadow-paper: none;
+  }
+  body { border-top: 0; background: #fff; }
+  .toc, .theme-toggle, .anchor { display: none !important; }
+  .page { width: auto; max-width: none; padding: 0; }
+  .doc-layout { display: block; }
+  .doc-layout > main,
+  body[data-profile] .doc-layout > main { padding: 0; border: 0; border-radius: 0; box-shadow: none; }
+  .doc-header { break-after: avoid; }
+  .report-summary, .metric-card, .status-item, .finding, .decision, .risk,
+  .next-action, .codeblock, .table-wrap, table, figure, .math-block,
+  .reproducibility { break-inside: avoid; }
+  details > summary { display: none !important; }
+  details > :not(summary) { display: block !important; }
+  main details { border: 0; }
+  main details > :not(summary), main details .codeblock { margin-right: 0; margin-left: 0; }
+  a { color: inherit; }
+  body[data-profile="scientific-narrative"],
+  :root[data-theme="dark"] body[data-profile="scientific-narrative"] {
+    color-scheme: light;
+    --canvas: #fff;
+    --paper: #fff;
+    --ink: #111;
+    --ink-strong: #000;
+    --ink-dim: #333;
+    --ink-faint: #555;
+    --line: #bbb;
+    --line-strong: #999;
+    --control-line: #777;
+    --accent: #a0523c;
+    --accent-ink: #7e3c2d;
+    --accent-soft: #f6e9e1;
+    --accent-line: #dbb7a7;
+    --positive: #187454;
+    --positive-soft: #e6f4ee;
+    --warning: #946316;
+    --warning-soft: #fbf1dc;
+    --negative: #a4403b;
+    --negative-soft: #f9e9e7;
+    --neutral: #536474;
+    --neutral-soft: #edf1f4;
+    --focus: #1667c5;
+    --surface: #f5f5f5;
+    --surface-strong: #eee;
+    --shadow-paper: none;
+  }
+  body[data-profile="scientific-narrative"] .page { padding: 0; }
+  body[data-profile="scientific-narrative"] .doc-layout > main { background: #fff; }
+  body[data-profile="scientific-narrative"] main > .table-wrap,
+  body[data-profile="scientific-narrative"] main > .codeblock,
+  body[data-profile="scientific-narrative"] main > .math-block {
+    max-width: none;
+    overflow: visible;
+  }
+  body[data-profile="scientific-narrative"] .table-wrap { width: 100%; }
+  body[data-profile="scientific-narrative"] th { white-space: normal; }
+  body[data-profile="scientific-narrative"] table { font-size: 9pt; }
+  body[data-profile="scientific-narrative"] .codeblock pre {
+    overflow-x: visible;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+  }
+  body[data-profile="scientific-narrative"] .math-block { font-size: 9pt; }
+  body[data-profile="scientific-narrative"] main {
+    font-size: 11pt;
+    line-height: 1.55;
+  }
+  body[data-profile="scientific-narrative"] h2 { border-top-color: var(--line-strong); }
+  body[data-profile="scientific-narrative"] details::details-content {
+    content-visibility: visible !important;
+  }
+  body[data-profile="scientific-narrative"] .report-summary,
+  body[data-profile="scientific-narrative"] main img,
+  body[data-profile="scientific-narrative"] .math-block,
+  body[data-profile="scientific-narrative"] .codeblock {
+    background: #fff;
+  }
+}
+
+</style>
+</head>
+<body class="report-page profile-development-log status-final" data-profile="development-log" data-status="final">
+<button class="theme-toggle" type="button" aria-label="Toggle color theme">Theme</button>
+<div class="page">
+<div class="doc-layout">
+<details class="toc" open><summary>Contents</summary><ol><li class="lvl-2"><a href="#question-and-decomposition">Question and decomposition</a></li><li class="lvl-2"><a href="#completed-deliverables">Completed deliverables</a></li><li class="lvl-2"><a href="#verification-inference-stage-a-matrix">Verification — inference (Stage A + matrix)</a></li><li class="lvl-2"><a href="#verification-trainer-stage-b">Verification — trainer (Stage B)</a></li><li class="lvl-2"><a href="#static-equivalence-megatron-side">Static equivalence (Megatron side)</a></li><li class="lvl-2"><a href="#campaign-follow-up-the-oft-b8-rollout-failure">Campaign follow-up — the OFT b8 rollout failure</a></li><li class="lvl-2"><a href="#risks-and-limitations">Risks and limitations</a></li><li class="lvl-2"><a href="#actions">Actions</a></li></ol></details>
+<main>
+<header class="doc-header">
+<div class="doc-state"><span class="doc-profile">Development log</span><span class="doc-status status-final">Final</span></div><div class="doc-kind">investigation</div><h1 class="doc-title">Merged-stack numerical equivalence — sglang v0.5.16 line and merged orbit vs the published E4 stack</h1>
+<div class="doc-tags"><span>lora-regret</span><span>numerics</span><span>sglang</span><span>megatron</span><span>oft</span><span>lora</span><span>verification</span></div>
+<dl class="meta"><div><dt>date</dt><dd>2026-08-19</dd></div><div><dt>commit</dt><dd>ef2c6510a894</dd></div><div><dt>branch</dt><dd>orbit-main</dd></div><div><dt>tree</dt><dd class="flag-dirty">dirty</dd></div><div><dt>host</dt><dd>Zejus-MacBook-Pro.local</dd></div><div><dt>python</dt><dd>3.9.6</dd></div><div><dt>old_stack</dt><dd>sglang b52394d22 (orbit_env), orbit 46c8e0f6</dd></div><div><dt>new_stack</dt><dd>sglang 05cd76b4d (orbit_env_v2), orbit orbit-main</dd></div><div><dt>fixes</dt><dd>sglang 40784883e + 51845dc4a, orbit 89ea48c + badab95</dd></div><div><dt>jobs</dt><dd>17466992 (i305), 17467160 (i201), 17467161 (i305), 17467303 (g102), 17468719 (g198), 17463137 (i407, OFT b8)</dd></div><div><dt>evidence</dt><dd>remote-cluster-runs mpi4 stage-a-inference-compare, mpi1/mpi2 backend-matrix, mpi4 stageb-trainer-equivalence</dd></div></dl>
+</header>
+<section class="report-summary" aria-label="Outcome">
+<p class="summary-label">Outcome</p>
+<p class="summary-title">The merged stack is numerically equivalent to the published E4 stack everywhere a deterministic comparison exists: bit-identical on H100 for inference (base, LoRA, OFT on fa3 and triton) and for the trainer (forward always; the full forward-backward-optimizer pipeline bit-exact on one of two nodes, envelope-equal on the other) — and bit-identical on B200/triton as well once the one root-caused difference, a deliberate sm100 prefill-tiling choice new in v0.5.16, is held equal.</p>
+<p class="summary-detail">Three latent serving bugs were found, fixed, verified on GPU, and pushed en route (disk-loaded adapters silently ignored; adapter/base radix-cache cross-contamination; OFT parameter-count 1.46x undercount). Caveats: seeded sampling is incompatible across builds by construction; stock B200 triton keeps its (adapter-agnostic, fully attributed) tiling drift by decision; trtllm_mha on B200 is untestable deterministically on the old build.</p>
+</section>
+<div class="status-grid" role="list" aria-label="Program status">
+<div class="status-item" data-status="complete" role="listitem"><strong class="status-value">3</strong><span class="status-label">Bugs fixed, verified, pushed</span></div>
+<div class="status-item" data-status="complete" role="listitem"><strong class="status-value">22</strong><span class="status-label">Comparison cells measured</span></div>
+<div class="status-item" data-status="blocked" role="listitem"><strong class="status-value">2</strong><span class="status-label">Cells unmeasurable</span></div>
+<div class="status-item" data-status="open" role="listitem"><strong class="status-value">3</strong><span class="status-label">Handoff follow-ups</span></div>
+</div>
+<h2 id="question-and-decomposition">Question and decomposition<a class="anchor" href="#question-and-decomposition" aria-hidden="true">#</a></h2>
+<p>A merge moved the stack from the sglang v0.5.9 line (<code>b52394d22</code>, the build every
+published E4 number was produced on, venv <code>orbit_env</code>) to the v0.5.16 line
+(<code>05cd76b4d</code>, venv <code>orbit_env_v2</code>), and moved orbit itself by 216 commits from the
+E4 report's provenance commit <code>46c8e0f6</code> (+4,490/−291 lines in
+<code>backends/megatron_utils</code> alone). The question: does the merged stack produce the
+same numbers?</p>
+<p>Unseeded sampling makes end-to-end RL runs incomparable (measured earlier: 0/32
+identical completions at fixed seed), so the program decomposed into pieces that
+are deterministic by construction:</p>
+<ol><li><strong>Stage A</strong> — inference forward: same weights, greedy decoding, deterministic<p>inference mode, pinned attention backend, both builds on one node.</p></li><li><strong>Backend × adapter × GPU matrix</strong> — the same probe over<p>{H100, B200} × {fa3, triton, flashinfer} × {base, LoRA r16, OFT b128}.</p></li><li><strong>Stage B</strong> — trainer: one frozen rollout batch replayed through the full E4<p>launcher on both stacks via orbit's own <code>--load-debug-rollout-data</code> /
+<code>--debug-train-only</code> seam (zero sglang engines, one GRPO step, 1×H100,
+TP1/DP1), comparing per-token logprobs, advantages, grad norm, repeated for a
+nondeterminism envelope.</p></li></ol>
+<h2 id="completed-deliverables">Completed deliverables<a class="anchor" href="#completed-deliverables" aria-hidden="true">#</a></h2>
+<ul><li><strong>sglang <code>40784883e</code></strong> — `fix(peft): propagate resolved adapter ids into cached<p>request sub-objects<code>. Batched</code>generate()<code>with</code>adapter_path<code>/</code>lora_path<code>resolved the adapter at the tokenizer but the id never reached the scheduler
+(</code>GenerateReqInput.<strong>getitem</strong>` memoizes sub-objects before resolution runs).
+OFT served the identity slot: disk-loaded adapters silently returned
+<strong>base-model output</strong>. Verified pre/post on GPU for both PEFT kinds.</p></li><li><strong>sglang <code>51845dc4a</code></strong> — <code>fix(peft): key the radix cache by OFT adapter id</code>.<p>The port dropped the old build's <code>|oft:{id}:v{n}</code> extra-key branch, so
+adapter and base requests shared radix keys; base requests prefix-matched
+adapter-computed KV (base greedy ≡ adapter output on 14/16 prompts, 0/16 with
+the cache disabled). RL was protected only because orbit force-disables the
+radix cache for PEFT rollout engines. Verified with the cache on.</p></li><li><strong>orbit <code>89ea48c</code> + <code>badab95</code></strong> — canonical OFT builds one rotation per fused<p><strong>output slice</strong> (qkv=3, fc1=2), not per module; the counter undercounted
+all-modules OFT by <strong>1.46×</strong> (b128: recorded 54,099,968, actual 79,069,184).
+This fed <code>matched_ratio</code>/<code>oft_matched_lora_rank</code>, so "parameter-matched"
+OFT/LoRA pairs handed OFT ~46% extra capacity. Consequences now pinned in
+tests: E4's b128 rung implies LoRA rank 35 (between the matrix's r16 and
+r256 — no capacity-comparable arm); every ladder rung now lands inside the
+0.85–1.15 band; attention-vs-MLP placement cannot be matched by block size at
+all (~26% high everywhere). <code>badab95</code> threads an <code>oft_type</code> keyword so legacy
+shared-R arms can never silently receive canonical accounting; legacy
+accounting reproduces the old ledger number exactly (regression-pinned).</p></li></ul>
+<p>All three fixes are pushed to <code>Sphere-AI-Lab/{sglang,orbit}</code> <code>orbit-main</code> and
+live in <code>orbit_env_v2</code>'s installed copy.</p>
+<aside class="finding" data-tone="caution">
+<p class="block-label">Finding</p>
+<p>Positive: any pre-fix evaluation that loaded a saved OFT adapter from disk in a batched request reported base-model numbers and must be rerun if it fed any record. Training via the streamed cpu_gather path was never affected; published E4 training curves are untouched by all three bugs.</p>
+</aside>
+<h2 id="verification-inference-stage-a-matrix">Verification — inference (Stage A + matrix)<a class="anchor" href="#verification-inference-stage-a-matrix" aria-hidden="true">#</a></h2>
+<p>Probe: 16 math prompts × 64 greedy tokens, deterministic inference, radix cache
+disabled, per-position |Δlogprob| over prompts whose full token sequences match.
+Within-build repeatability across independent engine boots was exactly 0.00
+(three control pairs), so every nonzero delta below is a genuine build
+difference.</p>
+<div class="table-wrap"><table><thead><tr><th>GPU</th><th>Backend</th><th>Phase</th><th>Tokens identical</th><th>p50</th><th>mean</th><th>p95</th><th>max</th></tr></thead><tbody><tr><td>H100</td><td>fa3</td><td>LoRA r16</td><td>16/16</td><td>0.00</td><td>0.00</td><td>0.00</td><td><strong>0.00</strong></td></tr><tr><td>H100</td><td>fa3</td><td>OFT b128</td><td>16/16</td><td>0.00</td><td>0.00</td><td>0.00</td><td><strong>0.00</strong></td></tr><tr><td>H100</td><td>fa3</td><td>base ×2 engines</td><td>16/16</td><td>0.00</td><td>0.00</td><td>0.00</td><td>0.00</td></tr><tr><td>H100</td><td>triton</td><td>LoRA r16</td><td>16/16</td><td>0.00</td><td>0.00</td><td>0.00</td><td><strong>0.00</strong></td></tr><tr><td>H100</td><td>triton</td><td>OFT b128</td><td>16/16</td><td>0.00</td><td>0.00</td><td>0.00</td><td><strong>0.00</strong></td></tr><tr><td>H100</td><td>triton</td><td>base ×2 engines</td><td>16/16</td><td>0.00</td><td>0.00</td><td>0.00</td><td>0.00</td></tr><tr><td>B200</td><td>triton (stock)</td><td>LoRA r16</td><td>10/16</td><td>8.0e-4</td><td>8.9e-3</td><td>5.0e-2</td><td>1.35e-1</td></tr><tr><td>B200</td><td>triton (stock)</td><td>OFT b128</td><td>16/16</td><td>4.7e-3</td><td>1.2e-2</td><td>4.7e-2</td><td>8.3e-2</td></tr><tr><td>B200</td><td>triton (stock)</td><td>base ×2 engines</td><td>11/16</td><td>9.1e-4</td><td>8.3e-3</td><td>4.4e-2</td><td>1.15e-1</td></tr><tr><td>B200</td><td>triton, tiling matched¹</td><td>LoRA r16</td><td>16/16</td><td>0.00</td><td>0.00</td><td>0.00</td><td><strong>0.00</strong></td></tr><tr><td>B200</td><td>triton, tiling matched¹</td><td>OFT b128</td><td>16/16</td><td>0.00</td><td>0.00</td><td>0.00</td><td><strong>0.00</strong></td></tr><tr><td>B200</td><td>triton, tiling matched¹</td><td>base ×2 engines</td><td>16/16</td><td>0.00</td><td>0.00</td><td>0.00</td><td><strong>0.00</strong></td></tr><tr><td>B200</td><td>flashinfer</td><td>all</td><td>—</td><td>—</td><td>—</td><td>—</td><td>old build SIGKILLed at boot, twice</td></tr><tr><td>H100</td><td>flashinfer</td><td>all</td><td>—</td><td>—</td><td>—</td><td>—</td><td>old build SIGKILLed at boot (child engine process fails); new build boots fine</td></tr><tr><td>B200</td><td>trtllm_mha²</td><td>OFT / base</td><td>—</td><td>—</td><td>—</td><td>—</td><td>old build SIGKILLed at boot, twice — cross-build unmeasurable</td></tr></tbody></table></div>
+<p>¹ New build with its sm100 extend-attention tiling branch disabled so it selects
+the same (128, 64) prefill tiles the old build used on B200 by fall-through —
+see the root-cause finding below. Same node (i305) as the stock rows; probe
+patch reverted after the measurement.</p>
+<p>² trtllm_mha rejects deterministic mode on the old build, so this cell was
+attempted WITHOUT deterministic inference (greedy, single fixed batch, radix
+off, 2 repeats per build). The old build was killed at engine boot both times.
+Instructively, the new build's own two repeats already disagree without
+deterministic mode — 16/16 tokens but max |Δlogprob| 1.55e-2 with the adapter,
+and only 15/16 identical token sequences on base — so even with both builds
+booting, this mode could never support bit-level cross-build claims; it bounds
+any comparison at the ~1e-2 batch-nondeterminism floor.</p>
+<aside class="finding" data-tone="positive">
+<p class="block-label">Finding</p>
+<p>On H100 every cell is bit-identical across the ~5,500-commit merge, on both backends. The only drift is triton-on-B200, it is adapter-agnostic (LoRA's max delta 1.35e-1 exceeds base 1.15e-1 exceeds OFT 8.3e-2; medians ~1 bf16 ulp; OFT's higher median is a position-mix artifact of EOS-short outputs) — and it was subsequently <strong>root-caused to a single prefill tiling branch and closed to bit-identity</strong> (below).</p>
+</aside>
+<aside class="finding" data-tone="positive">
+<p class="block-label">Root cause + closure (B200 drift)</p>
+<p>The v0.5.16 line added an sm100-specific branch to the extend-attention tile selection (<code>sglang/kernels/ops/attention/extend_attention.py</code>, <code>CUDA_CAPABILITY[0] == 10</code> → BLOCK_M,BLOCK_N = (64,64) for Lq≤256, added for sm_100a register constraints); the old build had no such branch and fell through to the Hopper sizes (128,64) on B200. Different tiles → different bf16 online-softmax accumulation order; decode kernels have no capability branches, so all decode-position drift was downstream of prefill-written KV. Confirmed by experiment (job 17469012, i305, the same node as the reference dumps): with the branch disabled, old-vs-new is <strong>bit-identical on B200/triton</strong> — 16/16 tokens and max |Δlogprob| = 0.000e+00 for OFT, LoRA, and both base controls. The probe patch was reverted after the run. <strong>Decision: no permanent match switch adopted</strong> — the experiment's purpose was verifying the merge, which it does conclusively (the new build is the old build plus one deliberate, documented sm100 performance tiling choice); anyone needing bit-continuity on B200/triton can reproduce the one-line branch disable recorded here.</p>
+</aside>
+<p>Seeded sampling (temperature 1.0, deterministic mode, same seed, same pytorch
+sampling backend): 16/16 prompts diverge from position 0. Each build is exactly
+self-reproducible; the RNG streams differ across builds. Cross-build "identical
+seeded rollouts" is not achievable — this dictated Stage B's frozen-batch
+design.</p>
+<h2 id="verification-trainer-stage-b">Verification — trainer (Stage B)<a class="anchor" href="#verification-trainer-stage-b" aria-hidden="true">#</a></h2>
+<p>One frozen batch (16 sequences: true-base greedy completions with documented
+provenance, all-ones loss masks, deterministic alternating advantages;
+<code>batch_0.pt</code> sha256 <code>cc97441e…</code>) replayed through the unmodified E4 launcher on
+both stacks: old = <code>orbit_env</code> + a git worktree pinned at <code>46c8e0f6</code>; new =
+<code>orbit_env_v2</code> + merged <code>orbit-main</code>. Same <code>MODEL/CKPT/PERF/PEFT</code> args as the
+campaign, 1×H100, TP1/PP1/DP1, one optimizer step, LoRA r16 and OFT b128, with
+repeats.</p>
+<p><strong>Forward: bit-identical.</strong> Every quantity the trainer computes ahead of the
+backward pass compared exactly equal, old-vs-new (max |Δ| = 0.00 at every
+position; "bit-equal" below means <code>torch.equal</code> on the full tensors). Backend
+note: the trainer has no fa3/triton axis — those are sglang serving backends.
+Both stacks ran the campaign launcher's own Megatron setting,
+<code>--attention-backend flash</code> (TransformerEngine → flash-attn 2.8.3, byte-identical
+builds in both venvs); other Megatron attention modes (fused/unfused) were not
+exercised because the campaign never uses them:</p>
+<div class="table-wrap"><table><thead><tr><th>Node</th><th>Method</th><th>Quantity</th><th>Positions compared</th><th>Old vs new</th></tr></thead><tbody><tr><td>g102</td><td>LoRA r16</td><td>per-token log_probs</td><td>1,023</td><td><strong>bit-equal</strong></td></tr><tr><td>g102</td><td>LoRA r16</td><td>advantages, returns, loss_masks</td><td>1,023 each</td><td>bit-equal</td></tr><tr><td>g102</td><td>LoRA r16</td><td>tokens consumed (prompt+response)</td><td>2,019</td><td>bit-equal</td></tr><tr><td>g102</td><td>OFT b128</td><td>per-token log_probs</td><td>1,023</td><td><strong>bit-equal</strong></td></tr><tr><td>g102</td><td>OFT b128</td><td>advantages, returns, loss_masks</td><td>1,023 each</td><td>bit-equal</td></tr><tr><td>g102</td><td>OFT b128</td><td>tokens consumed (prompt+response)</td><td>2,019</td><td>bit-equal</td></tr><tr><td>g198</td><td>OFT b128</td><td>per-token log_probs (both repeats)</td><td>1,023</td><td><strong>bit-equal</strong></td></tr><tr><td>B200 i305, flash</td><td>OFT b128 (×2 repeats)</td><td>per-token log_probs</td><td>1,023</td><td><strong>bit-equal</strong></td></tr><tr><td>B200 i305, flash</td><td>LoRA r16</td><td>per-token log_probs</td><td>1,023</td><td><strong>bit-equal</strong></td></tr><tr><td>B200 i305, fused (cuDNN)</td><td>OFT b128</td><td>per-token log_probs</td><td>1,023</td><td><strong>bit-equal</strong></td></tr><tr><td>H100 i108, fused (cuDNN)</td><td>OFT b128 (×2 repeats)</td><td>per-token log_probs</td><td>1,023</td><td><strong>bit-equal</strong></td></tr><tr><td>i203, flash, <strong>DP=4</strong></td><td>OFT b128 (×2 repeats)</td><td>per-token log_probs, all 4 rank shards</td><td>1,023 total</td><td><strong>bit-equal</strong></td></tr></tbody></table></div>
+<p>Within-build repeats were also bit-equal on every quantity, so the forward path
+is exactly deterministic per node; the token-stream equality doubles as proof
+that both stacks consumed and preprocessed the identical frozen batch.</p>
+<p><strong>Backward/optimizer (grad norm):</strong></p>
+<div class="table-wrap"><table><thead><tr><th>Node, backend</th><th>Method</th><th>Old (repeats)</th><th>New (repeats)</th><th>Within-build spread</th><th>Cross-build</th></tr></thead><tbody><tr><td>g102 (H100), flash</td><td>LoRA</td><td>1.059683204, 1.059853554</td><td>1.059390545, 1.059692621</td><td>1.6e-4 / 2.9e-4</td><td>2.8e-4 — inside envelope</td></tr><tr><td>g102 (H100), flash</td><td>OFT</td><td>4.716103554, 4.715067863</td><td>4.712501526, 4.712558270</td><td>2.2e-4 / 1.2e-5</td><td>5.3e-4–7.6e-4</td></tr><tr><td>g198 (H100), flash</td><td>OFT</td><td>4.847944260, 4.847944260</td><td>4.847944260, 4.847944260</td><td>0 (bit-equal)</td><td><strong>0 (bit-equal)</strong></td></tr><tr><td>i108 (H100), fused</td><td>OFT</td><td>4.849560738 ×2</td><td>4.849560738 ×2</td><td>0 (bit-equal)</td><td><strong>0 (bit-equal)</strong></td></tr><tr><td>i305 (B200), flash</td><td>OFT</td><td>4.810490608 ×2</td><td>4.810490608 ×2</td><td>0 (bit-equal)</td><td><strong>0 (bit-equal)</strong></td></tr><tr><td>i305 (B200), flash</td><td>LoRA</td><td>1.081156850 ×2</td><td>1.081156850 ×2</td><td>0 (bit-equal)</td><td><strong>0 (bit-equal)</strong></td></tr><tr><td>i305 (B200), fused</td><td>OFT</td><td>4.810490608 ×2</td><td>4.810490608 ×2</td><td>0 (bit-equal)</td><td><strong>0 (bit-equal)</strong></td></tr><tr><td>i203, flash, <strong>DP=4</strong></td><td>OFT</td><td>4.849619389 ×2</td><td>4.849619389 ×2</td><td>0 (bit-equal)</td><td><strong>0 (bit-equal)</strong></td></tr></tbody></table></div>
+<p>The DP row tests the campaign's data-parallel axis (per-rank sharding of the
+frozen batch, gradient allreduce across 4 ranks, one optimizer step): every
+rank's forward shard and the globally reduced grad norm are bit-equal
+cross-build. It ran as DP=4 on a 4-GPU slice rather than the campaign's DP=8
+whole node because all three free complete H100/B200 nodes offered to the
+whole-node request carried dead GPUs (i101: one, i104: two, i306: one, plus a
+mislabeled ClassAd) — reported to cluster operations; the allreduce mechanism
+under test is identical at either width.</p>
+<aside class="finding" data-tone="positive">
+<p class="block-label">Finding</p>
+<p>On every node/backend combination except g102, the entire pipeline — forward, backward, grad norm — is bit-identical across the merge: g198 and i108 (H100, flash and fused backends), and i305 (B200, flash and fused, both PEFT methods). A systematic code difference would appear in those cells too; g102's 7.6e-4 OFT cross-build delta is therefore node-state nondeterminism under-sampled at two repeats, not code. Grad-norm <em>values</em> differ per (node, backend) — 4.716 / 4.848 / 4.850 / 4.810 for the same OFT batch — but both builds always agree exactly per configuration; the variation is a hardware/backend effect orthogonal to the merge, and further support for the campaign's existing mixed-node-type limitation. Notably the B200 <em>trainer</em> is bit-identical cross-build even though the B200 <em>serving</em> triton path drifts: the trainer's TE/flash-attn kernels are the same binaries in both venvs, while the serving drift came from sglang's own re-tuned triton kernel.</p>
+</aside>
+<h2 id="static-equivalence-megatron-side">Static equivalence (Megatron side)<a class="anchor" href="#static-equivalence-megatron-side" aria-hidden="true">#</a></h2>
+<p>Between the two venvs: <code>megatron-core</code> installed trees byte-identical;
+Megatron-Bridge differs in exactly one file, scoped to grouped-MoE experts under
+legacy shared-R (the campaign is dense + canonical — doubly out of scope);
+torch 2.11.0, transformer_engine 2.14.0+71bbefbf, triton 3.6.0, flash-attn
+2.8.3, NCCL, numpy, apex, cuDNN all identical builds. The empirical Stage B was
+still necessary because orbit's own trainer-facing code moved substantially.</p>
+<h2 id="campaign-follow-up-the-oft-b8-rollout-failure">Campaign follow-up — the OFT b8 rollout failure<a class="anchor" href="#campaign-follow-up-the-oft-b8-rollout-failure" aria-hidden="true">#</a></h2>
+<p>The <code>e4oftverify</code> ladder (b8/b128/b1024, all-modules, math, one shared LR of
+7e-06) left one arm without a row: <code>oftverify-b8-all-math-lr7e-06-s0</code> died while
+its two siblings completed all 150 rollouts. The ledger holds three <code>failed</code>
+rows for it, and only the third is the event worth explaining:</p>
+<div class="table-wrap"><table><thead><tr><th>Attempt</th><th>Ran for</th><th>Died at</th><th>Cause</th></tr></thead><tbody><tr><td>1</td><td>339 s</td><td>engine init</td><td><code>NotImplementedError: Breakable CUDA graph is not compatible with memory saver mode</code></td></tr><tr><td>2</td><td>320 s</td><td>engine init</td><td><code>AssertionError: Triton tl.dot requires BS &gt;= 16; got BS=8</code></td></tr><tr><td>3</td><td>1,286 s</td><td>rollout 8/150</td><td><code>OSError: [Errno 116] Stale file handle</code> in the Triton JIT cache</td></tr></tbody></table></div>
+<p>Attempts 1 and 2 are already-closed environment faults: the first is the
+memory-saver/prefill-graph clash that <code>env_v0516.sh</code> now disables the prefill
+CUDA graph for, and the second is the pre-tiny-block package, whose fused kernel
+hard-asserts <code>BS &gt;= 16</code> and therefore cannot launch the b8 rung at all.</p>
+<p><strong>Attempt 3 is root-caused, and it is not an OFT defect.</strong> The arm was healthy
+right up to the crash — <code>train/loss</code> 0.0038 at step 7, 161 GB free of 178 on
+rank 0, rollouts pacing at 61–71 s, and a step-0 eval of 0.0572 against the
+campaign baseline's 0.056. Three seconds into rollout 8's first prefill, TP1
+raised inside <code>CompiledKernel.__init__</code>: Triton was compiling
+<code>_gemm_oft_r_kernel</code> for <code>o_proj</code>, and reading its own freshly written cache
+entry back returned ESTALE. The scheduler went down, SIGQUIT propagated, and the
+driver exited on a 502 from the router. The <code>CUDA error: invalid argument</code>
+printed afterwards comes from <code>MemPool::~MemPool</code> during crash teardown and is a
+consequence, not the cause.</p>
+<aside class="finding" data-tone="caution">
+<p class="block-label">Root cause (OFT b8 worker death)</p>
+<p>Triton's JIT cache was left at its default, <code><math xmlns="http://www.w3.org/1998/Math/MathML" alttext="HOME/.triton/cache&lt;/code&gt;, and this cluster&#x27;s &lt;code&gt;" data-tex="HOME/.triton/cache&lt;/code&gt;, and this cluster&#x27;s &lt;code&gt;"><mrow><mi>H</mi><mi>O</mi><mi>M</mi><mi>E</mi><mo>/</mo><mo>.</mo><mi>t</mi><mi>r</mi><mi>i</mi><mi>t</mi><mi>o</mi><mi>n</mi><mo>/</mo><mi>c</mi><mi>a</mi><mi>c</mi><mi>h</mi><mi>e</mi><mo>&lt;</mo><mo>/</mo><mi>c</mi><mi>o</mi><mi>d</mi><mi>e</mi><mo>&gt;</mo><mo>,</mo><mi>a</mi><mi>n</mi><mi>d</mi><mi>t</mi><mi>h</mi><mi>i</mi><mi>s</mi><mi>c</mi><mi>l</mi><mi>u</mi><mi>s</mi><mi>t</mi><mi>e</mi><msup><mi>r</mi><mo>&#x2032;</mo></msup><mi>s</mi><mo>&lt;</mo><mi>c</mi><mi>o</mi><mi>d</mi><mi>e</mi><mo>&gt;</mo></mrow></math>HOME</code> is NFS (<code>/lustre/home</code> is nfs4 from <code>sc-fb1:/cluster-home</code>). <code>_gemm_oft_r_kernel</code> declares <code>total_tokens</code> as <code>tl.constexpr</code>, so every distinct prefill token count is a separate specialization and a separate compile — an RL run compiles this kernel continuously rather than once at warmup, and the cache had grown to <strong>179,085 entries / 44 GB</strong>. All 16 ranks (8 engines × TP2) share that one directory and race to store the same key; on a network filesystem the loser's open handle is invalidated by the winner's rename and the read-back returns ESTALE. b8 is the exposed rung because its key space is entirely cold — <code>_pick_tiles</code> gives (8, 8) for BLOCK_SIZE=8 while b128 lands on the untiled (128, 128) path every earlier arm had already compiled — but nothing about the mechanism is specific to b8.</p>
+</aside>
+<p>Fixed in <code>scripts/lora_regret/campaign.sh</code>, which now exports a node-local
+<code>TRITON_CACHE_DIR</code> before any CUDA work. This is not a new idea: the same block,
+with the same reasoning in its comment, has been in
+<code>examples/low_precision/run-kimi-k25-int4-openr1-oft.sh</code> all along — the campaign
+was simply never given it. Placed in <code>campaign.sh</code> rather than <code>env_v0516.sh</code>
+because every launcher <code>exec</code>s the former while the latter is sourced by hand.</p>
+<p>Residual: b8 still has no completed math row at 7e-06, so the ladder's low rung
+is unmeasured. The fix removes the failure mode but is unproven against it until
+a rerun completes; the fault is intermittent by nature, so a clean 150-rollout
+b8 run is the only real confirmation.</p>
+<h2 id="risks-and-limitations">Risks and limitations<a class="anchor" href="#risks-and-limitations" aria-hidden="true">#</a></h2>
+<aside class="risk">
+<p class="block-label">Residuals</p>
+<p><strong>trtllm_mha on B200</strong> (the campaign's B200 default backend) rejects deterministic inference on the old build, so its cross-build equality is unmeasurable by this method. <strong>flashinfer on B200</strong>: the old build is SIGKILLed at engine boot (reproducibly), so that cell is empty. <strong>Sampling</strong>: cross-build rollout draws differ by construction; per-run RL results were never comparable across builds and remain so — seed replicates stay the only way to compare endpoint accuracies. The B200-triton tiling difference (root-caused above; bit-matchable on demand) and the per-node H100 grad-norm difference both belong in any record that mixes node types.</p>
+</aside>
+<h2 id="actions">Actions<a class="anchor" href="#actions" aria-hidden="true">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>action</th><th>owner</th><th>status</th><th>evidence or trigger</th></tr></thead><tbody><tr><td>Repoint campaign.sh / INSTALL.md at orbit_env_v2</td><td>zqiu</td><td>Done</td><td>all lora_regret launchers + INSTALL.md banner now point at env_v0516.sh; the 2026-08-10 E4 report keeps its orbit_env reference as historical provenance</td></tr><tr><td>Review + commit e4oftverify matrix and verify scripts</td><td>zqiu</td><td>Open</td><td>uncommitted in both orbit checkouts</td></tr><tr><td>Seed replicates for endpoint-accuracy claims</td><td>zqiu</td><td>Open</td><td>E4 report limitation #1</td></tr><tr><td>OFT b8 worker death at rollout 8/150</td><td>zqiu</td><td>Root-caused, fix applied</td><td>ESTALE on the NFS-backed Triton JIT cache, not OFT; <code>campaign.sh</code> now pins <code>TRITON_CACHE_DIR</code> node-local</td></tr><tr><td>Rerun the b8 rung to fill the ladder</td><td>zqiu</td><td>Open</td><td>needs one 8-GPU node, ~4.5 h; also the first real test of the cache fix</td></tr><tr><td>Retire leftover mpi4 tmux session claude-orbit-stageb-oft-extra</td><td>zqiu</td><td>Open</td><td>mpi4 dropped mid-teardown; job 17468719 idles out on its own</td></tr></tbody></table></div>
+<details class="reproducibility">
+<summary>Reproducibility</summary>
+<p><strong>Builds:</strong> old = <code>orbit_env</code> (sglang <code>0.0.0.dev9909+gb52394d22</code>), new =
+<code>orbit_env_v2</code> (sglang <code>0.0.0.dev15479+g05cd76b4d</code> + fixes <code>40784883e</code>,
+<code>51845dc4a</code> deployed). Orbit: old = worktree <code>/fast/zqiu/orbit-iclr/orbit-46c8e0f6</code>,
+new = <code>/fast/zqiu/orbit-iclr/orbit</code> at <code>orbit-main</code>.</p>
+<p><strong>Inference probes:</strong> <code>/lustre/home/zqiu/sglang_cmp/{stage_a_probe.py,matrix_probe.py,matrix_run.sh,stage_a_compare.py,matrix_report.py}</code> —
+greedy + deterministic inference, <code>attention_backend</code> pinned, <code>disable_radix_cache=True</code>,
+16 prompts from <code>math_test.jsonl</code>, 64 new tokens. Jobs: 17466992 (B200 i305),
+17467160 (H100 i201), 17467161 (B200 i305), all bid 100, 1 GPU.</p>
+<p><strong>Trainer probe:</strong> <code>/lustre/home/zqiu/sglang_cmp/stageb/</code> —
+<code>stageb_build_batch.py</code> (frozen batch, sha256 <code>cc97441e14745bee…</code>),
+<code>stageb_run3.sh</code> (launcher invocation), <code>gn_envelope.py</code>, <code>pernode_check.py</code>.
+Key launcher env: <code>GPUS_PER_NODE=1 NUM_ROLLOUT=1 GLOBAL_BATCH_SIZE=16
+ROLLOUT_BATCH_SIZE=16 N_SAMPLES_PER_PROMPT=1 ROLLOUT_NUM_GPUS_PER_ENGINE=1
+EPS_CLIP=1e9 SEED=1234</code>, <code>RL_EXTRA_ARGS="--disable-grpo-std-normalization
+--disable-rewards-normalization --load-debug-rollout-data … --save-debug-train-data …
+--ci-test --ci-disable-kl-checker --ci-save-grad-norm …"</code>. Jobs: 17467303
+(H100 g102), 17468719 (H100 g198).</p>
+<p><strong>Operational gotchas for reruns:</strong> <code>ROLLOUT_BATCH_SIZE × N_SAMPLES_PER_PROMPT</code>
+must equal <code>GLOBAL_BATCH_SIZE</code> or <code>train_iters=0</code> asserts;
+<code>ROLLOUT_NUM_GPUS_PER_ENGINE=1</code> required on 1 GPU (IPC gather group);
+<code>ray stop --force</code> between launcher cycles; never <code>sed -i</code> a script another node
+is reading (Lustre stale handle — ship under a fresh name); ~14 launcher cycles
+exhaust one allocation's PID budget.</p>
+<p><strong>Evidence stores</strong> (<code>~/.local/state/remote-cluster-runs/</code>, mirrored locally):
+<code>mpi4/…/20260818T234900/stage-a-inference-compare</code>,
+<code>mpi1/…/20260819T010500/backend-matrix-h100</code>,
+<code>mpi2/…/20260819T010500/backend-matrix-b200</code>,
+<code>mpi4/…/20260819T063000/stageb-trainer-equivalence</code> — dumps, grad-norm tensors,
+compare reports, and provenance.</p>
+</details>
+<footer class="doc-footer">Generated 2026-08-19 17:33 PDT by htmlreport</footer>
+</main>
+</div>
+</div>
+<script>
+(function () {
+  var root = document.documentElement, key = 'htmlreport-theme';
+  try { root.setAttribute('data-theme', localStorage.getItem(key) || 'light'); } catch (e) {}
+  var btn = document.querySelector('.theme-toggle');
+  if (!btn) return;
+  btn.addEventListener('click', function () {
+    var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem(key, next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>
