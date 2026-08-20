@@ -191,5 +191,17 @@ class BuildWavesFullftTest(unittest.TestCase):
         self.assertEqual(modes, {"sync", "async", "async_db"})
 
 
+def test_case_scripts_exist():
+    from tools.adapter_runtime_compare import run_compare
+
+    missing = []
+    for case in run_compare.CASES:
+        for attr in ("script", "fullft_script"):
+            rel = getattr(case, attr, None)
+            if rel and not (run_compare.REPO_ROOT / rel).exists():
+                missing.append(f"{case.model}/{case.precision}: {rel}")
+    assert not missing, f"CASES reference missing launchers: {missing}"
+
+
 if __name__ == "__main__":
     unittest.main()
