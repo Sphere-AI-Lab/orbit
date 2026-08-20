@@ -139,12 +139,13 @@ wrong place.
 
 **Prefer moving the branch to pinning a commit during rolling development.** `SGLANG_COMMIT` and `MEGATRON_COMMIT` are empty by default, so ordinary images follow `sglang-miles` and `miles-main` together. A versioned release is the deliberate exception: its lockfile supplies both exact commits to CI and the final image build.
 
-**Validate an image-affecting bump on the PR that makes it.** A PR touching
+**Validate an image-affecting bump on the PR that makes it.** For a same-repository PR touching
 `docker/Dockerfile`, `docker/build.py`, `docker/verify_transformer_engine.py`,
-`docker/patch/**` or `requirements.txt` builds a `pr-<number>` image first and runs every
-GPU suite inside it, and that fresh tag outranks a `ci-image-tag:` directive so the PR
-cannot accidentally test the old image. Add the `run-ci-image` label to widen the selection
-to every tag except the long-running and fault-tolerance ones.
+`docker/patch/**` or `requirements.txt`, add `run-ci-image` to build a `pr-<number>` image and
+run every GPU suite inside it. The fresh tag outranks a `ci-image-tag:` directive. Without the
+label, Docker detection is a hosted no-op and GPU suites use the released `dev` image, so that
+run does not validate the Docker change. The label also widens selection to every tag except
+the long-running and fault-tolerance ones.
 
 **Validate a dependency-ref bump without building anything.** Put the ref in the PR
 description and CI checks out that instead:

@@ -270,13 +270,19 @@ def _compute_rollout_kl_statistics(
         args.qkv_format,
         max_seq_lens,
     )
+    rollout_denominators = rollout_data.get("rollout_mask_sums", None)
+    if rollout_denominators is not None and rollout_count_share is None:
+        raise ValueError(
+            "Rollout-normalized KL metrics require rollout_count_share; "
+            "compute it from the batch-global rollout IDs before DP splitting."
+        )
     sample_mean = get_sum_of_sample_mean(
         total_lengths,
         response_lengths,
         loss_masks,
         qkv_format=args.qkv_format,
         max_seq_lens=max_seq_lens,
-        denominators=rollout_data.get("rollout_mask_sums", None),
+        denominators=rollout_denominators,
     )
     metrics: dict[str, float | tuple[float, float]] = {}
     reduction_by_key: dict[str, str] = {}
@@ -353,8 +359,9 @@ def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatc
         loss_masks = rollout_data["loss_masks"]
         total_lengths = rollout_data["total_lengths"]
         max_seq_lens = rollout_data.get("max_seq_lens", None)
-        # per-rollout-mean count share: num_rollouts / dp (None = legacy local count)
-        rollout_count_share = None
+        # Per-rollout mean count share: raw splits carry it directly; scheduled
+        # splits derive it from their per-step global rollout counts.
+        rollout_count_share = rollout_data.get("rollout_count_share")
         if (num_rollouts := rollout_data.get("num_rollouts")) is not None:
             rollout_count_share = sum(num_rollouts) / parallel_state.intra_dp.size
 
@@ -379,6 +386,7 @@ def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatc
                 "num_microbatches",
                 "micro_batch_indices",
                 "num_rollouts",
+                "rollout_count_share",
                 "n_adapters",
                 "adapter_slots",
                 "step_slots",

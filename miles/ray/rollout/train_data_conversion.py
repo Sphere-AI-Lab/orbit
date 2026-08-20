@@ -44,6 +44,7 @@ ROLLOUT_DATA_VALUE_SPEC: dict[str, ValueSpec] = {
     "num_microbatches": ValueSpec(codec="auto"),
     "micro_batch_indices": ValueSpec(codec="auto"),
     "num_rollouts": ValueSpec(codec="auto"),
+    "rollout_count_share": ValueSpec(codec="auto"),
 }
 
 
@@ -359,7 +360,15 @@ def split_train_data_by_dp_raw(args, data: dict[str, Any], *, dp_size: int) -> l
     if adapter_slots is not None:
         partitions = [sorted(p, key=lambda i: adapter_slots[i]) for p in partitions]
 
-    return _package_shards(args, data, partitions)
+    shards = _package_shards(args, data, partitions)
+    if (rollout_ids := data.get("rollout_ids")) is not None:
+        # Compute this before partitioning: compact siblings may land on
+        # different DP ranks, so local unique-ID counts would double-count a
+        # rollout. Equal shares sum back to the batch-global rollout count.
+        rollout_count_share = len(set(rollout_ids)) / dp_size
+        for shard in shards:
+            shard["rollout_count_share"] = rollout_count_share
+    return shards
 
 
 def _package_shards(args, data: dict[str, Any], partitions) -> list[dict[str, Any]]:

@@ -42,7 +42,7 @@ Both PR workflows are also reusable `workflow_call` entry points for release CI.
 
 The ROCm resolver uses only its dispatch input, defaults to its undated `rocm/sgl-dev` tag, and uses that default for called release runs too.
 
-Distinct from image selection, the **`run-ci-image` label** selects the test scope — every enabled tag except `long`, `ft-short`, and `ft-long` — which validates an image bump without selecting those domains implicitly.
+The **`run-ci-image` label** has two coordinated roles on a PR: it selects every enabled test tag except `long`, `ft-short`, and `ft-long`, and, for a same-repository Docker-relevant change, opts into building the PR-scoped image before GPU validation. Without the label, Docker detection is a hosted no-op and image resolution uses the released `dev` image.
 
 **Policy resolution (`resolve-ci-policy`).**
 

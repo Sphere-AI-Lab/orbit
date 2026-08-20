@@ -281,18 +281,54 @@ def test_log_rollout_data_wires_rollout_aware_kl_mean(monkeypatch):
             use_rollout_logprobs=False,
             ci_test=False,
             ci_disable_logprobs_checker=False,
+            log_multi_turn=False,
+            log_correct_samples=False,
         ),
         {
             "total_lengths": [2, 10],
             "response_lengths": [1, 9],
             "loss_masks": [torch.ones(1, dtype=torch.int32), torch.ones(9, dtype=torch.int32)],
             "rollout_mask_sums": torch.tensor([10.0, 10.0]),
-            "num_rollouts": [1],
+            "rollout_count_share": 1.0,
             "opd_reverse_kl": [torch.zeros(1), torch.full((9,), 2.0)],
         },
     )
 
     assert captured["opd_kl/k1/mean"] == pytest.approx((1.8, 1.0))
+
+
+def test_rollout_kl_mean_combines_compact_siblings_across_dp_shards(monkeypatch):
+    parallel_state = SimpleNamespace(cp=SimpleNamespace(size=1))
+    monkeypatch.setattr(cp_utils, "get_parallel_state", lambda: parallel_state)
+    shards = [
+        {
+            "total_lengths": [2],
+            "response_lengths": [1],
+            "loss_masks": [torch.ones(1, dtype=torch.int32)],
+            "rollout_mask_sums": torch.tensor([10.0]),
+            "opd_reverse_kl": [torch.zeros(1)],
+        },
+        {
+            "total_lengths": [10],
+            "response_lengths": [9],
+            "loss_masks": [torch.ones(9, dtype=torch.int32)],
+            "rollout_mask_sums": torch.tensor([10.0]),
+            "opd_reverse_kl": [torch.full((9,), 2.0)],
+        },
+    ]
+
+    gathered = []
+    for shard in shards:
+        metrics, _ = log_utils._compute_rollout_kl_statistics(
+            Namespace(qkv_format="thd", opd_log_prob_top_k=0),
+            shard,
+            cp_size=1,
+            rollout_count_share=0.5,
+        )
+        gathered.append({"opd_kl/k1/mean": metrics["opd_kl/k1/mean"]})
+
+    reduced = log_utils.reduce_gathered_log_dict(gathered, dp_size=2)
+    assert reduced["opd_kl/k1/mean"] == pytest.approx(1.8)
 
 
 def test_gathered_kl_mean_weights_uneven_rollout_counts():

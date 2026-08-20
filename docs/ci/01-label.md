@@ -7,7 +7,7 @@ A label is a GitHub PR label that changes what CI runs or how it fails. Three ki
 | Kind | Example | Effect |
 |---|---|---|
 | Domain label | `run-ci-megatron` | selects which tests run |
-| Scope label | `run-ci-image` | run every enabled tag except `long`, `ft-short`, and `ft-long` |
+| Scope/build label | `run-ci-image` | run every enabled tag except `long`, `ft-short`, and `ft-long`; for a same-repo Docker-relevant PR, build and test its PR-scoped image |
 | Cadence/scope label | `nightly` | select nightly cadence and every enabled tag except `long` and `ft-long`, with fast-fail disabled |
 | Scope label | `run-ci-all` | run every enabled tag |
 | Behavior label | `bypass-fastfail` | opt out of fast-fail; one run surfaces every failure |
@@ -44,6 +44,8 @@ There are four CI cadences: `regular`, the ordinary mode; `nightly`, which admit
 ## Broad CI scopes
 
 The workflow's `resolve-ci-policy` job forwards trigger-specific facts or a called workflow's explicit cadence override to `tests/ci/ci_policy.py`; that module adapts them into cadence and label inputs, then its shared `resolve_policy` maps those inputs to one effective include-label set and fast-fail policy. `run_suite.py` consumes the same resolved-policy function and never derives policy from `schedule`, `workflow_dispatch`, or the caller's inherited event name. A broad scope is just a large include set (every registered label minus the scope's subtractions).
+
+On same-repository PRs with Docker-relevant changes, `run-ci-image` also opts into the self-hosted PR image build. Without it, the build job completes as a hosted no-op and GPU suites use the released `dev` image; fork PRs always use `dev` because they cannot push PR-scoped tags.
 
 | Scope | Explicit source | Runs | Subtracts | Fast-fail |
 |---|---|---|---|---|

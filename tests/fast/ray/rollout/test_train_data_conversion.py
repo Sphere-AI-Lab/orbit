@@ -753,6 +753,21 @@ class TestSplitTrainDataByDp:
 
 
 class TestSplitTrainDataRaw:
+    def test_compact_siblings_use_batch_global_rollout_count_share(self) -> None:
+        data = {
+            "tokens": [[1], list(range(9))],
+            "response_lengths": [1, 9],
+            "loss_masks": [[1], [1] * 9],
+            "rollout_ids": [7, 7],
+            "rollout_mask_sums": [10, 10],
+        }
+        args = MagicMock(balance_data=False)
+
+        result = split_train_data_by_dp_raw(args, data, dp_size=2)
+
+        assert [part["rollout_ids"] for part in result] == [[7], [7]]
+        assert [part["rollout_count_share"] for part in result] == [0.5, 0.5]
+
     def test_witness_ids_split_across_dp(self) -> None:
         tokens = [[1, 2, 3], [4, 5], [6, 7, 8, 9], [10, 11]]
         witness_ids = [

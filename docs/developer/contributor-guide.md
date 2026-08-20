@@ -194,7 +194,7 @@ in `tests/ci/labels.py`, and a value outside it is a collection-time error.
 | `run-ci-<x>` | Selects tests declaring `<x>` |
 | `run-ci-all` | Every enabled tag |
 | `nightly` | Nightly cadence: admits `nightly=True` tests, every tag except `long` and `ft-long`, fast-fail off |
-| `run-ci-image` | Every tag except `long`, `ft-short`, `ft-long`; for validating an image bump |
+| `run-ci-image` | Every tag except `long`, `ft-short`, `ft-long`; on same-repo Docker changes, opt into the PR-scoped image build |
 | `bypass-fastfail` | Run GPU stages even if `stage-a-cpu` failed, and let each suite continue past the first failure |
 
 If your fork PR sits waiting for approval, that is GitHub holding first-time contributor
@@ -222,9 +222,9 @@ ci-image-tag: dev-202608100600
 ```
 
 Precedence, when several sources disagree: a `workflow_dispatch` input wins, then the
-PR-description line, then the default. `ci-image-tag:` has one more rule: on a PR that
-built its own image, the fresh `pr-<number>` tag outranks the directive, so a docker PR
-always tests what it just built.
+PR-description line, then the default. `ci-image-tag:` has one more rule: on a same-repo
+Docker-relevant PR carrying `run-ci-image`, the fresh `pr-<number>` tag outranks the directive,
+so the GPU suites test what the PR just built.
 
 ## PR conventions
 
