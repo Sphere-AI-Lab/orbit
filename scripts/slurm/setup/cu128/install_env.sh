@@ -462,7 +462,8 @@ install_environment() {
         --no-build-isolation --no-deps --editable "${apex_root}"
 
     stage 10 "build SGLang kernel and install pinned model backends"
-    run "${python}" -m pip install --no-build-isolation --no-deps --verbose \
+    run env CUDA_HOME="${CUDA_HOME}" CUDACXX="${CUDA_HOME}/bin/nvcc" \
+        "${python}" -m pip install --no-build-isolation --no-deps --verbose \
         "git+${SGLANG_SOURCE_URL}@${SGLANG_COMMIT}#subdirectory=sgl-kernel"
     run "${UV_EXE}" pip install --python "${python}" --override "${OVERRIDE_FILE}" \
         --editable "${sglang_root}/python"

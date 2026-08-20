@@ -111,6 +111,7 @@ def test_dry_run_prints_twelve_stage_plan_without_creating_prefix(tmp_path: Path
     assert result.stdout.count(nccl_install) == 3
     assert "flash_attn==2.8.3" in result.stdout
     assert "subdirectory=sgl-kernel" in result.stdout
+    assert "CUDACXX=/usr/local/cuda-12.8/bin/nvcc" in result.stdout
     assert "https://example.test/deep-ep.git" in result.stdout
     assert str(tmp_path / "sources" / "DeepEP") in result.stdout
     assert "--full-h200" in result.stdout
