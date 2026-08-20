@@ -342,19 +342,112 @@ def metadata_checks(pins: Mapping[str, str], orbit_root: Path, workspace: Path) 
     return checks
 
 
+def _bf16_matmul_probe(torch_module: object) -> bool:
+    left = torch_module.randn((512, 512), device="cuda", dtype=torch_module.bfloat16)
+    right = torch_module.randn((512, 512), device="cuda", dtype=torch_module.bfloat16)
+    result = left @ right
+    torch_module.cuda.synchronize()
+    return bool(torch_module.isfinite(result).all().item())
+
+
+def _format_library_version(value: object) -> str:
+    if isinstance(value, tuple):
+        return ".".join(str(part) for part in value)
+    return str(value)
+
+
+def check_h200_runtime(
+    pins: Mapping[str, str],
+    *,
+    torch_module: object | None = None,
+    matmul_probe: Callable[[object], bool] = _bf16_matmul_probe,
+) -> list[Check]:
+    """Run GPU checks that must execute inside the target H200 allocation."""
+    if torch_module is None:
+        try:
+            torch_module = importlib.import_module("torch")
+        except Exception as error:
+            return [Check("H200 runtime", False, f"cannot import torch: {error}")]
+
+    cuda = getattr(torch_module, "cuda", None)
+    if cuda is None or not cuda.is_available():
+        return [Check("CUDA availability", False, "torch.cuda.is_available() is false")]
+
+    checks: list[Check] = []
+    try:
+        device_name = cuda.get_device_name(0)
+        capability = cuda.get_device_capability(0)
+        capability_text = f"{capability[0]}.{capability[1]}"
+        expected_capability = pins.get("H200_COMPUTE_CAPABILITY", "9.0")
+        cuda_runtime = getattr(getattr(torch_module, "version", None), "cuda", None)
+        expected_cuda = pins.get("CUDA_TOOLKIT_VERSION", "12.8")
+        bf16_supported = bool(cuda.is_bf16_supported())
+        cudnn_version = torch_module.backends.cudnn.version()
+        nccl_version = cuda.nccl.version()
+    except Exception as error:
+        return [Check("H200 runtime metadata", False, f"{type(error).__name__}: {error}")]
+
+    checks.extend(
+        [
+            Check("H200 device", "H200" in device_name, device_name),
+            Check(
+                "CUDA runtime",
+                cuda_runtime == expected_cuda,
+                str(cuda_runtime)
+                if cuda_runtime == expected_cuda
+                else f"expected {expected_cuda}, got {cuda_runtime}",
+            ),
+            Check(
+                "Hopper compute capability",
+                capability_text == expected_capability,
+                capability_text
+                if capability_text == expected_capability
+                else f"expected {expected_capability}, got {capability_text}",
+            ),
+            Check("BF16 support", bf16_supported, str(bf16_supported)),
+            Check(
+                "cuDNN runtime",
+                bool(cudnn_version),
+                _format_library_version(cudnn_version),
+            ),
+            Check(
+                "NCCL runtime",
+                bool(nccl_version),
+                _format_library_version(nccl_version),
+            ),
+        ]
+    )
+    try:
+        matmul_ok = matmul_probe(torch_module)
+        checks.append(Check("BF16 CUDA matmul", matmul_ok, "finite 512x512 result"))
+    except Exception as error:
+        checks.append(Check("BF16 CUDA matmul", False, f"{type(error).__name__}: {error}"))
+    return checks
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pins", type=Path, default=DEFAULT_PINS)
     parser.add_argument("--orbit-root", type=Path, default=REPO_ROOT)
-    parser.add_argument("--workspace", type=Path)
+    source_group = parser.add_mutually_exclusive_group()
+    source_group.add_argument("--source-root", type=Path)
+    source_group.add_argument("--workspace", dest="source_root", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--full-h200",
+        action="store_true",
+        help="also run CUDA/H200/BF16/cuDNN/NCCL checks on a compute node",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    workspace = args.workspace or default_workspace(args.orbit_root)
+    source_root = args.source_root or default_workspace(args.orbit_root)
     try:
-        checks = metadata_checks(load_pins(args.pins), args.orbit_root.resolve(), workspace.resolve())
+        pins = load_pins(args.pins)
+        checks = metadata_checks(pins, args.orbit_root.resolve(), source_root.resolve())
+        if args.full_h200:
+            checks.extend(check_h200_runtime(pins))
     except (OSError, VerificationError, subprocess.CalledProcessError, json.JSONDecodeError) as error:
         print(f"verification input error: {error}", file=sys.stderr)
         return 2
