@@ -20,6 +20,24 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_PINS = Path(__file__).with_name("pins.env")
 PACKAGE_VERSION_SPECS = (
     ("orbit", "orbit version", ("ORBIT_VERSION",), "source"),
+    ("numpy", "numpy version", ("NUMPY_VERSION",), "exact"),
+    ("ninja", "ninja version", ("NINJA_VERSION",), "exact"),
+    ("pybind11", "pybind11 version", ("PYBIND11_VERSION",), "exact"),
+    ("cmake", "cmake version", ("CMAKE_VERSION",), "exact"),
+    ("scikit-build-core", "scikit-build-core version", ("SCIKIT_BUILD_CORE_VERSION",), "exact"),
+    ("setuptools", "setuptools version", ("SETUPTOOLS_VERSION",), "exact"),
+    ("wheel", "wheel version", ("WHEEL_VERSION",), "exact"),
+    ("packaging", "packaging version", ("PACKAGING_VERSION",), "exact"),
+    ("psutil", "psutil version", ("PSUTIL_VERSION",), "exact"),
+    ("flash-attn", "flash-attn version", ("FLASH_ATTN_VERSION",), "exact"),
+    ("causal-conv1d", "causal-conv1d version", ("CAUSAL_CONV1D_VERSION",), "exact"),
+    ("mamba-ssm", "mamba-ssm version", ("MAMBA_SSM_VERSION",), "exact"),
+    ("flash-linear-attention", "flash-linear-attention version", ("FLASH_LINEAR_ATTENTION_VERSION",), "exact"),
+    ("fast-hadamard-transform", "fast-hadamard-transform version", ("FAST_HADAMARD_VERSION",), "exact"),
+    ("humming-kernels", "humming-kernels version", ("HUMMING_KERNELS_VERSION",), "exact"),
+    ("nvidia-cutlass-dsl", "nvidia-cutlass-dsl version", ("NVIDIA_CUTLASS_DSL_VERSION",), "exact"),
+    ("timm", "timm version", ("TIMM_VERSION",), "exact"),
+    ("sglang-router", "sglang-router version", ("SGLANG_ROUTER_VERSION",), "exact"),
     ("torch", "torch build", ("TORCH_VERSION",), "cuda-local"),
     ("torchvision", "torchvision build", ("TORCHVISION_VERSION",), "cuda-local"),
     ("torchaudio", "torchaudio build", ("TORCHAUDIO_VERSION",), "cuda-local"),
@@ -296,6 +314,8 @@ def source_revision_inputs(
         "megatron-lm": workspace / "Megatron-LM",
         "megatron-bridge": workspace / "Megatron-Bridge",
         "transformer-engine": workspace / "TransformerEngine",
+        "apex": workspace / "apex",
+        "fast-hadamard": workspace / "fast-hadamard-transform",
     }
     expected_commits = {
         "sglang": _pin(pins, "SGLANG_COMMIT", "SGLANG_GIT_COMMIT"),
@@ -304,6 +324,8 @@ def source_revision_inputs(
         "transformer-engine": _pin(
             pins, "TRANSFORMER_ENGINE_COMMIT", "TRANSFORMER_ENGINE_GIT_COMMIT"
         ),
+        "apex": _pin(pins, "APEX_COMMIT"),
+        "fast-hadamard": _pin(pins, "FAST_HADAMARD_COMMIT"),
     }
     return source_paths, expected_commits
 
@@ -337,6 +359,13 @@ def metadata_checks(pins: Mapping[str, str], orbit_root: Path, workspace: Path) 
         "megatron.bridge",
         "transformer_engine",
         "flashinfer",
+        "flash_attn",
+        "causal_conv1d",
+        "mamba_ssm",
+        "fla",
+        "fast_hadamard_transform",
+        "sgl_kernel",
+        "sglang_router",
         "apex",
     ):
         checks.append(check_import(module_name))

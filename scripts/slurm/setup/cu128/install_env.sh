@@ -9,9 +9,10 @@ WORKSPACE=""
 ENV_PREFIX=""
 SOURCE_ROOT=""
 CONDA_EXE="${CONDA_EXE:-conda}"
-UV_EXE="${UV_EXE:-uv}"
+UV_EXE="${UV_EXE:-}"
 NVIDIA_SMI="${NVIDIA_SMI:-nvidia-smi}"
-JOBS="${MAX_JOBS:-8}"
+TOOL_PYTHON="${TOOL_PYTHON:-python3}"
+JOBS="${MAX_JOBS:-32}"
 DRY_RUN=0
 PREFLIGHT_ONLY=0
 LOCK_DIR=""
@@ -30,8 +31,9 @@ Options:
   --orbit-root PATH   Orbit checkout to install editable
   --pins PATH         Generated pins.env file
   --conda-exe PATH    Conda executable
-  --uv-exe PATH       uv executable
-  --jobs N            Parallel CUDA build jobs (default: 8)
+  --uv-exe PATH       Optional pinned uv executable; otherwise bootstrap it
+  --tool-python PATH  Python 3.11+ interpreter used to validate generated pins
+  --jobs N            Parallel CUDA build jobs (default: 32)
   --preflight-only    Validate Slurm, H200, CUDA, pins, and tools; install nothing
   --dry-run           Print the complete plan without scheduler or hardware checks
   -h, --help          Show this help
@@ -101,6 +103,7 @@ parse_args() {
             --pins) [[ $# -ge 2 ]] || die "$1 requires a path"; PINS_FILE="$2"; shift 2 ;;
             --conda-exe) [[ $# -ge 2 ]] || die "$1 requires a path"; CONDA_EXE="$2"; shift 2 ;;
             --uv-exe) [[ $# -ge 2 ]] || die "$1 requires a path"; UV_EXE="$2"; shift 2 ;;
+            --tool-python) [[ $# -ge 2 ]] || die "$1 requires a path"; TOOL_PYTHON="$2"; shift 2 ;;
             --jobs) [[ $# -ge 2 ]] || die "$1 requires a number"; JOBS="$2"; shift 2 ;;
             --preflight-only) PREFLIGHT_ONLY=1; shift ;;
             --dry-run) DRY_RUN=1; shift ;;
@@ -149,9 +152,17 @@ load_profile() {
     source "${PINS_FILE}"
     local required
     for required in \
-        CUDA_PROFILE CUDA_TOOLKIT_VERSION PYTHON_VERSION \
+        CUDA_PROFILE CUDA_TOOLKIT_VERSION PYTHON_VERSION UV_VERSION \
         TORCH_VERSION TORCHVISION_VERSION TORCHAUDIO_VERSION \
-        TORCH_INDEX_URL FLASHINFER_INDEX_URL \
+        TORCH_INDEX_URL FLASHINFER_INDEX_URL FLASHINFER_VERSION \
+        CUDA_PYTHON_VERSION TRANSFORMERS_VERSION \
+        NUMPY_VERSION NINJA_VERSION PYBIND11_VERSION CMAKE_VERSION \
+        SCIKIT_BUILD_CORE_VERSION SETUPTOOLS_VERSION WHEEL_VERSION \
+        PACKAGING_VERSION PSUTIL_VERSION FLASH_ATTN_VERSION \
+        CAUSAL_CONV1D_VERSION MAMBA_SSM_VERSION FLASH_LINEAR_ATTENTION_VERSION \
+        FAST_HADAMARD_VERSION FAST_HADAMARD_SOURCE_URL FAST_HADAMARD_COMMIT \
+        HUMMING_KERNELS_VERSION NVIDIA_CUTLASS_DSL_VERSION TIMM_VERSION \
+        SGLANG_ROUTER_VERSION SGLANG_ROUTER_WHEEL_URL \
         SGLANG_SOURCE_URL SGLANG_COMMIT MEGATRON_SOURCE_URL MEGATRON_COMMIT \
         MEGATRON_BRIDGE_SOURCE_URL MEGATRON_BRIDGE_COMMIT \
         TRANSFORMER_ENGINE_SOURCE_URL TRANSFORMER_ENGINE_COMMIT \
@@ -168,7 +179,6 @@ preflight() {
     if (( DRY_RUN )); then
         printf 'dry-run: scheduler and hardware probes skipped\n'
         CONDA_EXE="${CONDA_EXE}"
-        UV_EXE="${UV_EXE}"
         CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-12.8}"
         export CUDA_HOME
         return
@@ -176,10 +186,14 @@ preflight() {
 
     [[ -n "${SLURM_JOB_ID:-}" ]] || die "real installation must run inside a Slurm allocation"
     CONDA_EXE="$(resolve_command "${CONDA_EXE}")"
-    UV_EXE="$(resolve_command "${UV_EXE}")"
+    if [[ -n "${UV_EXE}" ]]; then
+        UV_EXE="$(resolve_command "${UV_EXE}")"
+    fi
     NVIDIA_SMI="$(resolve_command "${NVIDIA_SMI}")"
+    TOOL_PYTHON="$(resolve_command "${TOOL_PYTHON}")"
     resolve_command git >/dev/null
-    resolve_command python3 >/dev/null
+    "${TOOL_PYTHON}" -c 'import tomllib' >/dev/null 2>&1 \
+        || die "--tool-python must provide Python 3.11+ with tomllib"
 
     local gpu_names nvcc_exe nvcc_output
     gpu_names="$("${NVIDIA_SMI}" --query-gpu=name --format=csv,noheader)" \
@@ -219,7 +233,7 @@ release_lock() {
 }
 
 ensure_environment() {
-    stage 2 "create or resume the Conda Python ${PYTHON_VERSION} prefix"
+    stage 2 "create or resume Conda Python ${PYTHON_VERSION} and pinned uv"
     if [[ -e "${ENV_PREFIX}" && ! -x "${ENV_PREFIX}/bin/python" ]]; then
         die "existing prefix is not a recognizable environment: ${ENV_PREFIX}"
     fi
@@ -227,6 +241,18 @@ ensure_environment() {
         run "${CONDA_EXE}" create --yes --prefix "${ENV_PREFIX}" "python=${PYTHON_VERSION}" pip
     else
         printf 'resume: %s already contains Python\n' "${ENV_PREFIX}"
+    fi
+    if (( DRY_RUN )); then
+        run "${ENV_PREFIX}/bin/python" -m pip install "uv==${UV_VERSION}"
+        UV_EXE="${ENV_PREFIX}/bin/uv"
+    elif [[ -n "${UV_EXE}" ]]; then
+        local uv_output
+        uv_output="$("${UV_EXE}" --version)"
+        [[ "${uv_output}" == "uv ${UV_VERSION} "* ]] \
+            || die "uv must be ${UV_VERSION}, got: ${uv_output}"
+    else
+        "${ENV_PREFIX}/bin/python" -m pip install "uv==${UV_VERSION}"
+        UV_EXE="${ENV_PREFIX}/bin/uv"
     fi
 }
 
@@ -292,6 +318,64 @@ PY
     printf '+ generated %s\n' "${output}"
 }
 
+write_uv_overrides() {
+    OVERRIDE_FILE="${ENV_PREFIX}/.orbit-cu128-overrides.txt"
+    export OVERRIDE_FILE
+    if (( DRY_RUN )); then
+        printf '+ generate pinned uv override file at %q\n' "${OVERRIDE_FILE}"
+        return
+    fi
+    cat > "${OVERRIDE_FILE}" <<EOF
+numpy==${NUMPY_VERSION}
+torch==${TORCH_VERSION}
+cuda-python==${CUDA_PYTHON_VERSION}
+flashinfer-python==${FLASHINFER_VERSION}
+humming-kernels==${HUMMING_KERNELS_VERSION}
+nvidia-cutlass-dsl==${NVIDIA_CUTLASS_DSL_VERSION}
+transformers==${TRANSFORMERS_VERSION}
+timm==${TIMM_VERSION}
+EOF
+    printf '+ generated %s\n' "${OVERRIDE_FILE}"
+}
+
+setup_cuda_build_environment() {
+    local python="$1" site_packages cache_slug
+    if (( DRY_RUN )); then
+        site_packages="${ENV_PREFIX}/lib/python${PYTHON_VERSION}/site-packages"
+    else
+        site_packages="$("${python}" -c 'import site; print(site.getsitepackages()[0])')"
+    fi
+    cache_slug="$(basename -- "${ENV_PREFIX}")"
+    export CUDA_ROOT="${CUDA_HOME}"
+    export NCCL_ROOT="${site_packages}/nvidia/nccl"
+    export CUDNN_PATH="${site_packages}/nvidia/cudnn"
+    export CUDNN_HOME="${CUDNN_PATH}"
+    export TORCH_CUDA_ARCH_LIST="9.0"
+    export NVTE_CUDA_ARCHS="90"
+    export FLASH_ATTN_CUDA_ARCHS="90"
+    export CMAKE_CUDA_ARCHITECTURES="90a"
+    export NVTE_FRAMEWORK="pytorch"
+    export MAX_JOBS="${JOBS}"
+    export NVCC_THREADS=2
+    export NVTE_BUILD_THREADS_PER_JOB=2
+    export CMAKE_BUILD_PARALLEL_LEVEL=10
+    export CMAKE_PREFIX_PATH="${site_packages}/torch/share/cmake${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
+    export CMAKE_POLICY_VERSION_MINIMUM=3.5
+    export FLASH_ATTENTION_FORCE_BUILD=TRUE
+    export MAMBA_FORCE_BUILD=TRUE
+    export CAUSAL_CONV1D_FORCE_BUILD=TRUE
+    export CPATH="${CUDNN_PATH}/include:${NCCL_ROOT}/include:${CUDA_ROOT}/targets/x86_64-linux/include/cccl:${CUDA_ROOT}/include${CPATH:+:${CPATH}}"
+    export LIBRARY_PATH="${site_packages}/torch/lib:${CUDNN_PATH}/lib:${NCCL_ROOT}/lib${LIBRARY_PATH:+:${LIBRARY_PATH}}"
+    export LD_LIBRARY_PATH="${site_packages}/torch/lib:${CUDNN_PATH}/lib:${NCCL_ROOT}/lib:${CUDA_HOME}/lib64${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+    export FLASHINFER_WORKSPACE_BASE="/tmp/flashinfer-${USER}/${cache_slug}"
+    export FLASHINFER_NVCC="${CUDA_HOME}/bin/nvcc"
+    export TRITON_CACHE_DIR="/tmp/triton-${USER}-${cache_slug}"
+    if ! command -v cargo >/dev/null 2>&1; then
+        export SGLANG_BUILD_RUST_EXTS=none
+    fi
+    run mkdir -p "${FLASHINFER_WORKSPACE_BASE}" "${TRITON_CACHE_DIR}"
+}
+
 install_environment() {
     local python="${ENV_PREFIX}/bin/python"
     local sglang_root="${SOURCE_ROOT}/sglang"
@@ -299,27 +383,35 @@ install_environment() {
     local bridge_root="${SOURCE_ROOT}/Megatron-Bridge"
     local te_root="${SOURCE_ROOT}/TransformerEngine"
     local apex_root="${SOURCE_ROOT}/apex"
+    local fast_hadamard_root="${SOURCE_ROOT}/fast-hadamard-transform"
 
-    stage 3 "record Conda and uv tooling"
+    stage 3 "install pinned build tools and record tooling"
+    run "${python}" -m pip install --quiet \
+        "ninja==${NINJA_VERSION}" "pybind11==${PYBIND11_VERSION}" \
+        "cmake==${CMAKE_VERSION}" "scikit-build-core==${SCIKIT_BUILD_CORE_VERSION}" \
+        "setuptools==${SETUPTOOLS_VERSION}" "wheel==${WHEEL_VERSION}" \
+        "packaging==${PACKAGING_VERSION}" "psutil==${PSUTIL_VERSION}" \
+        "numpy==${NUMPY_VERSION}"
     run "${CONDA_EXE}" --version
     run "${UV_EXE}" --version
     run "${python}" --version
+    write_uv_overrides
 
     stage 4 "install exact CUDA 12.8 PyTorch wheels"
     run "${UV_EXE}" pip install --python "${python}" --index-url "${TORCH_INDEX_URL}" \
         "torch==${TORCH_VERSION}+${CUDA_PROFILE}" \
         "torchvision==${TORCHVISION_VERSION}+${CUDA_PROFILE}" \
         "torchaudio==${TORCHAUDIO_VERSION}+${CUDA_PROFILE}"
+    setup_cuda_build_environment "${python}"
 
     stage 5 "install pinned CUDA and inference wheels"
-    if [[ -n "${CUDA_PYTHON_VERSION:-}" ]]; then
-        run "${UV_EXE}" pip install --python "${python}" "cuda-python==${CUDA_PYTHON_VERSION}"
-    fi
-    if [[ -n "${FLASHINFER_VERSION:-}" ]]; then
-        run "${UV_EXE}" pip install --python "${python}" \
-            --extra-index-url "${FLASHINFER_INDEX_URL}" \
-            "flashinfer-python==${FLASHINFER_VERSION}"
-    fi
+    run "${UV_EXE}" pip install --python "${python}" --override "${OVERRIDE_FILE}" \
+        --extra-index-url "${FLASHINFER_INDEX_URL}" \
+        "cuda-python==${CUDA_PYTHON_VERSION}" \
+        "flashinfer-python==${FLASHINFER_VERSION}" \
+        "humming-kernels==${HUMMING_KERNELS_VERSION}" \
+        "nvidia-cutlass-dsl==${NVIDIA_CUTLASS_DSL_VERSION}" \
+        "transformers==${TRANSFORMERS_VERSION}" "timm==${TIMM_VERSION}"
 
     stage 6 "materialize immutable external source checkouts"
     ensure_checkout sglang "${SGLANG_SOURCE_URL}" "${SGLANG_COMMIT}" "${sglang_root}"
@@ -328,40 +420,52 @@ install_environment() {
     ensure_checkout transformer-engine "${TRANSFORMER_ENGINE_SOURCE_URL}" \
         "${TRANSFORMER_ENGINE_COMMIT}" "${te_root}"
     ensure_checkout apex "${APEX_SOURCE_URL}" "${APEX_COMMIT}" "${apex_root}"
+    ensure_checkout fast-hadamard "${FAST_HADAMARD_SOURCE_URL}" \
+        "${FAST_HADAMARD_COMMIT}" "${fast_hadamard_root}"
 
     stage 7 "install Orbit runtime dependencies without controlled backends"
     generate_runtime_requirements
-    run "${UV_EXE}" pip install --python "${python}" \
+    run "${UV_EXE}" pip install --python "${python}" --override "${OVERRIDE_FILE}" \
         --extra-index-url "${FLASHINFER_INDEX_URL}" \
-        --extra-index-url "${SGLANG_WHEEL_INDEX_URL:-${FLASHINFER_INDEX_URL}}" \
+        --extra-index-url "${SGLANG_WHEEL_INDEX_URL}" \
         --requirements "${ENV_PREFIX}/.orbit-cu128-requirements.txt"
 
-    stage 8 "build pinned Transformer Engine for Hopper"
-    run env CUDA_HOME="${CUDA_HOME}" NVTE_FRAMEWORK=pytorch NVTE_CUDA_ARCHS=90 \
-        MAX_JOBS="${JOBS}" "${UV_EXE}" pip install --python "${python}" \
-        --no-build-isolation --no-deps --editable "${te_root}"
+    stage 8 "build pinned Hopper CUDA extension layer"
+    run "${python}" -m pip install --no-build-isolation --no-deps --verbose \
+        "git+${TRANSFORMER_ENGINE_SOURCE_URL}@${TRANSFORMER_ENGINE_COMMIT}"
+    run "${python}" -m pip install --no-build-isolation --no-deps --verbose \
+        "flash_attn==${FLASH_ATTN_VERSION}"
+    run "${python}" -m pip install --no-build-isolation --no-deps \
+        "causal-conv1d==${CAUSAL_CONV1D_VERSION}" \
+        "mamba-ssm==${MAMBA_SSM_VERSION}" \
+        "flash-linear-attention==${FLASH_LINEAR_ATTENTION_VERSION}"
+    run "${python}" -m pip install --no-build-isolation --no-deps \
+        "git+${FAST_HADAMARD_SOURCE_URL}@${FAST_HADAMARD_COMMIT}"
 
     stage 9 "build pinned Apex CUDA extensions"
     run env CUDA_HOME="${CUDA_HOME}" APEX_CPP_EXT=1 APEX_CUDA_EXT=1 \
-        APEX_PARALLEL_BUILD="${JOBS}" "${UV_EXE}" pip install --python "${python}" \
+        APEX_PARALLEL_BUILD="${JOBS}" "${python}" -m pip install --verbose \
         --no-build-isolation --no-deps --editable "${apex_root}"
 
-    stage 10 "install pinned SGLang and Megatron backends editable"
-    run "${UV_EXE}" pip install --python "${python}" --no-build-isolation \
+    stage 10 "build SGLang kernel and install pinned model backends"
+    run "${python}" -m pip install --no-build-isolation --no-deps --verbose \
+        "git+${SGLANG_SOURCE_URL}@${SGLANG_COMMIT}#subdirectory=sgl-kernel"
+    run "${UV_EXE}" pip install --python "${python}" --override "${OVERRIDE_FILE}" \
         --editable "${sglang_root}/python"
-    run "${UV_EXE}" pip install --python "${python}" --no-build-isolation \
+    run "${python}" -m pip install "${SGLANG_ROUTER_WHEEL_URL}"
+    run "${UV_EXE}" pip install --python "${python}" --override "${OVERRIDE_FILE}" \
         --editable "${megatron_root}"
-    run "${UV_EXE}" pip install --python "${python}" --no-build-isolation \
+    run "${UV_EXE}" pip install --python "${python}" --override "${OVERRIDE_FILE}" \
         --editable "${bridge_root}"
 
-    stage 11 "install Orbit editable and reassert the torch wheel set"
+    stage 11 "install Orbit editable and reassert controlled versions"
     run "${UV_EXE}" pip install --python "${python}" --no-deps --editable "${ORBIT_ROOT}"
     run "${UV_EXE}" pip install --python "${python}" --index-url "${TORCH_INDEX_URL}" \
         "torch==${TORCH_VERSION}+${CUDA_PROFILE}" \
         "torchvision==${TORCHVISION_VERSION}+${CUDA_PROFILE}" \
         "torchaudio==${TORCHAUDIO_VERSION}+${CUDA_PROFILE}"
 
-    stage 12 "run metadata, import, CUDA, H200, BF16, cuDNN, and NCCL verification"
+    stage 12 "run metadata, imports, H200, BF16, cuDNN, and NCCL verification"
     run "${python}" "${SCRIPT_DIR}/verify_env.py" --pins "${PINS_FILE}" \
         --orbit-root "${ORBIT_ROOT}" --source-root "${SOURCE_ROOT}" --full-h200
 }
