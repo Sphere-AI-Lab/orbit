@@ -50,12 +50,22 @@ import pybase64
 import torch
 
 from orbit.rollout.scoring_client import post_json
+from orbit.utils.opd_dump import maybe_dump_teacher_logprobs
 from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)
 
 TEACHER_RESPONSE_METADATA_KEY = "opd_teacher_response"
 STUDENT_TOP_LOGPROBS_METADATA_KEY = "opd_student_top_logprobs"
+
+# M1 correctness leg (I-5): post_process's hook contract is (args, samples)
+# only -- RolloutManager.rollout_id (set once per generate() call) lives on
+# the caller and is not threaded through. This counter stands in for it:
+# post_process runs exactly once per rollout (RolloutManager.generate ->
+# _convert_samples_to_train_data -> _post_process_rewards, once each), so a
+# counter starting at 0 and incremented once per call matches the trainer's
+# rollout_id sequence in the common fresh-run case. See maybe_dump_teacher_logprobs.
+_teacher_dump_rollout_counter = 0
 
 TopLogprobs = list[list[Any]]
 LogprobMaps = list[dict[int, float]]
@@ -1128,6 +1138,17 @@ def post_process(args, samples: list[Sample], **kwargs):
         logger.warning(
             "OPD sglang post_process: %d/%d samples had no stashed teacher response.", unscored, len(samples)
         )
+
+    # M1 correctness leg (I-5): env-gated dump of the externally-served
+    # teacher_log_probs just assigned above (sampled-token path only -- full-vocab
+    # and top-k samples have no .teacher_log_probs and are skipped inside
+    # maybe_dump_teacher_logprobs). No torch.distributed rank concept applies here:
+    # post_process runs on the single RolloutManager Ray actor (there is exactly
+    # one instance), so no rank guard is needed. No-op unless
+    # ORBIT_OPD_TEACHER_LOGPROB_DUMP is set.
+    global _teacher_dump_rollout_counter
+    maybe_dump_teacher_logprobs(_teacher_dump_rollout_counter, samples)
+    _teacher_dump_rollout_counter += 1
 
     if full_vocab:
         scalar_rewards = [sample.get_reward_value(args) for sample in samples]
