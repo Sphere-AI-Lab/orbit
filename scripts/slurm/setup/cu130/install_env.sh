@@ -117,7 +117,7 @@ uv_install --upgrade \
 
 echo "[3/10] install official prebuilt SGLang CUDA 13 baseline"
 uv_install --force-reinstall --no-deps "$SGLANG_KERNEL_WHEEL_URL"
-uv_install --only-binary=:all: "sglang==$SGLANG_BASE_VERSION"
+uv_install --prerelease=allow --only-binary=:all: "sglang==$SGLANG_BASE_VERSION"
 uv_install --only-binary=:all: "sgl-deep-gemm==$SGL_DEEP_GEMM_VERSION"
 
 echo "[4/10] download RadixArk Miles release assets"
