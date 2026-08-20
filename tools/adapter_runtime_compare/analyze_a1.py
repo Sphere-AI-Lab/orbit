@@ -40,12 +40,28 @@ def iter_update_records(log_path: Path):
             yield payload
 
 
+def _iter_run_dirs(output_dir: Path):
+    """Yield (run_dir, id_match) pairs, descending one level into any child
+    directory whose name doesn't itself look like a run id -- run_compare.py
+    (~line 339) nests runs under <output-dir>/<campaign>/<run_id>/ when
+    --campaign is used, so the campaign directory needs one extra hop. Only
+    one level of recursion is applied (no deeper)."""
+    for entry in sorted(Path(output_dir).iterdir()):
+        if not entry.is_dir():
+            continue
+        id_match = RUN_ID_RE.match(entry.name)
+        if id_match:
+            yield entry, id_match
+            continue
+        for child in sorted(entry.iterdir()):
+            child_match = RUN_ID_RE.match(child.name)
+            if child_match and child.is_dir():
+                yield child, child_match
+
+
 def summarize(output_dir: Path, link_gbps: float) -> list[dict]:
     rows = []
-    for run_dir in sorted(Path(output_dir).iterdir()):
-        id_match = RUN_ID_RE.match(run_dir.name)
-        if not id_match or not run_dir.is_dir():
-            continue
+    for run_dir, id_match in _iter_run_dirs(output_dir):
         times, bytes_, pauses = [], [], []
         for log_path in sorted(run_dir.glob("*.log")):
             for rec in iter_update_records(log_path):

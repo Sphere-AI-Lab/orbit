@@ -6,6 +6,13 @@
 # adapter_swap plan specifically.
 # NOTE: same-base teachers require PEFT (--peft-method != none); --opd-type
 # megatron rejects PEFT only for --opd-teacher load:<ckpt> (full second model).
+# NOTE: the student here is LoRA rank-16 all-linear (see PEFT_ARGS below), so
+# OPD_TEACHER_ADAPTER must be a MATCHING LoRA adapter checkpoint -- same peft
+# config as this smoke's student -- or _validate_teacher_adapter_config
+# (orbit/utils/arguments.py) rejects it on a peft_type mismatch (e.g. an OFT
+# adapter). Use the saved actor adapter from a run of
+# run-qwen2_5-0_5b-opd-free-teacher-smoke.sh (also LoRA rank-16 all-linear,
+# 0.5B), e.g. its "${SAVE_DIR}/actor" checkpoint.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,9 +31,9 @@ RUN_LOG="${ORBIT_ROOT}/logs/${LAUNCHER_NAME}_$(date +%Y%m%d_%H%M%S).log"
 # === Paths ===
 : "${HF_CKPT:?set HF_CKPT to a Hugging Face checkpoint path}"
 : "${MEGATRON_LOAD:?set MEGATRON_LOAD to a Megatron torch_dist checkpoint path}"
-SAVE_DIR="${ORBIT_ROOT}/orbit_ckpts/Qwen2.5-0.5B-Instruct_opd_free_teacher_smoke"
+SAVE_DIR="${ORBIT_ROOT}/orbit_ckpts/Qwen2.5-0.5B-Instruct_opd_adapter_swap_smoke"
 : "${TRAIN_JSONL:?set TRAIN_JSONL to a training jsonl path}"
-: "${OPD_TEACHER_ADAPTER:?set OPD_TEACHER_ADAPTER to an OFT adapter checkpoint dir}"
+: "${OPD_TEACHER_ADAPTER:?set OPD_TEACHER_ADAPTER to a matching LoRA adapter checkpoint dir (rank-16, all-linear, same base) -- e.g. the actor adapter saved by run-qwen2_5-0_5b-opd-free-teacher-smoke.sh}"
 TEST_JSONL=${TEST_JSONL:-}
 
 # === Resources ===

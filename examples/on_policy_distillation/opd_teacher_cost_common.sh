@@ -48,6 +48,29 @@
 # inapplicable to pure distillation and is not the hook full-vocab scoring
 # expects).
 #
+# OPD_COST_EQUIVALENCE (default 0) -- served-only m1-eq equivalence knob.
+# Full-vocab scoring (orbit/rollout/opd_sglang.py's post_process, ~line 1109)
+# sets .teacher_hidden_states and never .teacher_log_probs, so the Task-6
+# teacher-logprob dump hook (ORBIT_OPD_TEACHER_LOGPROB_DUMP) writes nothing
+# for served and the M1 correctness leg's base<->served comparison cannot
+# run. OPD_COST_EQUIVALENCE=1 swaps served's full-vocab flag set for the
+# sampled-token external-teacher configuration that DOES set
+# .teacher_log_probs (post_process's non-full-vocab branch, ~line 1135):
+# drops --teacher-score-mode full_vocab and its full-vocab-only companions
+# (--loss-type opd_jsd_loss, --opd-jsd-beta, --opd-log-topk-overlap,
+# --opd-jsd-pointwise-clip), and adds --advantage-estimator
+# on_policy_distillation plus the pure-MOPD eps-clip/gamma/lambd block the
+# other four variants already use, so needs_opd_teacher() actually engages
+# the OPD teacher machinery. --opd-serve-teacher, the teacher GPU/mem flags,
+# the OPD reward hooks, and --rm-type math are unchanged either way. Flag
+# set ported from the sampled-token external smoke
+# (run-qwen2_5-0_5b-opd-sglang-smoke.sh) and cross-checked against
+# orbit/utils/arguments.py's _validate_opd_args (its external-sglang branch
+# accepts --opd-serve-teacher + the same custom-rm-path/post-process hooks
+# in sampled mode, no --teacher-score-mode required). This knob exists ONLY
+# for m1-eq equivalence runs; cost-table runs (default, OPD_COST_EQUIVALENCE
+# unset/0) keep the full-vocab config below unchanged.
+#
 # LAUNCHER_NAME (and therefore RUN_LOG/WANDB_GROUP/SAVE_DIR) is derived from
 # OPD_COST_VARIANT up front, right after the variant is validated, so those
 # identity strings actually reflect the variant; the RL_ARGS/PEFT_ARGS
@@ -263,34 +286,57 @@ PEFT_ARGS=(
 case "${OPD_COST_VARIANT}" in
     served)
         : "${OPD_TEACHER_HF_CKPT:?set OPD_TEACHER_HF_CKPT to the teacher Hugging Face checkpoint path}"
-        RL_ARGS+=(
-            --loss-type opd_jsd_loss
-            --teacher-score-mode full_vocab
-            --teacher-hf-checkpoint "${OPD_TEACHER_HF_CKPT}"
-            --opd-type sglang
-            --opd-jsd-beta "${OPD_JSD_BETA:-0.5}"
-            --opd-log-topk-overlap
-            --kl-loss-type k1
-            --opd-serve-teacher
-            --opd-teacher-num-gpus "${OPD_TEACHER_NUM_GPUS:-1}"
-            # Deviation: --teacher-score-mode full_vocab is validated
-            # (_validate_opd_args) to require the OPD full-vocab reward
-            # hooks, not the base recipe's math task-reward path.
-            --custom-rm-path orbit.rollout.opd_sglang.reward_func
-            --custom-reward-post-process-path orbit.rollout.opd_sglang.post_process
-            # Deviation: opd_sglang.reward_func's full-vocab branch delegates
-            # every sample to default_async_rm, which dispatches on rm_type
-            # and bypasses custom_rm_path entirely -- the base recipe's
-            # --rm-type custom is a NotImplementedError here. Served's task
-            # reward is therefore graded by the rule-based math grader
-            # (--rm-type math), not peft_arena_reward; matches the source
-            # smoke (run-qwen2_5-0_5b-opd-full-vocab-smoke.sh).
-            --rm-type math
-        )
+        if is_true "${OPD_COST_EQUIVALENCE:-0}"; then
+            # m1-eq equivalence config -- see OPD_COST_EQUIVALENCE note above.
+            # Sampled-token external-teacher scoring: same hooks/serving as
+            # the full-vocab config below, minus --teacher-score-mode
+            # full_vocab (and its full-vocab-only companions), plus the pure
+            # MOPD advantage-estimator/eps-clip/gamma/lambd block.
+            RL_ARGS+=(
+                --advantage-estimator on_policy_distillation
+                --teacher-hf-checkpoint "${OPD_TEACHER_HF_CKPT}"
+                --opd-type sglang
+                --kl-loss-type k1
+                --eps-clip 4e-4
+                --eps-clip-high 4e-4
+                --gamma 1.0
+                --lambd 1.0
+                --opd-serve-teacher
+                --opd-teacher-num-gpus "${OPD_TEACHER_NUM_GPUS:-1}"
+                --custom-rm-path orbit.rollout.opd_sglang.reward_func
+                --custom-reward-post-process-path orbit.rollout.opd_sglang.post_process
+                --rm-type math
+            )
+        else
+            RL_ARGS+=(
+                --loss-type opd_jsd_loss
+                --teacher-score-mode full_vocab
+                --teacher-hf-checkpoint "${OPD_TEACHER_HF_CKPT}"
+                --opd-type sglang
+                --opd-jsd-beta "${OPD_JSD_BETA:-0.5}"
+                --opd-log-topk-overlap
+                --kl-loss-type k1
+                --opd-serve-teacher
+                --opd-teacher-num-gpus "${OPD_TEACHER_NUM_GPUS:-1}"
+                # Deviation: --teacher-score-mode full_vocab is validated
+                # (_validate_opd_args) to require the OPD full-vocab reward
+                # hooks, not the base recipe's math task-reward path.
+                --custom-rm-path orbit.rollout.opd_sglang.reward_func
+                --custom-reward-post-process-path orbit.rollout.opd_sglang.post_process
+                # Deviation: opd_sglang.reward_func's full-vocab branch delegates
+                # every sample to default_async_rm, which dispatches on rm_type
+                # and bypasses custom_rm_path entirely -- the base recipe's
+                # --rm-type custom is a NotImplementedError here. Served's task
+                # reward is therefore graded by the rule-based math grader
+                # (--rm-type math), not peft_arena_reward; matches the source
+                # smoke (run-qwen2_5-0_5b-opd-full-vocab-smoke.sh).
+                --rm-type math
+            )
+        fi
         if [[ -n "${OPD_TEACHER_MEM_FRACTION:-}" ]]; then
             RL_ARGS+=( --opd-teacher-mem-fraction "${OPD_TEACHER_MEM_FRACTION}" )
         fi
-        if [[ -n "${OPD_JSD_POINTWISE_CLIP:-}" ]]; then
+        if [[ -n "${OPD_JSD_POINTWISE_CLIP:-}" ]] && ! is_true "${OPD_COST_EQUIVALENCE:-0}"; then
             RL_ARGS+=( --opd-jsd-pointwise-clip "${OPD_JSD_POINTWISE_CLIP}" )
         fi
         ;;
