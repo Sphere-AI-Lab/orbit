@@ -18,6 +18,7 @@ from miles.rollout.base_types import (
 )
 from miles.rollout.generate_hub.single_turn import generate
 from miles.rollout.generate_utils.generate_endpoint_utils import policy_uses_routing_key
+from miles.rollout.group_utils import group_has_aborted_sample
 from miles.rollout.inference_rollout.compatibility import load_generate_function
 from miles.rollout.inference_rollout.hook_utils import call_all_samples_process_fn
 from miles.rollout.rm_hub import async_rm, batched_async_rm
@@ -117,7 +118,7 @@ async def generate_and_rm(
     # multi samples
     if isinstance(sample, list):
         samples = sample
-        if any([sample.status == Sample.Status.ABORTED for sample in samples]):
+        if group_has_aborted_sample(samples):
             return samples
 
         # for multi agent system, the reward of some sample is calculated during generation.
@@ -178,7 +179,7 @@ async def generate_and_rm_group(
     if state.aborted:
         return group
 
-    if args.group_rm:
+    if args.group_rm and not group_has_aborted_sample(group):
         await batched_async_rm(args, group, inplace_set_reward_field=True)
 
     return group

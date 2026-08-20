@@ -11,6 +11,7 @@ from miles.rollout.base_types import RolloutFnTrainOutput
 from miles.rollout.filter_hub.base_types import MetricGatherer, call_dynamic_filter
 from miles.rollout.generate_utils.prefill_logprobs import recompute_samples_rollout_logprobs_via_prefill
 from miles.rollout.generate_utils.sample_utils import reward_log_summary, sample_text_preview
+from miles.rollout.group_utils import group_has_aborted_sample, prepare_partial_retry_group
 from miles.rollout.inference_rollout.hook_utils import call_all_samples_process_fn
 from miles.rollout.inference_rollout.inference_rollout_common import GenerateState, generate_and_rm_group
 from miles.rollout.inference_rollout.live_diagnostics import (
@@ -46,11 +47,8 @@ async def abort(state: GenerateState, pendings: set, rollout_id: int) -> list[li
         if not args.partial_rollout:
             continue
 
-        # for partial rollout, collect the partial samples into the data buffer
-        for sample in group:
-            if sample.response and "start_rollout_id" not in sample.metadata:
-                sample.metadata["start_rollout_id"] = rollout_id
-        aborted_samples.append(group)
+        # for partial rollout, collect a consumable flat group into the retry buffer
+        aborted_samples.append(prepare_partial_retry_group(group, rollout_id))
 
     if args.partial_rollout:
         logger.info(f"Collected {sum(len(x) for x in aborted_samples)} partial samples into the data buffer")
@@ -110,6 +108,7 @@ async def generate_rollout_async(
     pendings = set()
     data = []
     all_data = []
+    partial_aborted_samples = []
     do_print = True
     next_live_log_at = initial_live_log_at(args, target_data_size)
     pbar = tqdm(total=target_data_size * args.n_samples_per_prompt, desc="Rollout generation")
@@ -131,6 +130,12 @@ async def generate_rollout_async(
                 logger.error(f"[rollout] Task raised exception: {e!r}", exc_info=True)
                 continue
 
+            assert len(group) == args.n_samples_per_prompt
+            if group_has_aborted_sample(group):
+                if args.partial_rollout:
+                    partial_aborted_samples.append(prepare_partial_retry_group(group, rollout_id))
+                continue
+
             if do_print:
                 sample = group[0][0] if isinstance(group[0], list) else group[0]
                 logger.info(
@@ -141,7 +146,6 @@ async def generate_rollout_async(
                 )
                 do_print = False
 
-            assert len(group) == args.n_samples_per_prompt
             all_data.append(group)
             dynamic_filter_output = call_dynamic_filter(dynamic_filter, args, group)
             if not dynamic_filter_output.keep:
@@ -176,7 +180,7 @@ async def generate_rollout_async(
     )
 
     # there are still some unfinished requests, abort them
-    aborted_samples = await abort(state, pendings, rollout_id)
+    aborted_samples = partial_aborted_samples + await abort(state, pendings, rollout_id)
 
     assert len(data) == args.rollout_batch_size, f"Got {len(data)} samples, expected {args.rollout_batch_size}"
     data = sorted(data, key=lambda group: group[0][0].index if isinstance(group[0], list) else group[0].index)
