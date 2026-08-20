@@ -65,13 +65,16 @@ environment. The installer never deletes an unknown or existing directory.
 ## Preflight on an H200 node
 
 Acquire an interactive Slurm allocation containing an H200, then expose the site
-CUDA 12.8 toolkit so `nvcc --version` reports release 12.8. Conda and uv must be on
-`PATH`, or supplied with `--conda-exe` and `--uv-exe`.
+CUDA 12.8 toolkit so `nvcc --version` reports release 12.8. Conda must be on
+`PATH` or supplied with `--conda-exe`. The installer bootstraps the pinned uv release
+inside a new prefix. Pin extraction and freshness checks require Python 3.11+; select
+it with `--tool-python` when the login-node `python3` is older.
 
 ```bash
 scripts/slurm/setup/cu128/install_env.sh --preflight-only \
   --env-prefix /data/home/zeju/miles-orbit/envs/orbit_cu128_v1 \
-  --source-root /data/home/zeju/miles-orbit/sources/cu128_v1
+  --source-root /data/home/zeju/miles-orbit/sources/cu128_v1 \
+  --tool-python /path/to/python3.12
 ```
 
 Preflight rejects login-node execution, non-H200 allocations, the wrong CUDA
@@ -85,23 +88,29 @@ Run the same command without `--preflight-only` inside the H200 allocation:
 scripts/slurm/setup/cu128/install_env.sh \
   --env-prefix /data/home/zeju/miles-orbit/envs/orbit_cu128_v1 \
   --source-root /data/home/zeju/miles-orbit/sources/cu128_v1 \
-  --jobs 8
+  --tool-python /path/to/python3.12 \
+  --jobs 32
 ```
 
 The labeled stages are:
 
 1. Preflight scheduler, GPU, toolkit, pins, and tools.
-2. Create or resume the Conda Python 3.12 prefix.
-3. Record Conda, uv, and Python tooling.
+2. Create or resume Conda Python 3.12 and bootstrap pinned uv.
+3. Install pinned CUDA build tools and write the resolver override file.
 4. Install exact PyTorch CUDA 12.8 wheels.
-5. Install pinned CUDA Python and FlashInfer wheels.
+5. Install pinned CUDA Python, FlashInfer, and inference wheels.
 6. Clone immutable external sources at pinned commits.
 7. Install non-controlled Orbit runtime dependencies.
-8. Build Transformer Engine for Hopper.
+8. Build Transformer Engine, FlashAttention, causal-conv1d, Mamba, FLA, and fast Hadamard.
 9. Build Apex CUDA extensions.
-10. Install SGLang, Megatron-LM, and Megatron-Bridge editable.
-11. Install Orbit editable and reassert the torch wheel set.
+10. Build SGLang kernel/router and install SGLang plus Megatron backends editable.
+11. Install Orbit editable and reassert the controlled torch wheel set.
 12. Run metadata plus full H200 verification.
+
+The Hopper extension stage is intentionally expensive. On the reference H200 cluster,
+a clean FlashAttention build took about 3.25 hours; use an unattended batch allocation
+with enough wall time. User-level pip caches can substantially shorten later exact-pin
+builds.
 
 A sibling `<env-prefix>.install.lock` prevents concurrent installers from mutating
 the same prefix. Re-running the command resumes a recognizable Conda prefix and
