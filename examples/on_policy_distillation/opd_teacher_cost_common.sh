@@ -278,6 +278,14 @@ case "${OPD_COST_VARIANT}" in
             # hooks, not the base recipe's math task-reward path.
             --custom-rm-path orbit.rollout.opd_sglang.reward_func
             --custom-reward-post-process-path orbit.rollout.opd_sglang.post_process
+            # Deviation: opd_sglang.reward_func's full-vocab branch delegates
+            # every sample to default_async_rm, which dispatches on rm_type
+            # and bypasses custom_rm_path entirely -- the base recipe's
+            # --rm-type custom is a NotImplementedError here. Served's task
+            # reward is therefore graded by the rule-based math grader
+            # (--rm-type math), not peft_arena_reward; matches the source
+            # smoke (run-qwen2_5-0_5b-opd-full-vocab-smoke.sh).
+            --rm-type math
         )
         if [[ -n "${OPD_TEACHER_MEM_FRACTION:-}" ]]; then
             RL_ARGS+=( --opd-teacher-mem-fraction "${OPD_TEACHER_MEM_FRACTION}" )
