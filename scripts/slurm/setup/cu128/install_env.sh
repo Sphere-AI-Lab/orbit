@@ -151,11 +151,11 @@ load_profile() {
     for required in \
         CUDA_PROFILE CUDA_TOOLKIT_VERSION PYTHON_VERSION \
         TORCH_VERSION TORCHVISION_VERSION TORCHAUDIO_VERSION \
-        PYTORCH_INDEX_URL FLASHINFER_INDEX_URL \
-        SGLANG_SOURCE SGLANG_COMMIT MEGATRON_LM_SOURCE MEGATRON_LM_COMMIT \
-        MEGATRON_BRIDGE_SOURCE MEGATRON_BRIDGE_COMMIT \
-        TRANSFORMER_ENGINE_SOURCE TRANSFORMER_ENGINE_COMMIT \
-        APEX_SOURCE APEX_COMMIT; do
+        TORCH_INDEX_URL FLASHINFER_INDEX_URL \
+        SGLANG_SOURCE_URL SGLANG_COMMIT MEGATRON_SOURCE_URL MEGATRON_COMMIT \
+        MEGATRON_BRIDGE_SOURCE_URL MEGATRON_BRIDGE_COMMIT \
+        TRANSFORMER_ENGINE_SOURCE_URL TRANSFORMER_ENGINE_COMMIT \
+        APEX_SOURCE_URL APEX_COMMIT; do
         [[ -n "${!required:-}" ]] || die "required pin is missing: ${required}"
     done
     [[ "${CUDA_PROFILE}" == "cu128" ]] || die "pins select ${CUDA_PROFILE}, expected cu128"
@@ -306,7 +306,7 @@ install_environment() {
     run "${python}" --version
 
     stage 4 "install exact CUDA 12.8 PyTorch wheels"
-    run "${UV_EXE}" pip install --python "${python}" --index-url "${PYTORCH_INDEX_URL}" \
+    run "${UV_EXE}" pip install --python "${python}" --index-url "${TORCH_INDEX_URL}" \
         "torch==${TORCH_VERSION}+${CUDA_PROFILE}" \
         "torchvision==${TORCHVISION_VERSION}+${CUDA_PROFILE}" \
         "torchaudio==${TORCHAUDIO_VERSION}+${CUDA_PROFILE}"
@@ -322,12 +322,12 @@ install_environment() {
     fi
 
     stage 6 "materialize immutable external source checkouts"
-    ensure_checkout sglang "${SGLANG_SOURCE}" "${SGLANG_COMMIT}" "${sglang_root}"
-    ensure_checkout megatron-lm "${MEGATRON_LM_SOURCE}" "${MEGATRON_LM_COMMIT}" "${megatron_root}"
-    ensure_checkout megatron-bridge "${MEGATRON_BRIDGE_SOURCE}" "${MEGATRON_BRIDGE_COMMIT}" "${bridge_root}"
-    ensure_checkout transformer-engine "${TRANSFORMER_ENGINE_SOURCE}" \
+    ensure_checkout sglang "${SGLANG_SOURCE_URL}" "${SGLANG_COMMIT}" "${sglang_root}"
+    ensure_checkout megatron-lm "${MEGATRON_SOURCE_URL}" "${MEGATRON_COMMIT}" "${megatron_root}"
+    ensure_checkout megatron-bridge "${MEGATRON_BRIDGE_SOURCE_URL}" "${MEGATRON_BRIDGE_COMMIT}" "${bridge_root}"
+    ensure_checkout transformer-engine "${TRANSFORMER_ENGINE_SOURCE_URL}" \
         "${TRANSFORMER_ENGINE_COMMIT}" "${te_root}"
-    ensure_checkout apex "${APEX_SOURCE}" "${APEX_COMMIT}" "${apex_root}"
+    ensure_checkout apex "${APEX_SOURCE_URL}" "${APEX_COMMIT}" "${apex_root}"
 
     stage 7 "install Orbit runtime dependencies without controlled backends"
     generate_runtime_requirements
@@ -356,7 +356,7 @@ install_environment() {
 
     stage 11 "install Orbit editable and reassert the torch wheel set"
     run "${UV_EXE}" pip install --python "${python}" --no-deps --editable "${ORBIT_ROOT}"
-    run "${UV_EXE}" pip install --python "${python}" --index-url "${PYTORCH_INDEX_URL}" \
+    run "${UV_EXE}" pip install --python "${python}" --index-url "${TORCH_INDEX_URL}" \
         "torch==${TORCH_VERSION}+${CUDA_PROFILE}" \
         "torchvision==${TORCHVISION_VERSION}+${CUDA_PROFILE}" \
         "torchaudio==${TORCHAUDIO_VERSION}+${CUDA_PROFILE}"

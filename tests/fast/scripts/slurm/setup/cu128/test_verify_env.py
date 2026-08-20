@@ -44,13 +44,22 @@ def test_version_check_requires_cu128_local_tag() -> None:
 
 
 def test_version_check_audits_non_torch_package_pins() -> None:
-    pins = {"FLASHINFER_VERSION": "0.6.14", "TRANSFORMERS_VERSION": "4.57.6"}
-    installed = {"flashinfer-python": "0.6.13", "transformers": "4.57.6"}
+    pins = {
+        "ORBIT_VERSION": "0.1.0",
+        "FLASHINFER_VERSION": "0.6.14",
+        "TRANSFORMERS_VERSION": "4.57.6",
+    }
+    installed = {
+        "orbit": "0.1.0+editable",
+        "flashinfer-python": "0.6.13",
+        "transformers": "4.57.6",
+    }
     checks = check_versions(pins, installed)
     assert Check(
         "flashinfer-python version", False, "expected 0.6.14, got 0.6.13"
     ) in checks
     assert Check("transformers version", True, "4.57.6") in checks
+    assert Check("orbit version", True, "0.1.0+editable") in checks
 
 
 def test_editable_check_requires_expected_realpath(tmp_path: Path) -> None:

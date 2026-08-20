@@ -19,6 +19,7 @@ from urllib.parse import unquote, urlparse
 REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_PINS = Path(__file__).with_name("pins.env")
 PACKAGE_VERSION_SPECS = (
+    ("orbit", "orbit version", ("ORBIT_VERSION",), "source"),
     ("torch", "torch build", ("TORCH_VERSION",), "cuda-local"),
     ("torchvision", "torchvision build", ("TORCHVISION_VERSION",), "cuda-local"),
     ("torchaudio", "torchaudio build", ("TORCHAUDIO_VERSION",), "cuda-local"),
