@@ -11,8 +11,10 @@ from examples.model_response_trace_viewer.response_trace import (
 from PIL import Image
 from tests.fast.examples.model_response_trace_viewer.conftest import make_sample
 
+from miles.utils.types import Sample
 
-def _trace_args(path: Path | None, cap: int | None = None) -> SimpleNamespace:
+
+def _trace_args(path: Path | None, cap: int | None = 8) -> SimpleNamespace:
     return SimpleNamespace(
         save_model_response_trace_dir=None if path is None else str(path),
         model_response_trace_max_samples_per_step=cap,
@@ -234,12 +236,12 @@ def test_save_model_response_trace_caps_samples_and_assigns_ordinals(tmp_path):
     assert not list(step.parent.glob(".step0012.*"))
 
 
-def test_save_model_response_trace_exports_every_sample_by_default(tmp_path):
+def test_save_model_response_trace_exports_every_sample_when_cap_exceeds_batch(tmp_path):
     samples = [
         make_sample(group_index=7 if index < 3 else 8, index=index, response=f"r{index}") for index in range(10)
     ]
 
-    save_model_response_trace(_trace_args(tmp_path / "traces"), samples, rollout_id=12)
+    save_model_response_trace(_trace_args(tmp_path / "traces", cap=20), samples, rollout_id=12)
 
     step = tmp_path / "traces" / "train" / "step0012"
     indices = sorted(json.loads(path.read_text())["ids"]["sample_index"] for path in step.glob("*/record.json"))
@@ -370,3 +372,29 @@ def test_save_model_response_trace_disabled_or_empty_does_no_filesystem_work(tmp
     save_model_response_trace(_trace_args(tmp_path / "traces"), [], rollout_id=0)
 
     assert not (tmp_path / "traces").exists()
+
+
+def test_retry_trace_contains_prompt_and_fresh_images_but_not_stale_image(tmp_path):
+    prompt_image = Image.new("RGB", (1, 1), "red")
+    stale_image = Image.new("RGB", (1, 1), "green")
+    fresh_image = Image.new("RGB", (1, 1), "blue")
+    sample = make_sample(multimodal_inputs={"images": [prompt_image]})
+
+    sample.capture_multimodal_inputs_for_retry()
+    sample.multimodal_inputs["images"].append(stale_image)
+    sample.reset_for_retry()
+    sample.multimodal_inputs["images"].append(fresh_image)
+    sample.status = Sample.Status.COMPLETED
+    sample.tokens = [1]
+    sample.response = "accepted retry"
+    sample.response_length = 1
+    sample.metadata["response_turns"] = [{"turn": 1, "role": "assistant", "content": "accepted retry"}]
+
+    save_model_response_trace(_trace_args(tmp_path / "traces"), [sample], rollout_id=0)
+
+    rollout = tmp_path / "traces" / "train" / "step0000" / "prompt00000_rollout00"
+    with Image.open(rollout / "turn0_obs.png") as first:
+        assert first.getpixel((0, 0)) == (255, 0, 0, 255)
+    with Image.open(rollout / "turn1_obs.png") as second:
+        assert second.getpixel((0, 0)) == (0, 0, 255, 255)
+    assert not (rollout / "turn2_obs.png").exists()

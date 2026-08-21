@@ -93,6 +93,40 @@ class TestRoundTrip:
         save_debug_rollout_data(args, [make_sample()], rollout_id=0, evaluation=False)
         assert called == []
 
+    def test_sidecar_payloads_are_removed_only_from_serialized_copy(self, tmp_path: Path):
+        rollout_path = tmp_path / "debug" / "rollout_{rollout_id}.pt"
+        trajectory_path = tmp_path / "debug" / "trajectory_{rollout_id}.jsonl"
+        response_log_path = tmp_path / "debug" / "responses_{rollout_id}.jsonl"
+        args = make_args(
+            save_debug_rollout_data=str(rollout_path),
+            save_debug_trajectory_data=str(trajectory_path),
+            save_model_response_log=str(response_log_path),
+        )
+        messages = [
+            {"role": "user", "content": "question"},
+            {"role": "assistant", "content": "answer"},
+        ]
+        response_turns = [{"turn": 1, "role": "assistant", "content": "answer"}]
+        sample = make_sample(
+            metadata={
+                "dataset": "geo3k",
+                "messages": messages,
+                "response_turns": response_turns,
+            }
+        )
+
+        save_debug_rollout_data(args, [sample], rollout_id=2, evaluation=False)
+
+        assert sample.metadata == {
+            "dataset": "geo3k",
+            "messages": messages,
+            "response_turns": response_turns,
+        }
+        payload = torch.load(tmp_path / "debug" / "rollout_2.pt", weights_only=False)
+        assert payload["samples"][0]["metadata"] == {"dataset": "geo3k"}
+        trajectory = (tmp_path / "debug" / "trajectory_2.jsonl").read_text(encoding="utf-8")
+        assert '"messages"' in trajectory
+
 
 # ----------------------------- subsample -----------------------------
 
