@@ -221,22 +221,27 @@ install_optional() {
 }
 
 echo "[5/10] install prebuilt Miles Hopper wheels"
-uv_install --force-reinstall --no-deps "$(pick_one "$WHEEL_DIR/flash_attn-*cp312*linux_x86_64.whl")"
-flash_attn_3_wheel=$(pick_one "$WHEEL_DIR/flash_attn_3-*-abi3-linux_x86_64.whl")
+flash_attn_wheel=$(pick_one "$WHEEL_DIR/flash_attn-*.whl")
+flash_attn_3_wheel=$(pick_one "$WHEEL_DIR/flash_attn_3-*.whl")
+uv_install --force-reinstall --no-deps "$flash_attn_wheel"
 uv_install --force-reinstall --no-deps "$flash_attn_3_wheel"
+transformer_engine_wheel=$(pick_one "$WHEEL_DIR/transformer_engine-$TRANSFORMER_ENGINE_VERSION-*.whl")
+transformer_engine_cu13_wheel=$(pick_one "$WHEEL_DIR/transformer_engine_cu13-$TRANSFORMER_ENGINE_VERSION-*.whl")
+transformer_engine_torch_wheel=$(pick_one "$WHEEL_DIR/transformer_engine_torch-$TRANSFORMER_ENGINE_VERSION-*.whl")
 uv_install --force-reinstall --no-deps \
-    "$(pick_one "$WHEEL_DIR/transformer_engine-$TRANSFORMER_ENGINE_VERSION-py3-none-any.whl")" \
-    "$(pick_one "$WHEEL_DIR/transformer_engine_cu13-$TRANSFORMER_ENGINE_VERSION-py3-none-manylinux_2_28_*.whl")" \
-    "$(pick_one "$WHEEL_DIR/transformer_engine_torch-$TRANSFORMER_ENGINE_VERSION-cp312-cp312-linux_*.whl")"
+    "$transformer_engine_wheel" \
+    "$transformer_engine_cu13_wheel" \
+    "$transformer_engine_torch_wheel"
 uv_install einops onnx onnxscript pydantic nvdlfw-inspect
-uv_install --force-reinstall --no-deps "$(pick_one "$WHEEL_DIR/apex-*cp312*linux_x86_64.whl")"
-install_optional "$WHEEL_DIR/fast_hadamard_transform-*cp312*linux_x86_64.whl"
-install_optional "$WHEEL_DIR/causal_conv1d-*cp312*linux_x86_64.whl"
-install_optional "$WHEEL_DIR/mamba_ssm-*cp312*linux_x86_64.whl"
-install_optional "$WHEEL_DIR/deep_ep-*cp312*linux_x86_64.whl"
-install_optional "$WHEEL_DIR/ring_flash_attn-*cp312*linux_x86_64.whl"
-install_optional "$WHEEL_DIR/sglang_router-*cp38-abi3-manylinux_2_28_x86_64.whl"
-install_optional "$WHEEL_DIR/mooncake_transfer_engine-*cp312*linux_x86_64.whl"
+apex_wheel=$(pick_one "$WHEEL_DIR/apex-*.whl")
+uv_install --force-reinstall --no-deps "$apex_wheel"
+install_optional "$WHEEL_DIR/fast_hadamard_transform-*.whl"
+install_optional "$WHEEL_DIR/causal_conv1d-*.whl"
+install_optional "$WHEEL_DIR/mamba_ssm-*.whl"
+install_optional "$WHEEL_DIR/deep_ep-*.whl"
+install_optional "$WHEEL_DIR/ring_flash_attn-*.whl"
+install_optional "$WHEEL_DIR/sglang_router-*.whl"
+install_optional "$WHEEL_DIR/mooncake_transfer_engine_cuda13-*.whl"
 
 echo "[6/10] reconcile SGLang CUDA runtime pins"
 uv_install --force-reinstall --no-deps \
