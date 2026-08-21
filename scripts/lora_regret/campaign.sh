@@ -67,9 +67,11 @@ SKIP_PREFLIGHT=${SKIP_PREFLIGHT:-0}
 PREFLIGHT_STAGE=${PREFLIGHT_STAGE:-e4}
 DRY_RUN=${DRY_RUN:-0}
 : "${DATA_DIR:=/lustre/fast/fast/groups/ei-slm/data/lora_regret}"
-export DATA_DIR GPUS_PER_NODE
+: "${LORA_REGRET_LOG_DIR:=${ORBIT_ROOT}/logs/lora_regret}"
+: "${LORA_REGRET_CKPT_DIR:=${ORBIT_ROOT}/orbit_ckpts/lora_regret}"
+export DATA_DIR GPUS_PER_NODE LORA_REGRET_LOG_DIR LORA_REGRET_CKPT_DIR
 
-mkdir -p "$(dirname "${RESULTS}")" logs/lora_regret
+mkdir -p "$(dirname "${RESULTS}")" "${LORA_REGRET_LOG_DIR}" "${LORA_REGRET_CKPT_DIR}"
 say() { printf '\n=== %s ===\n' "$*"; }
 
 # --- environment ------------------------------------------------------------
@@ -230,7 +232,7 @@ fi
 
 # --- run -------------------------------------------------------------------
 say "running ${SELECTED} arms sequentially on ${GPUS_PER_NODE} GPUs"
-echo "logs:    logs/lora_regret/<arm>.log"
+echo "logs:    ${LORA_REGRET_LOG_DIR}/<arm>.log"
 echo "ledger:  ${RESULTS}"
 echo "resume:  re-run this same script; finished arms are skipped"
 exec python -m tools.lora_regret.sweep "${SWEEP_ARGS[@]}"

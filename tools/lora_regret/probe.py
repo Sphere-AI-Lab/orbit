@@ -27,7 +27,11 @@ import statistics
 from dataclasses import dataclass
 from pathlib import Path
 
-from tools.lora_regret.arms import MATRICES, MATRICES_REQUIRING_OFT_CENTRE
+from tools.lora_regret.arms import (
+    E4_ENV2_OFT_ROLLOUTS,
+    MATRICES,
+    MATRICES_REQUIRING_OFT_CENTRE,
+)
 from tools.lora_regret.models import DEFAULT_MODEL
 from tools.lora_regret.models import get as get_model
 from tools.lora_regret.probe_log import parse_rollout_seconds  # noqa: F401  (re-exported)
@@ -68,6 +72,7 @@ PROBE_OFT_CENTRE = 1e-4
 #   * e1/e2/e3 -- the operator exports NUM_ROLLOUT=2000 (runbook section 8);
 #                 nothing in the code says 2000, so nothing can derive it.
 #   * e4/e4place -- the RL launcher's own default of 500.
+#   * e4oftenv2 -- e4_protocol.sh's explicit default of 150.
 #   * e5/e5scout -- Tulu3 SFT under the same runbook convention as e1.
 OPENTHOUGHTS3_TRAIN_ROWS = 10_000
 ROLLOUT_BATCH_SIZE = 32
@@ -87,6 +92,7 @@ FULL_RUN_ROLLOUTS = {
     "e4oftb128low": RL_LAUNCHER_ROLLOUTS,
     "e4oftb128refine": RL_LAUNCHER_ROLLOUTS,
     "e4oftverify": RL_LAUNCHER_ROLLOUTS,
+    "e4oftenv2": E4_ENV2_OFT_ROLLOUTS,
     "e5scout": SFT_SWEEP_ROLLOUTS,
     "e5": SFT_SWEEP_ROLLOUTS,
     "e5rl": RL_LAUNCHER_ROLLOUTS,

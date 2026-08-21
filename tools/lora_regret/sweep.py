@@ -42,6 +42,7 @@ from tools.lora_regret.probe_log import (
     parse_rollout_seconds,
     parse_save_seconds,
 )
+from tools.lora_regret.run_paths import resolve_arm_paths
 from tools.lora_regret.trace import (  # noqa: F401  (parse_trace re-exported)
     NLL_LINE as _NLL_LINE,
     PHASE_AFTER_TRAIN as _PHASE_AFTER_TRAIN,
@@ -74,6 +75,7 @@ MATRIX_LAUNCHERS = {
     "e4oftb128low": RL_LAUNCHER,
     "e4oftb128refine": RL_LAUNCHER,
     "e4oftverify": RL_LAUNCHER,
+    "e4oftenv2": RL_LAUNCHER,
     "e4lr0": RL_LAUNCHER,
     "e4place": RL_LAUNCHER,
     "e5rl": RL_LAUNCHER,
@@ -92,6 +94,7 @@ MATRIX_METRICS = {
     "e4oftb128low": "accuracy",
     "e4oftb128refine": "accuracy",
     "e4oftverify": "accuracy",
+    "e4oftenv2": "accuracy",
     "e4lr0": "accuracy",
     "e4place": "accuracy",
     "e5rl": "accuracy",
@@ -162,6 +165,7 @@ MATRIX_PROJECTS = {
     "e4oftb128low": "rl-b128-low-lr",
     "e4oftb128refine": "rl-b128-refine-lr",
     "e4oftverify": "rl-oft-block-verify",
+    "e4oftenv2": "rl-b128-env2-lr",
     "e4lr0": "rl-rank",
     "e4place": "rl-placement",
     "e5rl": "rl-oft-match",
@@ -504,7 +508,7 @@ def run_arm(
     matrix: str | None = None,
     probe_rollouts: int | None = None,
 ) -> None:
-    log_path = repo_root / "logs" / "lora_regret" / f"{arm.name}.log"
+    log_path, save_dir = resolve_arm_paths(repo_root, arm.name, os.environ)
     # One dict, used for both the real environment and the dry-run preview --
     # so a previewed line cannot omit the per-arm SAVE_DIR that keeps
     # concurrent arms from overwriting each other.
@@ -546,7 +550,7 @@ def run_arm(
             # lands in the right account. Verified: with WANDB_ENTITY set, the
             # run record carries entity='zeju-qiu' instead of ''.
             "WANDB_ENTITY": WANDB_ENTITY,
-            "SAVE_DIR": str(repo_root / "orbit_ckpts" / "lora_regret" / arm.name),
+            "SAVE_DIR": str(save_dir),
         }
     )
     if probe_rollouts is not None:

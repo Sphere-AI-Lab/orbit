@@ -24,6 +24,9 @@ Matrices selected by ``sweep.py --matrix``:
 * ``e4oftb128refine`` -- a dedicated Math-only BS128 OFT learning-rate
   refinement around the established E4 region, with capacity, placement, seed,
   and the full E4 protocol held fixed.
+* ``e4oftenv2`` -- the clean env2 OFT rerun grid for MATH and GSM8K. It fixes
+  block size 128 and centres seven learning-rate columns on the historical
+  MATH optimum, 7e-6.
 * ``e5scout`` / ``e5`` -- matched-parameter OFT. The scout comes first and the
   refinement grid is centred on its argmin; see :func:`e5_arms` for why the match
   is solved by inverting to a LoRA rank rather than by choosing a block size.
@@ -783,6 +786,9 @@ def e3_arms(
 E4_OFT_BLOCK_LADDER = (8, 128, 1024)
 E4_MATH_OFT_B128_LOW_LRS = (1e-7, 3e-7, 1e-6, 3e-6, 1e-5)
 E4_MATH_OFT_B128_REFINE_LRS = (5e-6, 6e-6, 7e-6, 8e-6, 9e-6, 2e-5)
+E4_ENV2_OFT_BLOCK_SIZE = 128
+E4_ENV2_OFT_LRS = (5e-7, 1e-6, 3e-6, 7e-6, 2e-5, 4e-5, 1e-4)
+E4_ENV2_OFT_ROLLOUTS = 150
 
 # The one LR the whole ladder is re-run at. 7e-06 is b128's measured argmax from
 # `e4oftb128refine` -- 0.2742 against 0.2636 at 8e-06 and 0.2624 at 6e-06 -- and
@@ -967,6 +973,43 @@ def e4_math_oft_verify_arms(
             matched_ratio=oft_lora_match_report(block_size, selected_shapes)["ratio"],
         )
         for block_size in E4_OFT_BLOCK_LADDER
+    ]
+
+
+def e4_env2_oft_arms(
+    hidden_size: int = LLAMA31_8B_HIDDEN,
+    ffn_size: int = LLAMA31_8B_FFN,
+    seed: int = 0,
+    qkv_output_size: int = LLAMA31_8B_QKV_OUTPUT,
+    datasets: tuple[str, ...] = RL_DATASETS,
+) -> list[Arm]:
+    """Env2 OFT rerun: block 128, all modules, seven centred LR columns."""
+    shapes = megatron_module_shapes(hidden_size, ffn_size, qkv_output_size)
+    selected_shapes = {
+        name: shape for name, shape in shapes.items() if name in ALL_MODULES.split(",")
+    }
+    report = oft_lora_match_report(E4_ENV2_OFT_BLOCK_SIZE, selected_shapes)
+    return [
+        Arm(
+            _name(
+                "oftenv2",
+                f"b{E4_ENV2_OFT_BLOCK_SIZE}",
+                ALL_MODULES,
+                lr,
+                seed,
+                extra=dataset,
+            ),
+            "oft",
+            None,
+            E4_ENV2_OFT_BLOCK_SIZE,
+            ALL_MODULES,
+            lr,
+            seed,
+            dataset=dataset,
+            matched_ratio=report["ratio"],
+        )
+        for dataset in datasets
+        for lr in E4_ENV2_OFT_LRS
     ]
 
 
@@ -1398,6 +1441,12 @@ MATRICES = {
     "e4oftverify": (
         lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None:
         e4_math_oft_verify_arms(
+            hidden, ffn, seed=seed, qkv_output_size=qkv_output
+        )
+    ),
+    "e4oftenv2": (
+        lambda hidden, ffn, qkv_output, seed, oft_lr_centre=None, argmins=None:
+        e4_env2_oft_arms(
             hidden, ffn, seed=seed, qkv_output_size=qkv_output
         )
     ),

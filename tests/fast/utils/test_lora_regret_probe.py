@@ -23,18 +23,24 @@ class TestPlan:
     def test_the_method_level_is_one_run_per_task_per_method(self):
         """Rank, block size, placement and batch size exercise the same code at
         different shapes, so probing them separately re-runs a path that already
-        passed. 29 runs, not 67 -- and `path` collapses further still, to 23.
+        passed. 31 runs, not the full configuration grid -- and `path` collapses
+        further still by sharing the existing RL OFT code paths.
 
         24 before e5rl, which adds an OFT and a LoRA method row on math_gsm8k;
         then 29 once e4lr0, e4oftb128low and e4oftb128refine were given
         FULL_RUN_ROLLOUTS entries, each contributing one method row. Before that
         they were in the registry but absent from probe's cost table, so
-        probe_plan raised KeyError instead of planning them.
+        probe_plan raised KeyError instead of planning them. The block-verify
+        matrix contributes the thirtieth row and the env2 OFT matrix the
+        thirty-first.
 
         The counts are asserted rather than derived because the failure they
         guard is exactly that -- a matrix added to the registry without being
         taught to the probe."""
-        assert len(probe_plan("method")) == 29
+        assert len(probe_plan("method")) == 31
+
+    def test_env2_oft_cost_uses_the_protocols_150_rollouts(self):
+        assert FULL_RUN_ROLLOUTS["e4oftenv2"] == 150
 
     def test_config_level_launches_every_distinct_configuration_once(self):
         """The opt-in level, for hunting a shape-dependent failure rather than a
