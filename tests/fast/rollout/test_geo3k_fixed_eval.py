@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from examples.geo3k_vlm_multi_turn import fixed_eval
+from examples.geo3k_vlm.multi_turn import fixed_eval
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -250,7 +250,7 @@ def test_eval_config_scopes_metadata_and_task_reward_wrapper_to_eval(tmp_path) -
     }
     assert dataset["path"] == str(manifest_path)
     assert dataset["metadata_key"] == fixed_eval.EVAL_METADATA_KEY
-    assert dataset["custom_generate_function_path"] == "examples.geo3k_vlm_multi_turn.fixed_eval.generate"
+    assert dataset["custom_generate_function_path"] == "examples.geo3k_vlm.multi_turn.fixed_eval.generate"
 
 
 def test_eval_config_rejects_nonpositive_token_budget(tmp_path) -> None:
@@ -387,7 +387,7 @@ def test_eval_logger_rejects_missing_truncation_rows(monkeypatch) -> None:
 
 @pytest.mark.asyncio
 async def test_eval_generate_assigns_task_reward_before_custom_opd_rm(monkeypatch) -> None:
-    from examples.geo3k_vlm_multi_turn import rollout
+    from examples.geo3k_vlm.multi_turn import rollout
     from miles.rollout import rm_hub
 
     calls = []
@@ -484,7 +484,7 @@ def test_student_recipe_keeps_sync_hybrid_training_contract(
     assert _arg_value(args, "--opd-dagger-top-k") == "2"
     assert _arg_value(args, "--opd-dagger-coef") == "0.5"
     assert _arg_value(args, "--custom-rm-path") == "miles.rollout.on_policy_distillation.reward_func"
-    assert _arg_value(args, "--custom-generate-function-path") == "examples.geo3k_vlm_multi_turn.rollout.generate"
+    assert _arg_value(args, "--custom-generate-function-path") == "examples.geo3k_vlm.multi_turn.rollout.generate"
     assert _arg_value(args, "--rollout-max-response-len") == "12000"
     assert _arg_value(args, "--rollout-max-context-len") == "12000"
     assert _arg_value(args, "--eval-interval") == "5"
@@ -492,10 +492,10 @@ def test_student_recipe_keeps_sync_hybrid_training_contract(
     assert _arg_value(args, "--prompt-data").endswith("opd_eval_seed20260720_n30.train_augmented.parquet")
     assert (
         _arg_value(args, "--custom-eval-rollout-log-function-path")
-        == "examples.geo3k_vlm_multi_turn.fixed_eval.log_eval_rollout_data"
+        == "examples.geo3k_vlm.multi_turn.fixed_eval.log_eval_rollout_data"
     )
     assert _arg_value(args, "--rollout-all-samples-process-path") == (
-        "examples.geo3k_vlm_multi_turn.fixed_eval.dump_samples"
+        "examples.geo3k_vlm.multi_turn.fixed_eval.dump_samples"
     )
     assert _arg_value(args, "--sglang-mem-fraction-static") == expected_mem_fraction
     assert Path(metadata["teacher_model_dir"]).name == teacher_model
@@ -575,10 +575,10 @@ def test_teacher_reference_recipe_is_eval_only(tmp_path, recipe_name: str, model
     assert _arg_value(args, "--prompt-data").endswith("opd_eval_seed20260720_n30.parquet")
     assert (
         _arg_value(args, "--custom-eval-rollout-log-function-path")
-        == "examples.geo3k_vlm_multi_turn.fixed_eval.log_eval_rollout_data"
+        == "examples.geo3k_vlm.multi_turn.fixed_eval.log_eval_rollout_data"
     )
     assert _arg_value(args, "--rollout-all-samples-process-path") == (
-        "examples.geo3k_vlm_multi_turn.fixed_eval.dump_samples"
+        "examples.geo3k_vlm.multi_turn.fixed_eval.dump_samples"
     )
     assert "--use-opd" not in args
     assert "--custom-rm-path" not in args

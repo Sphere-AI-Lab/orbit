@@ -1,23 +1,27 @@
 import os
 
-from tests.ci.ci_register import register_cuda_ci
+from tests.ci.ci_register import register_cuda_ci, register_rocm_ci
 
 import miles.utils.external_utils.command_utils as U
 
 register_cuda_ci(
-    est_time=300,
-    suite="stage-c-8-gpu-h100",
-    labels=["short"],
-    disabled="FSDP backend has known issues, not actively maintained",
+    est_time=3000,
+    suite="stage-c-2-gpu-h200",
+    labels=["long"],
+)
+register_rocm_ci(
+    est_time=3900,
+    suite="nightly-stage-c-2-gpu-mi350",
+    labels=["long"],
 )
 
 MODEL_NAME = "Qwen3-0.6B"
-NUM_GPUS = 8
+NUM_GPUS = 2
 
 
 def prepare():
-    U.exec_command("mkdir -p /root/models /root/datasets")
-    U.exec_command(f"hf download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
+    U.exec_command_cpu("mkdir -p /root/models /root/datasets")
+    U.exec_command_cpu(f"hf download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
     U.hf_download_dataset("zhuzilin/gsm8k")
 
 
@@ -78,6 +82,8 @@ def execute():
         "--update-weight-buffer-size 536870912 "  # 512MB
     )
 
+    perf_args = "--use-dynamic-batch-size --max-tokens-per-gpu 32768 "
+
     ci_args = (
         "--ci-test "
         "--ci-disable-kl-checker "
@@ -96,6 +102,7 @@ def execute():
         f"{U.get_default_wandb_args(__file__)} "
         f"{eval_args} "
         f"{fsdp_args} "
+        f"{perf_args} "
         f"{ci_args} "
         f"{misc_args} "
     )
@@ -104,7 +111,6 @@ def execute():
         train_args=train_args,
         num_gpus_per_node=NUM_GPUS,
         megatron_model_type=None,
-        extra_env_vars={"MILES_EXPERIMENTAL_ROLLOUT_REFACTOR": "1"},
     )
 
 

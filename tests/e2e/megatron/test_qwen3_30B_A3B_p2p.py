@@ -23,8 +23,8 @@ register_ci_gate(metric_key="rollout/raw_reward")
 
 
 def prepare():
-    U.exec_command("mkdir -p /root/models /root/datasets")
-    U.exec_command(f"hf download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
+    U.exec_command_cpu("mkdir -p /root/models /root/datasets")
+    U.exec_command_cpu(f"hf download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
     U.hf_download_dataset("zhuzilin/dapo-math-17k")
     U.convert_checkpoint(model_name=MODEL_NAME, megatron_model_type=MODEL_TYPE, num_gpus_per_node=NUM_GPUS)
 
@@ -73,6 +73,7 @@ def execute():
         "--entropy-coef 0.00 "
         "--eps-clip 0.2 "
         "--eps-clip-high 0.28 "
+        "--skip-actor-forward-only "
     )
 
     optimizer_args = (

@@ -55,8 +55,8 @@ ROLLOUT_ARGS=(
    --input-key problem
    --label-key answer
    --apply-chat-template
-   --custom-generate-function-path examples.geo3k_vlm_multi_turn.rollout.generate
-   --custom-config-path examples/geo3k_vlm_multi_turn/geo3k_vlm_multi_turn_config.yaml
+   --custom-generate-function-path examples.geo3k_vlm.multi_turn.rollout.generate
+   --custom-config-path examples/geo3k_vlm/multi_turn/geo3k_vlm_multi_turn_config.yaml
    --num-rollout 0
    --rollout-batch-size 1
    --n-samples-per-prompt 1

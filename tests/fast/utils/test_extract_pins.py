@@ -44,7 +44,8 @@ def _render_values() -> dict[str, str]:
             "TORCH_INDEX_URL": "https://download.pytorch.org/whl/cu129",
             "FLASHINFER_INDEX_URL": "https://flashinfer.ai/whl/cu129",
             "SGL_WHL_INDEX_URL": "https://docs.sglang.ai/whl/cu129",
-            "TMS_COMMIT": "deadbeef",
+            # the hand-owned pin (FA3 interface since the 2026-08 sync; TMS is extracted again)
+            "FLASH_ATTN_INTERFACE_COMMIT": "deadbeef",
         }
     )
     return values

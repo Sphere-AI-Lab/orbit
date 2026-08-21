@@ -14,7 +14,7 @@ TestMergeTokensBoundary
     manipulation — not about template rendering.
 
     Why synthetic IDs?  merge_tokens is: ``prefix + [boundary fix] + incremental``.
-    The incremental part comes from tokenize_additional_non_assistant (tested
+    The incremental part comes from tokenize_additional_messages (tested
     separately); boundary logic depends only on the last token of the prefix.
     Synthetic IDs isolate this and make failures trivially diagnosable.
 
@@ -26,9 +26,7 @@ TestMergeTokensBoundary
     - Default: plain concatenation (no boundary handling).
 
 TestTokenizeAdditional
-    Behavioral tests for tokenize_additional_non_assistant — the single
-    synthetic-prefix diff that computes incremental token IDs for the complete
-    appended non-assistant suffix.
+    Behavioral tests for tokenize_additional_messages — the single synthetic-prefix diff that computes incremental token IDs for the complete appended suffix.
 
     ``test_produces_nonempty_incremental`` is parametrized over:
       _TOOL_TRAJECTORIES (trajectory classes) × _TITO_MODELS (qwen3, glm47)
@@ -46,12 +44,26 @@ TestFactory
 
 from __future__ import annotations
 
+import json
+from unittest.mock import MagicMock
+
 import pytest
 from transformers import AutoTokenizer
 
-from miles.utils.chat_template_utils import MismatchType, apply_chat_template, resolve_fixed_chat_template
+from miles.utils.chat_template_utils import (
+    TEMPLATE_DIR,
+    MismatchType,
+    apply_chat_template,
+    apply_chat_template_from_str,
+    resolve_fixed_chat_template,
+)
 from miles.utils.chat_template_utils.tito_tokenizer import (
+    ALL_APPEND_ROLES,
+    DeepSeekV4TITOTokenizer,
+    DeepSeekV32TITOTokenizer,
+    FixedTemplate,
     GLM47TITOTokenizer,
+    InklingTITOTokenizer,
     Qwen3TITOTokenizer,
     Qwen35TITOTokenizer,
     QwenNextTITOTokenizer,
@@ -80,7 +92,7 @@ _TOK_CACHE: dict[tuple[str, str | None], AutoTokenizer] = {}
 
 
 def _get_tokenizer(model_id: str, tito_type: TITOTokenizerType | None = None) -> AutoTokenizer:
-    chat_template_path = resolve_fixed_chat_template(tito_type, ["tool"])[0] if tito_type is not None else None
+    chat_template_path = resolve_fixed_chat_template(tito_type)[0] if tito_type is not None else None
     cache_key = (model_id, chat_template_path)
     if cache_key not in _TOK_CACHE:
         _TOK_CACHE[cache_key] = load_tokenizer(
@@ -104,8 +116,6 @@ _TITO_MODELS: dict[str, tuple[str, type[TITOTokenizer], TITOTokenizerType]] = {
     "glm47": ("zai-org/GLM-4.7-Flash", GLM47TITOTokenizer, TITOTokenizerType.GLM47),
 }
 
-_ALLOWED_APPEND_ROLES = ["tool", "user", "system"]
-
 
 @pytest.fixture(params=list(_TITO_MODELS.keys()))
 def tito(request) -> TITOTokenizer:
@@ -113,7 +123,6 @@ def tito(request) -> TITOTokenizer:
     return cls(
         _get_tokenizer(model_id, tito_type),
         chat_template_kwargs={"clear_thinking": False},
-        allowed_append_roles=_ALLOWED_APPEND_ROLES,
     )
 
 
@@ -122,7 +131,6 @@ def qwen3_tito() -> Qwen3TITOTokenizer:
     return Qwen3TITOTokenizer(
         _get_tokenizer("Qwen/Qwen3-4B", TITOTokenizerType.QWEN3),
         chat_template_kwargs={"clear_thinking": False},
-        allowed_append_roles=_ALLOWED_APPEND_ROLES,
     )
 
 
@@ -131,13 +139,12 @@ def glm47_tito() -> GLM47TITOTokenizer:
     return GLM47TITOTokenizer(
         _get_tokenizer("zai-org/GLM-4.7-Flash", TITOTokenizerType.GLM47),
         chat_template_kwargs={"clear_thinking": False},
-        allowed_append_roles=_ALLOWED_APPEND_ROLES,
     )
 
 
 @pytest.fixture
 def default_tito() -> TITOTokenizer:
-    return TITOTokenizer(_get_tokenizer("Qwen/Qwen3-4B"), allowed_append_roles=_ALLOWED_APPEND_ROLES)
+    return TITOTokenizer(_get_tokenizer("Qwen/Qwen3-4B"))
 
 
 # ---------------------------------------------------------------------------
@@ -226,10 +233,213 @@ class TestConfig:
         assert default_tito._assistant_start_str is None
         assert default_tito.trailing_token_ids == frozenset()
 
+    @pytest.mark.parametrize(
+        "chat_template_kwargs, expected",
+        [
+            pytest.param({}, True, id="default-thinking"),
+            pytest.param({"enable_thinking": False}, False, id="disable-via-miles-kwarg"),
+            pytest.param({"thinking": False}, False, id="disable-via-sglang-kwarg"),
+            pytest.param(
+                {"enable_thinking": False, "thinking": True},
+                False,
+                id="miles-kwarg-precedes-sglang-kwarg",
+            ),
+            pytest.param(
+                {"thinking_mode": "thinking", "thinking": False},
+                True,
+                id="explicit-mode-precedes-sglang-kwarg",
+            ),
+            pytest.param({"thinking_mode": "chat"}, False, id="explicit-chat-mode"),
+        ],
+    )
+    def test_deepseek_v32_forwards_effective_thinking_mode(self, chat_template_kwargs, expected):
+        tokenizer = MagicMock()
+        tokenizer.convert_tokens_to_ids.side_effect = [1, 2]
+
+        tito = DeepSeekV32TITOTokenizer(tokenizer, chat_template_kwargs=chat_template_kwargs)
+
+        assert tito.chat_template_kwargs["thinking"] is expected
+
+    @pytest.mark.parametrize("tito_cls", [DeepSeekV32TITOTokenizer, DeepSeekV4TITOTokenizer])
+    def test_deepseek_request_thinking_overrides_startup_mode(self, tito_cls):
+        tokenizer = MagicMock()
+        tokenizer.convert_tokens_to_ids.return_value = 1
+        startup_tito = tito_cls(tokenizer, chat_template_kwargs={"enable_thinking": False})
+
+        request_tito = startup_tito.clone_with_chat_template_kwargs({"thinking": True})
+
+        assert request_tito.chat_template_kwargs == {"drop_thinking": False, "thinking": True}
+
     def test_comparator_inherits_trailing_ids(self, qwen3_tito: Qwen3TITOTokenizer):
         """create_comparator propagates trailing_token_ids to the comparator's trim set."""
         comp = qwen3_tito.create_comparator()
         assert comp._trim_trailing_ids == set(qwen3_tito.trailing_token_ids)
+
+
+class TestInklingComparatorBoundaries:
+    @staticmethod
+    def _build_comparator():
+        token_ids = {
+            "<|message_user|>": 200000,
+            "<|message_model|>": 200001,
+            "<|message_system|>": 200002,
+            "<|message_tool|>": 200003,
+        }
+        token_text = {token_id: token for token, token_id in token_ids.items()}
+        tokenizer = MagicMock()
+        tokenizer.convert_tokens_to_ids.side_effect = token_ids.__getitem__
+        tokenizer.encode.side_effect = lambda text, add_special_tokens=False: [ord(char) for char in text]
+        tokenizer.decode.side_effect = lambda ids, skip_special_tokens=False: "".join(
+            token_text.get(token_id, chr(token_id)) for token_id in ids
+        )
+        comparator = InklingTITOTokenizer(tokenizer).create_comparator()
+        return token_ids, tokenizer, comparator
+
+    def test_uses_exact_message_role_boundaries(self):
+        token_ids, _, comparator = self._build_comparator()
+
+        assert comparator._special_ids == set(token_ids.values())
+
+    @pytest.mark.parametrize("appended_role", ["user", "system", "tool"])
+    def test_appended_non_assistant_content_is_not_assistant_text(self, appended_role):
+        token_ids, tokenizer, comparator = self._build_comparator()
+        assistant = [token_ids["<|message_model|>"]] + tokenizer.encode("assistant")
+        role_token = token_ids[f"<|message_{appended_role}|>"]
+        expected = assistant + [role_token] + tokenizer.encode("expected")
+        actual = assistant + [role_token] + tokenizer.encode("changed")
+
+        mismatches = comparator.compare_sequences(expected, actual)
+
+        assert [mismatch.type for mismatch in mismatches] == [MismatchType.NON_ASSISTANT_TEXT]
+
+    def test_assistant_content_remains_soft_mismatch(self):
+        token_ids, tokenizer, comparator = self._build_comparator()
+        assistant_role = [token_ids["<|message_model|>"]]
+        expected = assistant_role + tokenizer.encode("expected")
+        actual = assistant_role + tokenizer.encode("changed")
+
+        mismatches = comparator.compare_sequences(expected, actual)
+
+        assert [mismatch.type for mismatch in mismatches] == [MismatchType.ASSISTANT_TEXT]
+
+
+class TestInklingFixedTemplate:
+    @staticmethod
+    def _render(messages):
+        template = (TEMPLATE_DIR / "inkling_fixed.jinja").read_text()
+        return apply_chat_template_from_str(template, messages, add_generation_prompt=False)
+
+    def test_tool_call_only_turn_skips_empty_text_block(self):
+        messages = [
+            {"role": "user", "content": "weather?"},
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "check",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "get_weather", "arguments": {"location": "Beijing"}},
+                    }
+                ],
+            },
+        ]
+
+        rendered = self._render(messages)
+
+        assert "<|message_model|><|content_text|><|end_message|>" not in rendered
+        assert (
+            "<|message_model|><|content_thinking|>check<|end_message|>"
+            '<|message_model|>get_weather<|content_invoke_tool_json|>{"name":"get_weather",'
+            '"args":{"location":"Beijing"}}<|end_message|><|content_model_end_sampling|>'
+        ) in rendered
+
+    def test_empty_assistant_turn_skips_bare_terminator(self):
+        rendered = self._render(
+            [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": ""},
+            ]
+        )
+
+        assert "<|message_model|>" not in rendered
+        assert "<|content_model_end_sampling|>" not in rendered
+
+    def test_nonempty_reasoning_and_final_text_are_preserved(self):
+        rendered = self._render(
+            [
+                {"role": "user", "content": "hello"},
+                {
+                    "role": "assistant",
+                    "content": "done",
+                    "reasoning_content": "think",
+                },
+            ]
+        )
+
+        assert (
+            "<|message_model|><|content_thinking|>think<|end_message|>"
+            "<|message_model|><|content_text|>done<|end_message|>"
+            "<|content_model_end_sampling|>"
+        ) in rendered
+
+
+class TestDeepSeekV32IncrementalAppend:
+    """V3.2 rides the default synthetic-prefix suffix diff; with the family's
+    pinned ``drop_thinking=False`` the vendored encoder renders every turn
+    position-independently, so the synthetic-prefix incremental must equal the
+    real-history render suffix for both tool and user appends."""
+
+    class _CharTokenizer:
+        def __init__(self, name_or_path: str):
+            self.name_or_path = name_or_path
+
+        def encode(self, text, add_special_tokens=False):
+            assert add_special_tokens is False
+            return [ord(c) for c in text]
+
+        def convert_tokens_to_ids(self, token):
+            return {"<｜User｜>": 1, "<｜Assistant｜>": 2}[token]
+
+    @pytest.mark.parametrize(
+        "appended",
+        [
+            [{"role": "user", "content": "next question"}],
+            [{"role": "tool", "content": "out", "tool_call_id": "c0"}],
+            [{"role": "assistant", "content": "injected"}, {"role": "user", "content": "next"}],
+            [
+                {"role": "assistant", "content": "first injected"},
+                {"role": "assistant", "content": "second injected"},
+                {"role": "user", "content": "next"},
+            ],
+        ],
+        ids=["user", "tool", "assistant_then_user", "consecutive_assistants_then_user"],
+    )
+    def test_incremental_equals_real_history_suffix(self, tmp_path, appended):
+        (tmp_path / "config.json").write_text(json.dumps({"model_type": "deepseek_v32"}), encoding="utf-8")
+        tokenizer = self._CharTokenizer(str(tmp_path))
+        tito = DeepSeekV32TITOTokenizer(
+            tokenizer,
+            chat_template_kwargs={"drop_thinking": False},
+        )
+        old = [
+            {"role": "user", "content": "q"},
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "r",
+                "tool_calls": [{"type": "function", "function": {"name": "f", "arguments": '{"a": 1}'}}],
+            },
+        ]
+        new = old + appended
+
+        incremental = tito.tokenize_additional_messages(old, new)
+
+        text_old = tito.apply_chat_template(old, add_generation_prompt=False)
+        text_new = tito.apply_chat_template(new, add_generation_prompt=True)
+        assert text_new.startswith(text_old)
+        assert incremental == tokenizer.encode(text_new[len(text_old) :])
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +460,7 @@ class TestMergeTokensBoundary:
 
     def test_qwen3_inserts_newline_after_im_end(self, qwen3_tito: Qwen3TITOTokenizer):
         """Model stops at <|im_end|> without trailing \\n; merge_tokens inserts it."""
-        incremental = qwen3_tito.tokenize_additional_non_assistant(_BND_OLD, _BND_NEW, _BND_TOOLS)
+        incremental = qwen3_tito.tokenize_additional_messages(_BND_OLD, _BND_NEW, _BND_TOOLS)
         im_end = qwen3_tito._im_end_id
         nl = qwen3_tito._newline_id
 
@@ -259,7 +469,7 @@ class TestMergeTokensBoundary:
 
     def test_qwen3_no_newline_otherwise(self, qwen3_tito: Qwen3TITOTokenizer):
         """No insertion when prefix does not end with <|im_end|>."""
-        incremental = qwen3_tito.tokenize_additional_non_assistant(_BND_OLD, _BND_NEW, _BND_TOOLS)
+        incremental = qwen3_tito.tokenize_additional_messages(_BND_OLD, _BND_NEW, _BND_TOOLS)
         result = qwen3_tito.merge_tokens(_BND_OLD, _BND_NEW, [100, 200, 300], _BND_TOOLS)
         assert result == [100, 200, 300] + incremental
 
@@ -267,19 +477,19 @@ class TestMergeTokensBoundary:
 
     def test_glm47_strips_observation(self, glm47_tito: GLM47TITOTokenizer):
         """Model emits <|observation|> as stop token; merge_tokens strips the duplicate."""
-        incremental = glm47_tito.tokenize_additional_non_assistant(_BND_OLD, _BND_NEW, _BND_TOOLS)
+        incremental = glm47_tito.tokenize_additional_messages(_BND_OLD, _BND_NEW, _BND_TOOLS)
         result = glm47_tito.merge_tokens(_BND_OLD, _BND_NEW, [100, 200, glm47_tito._observation_id], _BND_TOOLS)
         assert result == [100, 200] + incremental
 
     def test_glm47_strips_user(self, glm47_tito: GLM47TITOTokenizer):
         """<|user|> is also an ambiguous boundary — stripped the same way."""
-        incremental = glm47_tito.tokenize_additional_non_assistant(_BND_OLD, _BND_NEW, _BND_TOOLS)
+        incremental = glm47_tito.tokenize_additional_messages(_BND_OLD, _BND_NEW, _BND_TOOLS)
         result = glm47_tito.merge_tokens(_BND_OLD, _BND_NEW, [100, 200, glm47_tito._user_id], _BND_TOOLS)
         assert result == [100, 200] + incremental
 
     def test_glm47_no_strip_otherwise(self, glm47_tito: GLM47TITOTokenizer):
         """Non-boundary trailing token is preserved."""
-        incremental = glm47_tito.tokenize_additional_non_assistant(_BND_OLD, _BND_NEW, _BND_TOOLS)
+        incremental = glm47_tito.tokenize_additional_messages(_BND_OLD, _BND_NEW, _BND_TOOLS)
         result = glm47_tito.merge_tokens(_BND_OLD, _BND_NEW, [100, 200, 300], _BND_TOOLS)
         assert result == [100, 200, 300] + incremental
 
@@ -287,7 +497,7 @@ class TestMergeTokensBoundary:
 
     def test_default_concatenates(self, default_tito: TITOTokenizer):
         """Base class does plain concatenation without any prefix modification."""
-        incremental = default_tito.tokenize_additional_non_assistant(_BND_OLD, _BND_NEW, _BND_TOOLS)
+        incremental = default_tito.tokenize_additional_messages(_BND_OLD, _BND_NEW, _BND_TOOLS)
         result = default_tito.merge_tokens(_BND_OLD, _BND_NEW, [100, 200, 300], _BND_TOOLS)
         assert result == [100, 200, 300] + incremental
 
@@ -295,7 +505,7 @@ class TestMergeTokensBoundary:
 
     def test_empty_prefix(self, qwen3_tito: Qwen3TITOTokenizer):
         """Empty prefix → no boundary handling, result is just incremental."""
-        incremental = qwen3_tito.tokenize_additional_non_assistant(_BND_OLD, _BND_NEW, _BND_TOOLS)
+        incremental = qwen3_tito.tokenize_additional_messages(_BND_OLD, _BND_NEW, _BND_TOOLS)
         result = qwen3_tito.merge_tokens(_BND_OLD, _BND_NEW, [], _BND_TOOLS)
         assert result == incremental
 
@@ -313,7 +523,7 @@ class TestMergeTokensBoundary:
 
 
 class TestTokenizeAdditional:
-    """tokenize_additional_non_assistant produces valid incremental tokens."""
+    """tokenize_additional_messages produces valid incremental tokens."""
 
     @pytest.mark.parametrize("traj_cls, pos", _TRAJ_CASES)
     def test_produces_nonempty_incremental(self, tito: TITOTokenizer, traj_cls, pos):
@@ -323,7 +533,7 @@ class TestTokenizeAdditional:
         TITO splits against every model tokenizer.
         """
         old_msgs, new_msgs, tools = _split_at(traj_cls, pos)
-        incremental = tito.tokenize_additional_non_assistant(old_msgs, new_msgs, tools)
+        incremental = tito.tokenize_additional_messages(old_msgs, new_msgs, tools)
         assert len(incremental) > 0
 
     def test_complete_appendix_reaches_renderer_and_its_error_propagates(
@@ -346,7 +556,7 @@ class TestTokenizeAdditional:
         monkeypatch.setattr(qwen3_tito, "_tokenize_rendered_suffix", reject_invalid_order)
 
         with pytest.raises(ValueError, match="invalid tool ordering"):
-            qwen3_tito.tokenize_additional_non_assistant(
+            qwen3_tito.tokenize_additional_messages(
                 old_msgs,
                 old_msgs + appended,
                 SingleToolTrajectory.TOOLS,
@@ -368,7 +578,7 @@ class TestTokenizeAdditional:
         ]
         tools = SingleToolThinkingTrajectory.TOOLS
 
-        incremental = qwen3_tito.tokenize_additional_non_assistant(old_msgs, new_msgs, tools)
+        incremental = qwen3_tito.tokenize_additional_messages(old_msgs, new_msgs, tools)
         decoded = qwen3_tito.tokenizer.decode(incremental)
         assert decoded.count(qwen3_tito._assistant_start_str) == 1
         assert decoded.endswith(
@@ -423,20 +633,32 @@ class TestTokenizeAdditional:
         mutated_old = [{"role": "user", "content": "CHANGED"}] + list(old_msgs[1:])
         mutated_new = mutated_old + list(new_msgs[len(old_msgs) :])
         with pytest.raises(ValueError, match="mismatch"):
-            qwen3_tito.tokenize_additional_non_assistant(old_msgs, mutated_new)
+            qwen3_tito.tokenize_additional_messages(old_msgs, mutated_new)
 
     def test_rejects_fewer_messages(self, qwen3_tito: Qwen3TITOTokenizer):
         """new_messages shorter than old_messages raises ValueError."""
         old_msgs = SingleToolTrajectory.MESSAGES[:3]
         with pytest.raises(ValueError, match="fewer"):
-            qwen3_tito.tokenize_additional_non_assistant(old_msgs, old_msgs[:1])
+            qwen3_tito.tokenize_additional_messages(old_msgs, old_msgs[:1])
 
-    def test_rejects_assistant_append(self, qwen3_tito: Qwen3TITOTokenizer):
-        """Appending an assistant message (not tool/system) raises ValueError."""
+    def test_restricted_template_rejects_unsupported_role(self, qwen3_tito: Qwen3TITOTokenizer):
+        """A template with an explicit narrow capability rejects other roles."""
+
+        class _ToolOnlyQwen3TITOTokenizer(Qwen3TITOTokenizer):
+            FIXED_TEMPLATE = FixedTemplate(
+                template=Qwen3TITOTokenizer.FIXED_TEMPLATE.template,
+                extra_kwargs=dict(Qwen3TITOTokenizer.FIXED_TEMPLATE.extra_kwargs),
+                allowed_append_roles=frozenset({"tool"}),
+            )
+
+        restricted = _ToolOnlyQwen3TITOTokenizer(
+            qwen3_tito.tokenizer,
+            chat_template_kwargs={"clear_thinking": False},
+        )
         old_msgs = SingleToolTrajectory.MESSAGES[:3]
         bad_new = list(old_msgs) + [{"role": "assistant", "content": "hi"}]
         with pytest.raises(ValueError, match="role"):
-            qwen3_tito.tokenize_additional_non_assistant(old_msgs, bad_new)
+            restricted.tokenize_additional_messages(old_msgs, bad_new)
 
 
 # ---------------------------------------------------------------------------
@@ -465,6 +687,7 @@ class TestFactory:
         """Enum values work the same as string values."""
         tito = get_tito_tokenizer(_get_tokenizer("Qwen/Qwen3-4B"), tokenizer_type=TITOTokenizerType.QWEN3)
         assert isinstance(tito, Qwen3TITOTokenizer)
+        assert tito.allowed_append_roles == ALL_APPEND_ROLES
 
     @pytest.mark.parametrize(
         "type_str, cls",
@@ -472,8 +695,8 @@ class TestFactory:
     )
     def test_qwen_variant_inherits_qwen3_boundary_logic(self, type_str, cls):
         """Qwen3.5 / Qwen3-Next reuse Qwen3's boundary handling via inheritance.
-        The named subclass exists so fixed_templates can key on (tito_model,
-        surface) — but token-level merge behavior is identical to Qwen3."""
+        The named subclass owns its FixedTemplate contract, while token-level
+        merge behavior remains identical to Qwen3."""
         tito = get_tito_tokenizer(_get_tokenizer("Qwen/Qwen3-4B"), tokenizer_type=type_str)
         assert isinstance(tito, cls)
         assert isinstance(tito, Qwen3TITOTokenizer)
@@ -509,6 +732,7 @@ class TestParserBinding:
             (TITOTokenizerType.MINIMAX_M27, "minimax-append-think", "minimax-m2"),
             (TITOTokenizerType.DEEPSEEKV32, "deepseek-v3", "deepseekv32"),
             (TITOTokenizerType.DEEPSEEKV4, "deepseek-v4", "deepseekv4"),
+            (TITOTokenizerType.INKLING, "inkling", "inkling"),
             (TITOTokenizerType.DEFAULT, None, None),
         ],
     )
