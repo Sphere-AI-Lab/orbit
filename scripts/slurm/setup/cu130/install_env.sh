@@ -222,7 +222,8 @@ install_optional() {
 
 echo "[5/10] install prebuilt Miles Hopper wheels"
 uv_install --force-reinstall --no-deps "$(pick_one "$WHEEL_DIR/flash_attn-*cp312*linux_x86_64.whl")"
-uv_install --force-reinstall --no-deps "$(pick_one "$WHEEL_DIR/flash_attn_3-*cp312*linux_x86_64.whl")"
+flash_attn_3_wheel=$(pick_one "$WHEEL_DIR/flash_attn_3-*-abi3-linux_x86_64.whl")
+uv_install --force-reinstall --no-deps "$flash_attn_3_wheel"
 uv_install --force-reinstall --no-deps \
     "$(pick_one "$WHEEL_DIR/transformer_engine-$TRANSFORMER_ENGINE_VERSION-py3-none-any.whl")" \
     "$(pick_one "$WHEEL_DIR/transformer_engine_cu13-$TRANSFORMER_ENGINE_VERSION-py3-none-manylinux_2_28_*.whl")" \
