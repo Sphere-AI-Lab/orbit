@@ -52,11 +52,11 @@ todo=${count}
 if [[ "${peft}" == "none" && "${FULLFT_ALREADY_DONE:-0}" == "1" ]]; then
     todo=0
 fi
-printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "${MATRIX:-}" "${METHOD_RE:-}" "${RESULTS:-}" "${EXPECT_ARMS:-}" \
     "${LORA_REGRET_LOG_DIR:-}" "${WANDB_DIR:-}" \
     "${LORA_REGRET_CKPT_DIR:-}" "${VIRTUAL_ENV:-}" "${ALLOW_OFT:-}" \
-    "${PREFLIGHT_STAGE:-}" >> "${CAPTURE_FILE}"
+    "${PREFLIGHT_STAGE:-}" "${NUM_ROLLOUT:-}" >> "${CAPTURE_FILE}"
 for ((i = 0; i < todo; i++)); do
     printf 'ARM=arm%s PEFT_METHOD=%s\n' "${i}" "${peft}"
 done
@@ -136,6 +136,12 @@ def test_env2_wrappers_run_the_shifted_lora_grid_in_clean_output_roots(tmp_path)
     assert {row[5] for row in rows} == {str(run_root / "wandb")}
     assert {row[6] for row in rows} == {str(run_root / "orbit_ckpts" / "lora_regret")}
     assert {row[7] for row in rows} == {str(env_root)}
+    math_rows = [row for row in rows if "_math_" in Path(row[2]).name]
+    gsm8k_rows = [row for row in rows if "_gsm8k_" in Path(row[2]).name]
+    assert len(math_rows) == 14
+    assert len(gsm8k_rows) == 14
+    assert all(row[10] == "150" for row in math_rows)
+    assert all(row[10] == "200" for row in gsm8k_rows)
 
     for dataset in DATASETS:
         for column, (fullft_lr, lora_lr) in enumerate(zip(FULLFT_LRS, LORA_LRS), start=1):
@@ -235,6 +241,12 @@ def test_env2_oft_wrappers_center_lr4_on_the_historical_math_optimum(tmp_path):
     assert {row[7] for row in rows} == {str(env_root)}
     assert {row[8] for row in rows} == {"1"}
     assert {row[9] for row in rows} == {"e4oftenv2"}
+    math_rows = [row for row in rows if "_math_" in Path(row[2]).name]
+    gsm8k_rows = [row for row in rows if "_gsm8k_" in Path(row[2]).name]
+    assert len(math_rows) == 7
+    assert len(gsm8k_rows) == 7
+    assert all(row[10] == "150" for row in math_rows)
+    assert all(row[10] == "200" for row in gsm8k_rows)
 
     for dataset in DATASETS:
         for column, expected_lr in enumerate(OFT_LRS, start=1):
@@ -252,20 +264,6 @@ def test_env2_oft_wrappers_center_lr4_on_the_historical_math_optimum(tmp_path):
             assert arm.lr == expected_lr
 
     assert OFT_LRS[3] == 7e-6
-
-
-def test_env2_oft_probe_cost_matches_the_shell_protocol():
-    import tools.lora_regret.arms as arms
-
-    expected_rollouts = getattr(arms, "E4_ENV2_OFT_ROLLOUTS", None)
-    assert expected_rollouts == 150
-
-    protocol = (REPO_ROOT / "scripts/lora_regret/e4_protocol.sh").read_text(
-        encoding="utf-8"
-    )
-    match = re.search(r'^: "\$\{NUM_ROLLOUT=([0-9]+)\}"$', protocol, re.MULTILINE)
-    assert match
-    assert int(match.group(1)) == expected_rollouts
 
 
 def test_env2_oft_aggregate_wrappers_visit_each_column_once(tmp_path):

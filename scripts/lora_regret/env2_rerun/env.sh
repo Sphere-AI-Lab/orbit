@@ -42,3 +42,15 @@ export WANDB_AUTOSYNC=0
 export CUDA_HOME="${CUDA_HOME:-/is/software/nvidia/cuda-13.2}"
 export PYTHONPATH="${ORBIT_ICLR_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 export RL_EXTRA_ARGS="${RL_EXTRA_ARGS:---disable-grpo-std-normalization} --sglang-cuda-graph-backend-prefill disabled"
+
+# The clean rerun intentionally gives GSM8K the longer horizon while keeping
+# Math comparable with the already-running 150-rollout panel. Pin both values
+# here so an exported shell value cannot make methods or columns drift.
+set_env2_rollout_budget() {
+    case "$1" in
+        math) NUM_ROLLOUT=150 ;;
+        gsm8k) NUM_ROLLOUT=200 ;;
+        *) echo "unsupported env2 rollout dataset: $1" >&2; return 2 ;;
+    esac
+    export NUM_ROLLOUT
+}

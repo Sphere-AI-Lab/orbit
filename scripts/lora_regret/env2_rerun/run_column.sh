@@ -23,6 +23,7 @@ fi
 
 # shellcheck disable=SC1091
 source "${HERE}/env.sh"
+set_env2_rollout_budget "${dataset}"
 
 FULLFT_LR=(unused 5e-08 1e-07 3e-07 7e-07 2e-06 4e-06 1e-05)
 FULLFT_LR_RE=(unused '5e\-08' '1e\-07' '3e\-07' '7e\-07' '2e\-06' '4e\-06' '1e\-05')
@@ -34,8 +35,8 @@ results="${E4_ENV2_RESULTS_DIR}/e4_${dataset}_lr${column}.jsonl"
 campaign="${ORBIT_ICLR_ROOT}/scripts/lora_regret/campaign.sh"
 
 printf '\n=== env2 rerun: %s lr%s ===\n' "${dataset}" "${column}"
-printf 'FullFT lr=%s; LoRA r1/r16/r256 lr=%s\n' \
-    "${FULLFT_LR[${column}]}" "${LORA_LR[${column}]}"
+printf 'FullFT lr=%s; LoRA r1/r16/r256 lr=%s; rollouts=%s\n' \
+    "${FULLFT_LR[${column}]}" "${LORA_LR[${column}]}" "${NUM_ROLLOUT}"
 printf 'results=%s\nlogs=%s\nwandb=%s\ncheckpoints=%s\n' \
     "${results}" "${LORA_REGRET_LOG_DIR}" "${WANDB_DIR}" "${LORA_REGRET_CKPT_DIR}"
 

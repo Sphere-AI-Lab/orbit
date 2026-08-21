@@ -23,6 +23,7 @@ fi
 
 # shellcheck disable=SC1091
 source "${HERE}/env.sh"
+set_env2_rollout_budget "${dataset}"
 
 OFT_LR=(unused 5e-07 1e-06 3e-06 7e-06 2e-05 4e-05 0.0001)
 OFT_LR_RE=(unused '5e\-07' '1e\-06' '3e\-06' '7e\-06' '2e\-05' '4e\-05' '0\.0001')
@@ -31,7 +32,8 @@ results="${E4_ENV2_RESULTS_DIR}/e4_${dataset}_oft_lr${column}.jsonl"
 campaign="${ORBIT_ICLR_ROOT}/scripts/lora_regret/campaign.sh"
 
 printf '\n=== env2 OFT rerun: %s lr%s ===\n' "${dataset}" "${column}"
-printf 'OFT block=128 modules=all lr=%s\n' "${OFT_LR[${column}]}"
+printf 'OFT block=128 modules=all lr=%s rollouts=%s\n' \
+    "${OFT_LR[${column}]}" "${NUM_ROLLOUT}"
 printf 'results=%s\nlogs=%s\nwandb=%s\ncheckpoints=%s\n' \
     "${results}" "${LORA_REGRET_LOG_DIR}" "${WANDB_DIR}" "${LORA_REGRET_CKPT_DIR}"
 
