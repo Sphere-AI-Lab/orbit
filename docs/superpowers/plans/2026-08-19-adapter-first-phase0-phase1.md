@@ -782,7 +782,7 @@ git commit -m "feat(examples): 3B OPD teacher-cost recipe suite (R-2)"
 
 ### Task 8: Phase-0 GPU smoke wave — **USER-RUN**, then executor triage
 
-Everything below runs on the user's B200s. Present the block, stop, wait for logs. All commands assume `cd /lustre/fast/fast/zqiu/clthegoat-orbit/orbit && source ../uv_env_build/activate.sh` first, plus the harness env exports from Task 1 Step 5.
+Everything below runs on the user's B200s. Present the block, stop, wait for logs. All commands assume `cd /lustre/fast/fast/zqiu/clthegoat-orbit/orbit && source ../uv_env_build/activate.sh && export ORBIT_PEFT_ADAPTER_TRANSPORT=cpu_gather` first (activate.sh does not set the cluster's PEFT transport; CUDA IPC is denied here — design doc constraint 10), plus the harness env exports from Task 1 Step 5. The 0.5B slice of this wave was run and qualified on 2026-08-21 (`docs/reports/_src/2026-08-21-phase0-qualification.md`); the 8-GPU pieces remain.
 
 - [ ] **Step 1: Present the smoke commands to the user (do not run):**
 
@@ -792,9 +792,12 @@ Everything below runs on the user's B200s. Present the block, stop, wait for log
 # arms. The four-arm qualification is the q25 profile on the OFT case:
 codexlog phase0-pilot python tools/adapter_runtime_compare/run_compare.py run \
   --branches runtime --profile pilot --num-rollout 4 --no-eval
+# OFT has no single-slot NCCL arm (design doc constraint 8); the single-slot async arm is LoRA.
 codexlog phase0-q25-arms python tools/adapter_runtime_compare/run_compare.py run \
-  --branches runtime --profile q25 --pefts oft --modes sync,async,async_db,async_fullft \
+  --branches runtime --profile q25 --pefts oft --modes sync,async_db,async_fullft \
   --num-rollout 4 --no-eval
+codexlog phase0-q25-lora python tools/adapter_runtime_compare/run_compare.py run \
+  --branches runtime --profile q25 --pefts lora --modes async --num-rollout 4 --no-eval
 
 # (b) 4B family, all four arms, bench batch profile
 codexlog phase0-q3-4b python tools/adapter_runtime_compare/run_compare.py run \
