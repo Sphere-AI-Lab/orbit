@@ -59,6 +59,13 @@ source "${_LIB_DIR}/wandb.sh"
 source "${_LIB_DIR}/ray.sh"
 source "${_LIB_DIR}/driver.sh"
 
+# Generic opt-in for the double-buffered adapter hot swap (the harness's
+# async_db arm, A3's ADAPTER_DOUBLE_BUFFER=1). store_true flag, so recipes that
+# already pass --adapter-double-buffer are unaffected.
+if is_true "${ADAPTER_DOUBLE_BUFFER:-0}"; then
+    ORBIT_EXTRA_TRAIN_ARGS+=( --adapter-double-buffer )
+fi
+
 # === Logging ===
 mkdir -p "$(dirname "${RUN_LOG}")"
 export ORBIT_RAY_LOG_TO_DRIVER=${ORBIT_RAY_LOG_TO_DRIVER:-1}

@@ -220,3 +220,18 @@ def test_a1_rungs_have_fullft_arms():
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_rollout_gpus_per_engine_defaults_to_rollout_gpus_async():
+    case = qwen3_4b_bf16_oft_case()
+    env = run_compare.job_env(make_job(case, "async"))
+    assert env["ROLLOUT_NUM_GPUS_PER_ENGINE"] == str(case.rollout_gpus_async)
+
+
+def test_rollout_gpus_per_engine_override_is_honored():
+    import dataclasses
+
+    case = dataclasses.replace(qwen3_4b_bf16_oft_case(), rollout_gpus_per_engine=1)
+    env = run_compare.job_env(make_job(case, "async"))
+    assert env["ROLLOUT_NUM_GPUS_PER_ENGINE"] == "1"
+    assert env["ROLLOUT_NUM_GPUS"] == str(case.rollout_gpus_async)

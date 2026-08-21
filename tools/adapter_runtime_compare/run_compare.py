@@ -75,6 +75,11 @@ class Case:
     gpu_total: int
     train_gpus_async: int
     rollout_gpus_async: int
+    # Per-engine TP for the async arms. None -> rollout_gpus_async (one engine
+    # spanning all rollout GPUs). Small dense models must pin 1: OFT requires
+    # every TP-sharded input dim to stay divisible by the block size
+    # (Qwen2.5-0.5B hidden 896 / TP2 = 448, not a multiple of 128).
+    rollout_gpus_per_engine: int | None = None
     target_modules: str | None = None
     lora_backend: str | None = None
     fullft_script: str | None = None
@@ -520,7 +525,11 @@ def apply_mode_env(env: dict[str, str], job: Job) -> None:
         env["ORBIT_COLOCATE"] = "0"
         env["GPUS_PER_NODE"] = str(job.case.train_gpus_async)
         env["ROLLOUT_NUM_GPUS"] = str(job.case.rollout_gpus_async)
-        env["ROLLOUT_NUM_GPUS_PER_ENGINE"] = str(job.case.rollout_gpus_async)
+        env["ROLLOUT_NUM_GPUS_PER_ENGINE"] = str(
+            job.case.rollout_gpus_per_engine
+            if job.case.rollout_gpus_per_engine is not None
+            else job.case.rollout_gpus_async
+        )
     env.update(arm.env)
     if arm.env.get("PEFT_METHOD") == "none":
         for key in PEFT_ONLY_ENV_KEYS:

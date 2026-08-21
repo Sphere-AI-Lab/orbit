@@ -121,3 +121,48 @@ def test_fullft_4b_default_behavior_preserved(tmp_path):
     lines = _argv_lines(proc.stdout)
     assert "--colocate" not in lines
     assert _adjacent_pair_present(lines, "--rollout-num-gpus", FULLFT_4B_ROLLOUT_NUM_GPUS)
+
+
+# ---------------------------------------------------------------------------
+# Other harness-driven env knobs that launchers must honor
+# ---------------------------------------------------------------------------
+
+OFT_LAUNCHERS = [
+    "examples/high_precision/run-qwen2_5-0_5b-bf16-math-oft.sh",
+    "examples/high_precision/run-qwen2_5-3b-bf16-math-oft.sh",
+    "examples/high_precision/run-qwen3-4b-instruct-2507-bf16-math-oft.sh",
+]
+
+
+def test_adapter_double_buffer_env_adds_flag(tmp_path):
+    env = _base_env(tmp_path)
+    env["ADAPTER_DOUBLE_BUFFER"] = "1"
+    proc = _run(OFT_05B_LAUNCHER, env)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert "--adapter-double-buffer" in _argv_lines(proc.stdout)
+
+
+def test_adapter_double_buffer_unset_adds_nothing(tmp_path):
+    env = _base_env(tmp_path)
+    env.pop("ADAPTER_DOUBLE_BUFFER", None)
+    proc = _run(OFT_05B_LAUNCHER, env)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert "--adapter-double-buffer" not in _argv_lines(proc.stdout)
+
+
+@pytest.mark.parametrize("launcher", OFT_LAUNCHERS)
+def test_oft_block_size_env_overrides_default(tmp_path, launcher):
+    env = _base_env(tmp_path)
+    env["OFT_BLOCK_SIZE"] = "64"
+    proc = _run(launcher, env)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert _adjacent_pair_present(_argv_lines(proc.stdout), "--oft-block-size", "64")
+
+
+@pytest.mark.parametrize("launcher", OFT_LAUNCHERS)
+def test_oft_block_size_default_is_128(tmp_path, launcher):
+    env = _base_env(tmp_path)
+    env.pop("OFT_BLOCK_SIZE", None)
+    proc = _run(launcher, env)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert _adjacent_pair_present(_argv_lines(proc.stdout), "--oft-block-size", "128")
