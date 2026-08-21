@@ -2,8 +2,10 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+from examples.geo3k_vlm.multi_turn import rollout as geo3k_rollout
 from examples.model_response_trace_viewer import response_trace as model_response_trace
-from examples.model_response_trace_viewer.response_log import model_response_row
+from examples.model_response_trace_viewer.response_log import RESPONSE_TURNS_KEY, model_response_row
 from examples.model_response_trace_viewer.response_trace import (
     model_response_trace_record,
     save_model_response_trace,
@@ -248,6 +250,15 @@ def test_save_model_response_trace_exports_every_sample_when_cap_exceeds_batch(t
     assert indices == list(range(10))
 
 
+def test_save_model_response_trace_fails_closed_without_a_cap(tmp_path, caplog):
+    trace_dir = tmp_path / "traces"
+
+    save_model_response_trace(_trace_args(trace_dir, cap=None), [make_sample()], rollout_id=12)
+
+    assert not trace_dir.exists()
+    assert "Failed to save model response trace" in caplog.text
+
+
 def test_save_model_response_trace_writes_metadata_free_rgba_png(tmp_path):
     source = Image.new("RGB", (2, 1), (10, 20, 30))
     source.info["secret"] = "do-not-copy"
@@ -398,3 +409,129 @@ def test_retry_trace_contains_prompt_and_fresh_images_but_not_stale_image(tmp_pa
     with Image.open(rollout / "turn1_obs.png") as second:
         assert second.getpixel((0, 0)) == (0, 0, 255, 255)
     assert not (rollout / "turn2_obs.png").exists()
+
+
+@pytest.mark.asyncio
+async def test_geo3k_abort_reset_retry_trace_uses_only_pristine_and_retry_state(tmp_path, monkeypatch):
+    prompt_image = Image.new("RGB", (1, 1), "red")
+    stale_image = Image.new("RGB", (1, 1), "green")
+    fresh_image = Image.new("RGB", (1, 1), "blue")
+
+    class FakeTokenizer:
+        bos_token_id = None
+
+        def encode(self, _text, *, add_special_tokens):
+            assert add_special_tokens is False
+            return [7, 8, 9]
+
+        def decode(self, token_ids, *, skip_special_tokens):
+            assert skip_special_tokens is False
+            return "decoded:" + ",".join(str(token_id) for token_id in token_ids)
+
+    class FakeEnv:
+        def reset(self):
+            return None
+
+        def close(self):
+            return None
+
+    state = SimpleNamespace(tokenizer=FakeTokenizer(), processor=None)
+    inference_steps = iter(
+        [
+            ("stale first", [11], [-0.1], "stop", "stale-v1"),
+            ("stale aborted", [12], [-0.2], "abort", "stale-v2"),
+            ("retry first", [21], [-0.3], "stop", "retry-v1"),
+            ("retry final", [22], [-0.4], "stop", "retry-v2"),
+        ]
+    )
+    environment_steps = iter(
+        [
+            (
+                [31],
+                [31],
+                [stale_image],
+                {"images": [stale_image]},
+                None,
+                {"role": "environment", "content": "stale observation"},
+                False,
+            ),
+            (
+                [41],
+                [41],
+                [fresh_image],
+                {"images": [fresh_image]},
+                None,
+                {"role": "environment", "content": "fresh observation"},
+                False,
+            ),
+            (None, None, None, None, None, None, True),
+        ]
+    )
+
+    monkeypatch.setattr(
+        geo3k_rollout,
+        "_initialize_resources",
+        lambda _args, _sample: (FakeEnv(), None, {"max_turns": 3}, state, "http://rollout/generate"),
+    )
+    monkeypatch.setattr(geo3k_rollout, "encode_image_for_rollout_engine", lambda image: image)
+
+    async def fake_run_inference_step(_url, tokens, *_args, **_kwargs):
+        response, token_ids, log_probs, finish_reason, weight_version = next(inference_steps)
+        return (
+            response,
+            token_ids,
+            log_probs,
+            finish_reason,
+            {
+                "prompt_tokens": len(tokens),
+                "weight_version": weight_version,
+            },
+        )
+
+    monkeypatch.setattr(geo3k_rollout, "_run_inference_step", fake_run_inference_step)
+    monkeypatch.setattr(
+        geo3k_rollout,
+        "_process_env_step",
+        lambda *_args, **_kwargs: next(environment_steps),
+    )
+
+    trace_dir = tmp_path / "traces"
+    args = SimpleNamespace(
+        partial_rollout=False,
+        rollout_max_context_len=None,
+        save_model_response_log=None,
+        save_model_response_trace_dir=str(trace_dir),
+    )
+    sample = Sample(
+        prompt="rendered Geo3K prompt",
+        multimodal_inputs={"images": [prompt_image]},
+        metadata=None,
+    )
+
+    first_attempt = await geo3k_rollout.generate(args, sample, {"max_new_tokens": 20})
+    assert first_attempt.status is Sample.Status.ABORTED
+    assert first_attempt.multimodal_inputs["images"] == [prompt_image, stale_image]
+    assert "stale aborted" in json.dumps(first_attempt.metadata[RESPONSE_TURNS_KEY])
+
+    sample.reset_for_retry()
+    retry = await geo3k_rollout.generate(args, sample, {"max_new_tokens": 20})
+    assert retry.status is Sample.Status.COMPLETED
+    assert retry.multimodal_inputs["images"] == [prompt_image, fresh_image]
+
+    save_model_response_trace(_trace_args(trace_dir), [retry], rollout_id=0)
+
+    rollout = trace_dir / "train" / "step0000" / "prompt00000_rollout00"
+    with Image.open(rollout / "turn0_obs.png") as first:
+        assert first.getpixel((0, 0)) == (255, 0, 0, 255)
+    with Image.open(rollout / "turn1_obs.png") as second:
+        assert second.getpixel((0, 0)) == (0, 0, 255, 255)
+    assert not (rollout / "turn2_obs.png").exists()
+
+    record = json.loads((rollout / "record.json").read_text(encoding="utf-8"))
+    serialized = json.dumps(record)
+    assert "retry first" in serialized
+    assert "fresh observation" in serialized
+    assert "retry final" in serialized
+    assert "stale first" not in serialized
+    assert "stale observation" not in serialized
+    assert "stale aborted" not in serialized

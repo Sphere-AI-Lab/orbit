@@ -58,6 +58,22 @@ def test_hook_writes_trace_steps_through_the_public_dispatch(tmp_path):
     assert indices == [0, 1]
 
 
+def test_hook_fails_closed_without_a_trace_cap_and_keeps_default_logging(tmp_path, caplog):
+    trace_dir = tmp_path / "traces"
+
+    ran = _run(
+        _args(
+            save_model_response_trace_dir=str(trace_dir),
+            model_response_trace_max_samples_per_step=None,
+        ),
+        [make_sample()],
+    )
+
+    assert ran
+    assert not trace_dir.exists()
+    assert "Failed to save model response trace" in caplog.text
+
+
 def test_hook_writes_the_compact_log_through_the_public_dispatch(tmp_path):
     template = str(tmp_path / "{rollout_id}.jsonl")
 
