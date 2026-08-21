@@ -177,7 +177,7 @@ All of I-0 through I-5 landed on `orbit-main` on 2026-08-17 (five `instr/*` bran
 
 ## Phasing
 
-- **Phase 0** — I-0 through I-5 (code work DONE 2026-08-17); remaining: smoke-qualify every launcher named above at 0.5B scale (GPU runs).
+- **Phase 0** — I-0 through I-5 (code work DONE 2026-08-17). 0.5B qualification DONE 2026-08-21 on 4×B200 — ledger, eleven defects and their fixes in `docs/reports/_src/2026-08-21-phase0-qualification.md` (constraints 8–10 came out of it). Remaining: the 8-GPU pieces (4B fully-async, harness `q3_4b`/`q3_30b`) once the 4B/30B torch_dist paths are known.
 - **Phase 1** — A1, A2, M1 (cheap, headline systems figures; no long training).
 - **Phase 2** — A3, A4; P2 pre-check then P2; P3 seed extension.
 - **Phase 3** — X1, M2, M3.
