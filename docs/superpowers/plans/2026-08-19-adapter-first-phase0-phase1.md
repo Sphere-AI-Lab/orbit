@@ -815,7 +815,8 @@ export HF_CKPT=/lustre/fast/fast/zqiu/orbit_env_build/models/Qwen2.5-0.5B-Instru
 codexlog phase0-opd-free    bash examples/on_policy_distillation/run-qwen2_5-0_5b-opd-free-teacher-smoke.sh
 codexlog phase0-opd-ema     bash examples/on_policy_distillation/run-qwen2_5-0_5b-opd-ema-smoke.sh
 codexlog phase0-opd-mopd    env OPD_TEACHER_LOAD=${MEGATRON_LOAD} bash examples/on_policy_distillation/run-qwen2_5-0_5b-opd-mopd-smoke.sh
-codexlog phase0-opd-served  bash examples/on_policy_distillation/run-qwen2_5-0_5b-opd-full-vocab-smoke.sh
+codexlog phase0-opd-served  env OPD_SERVE_TEACHER=1 OPD_TEACHER_HF_CKPT=${HF_CKPT} ROLLOUT_NUM_GPUS=1 \
+  bash examples/on_policy_distillation/run-qwen2_5-0_5b-opd-full-vocab-smoke.sh   # self-served teacher; 2+1+1 = 4 GPUs
 # adapter-swap needs a MATCHING LoRA rank-16 all-linear adapter (the smoke's student config) —
 # run phase0-opd-free FIRST and use its saved actor adapter; harness-pilot adapters are rank-32 and fail shape checks
 codexlog phase0-opd-adapter env OPD_TEACHER_ADAPTER=<phase0-opd-free SAVE_DIR>/actor \
