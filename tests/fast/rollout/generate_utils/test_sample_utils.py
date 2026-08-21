@@ -43,6 +43,32 @@ def make_sample(
 
 
 class TestMergeSamples:
+    def test_merge_sample_pair_explicitly_drops_retry_multimodal_snapshot(
+        self,
+        mock_tokenizer,
+    ):
+        first = make_sample(
+            tokens=[1, 2, 3, 10, 11, 12],
+            response="response1",
+            response_length=3,
+            loss_mask=[1, 1, 1],
+            rollout_log_probs=[-0.1, -0.2, -0.3],
+        )
+        second = make_sample(
+            tokens=[1, 2, 3, 10, 11, 12, 20, 21, 30, 31, 32],
+            response="response2",
+            response_length=3,
+            loss_mask=[1, 1, 1],
+            rollout_log_probs=[-0.4, -0.5, -0.6],
+            status=Sample.Status.TRUNCATED,
+        )
+        first.capture_multimodal_inputs_for_retry()
+        second.capture_multimodal_inputs_for_retry()
+
+        merged = _merge_sample_pair(first, second, mock_tokenizer)
+
+        assert merged.retry_multimodal_inputs_snapshot is None
+
     def test_basic_merge(self, mock_tokenizer):
         a = make_sample(
             tokens=[1, 2, 3, 10, 11, 12],

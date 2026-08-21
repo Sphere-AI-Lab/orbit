@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import numpy
 import pytest
 import torch
+from PIL import Image
 
 from miles.utils.types import Sample
 
@@ -36,6 +37,36 @@ def _make_sample(
         # shape: (num_tokens - 1, ...)
         s.rollout_indexer_topk = numpy.zeros((len(tokens) - 1, 2, 3), dtype=numpy.int32)
     return s
+
+
+def test_reset_for_retry_restores_captured_multimodal_containers_repeatedly():
+    prompt_image = Image.new("RGB", (1, 1), "red")
+    stale_image = Image.new("RGB", (1, 1), "green")
+    sample = Sample(multimodal_inputs={"images": [prompt_image], "tag": "prompt"})
+
+    sample.capture_multimodal_inputs_for_retry()
+    sample.multimodal_inputs["images"].append(stale_image)
+    sample.reset_for_retry()
+    first_restored_list = sample.multimodal_inputs["images"]
+    assert first_restored_list == [prompt_image]
+    assert first_restored_list[0] is prompt_image
+
+    first_restored_list.append(stale_image)
+    sample.reset_for_retry()
+    assert sample.multimodal_inputs["images"] == [prompt_image]
+    assert sample.multimodal_inputs["images"] is not first_restored_list
+    assert sample.multimodal_inputs["tag"] == "prompt"
+
+
+def test_retry_snapshot_is_not_serialized():
+    sample = Sample(multimodal_inputs={"images": []})
+    sample.capture_multimodal_inputs_for_retry()
+
+    payload = sample.to_dict()
+    restored = Sample.from_dict(payload)
+
+    assert "retry_multimodal_inputs_snapshot" not in payload
+    assert restored.retry_multimodal_inputs_snapshot is None
 
 
 @pytest.fixture
