@@ -29,7 +29,9 @@ SAVE_DIR="${ORBIT_ROOT}/orbit_ckpts/Qwen3-4B-Instruct-2507-BF16_math_fullft_asyn
 TEST_JSONL=${TEST_JSONL:-}
 
 # === Resources: 4 actor GPUs + 4 disjoint rollout GPUs ===
-GPUS_PER_NODE=4
+GPUS_PER_NODE="${GPUS_PER_NODE:-4}"
+ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-4}"
+ROLLOUT_NUM_GPUS_PER_ENGINE="${ROLLOUT_NUM_GPUS_PER_ENGINE:-4}"
 RAY_NUM_CPUS=64
 
 # === Model args ===
@@ -46,6 +48,9 @@ NUM_ROLLOUT=${NUM_ROLLOUT:-$(( (TRAIN_ROWS * TOTAL_EPOCHS + ROLLOUT_BATCH_SIZE -
 
 # === ARGS arrays ===
 COLOCATE_ARGS=( )
+if is_true "${ORBIT_COLOCATE:-0}"; then
+    COLOCATE_ARGS=( --colocate )
+fi
 
 CKPT_ARGS=(
     --hf-checkpoint "${HF_CKPT}"
@@ -126,9 +131,9 @@ EVAL_ARGS=(
 )
 
 SGLANG_ARGS=(
-    --rollout-num-gpus-per-engine 4
+    --rollout-num-gpus-per-engine "${ROLLOUT_NUM_GPUS_PER_ENGINE}"
     --sglang-mem-fraction-static 0.60
-    --rollout-num-gpus 4
+    --rollout-num-gpus "${ROLLOUT_NUM_GPUS}"
     --sglang-max-running-requests 1024
     --sglang-chunked-prefill-size 4096
     --sglang-attention-backend flashinfer

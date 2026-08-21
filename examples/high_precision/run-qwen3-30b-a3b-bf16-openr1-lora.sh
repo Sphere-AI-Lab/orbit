@@ -27,7 +27,9 @@ EVAL_DATA_DIR=${EVAL_DATA_DIR:-}
 EVAL_ORBIT_DIR=${EVAL_ORBIT_DIR:-${EVAL_DATA_DIR}}
 
 # === Resources ===
-GPUS_PER_NODE=8
+GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
+ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-0}"
+ROLLOUT_NUM_GPUS_PER_ENGINE="${ROLLOUT_NUM_GPUS_PER_ENGINE:-4}"
 RAY_NUM_CPUS=64
 
 # === Model args ===
@@ -42,7 +44,10 @@ N_SAMPLES_PER_PROMPT=8
 GLOBAL_BATCH_SIZE=128
 
 # === ARGS arrays ===
-COLOCATE_ARGS=( --colocate )
+COLOCATE_ARGS=( )
+if is_true "${ORBIT_COLOCATE:-1}"; then
+    COLOCATE_ARGS=( --colocate )
+fi
 
 CKPT_ARGS=(
     --hf-checkpoint "${HF_CKPT}"
@@ -130,9 +135,9 @@ EVAL_ARGS=(
 )
 
 SGLANG_ARGS=(
-    --rollout-num-gpus-per-engine 4
+    --rollout-num-gpus-per-engine "${ROLLOUT_NUM_GPUS_PER_ENGINE}"
     --sglang-mem-fraction-static 0.75
-    --rollout-num-gpus 0
+    --rollout-num-gpus "${ROLLOUT_NUM_GPUS}"
     --sglang-max-running-requests 128
     --sglang-max-total-tokens 262144
     --sglang-attention-backend trtllm_mha

@@ -28,7 +28,9 @@ SAVE_DIR="${ORBIT_ROOT}/orbit_ckpts/Qwen2.5-3B-Instruct_math_fullft_async"
 TEST_JSONL=${TEST_JSONL:-}
 
 # === Resources: 2 actor GPUs + 2 disjoint rollout GPUs ===
-GPUS_PER_NODE=2
+GPUS_PER_NODE="${GPUS_PER_NODE:-2}"
+ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-2}"
+ROLLOUT_NUM_GPUS_PER_ENGINE="${ROLLOUT_NUM_GPUS_PER_ENGINE:-2}"
 RAY_NUM_CPUS=64
 
 # === Model args ===
@@ -44,6 +46,9 @@ NUM_ROLLOUT=${NUM_ROLLOUT:-$(( (TRAIN_ROWS * TOTAL_EPOCHS + ROLLOUT_BATCH_SIZE -
 
 # === ARGS arrays ===
 COLOCATE_ARGS=( )
+if is_true "${ORBIT_COLOCATE:-0}"; then
+    COLOCATE_ARGS=( --colocate )
+fi
 
 CKPT_ARGS=(
     --hf-checkpoint "${HF_CKPT}"
@@ -123,9 +128,9 @@ EVAL_ARGS=(
 )
 
 SGLANG_ARGS=(
-    --rollout-num-gpus-per-engine 2
+    --rollout-num-gpus-per-engine "${ROLLOUT_NUM_GPUS_PER_ENGINE}"
     --sglang-mem-fraction-static 0.60
-    --rollout-num-gpus 2
+    --rollout-num-gpus "${ROLLOUT_NUM_GPUS}"
     --sglang-max-running-requests 1024
     --router-disable-circuit-breaker
 )
