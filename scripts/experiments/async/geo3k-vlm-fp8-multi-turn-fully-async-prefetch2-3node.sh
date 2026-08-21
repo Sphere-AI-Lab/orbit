@@ -21,8 +21,9 @@
 #
 # NOTE on --check-weight-update-equal (inherited from the base MISC_ARGS): that
 # check compares post-sync weights for exact equality, which quantized tensors
-# cannot satisfy. --check-weight-update-allow-quant-error is added below to
-# compare in dequantized space with a 1-ULP tolerance instead.
+# cannot satisfy. --check-weight-update-allow-quant-error sits beside it in
+# MISC_ARGS so the BF16-train/FP8-rollout A/B keeps the 1-ULP tolerance when
+# FP8_ARGS is omitted.
 #
 # Original header follows.
 #
@@ -45,14 +46,15 @@
 # (with the default rollout fn) is only step-overlapped async. Fully async needs
 # BOTH of the following — exactly what examples/fully_async/run-*.sh pairs:
 #   - the async driver train_async.py (set via MILES_TRAIN_ENTRY below) — NOT train.py;
-#   - --rollout-function-path examples.fully_async.fully_async_rollout.generate_rollout_fully_async;
+#   - --fully-async;
 #   - disaggregated layout (NO --colocate; train_async.py asserts not colocate);
 #   - --max-weight-staleness 2 (stale groups recycled to the data buffer);
 #   - --fully-async-prefetch-batches 2 (up to 2 rollout batches actively
 #     generating in the background worker);
-#   - NO eval: generate_rollout_fully_async raises on evaluation, and train_async.py
-#     would call the rollout fn with evaluation=True on --eval-interval. So we omit
-#     all EVAL_ARGS here.
+#   - No eval configured here: this recipe omits all EVAL_ARGS. (Since the
+#     2026-08-18 sync, fully-async CAN evaluate — upstream #1740 added
+#     shared-engine pause-the-world and dedicated eval fleets — so this is a
+#     recipe choice now, not a hard limitation.)
 #
 # Prefetch sizing (see examples/fully_async/README.md "Prefetch and Staleness"):
 #   max active groups = rollout_batch_size * prefetch_batches = 64 * 2 = 128
@@ -62,16 +64,16 @@
 # and prefetch_batches(2) <= max_weight_staleness(2)+1=3 (no wasteful-prefetch warning).
 #
 # Hyperparameters (batch / samples / length / temperature / GRPO / optimizer) are
-# aligned with examples/geo3k_vlm_multi_turn. Compute-level knobs are scaled up
+# aligned with examples/geo3k_vlm/multi_turn. Compute-level knobs are scaled up
 # for 3x H200 (see PERF_ARGS / SGLANG_ARGS comments and async/README.md).
 # No checkpoint saving in this example run (CKPT_ARGS has no --save).
 #
 # Multi-turn (geo3k) is layered on top via the per-sample custom generate fn; the
 # fully-async worker calls generate_and_rm_group, which honors
 # --custom-generate-function-path and multimodal inputs:
-#   - --custom-generate-function-path examples.geo3k_vlm_multi_turn.rollout.generate
-#   - --custom-config-path examples/geo3k_vlm_multi_turn/geo3k_vlm_multi_turn_config.yaml
-#     (sets max_turns: 3 and rollout_interaction_env_path: examples.geo3k_vlm_multi_turn.env_geo3k)
+#   - --custom-generate-function-path examples.geo3k_vlm.multi_turn.rollout.generate
+#   - --custom-config-path examples/geo3k_vlm/multi_turn/geo3k_vlm_multi_turn_config.yaml
+#     (sets max_turns: 3 and rollout_interaction_env_path: examples.geo3k_vlm.multi_turn.env_geo3k)
 #
 # VLM-specific (same as the geo3k disagg recipe):
 #   - MODEL_ARGS_ROTARY_BASE=5000000 before sourcing qwen3-8B.sh;
@@ -81,8 +83,8 @@
 #   - cudnn 9.16.0.29 in the env (else conv3d perf regression in torch 2.9).
 #
 # Submit (run id / W&B group come from JOB_NAME; see W&B notes below):
-#   JOB_NAME=geo3k-async-mt-pf2-8b TIME=72:00:00 NODES=3 MILES_ENV_NAME=miles \
-#   bash scripts/slurm/submit.sh async/geo3k-vlm-multi-turn-fully-async-prefetch2-3node
+#   JOB_NAME=geo3k-async-mt-pf2-8b-fp8 TIME=72:00:00 NODES=3 MILES_ENV_NAME=miles \
+#   bash scripts/slurm/submit.sh async/geo3k-vlm-fp8-multi-turn-fully-async-prefetch2-3node
 
 set -euo pipefail
 
@@ -97,7 +99,7 @@ export MILES_TRAIN_ENTRY=train_async.py
 # Resource metadata — read by submit.sh for sbatch
 # ---------------------------------------------------------------------------
 EXPERIMENT_NODES=3
-EXPERIMENT_TIME=${EXPERIMENT_TIME:-04:00:00}
+EXPERIMENT_TIME=72:00:00
 
 # ---------------------------------------------------------------------------
 # Asset metadata — read by submit.sh for the `hf download` step
@@ -113,6 +115,11 @@ HF_DATASETS=(
 HF_MODEL_DIR="$HF_MODEL_CACHE_DIR/models/Qwen3-VL-8B-Instruct-FP8"
 # BF16 HF checkpoint the trainer initializes from, via the bridge.
 HF_BF16_DIR="$HF_CACHE_DIR/models/Qwen3-VL-8B-Instruct"
+if [[ ! -r "$HF_BF16_DIR/config.json" ]]; then
+   echo "Missing readable BF16 checkpoint config: $HF_BF16_DIR/config.json" >&2
+   echo "Download Qwen/Qwen3-VL-8B-Instruct there before submitting." >&2
+   exit 1
+fi
 # HF_TORCHDIST_DIR intentionally unset — VLM loads HF directly via bridge.
 HF_TRAIN_DATA="$HF_CACHE_DIR/data/geo3k_imgurl_processed/train.parquet"
 
@@ -143,10 +150,13 @@ MULTIMODAL_ARGS=(
 # Fully-async rollout driver + multi-turn per-sample generation.
 # ONLY difference vs the base 3-node recipe: --fully-async-prefetch-batches 2.
 ASYNC_ROLLOUT_ARGS=(
-   --rollout-function-path        examples.fully_async.fully_async_rollout.generate_rollout_fully_async
-   --custom-generate-function-path examples.geo3k_vlm_multi_turn.rollout.generate
-   --custom-config-path           examples/geo3k_vlm_multi_turn/geo3k_vlm_multi_turn_config.yaml
+   --fully-async
+   --custom-generate-function-path examples.geo3k_vlm.multi_turn.rollout.generate
+   --custom-config-path           examples/geo3k_vlm/multi_turn/geo3k_vlm_multi_turn_config.yaml
    --max-weight-staleness         2
+   # pre-sync worker semantics: aborted/stale groups go back to the data buffer
+   # for regeneration (the class-based rollout's default is drop)
+   --async-unused-samples-handler retry
    # Keep up to rollout_batch_size * 2 = 128 prompt groups generating in the
    # background worker (vs the default 1 batch). Completed groups still count
    # against max_weight_staleness, so 2 <= staleness+1 avoids wasteful recycling.
@@ -156,7 +166,7 @@ ASYNC_ROLLOUT_ARGS=(
    --update-weights-interval      1
 )
 
-# Aligned with examples/geo3k_vlm_multi_turn (run_geo3k_vlm_multi_turn.py):
+# Aligned with examples/geo3k_vlm/multi_turn (run_geo3k_vlm_multi_turn.py):
 # same batch/sample/length/temperature and GRPO/optimizer settings.
 ROLLOUT_ARGS=(
    --prompt-data   "$HF_TRAIN_DATA"
@@ -272,9 +282,6 @@ FP8_ARGS=(
    --bf16
    --fp8-format e4m3
    --fp8-recipe  blockwise
-   # The base recipe enables --check-weight-update-equal, which cannot hold for
-   # quantized tensors; compare in dequantized space with 1-ULP tolerance.
-   --check-weight-update-allow-quant-error
 )
 
 MISC_ARGS=(
@@ -284,6 +291,9 @@ MISC_ARGS=(
    --attention-softmax-in-fp32
    --attention-backend flash
    --check-weight-update-equal
+   # Requantized weights cannot satisfy exact equality; compare in dequantized
+   # space with 1-ULP tolerance in both unified FP8 and rollout-only A/B runs.
+   --check-weight-update-allow-quant-error
 )
 
 MILES_ARGS=(
