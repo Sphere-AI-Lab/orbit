@@ -4,6 +4,7 @@ Wire it up with::
 
     --custom-rollout-log-function-path examples.model_response_trace_viewer.hook.log_rollout_data
     --save-model-response-trace-dir <run-dir>/traces
+    --model-response-trace-max-samples-per-step <positive-count>
 
 Both writers no-op unless their own flag is set, so the hook is safe to leave
 configured on a recipe that has tracing switched off.
