@@ -156,6 +156,8 @@ ray_submit_and_wait() {
             RUNTIME_ENV_JSON=$(python - <<EOF
 import json, os
 print(json.dumps({"env_vars": {
+    # ray buffers python stdout/stderr without this; the launcher tails logs live
+    "PYTHONUNBUFFERED": "1",
     "PYTHONPATH": "'"$MEGATRON_SRC"'",
     "LD_LIBRARY_PATH": os.environ.get("LD_LIBRARY_PATH", ""),
     "CUDA_DEVICE_MAX_CONNECTIONS": "1",

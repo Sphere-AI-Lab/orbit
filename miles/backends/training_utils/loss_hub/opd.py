@@ -20,7 +20,8 @@ def apply_opd_kl_to_advantages(
         args: Configuration containing `use_opd` and `opd_kl_coef`.
         rollout_data: Dict containing "teacher_log_probs".
         advantages: List of advantage tensors to modify in-place.
-        student_log_probs: List of student log-probability tensors.
+        student_log_probs: List of old-student log-probability tensors. OPD
+            treats these as fixed scoring inputs.
 
     References:
         https://github.com/thinking-machines-lab/tinker-cookbook/blob/main/tinker_cookbook/distillation/train_on_policy.py
@@ -42,10 +43,9 @@ def apply_opd_kl_to_advantages(
             reverse_kl = precomputed_reverse_kls[i]
             if not torch.is_tensor(reverse_kl):
                 reverse_kl = torch.tensor(reverse_kl, dtype=torch.float32)
-            # RKLD-PG treats the rollout-side score as a stop-gradient
-            # coefficient. Keep that contract explicit even if a custom data
-            # path accidentally supplies a tensor with autograd history.
-            reverse_kl = reverse_kl.to(device=adv.device).detach()
+            # Defensive consumer boundary for direct callers that bypass
+            # compute_advantages_and_returns' persistent-data detach.
+            reverse_kl = reverse_kl.detach().to(device=adv.device)
             if adv.shape != reverse_kl.shape:
                 raise ValueError(
                     f"OPD shape mismatch at sample {i}: advantages={tuple(adv.shape)}, "
@@ -68,7 +68,9 @@ def apply_opd_kl_to_advantages(
         )
 
     device = student_log_probs[0].device
-    teacher_log_probs = [t.to(device=device).detach() for t in teacher_log_probs]
+    detached_teacher_log_probs = [t.detach() for t in teacher_log_probs]
+    rollout_data["teacher_log_probs"] = detached_teacher_log_probs
+    teacher_log_probs = [t.to(device=device) for t in detached_teacher_log_probs]
 
     reverse_kls = []
     for i, adv in enumerate(advantages):
@@ -88,5 +90,5 @@ def apply_opd_kl_to_advantages(
         advantages[i] = adv - args.opd_kl_coef * reverse_kl
         reverse_kls.append(reverse_kl)
 
-    # Store reverse KL for logging
+    # Store reverse KL for logging.
     rollout_data["opd_reverse_kl"] = reverse_kls

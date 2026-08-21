@@ -24,9 +24,11 @@ _CONFIGS = [
 
 
 def prepare():
-    U.exec_command("mkdir -p /root/models /root/datasets")
-    U.exec_command(f"hf download lmsys/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
-    U.exec_command("hf download --repo-type dataset zhuzilin/dapo-math-17k --local-dir /root/datasets/dapo-math-17k")
+    U.exec_command_cpu("mkdir -p /root/models /root/datasets")
+    U.exec_command_cpu(f"hf download lmsys/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
+    U.exec_command_cpu(
+        "hf download --repo-type dataset zhuzilin/dapo-math-17k --local-dir /root/datasets/dapo-math-17k"
+    )
 
 
 def execute(shared_outer: bool, virtual_experts: bool):
@@ -94,7 +96,7 @@ def execute(shared_outer: bool, virtual_experts: bool):
         "--attention-dropout 0.0 "
         "--hidden-dropout 0.0 "
         "--qkv-format bshd "
-        "--attention-backend fused "
+        "--attention-backend auto "
         "--update-weight-buffer-size 536870912 "
         "--actor-num-nodes 1 "
         f"--actor-num-gpus-per-node {NUM_GPUS} "
@@ -102,7 +104,6 @@ def execute(shared_outer: bool, virtual_experts: bool):
         "--colocate "
         "--ci-test "
         "--ci-disable-logprobs-checker "
-        "--disable-weights-backuper "
     )
 
     train_args = (
@@ -113,7 +114,6 @@ def execute(shared_outer: bool, virtual_experts: bool):
         train_args=train_args,
         num_gpus_per_node=NUM_GPUS,
         megatron_model_type=MODEL_TYPE,
-        extra_env_vars={"MILES_EXPERIMENTAL_ROLLOUT_REFACTOR": "1"},
     )
 
 
@@ -124,6 +124,6 @@ if __name__ == "__main__":
     for name, shared_outer, virtual_experts in _CONFIGS:
         print(f"[gpt-oss-moe-lora-ci] ===== combo: {name} =====", flush=True)
         # fresh ray/sglang between combos
-        U.exec_command("ray stop --force || true; pkill -9 sglang || true; sleep 10")
+        U.exec_command_cpu("ray stop --force || true; pkill -9 sglang || true; sleep 10")
         execute(shared_outer, virtual_experts)
         print(f"[gpt-oss-moe-lora-ci] ===== combo PASSED: {name} =====", flush=True)

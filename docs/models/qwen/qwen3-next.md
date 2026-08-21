@@ -1,6 +1,6 @@
 ---
 title: Qwen3-Next 80B-A3B
-description: Launch recipes for Qwen3-Next-80B-A3B-Thinking on Megatron and FSDP backends.
+description: Launch recipes for Qwen3-Next-80B-A3B-Thinking on the Megatron backend.
 ---
 ## 1. Model Introduction
 
@@ -24,33 +24,31 @@ description: Launch recipes for Qwen3-Next-80B-A3B-Thinking on Megatron and FSDP
 ### 3.1 Required env vars
 
 ```bash
-export BASE_FOLDER=<shared FS path, must contain the staged checkpoint + datasets>
 export MASTER_ADDR=<head node IP>
 ```
 
-All three launchers (`run-qwen3-next-80B-A3B.sh`, `run-qwen3-next-80B-A3B-8gpus.sh`, `run-qwen3-next-80B-A3B-fsdp.sh`) hard-fail if these aren't set.
+`--topology 4node` needs `MASTER_ADDR` for the ray fan-out; `--topology single-node` needs nothing. Paths are Typer flags: `--model-dir` (default `/root/models`) for the staged checkpoint, `--data-dir` (default `/root/datasets`) for the datasets, `--output-dir` (default `/root/shared_data`) for what the run writes. On a multi-node run all three must be on a shared FS.
 
 ### 3.2 Download model + datasets
 
 ```bash
-hf download Qwen/Qwen3-Next-80B-A3B-Thinking --local-dir $BASE_FOLDER/Qwen3-Next-80B-A3B-Thinking
-hf download --repo-type dataset zhuzilin/dapo-math-17k --local-dir $BASE_FOLDER/dapo-math-17k
-hf download --repo-type dataset zhuzilin/aime-2024     --local-dir $BASE_FOLDER/aime-2024
+hf download Qwen/Qwen3-Next-80B-A3B-Thinking --local-dir /root/models/Qwen3-Next-80B-A3B-Thinking
+hf download --repo-type dataset zhuzilin/dapo-math-17k --local-dir /root/datasets/dapo-math-17k
+hf download --repo-type dataset zhuzilin/aime-2024     --local-dir /root/datasets/aime-2024
 ```
 
 ### 3.3 HF → Megatron `torch_dist` conversion
 
 ```bash
 cd /root/miles
-source scripts/models/qwen3-next-80B-A3B.sh
+MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py qwen3-next-80B-A3B)" || exit 1
+read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM torchrun --nproc-per-node 8 \
    tools/convert_hf_to_torch_dist.py \
    ${MODEL_ARGS[@]} \
-   --hf-checkpoint $BASE_FOLDER/Qwen3-Next-80B-A3B-Thinking \
-   --save          $BASE_FOLDER/Qwen3-Next-80B-A3B-Thinking_torch_dist
+   --hf-checkpoint /root/models/Qwen3-Next-80B-A3B-Thinking \
+   --save          /root/models/Qwen3-Next-80B-A3B-Thinking_torch_dist
 ```
-
-The FSDP variant skips this step and loads HF directly.
 
 ## 4. Launch
 
@@ -58,35 +56,43 @@ The FSDP variant skips this step and loads HF directly.
 
 ```bash
 cd /root/miles
-export BASE_FOLDER=...; export MASTER_ADDR=...
-bash scripts/run-qwen3-next-80B-A3B.sh
+export MASTER_ADDR=...
+python scripts/run_qwen3_next_80b_a3b.py --topology 4node
+
+# single 8-GPU node (6 GPUs train, 2 serve rollout)
+python scripts/run_qwen3_next_80b_a3b.py --topology single-node
 ```
 
 ### 4.2 Multi-node fan-out
 
-`run-qwen3-next-80B-A3B.sh` performs ssh fan-out internally — set `BASE_FOLDER` / `MASTER_ADDR` on the head node and the launcher reaches out to the workers. The 8-GPU and FSDP variants are single-node.
+`--topology 4node` performs ssh fan-out internally over `/root/mpi_rack_hostfile` — set `MASTER_ADDR` on the head node and the launcher reaches out to the workers. Pass `--no-join-ray-workers` when the ray cluster is already complete. `--topology single-node` never fans out.
 
 ## 5. Recipe Configuration
 
 ### 5.1 Parallelism
 
-| Script | Backend | TP | PP | CP | EP | expert-TP | `max_tokens_per_gpu` | GPUs |
+Both layouts are one launcher, `scripts/run_qwen3_next_80b_a3b.py`, selected by `--topology`:
+
+| `--topology` | Backend | TP | PP | CP | EP | expert-TP | `max_tokens_per_gpu` | Actor GPUs |
 |---|---|---|---|---|---|---|---|---|
-| `scripts/run-qwen3-next-80B-A3B.sh` | Megatron | 2 | 4 | 2 | 8 | 1 | 8192 | 32 (4 × 8) |
+| `4node` | Megatron | 2 | 4 | 2 | 8 | 1 | 8192 | 32 (4 × 8) |
+| `single-node` | Megatron | 1 | 6 | 1 | 1 | 1 | 2048 | 6 (1 × 6) |
+
+`4node` colocates the rollout engines on the training GPUs; `single-node` dedicates the remaining 2 GPUs of the node to rollout, which also shrinks every batch dimension.
 
 ### 5.2 Algorithm
 
-All three scripts use GSPO (`--advantage-estimator gspo --eps-clip 4e-4`); `--use-kl-loss` is commented out.
+Both topologies use GSPO (`--advantage-estimator gspo --eps-clip 4e-4`); `--use-kl-loss` is not passed.
 
 ### 5.3 Rollout & SGLang
 
-The canonical script enables EAGLE speculative rollout:
+`4node` enables EAGLE speculative rollout:
 
 ```bash
 --rollout-num-gpus-per-engine 8
 --sglang-mem-fraction-static 0.8
 --sglang-ep-size 8
---sglang-cuda-graph-bs 1 2 4 8 $(seq 16 8 128)
+--sglang-cuda-graph-bs 1 2 4 8 16 24 ... 128
 
 --sglang-speculative-algorithm EAGLE
 --sglang-speculative-num-steps 2
@@ -96,19 +102,17 @@ The canonical script enables EAGLE speculative rollout:
 --sglang-max-running-requests 512
 ```
 
-The 6-GPU and FSDP variants ship the EAGLE block commented out and use `--rollout-num-gpus-per-engine 2 --rollout-num-gpus 2 --sglang-mem-fraction-static 0.8 --sglang-ep-size 1`.
+`single-node` drops the EAGLE block and uses `--rollout-num-gpus-per-engine 2 --rollout-num-gpus 2 --sglang-mem-fraction-static 0.8 --sglang-ep-size 1`.
 
 ### 5.4 Optimizer
 
-The Megatron variants enable CPU Adam:
+Both topologies enable CPU Adam:
 
 ```bash
 --optimizer-cpu-offload
 --overlap-cpu-optimizer-d2h-h2d
 --use-precision-aware-optimizer
 ```
-
-The FSDP variant leaves Adam on GPU.
 
 ### 5.5 Notable quirks
 

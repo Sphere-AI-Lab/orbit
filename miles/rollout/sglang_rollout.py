@@ -15,6 +15,7 @@ from tqdm import tqdm
 
 from miles.rollout.base_types import GenerateFnInput, RolloutFnEvalOutput, RolloutFnTrainOutput
 from miles.rollout.filter_hub.base_types import MetricGatherer, call_dynamic_filter
+from miles.rollout.group_utils import group_has_aborted_sample, prepare_partial_retry_group
 from miles.rollout.inference_rollout.compatibility import load_generate_function
 from miles.rollout.inference_rollout.hook_utils import call_all_samples_process_fn
 from miles.rollout.inference_rollout.live_diagnostics import (
@@ -25,14 +26,15 @@ from miles.utils import dumper_utils
 from miles.utils.async_utils import run
 from miles.utils.data import Dataset
 from miles.utils.eval_config import EvalDatasetConfig
-from miles.utils.http_utils import get, post
+from miles.utils.http_utils import get, post, router_worker_base_urls
 from miles.utils.lifecycle import TrajectoryLifecycle
-from miles.utils.lora import LORA_ADAPTER_NAME, is_lora_enabled
+from miles.utils.lora import LORA_ADAPTER_NAME, lora_rollout_enabled
 from miles.utils.misc import SingletonMeta, call_agent_abort_hook, load_function
 from miles.utils.multi_lora import make_rid, slot_lora_name
 from miles.utils.processing_utils import (
     call_processor,
     encode_image_for_rollout_engine,
+    extract_multimodal_train_inputs,
     load_processor,
     load_tokenizer,
 )
@@ -44,6 +46,7 @@ from .generate_utils.generate_endpoint_utils import (
     policy_uses_routing_key,
 )
 from .generate_utils.prefill_logprobs import recompute_samples_rollout_logprobs_via_prefill
+from .generate_utils.sample_utils import reward_log_summary, sample_text_preview
 from .rm_hub import async_rm, batched_async_rm
 
 __all__ = ["generate_rollout", "get_model_url"]
@@ -153,21 +156,14 @@ async def generate(args: Namespace, sample: Sample, sampling_params: dict[str, A
         sample.status == Sample.Status.PENDING or sample.status == Sample.Status.ABORTED
     ), f"Sample status is {sample.status}"
 
-    if state.processor and sample.multimodal_inputs and any(v is not None for v in sample.multimodal_inputs.values()):
+    if state.processor and (
+        isinstance(sample.prompt, (list, tuple))
+        or (sample.multimodal_inputs and any(v is not None for v in sample.multimodal_inputs.values()))
+    ):
         processor_output = call_processor(state.processor, sample.prompt, sample.multimodal_inputs)
         prompt_ids = processor_output["input_ids"][0]
         prompt_ids = prompt_ids.tolist() if hasattr(prompt_ids, "tolist") else list(prompt_ids)
-        sample.multimodal_train_inputs = {
-            k: v
-            for k, v in processor_output.items()
-            # input_ids / attention_mask are passed separately by miles.
-            # mm_token_type_ids is emitted by HF Qwen3-VL processor
-            # (transformers>=5.0). Megatron-Bridge derives the same
-            # modality boundaries from input_ids plus image/video grids, and
-            # the HF-only field has variable per-sample seq_len that cannot
-            # be concatenated by data.py.
-            if k not in ["input_ids", "attention_mask", "mm_token_type_ids"]
-        } or None
+        sample.multimodal_train_inputs = extract_multimodal_train_inputs(processor_output)
     else:
         prompt_ids = state.tokenizer.encode(sample.prompt, add_special_tokens=False)
 
@@ -206,7 +202,7 @@ async def generate(args: Namespace, sample: Sample, sampling_params: dict[str, A
         payload["lora_path"] = slot_lora_name(sample.adapter.slot)
         payload["rid"] = make_rid(sample.adapter.name)
         payload["extra_key"] = f"{sample.adapter.name}:v{adapter.version}"
-    elif is_lora_enabled(args):
+    elif lora_rollout_enabled(args):
         payload["lora_path"] = LORA_ADAPTER_NAME
 
     if args.use_rollout_routing_replay:
@@ -217,6 +213,13 @@ async def generate(args: Namespace, sample: Sample, sampling_params: dict[str, A
     if sample.multimodal_inputs and sample.multimodal_inputs["images"]:
         image_data = sample.multimodal_inputs["images"]
         payload["image_data"] = [encode_image_for_rollout_engine(image) for image in image_data]
+
+    if sample.multimodal_inputs and sample.multimodal_inputs.get("audios"):
+        import base64 as _b64
+
+        payload["audio_data"] = [
+            f"data:audio;base64,{_b64.b64encode(a).decode('ascii')}" for a in sample.multimodal_inputs["audios"]
+        ]
 
     # Use existing tokens for multi-turn or tokenize the new prompt
     if len(sample.response) > 0:
@@ -256,14 +259,22 @@ async def generate(args: Namespace, sample: Sample, sampling_params: dict[str, A
     sample.rollout_log_probs += new_response_log_probs
 
     if "routed_experts" in output["meta_info"]:
-        sample.rollout_routed_experts = np.frombuffer(
+        _re = np.frombuffer(
             pybase64.b64decode(output["meta_info"]["routed_experts"].encode("ascii")),
             dtype=np.int32,
-        ).reshape(
-            len(sample.tokens) - 1,
-            args.num_layers,
-            args.moe_router_topk,
         )
+        _ntok = int(output["meta_info"]["prompt_tokens"]) + len(new_response_tokens) - 1
+        _topk = _re.size // max(1, _ntok * args.num_layers)
+        if _re.size == (_ntok + 1) * args.num_layers * max(1, _topk):
+            # stop-edge: sglang also forwarded the final token; its routing rows
+            # feed no training position - drop the tail position.
+            _re = _re[: _ntok * args.num_layers * _topk]
+        assert _re.size == _ntok * args.num_layers * _topk, (
+            f"routed_experts buffer {_re.size} != ntok({_ntok}) x layers({args.num_layers}) x topk({_topk}); "
+            f"prompt_tokens={output['meta_info'].get('prompt_tokens')} response={len(new_response_tokens)} "
+            f"unexpanded_tokens={len(sample.tokens)}"
+        )
+        sample.rollout_routed_experts = _re.reshape(_ntok, args.num_layers, _topk)
     if "indexer_topk" in output["meta_info"]:
         sample.rollout_indexer_topk = get_indexer_topk_from_response(args, output, sample)
 
@@ -330,7 +341,7 @@ async def generate_and_rm(
     # multi samples
     if isinstance(sample, list):
         samples = sample
-        if any([sample.status == Sample.Status.ABORTED for sample in samples]):
+        if group_has_aborted_sample(samples):
             return samples
 
         # for multi agent system, the reward of some sample is calculated during generation.
@@ -376,7 +387,7 @@ async def generate_and_rm_group(
     group = await asyncio.gather(*tasks)
 
     # for the rm that need the whole group, we will do the rm here
-    if not state.aborted and args.group_rm:
+    if not state.aborted and args.group_rm and not group_has_aborted_sample(group):
         rewards = await batched_async_rm(args, group)
         for sample, reward in zip(group, rewards, strict=False):
             sample.reward = reward
@@ -397,6 +408,7 @@ async def abort(args: Namespace, rollout_id: int) -> list[list[Sample]]:
     else:
         response = await get(f"http://{args.sglang_router_ip}:{args.sglang_router_port}/workers")
         urls = [worker["url"] for worker in response["workers"]]
+    urls = router_worker_base_urls(urls)
 
     logger.info(f"Abort request for {urls}")
     abort_tasks = [post(f"{url}/abort_request", {"abort_all": True}) for url in urls]
@@ -420,10 +432,7 @@ async def abort(args: Namespace, rollout_id: int) -> list[list[Sample]]:
         # for partial rollout, collect the partial samples into the data buffer
         for task in done:
             group = task.result()
-            for sample in group:
-                if sample.response and "start_rollout_id" not in sample.metadata:
-                    sample.metadata["start_rollout_id"] = rollout_id
-            aborted_samples.append(group)
+            aborted_samples.append(prepare_partial_retry_group(group, rollout_id))
             count += len(group)
 
     if args.partial_rollout:
@@ -465,6 +474,7 @@ async def generate_rollout_async(
 
     data = []
     all_data = []
+    partial_aborted_samples = []
     do_print = True
     next_live_log_at = initial_live_log_at(args, target_data_size)
     pbar = tqdm(total=target_data_size * args.n_samples_per_prompt, desc="Rollout generation")
@@ -479,14 +489,23 @@ async def generate_rollout_async(
         for task in done:
             group: list[Sample] = task.result()
 
+            assert len(group) == args.n_samples_per_prompt
+            if group_has_aborted_sample(group):
+                state.remaining_batch_size -= 1
+                if args.partial_rollout:
+                    partial_aborted_samples.append(prepare_partial_retry_group(group, rollout_id))
+                continue
+
             if do_print:
                 sample = group[0][0] if isinstance(group[0], list) else group[0]
                 logger.info(
-                    f"First rollout sample: {[str(sample.prompt) + sample.response]}, label: {str(sample.label)[:100]}, reward: {sample.reward}",
+                    "First rollout sample: text_preview=%s, label=%s, reward_summary=%s",
+                    sample_text_preview(sample),
+                    str(sample.label)[:100],
+                    reward_log_summary(sample.reward),
                 )
                 do_print = False
 
-            assert len(group) == args.n_samples_per_prompt
             all_data.append(group)
             dynamic_filter_output = call_dynamic_filter(dynamic_filter, args, group)
             if not dynamic_filter_output.keep:
@@ -515,11 +534,14 @@ async def generate_rollout_async(
     pbar.close()
     sample = data[-1][0][0] if isinstance(data[-1][0], list) else data[-1][0]
     logger.info(
-        f"Finish rollout: {[str(sample.prompt) + sample.response]}, label: {str(sample.label)[:100]}, reward: {sample.reward}",
+        "Finish rollout: text_preview=%s, label=%s, reward_summary=%s",
+        sample_text_preview(sample),
+        str(sample.label)[:100],
+        reward_log_summary(sample.reward),
     )
 
     # there are still some unfinished requests, abort them
-    aborted_samples = await abort(args, rollout_id)
+    aborted_samples = partial_aborted_samples + await abort(args, rollout_id)
 
     assert len(data) == args.rollout_batch_size, f"Got {len(data)} samples, expected {args.rollout_batch_size}"
     data = sorted(data, key=lambda group: group[0][0].index if isinstance(group[0], list) else group[0].index)

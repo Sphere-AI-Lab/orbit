@@ -160,10 +160,12 @@ def check_runtime() -> list[tuple[str, bool]]:
     except Exception as e:
         out.append((f"sgl_kernel symbol: sgl_per_token_quant_fp8 ({type(e).__name__}: {e})", False))
     try:
-        importlib.import_module("sglang.srt.layers.quantization.fp8_kernel")
-        out.append(("sglang engine import: srt.layers.quantization.fp8_kernel", True))
+        # fp8_kernel.py left in the v0.5.16 line; fp8.py exists on both lines
+        # and pulls the same deep kernel-import chain this probe is for.
+        importlib.import_module("sglang.srt.layers.quantization.fp8")
+        out.append(("sglang engine import: srt.layers.quantization.fp8", True))
     except Exception as e:
-        out.append((f"sglang engine import: fp8_kernel ({type(e).__name__}: {e})", False))
+        out.append((f"sglang engine import: fp8 ({type(e).__name__}: {e})", False))
     # torchcodec dlopens FFmpeg at first use (its import only WARNS when the libs are
     # missing, so an import check is toothless). Assert the install step's contract:
     # env-local ffmpeg 7 (libavutil.so.59 = torchcodec's core7 loader).

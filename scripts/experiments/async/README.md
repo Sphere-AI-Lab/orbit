@@ -13,15 +13,15 @@ This is the easy thing to get wrong:
 |------|--------|------------------|----------|
 | sync | `train.py` | default | generate a full batch, then train (barrier) |
 | step-overlapped async | `train_async.py` | default | next rollout prefetched while training the current one |
-| **fully async** | `train_async.py` | `generate_rollout_fully_async` | a global worker generates **continuously**; training just drains finished groups |
+| **fully async** | `train_async.py` | `--fully-async` (`FullyAsyncRolloutFn`) | a producer task generates **continuously**; training just drains finished groups |
 
 The "fully async" behavior comes from the **rollout function**, not the driver.
 `train_async.py` on its own is only step-overlapped. Fully async needs **both**
-pieces, exactly as `examples/fully_async/run-qwen3-4b-fully_async.sh` pairs them:
+pieces:
 
 ```bash
-MILES_TRAIN_ENTRY=train_async.py                                                   # driver
---rollout-function-path examples.fully_async.fully_async_rollout.generate_rollout_fully_async   # worker
+MILES_TRAIN_ENTRY=train_async.py   # driver
+--fully-async                      # worker (miles.rollout.fully_async_rollout.FullyAsyncRolloutFn)
 ```
 
 ## Runnable multi-turn recipes
@@ -84,7 +84,7 @@ No `--colocate` (train_async.py asserts not colocate).
 
 ## Hyperparameters
 
-Learning-relevant settings are **aligned with `examples/geo3k_vlm_multi_turn`**
+Learning-relevant settings are **aligned with `examples/geo3k_vlm/multi_turn`**
 so results stay comparable:
 
 | Param | Value | Source |
@@ -99,10 +99,16 @@ so results stay comparable:
 | optimizer (adam, lr 1e-6, wd 0.1, β 0.9/0.98) | — | example |
 | multi-turn (`max_turns: 3`, `env_geo3k`) | — | `geo3k_vlm_multi_turn_config.yaml` |
 
-Async-specific: `--max-weight-staleness 2`, `--update-weights-interval 1`.
-The prefetch2 recipes also set `--fully-async-prefetch-batches 2`, which means
-the background worker can keep `rollout_batch_size * 2` prompt groups actively
-generating while training consumes finished groups.
+Async-specific: `--max-weight-staleness 2`, `--update-weights-interval 1`, and
+`--async-unused-samples-handler retry` — the class-based rollout defaults to
+`drop`, while the pre-sync worker always recycled aborted/stale groups back to
+the data buffer, so the flag restores the training-data distribution.
+The prefetch2 recipes also set `--fully-async-prefetch-batches 2`. Since the
+upstream fully-async rewrite the flag no longer drives an example worker: it
+derives `--async-max-concurrent-samples` (`rollout_batch_size * prefetch *
+n_samples_per_prompt`), so `rollout_batch_size * 2` prompt groups stay actively
+generating while training consumes finished groups. Pass that absolute bound or
+this depth knob, not both.
 
 ## Scaling for H200 (the compute knobs we opened up)
 
@@ -140,9 +146,10 @@ the 16-engine sampler pool stays saturated, so the async pipeline rarely stalls.
 
 ## Limitations (inherited from `examples/fully_async`)
 
-- **No eval** — `generate_rollout_fully_async` raises on `evaluation=True`, and
-  `train_async.py` would call it that way on `--eval-interval`. This recipe omits
-  all eval args; watch the `train/` and `rollout/` W&B panels instead.
+- **No eval configured** — these recipes omit all eval args; watch the `train/`
+  and `rollout/` W&B panels instead. This stopped being a hard limitation in the
+  2026-08-18 sync: upstream #1740 gave fully-async both shared-engine
+  pause-the-world eval and dedicated eval fleets.
 - **No checkpoint saving** in this example run (`CKPT_ARGS` has no `--save`). Add
   `--save <dir> --save-interval N` to persist.
 - Ordering is best-effort; error handling in the worker is minimal.

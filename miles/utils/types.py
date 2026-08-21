@@ -26,8 +26,15 @@ class RewardSpec:
 class Sample:
     """The sample generated"""
 
+    @dataclass
+    class RetryMultimodalInputsSnapshot:
+        inputs: dict[str, Any] | None
+
     group_index: int | None = None
     index: int | None = None
+    # Rollout execution id; None falls back to ``index``. Compact / subagent
+    # siblings must share it so the rollout is counted once.
+    rollout_id: int | None = None
     # prompt
     prompt: str | list[dict[str, str]] = ""
     tokens: list[int] = field(default_factory=list)
@@ -36,6 +43,11 @@ class Sample:
     # response
     response: str = ""
     response_length: int = 0
+    retry_multimodal_inputs_snapshot: RetryMultimodalInputsSnapshot | None = field(
+        default=None,
+        kw_only=True,
+        repr=False,
+    )
     label: str | None = None
     reward: float | dict[str, Any] | None = None
     loss_mask: list[int] | None = None
@@ -154,6 +166,7 @@ class Sample:
 
     def to_dict(self):
         value = self.__dict__.copy()
+        value.pop("retry_multimodal_inputs_snapshot", None)
         value["status"] = self.status.value
         value["spec_info"] = self.spec_info.to_dict()
         value["prefix_cache_info"] = self.prefix_cache_info.to_dict()
@@ -162,6 +175,7 @@ class Sample:
     @staticmethod
     def from_dict(data: dict):
         data = dict(data)
+        data.pop("retry_multimodal_inputs_snapshot", None)
         data["status"] = Sample.Status(data["status"])
         data["spec_info"] = Sample.SpecInfo.from_dict(data.get("spec_info", {}))
         data["prefix_cache_info"] = Sample.PrefixCacheInfo.from_dict(data.get("prefix_cache_info", {}))
@@ -262,7 +276,14 @@ class Sample:
         if self.rollout_routed_experts is not None:
             actual = len(self.rollout_routed_experts)
             expect = len(self.tokens) - 1
-            assert actual == expect, f"rollout_routed_experts length ({actual}) != len(tokens) - 1 ({expect})"
+            mm = self.multimodal_train_inputs or {}
+            extra = sum(
+                int(c) - 1 for key in ("mm_vision_num_patches", "mm_audio_num_tokens") for c in list(mm.get(key) or [])
+            )
+            assert actual in (expect, expect + extra), (
+                f"rollout_routed_experts length ({actual}) != len(tokens) - 1 ({expect})"
+                f" or media-expanded ({expect + extra})"
+            )
         if self.rollout_indexer_topk is not None:
             actual = len(self.rollout_indexer_topk)
             expect = len(self.tokens) - 1
@@ -297,13 +318,37 @@ class Sample:
         if self.rollout_indexer_topk is not None:
             self.rollout_indexer_topk = self.rollout_indexer_topk[:-n]
 
+    @staticmethod
+    def _copy_multimodal_input_containers(
+        value: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        return {key: list(item) if isinstance(item, list) else item for key, item in value.items()}
+
+    def capture_multimodal_inputs_for_retry(self) -> None:
+        if self.retry_multimodal_inputs_snapshot is None:
+            self.retry_multimodal_inputs_snapshot = self.RetryMultimodalInputsSnapshot(
+                self._copy_multimodal_input_containers(self.multimodal_inputs)
+            )
+
     def reset_for_retry(self) -> None:
         """Reset generated outputs so the original prompt can be re-sampled.
 
         Keeps identity / prompt fields (group_index, index, prompt, label,
         multimodal_inputs, metadata, generate_function_path, routing_key) and
         restores everything else to dataclass defaults.
+
+        Multi-turn rollouts mutate ``multimodal_inputs`` in place as the
+        episode grows, so "keeping" it would carry the aborted attempt's
+        observations into the retry. When such a rollout has called
+        ``capture_multimodal_inputs_for_retry``, the pristine containers are
+        restored from that snapshot instead.
         """
+        if self.retry_multimodal_inputs_snapshot is not None:
+            self.multimodal_inputs = self._copy_multimodal_input_containers(
+                self.retry_multimodal_inputs_snapshot.inputs
+            )
         self.tokens = []
         self.multimodal_train_inputs = None
         self.response = ""
