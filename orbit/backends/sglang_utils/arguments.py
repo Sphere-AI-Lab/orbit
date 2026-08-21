@@ -156,8 +156,34 @@ def add_sglang_arguments(parser):
     return parser
 
 
+def apply_prefill_cuda_graph_policy(args) -> None:
+    """Default ``--sglang-cuda-graph-backend-prefill`` to "disabled"; reject any
+    other backend under ``--peft-method oft``.
+
+    Prefill CUDA graphs arrived with the sglang v0.5.16 merge, defaulting to the
+    "breakable" backend. Phase-0 qualification (2026-08-21, 4xB200) showed that
+    backend is unusable for orbit's engines: it refuses memory-saver mode (every
+    --colocate engine fails at startup) and its graph replay does not apply OFT
+    adapters (NaN logits at the first sample; "tc_piecewise" trips torch.compile
+    in the OFT layers). Default to the pre-merge envelope -- no prefill graphs --
+    so every arm of a systems comparison runs the same engine config; users may
+    opt back in explicitly with ``--sglang-cuda-graph-backend-prefill <backend>``.
+    """
+    backend = getattr(args, "sglang_cuda_graph_backend_prefill", None)
+    if backend is None:
+        args.sglang_cuda_graph_backend_prefill = "disabled"
+    elif backend != "disabled" and getattr(args, "peft_method", "none") == "oft":
+        raise ValueError(
+            f"--sglang-cuda-graph-backend-prefill {backend!r} is not supported with "
+            "--peft-method oft: the prefill CUDA-graph replay does not apply OFT adapters "
+            "(NaN logits). Use 'disabled' (the default)."
+        )
+
+
 def validate_args(args):
     args.sglang_tp_size = args.rollout_num_gpus_per_engine
+
+    apply_prefill_cuda_graph_policy(args)
 
     # Fallback net: --true-on-policy-mode can be set directly, bypassing the
     # --true-on-policy parse-time expansion (orbit/true_on_policy/config.py),
