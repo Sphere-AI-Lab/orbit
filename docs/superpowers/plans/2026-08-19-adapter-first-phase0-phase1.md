@@ -787,9 +787,13 @@ Everything below runs on the user's B200s. Present the block, stop, wait for log
 - [ ] **Step 1: Present the smoke commands to the user (do not run):**
 
 ```bash
-# (a) Harness pilot: 0.5B, all four arms, ~15 min
+# (a) Harness qualification at 0.5B. NOTE: `--profile pilot` is hard-pinned to the LoRA case + async
+# mode only (run_compare.py selected_cases/selected_modes) — it smokes the harness plumbing, not the
+# arms. The four-arm qualification is the q25 profile on the OFT case:
 codexlog phase0-pilot python tools/adapter_runtime_compare/run_compare.py run \
-  --branches runtime --profile pilot --modes sync,async,async_db,async_fullft \
+  --branches runtime --profile pilot --num-rollout 4 --no-eval
+codexlog phase0-q25-arms python tools/adapter_runtime_compare/run_compare.py run \
+  --branches runtime --profile q25 --pefts oft --modes sync,async,async_db,async_fullft \
   --num-rollout 4 --no-eval
 
 # (b) 4B family, all four arms, bench batch profile
