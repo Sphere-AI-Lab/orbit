@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Run one clean env2 E4 column: FullFT lrN plus LoRA's previous-grid lr(N-1).
+# Run one clean env2 FullFT column: the single FullFT arm at lrN.
+#
+# Same arm as the FullFT half of run_column.sh, but into its own ledger so a
+# FullFT-only node and a LoRA-only node can run the same column at once.
 
 set -euo pipefail
 
@@ -20,12 +23,11 @@ check_column "${column}"
 # shellcheck disable=SC1091
 source "${HERE}/env.sh"
 
-results="${E4_ENV2_RESULTS_DIR}/e4_${dataset}_lr${column}.jsonl"
+results="${E4_ENV2_RESULTS_DIR}/e4_${dataset}_ft_lr${column}.jsonl"
 campaign="${ORBIT_ICLR_ROOT}/scripts/lora_regret/campaign.sh"
 
-printf '\n=== env2 rerun: %s lr%s ===\n' "${dataset}" "${column}"
-printf 'FullFT lr=%s; LoRA r1/r16/r256 lr=%s\n' \
-    "${FULLFT_LR[${column}]}" "${LORA_LR[${column}]}"
+printf '\n=== env2 FullFT rerun: %s lr%s ===\n' "${dataset}" "${column}"
+printf 'FullFT lr=%s\n' "${FULLFT_LR[${column}]}"
 printf 'results=%s\nlogs=%s\nwandb=%s\ncheckpoints=%s\n' \
     "${results}" "${LORA_REGRET_LOG_DIR}" "${WANDB_DIR}" "${LORA_REGRET_CKPT_DIR}"
 
@@ -33,10 +35,4 @@ MATRIX=e4 \
 METHOD_RE="^full-na-na-${dataset}-lr${FULLFT_LR_RE[${column}]}-s" \
 RESULTS="${results}" \
 EXPECT_ARMS=1 \
-bash "${campaign}" "$@"
-
-MATRIX="${LORA_MATRIX[${column}]}" \
-METHOD_RE="^lora-r(1|16|256)-all-${dataset}-lr${LORA_LR_RE[${column}]}-s" \
-RESULTS="${results}" \
-EXPECT_ARMS=3 \
 bash "${campaign}" "$@"

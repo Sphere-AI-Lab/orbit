@@ -44,6 +44,35 @@ W&B files from a host with egress:
 bash scripts/lora_regret/env2_rerun/sync_wandb.sh
 ```
 
+## Per-method FullFT and LoRA sweeps
+
+The column wrappers above run FullFT and all three LoRA ranks into one ledger,
+which is right for one node per column. To put one *method* on one node
+instead, the per-method launchers run all seven columns sequentially and keep
+a separate ledger per (method, rank, column), so a FullFT node and three LoRA
+nodes can run the same column at the same time without sharing a file:
+
+```bash
+bash scripts/lora_regret/env2_rerun/run_e4_math_ft_lr1_lr7_8gpu.sh
+bash scripts/lora_regret/env2_rerun/run_e4_gsm8k_ft_lr1_lr7_8gpu.sh
+bash scripts/lora_regret/env2_rerun/run_e4_math_lora_r1_lr1_lr7_8gpu.sh     # also r16, r256
+bash scripts/lora_regret/env2_rerun/run_e4_gsm8k_lora_r1_lr1_lr7_8gpu.sh    # also r16, r256
+```
+
+Ledgers land in `results/` as `e4_<dataset>_ft_lr<N>.jsonl` and
+`e4_<dataset>_lora_r<rank>_lr<N>.jsonl`; the learning rate of column `N` is
+the same as in the table above. A single column is
+
+```bash
+bash scripts/lora_regret/env2_rerun/run_ft_column.sh math 4
+bash scripts/lora_regret/env2_rerun/run_lora_column.sh gsm8k 16 4
+```
+
+These ledgers are separate from the `e4_<dataset>_lr<N>.jsonl` ones written by
+`run_column.sh`, so an arm finished under one launcher family is not skipped by
+the other. Pick one family per (dataset, column). The column tables are in
+`columns.sh`, shared by every `run_*_column.sh`.
+
 ## OFT grid
 
 The OFT wrappers use block size 128 on all target modules. The seven-column

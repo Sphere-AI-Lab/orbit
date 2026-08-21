@@ -12,20 +12,13 @@ dataset=$1
 column=$2
 shift 2
 
-case "${dataset}" in
-    math|gsm8k) ;;
-    *) echo "unsupported dataset: ${dataset}" >&2; exit 2 ;;
-esac
-if [[ ! "${column}" =~ ^[1-7]$ ]]; then
-    echo "column must be an integer from 1 through 7, got: ${column}" >&2
-    exit 2
-fi
+# shellcheck disable=SC1091
+source "${HERE}/columns.sh"
+check_dataset "${dataset}"
+check_column "${column}"
 
 # shellcheck disable=SC1091
 source "${HERE}/env.sh"
-
-OFT_LR=(unused 5e-07 1e-06 3e-06 7e-06 2e-05 4e-05 0.0001)
-OFT_LR_RE=(unused '5e\-07' '1e\-06' '3e\-06' '7e\-06' '2e\-05' '4e\-05' '0\.0001')
 
 results="${E4_ENV2_RESULTS_DIR}/e4_${dataset}_oft_lr${column}.jsonl"
 campaign="${ORBIT_ICLR_ROOT}/scripts/lora_regret/campaign.sh"
