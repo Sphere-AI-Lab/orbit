@@ -1,0 +1,29 @@
+# One 8xH100 node for run_e4_gsm8k_ft_lr1_lr7_8gpu.sh (all seven LR columns, sequentially).
+#
+#   condor_submit_bid 35 scripts/lora_regret/env2_rerun/condor/e4_gsm8k_ft_lr1_lr7.sub
+#
+# Logs go to the scheduler directory that env.sh defaults E4_ENV2_SCHEDULER_DIR
+# to; keep the two in step. The cluster id in every file name means a
+# resubmission never overwrites an earlier attempt's log.
+
+executable     = /lustre/fast/fast/zqiu/orbit-iclr/orbit/scripts/lora_regret/env2_rerun/condor/job.sh
+arguments      = run_e4_gsm8k_ft_lr1_lr7_8gpu.sh $(ClusterId)
+initialdir     = /lustre/fast/fast/zqiu/orbit-iclr/orbit
+
+output         = /lustre/fast/fast/zqiu/orbit-iclr/experiment-runs/env2-rerun-20260821/scheduler/e4_gsm8k_ft_lr1_lr7.$(ClusterId).stdout.log
+error          = /lustre/fast/fast/zqiu/orbit-iclr/experiment-runs/env2-rerun-20260821/scheduler/e4_gsm8k_ft_lr1_lr7.$(ClusterId).stderr.log
+log            = /lustre/fast/fast/zqiu/orbit-iclr/experiment-runs/env2-rerun-20260821/scheduler/e4_gsm8k_ft_lr1_lr7.$(ClusterId).condor.log
+
+request_cpus   = 32
+request_gpus   = 8
+request_memory = 1000000
+request_disk   = 1000G
+requirements   = (CUDADeviceName == "NVIDIA H100 80GB HBM3")
+
+# Only these names cross from the submit shell. getenv = True would also carry
+# a stale NUM_ROLLOUT or VIRTUAL_ENV into the job; env.sh sets the rest.
+getenv         = HOME, USER, PATH, LANG
+
++JobBatchName  = "env2-e4_gsm8k_ft_lr1_lr7"
+
+queue 1

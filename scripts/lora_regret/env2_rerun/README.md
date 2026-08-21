@@ -112,3 +112,42 @@ bash scripts/lora_regret/env2_rerun/run_e4_gsm8k_oft_lr1_lr7_8gpu.sh
 
 These aggregate launchers call the per-column wrappers above, so they share the
 same ledgers. Re-running an aggregate launcher skips completed columns safely.
+
+## HTCondor submission
+
+`condor/` holds one submit file per aggregate launcher, all requesting a whole
+H100 node (`request_gpus = 8`, `request_cpus = 32`, `request_memory = 1000000`,
+`request_disk = 1000G`, `CUDADeviceName == "NVIDIA H100 80GB HBM3"`):
+
+```text
+condor/e4_{math,gsm8k}_ft_lr1_lr7.sub
+condor/e4_{math,gsm8k}_lora_r{1,16,256}_lr1_lr7.sub
+condor/e4_{math,gsm8k}_oft_lr1_lr7.sub
+```
+
+Submit with the cluster's bid wrapper, one node per file:
+
+```bash
+condor_submit_bid 35 scripts/lora_regret/env2_rerun/condor/e4_math_ft_lr1_lr7.sub
+# or several at once, same bid:
+bash scripts/lora_regret/env2_rerun/condor/submit.sh e4_math_ft_lr1_lr7 e4_gsm8k_ft_lr1_lr7
+```
+
+Every job writes into `E4_ENV2_SCHEDULER_DIR` (the submit files spell out the
+same default path as `env.sh`; change both together):
+
+```text
+scheduler/<name>.<ClusterId>.stdout.log   launcher output, stderr merged in
+scheduler/<name>.<ClusterId>.stderr.log   HTCondor's own stderr (normally empty)
+scheduler/<name>.<ClusterId>.condor.log   HTCondor job event log
+scheduler/<name>.<ClusterId>.status       state, commit, host, exit code
+```
+
+`condor/job.sh` is the executable: it sources `env.sh`, writes the status file,
+refuses to start unless `nvidia-smi` reports exactly eight H100 80GB HBM3
+devices (`state=allocation_unhealthy`, exit 3), then runs the launcher.
+`getenv` imports only `HOME, USER, PATH, LANG`, so a `NUM_ROLLOUT` left in the
+submit shell cannot reach the job. The ledgers are the resumable state, so a
+job that dies can simply be resubmitted. Do not submit an OFT file while the
+same sweep is still running interactively: both would append to one ledger.
+
