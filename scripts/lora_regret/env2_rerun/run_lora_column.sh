@@ -19,6 +19,7 @@ shift 3
 # shellcheck disable=SC1091
 source "${HERE}/columns.sh"
 check_dataset "${dataset}"
+set_dataset_rollouts "${dataset}"
 check_lora_rank "${rank}"
 check_column "${column}"
 
@@ -31,6 +32,7 @@ campaign="${ORBIT_ICLR_ROOT}/scripts/lora_regret/campaign.sh"
 printf '\n=== env2 LoRA rerun: %s r%s lr%s ===\n' "${dataset}" "${rank}" "${column}"
 printf 'LoRA r%s modules=all lr=%s (matrix %s)\n' \
     "${rank}" "${LORA_LR[${column}]}" "${LORA_MATRIX[${column}]}"
+printf 'rollouts=%s\n' "${NUM_ROLLOUT}"
 printf 'results=%s\nlogs=%s\nwandb=%s\ncheckpoints=%s\n' \
     "${results}" "${LORA_REGRET_LOG_DIR}" "${WANDB_DIR}" "${LORA_REGRET_CKPT_DIR}"
 

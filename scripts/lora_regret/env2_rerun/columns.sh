@@ -23,6 +23,25 @@ LORA_RANKS=(1 16 256)
 OFT_LR=(unused 5e-07 1e-06 3e-06 7e-06 2e-05 4e-05 0.0001)
 OFT_LR_RE=(unused '5e\-07' '1e\-06' '3e\-06' '7e\-06' '2e\-05' '4e\-05' '0\.0001')
 
+# Rollouts per dataset. Under the E4 protocol GLOBAL_BATCH_SIZE equals
+# ROLLOUT_BATCH_SIZE, so one rollout is one optimizer step and this is the
+# step count. GSM8K runs 200; MATH keeps the protocol's 150.
+MATH_ROLLOUTS=150
+GSM8K_ROLLOUTS=200
+
+# Export NUM_ROLLOUT for the dataset unless the operator already set it.
+# e4_protocol.sh assigns NUM_ROLLOUT only when unset, so the export here is
+# what reaches the launcher; an explicit NUM_ROLLOUT in the calling shell still
+# wins, and every runner prints the value it ended up with.
+set_dataset_rollouts() {
+    case "$1" in
+        math) : "${NUM_ROLLOUT=${MATH_ROLLOUTS}}" ;;
+        gsm8k) : "${NUM_ROLLOUT=${GSM8K_ROLLOUTS}}" ;;
+        *) echo "unsupported dataset: $1" >&2; exit 2 ;;
+    esac
+    export NUM_ROLLOUT
+}
+
 check_dataset() {
     case "$1" in
         math|gsm8k) ;;

@@ -44,6 +44,14 @@ W&B files from a host with egress:
 bash scripts/lora_regret/env2_rerun/sync_wandb.sh
 ```
 
+## Run length
+
+Every env2 runner exports `NUM_ROLLOUT` per dataset from `columns.sh` before
+calling the campaign: **MATH 150, GSM8K 200**. One rollout is one optimizer
+step under the E4 protocol, so these are step counts. An explicit
+`NUM_ROLLOUT=...` in the calling shell still overrides both, and each runner
+prints `rollouts=` so the value in force is in the log.
+
 ## Per-method FullFT and LoRA sweeps
 
 The column wrappers above run FullFT and all three LoRA ranks into one ledger,

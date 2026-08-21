@@ -15,6 +15,7 @@ shift 2
 # shellcheck disable=SC1091
 source "${HERE}/columns.sh"
 check_dataset "${dataset}"
+set_dataset_rollouts "${dataset}"
 check_column "${column}"
 
 # shellcheck disable=SC1091
@@ -25,6 +26,7 @@ campaign="${ORBIT_ICLR_ROOT}/scripts/lora_regret/campaign.sh"
 
 printf '\n=== env2 OFT rerun: %s lr%s ===\n' "${dataset}" "${column}"
 printf 'OFT block=128 modules=all lr=%s\n' "${OFT_LR[${column}]}"
+printf 'rollouts=%s\n' "${NUM_ROLLOUT}"
 printf 'results=%s\nlogs=%s\nwandb=%s\ncheckpoints=%s\n' \
     "${results}" "${LORA_REGRET_LOG_DIR}" "${WANDB_DIR}" "${LORA_REGRET_CKPT_DIR}"
 
