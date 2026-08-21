@@ -1,3 +1,4 @@
+import time
 from collections.abc import Callable
 
 import ray
@@ -11,6 +12,12 @@ from orbit.utils.distributed_utils import get_gloo_group
 
 from ...megatron_to_hf import convert_to_hf
 from ..common import all_gather_param, collect_named_tensors_for_weight_transfer, post_process_weights
+from ..sync_metrics import (
+    emit_timeline_event,
+    emit_update_weights_metrics,
+    get_payload_tracker,
+    sum_metrics_across_ranks,
+)
 
 
 class DistBucketedWeightUpdateMixin:
@@ -180,6 +187,17 @@ class DistBucketedWeightUpdateMixin:
         """
         self.weight_version += 1
 
+        # Sync-cost instrumentation (perf/update_weights_*) and A2 timeline
+        # markers, mirroring UpdateWeightFromTensor.update_weights: the
+        # broadcasting source rank records each bucket's payload (broadcast.py),
+        # rank 0 times the engine pause window (pause dispatch -> continue).
+        get_payload_tracker().reset()
+        pause_started = None
+        pause_seconds = 0.0
+        if dist.get_rank() == 0:
+            emit_timeline_event("update_start", weight_version=self.weight_version, mode="full")
+            pause_started = time.perf_counter()
+
         self._pause_and_prepare_engines()
         dist.barrier(group=get_gloo_group())
 
@@ -191,4 +209,21 @@ class DistBucketedWeightUpdateMixin:
         dist.barrier(group=get_gloo_group())
 
         self._finalize_and_resume_engines()
+        if pause_started is not None:
+            pause_seconds = time.perf_counter() - pause_started
+            emit_timeline_event("update_end", weight_version=self.weight_version, mode="full")
         dist.barrier(group=get_gloo_group())
+
+        # SUM per-rank contributions (collective on the gloo group, reached by
+        # every rank in lockstep) so the perf-logging primary rank emits totals.
+        tracker = get_payload_tracker()
+        pause_total, payload_bytes_total, payload_tensors_total, num_records_total = sum_metrics_across_ranks(
+            [pause_seconds, tracker.payload_bytes, tracker.num_tensors, tracker.num_records],
+            group=get_gloo_group(),
+        )
+        emit_update_weights_metrics(
+            pause_seconds=pause_total,
+            payload_bytes=payload_bytes_total,
+            num_tensors=payload_tensors_total,
+            num_chunks=num_records_total,
+        )

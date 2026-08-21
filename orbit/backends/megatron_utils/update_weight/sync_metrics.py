@@ -78,10 +78,14 @@ class WeightSyncPayloadTracker:
     def __init__(self) -> None:
         self.payload_bytes = 0
         self.num_tensors = 0
+        # One record per send call (a broadcast bucket / a flat PEFT payload);
+        # the distributed broadcast path reports it as perf/update_weights_num_chunks.
+        self.num_records = 0
 
     def reset(self) -> None:
         self.payload_bytes = 0
         self.num_tensors = 0
+        self.num_records = 0
 
     def record(
         self,
@@ -100,6 +104,7 @@ class WeightSyncPayloadTracker:
                     num_tensors = len(tensors)
             self.payload_bytes += int(num_bytes or 0)
             self.num_tensors += int(num_tensors or 0)
+            self.num_records += 1
         except Exception:
             logger.exception(_METRICS_FAILURE_MSG)
 
