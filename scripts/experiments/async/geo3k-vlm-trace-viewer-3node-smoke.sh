@@ -44,8 +44,9 @@ MILES_ARGS+=(
    # own rollout metrics on top.
    --custom-rollout-log-function-path examples.model_response_trace_viewer.hook.log_rollout_data
    --save-model-response-trace-dir    "$TRACE_DIR"
-   # Cap omitted on purpose: export every accepted sample, so the step count in
-   # the trace tree is a direct check against rollout_batch_size * n_samples.
+   # This smoke accepts exactly 4 prompts * 4 samples, so the bounded export is
+   # still a direct check against the full accepted batch.
+   --model-response-trace-max-samples-per-step 16
 
    # --- shrink to a smoke ----------------------------------------------------
    --num-rollout              3

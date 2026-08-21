@@ -2288,7 +2288,8 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 type=int,
                 default=None,
                 help=(
-                    "Maximum accepted samples saved for each trace step. " "Defaults to saving every accepted sample."
+                    "Maximum accepted samples saved for each trace step. "
+                    "Required when --save-model-response-trace-dir is set."
                 ),
             )
             parser.add_argument(
@@ -3223,6 +3224,10 @@ def _validate_model_response_trace_args(args: argparse.Namespace) -> None:
     if path is not None and (not isinstance(path, str) or not path):
         raise ValueError("--save-model-response-trace-dir must be a non-empty path")
     cap = getattr(args, "model_response_trace_max_samples_per_step", None)
+    if path is not None and cap is None:
+        raise ValueError(
+            "--model-response-trace-max-samples-per-step is required when --save-model-response-trace-dir is set"
+        )
     if cap is not None and (type(cap) is not int or cap <= 0):
         raise ValueError("--model-response-trace-max-samples-per-step must be a positive integer")
 

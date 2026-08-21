@@ -83,9 +83,23 @@ def save_debug_trajectory_data(args, samples: list[Sample], rollout_id, evaluati
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         f.write("".join(json.dumps(row, separators=(",", ":")) + "\n" for row in rows))
-    for sample in samples:
-        if sample.metadata:
-            sample.metadata.pop("messages", None)  # the sidecar is their home; keep the .pt lean
+
+
+def _sample_to_debug_dict(args, sample: Sample) -> dict:
+    data = sample.to_dict()
+    if not sample.metadata:
+        return data
+
+    metadata = dict(sample.metadata)
+    if getattr(args, "save_debug_trajectory_data", None) is not None:
+        metadata.pop("messages", None)
+    if (
+        getattr(args, "save_model_response_log", None) is not None
+        or getattr(args, "save_model_response_trace_dir", None) is not None
+    ):
+        metadata.pop("response_turns", None)
+    data["metadata"] = metadata
+    return data
 
 
 def load_debug_rollout_data(args, rollout_id: int) -> tuple[list[Sample], dict]:
@@ -113,7 +127,7 @@ def save_debug_rollout_data(args, data, rollout_id, evaluation: bool, metadata: 
         save_dashboard_columns(samples, path.parent.parent / "dashboard_columns" / f"rollout_{stem}.parquet")
 
         # TODO may improve the format
-        dump_data = dict(samples=[sample.to_dict() for sample in samples])
+        dump_data = dict(samples=[_sample_to_debug_dict(args, sample) for sample in samples])
         torch.save(dict(rollout_id=rollout_id, metadata=metadata or {}, **dump_data), path)
 
 
