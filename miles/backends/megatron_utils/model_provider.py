@@ -332,7 +332,7 @@ def get_model_provider_func(
             "post_process": post_process,
             "fp16_lm_cross_entropy": args.fp16_lm_cross_entropy,
             "parallel_output": True,
-            "share_embeddings_and_output_weights": not args.untie_embeddings_and_output_weights,
+            "share_embeddings_and_output_weights": role != "critic" and not args.untie_embeddings_and_output_weights,
             "position_embedding_type": args.position_embedding_type,
             "rotary_percent": args.rotary_percent,
             "rotary_base": args.rotary_base,
@@ -354,6 +354,7 @@ def get_model_provider_func(
             # hard code here to skip r3 registration for mtp layers
             # getattr is required to avoid ckpt conversion errors
             if getattr(args, "use_rollout_routing_replay", False):
+                prev_routing_replay_enabled = routing_replay_manager.enabled
                 routing_replay_manager.enabled = False
                 logger.warning(
                     "Rollout routing replay is not applicable for MTP modules, so skipped replay registration"
@@ -361,7 +362,8 @@ def get_model_provider_func(
             mtp_block_spec = get_gpt_mtp_block_spec(config, transformer_layer_spec, **mtp_kwargs)
             kwargs["mtp_block_spec"] = mtp_block_spec
             if getattr(args, "use_rollout_routing_replay", False):
-                routing_replay_manager.enabled = True
+                # restore instead of forcing True: the critic role keeps the manager disabled
+                routing_replay_manager.enabled = prev_routing_replay_enabled
 
         with build_model_context(**build_model_context_args):
             model = GPTModel(**kwargs)

@@ -38,7 +38,10 @@ HF_TRAIN_DATA="$HF_CACHE_DIR/data/geo3k_imgurl_processed/train.parquet"
 
 # submit.sh downloads only HF_MODEL_REPO, so the fixed teacher is staged and
 # owned separately on the Ray head node.
-OPD_TEACHER_MODEL_DIR=${OPD_TEACHER_MODEL_DIR:-"$HF_CACHE_DIR/models/Qwen3-VL-30B-A3B-Thinking"}
+# Read-only model tree was reorganized 2026-08-10: the big VL checkpoints moved
+# from hf_cache/models to /data/shared/models (same convention as the MoE recipes).
+HF_MODELS_ROOT=${HF_MODELS_ROOT:-/data/shared/models}
+OPD_TEACHER_MODEL_DIR=${OPD_TEACHER_MODEL_DIR:-"$HF_MODELS_ROOT/Qwen3-VL-30B-A3B-Thinking"}
 OPD_TEACHER_PORT=${OPD_TEACHER_PORT:-13141}
 OPD_TEACHER_TP=8
 OPD_TEACHER_GPUS=0,1,2,3,4,5,6,7
@@ -89,8 +92,8 @@ ROLLOUT_ARGS=(
    --input-key problem
    --label-key answer
    --apply-chat-template
-   --custom-generate-function-path examples.geo3k_vlm_multi_turn.rollout.generate
-   --custom-config-path examples/geo3k_vlm_multi_turn/geo3k_vlm_multi_turn_config.yaml
+   --custom-generate-function-path examples.geo3k_vlm.multi_turn.rollout.generate
+   --custom-config-path examples/geo3k_vlm/multi_turn/geo3k_vlm_multi_turn_config.yaml
    --rollout-shuffle
    --num-rollout 200
    --rollout-batch-size 16
@@ -169,8 +172,11 @@ SGLANG_ARGS=(
 )
 
 FULLY_ASYNC_ARGS=(
-   --rollout-function-path examples.fully_async.fully_async_rollout.generate_rollout_fully_async
+   --fully-async
    --fully-async-prefetch-batches 2
+   # pre-sync worker semantics: aborted/stale groups go back to the data buffer
+   # for regeneration (the class-based rollout's default is drop)
+   --async-unused-samples-handler retry
    --fully-async-max-completed-queue-groups 32
    --max-weight-staleness 2
    --update-weights-interval 1

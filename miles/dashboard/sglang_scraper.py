@@ -18,7 +18,7 @@ module has no collector or Ray dependency and is fully unit-testable.
 Failure policy: a failed tick (or a failed engine in direct mode) leaves a
 gap in the series — values are never fabricated — and warnings are
 rate-limited to one per ``WARN_INTERVAL_SECONDS`` (pattern from
-``examples/random_async/random_async_sglang_metrics.py``).
+``examples/infra_features/random_async/random_async_sglang_metrics.py``).
 """
 
 from __future__ import annotations
@@ -68,8 +68,10 @@ DEFAULT_METRIC_WHITELIST = (
     "sglang_e2e_request_latency_seconds_count",
 )
 
-# label subset passed through to EngineSample.labels (e.g. PD prefill/decode)
-KEPT_LABELS = ("engine_type",)
+# label subset passed through to EngineSample.labels: engine_type (PD
+# prefill/decode) and dp_rank (dp-attention engines export one sample per
+# dp rank; dropping the label would fold the ranks into one series)
+KEPT_LABELS = ("engine_type", "dp_rank")
 
 
 class ScrapeMode(StrEnum):

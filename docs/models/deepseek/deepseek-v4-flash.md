@@ -88,7 +88,8 @@ python tools/fp8_cast_bf16.py \
    --input-fp8-hf-path /root/models/DeepSeek-V4-Flash-FP8 \
    --output-bf16-hf-path /root/models/DeepSeek-V4-Flash-FP8-bf16/
 
-source scripts/models/deepseek-v4-flash.sh
+MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py deepseek-v4-flash)" || exit 1
+read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM torchrun \
    --nproc-per-node 4 --nnodes 8 \
    --master-addr ${MASTER_ADDR} --master-port 12345 \
@@ -120,7 +121,7 @@ Alternatively, you can set `MILES_SCRIPT_EXTERNAL_RAY=1` and `RAY_ADDRESS=…` t
 
 ### 4.4 Notable quirks
 
-- **Custom `transformers` patch.** miles ships `with_transformers_patch()` (`miles/utils/transformers_patch.py`) so HF's `AutoConfig.from_pretrained` recognizes `model_type=deepseek_v4` / `deepseek_ref` until support lands upstream.
+- **`model_type` rewrite for pruned checkpoints.** The older layer-pruning flow wrote `"model_type": "deepseek_ref"` into the local `config.json`. The launcher rewrites it back to `deepseek_v4` in place (`scripts/run_deepseek_v4.py`), so HF's `AutoConfig.from_pretrained` resolves the checkpoint without a patched `transformers`.
 
 ## 5. Example Recipe Configuration
 
@@ -169,7 +170,7 @@ SGLANG_ARGS=(
 )
 ```
 
-The launcher sets the required env vars for you: `SGLANG_SKIP_CHECKPOINT_LOAD_CHECK=1`, `SGLANG_DSV4_FP4_EXPERTS=0`, `MILES_HACK_TRAIN_TORCH_DETERMINISTIC=1`, and `NCCL_ALGO=Ring`.
+The launcher sets the required env vars for you: `SGLANG_SKIP_CHECKPOINT_LOAD_CHECK=1`, `SGLANG_DSV4_FP4_EXPERTS=0`, `SGLANG_HEALTH_CHECK_TIMEOUT=120`, `SGLANG_DG_CACHE_DIR_PER_PROCESS=1`, and `SGLANG_OPT_FP8_WO_A_GEMM=0`. Because `--train-deterministic` defaults to on, a stock run also gets `--deterministic-mode` plus `NCCL_ALGO=Ring`, `NVTE_ALLOW_NONDETERMINISTIC_ALGO=0` and `CUBLAS_WORKSPACE_CONFIG=:4096:8`; pass `--no-train-deterministic` to drop those four.
 
 On the Megatron side, V4 needs `--qkv-format bshd` with CP-aware data slicing. The DSA indexer additionally supports replay via `--use-rollout-indexer-replay` (off by default).
 
@@ -189,5 +190,5 @@ The `--low-memory-resume` flag (off by default) puts optimizer states on CPU dur
 
 ## 6. Pairs Well With
 
-- [FP8 & Low Precision](/advanced/fp8-low-precision)
+- [Low Precision RL](/advanced/low-precision)
 - [Architecture Support](/advanced/architecture-support) — the V4 plugin lives under `miles_plugins/models/deepseek_v4/`.

@@ -59,7 +59,6 @@ def run_ci(
             num_gpus_per_node=_TRAIN_GPUS + _ROLLOUT_GPUS,
             megatron_model_type=_MODEL_TYPE,
             extra_env_vars={
-                "MILES_EXPERIMENTAL_ROLLOUT_REFACTOR": "1",
                 # --ft-components train depends on cell-based indep_dp, which only
                 # the v2 RayTrainGroup supports.
                 "MILES_EXPERIMENTAL_FT_TRAINER": "1",
@@ -77,8 +76,8 @@ def run_ci(
 
 
 def _prepare_gsm8k() -> None:
-    U.exec_command("mkdir -p /root/models /root/datasets")
-    U.exec_command(f"hf download Qwen/{_MODEL_NAME} --local-dir /root/models/{_MODEL_NAME}")
+    U.exec_command_cpu("mkdir -p /root/models /root/datasets")
+    U.exec_command_cpu(f"hf download Qwen/{_MODEL_NAME} --local-dir /root/models/{_MODEL_NAME}")
     U.convert_checkpoint(
         model_name=_MODEL_NAME,
         megatron_model_type=_MODEL_TYPE,

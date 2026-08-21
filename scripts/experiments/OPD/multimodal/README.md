@@ -371,7 +371,7 @@ Milestone `04a` sources the validated `02a` recipe and replaces only its data
 and rollout-sequence arguments:
 
 - data: `VeraIsHere/geo3k_imgurl_processed`;
-- generator: `examples.geo3k_vlm_multi_turn.rollout.generate`;
+- generator: `examples.geo3k_vlm.multi_turn.rollout.generate`;
 - interaction config: `max_turns: 3` with the Geo3K feedback environment;
 - objective: sampled RKLD only (`opd_kl_coef=1`, DAgger disabled);
 - execution: synchronous, CP=1, five optimizer steps, no eval or checkpoint.
@@ -718,8 +718,8 @@ holds this synchronous hybrid contract fixed and changes scheduling only.
 ## 07: Geo3K multi-turn hybrid OPD under fully-async scheduling
 
 Milestone `07` does not change the objective established by `06`. It switches
-the training entry point to `train_async.py` and selects
-`examples.fully_async.fully_async_rollout.generate_rollout_fully_async`. The
+the training entry point to `train_async.py` and selects `--fully-async`
+(`miles.rollout.fully_async_rollout.FullyAsyncRolloutFn` since the 2026-08 sync). The
 persistent background worker continuously performs the existing per-sample
 sequence:
 
@@ -752,13 +752,18 @@ MILES_TRAIN_ENTRY=train_async.py
 --fully-async-prefetch-batches 1
 --fully-async-max-completed-queue-groups 32
 --max-weight-staleness 2
+--async-unused-samples-handler retry
 --update-weights-interval 1
 ```
 
 With `rollout_batch_size=16`, the worker keeps at most sixteen prompt groups
-actively generating. The completed-queue soft cap allows two additional
-batches to wait in CPU memory; already-running groups can finish beyond the
-cap. Stale groups are reset and returned to the data source, which clears their
+actively generating. `--fully-async-max-completed-queue-groups` no longer does
+anything: the class-based fully-async rewrite bounds the finished-group buffer
+with `--async-data-buffer-capacity-factor` (default 2.0, so
+`floor(2.0 x 16) = 32` groups — coincidentally the old cap) and the producer
+**blocks on put** when it is full, rather than pausing its own launches. The
+flag is still parsed for recipe compatibility and argument validation warns on
+it. Stale groups are reset and returned to the data source, which clears their
 response, rollout log-probs, teacher sampled log-probs and sparse teacher
 targets before regeneration.
 
@@ -783,7 +788,7 @@ algorithmic invariant and additionally show:
 3. exact-suffix alignment, multi-turn masks, total-loss additivity and both
    DAgger identities remain valid;
 4. accepted sample weight versions are finite and bounded, stale groups are
-   recycled rather than trained, and the completed queue remains bounded;
+   recycled rather than trained, and the finished-group buffer remains bounded;
 5. persistent OPD transport closes on the worker's owner event loop; and
 6. gradients, masses, scoring transport and rollout/train/total timing remain
    finite without NaN, OOM, timeout or deadlock.
@@ -891,7 +896,9 @@ HF_CACHE_DIR=/data/shared/hf_cache bash scripts/slurm/submit.sh \
 `08c/08d` source the completed async `07` contract, add the same task-reward
 flags, and set `--fully-async-prefetch-batches 2`. With rollout batch size 16
 and four samples per prompt, this allows 32 prompt groups / 128 sample requests
-to be active. The completed queue cap remains 32 groups and the accepted age
+to be active. The finished-group buffer still bounds at 32 groups — now via
+`--async-data-buffer-capacity-factor 2.0 x rollout_batch_size 16` rather than
+the inert `--fully-async-max-completed-queue-groups` — and the accepted age
 bound remains two weight versions. The existing warning contract permits this
 window because `prefetch=2 <= max_weight_staleness+1=3`.
 
@@ -1237,9 +1244,9 @@ optimization reward       = unchanged: task reward remains telemetry-only
 checkpoint saving         = disabled
 ```
 
-The eval dataset selects `examples.geo3k_vlm_multi_turn.fixed_eval.generate`
+The eval dataset selects `examples.geo3k_vlm.multi_turn.fixed_eval.generate`
 through a per-dataset `--eval-config`. Training keeps the original
-`examples.geo3k_vlm_multi_turn.rollout.generate` callback and metadata contract.
+`examples.geo3k_vlm.multi_turn.rollout.generate` callback and metadata contract.
 On eval only, the wrapper assigns the built-in `math` task reward before Miles
 can invoke the OPD custom RM. Student evaluation therefore generates with the
 current Student SGLang weights but issues no teacher-scoring request and cannot

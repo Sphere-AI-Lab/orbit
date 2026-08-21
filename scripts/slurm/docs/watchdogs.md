@@ -39,7 +39,7 @@ engine health-monitor and the weight-broadcast cascade matter most here.
 | 13 | slurm preemption (SIGTERM) | outer | scheduler sends `SIGTERM@120` | 120s grace | **INTERRUPTED**, graceful |
 | 14 | OOM detection | outer | oom_kill / exit −9 / OUT_OF_MEMORY | — | **FAILED** (rc 137) |
 | 15 | max_weight_staleness recycle | S5 | group older than current weight by >N | None (off) | **discard work** (not job) |
-| 16 | completed-queue soft cap | S5 | output queue ≥ cap | 2048 | **pause sampler** (backpressure) |
+| 16 | finished-group buffer capacity | S5 | buffer ≥ `floor(F × rollout_batch_size)` | F = 2.0 | **block the producer** (backpressure) |
 
 Stages: S1 startup, S2 assembly, S3 init, S4 warmup, S5 steady state, S5a weight broadcast,
 S7 training compute, "outer" = any time after submit.
@@ -172,9 +172,11 @@ S7 training compute, "outer" = any time after submit.
   oldest rollout weight version trails the current engine version by > N is **reset and
   returned to the data buffer** (re-sampled later), not trained on. **Discards work, never
   kills the job.** Default `None` (off); our recipes set 2.
-- **16. completed-queue soft cap** (`--fully-async-max-completed-queue-groups`, default 2048):
-  if the trainer falls behind and the output queue fills, the worker **stops launching new
-  generation** until the trainer drains. Backpressure / memory guard, not a kill.
+- **16. finished-group buffer capacity** (`--async-data-buffer-capacity-factor`, default 2.0):
+  bounds the finished-group buffer at `floor(factor * rollout_batch_size)` groups; when it is
+  full the producer **blocks on put** until training consumes. Backpressure / memory guard,
+  not a kill. (`--fully-async-max-completed-queue-groups` used to do this by pausing launches;
+  the 2026-08-18 class-based rewrite made it inert and argument validation now warns on it.)
 
 ### S5a — per-step weight broadcast (trainer → engines)
 - **8. The cascade hub.** `update_weights` broadcasts new weights to all engines via a

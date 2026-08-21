@@ -11,9 +11,11 @@ and the default it replaces.
 | Stage | Flag | Replaces |
 |---|---|---|
 | **Rollout** | `--rollout-function-path` | The whole rollout loop |
+| | `--custom-agent-function-path` | The agent-environment loop inside a TITO session |
 | | `--custom-generate-function-path` | A single sample's generation |
 | | `--data-source-path` | How prompts are loaded |
 | | `--eval-function-path` | The eval rollout |
+| **Session** | `--session-message-matcher` | Prefix-replay equivalence |
 | **Reward** | `--custom-rm-path` | Reward computation |
 | | `--custom-reward-post-process-path` | Reward normalization |
 | **Filtering** | `--dynamic-sampling-filter-path` | Per-group filter (DAPO) |
@@ -48,11 +50,9 @@ def generate_rollout(args, rollout_id, data_source, evaluation=False) \
     ...
 ```
 
-**Default:** `miles.rollout.sglang_rollout.generate_rollout`, or
-`miles.rollout.inference_rollout.inference_rollout_common.InferenceRolloutFn` when
-`enable_experimental_rollout_refactor()` is on.
+**Default:** `miles.rollout.inference_rollout.inference_rollout_common.InferenceRolloutFn`; use `miles.rollout.sglang_rollout.generate_rollout` under `MILES_USE_LEGACY_ROLLOUT_V1=1`.
 
-**Reference:** [`examples/multi_agent/rollout_with_multi_agents.py`](https://github.com/radixark/miles/blob/main/examples/multi_agent/rollout_with_multi_agents.py).
+**Reference:** [`examples/experimental/multi_agent/rollout_with_multi_agents.py`](https://github.com/radixark/miles/blob/main/examples/experimental/multi_agent/rollout_with_multi_agents.py).
 
 ### `--custom-generate-function-path`
 
@@ -64,7 +64,34 @@ async def custom_generate(args, sample: Sample, sampling_params: dict) -> Sample
     ...
 ```
 
-**Reference:** [`examples/search-r1/generate_with_search.py`](https://github.com/radixark/miles/blob/main/examples/search-r1/generate_with_search.py).
+The hook also accepts the `GenerateFnInput -> GenerateFnOutput` form; both
+signatures load through the same adapter. See
+[Generate Endpoint](/user-guide/generate-endpoint) for the full contract.
+
+**Reference:** [`examples/experimental/search-r1/generate_with_search.py`](https://github.com/radixark/miles/blob/main/examples/experimental/search-r1/generate_with_search.py).
+
+
+### `--custom-agent-function-path`
+
+Enabled when you set `--custom-generate-function-path miles.rollout.generate_hub.agentic_tool_call.generate`.
+Use `--custom-agent-function-path` to specify the async agent or environment loop
+that sends OpenAI-compatible chat requests through Miles' TITO session server.
+
+
+```python
+async def run_agent(
+    base_url: str,
+    prompt,
+    request_kwargs: dict,
+    metadata: dict,
+    **kwargs,
+) -> dict | None:
+    ...
+```
+
+See [Agentic Rollout (TITO)](/user-guide/agentic-rollout) for the full wiring and
+message/token ownership contract.
+
 
 ### `--data-source-path`
 
@@ -85,6 +112,21 @@ configured.
 
 ---
 
+## Session
+
+### `--session-message-matcher`
+
+Some harnesses do not replay history verbatim — they reserialize tool-call arguments or drop `reasoning_content` — and the default `strict` matcher counts that as divergence (v1 rollback, v2 branching). This flag loosens what "the same message" means during replay: choose a looser built-in selector (see [Agentic Rollout (TITO)](/user-guide/agentic-rollout#choose-replay-matching)) or supply your own matcher via a trusted dotted import path:
+
+```python
+def matcher(stored_message: dict[str, Any], replayed_message: dict[str, Any]) -> bool:
+    ...
+```
+
+`stored_message` is the authoritative stored message; return `True` to accept the replayed message as the same history at that position. Keep the matcher a fast, synchronous, side-effect-free equivalence check — exceptions or non-`bool` results return HTTP 500, and startup fails if the path does not resolve.
+
+---
+
 ## Reward
 
 ### `--custom-rm-path`
@@ -98,8 +140,10 @@ async def batched_custom_rm(args, samples: list[Sample]) -> list[float]:
     ...
 ```
 
-**Built-in `--rm-type` options:** `math`, `dapo`, `deepscaler`, `f1`, `gpqa`,
-`ifbench`, `remote_rm` (with `--rm-url`), `random`.
+**Built-in `--rm-type` options:** `math`, `dapo`, `deepscaler`, `gemma_math`, `f1`,
+`gpqa`, `ifbench`, `remote_rm` (with `--rm-url`), `random`, `deterministic_random`.
+Prefixing any of them with `boxed_` (for example `boxed_math`) extracts `\boxed{}`
+from the response before grading.
 
 ### `--custom-reward-post-process-path`
 
@@ -176,7 +220,7 @@ objectives or multi-objective work.
 Importance sampling correction for off-policy training when train and inference
 diverge.
 
-**Reference:** [`examples/train_infer_mismatch_helper/mis.py`](https://github.com/radixark/miles/blob/main/examples/train_infer_mismatch_helper/mis.py).
+**Reference:** [`examples/infra_features/train_infer_mismatch_helper/mis.py`](https://github.com/radixark/miles/blob/main/examples/infra_features/train_infer_mismatch_helper/mis.py).
 
 ### `--custom-pg-loss-reducer-function-path`
 
@@ -191,7 +235,7 @@ def get_pg_loss_reducer(
 ```
 
 Use case: Dr.GRPO divides by a constant instead of effective token count.
-**Reference:** [`examples/DrGRPO/custom_reducer.py`](https://github.com/radixark/miles/blob/main/examples/DrGRPO/custom_reducer.py).
+**Reference:** [`examples/experimental/DrGRPO/custom_reducer.py`](https://github.com/radixark/miles/blob/main/examples/experimental/DrGRPO/custom_reducer.py).
 
 ### `--custom-convert-samples-to-train-data-path`
 

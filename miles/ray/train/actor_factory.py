@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import ray
 from ray.util.placement_group import PlacementGroup
@@ -52,11 +53,19 @@ def allocate_gpus_for_actor(
         from torch_memory_saver.utils import get_binary_path_from_package
 
         dynlib_path = str(get_binary_path_from_package("torch_memory_saver_hook_mode_preload"))
-        assert os.path.exists(dynlib_path), f"LD_PRELOAD so file {dynlib_path} does not exist."
 
         env_vars["LD_PRELOAD"] = dynlib_path
         env_vars["TMS_INIT_ENABLE"] = "1"
-        env_vars["TMS_INIT_ENABLE_CPU_BACKUP"] = "1"
+        if args.offload_train_target == "disk":
+            assert b"TMS_INIT_ENABLE_DISK_BACKUP" in Path(dynlib_path).read_bytes(), (
+                f"{dynlib_path} has no disk backend; reinstall torch_memory_saver at the commit "
+                f"docker/Dockerfile pins."
+            )
+            env_vars["TMS_INIT_ENABLE_CPU_BACKUP"] = "0"
+            env_vars["TMS_INIT_ENABLE_DISK_BACKUP"] = "1"
+            env_vars["TMS_DISK_BACKUP_CHUNK_MB"] = str(args.offload_train_disk_chunk_mb)
+        else:
+            env_vars["TMS_INIT_ENABLE_CPU_BACKUP"] = "1"
 
     backend = args.train_backend
     if backend == "megatron":
@@ -65,7 +74,7 @@ def allocate_gpus_for_actor(
         actor_impl = MegatronTrainRayActor
 
     else:
-        from miles.backends.experimental.fsdp_utils import FSDPTrainRayActor
+        from miles.backends.fsdp_utils import FSDPTrainRayActor
 
         actor_impl = FSDPTrainRayActor
 
@@ -80,14 +89,18 @@ def allocate_gpus_for_actor(
     actor_handles = []
     master_addr, master_port = None, None
     for rank in range(world_size):
-        actor = TrainRayActor.options(
+        options = dict(
             num_cpus=num_gpus_per_actor,
             num_gpus=num_gpus_per_actor,
             scheduling_strategy=PlacementGroupSchedulingStrategy(
                 placement_group=pg,
                 placement_group_bundle_index=reordered_bundle_indices[rank],
             ),
-        ).remote(
+        )
+        if args.offload_train_target == "disk" and args.offload_train and args.train_backend == "megatron":
+            rank_dir = os.path.join(args.offload_train_disk_dir, f"cell{cell_index}_rank{rank}")
+            options["runtime_env"] = {"env_vars": {**env_vars, "TMS_DISK_BACKUP_DIR": rank_dir}}
+        actor = TrainRayActor.options(**options).remote(
             args,
             world_size,
             rank,

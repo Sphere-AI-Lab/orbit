@@ -28,7 +28,7 @@ examples/vagen/
 ├── rollout.py                ← custom multi-turn generate function
 ├── env_adapter.py            ← VAGEN ↔ miles bridge (local copy of helpers)
 ├── debug_dump.py             ← --rollout-all-samples-process-path hook
-└── tests/test_env_dynamics.py
+└── tests/env_dynamics_probe.py
 ```
 
 The experiment launchers live under `scripts/experiments/vagen-*.sh`.

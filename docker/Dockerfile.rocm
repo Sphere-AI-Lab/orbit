@@ -8,7 +8,7 @@
 #    build-arg:GPU_ARCH=gfx942  SGLANG_IMAGE_TAG=v0.5.10-rocm700-mi30x
 #
 # 3. rocm720-mi35x  (gfx950, ROCm 7.2 / MI350 / MI355X)
-#    build-arg:SGLANG_IMAGE_REPO=rocm/sgl-dev  SGLANG_IMAGE_TAG=v0.5.14-rocm720-mi35x-20260627
+#    build-arg:SGLANG_IMAGE_REPO=rocm/sgl-dev  SGLANG_IMAGE_TAG=v0.5.16-rocm720-mi35x-20260730
 
 ARG SGLANG_IMAGE_REPO=lmsysorg/sglang
 ARG SGLANG_IMAGE_TAG=v0.5.10-rocm700-mi35x
@@ -39,6 +39,9 @@ ARG RCCL_TESTS_PATH=projects/rccl-tests
 
 ARG TRANSFORMER_ENGINE_REPO=https://github.com/ROCm/TransformerEngine.git
 ARG TRANSFORMER_ENGINE_BRANCH=v2.8_rocm
+ARG MOONCAKE_VERSION=0.3.12.post1
+
+ARG TARGETARCH
 
 # ======================================== Setup ================================================
 WORKDIR /root/
@@ -61,8 +64,6 @@ ENV CMAKE_PREFIX_PATH=/opt/rocm:/opt/rocm/hip:/usr/local:/usr
 # Patches + requirements consumed below.
 # TODO: remove these patches once the changes are merged into the main codebase.
 COPY docker/amd_patch/latest/megatron.patch /tmp/amd_patch/megatron.patch
-COPY docker/amd_patch/latest/miles.patch /tmp/amd_patch/miles.patch
-COPY docker/amd_patch/latest/sglang_attn_bridge /tmp/amd_patch/sglang_attn_bridge
 COPY docker/amd_patch/latest/tile_kernels.patch /tmp/amd_patch/tile_kernels.patch
 COPY docker/amd_patch/latest/tilelang_hip_fp8.patch /tmp/amd_patch/tilelang_hip_fp8.patch
 COPY requirements.txt /tmp/requirements.txt
@@ -101,6 +102,11 @@ RUN pip uninstall -y transformer-engine transformer_engine transformer_engine_to
     fi
 RUN pip install /tmp/wheels/flash_attn-*.whl
 
+# make install lays down mooncake's native modules but not its pure Python files.
+RUN pip install --no-deps --target=/tmp/mc "mooncake-transfer-engine-non-cuda==${MOONCAKE_VERSION}" && \
+    cp -n /tmp/mc/mooncake/*.py "$(python3 -c 'import mooncake, os; print(os.path.dirname(mooncake.__file__))')" && \
+    rm -rf /tmp/mc
+
 RUN pip install flash-linear-attention==0.4.2
 
 # Enable deepseek-ai/TileKernels on ROCm/gfx950 for mHC and FP8 QAT cast-back.
@@ -129,7 +135,7 @@ RUN cd /sgl-workspace/sglang && \
 
 RUN python -c "import sglang; import sgl_kernel; print('SGLang + sgl_kernel: OK')"
 
-RUN pip install git+https://github.com/fzyzcjy/torch_memory_saver.git --no-cache-dir --force-reinstall
+RUN pip install git+https://github.com/fzyzcjy/torch_memory_saver.git@74d68c5e4bedf2b6774f2c92ed0f81b7c8d91ed0 --no-cache-dir --force-reinstall
 
 # Fix the ROCm 7.2 ROCr VMM-pause leak.
 RUN if [ "$APPLY_ROCR_VMMFIX" = "1" ]; then \
@@ -166,15 +172,17 @@ RUN pip install "typer==0.25.1" "click==8.2.1"
 # Pin numpy 1.x for Megatron compatibility.
 RUN pip install "numpy<2"
 
+COPY docker/install-kube-tools.sh /tmp/install-kube-tools.sh
+RUN bash /tmp/install-kube-tools.sh "${TARGETARCH}" && rm -f /tmp/install-kube-tools.sh
+
 # ====================================== Install main package ===================================
 
 RUN git clone https://github.com/radixark/miles.git /root/miles && \
     cd /root/miles && \
     git checkout ${MILES_COMMIT} && \
-    git apply --3way --unidiff-zero /tmp/amd_patch/miles.patch && \
-    mkdir -p miles/backends/experimental/fsdp_utils/sglang_attn_bridge && \
-    cp -r /tmp/amd_patch/sglang_attn_bridge/. miles/backends/experimental/fsdp_utils/sglang_attn_bridge/ && \
     pip install -e . --no-deps
+
+RUN python -c "import miles.backends.fsdp_utils; import miles.backends.megatron_utils; print('miles backends: OK')"
 
 # ====================================== Install sgl-model-gateway ============================================
 # SGL_ROUTER_USE_WHEELS=1 (default): prebuilt sgl-router wheel + gateway binary; 0: build from source.
@@ -206,6 +214,8 @@ RUN rm -rf /tmp/wheels
 # ====================================== Runtime knobs ==========================================
 
 # Runtime knobs consumed by the current SGLang/PyTorch stack.
+# Lets scripts and tests pick the ROCm recipe without probing the device.
+ENV MILES_HARDWARE_PLATFORM=rocm
 ENV HIP_FORCE_DEV_KERNARG=1
 # ROCm 7.2 switched IPC to dma-buf, which leaks exported VRAM in colocate; force legacy IPC to avoid it.
 ENV HSA_ENABLE_IPC_MODE_LEGACY=1

@@ -21,13 +21,19 @@ def get_logits_and_tokens_offset_with_cp(
     response_length: int,
     qkv_format: str = "thd",
     max_seq_len: int | None = None,
+    cp_rank: int | None = None,
+    cp_size: int | None = None,
 ):
     """
     All offsets start from the begining of the prompt.
+
+    ``cp_rank`` / ``cp_size`` default to this process's parallel state; pass them
+    explicitly to compute another rank's offsets outside the process group.
     """
-    parallel_state = get_parallel_state()
-    cp_rank = parallel_state.cp.rank
-    cp_size = parallel_state.cp.size
+    if cp_rank is None or cp_size is None:
+        parallel_state = get_parallel_state()
+        cp_rank = parallel_state.cp.rank
+        cp_size = parallel_state.cp.size
     assert cp_size > 1
 
     prompt_length = total_length - response_length
@@ -96,10 +102,15 @@ def get_sum_of_sample_mean(
     calculate_per_token_loss: bool = False,
     qkv_format: str = "thd",
     max_seq_lens: list[int] | None = None,
+    *,
+    denominators: list[torch.Tensor] | torch.Tensor | None = None,
 ) -> Callable[[torch.Tensor], torch.Tensor]:
-    """
-    Calculate correct sample mean for CP
-    """
+    """Calculate correct sample mean for CP; ``denominators`` overrides each
+    sample's own ``loss_mask.sum()`` (e.g. pass ``rollout_mask_sums`` for
+    per-rollout means)."""
+    if denominators is None:
+        denominators = [m.sum() for m in loss_masks]
+
     parallel_state = get_parallel_state()
     cp_size = parallel_state.cp.size
     if cp_size == 1:
@@ -107,8 +118,10 @@ def get_sum_of_sample_mean(
         def sum_of_sample_mean(x: torch.Tensor) -> torch.Tensor:
             return sum(
                 [
-                    (x_i * loss_mask_i).sum() / torch.clamp_min(loss_mask_i.sum(), 1)
-                    for x_i, loss_mask_i in zip(x.split(response_lengths, dim=0), loss_masks, strict=True)
+                    (x_i * loss_mask_i).sum() / torch.clamp_min(denominator, 1)
+                    for x_i, loss_mask_i, denominator in zip(
+                        x.split(response_lengths, dim=0), loss_masks, denominators, strict=True
+                    )
                 ]
             )
 
@@ -135,9 +148,9 @@ def get_sum_of_sample_mean(
         def sum_of_sample_mean(x: torch.Tensor) -> torch.Tensor:
             return sum(
                 [
-                    (x_i * chunked_loss_mask).sum() / torch.clamp_min(loss_mask.sum(), 1)
-                    for x_i, chunked_loss_mask, loss_mask in zip(
-                        x.split(cp_chunk_lengths, dim=0), chunked_loss_masks, loss_masks, strict=True
+                    (x_i * chunked_loss_mask).sum() / torch.clamp_min(denominator, 1)
+                    for x_i, chunked_loss_mask, denominator in zip(
+                        x.split(cp_chunk_lengths, dim=0), chunked_loss_masks, denominators, strict=True
                     )
                 ]
             )
@@ -438,6 +451,41 @@ def slice_log_prob_with_cp(
 ) -> list[float] | torch.Tensor:
     """Backward-compatible scalar-response wrapper."""
     return slice_response_tensor_with_cp(log_prob, total_length, response_length, qkv_format, max_token_len)
+
+
+def assemble_log_prob_from_cp(
+    chunks: dict[int, torch.Tensor],
+    total_length: int,
+    response_length: int,
+    cp_size: int,
+    qkv_format: str = "thd",
+    max_seq_len: int | None = None,
+) -> torch.Tensor:
+    """Inverse of `slice_log_prob_with_cp`: per-rank slices back to one response.
+
+    `chunks` maps cp_rank to that rank's slice; every rank must be present.
+    Offsets come from the same helper the forward split uses.
+    """
+    assert cp_size > 1, "no reassembly needed at cp_size=1"
+    missing = sorted(set(range(cp_size)) - set(chunks))
+    assert not missing, f"cp ranks {missing} missing; cannot reassemble a partial group"
+
+    prompt_length = total_length - response_length
+    out = torch.zeros(response_length, dtype=next(iter(chunks.values())).dtype)
+    for cp_rank, chunk in chunks.items():
+        _, _, logits_offset, _ = get_logits_and_tokens_offset_with_cp(
+            total_length, response_length, qkv_format, max_seq_len, cp_rank=cp_rank, cp_size=cp_size
+        )
+        taken = 0
+        for lo, hi in logits_offset:
+            start, stop = lo - (prompt_length - 1), hi - (prompt_length - 1)
+            width = stop - start
+            if width <= 0:
+                continue
+            out[start:stop] = chunk[taken : taken + width]
+            taken += width
+        assert taken == len(chunk), f"cp rank {cp_rank}: consumed {taken} of {len(chunk)} values"
+    return out
 
 
 def build_gdn_cp_context(module: nn.Module, cu_seqlens: torch.Tensor, device: torch.device):

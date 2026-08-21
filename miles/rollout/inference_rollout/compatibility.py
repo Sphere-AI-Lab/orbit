@@ -1,4 +1,5 @@
 import inspect
+import sys
 from collections.abc import Callable
 
 from miles.rollout.base_types import (
@@ -48,12 +49,18 @@ def dispose_rollout_function(fn) -> None:
         fn = fn.fn
 
     dispose = getattr(fn, "dispose", None)
-    if dispose is None:
-        return
+    if dispose is not None:
+        output = dispose()
+        if inspect.isawaitable(output):
+            run(output)
 
-    output = dispose()
-    if inspect.isawaitable(output):
-        run(output)
+    # Fork (#24, re-wired after the 2026-08 sync removed the legacy fully-async
+    # worker): the OPD persistent scoring ClientSession is loop-local to the
+    # shared rollout loop, so close it here where that loop still runs. The
+    # sys.modules probe keeps this a no-op for every run that never scored.
+    opd = sys.modules.get("miles.rollout.on_policy_distillation")
+    if opd is not None:
+        run(opd.close_scoring_transport())
 
 
 def call_rollout_function(fn, input: RolloutFnInput) -> RolloutFnOutput:

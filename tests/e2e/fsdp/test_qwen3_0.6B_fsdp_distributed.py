@@ -1,23 +1,27 @@
 import os
 
-from tests.ci.ci_register import register_cuda_ci
+from tests.ci.ci_register import register_cuda_ci, register_rocm_ci
 
 import miles.utils.external_utils.command_utils as U
 
 register_cuda_ci(
-    est_time=600,
-    suite="stage-c-8-gpu-h100",
-    labels=["fsdp"],
-    disabled="FSDP backend has known issues, not actively maintained",
+    est_time=2200,
+    suite="stage-c-4-gpu-h200",
+    labels=["long"],
+)
+register_rocm_ci(
+    est_time=2400,
+    suite="nightly-stage-c-4-gpu-mi350",
+    labels=["long"],
 )
 
 MODEL_NAME = "Qwen3-0.6B"
-NUM_GPUS = 8
+NUM_GPUS = 4
 
 
 def prepare():
-    U.exec_command("mkdir -p /root/models /root/datasets")
-    U.exec_command(f"hf download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
+    U.exec_command_cpu("mkdir -p /root/models /root/datasets")
+    U.exec_command_cpu(f"hf download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
     U.hf_download_dataset("zhuzilin/gsm8k")
 
 
@@ -103,7 +107,6 @@ def execute():
         num_gpus_per_node=NUM_GPUS,
         megatron_model_type=None,
         train_script="train_async.py",
-        extra_env_vars={"MILES_EXPERIMENTAL_ROLLOUT_REFACTOR": "1"},
     )
 
 

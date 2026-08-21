@@ -1,49 +1,14 @@
-NLAYERS="${MODEL_ARGS_NUM_LAYERS:-48}"
-FIRST_K_DENSE_REPLACE=0
-
-arr=()
-for ((i=0; i<NLAYERS; i++)); do
-  if (( i < FIRST_K_DENSE_REPLACE )); then
-    arr+=(0)
-  else
-    arr+=(1)
-  fi
-done
-
-printf -v MOE_LAYER_FREQ "[%s]" "$(IFS=', '; echo "${arr[*]}")"
-
-
-MODEL_ARGS=(
-   --disable-bias-linear
-   --qk-layernorm
-   --group-query-attention
-   --num-attention-heads 32
-   --num-query-groups 4
-   --kv-channels 128
-   --num-layers $NLAYERS
-   --hidden-size 2048
-   --ffn-hidden-size 6144
-
-   --normalization RMSNorm
-   --position-embedding-type rope
-   --norm-epsilon 1e-6
-   --rotary-percent 1.0
-   --swiglu
-   --untie-embeddings-and-output-weights
-   --vocab-size 151936
-
-   --rotary-base "${MODEL_ARGS_ROTARY_BASE:-1000000}"
-
-   # moe
-   --moe-ffn-hidden-size 768
-   --moe-router-score-function softmax
-   --moe-token-dispatcher-type alltoall
-   --moe-router-topk 8
-   --moe-layer-freq "$MOE_LAYER_FREQ"
-   --num-experts 128
-   --moe-grouped-gemm
-   --moe-token-drop-policy probs
-   --moe-router-dtype fp32
-   --moe-permute-fusion
-   --moe-aux-loss-coeff 0
-)
+# scripts/models/qwen3-30B-A3B.sh — fork compatibility shim (2026-08-18 sync).
+#
+# Upstream converted every scripts/models/*.sh into python model_args()
+# scripts (see the sibling qwen3-30B-A3B.py, consumed via
+# miles.utils.external_utils.model_args_utils.load_model_args). Existing bash
+# recipes keep sourcing this shim, which delegates to the python source of
+# truth — so model args cannot drift between the two forms.
+#
+# NEW recipes must NOT add more shims: consume load_model_args('<model>')
+# directly (python launchers) or inline the one-liner below (bash launchers).
+# Env-assignment prefix: recipes set knobs like MODEL_ARGS_ROTARY_BASE as plain
+# shell vars (the old sourced .sh saw them); the python child only sees exports,
+# so forward them explicitly.
+MODEL_ARGS=($(MODEL_ARGS_ROTARY_BASE="${MODEL_ARGS_ROTARY_BASE:-}" MODEL_ARGS_NUM_LAYERS="${MODEL_ARGS_NUM_LAYERS:-}" python3 -c "from miles.utils.external_utils.model_args_utils import load_model_args; print(load_model_args('qwen3-30B-A3B'))"))
