@@ -63,7 +63,11 @@ def _expected_from_args(run_dir: Path) -> tuple[int | None, int | None]:
 
     steps = value("num-rollout")
     batch, samples = value("rollout-batch-size"), value("n-samples-per-prompt")
-    return steps, (batch * samples if batch and samples else None)
+    per_step = batch * samples if batch and samples else None
+    cap = value("model-response-trace-max-samples-per-step")
+    if per_step is not None and cap is not None:
+        per_step = min(per_step, cap)
+    return steps, per_step
 
 
 def main() -> int:

@@ -167,14 +167,14 @@ def _sample_images(sample: Sample) -> list[Image.Image]:
 
 def _selected_samples(
     samples: Sequence[Sample],
-    cap: int | None,
+    cap: int,
 ) -> list[tuple[Sample, int, int, str]]:
-    if cap is not None and (type(cap) is not int or cap <= 0):
+    if type(cap) is not int or cap <= 0:
         raise ValueError("model response trace sample cap must be a positive integer")
     next_ordinal: dict[int, int] = defaultdict(int)
     selected = []
     names = set()
-    for position, sample in enumerate(samples if cap is None else samples[:cap]):
+    for position, sample in enumerate(samples[:cap]):
         group_index = sample.group_index
         if type(group_index) is not int or group_index < 0:
             group_index = position

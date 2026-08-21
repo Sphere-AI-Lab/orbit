@@ -396,6 +396,7 @@ async def generate(args: Any, sample: Sample, sampling_params) -> Sample:
     assert not args.partial_rollout, "Partial rollout is not supported for interaction rollouts."
 
     sample.capture_multimodal_inputs_for_retry()
+    sample.metadata = sample.metadata or {}
     # metadata survives reset_for_retry, so drop any turns the aborted attempt left.
     sample.metadata.pop(RESPONSE_TURNS_KEY, None)
     env, env_module, config, state, url = _initialize_resources(args, sample)
