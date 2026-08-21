@@ -121,43 +121,75 @@ uv_install --prerelease=allow --only-binary=:all: "sglang==$SGLANG_BASE_VERSION"
 uv_install --only-binary=:all: "sgl-deep-gemm==$SGL_DEEP_GEMM_VERSION"
 
 echo "[4/10] download RadixArk Miles release assets"
-"$PYTHON" - "$MILES_WHEELS_REPO" "$MILES_WHEELS_TAG" "$WHEEL_DIR" <<'PY'
-import json
+"$PYTHON" - \
+    "$MILES_WHEELS_REPO" \
+    "$MILES_WHEELS_TAG" \
+    "$WHEEL_DIR" \
+    "$SCRIPT_DIR/miles-wheels-$MILES_WHEELS_TAG.sha256" <<'PY'
+import hashlib
 import os
 import sys
+import time
 import urllib.request
 from pathlib import Path
+from urllib.parse import quote
 
-repo, tag, output = sys.argv[1], sys.argv[2], Path(sys.argv[3])
+repo, tag, output, manifest = sys.argv[1], sys.argv[2], Path(sys.argv[3]), Path(sys.argv[4])
+if not manifest.is_file():
+    raise SystemExit(f"missing pinned asset manifest: {manifest}")
 output.mkdir(parents=True, exist_ok=True)
-request = urllib.request.Request(
-    f"https://api.github.com/repos/{repo}/releases/tags/{tag}",
-    headers={"User-Agent": "orbit-cu130-installer"},
-)
-with urllib.request.urlopen(request, timeout=30) as response:
-    assets = json.load(response).get("assets", [])
-assets = [item for item in assets if item["name"].endswith((".whl", ".tar.gz"))]
+
+
+def digest(path: Path) -> str:
+    value = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(8 * 1024 * 1024):
+            value.update(chunk)
+    return value.hexdigest()
+
+
+assets = []
+for raw_line in manifest.read_text().splitlines():
+    line = raw_line.strip()
+    if not line or line.startswith("#"):
+        continue
+    checksum, name = line.split(maxsplit=1)
+    assets.append((checksum, name))
 if not assets:
-    raise SystemExit(f"no assets found for {repo}@{tag}")
-for asset in assets:
-    target = output / asset["name"]
-    if target.exists() and target.stat().st_size == asset.get("size"):
+    raise SystemExit(f"empty pinned asset manifest: {manifest}")
+
+timeout = int(os.environ.get("ORBIT_DOWNLOAD_TIMEOUT", "600"))
+for expected, name in assets:
+    target = output / name
+    if target.exists() and digest(target) == expected:
         print("[cache] reuse " + target.name)
         continue
+    if target.exists():
+        print("[cache] discard checksum mismatch: " + target.name)
+        target.unlink()
     temporary = Path(str(target) + ".part")
-    download = urllib.request.Request(
-        asset["browser_download_url"],
-        headers={"User-Agent": "orbit-cu130-installer"},
+    url = (
+        f"https://github.com/{repo}/releases/download/"
+        f"{quote(tag, safe='')}/{quote(name, safe='')}"
     )
     print("[cache] download " + target.name)
-    with urllib.request.urlopen(download, timeout=120) as source, temporary.open("wb") as sink:
-        while True:
-            chunk = source.read(8 * 1024 * 1024)
-            if not chunk:
-                break
-            sink.write(chunk)
-    if asset.get("size") and temporary.stat().st_size != asset["size"]:
-        raise SystemExit("size mismatch for " + target.name)
+    for attempt in range(1, 4):
+        temporary.unlink(missing_ok=True)
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "orbit-cu130-installer"})
+            with urllib.request.urlopen(request, timeout=timeout) as source, temporary.open("wb") as sink:
+                while chunk := source.read(8 * 1024 * 1024):
+                    sink.write(chunk)
+            break
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            if attempt == 3:
+                raise
+            time.sleep(2**attempt)
+    actual = digest(temporary)
+    if actual != expected:
+        temporary.unlink(missing_ok=True)
+        raise SystemExit(f"checksum mismatch for {name}: expected {expected}, got {actual}")
     os.replace(temporary, target)
 PY
 
