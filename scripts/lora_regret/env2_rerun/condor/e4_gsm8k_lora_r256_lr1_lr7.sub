@@ -18,7 +18,10 @@ request_cpus   = 32
 request_gpus   = 8
 request_memory = 1000000
 request_disk   = 1000G
-requirements   = (CUDADeviceName == "NVIDIA H100 80GB HBM3")
+# i101 and i104 are excluded: both have been allocated and found unhealthy.
+requirements   = (CUDADeviceName == "NVIDIA H100 80GB HBM3") && \
+                 (Machine != "i101.internal.cluster.is.localnet") && \
+                 (Machine != "i104.internal.cluster.is.localnet")
 
 # Only these names cross from the submit shell. getenv = True would also carry
 # a stale NUM_ROLLOUT or VIRTUAL_ENV into the job; env.sh sets the rest.
