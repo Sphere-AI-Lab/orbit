@@ -249,7 +249,10 @@ install_optional "$WHEEL_DIR/causal_conv1d-*.whl"
 install_optional "$WHEEL_DIR/mamba_ssm-*.whl"
 install_optional "$WHEEL_DIR/deep_ep-*.whl"
 install_optional "$WHEEL_DIR/ring_flash_attn-*.whl"
-install_optional "$WHEEL_DIR/sglang_router-*.whl"
+# Not the Miles router wheel: it is tagged manylinux_2_39 and fails to load on
+# glibc 2.35 nodes (Ubuntu 22.04) with "GLIBC_2.38 not found". Install the
+# manylinux_2_28 wheel that orbit/pyproject.toml pins under [tool.uv.sources].
+uv_install --force-reinstall --no-deps "$SGLANG_ROUTER_WHEEL_URL"
 install_optional "$WHEEL_DIR/mooncake_transfer_engine_cuda13-*.whl"
 
 echo "[6/10] reconcile SGLang CUDA runtime pins"

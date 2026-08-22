@@ -97,6 +97,11 @@ def extract(dockerfile: str, dockerfile_url: str) -> dict[str, str]:
         ),
         "SGL_DEEP_GEMM_VERSION": exact_requirement(sglang_project, "sgl-deep-gemm"),
         "SGLANG_ROUTER_VERSION": exact_requirement(project, "sglang-router"),
+        # [tool.uv.sources] names the router wheel Orbit actually runs on; the
+        # Miles release ships a manylinux_2_39 build that needs glibc >= 2.39.
+        "SGLANG_ROUTER_WHEEL_URL": one(
+            project, r'^sglang-router\s*=\s*\{\s*url\s*=\s*"([^"]+)"', "sglang-router wheel url"
+        ),
         "MILES_WHEELS_REPO": one(dockerfile, r"^ARG WHEELS_REPO=(\S+)", "WHEELS_REPO"),
         "MILES_WHEELS_TAG": one(dockerfile, r"^ARG WHEELS_TAG_X86=(\S+)", "WHEELS_TAG_X86"),
         "TRANSFORMER_ENGINE_VERSION": one(
@@ -146,6 +151,7 @@ ORDER = (
     "SGLANG_KERNEL_WHEEL_URL",
     "SGL_DEEP_GEMM_VERSION",
     "SGLANG_ROUTER_VERSION",
+    "SGLANG_ROUTER_WHEEL_URL",
     "MILES_WHEELS_REPO",
     "MILES_WHEELS_TAG",
     "TRANSFORMER_ENGINE_VERSION",

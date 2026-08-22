@@ -70,6 +70,7 @@ def main() -> int:
         "torch",
         "sglang",
         "sgl_kernel",
+        "sglang_router.launch_router",
         "deep_gemm",
         "megatron.core",
         "megatron.bridge",
