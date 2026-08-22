@@ -1,0 +1,15 @@
+# Pinned assets from yueming-yuan/miles-wheels release cu130-x86_64.
+# Source: https://github.com/yueming-yuan/miles-wheels/releases/expanded_assets/cu130-x86_64
+134599680a6b84706b4b97b58d48fd932eca1c45c738994f04bc80ccd363d235  apex-0.1-cp312-cp312-linux_x86_64.whl
+af96314b90f6baabbdea79276dca0c45539a86102dc2c57a696e863664138759  causal_conv1d-1.6.1-cp312-cp312-linux_x86_64.whl
+c17874b7e07b3070d1f87f3effde014d88bc5a8d7654eb68306f9a57249a85fd  fake_int4_quant_cuda-0.0.0-cp312-cp312-linux_x86_64.whl
+e01fd9b9799c69a7ad3569baa931d60e9f8b9cf1a3215845fea678df5f3041bd  fast_hadamard_transform-1.1.0-cp312-cp312-linux_x86_64.whl
+7c4a1872666b32628b2827c835cc26907363e1f3054a8e2560de0c9f04f0e7f2  flash_attn-2.7.4.post1-cp312-cp312-linux_x86_64.whl
+d4902ac89a3b60dd274ec1e8b49230737c2d2a6318a259c5f0cdc3fbd6381c7a  flash_attn_3-3.0.0-cp310-abi3-linux_x86_64.whl
+b1c2284e9b39b48b7af00850c577cd0eb631168ed9c43ff7ad3b7ec13c5c92a2  mamba_ssm-2.3.1-cp312-cp312-linux_x86_64.whl
+0ae8284c1315fdf9e7cc1effafc15108be0dec3d34a21a05632232b926baabbb  mooncake_transfer_engine_cuda13-0.3.13.dev0+g4dbe5a4c-cp312-cp312-manylinux_2_39_x86_64.whl
+505aa48b825b295500b65a1478d4758223169b3733a9e1c62c0559744b76dec4  sgl-model-gateway-linux-x86_64.tar.gz
+a29dbac7131a04bafa3c8eee399f1496b5bac8b97ebba26342210b13e8ddc23b  sglang_router-0.3.2-cp38-abi3-manylinux_2_39_x86_64.whl
+c274fd74ea2e4caa7132921e1ecfa3847931abbed9f6b8cab61346cdb833bc76  transformer_engine-2.17.0-py3-none-any.whl
+1c8e6627cf02358201f513ab902c7b4f82f179214bd775edc97ce0f2001d82da  transformer_engine_cu13-2.17.0-py3-none-manylinux_2_28_x86_64.whl
+6f532e87ea2ce72c355856f239a9d4208418256359b6c5524d3434ae66062414  transformer_engine_torch-2.17.0-cp312-cp312-linux_x86_64.whl

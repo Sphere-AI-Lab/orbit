@@ -165,3 +165,8 @@ Orbit stands on the shoulders of these excellent projects:
 ## License
 
 Orbit is released under the [Apache License 2.0](LICENSE).
+
+## CUDA 12.8 / H200 native installation
+
+For the reproducible Conda/uv environment pipeline, see
+[`scripts/slurm/setup/cu128/README.md`](scripts/slurm/setup/cu128/README.md).

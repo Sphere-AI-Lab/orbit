@@ -3,7 +3,7 @@
 # E4, math panel, learning-rate column 6 of 7: FullFT at 4e-06 and LoRA
 # r1/r16/r256 at 0.0004.  Book a WHOLE node.
 #
-#   source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
+#   source scripts/lora_regret/env_v0516.sh
 #   cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
 #   bash scripts/lora_regret/run_e4_math_lr6_8gpu.sh
 #

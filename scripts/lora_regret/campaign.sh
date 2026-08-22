@@ -21,7 +21,7 @@
 # Environment (in this order -- megatron.core imports deep_ep, which asserts on
 # an unset CUDA_HOME):
 #
-#   source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
+#   source scripts/lora_regret/env_v0516.sh
 #   cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
 #   bash scripts/lora_regret/run_e4_lora_8gpu.sh
 #
@@ -67,9 +67,11 @@ SKIP_PREFLIGHT=${SKIP_PREFLIGHT:-0}
 PREFLIGHT_STAGE=${PREFLIGHT_STAGE:-e4}
 DRY_RUN=${DRY_RUN:-0}
 : "${DATA_DIR:=/lustre/fast/fast/groups/ei-slm/data/lora_regret}"
-export DATA_DIR GPUS_PER_NODE
+: "${LORA_REGRET_LOG_DIR:=${ORBIT_ROOT}/logs/lora_regret}"
+: "${LORA_REGRET_CKPT_DIR:=${ORBIT_ROOT}/orbit_ckpts/lora_regret}"
+export DATA_DIR GPUS_PER_NODE LORA_REGRET_LOG_DIR LORA_REGRET_CKPT_DIR
 
-mkdir -p "$(dirname "${RESULTS}")" logs/lora_regret
+mkdir -p "$(dirname "${RESULTS}")" "${LORA_REGRET_LOG_DIR}" "${LORA_REGRET_CKPT_DIR}"
 say() { printf '\n=== %s ===\n' "$*"; }
 
 # --- environment ------------------------------------------------------------
@@ -77,7 +79,7 @@ say() { printf '\n=== %s ===\n' "$*"; }
 # survive back to your shell -- but everything after it can be, and is.
 if [[ -z "${VIRTUAL_ENV:-}" ]]; then
     echo "No virtualenv active. Run:" >&2
-    echo "  source /fast/zqiu/orbit-iclr/orbit_env/bin/activate" >&2
+    echo "  source scripts/lora_regret/env_v0516.sh" >&2
     echo "  cd ${ORBIT_ROOT} && bash \$0" >&2
     exit 2
 fi
@@ -91,6 +93,38 @@ if [[ -f "${ORBIT_ROOT}/env.sh" ]]; then
     # shellcheck disable=SC1091
     source "${ORBIT_ROOT}/env.sh" >/dev/null 2>&1 || true
 fi
+
+# Triton's JIT cache goes on node-local disk, never on the shared home.
+#
+# Unset, Triton caches in `$HOME/.triton/cache`, and $HOME here is NFS
+# (`stat -f` reports `nfs` on /home/zqiu). `_gemm_oft_r_kernel` takes
+# `total_tokens` as a `tl.constexpr`, so every distinct prefill token count is
+# its own specialization and its own compile -- an RL run JIT-compiles this
+# kernel continuously rather than once at warmup. Each compile writes the cache
+# entry and reads it back, and all 16 ranks (8 engines x TP2) share one cache
+# directory, so they race to store the same key. On a network filesystem the
+# loser's open handle is invalidated by the winner's rename and the read-back
+# returns ESTALE.
+#
+# That killed `oftverify-b8-all-math-lr7e-06-s0` at rollout 8/150 on 2026-08-17
+# (job 17463137, i407): `OSError: [Errno 116] Stale file handle` inside
+# `CompiledKernel.__init__`, TP1 scheduler down, SIGQUIT, and the driver out on
+# a 502 from the router. The `CUDA error: invalid argument` printed after it
+# comes from `MemPool::~MemPool` during crash teardown and is not the cause.
+#
+# b8 is the exposed rung because its key space is entirely cold: `_pick_tiles`
+# returns (8, 8) for BLOCK_SIZE=8 and (128, 128) for b128, and b128's tiles are
+# the untiled path every earlier arm already compiled. Nothing here is specific
+# to b8 though -- any arm compiling a cold key can lose the same race.
+#
+# Same idiom and same reason as
+# `examples/low_precision/run-kimi-k25-int4-openr1-oft.sh`; this only extends it
+# to the campaign, which had been left on the default.
+if [[ -z "${TRITON_CACHE_DIR:-}" ]]; then
+    _triton_user="${USER:-$(id -un 2>/dev/null || printf 'user')}"
+    export TRITON_CACHE_DIR="/tmp/triton_cache_${_triton_user}"
+fi
+mkdir -p "${TRITON_CACHE_DIR}"
 
 if ! python -c "import megatron.core" >/dev/null 2>&1; then
     echo "megatron.core will not import even after sourcing env.sh." >&2
@@ -198,7 +232,7 @@ fi
 
 # --- run -------------------------------------------------------------------
 say "running ${SELECTED} arms sequentially on ${GPUS_PER_NODE} GPUs"
-echo "logs:    logs/lora_regret/<arm>.log"
+echo "logs:    ${LORA_REGRET_LOG_DIR}/<arm>.log"
 echo "ledger:  ${RESULTS}"
 echo "resume:  re-run this same script; finished arms are skipped"
 exec python -m tools.lora_regret.sweep "${SWEEP_ARGS[@]}"

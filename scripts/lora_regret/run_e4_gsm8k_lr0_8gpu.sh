@@ -3,7 +3,7 @@
 # E4 LR0 extension, GSM8K panel: LoRA r1/r16/r256 at 2e-06.
 # Book a whole 8-GPU node. Finished arms recorded in the ledger are skipped.
 #
-#   source /fast/zqiu/orbit-iclr/orbit_env/bin/activate
+#   source scripts/lora_regret/env_v0516.sh
 #   cd /lustre/fast/fast/zqiu/orbit-iclr/orbit
 #   bash scripts/lora_regret/run_e4_gsm8k_lr0_8gpu.sh
 set -uo pipefail

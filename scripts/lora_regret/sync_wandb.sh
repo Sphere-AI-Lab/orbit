@@ -38,11 +38,14 @@
 # directory into the same run at once are convergent but racy and doubly slow.
 # A second invocation (say, WATCH mode already running) exits 0 immediately.
 set -uo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/../.." || exit 1
+REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+WANDB_SYNC_ROOT="${WANDB_SYNC_ROOT:-${REPO_ROOT}}"
+mkdir -p "${WANDB_SYNC_ROOT}"
+cd "${WANDB_SYNC_ROOT}" || exit 1
 
 if [[ -z "${VIRTUAL_ENV:-}" ]]; then
     echo "No virtualenv active. Run:" >&2
-    echo "  source /fast/zqiu/orbit-iclr/orbit_env/bin/activate" >&2
+    echo "  source scripts/lora_regret/env_v0516.sh" >&2
     exit 2
 fi
 

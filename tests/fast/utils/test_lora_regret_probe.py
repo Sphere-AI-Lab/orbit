@@ -23,18 +23,31 @@ class TestPlan:
     def test_the_method_level_is_one_run_per_task_per_method(self):
         """Rank, block size, placement and batch size exercise the same code at
         different shapes, so probing them separately re-runs a path that already
-        passed. 29 runs, not 67 -- and `path` collapses further still, to 23.
+        passed. 32 runs, not the full configuration grid -- and `path` collapses
+        further still by sharing the existing RL OFT code paths.
 
         24 before e5rl, which adds an OFT and a LoRA method row on math_gsm8k;
         then 29 once e4lr0, e4oftb128low and e4oftb128refine were given
         FULL_RUN_ROLLOUTS entries, each contributing one method row. Before that
         they were in the registry but absent from probe's cost table, so
-        probe_plan raised KeyError instead of planning them.
+        probe_plan raised KeyError instead of planning them. The block-verify
+        matrix contributes the thirtieth row and the env2 OFT matrix contributes
+        two more: Math and GSM8K have different rollout budgets and cannot share
+        one cost multiplier.
 
         The counts are asserted rather than derived because the failure they
         guard is exactly that -- a matrix added to the registry without being
         taught to the probe."""
-        assert len(probe_plan("method")) == 29
+        assert len(probe_plan("method")) == 32
+
+    def test_env2_oft_cost_uses_each_datasets_real_rollout_budget(self):
+        runs = [run for run in probe_plan("method") if run.matrix == "e4oftenv2"]
+        assert {run.full_rollouts for run in runs if "-math-" in run.arm} == {150}
+        assert {run.full_rollouts for run in runs if "-gsm8k-" in run.arm} == {200}
+        assert {(run.full_rollouts, run.arms_of_method) for run in runs} == {
+            (150, 7),
+            (200, 7),
+        }
 
     def test_config_level_launches_every_distinct_configuration_once(self):
         """The opt-in level, for hunting a shape-dependent failure rather than a
@@ -76,11 +89,16 @@ class TestPlan:
         assert ("e1", "lora/r512/all") in labels
         assert ("e5", "oft/b256/all") in labels
 
-    def test_one_run_per_task_per_method(self):
-        seen = [(run.matrix, run.method) for run in probe_plan("method")]
-        assert len(seen) == len(set(seen)), "a (task, method) pair is probed twice"
+    def test_one_run_per_task_method_and_rollout_budget(self):
+        seen = [
+            (run.matrix, run.method, run.full_rollouts)
+            for run in probe_plan("method")
+        ]
+        assert len(seen) == len(set(seen)), (
+            "a (task, method, rollout budget) cell is probed twice"
+        )
         by_matrix = {}
-        for matrix, method in seen:
+        for matrix, method, _ in seen:
             by_matrix.setdefault(matrix, set()).add(method)
         from tools.lora_regret.arms import MATRICES, MATRICES_REQUIRING_OFT_CENTRE
 

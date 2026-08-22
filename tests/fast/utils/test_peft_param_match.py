@@ -164,7 +164,9 @@ from orbit.utils.peft_param_match import (  # noqa: E402
     oft_block_size_matching_params,
     oft_lora_match_report,
     oft_matched_lora_rank,
+    oft_param_count,
     oft_param_count_for_modules,
+    oft_rotation_slices,
 )
 
 LLAMA31_8B = dict(hidden_size=4096, ffn_size=14336, qkv_output_size=6144)
@@ -199,19 +201,25 @@ def test_block_size_snap_error_is_worst_at_small_rank():
 
 
 def test_one_global_block_size_cannot_match_across_mixed_shapes():
-    """The constraint that forces E5's design. OFT's count ignores d_out, so a
-    shared block size starves linear_fc1 (d_out = 7*d_in) and overfeeds
-    linear_fc2 -- and no divisor fixes both."""
+    """The constraint that forces E5's design. OFT's per-rotation count ignores
+    d_out, so a shared block size starves linear_fc1 (d_out = 7*d_in) and
+    overfeeds linear_fc2 -- and no divisor fixes both.
+
+    Canonical OFT widens the spread rather than closing it: linear_qkv carries
+    three rotations and linear_fc1 two, so the two fused modules move in
+    OPPOSITE directions relative to LoRA (qkv up to 2.36, fc1 only to 0.49).
+    """
     shapes = megatron_module_shapes(**LLAMA31_8B)
     per_module = {
         name: oft_param_count_for_modules(64, {name: shape})
         / lora_param_count_for_modules(16, {name: shape})
         for name, shape in shapes.items()
     }
-    assert per_module["linear_fc1"] < 0.3
+    assert per_module["linear_fc1"] < 0.6
     assert per_module["linear_fc2"] > 1.5
+    assert per_module["linear_qkv"] > 2.0, "3 rotations on a fused qkv"
     whole = oft_param_count_for_modules(64, shapes) / lora_param_count_for_modules(16, shapes)
-    assert 0.70 < whole < 0.80, "all-modules lands ~0.76, not 1.0"
+    assert 1.05 < whole < 1.15, "all-modules lands ~1.10, not 1.0"
 
 
 def test_inverting_the_match_lands_within_a_few_percent():
@@ -224,12 +232,17 @@ def test_inverting_the_match_lands_within_a_few_percent():
 
 
 def test_small_block_sizes_cannot_be_matched_and_say_so():
-    """b=8 matches to rank 1, where the rank lattice is too coarse -- the report
-    must expose that rather than round it away."""
+    """Where the rank lattice runs out, the report must expose it rather than
+    round it away.
+
+    The boundary moved with canonical accounting: three rotations on qkv put b=8
+    at rank 2 (ratio 0.978, genuinely matched), so the coarseness now bites at
+    b <= 4, where the nearest rank is 1 and the match is off by a factor.
+    """
     shapes = megatron_module_shapes(**LLAMA31_8B)
-    report = oft_lora_match_report(8, shapes)
+    report = oft_lora_match_report(2, shapes)
     assert report["lora_rank"] == 1
-    assert report["ratio"] > 1.3
+    assert report["ratio"] < 0.35, report
 
 
 def test_matched_lora_rank_is_never_zero():
@@ -237,17 +250,93 @@ def test_matched_lora_rank_is_never_zero():
     assert oft_matched_lora_rank(2, shapes) >= 1
 
 
-def test_oft_placements_are_matched_to_each_other_by_block_size():
-    """attention-only and MLP-only at the SAME block size are not equal-capacity,
-    because OFT's count follows d_in. E5's 2x2 needs them matched."""
+def test_legacy_oft_type_counts_one_rotation_per_module():
+    """`--oft-type oft` (legacy shared-R) builds ONE rotation per module no
+    matter the fusion, so its count must skip the slice factor.
+
+    Pinned to the number E4's ledgers recorded before the canonical correction
+    -- 54,099,968 at b128 all-modules over 32 layers -- because that is exactly
+    what those ledgers were counting: legacy accounting applied to canonical
+    arms. The keyword exists so the two variants can never be silently
+    conflated again, in either direction.
+    """
+    shapes = megatron_module_shapes(**LLAMA31_8B)
+    legacy = oft_param_count_for_modules(128, shapes, oft_type="oft")
+    assert legacy * 32 == 54_099_968
+    canonical = oft_param_count_for_modules(128, shapes)
+    assert canonical * 32 == 79_069_184
+    # Unfused (HF-style) names carry one rotation under BOTH variants.
+    unfused = {"q_proj": (4096, 4096), "gate_proj": (4096, 14336)}
+    assert oft_param_count_for_modules(64, unfused, oft_type="oft") == (
+        oft_param_count_for_modules(64, unfused)
+    )
+    # The report records which accounting produced it.
+    assert oft_lora_match_report(128, shapes, oft_type="oft")["oft_params"] == legacy
+    assert oft_lora_match_report(128, shapes)["oft_type"] == "canonical_oft"
+
+
+def test_unsupported_oft_type_raises():
+    shapes = megatron_module_shapes(**LLAMA31_8B)
+    with pytest.raises(ValueError, match="Unsupported OFT type"):
+        oft_param_count_for_modules(64, shapes, oft_type="dora")
+
+
+def test_oft_placements_cannot_be_matched_by_block_size_alone():
+    """attention-only and MLP-only are not equal-capacity at the same block size,
+    and under canonical accounting they cannot be BROUGHT to equal capacity by
+    choosing one either.
+
+    This inverts what the suite previously asserted. Counting one rotation per
+    module, the search matched them to within 2%, and E3/E5's 2x2 placement
+    design was built on that. Three rotations on `linear_qkv` make attention-only
+    much heavier, and MLP-only's realized counts cannot come down to meet it --
+    `linear_fc1` snaps to a divisor of 4096 while `linear_fc2` snaps to one of
+    14336, and no single block satisfies both. The best available lands ~26%
+    high at every attention block size.
+
+    So a placement comparison has to QUOTE the realized ratio; it cannot claim a
+    match. Pinned across several block sizes because the gap is structural, not
+    an artifact of one choice.
+    """
     shapes = megatron_module_shapes(**LLAMA31_8B)
     attn, mlp = _subset(shapes, ATTENTION_MODULES), _subset(shapes, MLP_MODULES)
-    attn_params = oft_param_count_for_modules(64, attn)
-    assert oft_param_count_for_modules(64, mlp) / attn_params > 2.0, "same block size, unequal capacity"
+    for attn_block in (32, 64, 128, 256):
+        attn_params = oft_param_count_for_modules(attn_block, attn)
+        same_block = oft_param_count_for_modules(attn_block, mlp) / attn_params
+        assert same_block > 1.3, (attn_block, same_block)
 
-    mlp_block = oft_block_size_matching_params(attn_params, mlp)
-    ratio = oft_param_count_for_modules(mlp_block, mlp) / attn_params
-    assert abs(ratio - 1.0) < 0.02, (mlp_block, ratio)
+        mlp_block = oft_block_size_matching_params(attn_params, mlp)
+        ratio = oft_param_count_for_modules(mlp_block, mlp) / attn_params
+        assert 1.2 < ratio < 1.3, (attn_block, mlp_block, ratio)
+
+
+def test_fused_modules_carry_one_rotation_per_output_slice():
+    """The regression this suite did not have.
+
+    Canonical OFT (`--oft-type canonical_oft`, which every RL launcher here
+    passes) builds one rotation per OUTPUT SLICE: Megatron-Bridge's R is
+    `(num_slices, num_blocks, block_size, block_size)`, and sglang's dense
+    forward splits the rotated activation into `num_slices` copies of width
+    `d_in`. Counting one per module understated every OFT arm -- 54,099,968
+    recorded for E4's b128 all-modules arms against 79,069,184 actually built,
+    a factor of 1.46 that fed `matched_ratio` and `oft_matched_lora_rank`.
+    """
+    shapes = megatron_module_shapes(**LLAMA31_8B)
+    assert oft_rotation_slices("linear_qkv") == 3
+    assert oft_rotation_slices("linear_fc1") == 2
+    assert oft_rotation_slices("linear_proj") == 1
+    assert oft_rotation_slices("linear_fc2") == 1
+    # Unfused names are one rotation each, so HF-style shapes stay correct.
+    assert oft_rotation_slices("q_proj") == 1
+
+    # A fused module costs exactly its slice count times one rotation.
+    one_rotation = oft_param_count(128, 4096)
+    assert oft_param_count_for_modules(128, _subset(shapes, ("linear_qkv",))) == 3 * one_rotation
+    assert oft_param_count_for_modules(128, _subset(shapes, ("linear_fc1",))) == 2 * one_rotation
+    assert oft_param_count_for_modules(128, _subset(shapes, ("linear_proj",))) == one_rotation
+
+    # The E4 b128 all-modules arm, per layer and over Llama-3.1-8B's 32 layers.
+    assert oft_param_count_for_modules(128, shapes) * 32 == 79_069_184
 
 
 def test_block_size_matching_params_rejects_nonpositive_targets():

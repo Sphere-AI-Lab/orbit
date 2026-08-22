@@ -86,6 +86,9 @@ if [[ -n "${CAPTURE_FILE:-}" ]]; then
         "${MATRIX:-}" "${METHOD_RE:-}" "${RESULTS:-}" \
         "${EXPECT_ARMS:-}" "${ALLOW_OFT:-}" >> "${CAPTURE_FILE}"
 fi
+if [[ -n "${CACHE_CAPTURE_FILE:-}" ]]; then
+    printf '%s\n' "${TRITON_CACHE_DIR:-}" > "${CACHE_CAPTURE_FILE}"
+fi
 printf '%s\n' \
     'ARM=one PEFT_METHOD=oft' \
     'ARM=two PEFT_METHOD=oft' \
@@ -195,6 +198,61 @@ def test_campaign_still_refuses_oft_without_a_dedicated_ledger_opt_in(tmp_path):
 
     assert result.returncode != 0
     assert "REFUSING: the selection contains OFT arms" in result.stderr
+
+
+def _run_dry_campaign(tmp_path: Path, extra_env: dict[str, str]) -> subprocess.CompletedProcess:
+    fake_bin = _fake_python(tmp_path)
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_bin}:{env['PATH']}",
+            "VIRTUAL_ENV": str(tmp_path / "venv"),
+            "CUDA_HOME": str(tmp_path),
+            "UV_CACHE_DIR": str(tmp_path / "uv-cache"),
+            "SKIP_PREFLIGHT": "1",
+            "DRY_RUN": "1",
+            "MATRIX": "e4",
+            "METHOD_RE": "^lora-",
+            "RESULTS": str(tmp_path / "results.jsonl"),
+            "EXPECT_ARMS": "3",
+            "ALLOW_OFT": "1",
+            "CACHE_CAPTURE_FILE": str(tmp_path / "cache-dir.txt"),
+            **extra_env,
+        }
+    )
+    return subprocess.run(
+        ["bash", str(SCRIPT_DIR / "campaign.sh")],
+        cwd=SCRIPT_DIR.parents[1],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_campaign_defaults_triton_cache_to_node_local_tmp(tmp_path):
+    """A missing override must not leave Triton's concurrent JIT cache on NFS."""
+    test_user = f"orbit-campaign-test-{os.getpid()}"
+    cache_dir = Path(f"/tmp/triton_cache_{test_user}")
+    if cache_dir.is_dir():
+        cache_dir.rmdir()
+    try:
+        result = _run_dry_campaign(tmp_path, {"USER": test_user})
+        assert result.returncode == 0, (result.stdout, result.stderr)
+        assert (tmp_path / "cache-dir.txt").read_text(encoding="utf-8").strip() == str(cache_dir)
+        assert cache_dir.is_dir()
+    finally:
+        if cache_dir.is_dir():
+            cache_dir.rmdir()
+
+
+def test_campaign_preserves_explicit_triton_cache_dir(tmp_path):
+    """A caller-selected local cache remains authoritative."""
+    cache_dir = tmp_path / "custom-triton-cache"
+    result = _run_dry_campaign(tmp_path, {"TRITON_CACHE_DIR": str(cache_dir)})
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert (tmp_path / "cache-dir.txt").read_text(encoding="utf-8").strip() == str(cache_dir)
+    assert cache_dir.is_dir()
 
 
 def test_lr0_scripts_exist():
