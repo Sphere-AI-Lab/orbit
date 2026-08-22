@@ -72,9 +72,11 @@ for executable in "$CONDA_EXE" "$UV_EXE" "$TOOL_PYTHON" git nvidia-smi; do
 done
 "$TOOL_PYTHON" "$SCRIPT_DIR/extract_pins.py" --check
 gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+# The Miles cu130 wheels ship sm_90 and sm_100 code (FA3 is sm_90a-only), so
+# Hopper H100 and Blackwell B200 allocations are both accepted.
 case "$gpu_name" in
-    *H100*) ;;
-    *) echo "FATAL: expected H100, got $gpu_name" >&2; exit 1 ;;
+    *H100*|*B200*) ;;
+    *) echo "FATAL: expected H100 or B200, got $gpu_name" >&2; exit 1 ;;
 esac
 echo "[preflight] GPU=$gpu_name"
 [ "$PREFLIGHT_ONLY" -eq 1 ] && exit 0
@@ -322,7 +324,10 @@ for requirement in data["project"]["dependencies"]:
         requirements.append(requirement)
 Path(sys.argv[2]).write_text("\n".join(requirements) + "\n")
 PY
-uv_install -r "$RUNTIME_REQUIREMENTS"
+# The numpy==1.26.4 override in pyproject lets scipy float to a numpy>=2-only
+# release (1.18 references np.long and breaks `import sglang`); hold scipy on
+# the last line that supports numpy 1.x.
+uv_install -r "$RUNTIME_REQUIREMENTS" "scipy<1.14"
 uv_install "nvidia-modelopt==0.44.0" "torch-memory-saver==0.0.9.post1"
 
 echo "[9/10] install editable Sphere-Lab and Orbit overlays"

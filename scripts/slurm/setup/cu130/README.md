@@ -1,4 +1,4 @@
-# Orbit native CUDA 13 / H100 environment
+# Orbit native CUDA 13 / H100 or B200 environment
 
 This profile follows the Miles-IMP installation model. The RadixArk Miles
 Dockerfile is a pinned dependency recipe, not a runtime container. Its prebuilt
@@ -89,7 +89,7 @@ Dry-run mode performs no network access and creates no files:
 scripts/slurm/setup/cu130/install_env.sh --dry-run
 ~~~
 
-## Install inside an H100 allocation
+## Install inside an H100 or B200 allocation
 
 ~~~bash
 scripts/slurm/setup/cu130/install_env.sh
@@ -116,7 +116,7 @@ with --no-deps so dependency resolution cannot replace the controlled stack.
 
 ## Re-run verification
 
-Inside an H100 allocation:
+Inside an H100 or B200 allocation (FlashAttention 3 is sm_90a-only and is not exercised on B200):
 
 ~~~bash
 /fast/zqiu/orbit-iclr/orbit/envs/orbit-cu130-v1/bin/python \
