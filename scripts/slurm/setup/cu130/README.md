@@ -106,7 +106,18 @@ conda activate /fast/zqiu/orbit-iclr/orbit/envs/orbit-cu130-v1
 ~~~
 
 The editable source links are part of the environment. No extra PYTHONPATH is
-normally needed.
+normally needed. Before running launchers, load Orbit's runtime loader with the
+prefix as `ORBIT_VENV`; it adds the `z3/lib` path that `megatron.bridge`
+(via nvidia-modelopt) needs and the cuDNN/FlashInfer runtime settings:
+
+~~~bash
+ORBIT_VENV=/fast/zqiu/orbit-iclr/orbit/envs/orbit-cu130-v1 \
+  source examples/load_cuda13_2_orbit_env.sh
+~~~
+
+Without a Rust toolchain on `PATH`, the Sphere-Lab SGLang editable install skips
+its `setuptools-rust` extensions (`SGLANG_BUILD_RUST_EXTS=none`); Orbit uses the
+separate `sglang-router` wheel instead.
 
 ## Why cuda-python 13 appears
 

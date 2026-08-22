@@ -333,6 +333,13 @@ uv_install "nvidia-modelopt==0.44.0" "torch-memory-saver==0.0.9.post1"
 echo "[9/10] install editable Sphere-Lab and Orbit overlays"
 uv_install -e "$MEGATRON_SRC" --no-deps
 uv_install -e "$BRIDGE_SRC" --no-deps --no-build-isolation
+# Sphere-Lab SGLang declares setuptools-rust extensions (rust/sglang-grpc,
+# rust/sglang-mm). Orbit drives the router through the separate sglang-router
+# wheel, so without a Rust toolchain skip them instead of failing the build
+# (same policy as the cu128 profile).
+if ! command -v cargo >/dev/null 2>&1; then
+    export SGLANG_BUILD_RUST_EXTS=none
+fi
 uv_install -e "$SGLANG_SRC/$ORBIT_SGLANG_SUBDIRECTORY" --no-deps
 uv_install -e "$REPO_ROOT" --no-deps
 
@@ -344,7 +351,12 @@ uv_install --no-deps \
     "triton==$TRITON_VERSION" \
     "cuda-python==$CUDA_PYTHON_VERSION" \
     "nvidia-cudnn-cu13==$CUDNN_CU13_VERSION"
-"$PYTHON" "$SCRIPT_DIR/verify_env.py" --source-root "$SOURCE_ROOT" --full-h100
+# nvidia-modelopt (imported by megatron.bridge) dlopens libz3.so.4.15 by soname;
+# the z3-solver wheel keeps it under site-packages/z3/lib. env.sh and
+# examples/load_cuda13_2_orbit_env.sh add that path at runtime; mirror it here
+# so verification sees the same loader environment.
+LD_LIBRARY_PATH="$ENV_PREFIX/lib/python$PYTHON_VERSION/site-packages/z3/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    "$PYTHON" "$SCRIPT_DIR/verify_env.py" --source-root "$SOURCE_ROOT" --full-h100
 
 echo "[done] activate with:"
 echo "source /home/zqiu/anaconda3/etc/profile.d/conda.sh"
