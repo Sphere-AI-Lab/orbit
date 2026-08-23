@@ -26,10 +26,19 @@ and one PPO step.
 | `phase1-q25-3b-oft-arms.sh` | 3B: oft/sync, oft/async_db | 4 | launch-verified, 1 rollout: 2/2 ok |
 | `phase1-q3-4b-arms.sh` | 4B bf16: oft ×2, lora ×3 | 4 | launch-verified, 1 rollout: 5/5 ok (oft 233 s/~160 s, lora 178/158/165 s) |
 | `phase1-q3-30b-arms.sh` | 30B-A3B bf16: oft ×2, lora ×3 | **8** | NOT verified: needs an 8-GPU allocation |
+| `phase0-opd-smokes.sh` | 0.5B OPD: free-teacher, ema, mopd, served, adapter-swap (M1 rows) | 2–4 | verified: 5/5 ok |
+| `phase1-q25-3b-opd-cost-suite.sh` | 3B OPD teacher-cost suite (R-2/M1): base, ema, load, served, adapter | 4 (served: 1+2+1) | launch-verified, 1 rollout: 5/5 ok |
 
 The harness's 4B LoRA cases used to point at the OFT launcher (which hardcodes
 `--peft-method oft`), so they silently trained OFT; `run-qwen3-4b-instruct-2507-bf16-math-lora.sh`
 now exists and the case table references it.
+
+Two defects in the 3B `served` variant were fixed during the 2026-08-23 sweep: the
+full-vocab scoring byte cap assumed base64 hidden states (the server sends JSON floats,
+~4x larger), and the variant inherited `--reward-key score` although its OPD reward hook
+returns a scalar. `adapter:` teacher paths must point at the directory holding
+`adapter_megatron_tp*_pp*.pt` (`<save>/iter_N/adapter`); `env.sh`'s
+`adapter_first_latest_adapter` resolves it.
 
 Not covered: the 4B INT4 cases (`examples/low_precision/run-qwen3-4b-int4-math-oft.sh`)
 need a W4A16 checkpoint that does not exist yet; the 30B rung needs 8 GPUs.

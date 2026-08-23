@@ -59,6 +59,17 @@ adapter_first_select_model() {
     done
 }
 
+# adapter_first_latest_adapter ROOT : the newest directory under ROOT that holds
+# Megatron-native adapter shards (adapter_megatron_tp*_pp*.pt) -- the form
+# `--opd-teacher adapter:<path>` loads. Launchers save them at
+# <save>/iter_NNNNNNN/adapter (with an extra actor/ level for PPO recipes).
+adapter_first_latest_adapter() {
+    local shard
+    shard=$(find "$1" -name 'adapter_megatron_tp0_pp0.pt' 2>/dev/null | sort | tail -1)
+    [[ -n "$shard" ]] || { echo "FATAL: no adapter_megatron_tp0_pp0.pt under $1" >&2; return 1; }
+    dirname "$shard"
+}
+
 # run_harness CAMPAIGN ARGS... : one harness invocation, timed, exit code kept.
 run_harness() {
     local campaign=$1; shift
