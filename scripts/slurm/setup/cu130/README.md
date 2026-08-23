@@ -183,3 +183,6 @@ UV_CACHE_DIR=/lustre/home/$USER/.cache/orbit-cu130-v2-clean/uv \
 These paths are independent of `orbit-cu130-v1`. Do not delete or overwrite the
 validated v1 environment. A successful installation ends with
 `[summary] 38/38 passed`.
+
+For repeated clean-room checks, choose a new shared suffix for all four paths so
+that the environment, sources, wheel cache, and uv cache are all unused.

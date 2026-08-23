@@ -344,7 +344,7 @@ esac
 EOF
 
 echo "[9/10] install editable Sphere-Lab and Orbit overlays"
-uv_install --no-cache --link-mode copy --force-reinstall --no-deps --editable "$MEGATRON_SRC"
+"$PYTHON" -m pip install --no-cache-dir --force-reinstall --no-deps --editable "$MEGATRON_SRC"
 uv_install -e "$BRIDGE_SRC" --no-deps --no-build-isolation
 # Reuse the prebuilt sglang_router wheel; do not compile Rust for the Python overlay.
 SGLANG_BUILD_RUST_EXTS=none uv_install -e "$SGLANG_SRC/$ORBIT_SGLANG_SUBDIRECTORY" --no-deps
