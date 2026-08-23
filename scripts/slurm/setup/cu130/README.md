@@ -69,6 +69,12 @@ Cache:
 These directories must be excluded from Git. The installer never resets an
 existing source checkout or overwrites an unknown environment.
 
+Put `--cache-dir` on node-local disk (for example under `/tmp`): uv extracts
+every wheel into the cache, and a cache on Lustre extracts so slowly that
+downloads time out. The installer symlinks site-packages into the cache while it
+runs and then copies everything into the prefix (`materialize_env.py`, parallel),
+so the finished environment does not depend on the cache or the node.
+
 ## Refresh or audit pins
 
 From the Orbit repository root:

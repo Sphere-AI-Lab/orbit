@@ -90,6 +90,13 @@ mkdir "$LOCK_DIR"
 trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 
 export UV_CACHE_DIR="$CACHE_DIR/uv"
+# Link mode: unpack into the cache and symlink site-packages at it, which is
+# the only fast path when --cache-dir is node-local (/tmp). uv's copy mode runs
+# at ~3 files/s onto Lustre, and a uv cache on Lustre is so slow to extract
+# into that downloads time out. The prefix is made self-contained afterwards by
+# materialize_env.py, which replaces every cache symlink with a parallel copy.
+export UV_LINK_MODE=symlink
+export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-120}"
 export PIP_CACHE_DIR="$CACHE_DIR/pip"
 export MAX_JOBS="$JOBS"
 
@@ -351,6 +358,9 @@ uv_install --no-deps \
     "triton==$TRITON_VERSION" \
     "cuda-python==$CUDA_PYTHON_VERSION" \
     "nvidia-cudnn-cu13==$CUDNN_CU13_VERSION"
+echo "[materialize] replace cache symlinks with copies so the prefix outlives $CACHE_DIR"
+"$PYTHON" "$SCRIPT_DIR/materialize_env.py" --prefix "$ENV_PREFIX" --cache-dir "$UV_CACHE_DIR" --jobs "$JOBS"
+
 # nvidia-modelopt (imported by megatron.bridge) dlopens libz3.so.4.15 by soname;
 # the z3-solver wheel keeps it under site-packages/z3/lib. env.sh and
 # examples/load_cuda13_2_orbit_env.sh add that path at runtime; mirror it here
