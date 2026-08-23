@@ -245,7 +245,7 @@ install_optional "$WHEEL_DIR/sglang_router-*.whl"
 install_optional "$WHEEL_DIR/mooncake_transfer_engine_cuda13-*.whl"
 
 echo "[6/10] reconcile SGLang CUDA runtime pins"
-uv_install --no-cache --force-reinstall --no-deps \
+uv_install --no-cache --link-mode copy --force-reinstall --no-deps \
     "https://flashinfer.ai/whl/flashinfer-python/flashinfer_python-${FLASHINFER_VERSION}-py3-none-any.whl"
 uv_install --force-reinstall --no-deps \
     --extra-index-url https://flashinfer.ai/whl \
