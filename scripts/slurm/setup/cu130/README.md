@@ -124,3 +124,34 @@ Inside an H100 allocation:
   --source-root /fast/zqiu/orbit-iclr/orbit/sources/orbit-cu130-v1 \
   --full-h100
 ~~~
+
+## MPI cache placement
+
+The large, immutable Miles wheel cache remains under `CACHE_ROOT` (normally
+`/fast/.../cache/orbit-cu130-v1`). The mutable `uv` distribution cache requires
+file locking, but the MPI `/fast` filesystem can return `Function not implemented
+(os error 38)` for that operation. The installer therefore defaults
+`UV_CACHE_DIR` to `${HOME}/.cache/orbit-cu130-v1/uv`, which resolves to a
+Lustre-backed home directory on MPI. Override it explicitly when needed:
+
+```bash
+UV_CACHE_DIR=/lustre/home/$USER/.cache/orbit-cu130-v1/uv \
+  scripts/slurm/setup/cu130/install_env.sh
+```
+
+This changes only the lock-sensitive `uv` cache. Prebuilt CUDA wheels and other
+large reusable artifacts remain in `CACHE_ROOT`.
+
+## Prebuilt router and editable overlays
+
+The CUDA 13 workflow installs `sglang_router` from the prebuilt RadixArk Miles
+wheel set. The editable Sphere-Lab SGLang checkout is a Python and Triton source
+overlay, so rebuilding its Rust router would duplicate the prebuilt component
+and require an unnecessary Rust toolchain. For the SGLang editable install only,
+`install_env.sh` sets `SGLANG_BUILD_RUST_EXTS=none`.
+
+Megatron-LM is installed with `--reinstall -e` so an existing non-editable
+`megatron-core` distribution cannot cause `uv` to skip the editable link.
+The runtime pins use NumPy 2.3.5 and align `flashinfer-python`,
+`flashinfer-cubin`, and `flashinfer-jit-cache` at 0.6.15.post1; the JIT-cache
+wheel carries the expected `+cu130` local version suffix.

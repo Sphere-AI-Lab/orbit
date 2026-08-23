@@ -114,15 +114,11 @@ allinone = [
 [tool.uv]
 # Keep transitive packages from silently selecting an untested CUDA/Torch build.
 override-dependencies = [
-    # Megatron requires numpy 1.x; pin hard so no transitive dep pulls 2.x back.
-    "numpy==1.26.4",
+    # Match the tested SGLang CUDA 13 stack. Current Megatron-Core does not cap NumPy to 1.x.
+    "numpy==2.3.5",
     "cuda-python==13.2.0",
-    # 0.6.14, not 0.6.3: sglang on the v0.5.16 line declares
-    # flashinfer_python[cu13]==0.6.14 ("keep it aligned with jit-cache version
-    # in Dockerfile"), and this override silently outvotes that requirement.
-    # Holding it at 0.6.3 ran the new sglang against a flashinfer ten patch
-    # releases older than the one it was written for.
-    "flashinfer-python==0.6.14",
+    # Keep the Python package aligned with the cu130 cubin and JIT-cache artifacts.
+    "flashinfer-python==0.6.15.post1",
     "megatron-core",
     "nvidia-cublas==13.4.1.1",
     "nvidia-cuda-cupti==13.2.75",

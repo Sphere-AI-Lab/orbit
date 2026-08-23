@@ -87,7 +87,8 @@ mkdir -p "$(dirname "$ENV_PREFIX")" "$SOURCE_ROOT" "$CACHE_DIR" "$WHEEL_DIR"
 mkdir "$LOCK_DIR"
 trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 
-export UV_CACHE_DIR="$CACHE_DIR/uv"
+# uv requires working file locks; the MPI /fast filesystem does not provide them.
+export UV_CACHE_DIR="${UV_CACHE_DIR:-${HOME}/.cache/orbit-cu130-v1/uv}"
 export PIP_CACHE_DIR="$CACHE_DIR/pip"
 export MAX_JOBS="$JOBS"
 
@@ -244,10 +245,11 @@ install_optional "$WHEEL_DIR/sglang_router-*.whl"
 install_optional "$WHEEL_DIR/mooncake_transfer_engine_cuda13-*.whl"
 
 echo "[6/10] reconcile SGLang CUDA runtime pins"
+uv_install --no-cache --force-reinstall --no-deps \
+    "https://flashinfer.ai/whl/flashinfer-python/flashinfer_python-${FLASHINFER_VERSION}-py3-none-any.whl"
 uv_install --force-reinstall --no-deps \
     --extra-index-url https://flashinfer.ai/whl \
     --extra-index-url https://flashinfer.ai/whl/cu130 \
-    "flashinfer-python==$FLASHINFER_VERSION" \
     "flashinfer-cubin==$FLASHINFER_VERSION" \
     "flashinfer-jit-cache==$FLASHINFER_VERSION"
 uv_install --force-reinstall --no-deps \
@@ -326,9 +328,10 @@ uv_install -r "$RUNTIME_REQUIREMENTS"
 uv_install "nvidia-modelopt==0.44.0" "torch-memory-saver==0.0.9.post1"
 
 echo "[9/10] install editable Sphere-Lab and Orbit overlays"
-uv_install -e "$MEGATRON_SRC" --no-deps
+uv_install --reinstall -e "$MEGATRON_SRC" --no-deps
 uv_install -e "$BRIDGE_SRC" --no-deps --no-build-isolation
-uv_install -e "$SGLANG_SRC/$ORBIT_SGLANG_SUBDIRECTORY" --no-deps
+# Reuse the prebuilt sglang_router wheel; do not compile Rust for the Python overlay.
+SGLANG_BUILD_RUST_EXTS=none uv_install -e "$SGLANG_SRC/$ORBIT_SGLANG_SUBDIRECTORY" --no-deps
 uv_install -e "$REPO_ROOT" --no-deps
 
 echo "[10/10] reassert ABI pins and verify"
