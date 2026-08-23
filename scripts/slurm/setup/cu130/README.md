@@ -165,3 +165,21 @@ commands receive the same runtime path.
 The runtime pins use NumPy 2.3.5 and align `flashinfer-python`,
 `flashinfer-cubin`, and `flashinfer-jit-cache` at 0.6.15.post1; the JIT-cache
 wheel carries the expected `+cu130` local version suffix.
+
+## Clean-room verification
+
+To verify the complete CUDA 13 workflow without reusing an existing environment,
+source checkout, wheel cache, or uv cache, run this command from the Orbit
+repository inside an H100 allocation:
+
+```bash
+ENV_PREFIX=/fast/zqiu/orbit-iclr/orbit/envs/orbit-cu130-v2-clean \
+SOURCE_ROOT=/fast/zqiu/orbit-iclr/orbit/sources/orbit-cu130-v2-clean \
+CACHE_DIR=/fast/zqiu/orbit-iclr/orbit/cache/orbit-cu130-v2-clean \
+UV_CACHE_DIR=/lustre/home/$USER/.cache/orbit-cu130-v2-clean/uv \
+  scripts/slurm/setup/cu130/install_env.sh
+```
+
+These paths are independent of `orbit-cu130-v1`. Do not delete or overwrite the
+validated v1 environment. A successful installation ends with
+`[summary] 38/38 passed`.
