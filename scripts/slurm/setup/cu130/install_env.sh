@@ -327,6 +327,22 @@ PY
 uv_install -r "$RUNTIME_REQUIREMENTS"
 uv_install "nvidia-modelopt==0.44.0" "torch-memory-saver==0.0.9.post1"
 
+# TileLang's bundled TVM links against the Z3 wheel without an embedded rpath.
+Z3_LIB_DIR="$ENV_PREFIX/lib/python$PYTHON_VERSION/site-packages/z3/lib"
+if [ ! -f "$Z3_LIB_DIR/libz3.so.4.15" ]; then
+    echo "FATAL: missing TileLang runtime dependency: $Z3_LIB_DIR/libz3.so.4.15" >&2
+    exit 1
+fi
+export LD_LIBRARY_PATH="$Z3_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+mkdir -p "$ENV_PREFIX/etc/conda/activate.d"
+cat > "$ENV_PREFIX/etc/conda/activate.d/orbit-cu130-z3.sh" <<EOF
+# TileLang's bundled TVM needs the shared library shipped by z3-solver.
+case ":\${LD_LIBRARY_PATH:-}:" in
+    *":$Z3_LIB_DIR:"*) ;;
+    *) export LD_LIBRARY_PATH="$Z3_LIB_DIR\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}" ;;
+esac
+EOF
+
 echo "[9/10] install editable Sphere-Lab and Orbit overlays"
 uv_install --no-cache --link-mode copy --force-reinstall --no-deps --editable "$MEGATRON_SRC"
 uv_install -e "$BRIDGE_SRC" --no-deps --no-build-isolation

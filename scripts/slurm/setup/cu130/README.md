@@ -152,6 +152,16 @@ and require an unnecessary Rust toolchain. For the SGLang editable install only,
 
 Megatron-LM is installed with `--no-cache --link-mode copy --force-reinstall --editable` so an existing non-editable
 `megatron-core` distribution cannot cause `uv` to skip the editable link.
+
+## TileLang Z3 runtime loader
+
+The editable Sphere-Lab Megatron path imports TileLang's bundled TVM. That native
+library depends on `libz3.so.4.15`, which is supplied by the installed
+`z3-solver` wheel but is outside the default dynamic-loader search path. The
+installer exports the wheel's `z3/lib` directory for verification and writes an
+idempotent Conda activation hook at
+`$ENV_PREFIX/etc/conda/activate.d/orbit-cu130-z3.sh` so later `conda activate`
+commands receive the same runtime path.
 The runtime pins use NumPy 2.3.5 and align `flashinfer-python`,
 `flashinfer-cubin`, and `flashinfer-jit-cache` at 0.6.15.post1; the JIT-cache
 wheel carries the expected `+cu130` local version suffix.
