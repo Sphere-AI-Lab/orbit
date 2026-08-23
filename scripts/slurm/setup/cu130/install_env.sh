@@ -89,12 +89,14 @@ mkdir -p "$(dirname "$ENV_PREFIX")" "$SOURCE_ROOT" "$CACHE_DIR" "$WHEEL_DIR"
 mkdir "$LOCK_DIR"
 trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 
-export UV_CACHE_DIR="$CACHE_DIR/uv"
-# Link mode: unpack into the cache and symlink site-packages at it, which is
-# the only fast path when --cache-dir is node-local (/tmp). uv's copy mode runs
-# at ~3 files/s onto Lustre, and a uv cache on Lustre is so slow to extract
-# into that downloads time out. The prefix is made self-contained afterwards by
-# materialize_env.py, which replaces every cache symlink with a parallel copy.
+# uv requires working file locks; the MPI /fast filesystem does not provide
+# them, so the uv cache defaults to cluster home. Set UV_CACHE_DIR to a
+# node-local path (e.g. under /tmp) for the fastest extraction.
+export UV_CACHE_DIR="${UV_CACHE_DIR:-${HOME}/.cache/orbit-cu130-v1/uv}"
+# Link mode: unpack into the cache and symlink site-packages at it (uv's copy
+# mode runs at ~3 files/s onto Lustre). The prefix is made self-contained
+# afterwards by materialize_env.py, which replaces every cache symlink with a
+# parallel copy, so the finished env depends on neither the cache nor the node.
 export UV_LINK_MODE=symlink
 export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-120}"
 export PIP_CACHE_DIR="$CACHE_DIR/pip"
@@ -256,10 +258,11 @@ uv_install --force-reinstall --no-deps "$SGLANG_ROUTER_WHEEL_URL"
 install_optional "$WHEEL_DIR/mooncake_transfer_engine_cuda13-*.whl"
 
 echo "[6/10] reconcile SGLang CUDA runtime pins"
+uv_install --no-cache --link-mode copy --force-reinstall --no-deps \
+    "https://flashinfer.ai/whl/flashinfer-python/flashinfer_python-${FLASHINFER_VERSION}-py3-none-any.whl"
 uv_install --force-reinstall --no-deps \
     --extra-index-url https://flashinfer.ai/whl \
     --extra-index-url https://flashinfer.ai/whl/cu130 \
-    "flashinfer-python==$FLASHINFER_VERSION" \
     "flashinfer-cubin==$FLASHINFER_VERSION" \
     "flashinfer-jit-cache==$FLASHINFER_VERSION"
 uv_install --force-reinstall --no-deps \
@@ -340,17 +343,29 @@ PY
 uv_install -r "$RUNTIME_REQUIREMENTS" "scipy<1.14"
 uv_install "nvidia-modelopt==0.44.0" "torch-memory-saver==0.0.9.post1"
 
+# TileLang's bundled TVM links against the Z3 wheel without an embedded rpath.
+Z3_LIB_DIR="$ENV_PREFIX/lib/python$PYTHON_VERSION/site-packages/z3/lib"
+if [ ! -f "$Z3_LIB_DIR/libz3.so.4.15" ]; then
+    echo "FATAL: missing TileLang runtime dependency: $Z3_LIB_DIR/libz3.so.4.15" >&2
+    exit 1
+fi
+export LD_LIBRARY_PATH="$Z3_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+mkdir -p "$ENV_PREFIX/etc/conda/activate.d"
+cat > "$ENV_PREFIX/etc/conda/activate.d/orbit-cu130-z3.sh" <<EOF
+# TileLang's bundled TVM needs the shared library shipped by z3-solver.
+case ":\${LD_LIBRARY_PATH:-}:" in
+    *":$Z3_LIB_DIR:"*) ;;
+    *) export LD_LIBRARY_PATH="$Z3_LIB_DIR\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}" ;;
+esac
+EOF
+
 echo "[9/10] install editable Sphere-Lab and Orbit overlays"
-uv_install -e "$MEGATRON_SRC" --no-deps
+"$PYTHON" -m pip install --no-cache-dir --force-reinstall --no-deps --editable "$MEGATRON_SRC"
 uv_install -e "$BRIDGE_SRC" --no-deps --no-build-isolation
 # Sphere-Lab SGLang declares setuptools-rust extensions (rust/sglang-grpc,
-# rust/sglang-mm). Orbit drives the router through the separate sglang-router
-# wheel, so without a Rust toolchain skip them instead of failing the build
-# (same policy as the cu128 profile).
-if ! command -v cargo >/dev/null 2>&1; then
-    export SGLANG_BUILD_RUST_EXTS=none
-fi
-uv_install -e "$SGLANG_SRC/$ORBIT_SGLANG_SUBDIRECTORY" --no-deps
+# rust/sglang-mm); Orbit uses the separate sglang-router wheel, so never
+# compile Rust for the Python overlay.
+SGLANG_BUILD_RUST_EXTS=none uv_install -e "$SGLANG_SRC/$ORBIT_SGLANG_SUBDIRECTORY" --no-deps
 uv_install -e "$REPO_ROOT" --no-deps
 
 echo "[10/10] reassert ABI pins and verify"
@@ -364,12 +379,7 @@ uv_install --no-deps \
 echo "[materialize] replace cache symlinks with copies so the prefix outlives $CACHE_DIR"
 "$PYTHON" "$SCRIPT_DIR/materialize_env.py" --prefix "$ENV_PREFIX" --cache-dir "$UV_CACHE_DIR" --jobs "$JOBS"
 
-# nvidia-modelopt (imported by megatron.bridge) dlopens libz3.so.4.15 by soname;
-# the z3-solver wheel keeps it under site-packages/z3/lib. env.sh and
-# examples/load_cuda13_2_orbit_env.sh add that path at runtime; mirror it here
-# so verification sees the same loader environment.
-LD_LIBRARY_PATH="$ENV_PREFIX/lib/python$PYTHON_VERSION/site-packages/z3/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-    "$PYTHON" "$SCRIPT_DIR/verify_env.py" --source-root "$SOURCE_ROOT" --full-h100
+"$PYTHON" "$SCRIPT_DIR/verify_env.py" --source-root "$SOURCE_ROOT" --full-h100
 
 echo "[done] activate with:"
 echo "source /home/zqiu/anaconda3/etc/profile.d/conda.sh"
