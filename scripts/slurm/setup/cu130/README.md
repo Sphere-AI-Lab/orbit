@@ -150,7 +150,7 @@ overlay, so rebuilding its Rust router would duplicate the prebuilt component
 and require an unnecessary Rust toolchain. For the SGLang editable install only,
 `install_env.sh` sets `SGLANG_BUILD_RUST_EXTS=none`.
 
-Megatron-LM is installed with `--reinstall -e` so an existing non-editable
+Megatron-LM is installed with `--no-cache --link-mode copy --force-reinstall --editable` so an existing non-editable
 `megatron-core` distribution cannot cause `uv` to skip the editable link.
 The runtime pins use NumPy 2.3.5 and align `flashinfer-python`,
 `flashinfer-cubin`, and `flashinfer-jit-cache` at 0.6.15.post1; the JIT-cache
