@@ -12,6 +12,10 @@ if [ "$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)" -lt 8 ]; the
     exit 1
 fi
 adapter_first_select_model q3_30b
+# env.sh's 30B rung is Qwen3-30B-A3B-Instruct-2507 (rope_theta 10000000); the
+# shared model-args file defaults --rotary-base to the base model's 1000000 and
+# hf_validate_args rejects the mismatch (30B probe, 2026-08-23).
+export MODEL_ARGS_ROTARY_BASE="${MODEL_ARGS_ROTARY_BASE:-10000000}"
 rc=0
 run_harness "${CAMPAIGN:-phase1-q3-30b-$(date +%Y%m%d_%H%M%S)}-oft" \
     --profile q3_30b --pefts oft --modes sync,async_db \
