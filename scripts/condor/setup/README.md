@@ -38,7 +38,8 @@ bash scripts/condor/setup/install_env.sh
 bash scripts/condor/setup/verify_env.sh --full-h100
 ```
 
-The wrapper adds `~/.local/bin` (uv) to `PATH` and otherwise forwards all
+The wrapper adds `~/.local/bin` (uv) to `PATH`, defaults `UV_CACHE_DIR` to
+node-local scratch (see "uv cache placement" below), and otherwise forwards all
 installer arguments and environment variables — `ENV_PREFIX`, `SOURCE_ROOT`,
 `CACHE_DIR`, `UV_CACHE_DIR`, `JOBS`, and the `ORBIT_*_REPO`/`ORBIT_*_COMMIT`
 overrides — to the canonical installer, whose defaults already point at this
@@ -46,6 +47,26 @@ cluster's paths (`/fast/zqiu/orbit-iclr/orbit/{envs,sources,cache}/orbit-cu130-v
 conda at `/home/zqiu/anaconda3`). `--dry-run` prints the plan without touching
 anything. The installer holds a lock at `$ENV_PREFIX.install.lock`; do not run
 concurrent installers against the same prefix.
+
+## uv cache placement
+
+uv requires a lock-capable cache filesystem, so the canonical installer defaults
+`UV_CACHE_DIR` to cluster home. On this cluster home is NFS
+(`sc-fb1:/cluster-home`), and extraction there is slow enough to dominate a cold
+install: a clean-room run on 2026-08-24 (job 17476896) measured roughly
+150 KB/s across uv's parallel unpack streams against a cache that reaches about
+19 GB, and was still inside step 2 of 10 after 80 minutes.
+
+Both wrappers therefore default `UV_CACHE_DIR` to the job's node-local Condor
+scratch directory (`$_CONDOR_SCRATCH_DIR`, falling back to `$TMPDIR` or `/tmp`
+outside a job), which the canonical README names as the fastest cache location.
+`materialize_env.py` copies site-packages into the prefix at the end of the
+install, so the finished environment depends on neither the cache nor the node.
+This is why the submit description requests 500 GB of disk: Condor sizes the
+scratch directory from `request_disk`.
+
+Set `UV_CACHE_DIR` explicitly to override — for example to reuse a warm cache on
+home across installs, at the extraction cost measured above.
 
 ## Batch installation
 
@@ -80,8 +101,10 @@ the shared filesystem directly (`should_transfer_files = NO`), writes the event
 log, stdout, and stderr to `run_dir`, and never embeds a bid.
 
 For a clean-room installation, pick a fresh shared suffix for `env_prefix`,
-`source_root`, `cache_dir`, and `UV_CACHE_DIR` as described in the canonical
-README — do not overwrite the validated `orbit-cu130-v1` environment.
+`source_root`, and `cache_dir` as described in the canonical README — do not
+overwrite the validated `orbit-cu130-v1` environment. Leave `UV_CACHE_DIR`
+unset so the job gets an empty node-local cache, which is both clean-room
+correct and the fast path.
 
 ## Verification and activation
 
