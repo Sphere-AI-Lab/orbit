@@ -78,13 +78,20 @@ left one behind — and the install skips both the downloads and the extraction.
 For the same reason, prefer one cache reused across installs of this profile
 over a fresh cache per install.
 
-Do not extend that sharing to the Miles-IMP environment on this cluster. It is
-safe — uv's cache is content-addressed, so unrelated artifacts coexist — but it
-gains nothing, because the two stacks share almost no binaries despite similar
-version strings. Measured on 2026-08-24: `libtorch_cuda.so` is 1,043,840,721
-bytes in the Miles cache against 456,142,457 here (Miles installs torch from
-`download.pytorch.org/whl/cu130`, this profile from PyPI), and cuBLAS and cuDNN
-differ too. A shared cache would hold both stacks in full.
+Share that cache with the Miles-IMP environment on this cluster. Both profiles
+derive their binary pins from the same `radixark/miles` Dockerfile, and the
+installed artifacts are identical, not merely similarly versioned. Verified on
+2026-08-24 by comparing the two environments rather than their caches:
+
+| file | Miles env | this profile |
+| --- | --- | --- |
+| `torch/lib/libtorch_cuda.so` | 456,142,457 B, md5 `05b737fb2408…` | identical |
+| `nvidia/cudnn/lib/libcudnn_adv.so.9` | 109,169,104 B, md5 `8bc5a9fb4c38…` | identical |
+
+Compare installed files, not cache entries, if you re-check this. A uv cache
+accumulates every artifact it has ever seen — the global cache on this account
+holds sixteen distinct torch builds from unrelated work — so picking an
+arbitrary entry out of one proves nothing.
 
 ## Batch installation
 
