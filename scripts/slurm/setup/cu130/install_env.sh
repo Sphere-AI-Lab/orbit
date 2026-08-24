@@ -47,6 +47,12 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
+# The pinned tool defaults above are the MPI cluster's paths; on clusters
+# where they do not exist (e.g. the H200 Slurm cluster) fall back to PATH.
+[ -x "$CONDA_EXE" ] || command -v "$CONDA_EXE" >/dev/null 2>&1 || CONDA_EXE=$(command -v conda || echo "$CONDA_EXE")
+[ -x "$UV_EXE" ] || command -v "$UV_EXE" >/dev/null 2>&1 || UV_EXE=$(command -v uv || echo "$UV_EXE")
+[ -x "$TOOL_PYTHON" ] || command -v "$TOOL_PYTHON" >/dev/null 2>&1 || TOOL_PYTHON=$(command -v python3 || echo "$TOOL_PYTHON")
+
 WHEEL_DIR="$CACHE_DIR/miles-wheels/$MILES_WHEELS_TAG"
 LOCK_DIR="$ENV_PREFIX.install.lock"
 
@@ -72,9 +78,11 @@ for executable in "$CONDA_EXE" "$UV_EXE" "$TOOL_PYTHON" git nvidia-smi; do
 done
 "$TOOL_PYTHON" "$SCRIPT_DIR/extract_pins.py" --check
 gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
+# The Miles cu130 wheels ship sm_90 and sm_100 code (FA3 is sm_90a-only), so
+# Hopper H100 and Blackwell B200 allocations are both accepted.
 case "$gpu_name" in
-    *H100*) ;;
-    *) echo "FATAL: expected H100, got $gpu_name" >&2; exit 1 ;;
+    *H100*|*H200*|*B200*) ;;
+    *) echo "FATAL: expected H100, H200 or B200, got $gpu_name" >&2; exit 1 ;;
 esac
 echo "[preflight] GPU=$gpu_name"
 [ "$PREFLIGHT_ONLY" -eq 1 ] && exit 0
@@ -87,7 +95,16 @@ mkdir -p "$(dirname "$ENV_PREFIX")" "$SOURCE_ROOT" "$CACHE_DIR" "$WHEEL_DIR"
 mkdir "$LOCK_DIR"
 trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 
-export UV_CACHE_DIR="$CACHE_DIR/uv"
+# uv requires working file locks; the MPI /fast filesystem does not provide
+# them, so the uv cache defaults to cluster home. Set UV_CACHE_DIR to a
+# node-local path (e.g. under /tmp) for the fastest extraction.
+export UV_CACHE_DIR="${UV_CACHE_DIR:-${HOME}/.cache/orbit-cu130-v1/uv}"
+# Link mode: unpack into the cache and symlink site-packages at it (uv's copy
+# mode runs at ~3 files/s onto Lustre). The prefix is made self-contained
+# afterwards by materialize_env.py, which replaces every cache symlink with a
+# parallel copy, so the finished env depends on neither the cache nor the node.
+export UV_LINK_MODE=symlink
+export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-120}"
 export PIP_CACHE_DIR="$CACHE_DIR/pip"
 export MAX_JOBS="$JOBS"
 
@@ -240,14 +257,21 @@ install_optional "$WHEEL_DIR/causal_conv1d-*.whl"
 install_optional "$WHEEL_DIR/mamba_ssm-*.whl"
 install_optional "$WHEEL_DIR/deep_ep-*.whl"
 install_optional "$WHEEL_DIR/ring_flash_attn-*.whl"
-install_optional "$WHEEL_DIR/sglang_router-*.whl"
+# Not the Miles router wheel: it is tagged manylinux_2_39 and fails to load on
+# glibc 2.35 nodes (Ubuntu 22.04) with "GLIBC_2.38 not found". Install the
+# manylinux_2_28 wheel that orbit/pyproject.toml pins under [tool.uv.sources].
+uv_install --force-reinstall --no-deps "$SGLANG_ROUTER_WHEEL_URL"
 install_optional "$WHEEL_DIR/mooncake_transfer_engine_cuda13-*.whl"
 
 echo "[6/10] reconcile SGLang CUDA runtime pins"
+# flashinfer.ai's per-project index stops at 0.6.9 (newer releases moved to
+# PyPI); the old direct URL now 404s. PyPI ships the identical
+# py3-none-any wheel for ${FLASHINFER_VERSION}.
+uv_install --no-cache --link-mode copy --force-reinstall --no-deps \
+    --only-binary=:all: "flashinfer-python==${FLASHINFER_VERSION}"
 uv_install --force-reinstall --no-deps \
     --extra-index-url https://flashinfer.ai/whl \
     --extra-index-url https://flashinfer.ai/whl/cu130 \
-    "flashinfer-python==$FLASHINFER_VERSION" \
     "flashinfer-cubin==$FLASHINFER_VERSION" \
     "flashinfer-jit-cache==$FLASHINFER_VERSION"
 uv_install --force-reinstall --no-deps \
@@ -322,13 +346,35 @@ for requirement in data["project"]["dependencies"]:
         requirements.append(requirement)
 Path(sys.argv[2]).write_text("\n".join(requirements) + "\n")
 PY
-uv_install -r "$RUNTIME_REQUIREMENTS"
+# The numpy==1.26.4 override in pyproject lets scipy float to a numpy>=2-only
+# release (1.18 references np.long and breaks `import sglang`); hold scipy on
+# the last line that supports numpy 1.x.
+uv_install -r "$RUNTIME_REQUIREMENTS" "scipy<1.14"
 uv_install "nvidia-modelopt==0.44.0" "torch-memory-saver==0.0.9.post1"
 
+# TileLang's bundled TVM links against the Z3 wheel without an embedded rpath.
+Z3_LIB_DIR="$ENV_PREFIX/lib/python$PYTHON_VERSION/site-packages/z3/lib"
+if [ ! -f "$Z3_LIB_DIR/libz3.so.4.15" ]; then
+    echo "FATAL: missing TileLang runtime dependency: $Z3_LIB_DIR/libz3.so.4.15" >&2
+    exit 1
+fi
+export LD_LIBRARY_PATH="$Z3_LIB_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+mkdir -p "$ENV_PREFIX/etc/conda/activate.d"
+cat > "$ENV_PREFIX/etc/conda/activate.d/orbit-cu130-z3.sh" <<EOF
+# TileLang's bundled TVM needs the shared library shipped by z3-solver.
+case ":\${LD_LIBRARY_PATH:-}:" in
+    *":$Z3_LIB_DIR:"*) ;;
+    *) export LD_LIBRARY_PATH="$Z3_LIB_DIR\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}" ;;
+esac
+EOF
+
 echo "[9/10] install editable Sphere-Lab and Orbit overlays"
-uv_install -e "$MEGATRON_SRC" --no-deps
+"$PYTHON" -m pip install --no-cache-dir --force-reinstall --no-deps --editable "$MEGATRON_SRC"
 uv_install -e "$BRIDGE_SRC" --no-deps --no-build-isolation
-uv_install -e "$SGLANG_SRC/$ORBIT_SGLANG_SUBDIRECTORY" --no-deps
+# Sphere-Lab SGLang declares setuptools-rust extensions (rust/sglang-grpc,
+# rust/sglang-mm); Orbit uses the separate sglang-router wheel, so never
+# compile Rust for the Python overlay.
+SGLANG_BUILD_RUST_EXTS=none uv_install -e "$SGLANG_SRC/$ORBIT_SGLANG_SUBDIRECTORY" --no-deps
 uv_install -e "$REPO_ROOT" --no-deps
 
 echo "[10/10] reassert ABI pins and verify"
@@ -339,6 +385,9 @@ uv_install --no-deps \
     "triton==$TRITON_VERSION" \
     "cuda-python==$CUDA_PYTHON_VERSION" \
     "nvidia-cudnn-cu13==$CUDNN_CU13_VERSION"
+echo "[materialize] replace cache symlinks with copies so the prefix outlives $CACHE_DIR"
+"$PYTHON" "$SCRIPT_DIR/materialize_env.py" --prefix "$ENV_PREFIX" --cache-dir "$UV_CACHE_DIR" --jobs "$JOBS"
+
 "$PYTHON" "$SCRIPT_DIR/verify_env.py" --source-root "$SOURCE_ROOT" --full-h100
 
 echo "[done] activate with:"

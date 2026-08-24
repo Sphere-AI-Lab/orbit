@@ -71,7 +71,8 @@ run_training_driver() {
             "${SGLANG_ARGS[@]}" \
             "${MISC_ARGS[@]}" \
             "${DEBUG_ARGS[@]}" \
-            "${PEFT_ARGS[@]}"
+            "${PEFT_ARGS[@]}" \
+            ${ORBIT_EXTRA_TRAIN_ARGS[@]+"${ORBIT_EXTRA_TRAIN_ARGS[@]}"}
         return 0
     fi
     set +x
@@ -96,7 +97,8 @@ run_training_driver() {
        "${SGLANG_ARGS[@]}" \
        "${MISC_ARGS[@]}" \
        "${DEBUG_ARGS[@]}" \
-       "${PEFT_ARGS[@]}" <<'PY' 2>&1 | tee "${_PARITY_TEE_TARGET}"
+       "${PEFT_ARGS[@]}" \
+       ${ORBIT_EXTRA_TRAIN_ARGS[@]+"${ORBIT_EXTRA_TRAIN_ARGS[@]}"} <<'PY' 2>&1 | tee "${_PARITY_TEE_TARGET}"
 import os
 import re
 import runpy

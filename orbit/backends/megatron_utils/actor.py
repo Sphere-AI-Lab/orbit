@@ -1,6 +1,7 @@
 import logging
 import random
 import socket
+import types
 from argparse import Namespace
 
 import ray
@@ -30,6 +31,7 @@ from orbit.utils.eval_nll import (
     plan_eval_nll_shards,
 )
 from orbit.utils.memory_utils import clear_memory, print_memory
+from orbit.utils.opd_dump import maybe_dump_teacher_logprobs
 from orbit.utils.opd_teacher_spec import should_promote_teacher, teacher_forward_plan
 from orbit.utils.processing_utils import load_tokenizer
 from orbit.utils.ray_utils import Box
@@ -1029,6 +1031,29 @@ class MegatronTrainRayActor(TrainRayActor):
                 teacher_data = self.compute_teacher_log_probs(data_iterator, num_microbatches, ref_data=ref_data)
                 if teacher_data is not None:
                     rollout_data.update(teacher_data)
+                    if self._is_main_rank:
+                        # M1 correctness leg (I-5): env-gated dump of the in-process
+                        # teacher_log_probs just computed. No Sample objects exist at
+                        # this point (megatron computes teacher_log_probs directly onto
+                        # the batch-level rollout_data/teacher_data dicts, never through
+                        # Sample), so synthesize lightweight per-sample stand-ins from
+                        # this rank's local shard: .tokens is the same full
+                        # prompt+response ids as Sample.tokens; sample_index numbers
+                        # this rank's local (seqlen-balanced) order, not the original
+                        # global rollout order -- process_rollout_data discards that
+                        # partition mapping before this point. The compare CLI's
+                        # required tokens-equality check still makes any accidental
+                        # cross-index comparison fail loudly rather than silently.
+                        # No-op unless ORBIT_OPD_TEACHER_LOGPROB_DUMP is set.
+                        maybe_dump_teacher_logprobs(
+                            rollout_id,
+                            [
+                                types.SimpleNamespace(tokens=tokens.tolist(), teacher_log_probs=teacher_lp.tolist())
+                                for tokens, teacher_lp in zip(
+                                    rollout_data["tokens"], teacher_data["teacher_log_probs"], strict=True
+                                )
+                            ],
+                        )
                 self._switch_model("old_actor" if self.args.keep_old_actor else "actor")
                 if not self.args.use_rollout_logprobs or self.args.get_mismatch_metrics:
                     for m in all_replay_managers:

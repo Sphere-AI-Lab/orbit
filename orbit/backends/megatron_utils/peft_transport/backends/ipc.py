@@ -15,6 +15,7 @@ from ray.actor import ActorHandle
 
 from orbit.backends.megatron_utils.peft_utils import PeftSyncSpec
 from orbit.backends.megatron_utils.sglang import MultiprocessingSerializer
+from orbit.backends.megatron_utils.update_weight.sync_metrics import get_payload_tracker
 from orbit.utils.distributed_utils import get_gloo_group
 
 from .._gather import peft_adapter_preloaded, validate_adapter_weight_chunk
@@ -113,6 +114,9 @@ class IpcBackend(PeftWeightTransport):
         send_result: PeftSendResult | None = None
         load_error: Exception | None = None
         if is_src:
+            # Payload accounting: only the source rank ships tensors to the
+            # engine actor (peers just hit the barrier), so only it records.
+            get_payload_tracker().record(weight_tensors)
             cpu_tensors = {
                 name: tensor.detach().to(device="cpu", copy=True).contiguous()
                 for name, tensor in weight_tensors
@@ -157,6 +161,9 @@ class IpcBackend(PeftWeightTransport):
             payload.extra["entries"],
         )
         serialized = MultiprocessingSerializer.serialize(inner, output_str=True)
+        # Payload accounting: the engine deserializes every gather-group
+        # rank's flat tensor, so each rank records its own.
+        get_payload_tracker().record([payload.flat_tensor])
         gathered = [None] * world_size if is_src else None
         dist.gather_object(
             serialized,
@@ -203,6 +210,9 @@ class IpcBackend(PeftWeightTransport):
             payload.metadata,
             payload.extra["entries"],
         )
+        # Payload accounting: every gather-group rank ships its CPU copy of
+        # the flat tensor to the source rank, so each rank records its own.
+        get_payload_tracker().record([payload.flat_tensor])
         gathered = [None] * world_size if is_src else None
         dist.gather_object(
             rank_payload,

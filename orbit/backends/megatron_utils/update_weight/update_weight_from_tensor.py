@@ -1,6 +1,7 @@
 import dataclasses
 import logging
 import os
+import time
 from argparse import Namespace
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -26,6 +27,12 @@ from ..sglang import FlattenedTensorBucket, MultiprocessingSerializer
 
 from .common import post_process_weights
 from .hf_weight_iterator_base import HfWeightIteratorBase
+from .sync_metrics import (
+    emit_timeline_event,
+    emit_update_weights_metrics,
+    get_payload_tracker,
+    sum_metrics_across_ranks,
+)
 from .update_weight_from_distributed.broadcast import (
     connect_rollout_engines_from_distributed,
     disconnect_rollout_engines_from_distributed,
@@ -269,6 +276,21 @@ class UpdateWeightFromTensor:
                 transport_gpu_counts = []
             self._peft_transport.connect(transport_engines, rollout_engine_lock, transport_gpu_counts)
 
+    def _sync_mode_label(self) -> str:
+        """Human-readable sync mode for metrics/timeline markers.
+
+        "full" for base-model sync, "adapter_double_buffer" when the PEFT
+        transport stages into an inactive slot, "adapter_single_slot"
+        otherwise. Only consulted for rank-0 emission; on distributed non-src
+        PEFT ranks (transport is None) the label falls back to single-slot.
+        """
+        if self._peft_sync_spec is None:
+            return "full"
+        runtime_mode = getattr(self._peft_transport, "runtime_mode", None)
+        if getattr(runtime_mode, "adapter_double_buffer", False):
+            return "adapter_double_buffer"
+        return "adapter_single_slot"
+
     @torch.no_grad()
     def update_weights(self) -> None:
         """
@@ -289,6 +311,13 @@ class UpdateWeightFromTensor:
         )
         lifecycle_rollout_engines = getattr(self, "_all_rollout_engines", None) or self.rollout_engines
 
+        # Sync-cost instrumentation (perf/update_weights_*): every rank tracks
+        # the payload it actually ships; rank 0 tracks the engine pause window.
+        get_payload_tracker().reset()
+        sync_mode = self._sync_mode_label()
+        pause_dispatch_started = None
+        pause_seconds = 0.0
+
         if rank == 0:
             mode = self.args.pause_generation_mode
             _log_weight_sync_event(
@@ -299,6 +328,8 @@ class UpdateWeightFromTensor:
                 rollout_engine_count=len(lifecycle_rollout_engines),
                 pause_generation_mode=mode,
             )
+            emit_timeline_event("update_start", weight_version=self.weight_version, mode=sync_mode)
+            pause_dispatch_started = time.perf_counter()
             ray.get([engine.pause_generation.remote(mode=mode) for engine in lifecycle_rollout_engines])
             ray.get([engine.flush_cache.remote() for engine in lifecycle_rollout_engines])
             if self.quantization_config and self.quantization_config["quant_method"] in ["compressed-tensors"]:
@@ -408,6 +439,9 @@ class UpdateWeightFromTensor:
                 post_process_quantization=True,
             )
             ray.get([engine.continue_generation.remote() for engine in lifecycle_rollout_engines])
+            if pause_dispatch_started is not None:
+                pause_seconds = time.perf_counter() - pause_dispatch_started
+            emit_timeline_event("update_end", weight_version=self.weight_version, mode=sync_mode)
             _log_weight_sync_event(
                 "post_process_and_continue_complete",
                 rank=rank,
@@ -421,6 +455,22 @@ class UpdateWeightFromTensor:
             world_size=world_size,
             weight_version=self.weight_version,
             peft_method=self.peft_method,
+        )
+        # SUM the per-rank contributions so the perf-logging primary rank
+        # (which is the last PP stage, not necessarily rank 0) emits the
+        # per-update totals. This is a collective on the same gloo group as the
+        # barrier above, which guarantees all ranks reach it in lockstep; local
+        # value computation is deterministic and identical on every rank.
+        tracker = get_payload_tracker()
+        pause_total, payload_bytes_total, payload_tensors_total = sum_metrics_across_ranks(
+            [pause_seconds, tracker.payload_bytes, tracker.num_tensors],
+            group=get_gloo_group(),
+        )
+        emit_update_weights_metrics(
+            pause_seconds=pause_total,
+            payload_bytes=payload_bytes_total,
+            num_tensors=payload_tensors_total,
+            num_chunks=sync_chunk_count,
         )
         _log_weight_sync_event(
             "update_weights_complete",
@@ -622,6 +672,11 @@ def _send_to_colocated_engine(
         }
         long_live_tensors.append(flattened_tensor_data)
         serialized_tensors.append(MultiprocessingSerializer.serialize(flattened_tensor_data, output_str=True))
+
+    # Payload accounting: the engine deserializes every gather-group rank's
+    # flattened bucket(s), so each rank records its own flat tensor(s). Byte
+    # computation happens inside record()'s never-raise guard.
+    get_payload_tracker().record([data.get("flattened_tensor") for data in long_live_tensors])
 
     serialized_named_tensors = (
         [None] * dist.get_world_size(ipc_gather_group) if ipc_gather_src == dist.get_rank() else None

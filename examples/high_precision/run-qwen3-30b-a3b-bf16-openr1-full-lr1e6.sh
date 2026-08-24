@@ -37,7 +37,7 @@ GPUS_PER_NODE=8
 RAY_NUM_CPUS=64
 
 # === Model args ===
-MODEL_ARGS_ROTARY_BASE=1000000
+MODEL_ARGS_ROTARY_BASE="${MODEL_ARGS_ROTARY_BASE:-1000000}"   # Instruct-2507 checkpoints need 10000000
 source "${ORBIT_ROOT}/orbit_plugins/model_args/qwen3-30B-A3B.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===

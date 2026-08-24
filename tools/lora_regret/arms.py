@@ -788,7 +788,7 @@ E4_MATH_OFT_B128_LOW_LRS = (1e-7, 3e-7, 1e-6, 3e-6, 1e-5)
 E4_MATH_OFT_B128_REFINE_LRS = (5e-6, 6e-6, 7e-6, 8e-6, 9e-6, 2e-5)
 E4_ENV2_OFT_BLOCK_SIZE = 128
 E4_ENV2_OFT_LRS = (5e-7, 1e-6, 3e-6, 7e-6, 2e-5, 4e-5, 1e-4)
-E4_ENV2_OFT_ROLLOUTS = 150
+E4_ENV2_OFT_ROLLOUTS = {"math": 150, "gsm8k": 200}
 
 # The one LR the whole ladder is re-run at. 7e-06 is b128's measured argmax from
 # `e4oftb128refine` -- 0.2742 against 0.2636 at 8e-06 and 0.2624 at 6e-06 -- and

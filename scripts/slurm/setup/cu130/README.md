@@ -1,4 +1,4 @@
-# Orbit native CUDA 13 / H100 environment
+# Orbit native CUDA 13 / H100 or B200 environment
 
 This profile follows the Miles-IMP installation model. The RadixArk Miles
 Dockerfile is a pinned dependency recipe, not a runtime container. Its prebuilt
@@ -69,6 +69,12 @@ Cache:
 These directories must be excluded from Git. The installer never resets an
 existing source checkout or overwrites an unknown environment.
 
+The uv cache defaults to cluster home (see "MPI cache placement"); for the
+fastest extraction point `UV_CACHE_DIR` at node-local disk (for example under
+`/tmp`). Either way the installer symlinks site-packages into the cache while it
+runs and then copies everything into the prefix (`materialize_env.py`, parallel),
+so the finished environment depends on neither the cache nor the node.
+
 ## Refresh or audit pins
 
 From the Orbit repository root:
@@ -89,7 +95,7 @@ Dry-run mode performs no network access and creates no files:
 scripts/slurm/setup/cu130/install_env.sh --dry-run
 ~~~
 
-## Install inside an H100 allocation
+## Install inside an H100 or B200 allocation
 
 ~~~bash
 scripts/slurm/setup/cu130/install_env.sh
@@ -106,7 +112,18 @@ conda activate /fast/zqiu/orbit-iclr/orbit/envs/orbit-cu130-v1
 ~~~
 
 The editable source links are part of the environment. No extra PYTHONPATH is
-normally needed.
+normally needed. Before running launchers, load Orbit's runtime loader with the
+prefix as `ORBIT_VENV`; it adds the `z3/lib` path that `megatron.bridge`
+(via nvidia-modelopt) needs and the cuDNN/FlashInfer runtime settings:
+
+~~~bash
+ORBIT_VENV=/fast/zqiu/orbit-iclr/orbit/envs/orbit-cu130-v1 \
+  source examples/load_cuda13_2_orbit_env.sh
+~~~
+
+Without a Rust toolchain on `PATH`, the Sphere-Lab SGLang editable install skips
+its `setuptools-rust` extensions (`SGLANG_BUILD_RUST_EXTS=none`); Orbit uses the
+separate `sglang-router` wheel instead.
 
 ## Why cuda-python 13 appears
 
@@ -116,7 +133,7 @@ with --no-deps so dependency resolution cannot replace the controlled stack.
 
 ## Re-run verification
 
-Inside an H100 allocation:
+Inside an H100 or B200 allocation (FlashAttention 3 is sm_90a-only and is not exercised on B200):
 
 ~~~bash
 /fast/zqiu/orbit-iclr/orbit/envs/orbit-cu130-v1/bin/python \
@@ -124,3 +141,113 @@ Inside an H100 allocation:
   --source-root /fast/zqiu/orbit-iclr/orbit/sources/orbit-cu130-v1 \
   --full-h100
 ~~~
+
+## MPI cache placement
+
+The large, immutable Miles wheel cache remains under `CACHE_ROOT` (normally
+`/fast/.../cache/orbit-cu130-v1`). The mutable `uv` distribution cache requires
+file locking, but the MPI `/fast` filesystem can return `Function not implemented
+(os error 38)` for that operation. The installer therefore defaults
+`UV_CACHE_DIR` to `${HOME}/.cache/orbit-cu130-v1/uv`, which resolves to a
+Lustre-backed home directory on MPI. Override it explicitly when needed:
+
+```bash
+UV_CACHE_DIR=/lustre/home/$USER/.cache/orbit-cu130-v1/uv \
+  scripts/slurm/setup/cu130/install_env.sh
+```
+
+This changes only the lock-sensitive `uv` cache. Prebuilt CUDA wheels and other
+large reusable artifacts remain in `CACHE_ROOT`.
+
+## Prebuilt router and editable overlays
+
+The CUDA 13 workflow installs `sglang_router` from the manylinux_2_28 wheel that
+`orbit/pyproject.toml` pins under `[tool.uv.sources]` (`SGLANG_ROUTER_WHEEL_URL`
+in `pins.env`), not from the RadixArk Miles wheel set: the Miles build is tagged
+manylinux_2_39 and fails to load on glibc 2.35 nodes (Ubuntu 22.04) with
+`GLIBC_2.38 not found`. The editable Sphere-Lab SGLang checkout is a Python and
+Triton source overlay, so rebuilding its Rust router would duplicate that
+component and require an unnecessary Rust toolchain. For the SGLang editable
+install only, `install_env.sh` sets `SGLANG_BUILD_RUST_EXTS=none`.
+
+Megatron-LM is installed with `--no-cache --link-mode copy --force-reinstall --editable` so an existing non-editable
+`megatron-core` distribution cannot cause `uv` to skip the editable link.
+
+## TileLang Z3 runtime loader
+
+The editable Sphere-Lab Megatron path imports TileLang's bundled TVM. That native
+library depends on `libz3.so.4.15`, which is supplied by the installed
+`z3-solver` wheel but is outside the default dynamic-loader search path. The
+installer exports the wheel's `z3/lib` directory for verification and writes an
+idempotent Conda activation hook at
+`$ENV_PREFIX/etc/conda/activate.d/orbit-cu130-z3.sh` so later `conda activate`
+commands receive the same runtime path.
+The runtime pins use NumPy 2.3.5 and align `flashinfer-python`,
+`flashinfer-cubin`, and `flashinfer-jit-cache` at 0.6.15.post1; the JIT-cache
+wheel carries the expected `+cu130` local version suffix.
+
+## Clean-room verification
+
+To verify the complete CUDA 13 workflow without reusing an existing environment,
+source checkout, wheel cache, or uv cache, run this command from the Orbit
+repository inside an H100 allocation:
+
+```bash
+ENV_PREFIX=/fast/zqiu/orbit-iclr/orbit/envs/orbit-cu130-v2-clean \
+SOURCE_ROOT=/fast/zqiu/orbit-iclr/orbit/sources/orbit-cu130-v2-clean \
+CACHE_DIR=/fast/zqiu/orbit-iclr/orbit/cache/orbit-cu130-v2-clean \
+UV_CACHE_DIR=/lustre/home/$USER/.cache/orbit-cu130-v2-clean/uv \
+  scripts/slurm/setup/cu130/install_env.sh
+```
+
+These paths are independent of `orbit-cu130-v1`. Do not delete or overwrite the
+validated v1 environment. A successful installation ends with
+`[summary] 38/38 passed`.
+
+For repeated clean-room checks, choose a new shared suffix for all four paths so
+that the environment, sources, wheel cache, and uv cache are all unused.
+
+## H200 Slurm cluster (verified 2026-08-24)
+
+The driver on this cluster now supports CUDA 13 (post 2026-08-21 maintenance),
+so this profile applies unchanged; the nodes report `NVIDIA H200` (same
+sm_90/sm_90a Hopper die as H100 -- every prebuilt wheel applies). Verified
+install: env `orbit_cu130_zeju`, install job 1717, `[summary] 39/39 passed`.
+
+Working invocation (user paths shown as used; clone sources point at local
+mirrors so the exact commits are guaranteed present):
+
+~~~bash
+ORBIT_SGLANG_REPO=/data/home/zeju/miles-orbit/sglang \
+ORBIT_MEGATRON_REPO=/data/home/zeju/miles-orbit/Megatron-LM \
+ORBIT_MEGATRON_BRIDGE_REPO=/data/home/zeju/miles-orbit/Megatron-Bridge \
+UV_CACHE_DIR=/data/home/zeju/.cache/orbit_cu130_zeju/uv \
+scripts/slurm/setup/cu130/install_env.sh \
+  --env-prefix /data/home/zeju/miles-orbit/envs/orbit_cu130_zeju \
+  --source-root /data/home/zeju/miles-orbit/sources/orbit_cu130_zeju \
+  --cache-dir /data/home/zeju/miles-orbit/cache/orbit_cu130_zeju \
+  --conda-exe /data/shared/conda/miniconda3/bin/conda \
+  --uv-exe "$HOME/.local/bin/uv" \
+  --tool-python /data/shared/conda/miniconda3/bin/python \
+  --jobs 16
+~~~
+
+Submit inside a 1-GPU allocation (16 CPU / 128G / ~30 min with a warm wheel
+cache). `ORBIT_SGLANG_COMMIT` may be overridden the same way when a different
+Sphere-Lab sglang revision is wanted (the pins.env value is the default).
+
+At runtime, source the companion preamble after activating the env -- it
+carries the cluster's cuDNN/cudart pins, node-local caches, and the mandatory
+`ORBIT_PEFT_ADAPTER_TRANSPORT=cpu_gather` (this cluster's SGLang scheduler
+children cannot rebuild trainer-side CUDA IPC handles):
+
+~~~bash
+source /data/shared/conda/miniconda3/etc/profile.d/conda.sh
+conda activate /data/home/zeju/miles-orbit/envs/orbit_cu130_zeju
+source scripts/slurm/setup/cu130/slurm_h200_runtime.sh
+export PYTHONPATH="$PWD"   # Ray workers import orbit by path
+~~~
+
+No CUDA toolkit is required on the nodes (prebuilt wheels + flashinfer
+jit-cache); `examples/load_cuda13_2_orbit_env.sh` is the MPI/uv-venv loader
+and is NOT used here.

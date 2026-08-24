@@ -239,6 +239,13 @@ def create_rollout_manager(args, pg):
         ray.get(rollout_manager.check_weights.remote(action="reset_tensors"))
 
     if args.offload_rollout:
+        # No-tags call: RolloutManager.offload(tags=None) routes through
+        # ServerGroup.needs_offload, which start_rollout_servers only sets for
+        # groups whose GPUs overlap the megatron training GPUs (colocate). In
+        # async/disjoint topologies every group has needs_offload=False, so this
+        # releases nothing and the engines stay resident -- which is why
+        # train_async.py has no onload_weights/onload_kv dance (train.py does,
+        # for the colocated case). Pinned by tests/fast/test_async_offload_noop.py.
         ray.get(rollout_manager.offload.remote())
 
     return rollout_manager, num_rollout_per_epoch

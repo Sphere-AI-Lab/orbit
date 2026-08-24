@@ -50,12 +50,22 @@ import pybase64
 import torch
 
 from orbit.rollout.scoring_client import post_json
+from orbit.utils.opd_dump import maybe_dump_teacher_logprobs
 from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)
 
 TEACHER_RESPONSE_METADATA_KEY = "opd_teacher_response"
 STUDENT_TOP_LOGPROBS_METADATA_KEY = "opd_student_top_logprobs"
+
+# M1 correctness leg (I-5): post_process's hook contract is (args, samples)
+# only -- RolloutManager.rollout_id (set once per generate() call) lives on
+# the caller and is not threaded through. This counter stands in for it:
+# post_process runs exactly once per rollout (RolloutManager.generate ->
+# _convert_samples_to_train_data -> _post_process_rewards, once each), so a
+# counter starting at 0 and incremented once per call matches the trainer's
+# rollout_id sequence in the common fresh-run case. See maybe_dump_teacher_logprobs.
+_teacher_dump_rollout_counter = 0
 
 TopLogprobs = list[list[Any]]
 LogprobMaps = list[dict[int, float]]
@@ -127,18 +137,27 @@ def _teacher_hidden_size(checkpoint_path: str) -> int:
     return _TEACHER_HIDDEN_SIZE_CACHE[checkpoint_path]
 
 
+# Bytes per hidden-state value on the wire. The Sphere-Lab sglang server
+# serializes ``meta_info.hidden_states`` as nested JSON floats (no branch ever
+# shipped the base64 buffer this client also accepts): a JSON float such as
+# ``-0.0123456789012345`` plus its separator is ~20 bytes, so size the cap for
+# that format with headroom. Base64 fp32 would be 16/3 bytes per value.
+_HIDDEN_STATE_JSON_BYTES_PER_VALUE = 24
+
+
 def _full_vocab_response_byte_limit(args: Namespace, num_tokens: int) -> int:
     """Response cap for one full-vocab scoring call, sized to its actual payload.
 
-    The dominant field is base64 fp32 hidden states: num_tokens x hidden_size x 4
-    bytes x 4/3 encoding overhead. A 7B teacher (hidden 3584) scoring an eval-length
-    sample legitimately exceeds the generic SCORING_MAX_RESPONSE_BYTES, so the cap
-    scales with the request instead; the generic cap stays as the floor.
+    The dominant field is the per-position teacher hidden states: num_tokens x
+    hidden_size values, ~24 bytes each as JSON floats. A 3B teacher (hidden
+    2048) scoring a 1k-token sample already exceeds the generic
+    SCORING_MAX_RESPONSE_BYTES, so the cap scales with the request instead; the
+    generic cap stays as the floor.
     """
     from orbit.rollout.scoring_client import SCORING_MAX_RESPONSE_BYTES
 
     hidden = _teacher_hidden_size(args.teacher_hf_checkpoint)
-    payload = (num_tokens * hidden * 4 * 4) // 3 + 1024 * 1024
+    payload = num_tokens * hidden * _HIDDEN_STATE_JSON_BYTES_PER_VALUE + 1024 * 1024
     return max(payload, SCORING_MAX_RESPONSE_BYTES)
 
 
@@ -1128,6 +1147,17 @@ def post_process(args, samples: list[Sample], **kwargs):
         logger.warning(
             "OPD sglang post_process: %d/%d samples had no stashed teacher response.", unscored, len(samples)
         )
+
+    # M1 correctness leg (I-5): env-gated dump of the externally-served
+    # teacher_log_probs just assigned above (sampled-token path only -- full-vocab
+    # and top-k samples have no .teacher_log_probs and are skipped inside
+    # maybe_dump_teacher_logprobs). No torch.distributed rank concept applies here:
+    # post_process runs on the single RolloutManager Ray actor (there is exactly
+    # one instance), so no rank guard is needed. No-op unless
+    # ORBIT_OPD_TEACHER_LOGPROB_DUMP is set.
+    global _teacher_dump_rollout_counter
+    maybe_dump_teacher_logprobs(_teacher_dump_rollout_counter, samples)
+    _teacher_dump_rollout_counter += 1
 
     if full_vocab:
         scalar_rewards = [sample.get_reward_value(args) for sample in samples]

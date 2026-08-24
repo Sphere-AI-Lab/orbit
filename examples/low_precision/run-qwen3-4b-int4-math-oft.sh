@@ -43,6 +43,8 @@ SAVE_DIR=${SAVE_DIR:-${ORBIT_ROOT}/orbit_ckpts/Qwen3-4B-Instruct-2507-W4A16_${DA
 
 # === Resources ===
 GPUS_PER_NODE=${GPUS_PER_NODE:-8}
+ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-0}"
+ROLLOUT_NUM_GPUS_PER_ENGINE="${ROLLOUT_NUM_GPUS_PER_ENGINE:-1}"
 RAY_NUM_CPUS=${RAY_NUM_CPUS:-64}
 
 # === Training schedule ===
@@ -122,7 +124,10 @@ NUM_ROLLOUT=${NUM_ROLLOUT:-$(( (TRAIN_ROWS * TOTAL_EPOCHS + ROLLOUT_BATCH_SIZE -
 source "${MODEL_ARGS_FILE}"   # provides MODEL_ARGS=(...)
 
 # === ARGS arrays ===
-COLOCATE_ARGS=( --colocate )
+COLOCATE_ARGS=( )
+if is_true "${ORBIT_COLOCATE:-1}"; then
+    COLOCATE_ARGS=( --colocate )
+fi
 
 CKPT_ARGS=(
     --hf-checkpoint "${HF_CKPT}"
@@ -195,9 +200,9 @@ PERF_ARGS=(
 EVAL_ARGS=( )
 
 SGLANG_ARGS=(
-    --rollout-num-gpus-per-engine 1
+    --rollout-num-gpus-per-engine "${ROLLOUT_NUM_GPUS_PER_ENGINE}"
     --sglang-mem-fraction-static "${SGLANG_MEM_FRACTION_STATIC}"
-    --rollout-num-gpus 0
+    --rollout-num-gpus "${ROLLOUT_NUM_GPUS}"
     --sglang-server-concurrency "${SGLANG_SERVER_CONCURRENCY}"
     --sglang-max-running-requests 1024
     --sglang-chunked-prefill-size "${SGLANG_CHUNKED_PREFILL_SIZE}"

@@ -72,7 +72,7 @@ PROBE_OFT_CENTRE = 1e-4
 #   * e1/e2/e3 -- the operator exports NUM_ROLLOUT=2000 (runbook section 8);
 #                 nothing in the code says 2000, so nothing can derive it.
 #   * e4/e4place -- the RL launcher's own default of 500.
-#   * e4oftenv2 -- e4_protocol.sh's explicit default of 150.
+#   * e4oftenv2 -- the env2 wrappers pin Math at 150 and GSM8K at 200.
 #   * e5/e5scout -- Tulu3 SFT under the same runbook convention as e1.
 OPENTHOUGHTS3_TRAIN_ROWS = 10_000
 ROLLOUT_BATCH_SIZE = 32
@@ -92,17 +92,23 @@ FULL_RUN_ROLLOUTS = {
     "e4oftb128low": RL_LAUNCHER_ROLLOUTS,
     "e4oftb128refine": RL_LAUNCHER_ROLLOUTS,
     "e4oftverify": RL_LAUNCHER_ROLLOUTS,
-    "e4oftenv2": E4_ENV2_OFT_ROLLOUTS,
     "e5scout": SFT_SWEEP_ROLLOUTS,
     "e5": SFT_SWEEP_ROLLOUTS,
     "e5rl": RL_LAUNCHER_ROLLOUTS,
 }
 
 
+def full_run_rollouts(matrix: str, arm) -> int:
+    """The real wrapper budget for this matrix arm."""
+    if matrix == "e4oftenv2":
+        return E4_ENV2_OFT_ROLLOUTS[arm.dataset]
+    return FULL_RUN_ROLLOUTS[matrix]
+
+
 # What counts as one probe. Three levels, coarsest first.
 #
 # `path` is the default: one run per distinct **code path**, which is
-# (launcher, dataset, method, target modules). 13 runs against `method`'s 24.
+# (launcher, dataset, method, target modules). 23 runs against `method`'s 32.
 #
 #   Carried on the axis, so it is probed:
 #     launcher       -- SFT and RL are different scripts and different parsers
@@ -121,11 +127,12 @@ FULL_RUN_ROLLOUTS = {
 # The report still prints all 24 (task, method) rows -- each one reads the pace
 # measured on ITS code path -- so nothing is lost from the estimate.
 #
-# `method` is the previous default: one run per (task, method), 24 runs. Use it
-# if you want each task independently confirmed rather than inferred.
+# `method` is the previous default: one run per (task, method, rollout budget),
+# 32 runs. Use it if you want each task independently confirmed rather than
+# inferred. Different budgets stay separate so campaign cost is not averaged.
 #
 # `config` collapses only the learning rate, so every rank, block size,
-# placement and batch size is launched once -- 61 runs. Worth it only when
+# placement and batch size is launched once -- 79 runs. Worth it only when
 # hunting a shape-dependent failure (an OOM at a batch size nothing has run at)
 # rather than a code-path one.
 PROBE_LEVELS = ("path", "method", "config")
@@ -140,7 +147,7 @@ class ProbeRun:
     gpus: int
     metric: str
     full_rollouts: int
-    arms_of_method: int
+    arms_of_method: int  # arms sharing this method and rollout budget
     project: str
     label: str          # task/method/capacity/placement, for the report
     arms_in_config: int  # arms sharing this configuration -- the LR grid width
@@ -227,9 +234,13 @@ def _probe_run(matrix: str, arm, label: str, multiplier: int) -> ProbeRun:
         only=f"^{re.escape(arm.name)}$",
         gpus=_gpus(arm.method, metric),
         metric=metric,
-        full_rollouts=FULL_RUN_ROLLOUTS[matrix],
+        full_rollouts=full_run_rollouts(matrix, arm),
         arms_of_method=sum(
-            1 for a in _build(matrix) if a.method == arm.method
+            1
+            for candidate in _build(matrix)
+            if candidate.method == arm.method
+            and full_run_rollouts(matrix, candidate)
+            == full_run_rollouts(matrix, arm)
         ),
         project=wandb_project(matrix),
         label=label,
@@ -258,7 +269,10 @@ def probe_plan(level: str = "path") -> list[ProbeRun]:
             # Cheapest representative: the task with the fewest rollouts still
             # exercises the identical code, and there is no reason to probe on
             # the expensive one.
-            matrix, arm = min(members, key=lambda m: (FULL_RUN_ROLLOUTS[m[0]], m[0]))
+            matrix, arm = min(
+                members,
+                key=lambda m: (full_run_rollouts(m[0], m[1]), m[0]),
+            )
             launcher, dataset, method, modules = key
             label = f"{launcher}/{dataset}/{method}/{_MODULE_SHORT.get(modules, modules)}"
             runs.append(_probe_run(matrix, arm, label, len(members)))
@@ -270,13 +284,16 @@ def probe_plan(level: str = "path") -> list[ProbeRun]:
             continue
         cells = {}
         for arm in _build(matrix):
-            key = config_key(arm) if level == "config" else (arm.method,)
+            base_key = config_key(arm) if level == "config" else (arm.method,)
+            key = (*base_key, full_run_rollouts(matrix, arm))
             cells.setdefault(key, []).append(arm)
         for cell in cells.values():
             arm = _representative(cell)
             label = (
                 config_label(config_key(arm)) if level == "config" else arm.method
             )
+            if matrix == "e4oftenv2":
+                label = f"{label}/{arm.dataset}"
             runs.append(_probe_run(matrix, arm, label, len(cell)))
     return runs
 
@@ -456,10 +473,10 @@ def main(argv: list[str] | None = None) -> int:
     plan.add_argument("--gpus", type=int, default=None, help="only runs needing this many GPUs")
     plan.add_argument(
         "--level", choices=PROBE_LEVELS, default="method",
-        help="method (default): one run per (task, method), 24 runs. Rank, block "
+        help="method (default): one run per (task, method, rollout budget), 32 runs. Rank, block "
              "size, placement and batch size exercise the same code at different "
              "shapes, so they add no coverage. config: one run per distinct "
-             "configuration, 61 runs -- for hunting a shape-dependent OOM.",
+             "configuration and rollout budget, 79 runs -- for hunting a shape-dependent OOM.",
     )
     report = sub.add_parser("report", help="read probe ledgers and estimate the campaign")
     report.add_argument(

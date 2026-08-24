@@ -24,7 +24,9 @@ SAVE_DIR="${ORBIT_ROOT}/orbit_ckpts/Qwen3-4B-Instruct-2507-BF16_math_oft"
 TEST_JSONL=${TEST_JSONL:-}
 
 # === Resources ===
-GPUS_PER_NODE=4
+GPUS_PER_NODE="${GPUS_PER_NODE:-4}"
+ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-0}"
+ROLLOUT_NUM_GPUS_PER_ENGINE="${ROLLOUT_NUM_GPUS_PER_ENGINE:-1}"
 RAY_NUM_CPUS=64
 
 # === Model args ===
@@ -40,7 +42,10 @@ TRAIN_ROWS=${TRAIN_ROWS:-$(wc -l < "${TRAIN_JSONL}")}
 NUM_ROLLOUT=${NUM_ROLLOUT:-$(( (TRAIN_ROWS * TOTAL_EPOCHS + ROLLOUT_BATCH_SIZE - 1) / ROLLOUT_BATCH_SIZE ))}
 
 # === ARGS arrays ===
-COLOCATE_ARGS=( --colocate )
+COLOCATE_ARGS=( )
+if is_true "${ORBIT_COLOCATE:-1}"; then
+    COLOCATE_ARGS=( --colocate )
+fi
 
 CKPT_ARGS=(
     --hf-checkpoint "${HF_CKPT}"
@@ -121,9 +126,9 @@ EVAL_ARGS=(
 )
 
 SGLANG_ARGS=(
-    --rollout-num-gpus-per-engine 1
+    --rollout-num-gpus-per-engine "${ROLLOUT_NUM_GPUS_PER_ENGINE}"
     --sglang-mem-fraction-static 0.60
-    --rollout-num-gpus 0
+    --rollout-num-gpus "${ROLLOUT_NUM_GPUS}"
     --sglang-max-running-requests 1024
     --sglang-chunked-prefill-size 4096
     --sglang-attention-backend flashinfer
@@ -149,7 +154,7 @@ PEFT_ARGS=(
     --peft-method oft
     --peft-variant standard
     --oft-type canonical_oft
-    --oft-block-size 128
+    --oft-block-size "${OFT_BLOCK_SIZE:-128}"
     --oft-eps 6e-5
     --target-modules all-linear
 )
