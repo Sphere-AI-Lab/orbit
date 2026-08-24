@@ -306,6 +306,10 @@ case "${OPD_COST_VARIANT}" in
                 --custom-rm-path orbit.rollout.opd_sglang.reward_func
                 --custom-reward-post-process-path orbit.rollout.opd_sglang.post_process
                 --rm-type math
+                # The OPD reward hook returns a scalar, not the {"score": ...}
+                # dict the shared ROLLOUT_ARGS' --reward-key score expects.
+                --reward-key ""
+                --eval-reward-key ""
             )
         else
             RL_ARGS+=(
@@ -331,6 +335,10 @@ case "${OPD_COST_VARIANT}" in
                 # (--rm-type math), not peft_arena_reward; matches the source
                 # smoke (run-qwen2_5-0_5b-opd-full-vocab-smoke.sh).
                 --rm-type math
+                # The OPD reward hook returns a scalar, not the {"score": ...}
+                # dict the shared ROLLOUT_ARGS' --reward-key score expects.
+                --reward-key ""
+                --eval-reward-key ""
             )
         fi
         if [[ -n "${OPD_TEACHER_MEM_FRACTION:-}" ]]; then

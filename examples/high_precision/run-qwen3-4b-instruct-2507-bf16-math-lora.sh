@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Qwen3-30B-A3B (MoE) BF16 + LoRA on PEFT-Arena openr1-50k, tuned for 8xB200.
-# TP=4 EP=4, TRT-LLM MHA, LoRA rank 32, lr=1e-5, 500 rollouts.
-# Self-contained launcher — no exec-chain.
+# Qwen3-4B-Instruct-2507 BF16 + LoRA on the math dataset. Self-contained launcher.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,7 +9,7 @@ source "${ORBIT_ROOT}/scripts/lib/common.sh"
 source "${ORBIT_ROOT}/scripts/lib/paths.sh"
 
 # === Recipe identity ===
-LAUNCHER_NAME=run_qwen3_30b_a3b_openr1_lora_r16_a32_tp4_ep4_bs16_r1000_lr1e5
+LAUNCHER_NAME=run_qwen3_4b_bf16_math_megatron_lora
 WANDB_PROJECT=${WANDB_PROJECT:-orbit-release}
 WANDB_GROUP=${WANDB_GROUP:-${LAUNCHER_NAME}}
 PRECISION_PROFILE=bf16
@@ -21,27 +19,27 @@ RUN_LOG="${ORBIT_ROOT}/logs/${LAUNCHER_NAME}_$(date +%Y%m%d_%H%M%S).log"
 # === Paths ===
 : "${HF_CKPT:?set HF_CKPT to a Hugging Face checkpoint path}"
 : "${MEGATRON_LOAD:?set MEGATRON_LOAD to a Megatron torch_dist checkpoint path}"
-SAVE_DIR="${SAVE_DIR:-${ORBIT_ROOT}/orbit_ckpts/exp_ckpt/${LAUNCHER_NAME#run_}_$(date +%Y%m%d_%H%M%S)}"
+SAVE_DIR="${ORBIT_ROOT}/orbit_ckpts/Qwen3-4B-Instruct-2507-BF16_math_lora"
 : "${TRAIN_JSONL:?set TRAIN_JSONL to a training jsonl path}"
-EVAL_DATA_DIR=${EVAL_DATA_DIR:-}
-EVAL_ORBIT_DIR=${EVAL_ORBIT_DIR:-${EVAL_DATA_DIR}}
+TEST_JSONL=${TEST_JSONL:-}
 
 # === Resources ===
-GPUS_PER_NODE="${GPUS_PER_NODE:-8}"
+GPUS_PER_NODE="${GPUS_PER_NODE:-4}"
 ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-0}"
-ROLLOUT_NUM_GPUS_PER_ENGINE="${ROLLOUT_NUM_GPUS_PER_ENGINE:-4}"
+ROLLOUT_NUM_GPUS_PER_ENGINE="${ROLLOUT_NUM_GPUS_PER_ENGINE:-1}"
 RAY_NUM_CPUS=64
 
 # === Model args ===
-MODEL_ARGS_ROTARY_BASE="${MODEL_ARGS_ROTARY_BASE:-1000000}"   # Instruct-2507 checkpoints need 10000000
-source "${ORBIT_ROOT}/orbit_plugins/model_args/qwen3-30B-A3B.sh"   # provides MODEL_ARGS=(...)
+MODEL_ARGS_ROTARY_BASE=5000000
+source "${ORBIT_ROOT}/orbit_plugins/model_args/qwen3-4B-Instruct-2507.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
-TOTAL_EPOCHS=1000
-NUM_ROLLOUT=1000
-ROLLOUT_BATCH_SIZE=16
-N_SAMPLES_PER_PROMPT=8
-GLOBAL_BATCH_SIZE=128
+TOTAL_EPOCHS="${TOTAL_EPOCHS:-15}"
+ROLLOUT_BATCH_SIZE="${ROLLOUT_BATCH_SIZE:-128}"
+N_SAMPLES_PER_PROMPT="${N_SAMPLES_PER_PROMPT:-4}"
+GLOBAL_BATCH_SIZE="${GLOBAL_BATCH_SIZE:-512}"
+TRAIN_ROWS=${TRAIN_ROWS:-$(wc -l < "${TRAIN_JSONL}")}
+NUM_ROLLOUT=${NUM_ROLLOUT:-$(( (TRAIN_ROWS * TOTAL_EPOCHS + ROLLOUT_BATCH_SIZE - 1) / ROLLOUT_BATCH_SIZE ))}
 
 # === ARGS arrays ===
 COLOCATE_ARGS=( )
@@ -53,7 +51,7 @@ CKPT_ARGS=(
     --hf-checkpoint "${HF_CKPT}"
     --load "${MEGATRON_LOAD}"
     --save "${SAVE_DIR}"
-    --save-interval 20
+    --save-interval 200
     --no-save-optim
     --no-save-rng
     --megatron-to-hf-mode bridge
@@ -65,27 +63,22 @@ ROLLOUT_ARGS=(
     --label-key label
     --apply-chat-template
     --rollout-shuffle
-    --rm-type custom
+    --rm-type math
     --num-rollout "${NUM_ROLLOUT}"
     --rollout-batch-size "${ROLLOUT_BATCH_SIZE}"
     --n-samples-per-prompt "${N_SAMPLES_PER_PROMPT}"
-    --rollout-max-response-len 8192
+    --rollout-max-response-len 1024
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --use-rollout-routing-replay
-    --custom-rm-path orbit.rollout.rm_hub.peft_arena_reward.peft_arena_reward
-    --reward-key score
-    --eval-reward-key score
 )
 
 OPTIMIZER_ARGS=(
     --optimizer adam
-    --lr 1e-5
+    --lr 3e-6
     --lr-decay-style constant
     --weight-decay 0.01
     --adam-beta1 0.9
     --adam-beta2 0.999
-    --use-precision-aware-optimizer
 )
 
 RL_ARGS=(
@@ -109,13 +102,13 @@ WANDB_ARGS=(
 )
 
 PERF_ARGS=(
-    --tensor-model-parallel-size 4
+    --tensor-model-parallel-size 1
     --pipeline-model-parallel-size 1
     --context-parallel-size 1
-    --expert-model-parallel-size 4
+    --expert-model-parallel-size 1
     --expert-tensor-parallel-size 1
     --use-dynamic-batch-size
-    --max-tokens-per-gpu 32768
+    --max-tokens-per-gpu 16384
     --recompute-granularity full
     --recompute-method uniform
     --recompute-num-layers 1
@@ -123,12 +116,10 @@ PERF_ARGS=(
 )
 
 EVAL_ARGS=(
-    --eval-interval 20
-    --eval-prompt-data math500 "${EVAL_ORBIT_DIR}/math500.jsonl" \
-                       aime24  "${EVAL_ORBIT_DIR}/aime24.jsonl" \
-                       amc23   "${EVAL_ORBIT_DIR}/amc23.jsonl"
+    --eval-interval 10
+    --eval-prompt-data math "${TEST_JSONL}"
     --n-samples-per-eval-prompt 1
-    --eval-max-response-len 8192
+    --eval-max-response-len 1024
     --eval-top-k 1
     --skip-eval-before-train
     --eval-pass-k-values 1 2 4 8 16
@@ -136,16 +127,12 @@ EVAL_ARGS=(
 
 SGLANG_ARGS=(
     --rollout-num-gpus-per-engine "${ROLLOUT_NUM_GPUS_PER_ENGINE}"
-    --sglang-mem-fraction-static 0.75
+    --sglang-mem-fraction-static 0.60
     --rollout-num-gpus "${ROLLOUT_NUM_GPUS}"
-    --sglang-max-running-requests 128
-    --sglang-max-total-tokens 262144
-    --sglang-attention-backend trtllm_mha
-    --sglang-moe-runner-backend triton
+    --sglang-max-running-requests 1024
+    --sglang-chunked-prefill-size 4096
+    --sglang-attention-backend flashinfer
     --router-disable-circuit-breaker
-    --sglang-lora-backend triton
-    --sglang-cuda-graph-max-bs 512
-    --sglang-router-policy round_robin
 )
 
 MISC_ARGS=(
@@ -161,14 +148,13 @@ MISC_ARGS=(
 
 DEBUG_ARGS=(
     --log-passrate
-    --log-reward-category acc
 )
 
 PEFT_ARGS=(
     --peft-method lora
     --peft-variant standard
-    --lora-rank 16
-    --lora-alpha 32
+    --lora-rank 32
+    --lora-alpha 64
     --lora-dropout 0.0
     --target-modules all-linear
 )

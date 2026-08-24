@@ -366,6 +366,24 @@ def test_full_vocab_response_limit_scales_with_teacher_hidden(tmp_path):
     from orbit.rollout.scoring_client import SCORING_MAX_RESPONSE_BYTES
 
     big = opd_sglang._full_vocab_response_byte_limit(args, 1100)
-    assert big > 20 * 1024 * 1024  # 1100 x 3584 x fp32 x base64 ~ 21MB
+    assert big > 90 * 1024 * 1024  # 1100 x 3584 values x ~24 B as JSON floats ~ 95MB
     small = opd_sglang._full_vocab_response_byte_limit(args, 10)
     assert small == SCORING_MAX_RESPONSE_BYTES  # generic cap stays the floor
+
+
+def test_full_vocab_response_limit_covers_json_float_hidden_states(tmp_path):
+    """The server emits nested JSON floats (~20 B/value), not base64 (16/3 B/value).
+
+    Regression for the 3B OPD cost suite's served variant, which tripped the
+    16 MiB floor with a 2048-wide teacher on ~1.3k-token samples.
+    """
+    import json as json_mod
+
+    ckpt = tmp_path / "teacher"
+    ckpt.mkdir()
+    (ckpt / "config.json").write_text(json_mod.dumps({"hidden_size": 2048}))
+    args = _full_vocab_args(teacher_hf_checkpoint=str(ckpt))
+    num_tokens = 1300
+    # Worst-case JSON rendering of one fp32 value with its separator.
+    json_payload = len(json_mod.dumps([-0.012345678901234567] * num_tokens * 2048))
+    assert opd_sglang._full_vocab_response_byte_limit(args, num_tokens) > json_payload
