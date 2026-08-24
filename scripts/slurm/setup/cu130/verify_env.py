@@ -154,7 +154,7 @@ def main() -> int:
             if available:
                 name = torch.cuda.get_device_name(0)
                 capability = torch.cuda.get_device_capability(0)
-                check("GPU is H100 or B200", "H100" in name or "B200" in name, name)
+                check("GPU is H100, H200 or B200", "H100" in name or "H200" in name or "B200" in name, name)
                 check("compute capability in {9.0, 10.0}", capability in {(9, 0), (10, 0)}, capability)
                 value = torch.randn((256, 256), device="cuda", dtype=torch.bfloat16)
                 result = value @ value

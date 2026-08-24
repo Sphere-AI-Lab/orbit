@@ -75,8 +75,8 @@ gpu_name=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1)
 # The Miles cu130 wheels ship sm_90 and sm_100 code (FA3 is sm_90a-only), so
 # Hopper H100 and Blackwell B200 allocations are both accepted.
 case "$gpu_name" in
-    *H100*|*B200*) ;;
-    *) echo "FATAL: expected H100 or B200, got $gpu_name" >&2; exit 1 ;;
+    *H100*|*H200*|*B200*) ;;
+    *) echo "FATAL: expected H100, H200 or B200, got $gpu_name" >&2; exit 1 ;;
 esac
 echo "[preflight] GPU=$gpu_name"
 [ "$PREFLIGHT_ONLY" -eq 1 ] && exit 0
