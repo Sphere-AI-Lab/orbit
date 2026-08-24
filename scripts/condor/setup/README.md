@@ -57,27 +57,28 @@ both the downloads and the extraction step entirely. Home is NFS
 copies out of a warm cache quickly. The condor wrappers set no cache policy of
 their own, so installs here behave the same as on the Slurm cluster.
 
-A *cold* cache is the case worth relocating. Filling one on home means uv
-creating tens of thousands of small files over NFS, which is latency-bound:
-clean-room job 17476896 on 2026-08-24 measured about 150 KB/s and was still
-inside step 2 of 10 after 80 minutes. The same work against node-local disk
-measured about 1.33 MB/s, roughly nine times faster.
+What matters is whether the cache is warm, not where it lives. Two clean-room
+installs on 2026-08-24 measured this directly:
 
-So for a clean-room or first-ever install, point the cache at the job's
-node-local scratch directory, which the canonical README names as the fastest
-extraction target:
+| job | cache | sustained fill rate |
+| --- | --- | --- |
+| 17476896 | home NFS | ~90–220 KB/s |
+| 17477168 | node-local scratch | ~326 KB/s |
 
-```bash
-# inside the job, or via the submit file's environment
-UV_CACHE_DIR=$_CONDOR_SCRATCH_DIR/orbit-uv-cache
-```
+Sampling job 17477168 over five minutes showed the whole cache growing by 95 MB
+while the unpacked `archive-v0` tree did not grow at all, and only ten packages
+had finished downloading in the first hour. A cold install on this cluster is
+bound by download throughput, not by the cache filesystem, so relocating the
+cache buys almost nothing: expect a cold cache to take the better part of a day
+either way, and do not use node-local scratch to try to avoid that.
 
-Condor sizes that scratch directory from `request_disk` (500 GB here), and it is
-discarded when the job ends. That is safe because `materialize_env.py` replaces
-every cache symlink in the prefix with a real copy before the installer exits,
-and fails the install if any remain — so the finished environment depends on
-neither the cache nor the node. It does mean the next install starts cold again;
-prefer the home default whenever reuse matters more than one cold extraction.
+The way to make an install fast is to not download at all. Point `UV_CACHE_DIR`
+at a cache that already holds these pins — the environments under
+`envs/` each left one behind — and the install skips both the downloads and the
+extraction. This is also why a single shared cache is worth more than a
+per-install one, and why the Miles-IMP condor entrypoints in the sibling
+repository use the same policy: both stacks install the same torch 2.11+cu130
+wheel set and can share it.
 
 ## Batch installation
 
@@ -113,11 +114,14 @@ log, stdout, and stderr to `run_dir`, and never embeds a bid.
 
 For a clean-room installation, pick a fresh shared suffix for `env_prefix`,
 `source_root`, and `cache_dir` as described in the canonical README — do not
-overwrite the validated `orbit-cu130-v1` environment. Set `UV_CACHE_DIR` too:
-the canonical default hardcodes the `orbit-cu130-v1` suffix regardless of the
-prefix in use, so leaving it unset silently reuses that cache and the run is not
-clean-room. Node-local scratch is the fast choice for this case, since a
-clean-room cache is cold by definition and has nothing to reuse.
+overwrite the validated `orbit-cu130-v1` environment.
+
+Decide deliberately what to do about `UV_CACHE_DIR`. The canonical default
+hardcodes the `orbit-cu130-v1` suffix regardless of the prefix in use, so
+leaving it unset reuses that cache — which makes the run fast but means the
+downloads are not part of what is being tested. Pointing it at a fresh path
+tests the whole path from nothing, and costs the better part of a day at the
+download rates above. Neither is wrong; state which one a given run intends.
 
 ## Verification and activation
 
