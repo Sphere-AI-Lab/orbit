@@ -206,3 +206,48 @@ validated v1 environment. A successful installation ends with
 
 For repeated clean-room checks, choose a new shared suffix for all four paths so
 that the environment, sources, wheel cache, and uv cache are all unused.
+
+## H200 Slurm cluster (verified 2026-08-24)
+
+The driver on this cluster now supports CUDA 13 (post 2026-08-21 maintenance),
+so this profile applies unchanged; the nodes report `NVIDIA H200` (same
+sm_90/sm_90a Hopper die as H100 -- every prebuilt wheel applies). Verified
+install: env `orbit_cu130_zeju`, install job 1717, `[summary] 39/39 passed`.
+
+Working invocation (user paths shown as used; clone sources point at local
+mirrors so the exact commits are guaranteed present):
+
+~~~bash
+ORBIT_SGLANG_REPO=/data/home/zeju/miles-orbit/sglang \
+ORBIT_MEGATRON_REPO=/data/home/zeju/miles-orbit/Megatron-LM \
+ORBIT_MEGATRON_BRIDGE_REPO=/data/home/zeju/miles-orbit/Megatron-Bridge \
+UV_CACHE_DIR=/data/home/zeju/.cache/orbit_cu130_zeju/uv \
+scripts/slurm/setup/cu130/install_env.sh \
+  --env-prefix /data/home/zeju/miles-orbit/envs/orbit_cu130_zeju \
+  --source-root /data/home/zeju/miles-orbit/sources/orbit_cu130_zeju \
+  --cache-dir /data/home/zeju/miles-orbit/cache/orbit_cu130_zeju \
+  --conda-exe /data/shared/conda/miniconda3/bin/conda \
+  --uv-exe "$HOME/.local/bin/uv" \
+  --tool-python /data/shared/conda/miniconda3/bin/python \
+  --jobs 16
+~~~
+
+Submit inside a 1-GPU allocation (16 CPU / 128G / ~30 min with a warm wheel
+cache). `ORBIT_SGLANG_COMMIT` may be overridden the same way when a different
+Sphere-Lab sglang revision is wanted (the pins.env value is the default).
+
+At runtime, source the companion preamble after activating the env -- it
+carries the cluster's cuDNN/cudart pins, node-local caches, and the mandatory
+`ORBIT_PEFT_ADAPTER_TRANSPORT=cpu_gather` (this cluster's SGLang scheduler
+children cannot rebuild trainer-side CUDA IPC handles):
+
+~~~bash
+source /data/shared/conda/miniconda3/etc/profile.d/conda.sh
+conda activate /data/home/zeju/miles-orbit/envs/orbit_cu130_zeju
+source scripts/slurm/setup/cu130/slurm_h200_runtime.sh
+export PYTHONPATH="$PWD"   # Ray workers import orbit by path
+~~~
+
+No CUDA toolkit is required on the nodes (prebuilt wheels + flashinfer
+jit-cache); `examples/load_cuda13_2_orbit_env.sh` is the MPI/uv-venv loader
+and is NOT used here.

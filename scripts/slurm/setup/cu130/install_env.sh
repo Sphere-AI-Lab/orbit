@@ -47,6 +47,12 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
+# The pinned tool defaults above are the MPI cluster's paths; on clusters
+# where they do not exist (e.g. the H200 Slurm cluster) fall back to PATH.
+[ -x "$CONDA_EXE" ] || command -v "$CONDA_EXE" >/dev/null 2>&1 || CONDA_EXE=$(command -v conda || echo "$CONDA_EXE")
+[ -x "$UV_EXE" ] || command -v "$UV_EXE" >/dev/null 2>&1 || UV_EXE=$(command -v uv || echo "$UV_EXE")
+[ -x "$TOOL_PYTHON" ] || command -v "$TOOL_PYTHON" >/dev/null 2>&1 || TOOL_PYTHON=$(command -v python3 || echo "$TOOL_PYTHON")
+
 WHEEL_DIR="$CACHE_DIR/miles-wheels/$MILES_WHEELS_TAG"
 LOCK_DIR="$ENV_PREFIX.install.lock"
 
