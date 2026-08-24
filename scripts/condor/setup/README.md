@@ -38,8 +38,7 @@ bash scripts/condor/setup/install_env.sh
 bash scripts/condor/setup/verify_env.sh --full-h100
 ```
 
-The wrapper adds `~/.local/bin` (uv) to `PATH`, defaults `UV_CACHE_DIR` to
-node-local scratch (see "uv cache placement" below), and otherwise forwards all
+The wrapper adds `~/.local/bin` (uv) to `PATH` and otherwise forwards all
 installer arguments and environment variables — `ENV_PREFIX`, `SOURCE_ROOT`,
 `CACHE_DIR`, `UV_CACHE_DIR`, `JOBS`, and the `ORBIT_*_REPO`/`ORBIT_*_COMMIT`
 overrides — to the canonical installer, whose defaults already point at this
@@ -51,22 +50,34 @@ concurrent installers against the same prefix.
 ## uv cache placement
 
 uv requires a lock-capable cache filesystem, so the canonical installer defaults
-`UV_CACHE_DIR` to cluster home. On this cluster home is NFS
-(`sc-fb1:/cluster-home`), and extraction there is slow enough to dominate a cold
-install: a clean-room run on 2026-08-24 (job 17476896) measured roughly
-150 KB/s across uv's parallel unpack streams against a cache that reaches about
-19 GB, and was still inside step 2 of 10 after 80 minutes.
+`UV_CACHE_DIR` to cluster home. Keep that default for ordinary installs: the
+cache reaches about 19 GB, persists between installs, and a warm cache skips
+both the downloads and the extraction step entirely. Home is NFS
+(`sc-fb1:/cluster-home`) but reads back at roughly 326 MB/s, so `materialize_env.py`
+copies out of a warm cache quickly. The condor wrappers set no cache policy of
+their own, so installs here behave the same as on the Slurm cluster.
 
-Both wrappers therefore default `UV_CACHE_DIR` to the job's node-local Condor
-scratch directory (`$_CONDOR_SCRATCH_DIR`, falling back to `$TMPDIR` or `/tmp`
-outside a job), which the canonical README names as the fastest cache location.
-`materialize_env.py` copies site-packages into the prefix at the end of the
-install, so the finished environment depends on neither the cache nor the node.
-This is why the submit description requests 500 GB of disk: Condor sizes the
-scratch directory from `request_disk`.
+A *cold* cache is the case worth relocating. Filling one on home means uv
+creating tens of thousands of small files over NFS, which is latency-bound:
+clean-room job 17476896 on 2026-08-24 measured about 150 KB/s and was still
+inside step 2 of 10 after 80 minutes. The same work against node-local disk
+measured about 1.33 MB/s, roughly nine times faster.
 
-Set `UV_CACHE_DIR` explicitly to override — for example to reuse a warm cache on
-home across installs, at the extraction cost measured above.
+So for a clean-room or first-ever install, point the cache at the job's
+node-local scratch directory, which the canonical README names as the fastest
+extraction target:
+
+```bash
+# inside the job, or via the submit file's environment
+UV_CACHE_DIR=$_CONDOR_SCRATCH_DIR/orbit-uv-cache
+```
+
+Condor sizes that scratch directory from `request_disk` (500 GB here), and it is
+discarded when the job ends. That is safe because `materialize_env.py` replaces
+every cache symlink in the prefix with a real copy before the installer exits,
+and fails the install if any remain — so the finished environment depends on
+neither the cache nor the node. It does mean the next install starts cold again;
+prefer the home default whenever reuse matters more than one cold extraction.
 
 ## Batch installation
 
@@ -102,9 +113,11 @@ log, stdout, and stderr to `run_dir`, and never embeds a bid.
 
 For a clean-room installation, pick a fresh shared suffix for `env_prefix`,
 `source_root`, and `cache_dir` as described in the canonical README — do not
-overwrite the validated `orbit-cu130-v1` environment. Leave `UV_CACHE_DIR`
-unset so the job gets an empty node-local cache, which is both clean-room
-correct and the fast path.
+overwrite the validated `orbit-cu130-v1` environment. Set `UV_CACHE_DIR` too:
+the canonical default hardcodes the `orbit-cu130-v1` suffix regardless of the
+prefix in use, so leaving it unset silently reuses that cache and the run is not
+clean-room. Node-local scratch is the fast choice for this case, since a
+clean-room cache is cold by definition and has nothing to reuse.
 
 ## Verification and activation
 
