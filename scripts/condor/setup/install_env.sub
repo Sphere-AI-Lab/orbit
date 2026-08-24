@@ -1,0 +1,34 @@
+# Submit from the repository root after creating run_dir:
+#
+#   condor_submit_bid BID \
+#     repo_dir="$PWD" \
+#     env_prefix=/fast/zqiu/orbit-iclr/orbit/envs/orbit-cu130-v1 \
+#     source_root=/fast/zqiu/orbit-iclr/orbit/sources/orbit-cu130-v1 \
+#     cache_dir=/fast/zqiu/orbit-iclr/orbit/cache/orbit-cu130-v1 \
+#     run_dir="$RUN_DIR" \
+#     scripts/condor/setup/install_env.sub
+#
+# BID is deliberately supplied at submission time. The Condor bank and current
+# capacity determine an appropriate value.
+
+universe = vanilla
+
+initialdir = $(repo_dir)
+executable = $(repo_dir)/scripts/condor/setup/install_env.sh
+environment = "ENV_PREFIX=$(env_prefix) SOURCE_ROOT=$(source_root) CACHE_DIR=$(cache_dir)"
+getenv = PATH,HOME,USER,XDG_CACHE_HOME,HF_HOME,UV_CACHE_DIR
+
+request_cpus = 16
+request_gpus = 1
+request_memory = 128000
+request_disk = 500G
+requirements = (CUDADeviceName == "NVIDIA H100")
+
+should_transfer_files = NO
+notification = Never
+
+output = $(run_dir)/install-$(Cluster).$(Process).out
+error = $(run_dir)/install-$(Cluster).$(Process).err
+log = $(run_dir)/install-$(Cluster).$(Process).events
+
+queue 1

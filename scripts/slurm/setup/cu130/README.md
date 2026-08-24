@@ -27,6 +27,9 @@ orbit/pyproject.toml
 
 No Docker, Enroot, or Apptainer runtime is involved.
 
+HTCondor entrypoints for the MPI cluster (interactive workflow and a batch
+submit description wrapping this recipe) live in `scripts/condor/setup/`.
+
 ## What is prebuilt
 
 The primary path does not compile CUDA extensions. It installs:
