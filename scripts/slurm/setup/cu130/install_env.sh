@@ -258,8 +258,11 @@ uv_install --force-reinstall --no-deps "$SGLANG_ROUTER_WHEEL_URL"
 install_optional "$WHEEL_DIR/mooncake_transfer_engine_cuda13-*.whl"
 
 echo "[6/10] reconcile SGLang CUDA runtime pins"
+# flashinfer.ai's per-project index stops at 0.6.9 (newer releases moved to
+# PyPI); the old direct URL now 404s. PyPI ships the identical
+# py3-none-any wheel for ${FLASHINFER_VERSION}.
 uv_install --no-cache --link-mode copy --force-reinstall --no-deps \
-    "https://flashinfer.ai/whl/flashinfer-python/flashinfer_python-${FLASHINFER_VERSION}-py3-none-any.whl"
+    --only-binary=:all: "flashinfer-python==${FLASHINFER_VERSION}"
 uv_install --force-reinstall --no-deps \
     --extra-index-url https://flashinfer.ai/whl \
     --extra-index-url https://flashinfer.ai/whl/cu130 \
