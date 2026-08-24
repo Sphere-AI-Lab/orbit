@@ -136,6 +136,24 @@ downloads are not part of what is being tested. Pointing it at a fresh path
 tests the whole path from nothing, and costs the better part of a day at the
 download rates above. Neither is wrong; state which one a given run intends.
 
+## CUDA_HOME is required at runtime
+
+`deep_gemm` resolves a CUDA home when it is imported — `$CUDA_HOME`, then
+`$CUDA_PATH`, then `nvcc` on `PATH`, then `/usr/local/cuda` — and asserts if it
+finds none. The execution nodes provide none of them, because the toolkit here
+is module-style at `/is/software/nvidia/cuda-13.2`. Without it, `import
+deep_gemm` fails with a bare `AssertionError` and verification stops at 38/39
+(observed in batch job 17477511 on 2026-08-24).
+
+`install_env.sh` therefore exports `CUDA_HOME`. Nothing in this profile is
+compiled from source; the toolkit is needed only for that runtime lookup, and
+it is the same path the Miles-IMP condor wrapper uses. Export it in any shell
+that runs the environment as well:
+
+```bash
+export CUDA_HOME=/is/software/nvidia/cuda-13.2
+```
+
 ## Verification and activation
 
 After a batch installation completes, enter an allocated GPU shell and run:
