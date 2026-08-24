@@ -73,12 +73,18 @@ cache buys almost nothing: expect a cold cache to take the better part of a day
 either way, and do not use node-local scratch to try to avoid that.
 
 The way to make an install fast is to not download at all. Point `UV_CACHE_DIR`
-at a cache that already holds these pins — the environments under
-`envs/` each left one behind — and the install skips both the downloads and the
-extraction. This is also why a single shared cache is worth more than a
-per-install one, and why the Miles-IMP condor entrypoints in the sibling
-repository use the same policy: both stacks install the same torch 2.11+cu130
-wheel set and can share it.
+at a cache that already holds these pins — the environments under `envs/` each
+left one behind — and the install skips both the downloads and the extraction.
+For the same reason, prefer one cache reused across installs of this profile
+over a fresh cache per install.
+
+Do not extend that sharing to the Miles-IMP environment on this cluster. It is
+safe — uv's cache is content-addressed, so unrelated artifacts coexist — but it
+gains nothing, because the two stacks share almost no binaries despite similar
+version strings. Measured on 2026-08-24: `libtorch_cuda.so` is 1,043,840,721
+bytes in the Miles cache against 456,142,457 here (Miles installs torch from
+`download.pytorch.org/whl/cu130`, this profile from PyPI), and cuBLAS and cuDNN
+differ too. A shared cache would hold both stacks in full.
 
 ## Batch installation
 
