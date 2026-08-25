@@ -14,8 +14,8 @@
 # controlled ablation.
 #
 # Vision stays BF16 on all three layers that could break it: the 8B FP8
-# checkpoint declares quantization_config.modules_to_not_convert =
-# ["lm_head", "model.visual"], quantizer_fp8.py excludes vision_model.decoder.*,
+# checkpoint's quantization_config.ignored_layers enumerates lm_head and the
+# vision modules, quantizer_fp8.py excludes vision_model.decoder.*,
 # and Megatron-Bridge's get_vision_model_config() never copies fp8 into the vision
 # TransformerConfig.
 #

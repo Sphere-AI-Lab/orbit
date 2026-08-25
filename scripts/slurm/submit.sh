@@ -18,6 +18,7 @@
 #   NODES        # overrides EXPERIMENT_NODES from the recipe
 #   TIME         # overrides EXPERIMENT_TIME
 #   JOB_NAME     # overrides the slurm job name (defaults to experiment name)
+#   RUN_DIR      # exact empty output directory (defaults under runs/JOB_NAME)
 #   SBATCH_EXTRA # extra args spliced into sbatch, e.g. "--exclude=slinky-15"
 #
 # Passed straight through to the run via sbatch --export=ALL (not parsed here):
@@ -117,8 +118,9 @@ SBATCH_EXTRA=${SBATCH_EXTRA:-}
 # a job ever ran. launch_miles.sbatch already takes RUN_DIR from the
 # environment; this line was the only place that forced it under $MILES_REPO.
 RUN_STAMP=$(date +%y%m%d_%H%M%S)
-RUN_DIR=${RUN_DIR:-"$MILES_REPO/runs/$JOB_NAME/$RUN_STAMP"}
-mkdir -p "$RUN_DIR"
+# shellcheck disable=SC1091
+source "$MILES_REPO/scripts/slurm/lib/run_dir.sh"
+RUN_DIR=$(prepare_run_dir "${RUN_DIR:-}" "$MILES_REPO/runs/$JOB_NAME/$RUN_STAMP")
 
 # Warn if any of the last 3 runs for this job_name ended in a non-success state.
 # Scan RUN_DIR's parent rather than a fixed repo path so history stays with the
