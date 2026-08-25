@@ -12,6 +12,7 @@ from miles.utils.arguments import (
     _maybe_apply_dumper_overrides,
     _resolve_ft_components,
     _resolve_rollout_functions,
+    _validate_model_response_trace_args,
     _validate_opd_dagger_args,
     _validate_opd_sglang_scoring_args,
     _validate_opd_task_reward_args,
@@ -27,6 +28,25 @@ from miles.utils.misc import function_registry
 
 PATH_ARGS = ["--rollout-function-path", "--custom-generate-function-path"]
 REQUIRED_ARGS = ["--rollout-batch-size", "64"]
+
+
+class TestValidateModelResponseTraceArgs:
+    def test_trace_output_requires_an_explicit_positive_cap(self) -> None:
+        args = SimpleNamespace(
+            save_model_response_trace_dir="/tmp/traces",
+            model_response_trace_max_samples_per_step=None,
+        )
+
+        with pytest.raises(ValueError, match="--model-response-trace-max-samples-per-step"):
+            _validate_model_response_trace_args(args)
+
+    def test_trace_output_accepts_an_explicit_positive_cap(self) -> None:
+        args = SimpleNamespace(
+            save_model_response_trace_dir="/tmp/traces",
+            model_response_trace_max_samples_per_step=16,
+        )
+
+        _validate_model_response_trace_args(args)
 
 
 def _hf_validation_args(*, untie_embeddings: bool) -> SimpleNamespace:

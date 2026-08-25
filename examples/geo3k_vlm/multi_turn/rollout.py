@@ -8,6 +8,7 @@ from typing import Any
 
 import torch
 from examples.geo3k_vlm.multi_turn.base_env import BaseInteractionEnv
+from examples.model_response_trace_viewer.response_log import RESPONSE_TURNS_KEY
 
 # When executed as a module: python -m examples.geo3k_vlm.multi_turn.rollout
 from miles.rollout.sglang_rollout import GenerateState
@@ -255,10 +256,28 @@ def _validate_multimodal_generation_alignment(meta_info: dict, expected_prompt_t
         )
 
 
+def _record_response_turn(
+    args: Any,
+    sample: Sample,
+    entry: dict[str, Any],
+) -> None:
+    """Append a turn to the viewer's record, if any trace output is enabled.
+
+    Turns live on ``Sample.metadata`` so this stays a customization-layer
+    feature: nothing in ``miles/`` has to know the viewer exists.
+    """
+    if (
+        getattr(args, "save_model_response_log", None) is None
+        and getattr(args, "save_model_response_trace_dir", None) is None
+    ):
+        return
+    sample.metadata.setdefault(RESPONSE_TURNS_KEY, []).append(entry)
+
+
 def _process_env_step(env: BaseInteractionEnv, response_text: str, tokenizer, processor, args, sample_metadata):
     observation, done, _ = env.step(response_text)
     if done:
-        return None, None, None, None, None, True
+        return None, None, None, None, None, None, True
 
     next_user_message = env.format_observation(observation)
     (
@@ -282,12 +301,19 @@ def _process_env_step(env: BaseInteractionEnv, response_text: str, tokenizer, pr
     if bos_id is not None and compact_obs_prompt_ids and compact_obs_prompt_ids[0] == bos_id:
         compact_obs_prompt_ids = compact_obs_prompt_ids[1:]
 
+    environment_turn = {
+        "role": "environment",
+        "model_input_role": next_user_message.get("role", "user"),
+        "content": next_user_message.get("content", ""),
+    }
+
     return (
         obs_prompt_ids,
         compact_obs_prompt_ids,
         obs_image_data,
         obs_multimodal_inputs,
         obs_multimodal_train_inputs,
+        environment_turn,
         False,
     )
 
@@ -370,6 +396,9 @@ async def generate(args: Any, sample: Sample, sampling_params) -> Sample:
     assert not args.partial_rollout, "Partial rollout is not supported for interaction rollouts."
 
     sample.capture_multimodal_inputs_for_retry()
+    sample.metadata = sample.metadata or {}
+    # metadata survives reset_for_retry, so drop any turns the aborted attempt left.
+    sample.metadata.pop(RESPONSE_TURNS_KEY, None)
     env, env_module, config, state, url = _initialize_resources(args, sample)
     sampling_params = sampling_params.copy()
     (
@@ -405,6 +434,17 @@ async def generate(args: Any, sample: Sample, sampling_params) -> Sample:
                 expected_prompt_tokens,
                 current_image_data,
             )
+            _record_response_turn(
+                args,
+                sample,
+                {
+                    "turn": turn_idx + 1,
+                    "role": "assistant",
+                    "content": response_text,
+                    "finish_reason": finish_type,
+                    "weight_version": meta_info.get("weight_version"),
+                },
+            )
             # Miles' multi-turn logger consumes this top-level field after
             # rollout conversion. It is telemetry only and does not affect
             # rewards, masks, scoring, or the trainer objective.
@@ -436,6 +476,7 @@ async def generate(args: Any, sample: Sample, sampling_params) -> Sample:
                 obs_image_data,
                 obs_multimodal_inputs,
                 obs_multimodal_train_inputs,
+                environment_turn,
                 done,
             ) = _process_env_step(env, response_text, state.tokenizer, state.processor, args, sample.metadata)
             if done:
@@ -461,6 +502,12 @@ async def generate(args: Any, sample: Sample, sampling_params) -> Sample:
                 obs_multimodal_train_inputs,
                 multimodal_train_inputs_buffer,
             )
+
+            # Only record the observation the model will actually be shown: if this
+            # is the last turn, it never reaches the model and would be a phantom turn.
+            will_generate_another_turn = turn_idx + 1 < config["max_turns"] and (budget is None or budget > 0)
+            if will_generate_another_turn and environment_turn is not None:
+                _record_response_turn(args, sample, {"turn": turn_idx + 1, **environment_turn})
 
             if budget is not None and budget <= 0:
                 sample.status = Sample.Status.TRUNCATED

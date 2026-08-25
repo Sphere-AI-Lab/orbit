@@ -219,9 +219,12 @@ def test_sample_messages_from_trajectory_sidecar(tmp_path):
     row = client.get("/api/rollout/0/sample/0/messages").json()
     assert [m["role"] for m in row["messages"]] == ["system", "user", "assistant", "tool", "assistant"]
     assert row["messages"][2]["tool_calls"][0]["function"]["name"] == "lookup"
-    # sample 2 recorded no conversation; eval dumps carry none at all
+    # Sample 2 recorded no conversation. The eval fixture reuses the same
+    # message-bearing samples, and the rollout dump must not erase them before
+    # the eval sidecar is written.
     assert client.get("/api/rollout/0/sample/2/messages").status_code == 404
-    assert client.get("/api/rollout/0/sample/0/messages?eval=1").status_code == 404
+    eval_row = client.get("/api/rollout/0/sample/0/messages?eval=1").json()
+    assert eval_row["messages"] == row["messages"]
 
 
 def test_make_demo_dir(tmp_path):
