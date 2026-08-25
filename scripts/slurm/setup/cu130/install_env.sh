@@ -368,6 +368,29 @@ case ":\${LD_LIBRARY_PATH:-}:" in
 esac
 EOF
 
+# deep_gemm resolves a CUDA home when it is imported, trying CUDA_HOME, then
+# CUDA_PATH, then nvcc on PATH, then /usr/local/cuda, and failing on a bare
+# `assert cuda_home is not None` when none of them exist. Clusters whose CUDA
+# toolkit is module-style rather than at /usr/local/cuda therefore import
+# deep_gemm only in shells that already export CUDA_HOME, and verification
+# reports 38/39 everywhere else. Record whatever resolved at install time so
+# later activations inherit it; write nothing when nothing resolves, which
+# leaves clusters that need no toolkit untouched.
+cuda_home_for_env=${CUDA_HOME:-${CUDA_PATH:-}}
+if [ -z "$cuda_home_for_env" ]; then
+    nvcc_path=$(command -v nvcc 2>/dev/null || true)
+    [ -n "$nvcc_path" ] && cuda_home_for_env=$(dirname "$(dirname "$nvcc_path")")
+fi
+if [ -n "$cuda_home_for_env" ] && [ -d "$cuda_home_for_env" ]; then
+    cat > "$ENV_PREFIX/etc/conda/activate.d/orbit-cu130-cuda-home.sh" <<EOF
+# deep_gemm asserts at import unless a CUDA home resolves.
+export CUDA_HOME="\${CUDA_HOME:-$cuda_home_for_env}"
+EOF
+    echo "[env] CUDA_HOME for deep_gemm: $cuda_home_for_env (recorded in activate.d)"
+else
+    echo "[env] WARNING: no CUDA home resolved; 'import deep_gemm' will fail unless CUDA_HOME is exported" >&2
+fi
+
 echo "[9/10] install editable Sphere-Lab and Orbit overlays"
 "$PYTHON" -m pip install --no-cache-dir --force-reinstall --no-deps --editable "$MEGATRON_SRC"
 uv_install -e "$BRIDGE_SRC" --no-deps --no-build-isolation
