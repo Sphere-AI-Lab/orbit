@@ -18,7 +18,6 @@
 #   NODES        # overrides EXPERIMENT_NODES from the recipe
 #   TIME         # overrides EXPERIMENT_TIME
 #   JOB_NAME     # overrides the slurm job name (defaults to experiment name)
-#   RUN_DIR      # exact empty output directory (defaults under runs/JOB_NAME)
 #   SBATCH_EXTRA # extra args spliced into sbatch, e.g. "--exclude=slinky-15"
 #
 # Passed straight through to the run via sbatch --export=ALL (not parsed here):
@@ -111,24 +110,14 @@ SBATCH_EXTRA=${SBATCH_EXTRA:-}
 
 # Per-launch dir, named by wall-clock submit time. Created up-front so slurm
 # can write --output directly into it (no symlink, no tee).
-#
-# Overridable so a caller can place authoritative run output outside the
-# repository — agent-driven runs point this at a durable per-user run store,
-# because a worktree can be retired while its logs are still the only evidence
-# a job ever ran. launch_miles.sbatch already takes RUN_DIR from the
-# environment; this line was the only place that forced it under $MILES_REPO.
 RUN_STAMP=$(date +%y%m%d_%H%M%S)
-# shellcheck disable=SC1091
-source "$MILES_REPO/scripts/slurm/lib/run_dir.sh"
-RUN_DIR=$(prepare_run_dir "${RUN_DIR:-}" "$MILES_REPO/runs/$JOB_NAME/$RUN_STAMP")
+RUN_DIR="$MILES_REPO/runs/$JOB_NAME/$RUN_STAMP"
+mkdir -p "$RUN_DIR"
 
 # Warn if any of the last 3 runs for this job_name ended in a non-success state.
-# Scan RUN_DIR's parent rather than a fixed repo path so history stays with the
-# runs themselves when RUN_DIR is overridden; identical to the old behaviour
-# for the default layout.
 # shellcheck disable=SC1091
 source "$MILES_REPO/scripts/slurm/lib/manifest.sh"
-read_recent_manifests "$(dirname "$RUN_DIR")" 3 "$RUN_STAMP"
+read_recent_manifests "$MILES_REPO/runs/$JOB_NAME" 3 "$RUN_STAMP"
 
 echo "[sbatch] $EXP_NAME  nodes=$NODES  time=$TIME  job-name=$JOB_NAME  run_dir=$RUN_DIR"
 exec sbatch \
