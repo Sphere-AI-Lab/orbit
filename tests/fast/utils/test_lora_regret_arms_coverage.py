@@ -527,7 +527,7 @@ class TestOftBlockCeilingUnderRl:
         # sgl-kernel no longer lags sglang: the v0.5.9 -> v0.5.16 move changes the
         # sgl-kernel tree, so the two must be built from the same rev.
         kernel_sha = expected_sha
-        bridge_sha = "69a8e369e23f522c354f1cd33c2cfd21ef5768d6"
+        bridge_sha = "988d642688b46ccf68796b0eb9c22aacc59593bc"
         assert sources["sglang"]["rev"] == expected_sha
         assert pins["sglang"]["tested-ref"] == expected_sha
         assert packages["sglang"]["version"] == "0.0.0.dev15484+g51845dc4a"
