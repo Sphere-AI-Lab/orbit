@@ -521,7 +521,7 @@ def _build_bridge_for_dsv4(hf_path: Path):
     fixture: load native config, translate to HF schema, override the state
     accessor, then drive ``DeepSeekV4Bridge`` directly.
     """
-    from megatron.bridge.models.deepseek.deepseek_v4_bridge import DeepSeekV4Bridge
+    from megatron.bridge.orbit.model_bridges.deepseek_v4_bridge import DeepSeekV4Bridge
     from megatron.bridge.models.hf_pretrained.causal_lm import PreTrainedCausalLM
     from megatron.bridge.models.hf_pretrained.state import StateDict
 

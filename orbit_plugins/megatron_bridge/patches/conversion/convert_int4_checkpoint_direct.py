@@ -47,15 +47,15 @@ import torch
 from megatron.core.optimizer import OptimizerConfig
 
 from megatron.bridge import AutoBridge
-from megatron.bridge.models.conversion.low_precision.common import (
+from megatron.bridge.orbit.low_precision.common import (
     build_single_rank_meta_provider,
     patch_meta_init_for_te_modules,
 )
-from megatron.bridge.models.conversion.low_precision.int4 import build_int4_direct_model_state_dict
-from megatron.bridge.models.deepseek.deepseek_v3_int4_bridge import DeepSeekV3INT4Bridge
+from megatron.bridge.orbit.low_precision.int4 import build_int4_direct_model_state_dict
+from megatron.bridge.orbit.model_bridges.deepseek_v3_int4_bridge import DeepSeekV3INT4Bridge
 from megatron.bridge.models.kimi_vl.kimi_k25_vl_bridge import KimiK25VLBridge
-from megatron.bridge.models.llama.llama_int4_bridge import LlamaINT4Bridge
-from megatron.bridge.models.qwen.qwen3_int4_bridge import Qwen3INT4Bridge, Qwen3MoEINT4Bridge
+from megatron.bridge.orbit.model_bridges.llama_int4_bridge import LlamaINT4Bridge
+from megatron.bridge.orbit.model_bridges.qwen3_int4_bridge import Qwen3INT4Bridge, Qwen3MoEINT4Bridge
 from megatron.bridge.training.checkpointing import (
     get_checkpoint_name,
     save_checkpoint,

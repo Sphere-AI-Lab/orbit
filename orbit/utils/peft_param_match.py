@@ -1,7 +1,7 @@
 """Match OFT block size to LoRA rank by trainable-parameter count.
 
 OFT stores one skew-symmetric vector per block. Per
-``megatron/bridge/peft/oft_layers.py`` (``OFTRotationModule.__init__``, see
+``megatron/bridge/orbit/oft/oft_layers.py`` (``OFTRotationModule.__init__``, see
 ``self.oft_r = nn.Parameter(torch.zeros(num_blocks, n_elements, ...))``):
 
     n_elements  = block_size * (block_size - 1) // 2
@@ -135,7 +135,7 @@ def nearest_divisor(n: int, target: int) -> int:
     """Nearest divisor of `n` to `target`.
 
     Mirrors ``OFTRotationModule._find_nearest_divisor`` in
-    ``megatron/bridge/peft/oft_layers.py``: scans ``i = 1..isqrt(n)``,
+    ``megatron/bridge/orbit/oft/oft_layers.py``: scans ``i = 1..isqrt(n)``,
     considers both ``i`` and ``n // i`` as candidate divisors, and keeps a
     candidate only on a *strict* improvement. That strictness is what fixes
     the tie-break: among equidistant divisors, whichever this scan order

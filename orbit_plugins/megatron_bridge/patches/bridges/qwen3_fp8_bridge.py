@@ -15,7 +15,7 @@ from megatron.bridge.models.conversion.param_mapping import (
 )
 from megatron.bridge.models.conversion.utils import get_module_and_param_from_name
 from megatron.bridge.models.qwen.qwen3_bridge import Qwen3Bridge
-from megatron.bridge.peft.fp8_utils import merge_gated_mlp_scale_inv, merge_qkv_scale_inv
+from megatron.bridge.orbit.quant.fp8_utils import merge_gated_mlp_scale_inv, merge_qkv_scale_inv
 
 
 logger = logging.getLogger(__name__)

@@ -2,7 +2,7 @@
 
 Replicates orbit's canonical-OFT runtime exactly so the baked dense model matches
 what orbit serves: R via the 5-term Cayley-Neumann series (mirrors
-megatron.bridge.peft.oft_layers._cayley_batch), applied as a block-diagonal INPUT
+megatron.bridge.orbit.oft.oft_layers._cayley_batch), applied as a block-diagonal INPUT
 rotation (W' = W @ blockdiag(R^T), matching the forward einsum '...rk,rkc->...rc').
 """
 from __future__ import annotations
@@ -34,7 +34,7 @@ def cayley_neumann(oft_r: torch.Tensor, block_size: int, num_terms: int = 5) -> 
     orbit's _cayley_batch uses (n=num_terms=5 by default). fp32.
 
     Every power except the last carries coefficient 2.0; the last power Q^(n-1)
-    carries coefficient 1.0, matching megatron.bridge.peft.oft_layers._cayley_batch
+    carries coefficient 1.0, matching megatron.bridge.orbit.oft.oft_layers._cayley_batch
     and its Triton kernel exactly.
     """
     Q = skew_from_vec(oft_r.float(), block_size)             # (nb, b, b)

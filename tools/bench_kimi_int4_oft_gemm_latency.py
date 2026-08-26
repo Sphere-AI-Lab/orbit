@@ -369,7 +369,7 @@ def _fp8_qdq_per_group(
 def _try_megatron_dequantize_int4(args: argparse.Namespace) -> tuple[Callable[..., torch.Tensor], str]:
     bridge_src_path = _insert_megatron_bridge_paths(args.megatron_bridge_src)
     try:
-        from megatron.bridge.models.conversion.low_precision.int4 import dequantize_int4
+        from megatron.bridge.orbit.low_precision.int4 import dequantize_int4
 
         return dequantize_int4, f"Megatron-Bridge:dequantize_int4 ({bridge_src_path}) + F.linear"
     except Exception as exc:

@@ -576,7 +576,7 @@ def is_peft_enabled(args) -> bool:
     return get_peft_method(args) != "none"
 
 
-from megatron.bridge.peft.param_names import CANONICAL_OFT_SLICE_NAMES, is_peft_adapter_param_name
+from megatron.bridge.orbit.oft.param_names import CANONICAL_OFT_SLICE_NAMES, is_peft_adapter_param_name
 
 
 def is_adapter_param_name(name: str) -> bool:

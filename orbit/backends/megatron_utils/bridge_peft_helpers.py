@@ -98,7 +98,7 @@ def _grouped_expert_fc1_aliases(debug_name: str) -> list[str]:
     still wants to see both ``linear_fc1_gate`` and ``linear_fc1_up`` so it
     can confirm the canonical target list was honored.
     """
-    # Keep this predicate in sync with megatron.bridge.peft.canonical_oft._should_treat_linear_fc1_as_unfused.
+    # Keep this predicate in sync with megatron.bridge.orbit.oft.canonical_oft._should_treat_linear_fc1_as_unfused.
     if not debug_name.endswith(".mlp.experts.linear_fc1"):
         return []
     return [

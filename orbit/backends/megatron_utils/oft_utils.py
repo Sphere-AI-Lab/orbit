@@ -33,7 +33,7 @@ def _patch_bridge_oft_embedding_weight_proxy() -> None:
     if _BRIDGE_OFT_EMBEDDING_WEIGHT_PROXY_PATCHED:
         return
 
-    from megatron.bridge.peft.oft_layers import OFTVocabParallelEmbedding
+    from megatron.bridge.orbit.oft.oft_layers import OFTVocabParallelEmbedding
 
     current = getattr(OFTVocabParallelEmbedding, "weight", None)
     if current is None:
@@ -85,7 +85,7 @@ def create_oft_instance(args: Namespace):
     )
 
     if variant == "dsv4":
-        from megatron.bridge.models.deepseek.deepseek_v4_bridge import DSV4OFT
+        from megatron.bridge.orbit.model_bridges.deepseek_v4_bridge import DSV4OFT
 
         target_modules = convert_target_modules_to_megatron(args.target_modules, variant="dsv4")
         exclude_modules = parse_exclude_modules(args, variant="dsv4")
@@ -100,7 +100,7 @@ def create_oft_instance(args: Namespace):
         )
 
     if _oft_type(args) == "oft":
-        from megatron.bridge.peft.oft import OFT
+        from megatron.bridge.orbit.oft.oft import OFT
 
         target_modules = convert_target_modules_to_megatron(args.target_modules, variant=variant)
         exclude_modules = parse_exclude_modules(args, variant=variant)
@@ -119,7 +119,7 @@ def create_oft_instance(args: Namespace):
             block_share=args.oft_block_share,
         )
 
-    from megatron.bridge.peft.canonical_oft import CanonicalOFT
+    from megatron.bridge.orbit.oft.canonical_oft import CanonicalOFT
 
     target_modules = convert_target_modules_to_megatron(args.target_modules, variant="canonical")
     exclude_modules = parse_exclude_modules(args, variant="canonical")

@@ -84,7 +84,7 @@ fi
 # Bridge + Megatron-LM checkouts the V4 stack expects.
 : "${MEGATRON_BRIDGE_ROOT:?set MEGATRON_BRIDGE_ROOT to a Megatron-Bridge checkout}"
 : "${MEGATRON_LM_PATH:?set MEGATRON_LM_PATH to a Megatron-LM checkout}"
-if [[ ! -f "${MEGATRON_BRIDGE_ROOT}/src/megatron/bridge/models/deepseek/deepseek_v4_bridge.py" ]]; then
+if [[ ! -f "${MEGATRON_BRIDGE_ROOT}/src/megatron/bridge/orbit/model_bridges/deepseek_v4_bridge.py" ]]; then
     echo "MEGATRON_BRIDGE_ROOT does not contain deepseek_v4_bridge.py: ${MEGATRON_BRIDGE_ROOT}" >&2
     exit 1
 fi

@@ -27,7 +27,7 @@ from typing import Any, Optional
 
 
 def build_single_rank_meta_provider(*args, **kwargs):
-    from megatron.bridge.models.conversion.low_precision.common import (
+    from megatron.bridge.orbit.low_precision.common import (
         build_single_rank_meta_provider as _impl,
     )
 
@@ -35,7 +35,7 @@ def build_single_rank_meta_provider(*args, **kwargs):
 
 
 def patch_meta_init_for_te_modules(*args, **kwargs):
-    from megatron.bridge.models.conversion.low_precision.common import (
+    from megatron.bridge.orbit.low_precision.common import (
         patch_meta_init_for_te_modules as _impl,
     )
 
@@ -43,7 +43,7 @@ def patch_meta_init_for_te_modules(*args, **kwargs):
 
 
 def build_fp8_direct_model_state_dict(*args, **kwargs):
-    from megatron.bridge.models.conversion.low_precision.fp8 import (
+    from megatron.bridge.orbit.low_precision.fp8 import (
         build_fp8_direct_model_state_dict as _impl,
     )
 
@@ -51,7 +51,7 @@ def build_fp8_direct_model_state_dict(*args, **kwargs):
 
 
 def apply_modelopt_fp8_to_meta_model(*args, **kwargs):
-    from megatron.bridge.models.conversion.low_precision.fp8 import (
+    from megatron.bridge.orbit.low_precision.fp8 import (
         apply_modelopt_fp8_to_meta_model as _impl,
     )
 

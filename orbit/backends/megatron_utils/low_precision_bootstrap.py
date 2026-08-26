@@ -879,7 +879,7 @@ def load_dist_checkpoint(parallel_model, dist_weight_path: str, *, is_value_mode
     transform_sharded_state_dict_for_fp8 = None
 
     if fp8_mode:
-        from megatron.bridge.peft.fp8_utils import (
+        from megatron.bridge.orbit.quant.fp8_utils import (
             register_fp8_scale_inv_buffers_after_load,
             transform_sharded_state_dict_for_fp8,
         )
@@ -888,12 +888,12 @@ def load_dist_checkpoint(parallel_model, dist_weight_path: str, *, is_value_mode
         import megatron.core.transformer.moe.experts as moe_experts
 
         if has_expert_int4:
-            from megatron.bridge.peft.int4_utils import (
+            from megatron.bridge.orbit.quant.int4_utils import (
                 register_int4_buffers_after_load,
                 transform_sharded_state_dict_for_int4,
             )
         if has_dense_int4:
-            from megatron.bridge.models.conversion.low_precision.int4 import (
+            from megatron.bridge.orbit.low_precision.int4 import (
                 register_int4_buffers_after_load_dense,
                 transform_sharded_state_dict_for_int4_dense,
             )
@@ -914,11 +914,11 @@ def load_dist_checkpoint(parallel_model, dist_weight_path: str, *, is_value_mode
     nvfp4_register_expert = None
 
     if nvfp4_mode:
-        from megatron.bridge.models.conversion.low_precision.nvfp4 import (
+        from megatron.bridge.orbit.low_precision.nvfp4 import (
             register_nvfp4_buffers_after_load_dense,
             transform_sharded_state_dict_for_nvfp4_dense,
         )
-        from megatron.bridge.peft.nvfp4_utils import (
+        from megatron.bridge.orbit.quant.nvfp4_utils import (
             register_nvfp4_buffers_after_load,
             transform_sharded_state_dict_for_nvfp4,
         )

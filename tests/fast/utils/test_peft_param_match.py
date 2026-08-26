@@ -1,9 +1,12 @@
 """Parameter-count matching between LoRA rank and OFT block size.
 
-The formulas here must track megatron/bridge/peft/oft_layers.py: oft_r has
+The formulas here must track megatron/bridge/orbit/oft/oft_layers.py: oft_r has
 shape (d_in // block_size, block_size * (block_size - 1) // 2), and a block
 size that does not divide d_in is snapped to the nearest divisor.
 """
+
+import os
+from pathlib import Path
 
 import pytest
 
@@ -101,20 +104,20 @@ class TestAgreesWithBridgeFindNearestDivisor:
     than trusting a hand-transcribed copy.
     """
 
-    BRIDGE_PATH = (
-        "/lustre/fast/fast/zqiu/NeckariumAI/clthegoat/release/Megatron-Bridge/"
-        "src/megatron/bridge/peft/oft_layers.py"
-    )
-
     @pytest.fixture(scope="class")
     def bridge_find_nearest_divisor(self):
         import ast
         import math
 
+        bridge_root = os.environ.get("MEGATRON_BRIDGE_ROOT")
+        if bridge_root is None:
+            pytest.skip("MEGATRON_BRIDGE_ROOT is not set")
+        bridge_path = Path(bridge_root) / "src/megatron/bridge/orbit/oft/oft_layers.py"
+
         try:
-            src = open(self.BRIDGE_PATH).read()
+            src = bridge_path.read_text()
         except OSError:
-            pytest.skip("Megatron-Bridge checkout not available in this environment")
+            pytest.skip(f"Megatron-Bridge source not available at {bridge_path}")
 
         tree = ast.parse(src)
         func_node = None

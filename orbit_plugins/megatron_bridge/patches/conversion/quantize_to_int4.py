@@ -13,7 +13,7 @@ from pathlib import Path
 from safetensors import safe_open
 from safetensors.torch import save_file
 
-from megatron.bridge.models.conversion.low_precision.int4 import quantize_to_int4
+from megatron.bridge.orbit.low_precision.int4 import quantize_to_int4
 
 
 def should_quantize(key: str) -> bool:
