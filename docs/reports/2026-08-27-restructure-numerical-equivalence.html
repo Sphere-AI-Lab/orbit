@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>reports — reports</title>
-<script type="application/json" id="report-meta">{"title": "reports — reports", "kind": "index", "subtitle": "4 documents", "date": "", "tags": [], "generated": "2026-08-27T04:13:21+02:00", "meta": {"directory": "/Users/zqiu/Documents/GitHub/orbit-iclr/.worktrees/orbit-pins-fix/docs/reports"}}</script>
+<title>Restructure numerical equivalence — updated orbit-main heads vs the pre-restructure stack on H200</title>
+<script type="application/json" id="report-meta">{"title": "Restructure numerical equivalence — updated orbit-main heads vs the pre-restructure stack on H200", "kind": "investigation", "date": "2026-08-27", "tags": ["numerics", "restructure", "megatron", "bridge", "sglang", "oft", "lora", "verification", "h200"], "subtitle": "", "generated": "2026-08-27T04:13:20+02:00", "meta": {"date": "2026-08-27", "commit": "be8692e243e6", "branch": "pins-restructured-stack", "tree": "clean", "host": "Zejus-MacBook-Pro.local", "python": "3.9.6", "scheduler": "slurm", "execution": "20260827T004939Z-r517330440", "old_stack": "orbit 2f8015cb (worktree 60679af, package-identical), Megatron-LM 00eb75b0c, Megatron-Bridge ad26fc46, sglang a6fe249b3, env orbit_cu130_zeju", "new_stack": "orbit 197c9137 (pushed head be8692e, runtime-identical), Megatron-LM 83879096b, Megatron-Bridge 988d6426, sglang a6fe249b3, env orbit_cu130_omr", "fixes": "Megatron-Bridge orbit-main fast-forwarded ad26fc46 to 988d6426; orbit be8692e repins megatron-core 83879096b and sglang a6fe249b3", "jobs": "2952 install, 2955 mlm-kernels, 2966 bridge (2956 first attempt), 2983/2984/2985 stage A, 2980/2981/2982 stage B, 2959/2960 smokes", "evidence": "remote-cluster-runs slurm/orbit/orbit-main/20260827T004939Z-r517330440 (cluster + local mirror)", "cluster": "slurm H200 (slinky nodes), partition all"}, "profile": "development-log", "status": "final", "source": {"path": "docs/reports/_src/2026-08-27-restructure-numerical-equivalence.md", "sha256": "721090c99f8a852071d2f922e338d0cde17f2c39b70df76ea991c417cd9b95b3", "assets": []}}</script>
 <style>
 /* html-reports visual system.
    One offline, dependency-free shell with three reading modes:
@@ -1165,19 +1165,152 @@ td.t-status.status-final { color: var(--positive); }
 
 </style>
 </head>
-<body class="report-page">
+<body class="report-page profile-development-log status-final" data-profile="development-log" data-status="final">
 <button class="theme-toggle" type="button" aria-label="Toggle color theme">Theme</button>
 <div class="page">
 <div class="doc-layout">
-
+<details class="toc" open><summary>Contents</summary><ol><li class="lvl-2"><a href="#question-and-scope">Question and scope</a></li><li class="lvl-2"><a href="#completed-deliverables">Completed deliverables</a></li><li class="lvl-2"><a href="#static-equivalence">Static equivalence</a></li><li class="lvl-2"><a href="#verification-environment-and-structure">Verification — environment and structure</a></li><li class="lvl-2"><a href="#verification-serving-stage-a">Verification — serving (Stage A)</a></li><li class="lvl-2"><a href="#verification-trainer-stage-b">Verification — trainer (Stage B)</a></li><li class="lvl-2"><a href="#verification-e2e-smoke-grpo-oft-8x-h200">Verification — e2e smoke (GRPO OFT, 8x H200)</a></li><li class="lvl-2"><a href="#campaign-mechanics-and-incidents">Campaign mechanics and incidents</a></li><li class="lvl-2"><a href="#risks-and-limitations">Risks and limitations</a></li><li class="lvl-2"><a href="#actions">Actions</a></li></ol></details>
 <main>
 <header class="doc-header">
-<div class="doc-kind">index</div><h1 class="doc-title">reports — reports</h1>
-<p class="doc-subtitle">4 documents</p>
-<dl class="meta"><div><dt>directory</dt><dd>/Users/zqiu/Documents/GitHub/orbit-iclr/.worktrees/orbit-pins-fix/docs/reports</dd></div></dl>
+<div class="doc-state"><span class="doc-profile">Development log</span><span class="doc-status status-final">Final</span></div><div class="doc-kind">investigation</div><h1 class="doc-title">Restructure numerical equivalence — updated orbit-main heads vs the pre-restructure stack on H200</h1>
+<div class="doc-tags"><span>numerics</span><span>restructure</span><span>megatron</span><span>bridge</span><span>sglang</span><span>oft</span><span>lora</span><span>verification</span><span>h200</span></div>
+<dl class="meta"><div><dt>date</dt><dd>2026-08-27</dd></div><div><dt>commit</dt><dd>be8692e243e6</dd></div><div><dt>branch</dt><dd>pins-restructured-stack</dd></div><div><dt>tree</dt><dd class="flag-clean">clean</dd></div><div><dt>host</dt><dd>Zejus-MacBook-Pro.local</dd></div><div><dt>python</dt><dd>3.9.6</dd></div><div><dt>scheduler</dt><dd>slurm</dd></div><div><dt>execution</dt><dd>20260827T004939Z-r517330440</dd></div><div><dt>old_stack</dt><dd>orbit 2f8015cb (worktree 60679af, package-identical), Megatron-LM 00eb75b0c, Megatron-Bridge ad26fc46, sglang a6fe249b3, env orbit_cu130_zeju</dd></div><div><dt>new_stack</dt><dd>orbit 197c9137 (pushed head be8692e, runtime-identical), Megatron-LM 83879096b, Megatron-Bridge 988d6426, sglang a6fe249b3, env orbit_cu130_omr</dd></div><div><dt>fixes</dt><dd>Megatron-Bridge orbit-main fast-forwarded ad26fc46 to 988d6426; orbit be8692e repins megatron-core 83879096b and sglang a6fe249b3</dd></div><div><dt>jobs</dt><dd>2952 install, 2955 mlm-kernels, 2966 bridge (2956 first attempt), 2983/2984/2985 stage A, 2980/2981/2982 stage B, 2959/2960 smokes</dd></div><div><dt>evidence</dt><dd>remote-cluster-runs slurm/orbit/orbit-main/20260827T004939Z-r517330440 (cluster + local mirror)</dd></div><div><dt>cluster</dt><dd>slurm H200 (slinky nodes), partition all</dd></div></dl>
 </header>
-<div class="table-wrap"><table><thead><tr><th>Date</th><th>Title</th><th>Profile</th><th>Status</th><th>Kind</th><th>Tags</th><th>Commit</th></tr></thead><tbody><tr><td class="t-date">2026-08-27</td><td class="t-title"><a href="2026-08-27-restructure-numerical-equivalence.html">Restructure numerical equivalence — updated orbit-main heads vs the pre-restructure stack on H200</a></td><td class="t-profile">Development log</td><td class="t-status status-final">Final</td><td class="t-kind"><span>investigation</span></td><td>numerics, restructure, megatron, bridge, sglang, oft, lora, verification, h200</td><td class="t-commit">be8692e243e6</td></tr><tr><td class="t-date">2026-08-19</td><td class="t-title"><a href="2026-08-19-merged-stack-numerical-equivalence.html">Merged-stack numerical equivalence — sglang v0.5.16 line and merged orbit vs the published E4 stack</a></td><td class="t-profile">Development log</td><td class="t-status status-final">Final</td><td class="t-kind"><span>investigation</span></td><td>lora-regret, numerics, sglang, megatron, oft, lora, verification</td><td class="t-commit">ef2c6510a894</td></tr><tr><td class="t-date">2026-08-15</td><td class="t-title"><a href="2026-08-10-ppo-critic-comparison.html">Full critic vs adapter critic: PPO on Qwen2.5-3B math</a></td><td class="t-profile"></td><td class="t-status"></td><td class="t-kind"><span>benchmark</span></td><td>ppo, grpo, oft, critic, qwen2.5-3b</td><td class="t-commit">613b0f11cb5e</td></tr><tr><td class="t-date">2026-08-10</td><td class="t-title"><a href="2026-08-10-e4-gsm8k-math-panel.html">E4 GSM8K + Math — FullFT vs LoRA across the complete RL learning-rate panel</a></td><td class="t-profile"></td><td class="t-status"></td><td class="t-kind"><span>experiment</span></td><td>lora-regret, e4, gsm8k, math, rl, learning-rate-sweep</td><td class="t-commit">b37f97743e89</td></tr></tbody></table></div>
-<footer class="doc-footer">Index rebuilt 2026-08-27 04:13 CEST by htmlreport</footer>
+<section class="report-summary" aria-label="Outcome">
+<p class="summary-label">Outcome</p>
+<p class="summary-title">The updated orbit-main branch heads — restructured Megatron-LM, the shimless orbit-namespace Megatron-Bridge, and the migrated orbit — are numerically equivalent to the pre-restructure stack: bit-identical on every deterministic H200 axis. Serving matches in all 12 cross-arm cells (fa3, triton, flashinfer, each with base, OFT b32, LoRA r16), the trainer step matches per-token logprobs and grad norms to the last digit for base, OFT, and LoRA, and the moved Megatron kernels match 15/15 captured tensors bitwise.</p>
+<p class="summary-detail">Caveats: the GRPO e2e smoke is non-bitwise by construction (sampled rollouts) and instead matched the qualified logprob-sync envelope; two vendored TE reference files under te_oft/ are unimportable in the new tree, but provably unimportable in the old tree too (pre-existing dead code, not a restructure effect). En route, two repo-state gaps were fixed and pushed: Megatron-Bridge orbit-main was fast-forwarded to the pinned commit, and orbit's stale megatron-core/sglang pins were bumped (be8692e).</p>
+</section>
+<div class="status-grid" role="list" aria-label="Program status">
+<div class="status-item" data-status="complete" role="listitem"><strong class="status-value">7</strong><span class="status-label">Battery legs green</span></div>
+<div class="status-item" data-status="complete" role="listitem"><strong class="status-value">18</strong><span class="status-label">Bit-identical comparison cells</span></div>
+<div class="status-item" data-status="complete" role="listitem"><strong class="status-value">2</strong><span class="status-label">Repo-state fixes pushed</span></div>
+<div class="status-item" data-status="open" role="listitem"><strong class="status-value">3</strong><span class="status-label">Optional follow-ups</span></div>
+</div>
+<h2 id="question-and-scope">Question and scope<a class="anchor" href="#question-and-scope" aria-hidden="true">#</a></h2>
+<p>The Sphere fork isolation restructure (GPU-qualified pre-merge on 2026-08-25) was pushed to
+the Sphere-AI-Lab <code>orbit-main</code> branches on 2026-08-26, with two additional commits beyond the
+qualified state: a Bridge-side sphere-to-orbit namespace rename plus removal of all legacy
+import shims, and an orbit-side migration to the new namespace. The question: is the published
+new code numerically the same as the old code?</p>
+<div class="table-wrap"><table><thead><tr><th>repo</th><th>old (baseline)</th><th>new (orbit-main head)</th><th>delta</th></tr></thead><tbody><tr><td>orbit</td><td><code>2f8015cb</code> (via worktree <code>60679af</code>; <code>orbit/</code> + <code>train.py</code> verified byte-identical)</td><td><code>197c9137</code></td><td>namespace migration <code>3306f84</code> (imports + 2 docstrings), OPD-only fix <code>18cc27f</code>, launchers/setup</td></tr><tr><td>Megatron-LM</td><td><code>00eb75b0c</code></td><td><code>83879096b</code></td><td>exactly the qualified restructure commit (kernels moved into <code>experimental_attention_variant/</code>)</td></tr><tr><td>Megatron-Bridge</td><td><code>ad26fc46</code></td><td><code>988d6426</code></td><td>qualified <code>69eba707</code> + rename <code>69a8e369</code> + shim removal <code>988d6426</code> — the two new commits were unqualified before this campaign</td></tr><tr><td>sglang</td><td><code>a6fe249b3</code></td><td><code>a6fe249b3</code></td><td>unchanged</td></tr></tbody></table></div>
+<p>Both arms therefore share one sglang commit and differ only in the three restructured trees.
+The comparison arms are complete installed environments built by the same cu130 installer:
+<code>orbit_cu130_zeju</code> (old, pre-existing and previously verified) and <code>orbit_cu130_omr</code> (new,
+built this campaign from the branch heads). Acceptance bar: bit-identity, justified because
+both arms share the same megatron-core 0.18 line and the static delta is code motion only.</p>
+<h2 id="completed-deliverables">Completed deliverables<a class="anchor" href="#completed-deliverables" aria-hidden="true">#</a></h2>
+<ul><li>New-stack environment <code>orbit_cu130_omr</code> installed from the orbit-main heads and verified<p>39/39 (job 2952); editable sources at <code>~/miles-orbit/sources/orbit_cu130_omr/</code>.</p></li><li>Full H200 equivalence battery: static equivalence, kernel parity, Bridge contracts and unit<p>tests, Stage A serving matrix, Stage B frozen-batch trainer, GRPO OFT e2e smoke pair.</p></li><li>Megatron-Bridge <code>orbit-main</code> fast-forwarded <code>ad26fc46..988d6426</code> (7 commits; clean<p>ancestry verified) so the branch equals the commit orbit pins.</p></li><li>orbit <code>be8692e</code> (pushed as the new <code>orbit-main</code> head): repins megatron-core to <code>83879096b</code><p>and sglang to <code>a6fe249b3</code> across <code>pyproject.toml</code>, <code>uv.lock</code>, both <code>pins.env</code> files,
+<code>CUDA-13-install.md</code>, and the two pin-guard test suites. Before this fix a fresh install
+from orbit's own pins silently got the pre-restructure Megatron-LM. <code>be8692e</code> touches no
+runtime code, so this campaign's verdict (measured at <code>197c9137</code>) applies to it verbatim.</p></li><li>Durable evidence in the run store<p><code>slurm/orbit/orbit-main/20260827T004939Z-r517330440</code> (cluster and local mirror), including
+<code>VERDICT.md</code>, per-leg provenance, raw probe captures, and all failed attempts.</p></li></ul>
+<h2 id="static-equivalence">Static equivalence<a class="anchor" href="#static-equivalence" aria-hidden="true">#</a></h2>
+<p>Login-node analysis before any GPU was spent:</p>
+<ul><li><strong>Bridge <code>69eba707..988d6426</code></strong> (the unqualified delta): 68/68 renamed files are<p>byte-identical after the mechanical sphere-to-orbit token rewrite; all 31 deletions are
+compatibility shims (every header carries the shim marker; <code>kimi_vl/utils.py</code> is a shim with
+a long license header); additions are the renamed package inits plus
+<code>tests/unit_tests/test_orbit_namespace.py</code>. The single non-mechanical modification is the
+removal of the legacy <code>low_precision</code> re-export from <code>models/conversion/__init__.py</code>,
+consistent with shim removal. No <code>megatron.bridge.sphere</code> references remain.</p></li><li><strong>orbit <code>2f8015cb..197c9137</code>, package scope</strong>: only two commits touch <code>orbit/</code> or<p><code>train.py</code>. The namespace migration <code>3306f84</code> changes import lines plus two docstring
+mentions; <code>18cc27f</code> touches the OPD rollout path only, which this battery does not
+exercise. <code>orbit_plugins/model_args/</code> (sourced by every recipe) is byte-identical across
+arms; the five <code>orbit_plugins/megatron_bridge/patches/</code> files change import paths only.</p></li><li><strong>Import contract</strong>: all 17 distinct <code>megatron.bridge</code> module references in the orbit<p>package resolve against the Bridge <code>988d6426</code> tree.</p></li><li><strong>sglang pin move context</strong> (for the be8692e pins fix): <code>51845dc4a..a6fe249b3</code> is three<p>serving fixes plus a merge, all Python-side; <code>sgl-kernel/</code> is byte-identical, so kernel
+builds and prebuilt wheels are unaffected.</p></li></ul>
+<h2 id="verification-environment-and-structure">Verification — environment and structure<a class="anchor" href="#verification-environment-and-structure" aria-hidden="true">#</a></h2>
+<ul><li>Install job 2952 (installer from the new head itself, sglang overridden to the orbit-main<p>head): verify_env <strong>39/39</strong>, same count as the old env's original qualification.</p></li><li><strong>Megatron-LM kernel parity</strong> (job 2955, both captures on one H200): the restructure-moved<p>kernels — <code>matmul_fixed_order</code>, <code>LinearFixedOrderFn</code> forward and backward,
+<code>BatchInvariantRMSNormFn</code> forward and backward in both zero-centered modes, and the TEGemm
+TN / dsv4 fast paths — are <strong>bitwise-equal in all 15 captured tensors</strong> between the old and
+new environments (<code>KERNEL_PARITY_BITWISE_EQUAL</code>).</p></li><li><strong>Bridge contracts and unit tests</strong> (job 2966): old arm passes the legacy-path contract and<p><code>test_adapter_export.py</code> <strong>29/29</strong>; new arm passes <strong>70 tests</strong>
+(adapter-export 29 + the new orbit-namespace suite), all 14 removed legacy paths are
+confirmed absent, and a full import walk of <code>megatron.bridge.orbit</code> covers 51 modules with
+<strong>0 unexpected errors</strong>.</p></li></ul>
+<aside class="finding" data-tone="neutral">
+<p class="block-label">Finding</p>
+<p>The import walk surfaced exactly two failing modules: the vendored TE reference copies
+<p>te_oft/ref_te_common.py and te_oft/ref_te_layernorm_linear.py. Git shows their imports
+(a relative cpp_extensions, a relative debug module) dangling at the old SHA as well, and a
+parity-of-brokenness probe in the old environment confirms both are equally unimportable
+there (OLD_BROKEN_PARITY_OK). Pre-existing dead reference code; not a restructure effect.
+The first bridge job (2956) failed only because the walk was stricter than the old tree's
+reality; it was re-run as 2966 with the parity assertion.</p></p>
+</aside>
+<h2 id="verification-serving-stage-a">Verification — serving (Stage A)<a class="anchor" href="#verification-serving-stage-a" aria-hidden="true">#</a></h2>
+<p>Method: per cell, 16 gsm8k-test chat-template prompts, 64 greedy tokens,
+<code>enable_deterministic_inference</code>, radix cache disabled, TP1, pinned attention backend,
+synthetic byte-identical adapters shared by both arms (canonical OFT block 32 on all 7 linear
+targets; LoRA rank 16). Each boot also records <code>base_greedy</code>, giving a per-backend within-arm
+control. Both arms report the same engine build (<code>sglang 0.0.0.dev1+ga6fe249b3</code>).</p>
+<p><strong>All 12 cross-arm cells are bit-identical: 16/16 tokens identical and 0.00 logprob delta at
+every position</strong> — OFT, LoRA, and both base boots, on fa3, triton, and flashinfer.</p>
+<div class="table-wrap"><table><thead><tr><th>backend</th><th>oft_greedy</th><th>base (oft boot)</th><th>lora_greedy</th><th>base (lora boot)</th></tr></thead><tbody><tr><td>fa3</td><td>16/16, 0.00</td><td>16/16, 0.00</td><td>16/16, 0.00</td><td>16/16, 0.00</td></tr><tr><td>triton</td><td>16/16, 0.00</td><td>16/16, 0.00</td><td>16/16, 0.00</td><td>16/16, 0.00</td></tr><tr><td>flashinfer</td><td>16/16, 0.00</td><td>16/16, 0.00</td><td>16/16, 0.00</td><td>16/16, 0.00</td></tr></tbody></table></div>
+<p>The within-arm control (base_greedy across the two independent engine boots of the same arm)
+reproduces the known cross-config effect of the OFT boot's prefill-graph disable — and the two
+arms show <strong>identical fingerprints to the digit</strong> (max abs dlogprob 1.369e-01 on fa3,
+1.194e-01 on triton, 1.108e-01 on flashinfer, with identical token-flip counts 11/10/13 of
+16). The new stack does not merely match outputs; it reproduces the old stack's
+config-sensitivity exactly. flashinfer, unmeasurable on the older B200 comparison, boots and
+matches cleanly on H200.</p>
+<h2 id="verification-trainer-stage-b">Verification — trainer (Stage B)<a class="anchor" href="#verification-trainer-stage-b" aria-hidden="true">#</a></h2>
+<p>Method: the frozen 16-sequence batch from the 2026-08-24 port campaign
+(<code>batch_orbit_0.pt</code>, reused byte-identically by both arms as <code>batch_frozen_0.pt</code>), the
+byte-copied campaign recipe with the debug-replay override block appended (argparse
+last-wins): 1 GPU, TP1/PP1/DP1, one GRPO step, <code>--load-debug-rollout-data</code> +
+<code>--debug-train-only</code> (zero engines), eps-clip 1e9, both normalizations off,
+<code>--ci-save-grad-norm</code>. Cells: {old, new} x {base, oft b32, lora r16} x 2 repeats; each
+method's four cells ran on one node and GPU.</p>
+<p>Both arms are exactly deterministic (repeat pairs bit-equal everywhere), and <strong>every
+cross-arm comparison is bit-identical</strong>: tokens 16/16, advantages 16/16, per-token logprobs
+16/16 <code>torch.equal</code> with max abs delta 0.00, and grad norms equal to the last printed digit.</p>
+<div class="table-wrap"><table><thead><tr><th>method</th><th>logprobs (old vs new)</th><th>grad norm old</th><th>grad norm new</th><th>equal</th></tr></thead><tbody><tr><td>base</td><td>16/16 bit-equal, max 0.00</td><td>5.604307651519775</td><td>5.604307651519775</td><td>yes</td></tr><tr><td>oft b32</td><td>16/16 bit-equal, max 0.00</td><td>1.0412166118621826</td><td>1.0412166118621826</td><td>yes</td></tr><tr><td>lora r16</td><td>16/16 bit-equal, max 0.00</td><td>0.8442838191986084</td><td>0.8442838191986084</td><td>yes</td></tr></tbody></table></div>
+<h2 id="verification-e2e-smoke-grpo-oft-8x-h200">Verification — e2e smoke (GRPO OFT, 8x H200)<a class="anchor" href="#verification-e2e-smoke-grpo-oft-8x-h200" aria-hidden="true">#</a></h2>
+<p>The 3-rollout colocate GRPO OFT smoke (qwen2.5-0.5B, gsm8k, OFT b32 canonical, per-rollout
+adapter re-sync, checkpoint save) ran once per arm from the arm's own worktree and
+environment (jobs 2959/2960). Both completed cleanly (exit 0, all adapter POSTs 200, PEFT
+checkpoint saved). This axis samples rollouts, so it is non-bitwise by construction; the
+comparison metric is the trainer-vs-engine logprob sync fidelity:</p>
+<div class="table-wrap"><table><thead><tr><th>round</th><th>old lp_absdiff</th><th>new lp_absdiff</th></tr></thead><tbody><tr><td>0</td><td>0.00874</td><td>0.00873</td></tr><tr><td>1</td><td>0.00934</td><td>0.00912</td></tr><tr><td>2</td><td>0.00946</td><td>0.00934</td></tr></tbody></table></div>
+<p>Both sit inside the previously qualified envelope (0.0081–0.0099 across the vanilla and
+pre-merge-restructure smokes). Raw rewards (32 samples per round) are at noise scale in both
+arms: old {0.625, 0.344, 0.313}, new {0.719, 0.375, 0.5}, against the 0.31–0.75 range of
+prior runs of this smoke.</p>
+<h2 id="campaign-mechanics-and-incidents">Campaign mechanics and incidents<a class="anchor" href="#campaign-mechanics-and-incidents" aria-hidden="true">#</a></h2>
+<p>The battery ran as chained Slurm jobs with a shared run store. After the serial chain proved
+slower than needed, Stage A was split per backend and Stage B per method into six
+node-exclusive 1-GPU jobs running in parallel: every compared pair still shares one GPU
+(cross-arm pairs live inside one job), while node exclusivity removes the cross-job
+<code>pkill</code>/<code>ray stop</code> interference that had forced serialization. Remaining wall time dropped
+from about 3 hours to about 35 minutes.</p>
+<p>Failed attempts, kept in provenance: job 2956 (bridge, first attempt) failed on the
+import-walk strictness later resolved by the parity-of-brokenness assertion; jobs 2977–2979
+died instantly on a shell script corrupted by an in-place <code>perl</code> edit (pipe characters inside
+<code>s|||</code> delimiters) and were resubmitted as 2983–2985 after a clean rewrite; jobs 2957/2958
+were the superseded serial stages, cancelled un-started except for Stage A prep, whose
+prompt/adapter artifacts the parallel jobs then reused.</p>
+<h2 id="risks-and-limitations">Risks and limitations<a class="anchor" href="#risks-and-limitations" aria-hidden="true">#</a></h2>
+<ul><li>Scope is H200 only, per the campaign request. Cross-GPU and cross-backend behavior of the<p>underlying lines is covered by the 2026-08-19 merged-stack report; nothing in this
+restructure touches arithmetic, and kernel bit-parity held, so no new GPU-dependence is
+expected.</p></li><li>The e2e smoke axis is statistical, not bitwise; its per-round sync metric and reward scale<p>matched the qualified envelope.</p></li><li>The two dead <code>ref_te_*</code> reference files remain in the tree (equally broken in both arms).<p>Deleting them upstream is an optional chore; nothing imports them.</p></li><li>The pre-fix window (2026-08-26 to be8692e) exists in history: installs pinned from orbit<p><code>197c9137</code> or earlier get the pre-restructure Megatron-LM with the new Bridge. That
+combination is exactly what jobs 2952-era environments avoided only via explicit overrides;
+anyone who built from raw orbit-main pins in that window should rebuild.</p></li></ul>
+<h2 id="actions">Actions<a class="anchor" href="#actions" aria-hidden="true">#</a></h2>
+<div class="table-wrap"><table><thead><tr><th>action</th><th>owner</th><th>status</th><th>evidence or trigger</th></tr></thead><tbody><tr><td>Adopt <code>orbit_cu130_omr</code> as the go-forward slurm env</td><td>zeju</td><td>Ready</td><td>This report; env verified 39/39</td></tr><tr><td>Delete or keep Bridge <code>orbit-main-restructured</code> (now equal to <code>orbit-main</code>)</td><td>zeju</td><td>Open</td><td>Branch cleanup preference</td></tr><tr><td>Retire pre-merge qualification envs <code>orbit_cu130_{mlmr,mbr}</code></td><td>zeju</td><td>Open</td><td>Disk pressure; superseded by this campaign</td></tr><tr><td>Publish this report to VigaHub</td><td>zeju/agent</td><td>Open</td><td>On request</td></tr></tbody></table></div>
+<details class="reproducibility">
+<summary>Reproducibility</summary>
+<ul><li>Run store (cluster and local mirror):<p><code>~/.local/state/remote-cluster-runs/slurm/orbit/orbit-main/20260827T004939Z-r517330440/</code>
+with per-leg directories <code>install-orbit_cu130_omr</code>, <code>static-equivalence</code>, <code>compare-mlm</code>,
+<code>compare-bridge</code>, <code>stage-a</code>, <code>stage-b</code>, <code>smoke-old</code>, <code>smoke-new</code>, plus <code>provenance.json</code>
+and <code>VERDICT.md</code>.</p></li><li>New env install (job 2952), run from the new orbit head's own installer with source<p>overrides pinning the branch heads:
+<code>bash scripts/slurm/setup/cu130/install_env.sh --env-prefix .../envs/orbit_cu130_omr
+--source-root .../sources/orbit_cu130_omr --cache-dir .../cache/orbit_cu130_zeju</code> with
+<code>ORBIT_MEGATRON_COMMIT=83879096b...</code>, <code>ORBIT_MEGATRON_BRIDGE_COMMIT=988d6426...</code>,
+<code>ORBIT_SGLANG_COMMIT=a6fe249b3...</code> (after be8692e the megatron/bridge overrides are the
+defaults).</p></li><li>Arm activation: <code>scripts/arm_env2.sh &lt;old|new&gt; &lt;serving|trainer&gt;</code> in the run store —<p>conda env + worktree PYTHONPATH + the cluster-required cuDNN pins +
+<code>ORBIT_PEFT_ADAPTER_TRANSPORT=cpu_gather</code> + node-local <code>TRITON_CACHE_DIR</code>.</p></li><li>Probes: <code>kernel_parity.py</code>/<code>compare_tensors.py</code> (compare-mlm), <code>bridge_checks*.py</code><p>(compare-bridge), <code>matrix_probe.py</code> + <code>stage_a_matrix_report.py</code> (stage-a),
+<code>stageb_cell_oldnew.sh</code> + <code>stageb_compare_oldnew.py</code> (stage-b) — all in the run store's
+<code>scripts/</code> and leg directories, derived from the 2026-08-24 port-campaign harness.</p></li><li>Hardware: NVIDIA H200 nodes (slinky), partition <code>all</code>; smokes used 8 GPUs per arm<p>(cpu=156, 50 min limit), all other legs 1 GPU.</p></li><li>Model and data: Qwen2.5-0.5B-Instruct, gsm8k train/test parquets from<p><code>/data/home/zeju/{models,datasets}</code>.</p></li></ul>
+</details>
+<footer class="doc-footer">Generated 2026-08-27 04:13 CEST by htmlreport</footer>
 </main>
 </div>
 </div>
