@@ -14,14 +14,15 @@ class HfWeightIteratorBase(ABC):
 
         return c(args, model, **kwargs)
 
-    def __init__(self, args, model, model_name, quantization_config, **kwargs):
+    def __init__(self, args, model, model_name, quantization_config, *, peft_method="none", **kwargs):
         self.args = args
         self.model = model
         self.model_name = model_name
         self.quantization_config = quantization_config
+        self.peft_method = peft_method
 
     @abstractmethod
-    def get_hf_weight_chunks(self, megatron_local_weights, weight_type="base"):
+    def get_hf_weight_chunks(self, megatron_local_weights, weight_type=None):
         """
         Mental model of the API:
         megatron_model.to_hf_magically().named_parameters()

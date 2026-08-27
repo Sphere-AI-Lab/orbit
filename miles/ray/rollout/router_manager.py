@@ -15,12 +15,27 @@ from miles.utils.http_utils import wait_for_server_ready
 logger = logging.getLogger(__name__)
 
 
+def _requires_miles_router_passthrough(args) -> bool:
+    return getattr(args, "peft_method", "none") == "oft" and not getattr(args, "use_miles_router", False)
+
+
 def start_router(args, *, has_pd_disaggregation: bool = False, force_new: bool = False) -> tuple[str, int]:
     """Start sgl router or miles router and return (router_ip, router_port).
 
     If ``args.sglang_router_ip`` is already set and ``force_new`` is False,
     skip launching and return the existing values.
     """
+    if _requires_miles_router_passthrough(args):
+        if has_pd_disaggregation:
+            raise RuntimeError(
+                "OFT rollout requires Miles's pass-through router, which does not support PD disaggregation."
+            )
+        logger.warning(
+            "Forcing Miles router for OFT rollout because the installed sglang_router does not preserve "
+            "the adapter path."
+        )
+        args.use_miles_router = True
+
     if not force_new and args.sglang_router_ip is not None:
         return args.sglang_router_ip, args.sglang_router_port
 

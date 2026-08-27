@@ -17,6 +17,8 @@ from miles.utils.types import ParamInfo
 
 logger = logging.getLogger(__name__)
 
+DSV4_GROUPED_MOE_OFT_PARAM_NAMES = frozenset({"w1_oft_r", "w2_oft_r", "w3_oft_r"})
+
 
 @dataclasses.dataclass(frozen=True)
 class AtomicUpdateGroup:
@@ -451,3 +453,19 @@ def _check_weight_sync_results(results: list, *, is_lora: bool) -> None:
                 f"{sync_type} weight sync failed on rollout engine: {error_msg}. "
                 f"Check SGLang version compatibility."
             )
+
+
+def is_named_adapter_tensor(name: str) -> bool:
+    stripped_name = strip_param_name_prefix(name)
+    return (
+        "lora_" in stripped_name
+        or ".adapter." in stripped_name
+        or stripped_name.startswith("adapter.")
+        or ".oft_" in stripped_name
+        or stripped_name.startswith("oft_")
+        or is_dsv4_grouped_moe_oft_param_name(stripped_name)
+    )
+
+
+def is_dsv4_grouped_moe_oft_param_name(name: str) -> bool:
+    return name.rsplit(".", 1)[-1] in DSV4_GROUPED_MOE_OFT_PARAM_NAMES

@@ -2,12 +2,15 @@
 Utils to integrate SGLang's `/generate` endpoint with RL things like Sample.
 """
 
+import os
 from copy import deepcopy
 from typing import Any
 
 import numpy as np
 import pybase64
 
+from miles.backends.megatron_utils.oft_utils import OFT_ADAPTER_NAME
+from miles.backends.megatron_utils.peft_utils import get_peft_method
 from miles.utils.lora import LORA_ADAPTER_NAME, lora_rollout_enabled
 from miles.utils.processing_utils import encode_image_for_rollout_engine, extract_multimodal_train_inputs
 from miles.utils.types import Sample
@@ -74,7 +77,23 @@ def compute_request_payload(
     if image_data := (multimodal_inputs or {}).get("images"):
         payload["image_data"] = [encode_image_for_rollout_engine(image) for image in image_data]
 
+    attach_peft_request_payload(args, payload)
+
     return payload, None
+
+
+def attach_peft_request_payload(args, payload: dict[str, Any]) -> dict[str, Any]:
+    peft_method = get_peft_method(args)
+    # LoRA is routed through the fork's SINGLE-ACTIVE peft/lora (peft_method="lora",
+    # see sglang_engine.py) -- NOT upstream's multi-tenant LoRAManager. The
+    # single-active path applies the index-0 adapter unconditionally, so the
+    # generate request must NOT name an adapter (sending lora_path 400s in
+    # upstream's _validate_and_resolve_lora when enable_lora is unset).
+    # OFT runs multi-slot (base slot 0 + adapter slot 1) and selects its trained
+    # slot via the fork's adapter_* wire key (v0.5.16 rename of oft_path).
+    if peft_method == "oft" and not os.environ.get("MILES_DSV4_DISABLE_OFT_REQUEST"):
+        payload["adapter_path"] = OFT_ADAPTER_NAME
+    return payload
 
 
 async def update_sample_from_response(

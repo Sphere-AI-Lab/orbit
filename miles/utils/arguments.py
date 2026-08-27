@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 _OPD_SGLANG_REWARD_FUNC_PATH = "miles.rollout.on_policy_distillation.reward_func"
 _OPD_SGLANG_REWARD_POST_PROCESS_PATH = "miles.rollout.on_policy_distillation.post_process_rewards"
+_PEFT_METHODS = {"none", "lora", "oft"}
 
 
 def resolve_rollout_function_paths(args) -> tuple[str, str]:
@@ -150,6 +151,42 @@ def reset_arg(parser, name, **kwargs):
         parser.add_argument(name, **kwargs)
 
 
+def _normalize_peft_args(args):
+    method = getattr(args, "peft_method", "none")
+    assert method in _PEFT_METHODS, "--peft-method must be one of none, lora, oft"
+
+    if method == "none":
+        return
+
+    assert args.megatron_to_hf_mode == "bridge", "PEFT requires --megatron-to-hf-mode bridge"
+    assert args.target_modules is not None, "--target-modules is required when PEFT is enabled"
+
+    adapter_path = getattr(args, "peft_adapter_path", None)
+    if method == "lora":
+        if adapter_path is not None:
+            if args.lora_adapter_path is not None and args.lora_adapter_path != adapter_path:
+                raise ValueError("--peft-adapter-path and --lora-adapter-path must match")
+            args.lora_adapter_path = adapter_path
+        assert (
+            args.lora_rank > 0 or args.lora_adapter_path is not None
+        ), "--peft-method lora requires --lora-rank > 0 or an adapter path"
+    else:
+        if adapter_path is not None:
+            if args.oft_adapter_path is not None and args.oft_adapter_path != adapter_path:
+                raise ValueError("--peft-adapter-path and --oft-adapter-path must match")
+            args.oft_adapter_path = adapter_path
+        assert (
+            args.oft_block_size > 0 or args.oft_adapter_path is not None
+        ), "--peft-method oft requires --oft-block-size > 0 or an adapter path"
+        if args.target_modules == "all-linear":
+            args.target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+        elif isinstance(args.target_modules, str):
+            args.target_modules = [name.strip() for name in args.target_modules.split(",")]
+
+    if args.adapter_double_buffer and args.peft_distributed_transport != "nccl":
+        raise ValueError("--adapter-double-buffer requires --peft-distributed-transport nccl")
+
+
 _FT_CHOICES = ["rollout", "train"]
 
 
@@ -215,6 +252,36 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                     "Whether to offload the training actor to CPU while the rollout engines generate. "
                     "Defaults to true when --colocate is set; an explicit --no-offload-train is respected."
                 ),
+            )
+            parser.add_argument(
+                "--offload-train-adapter",
+                action=argparse.BooleanOptionalAction,
+                default=None,
+                help="Also offload trainable PEFT adapter tensors while the trainer sleeps.",
+            )
+            parser.add_argument(
+                "--offload-train-grad-buffers",
+                action=argparse.BooleanOptionalAction,
+                default=None,
+                help="Offload Megatron gradient buffers while the trainer sleeps.",
+            )
+            parser.add_argument(
+                "--offload-train-optimizer",
+                action=argparse.BooleanOptionalAction,
+                default=None,
+                help="Offload Megatron optimizer state while the trainer sleeps.",
+            )
+            parser.add_argument(
+                "--offload-train-async",
+                action=argparse.BooleanOptionalAction,
+                default=None,
+                help="Prefetch PEFT train state on a dedicated CUDA stream.",
+            )
+            parser.add_argument(
+                "--offload-train-frozen-base-mode",
+                choices=["auto", "flat", "tms"],
+                default="auto",
+                help="Frozen-base PEFT offload implementation.",
             )
             parser.add_argument(
                 "--offload-rollout",
@@ -1928,6 +1995,28 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
             )
             return parser
 
+        def add_peft_arguments(parser):
+            parser.add_argument("--peft-method", choices=["none", "lora", "oft"], default="none")
+            parser.add_argument("--peft-adapter-path", type=str, default=None)
+            parser.add_argument(
+                "--peft-variant",
+                choices=["standard", "canonical", "mla", "dsv4"],
+                default="standard",
+            )
+            parser.add_argument("--adapter-double-buffer", action="store_true", default=False)
+            parser.add_argument(
+                "--peft-distributed-transport",
+                choices=["nccl", "ray"],
+                default=os.getenv("MILES_PEFT_DISTRIBUTED_TRANSPORT", "nccl"),
+            )
+            parser.add_argument("--oft-type", choices=["oft", "canonical_oft"], default="canonical_oft")
+            parser.add_argument("--oft-adapter-path", type=str, default=None)
+            parser.add_argument("--oft-block-size", type=int, default=0)
+            parser.add_argument("--oft-coft", action="store_true", default=False)
+            parser.add_argument("--oft-eps", type=float, default=1e-5)
+            parser.add_argument("--oft-block-share", action="store_true", default=False)
+            return parser
+
         def add_lora_arguments(parser):
             """Add LoRA-related arguments for Megatron backend."""
             parser.add_argument(
@@ -1979,6 +2068,12 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
                 action="store_true",
                 default=False,
                 help="Sync LoRA weights via tensor instead of file (more efficient)",
+            )
+            parser.add_argument(
+                "--lora-a-init-method",
+                choices=["xavier", "zeros", "normal"],
+                default="xavier",
+                help="Initialization method for LoRA A matrices.",
             )
             parser.add_argument(
                 "--lora-base-cpu-backup",
@@ -2889,6 +2984,7 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
         parser = add_eval_arguments(parser)
         parser = add_algo_arguments(parser)
         parser = add_on_policy_distillation_arguments(parser)
+        parser = add_peft_arguments(parser)
         parser = add_lora_arguments(parser)
         parser = add_wandb_arguments(parser)
         parser = add_mlflow_arguments(parser)
@@ -3526,6 +3622,8 @@ def miles_validate_args(args):
     if args.custom_megatron_post_save_hook_path is not None:
         assert args.save is not None, "'--save' is required when custom_megatron_post_save_hook_path is set."
 
+    _normalize_peft_args(args)
+
     # Parse LoRA target modules
     if args.lora_rank > 0:
         assert args.target_modules is not None, "'--target-modules' is required when LoRA is enabled."
@@ -3774,6 +3872,16 @@ def miles_validate_args(args):
         args.offload_train = False
     if args.offload_rollout is None:
         args.offload_rollout = False
+    for name in (
+        "offload_train_adapter",
+        "offload_train_grad_buffers",
+        "offload_train_optimizer",
+        "offload_train_async",
+    ):
+        if getattr(args, name, None) is None:
+            setattr(args, name, False)
+        if getattr(args, name) and not args.offload_train:
+            raise ValueError(f"--{name.replace('_', '-')} requires --offload-train")
 
     if args.offload_train:
         args.disable_grad_buffers_cpu_backup = True

@@ -30,7 +30,8 @@ class HfWeightIteratorDirect(HfWeightIteratorBase):
             self.args, self.model, self.model_name
         )
 
-    def get_hf_weight_chunks(self, megatron_local_weights, weight_type="base"):
+    def get_hf_weight_chunks(self, megatron_local_weights, weight_type=None):
+        weight_type = weight_type or self.peft_method
         rank = dist.get_rank()
 
         if weight_type == "lora":

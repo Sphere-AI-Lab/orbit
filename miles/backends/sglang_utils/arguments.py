@@ -162,6 +162,15 @@ def add_sglang_arguments(parser):
     )
 
     parser.add_argument(
+        "--sglang-force-native-ops",
+        action="store_true",
+        default=False,
+        help=(
+            "Miles compatibility override: force selected SGLang MultiPlatformOp "
+            "layers onto PyTorch-native forwards inside spawned rollout servers."
+        ),
+    )
+    parser.add_argument(
         "--sglang-config",
         type=str,
         default=None,
@@ -180,8 +189,34 @@ def add_sglang_arguments(parser):
     return parser
 
 
+def apply_prefill_cuda_graph_policy(args) -> None:
+    """Default ``--sglang-cuda-graph-backend-prefill`` to "disabled"; reject any
+    other backend under ``--peft-method oft``.
+
+    Prefill CUDA graphs arrived with the sglang v0.5.16 merge, defaulting to the
+    "breakable" backend. Phase-0 qualification (2026-08-21, 4xB200) showed that
+    backend is unusable for miles's engines: it refuses memory-saver mode (every
+    --colocate engine fails at startup) and its graph replay does not apply OFT
+    adapters (NaN logits at the first sample; "tc_piecewise" trips torch.compile
+    in the OFT layers). Default to the pre-merge envelope -- no prefill graphs --
+    so every arm of a systems comparison runs the same engine config; users may
+    opt back in explicitly with ``--sglang-cuda-graph-backend-prefill <backend>``.
+    """
+    backend = getattr(args, "sglang_cuda_graph_backend_prefill", None)
+    if backend is None:
+        args.sglang_cuda_graph_backend_prefill = "disabled"
+    elif backend != "disabled" and getattr(args, "peft_method", "none") == "oft":
+        raise ValueError(
+            f"--sglang-cuda-graph-backend-prefill {backend!r} is not supported with "
+            "--peft-method oft: the prefill CUDA-graph replay does not apply OFT adapters "
+            "(NaN logits). Use 'disabled' (the default)."
+        )
+
+
 def validate_args(args):
     args.sglang_tp_size = args.rollout_num_gpus_per_engine
+
+    apply_prefill_cuda_graph_policy(args)
 
     if args.true_on_policy_mode:
         args.sglang_enable_deterministic_inference = True
@@ -189,6 +224,19 @@ def validate_args(args):
     if getattr(args, "recompute_logprobs_via_prefill", False):
         args.sglang_enable_prefill_only_deterministic_inference = True
         args.sglang_enable_deterministic_inference = True
+
+    # sglang attention-CP / MoE-DP sizes: newer ServerArgs expose dp/pp/ep
+    # directly; keep the long-form aliases working for miles-ported launchers.
+    args.sglang_attn_cp_size = getattr(
+        args,
+        "sglang_attn_cp_size",
+        getattr(args, "sglang_attention_context_parallel_size", 1),
+    )
+    args.sglang_moe_dp_size = getattr(
+        args,
+        "sglang_moe_dp_size",
+        getattr(args, "sglang_moe_data_parallel_size", 1),
+    )
 
     if args.sglang_dp_size > 1:
         assert args.sglang_enable_dp_attention

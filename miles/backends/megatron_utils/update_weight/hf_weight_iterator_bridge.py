@@ -35,11 +35,18 @@ class HfWeightIteratorBridge(HfWeightIteratorBase):
                     "_miles_quantized_basenames": quantized_basenames,
                 }
 
-    def get_hf_weight_chunks(self, megatron_local_weights, weight_type: str = "base"):
+    def get_hf_weight_chunks(self, megatron_local_weights, weight_type: str | None = None):
+        weight_type = weight_type or self.peft_method
         renamed_megatron_local_weights = {strip_param_name_prefix(k): v for k, v in megatron_local_weights.items()}
         with megatron_bridge_utils.patch_megatron_model(self.model):
             if weight_type == "lora":
                 named_weights = self._bridge.export_adapter_weights(
+                    self.model,
+                    cpu=False,
+                    show_progress=False,
+                )
+            elif weight_type == "oft":
+                named_weights = self._bridge.export_oft_adapter_weights(
                     self.model,
                     cpu=False,
                     show_progress=False,

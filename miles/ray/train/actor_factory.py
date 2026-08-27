@@ -10,21 +10,8 @@ from miles.utils.environ import default_fp8_block_scaling_fp32_scales
 from miles.utils.ft_utils.heartbeat_utils import HeartbeatStatus
 
 
-def allocate_gpus_for_actor(
-    args,
-    gpus_per_cell: int,
-    pg: tuple[PlacementGroup, list[int], list[int]],
-    num_gpus_per_actor: float,
-    indep_dp_store_addr: str,
-    role: str,
-    cell_index: int,
-):
-    world_size = gpus_per_cell
-
-    # Use placement group to lock resources for models of same type
-    assert pg is not None
-    pg, reordered_bundle_indices, _reordered_gpu_ids = pg
-
+def build_train_actor_env(args) -> dict[str, str]:
+    """Env vars for spawned train actors (shared with tests)."""
     env_vars = {
         # because sglang will always set NCCL_CUMEM_ENABLE to 0
         # we need also set it to 0 to prevent nccl error.
@@ -43,8 +30,40 @@ def allocate_gpus_for_actor(
         **args.train_env_vars,
     }
 
+    # PEFT hands the GPU back to a colocated engine every rollout, and its train
+    # step frees nearly everything: a few MB of straggler blocks can pin multi-GB
+    # non-releasable split segments, and the engine's cuMemCreate then fails at
+    # resume. Expandable segments map physical pages on demand, so a live block
+    # pins pages instead of its whole segment. Full fine-tuning is left alone:
+    # its pool is tight because the grad-buffer/optimizer offloads return
+    # genuinely live state every step.
+    if getattr(args, "peft_method", "none") != "none":
+        env_vars.setdefault(
+            "PYTORCH_CUDA_ALLOC_CONF",
+            os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True"),
+        )
+
     if source_patcher_config := args.dumper_source_patcher_config_train:
         env_vars["DUMPER_SOURCE_PATCHER_CONFIG"] = source_patcher_config
+    return env_vars
+
+
+def allocate_gpus_for_actor(
+    args,
+    gpus_per_cell: int,
+    pg: tuple[PlacementGroup, list[int], list[int]],
+    num_gpus_per_actor: float,
+    indep_dp_store_addr: str,
+    role: str,
+    cell_index: int,
+):
+    world_size = gpus_per_cell
+
+    # Use placement group to lock resources for models of same type
+    assert pg is not None
+    pg, reordered_bundle_indices, _reordered_gpu_ids = pg
+
+    env_vars = build_train_actor_env(args)
 
     if args.offload_train and args.train_backend == "megatron":
         # torch_memory_saver ships one .so per GPU runtime (`..._cu12.abi3.so`,

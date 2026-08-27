@@ -41,6 +41,7 @@ from miles.utils.processing_utils import (
 from miles.utils.types import Sample
 
 from .generate_utils.generate_endpoint_utils import (
+    attach_peft_request_payload,
     compute_routing_headers,
     get_indexer_topk_from_response,
     policy_uses_routing_key,
@@ -202,8 +203,10 @@ async def generate(args: Namespace, sample: Sample, sampling_params: dict[str, A
         payload["lora_path"] = slot_lora_name(sample.adapter.slot)
         payload["rid"] = make_rid(sample.adapter.name)
         payload["extra_key"] = f"{sample.adapter.name}:v{adapter.version}"
-    elif lora_rollout_enabled(args):
+    elif lora_rollout_enabled(args) and getattr(args, "peft_method", "none") != "lora":
         payload["lora_path"] = LORA_ADAPTER_NAME
+
+    attach_peft_request_payload(args, payload)
 
     if args.use_rollout_routing_replay:
         payload["return_routed_experts"] = True

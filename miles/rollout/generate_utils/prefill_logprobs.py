@@ -16,7 +16,7 @@ def _lora_path_for_sample(args: Any, sample: Sample) -> str | None:
     """Adapter name to score under: the sample slot's __miles_slot_{N} name, the fixed single-LoRA name, or None."""
     if sample.adapter is not None:
         return slot_lora_name(sample.adapter.slot)
-    if lora_rollout_enabled(args):
+    if lora_rollout_enabled(args) and getattr(args, "peft_method", "none") != "lora":
         return LORA_ADAPTER_NAME
     return None
 
@@ -50,6 +50,13 @@ def _build_prefill_scoring_payload(
 
     if (lora_path := _lora_path_for_sample(args, sample)) is not None:
         payload["lora_path"] = lora_path
+    elif (getattr(args, "peft_method", "none") or "none") != "none":
+        # Unified PEFT: OFT selects its adapter slot; LoRA's single-active path
+        # applies index 0 without a per-request lora_path.
+        # Imported lazily so CPU-only unit tests keep importing this module.
+        from miles.rollout.generate_utils.generate_endpoint_utils import attach_peft_request_payload
+
+        attach_peft_request_payload(args, payload)
 
     if sample.multimodal_inputs and sample.multimodal_inputs.get("images"):
         image_data = sample.multimodal_inputs["images"]

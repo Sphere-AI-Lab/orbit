@@ -11,7 +11,9 @@ import torch
 import torch.distributed as dist
 
 from miles.backends.training_utils.parallel import get_parallel_state
-from miles.utils.lora import is_lora_enabled, lora_rollout_enabled  # noqa: F401  (re-exported)
+from miles.utils.lora import LORA_ADAPTER_NAME, is_lora_enabled, lora_rollout_enabled  # noqa: F401  (re-exported)
+
+from .peft_utils import PeftCheckpointPreflight
 
 logger = logging.getLogger(__name__)
 
@@ -381,7 +383,7 @@ def create_lora_instance(args: Namespace):
         dim=args.lora_rank,
         alpha=args.lora_alpha,
         dropout=args.lora_dropout,
-        lora_A_init_method=getattr(args, "lora_A_init_method", "xavier"),
+        lora_A_init_method=getattr(args, "lora_a_init_method", "xavier"),
         lora_B_init_method=getattr(args, "lora_B_init_method", "zero"),
     )
     # shared-outer grouped-expert LoRA (SGLang PR #21466); per-expert is the default
@@ -393,8 +395,8 @@ def create_lora_instance(args: Namespace):
 
     logger.info(
         f"Created {lora_cls.__name__}: rank={args.lora_rank}, alpha={args.lora_alpha}, "
-        f"dropout={args.lora_dropout}, target_modules={target_modules}, "
-        f"exclude_modules={exclude_modules}"
+        f"dropout={args.lora_dropout}, a_init={getattr(args, 'lora_a_init_method', 'xavier')}, "
+        f"target_modules={target_modules}, exclude_modules={exclude_modules}"
     )
     return lora
 
@@ -412,6 +414,7 @@ def save_lora_checkpoint(
     optimizer: Any | None = None,
     opt_param_scheduler: Any | None = None,
     iteration: int | None = None,
+    active_student_version: str | None = None,
 ) -> str:
     """Save LoRA adapter checkpoint to disk.
 
@@ -525,6 +528,9 @@ def load_lora_adapter(
     *,
     optimizer: Any | None = None,
     opt_param_scheduler: Any | None = None,
+    expected_iteration: int | None = None,
+    expected_active_student_version: str | None = None,
+    checkpoint_preflight: PeftCheckpointPreflight | None = None,
 ) -> tuple[bool, int | None]:
     """Load LoRA adapter weights from a saved checkpoint into the model.
 

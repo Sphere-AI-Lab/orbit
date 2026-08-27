@@ -89,6 +89,15 @@ def _create_placement_group(num_gpus):
     return pg, pg_reordered_bundle_indices, pg_reordered_gpu_ids
 
 
+def _actor_needs_reference_weights(args) -> bool:
+    """Whether the actor should load a separate reference checkpoint.
+
+    True only for full-FT KL runs. PEFT runs derive the reference policy by
+    disabling adapters on the actor model and never load a "ref" tag.
+    """
+    return (args.kl_coef != 0 or args.use_kl_loss) and getattr(args, "peft_method", "none") == "none"
+
+
 def _get_placement_group_layout(args) -> tuple[int, int]:
     actor_num_gpus = args.actor_num_nodes * args.actor_num_gpus_per_node
 
@@ -147,7 +156,7 @@ async def create_training_models(args, pgs, rollout_manager):
         num_gpus_per_node=args.actor_num_gpus_per_node,
         pg=pgs["actor"],
         role="actor",
-        with_ref=args.kl_coef != 0 or args.use_kl_loss,
+        with_ref=_actor_needs_reference_weights(args),
         rollout_manager=rollout_manager,
         with_opd_teacher=args.use_opd and args.opd_type == "megatron",
     )

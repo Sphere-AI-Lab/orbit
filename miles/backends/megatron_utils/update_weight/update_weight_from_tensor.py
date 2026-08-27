@@ -17,6 +17,7 @@ from miles.backends.megatron_utils.lora_utils import (
     is_lora_weight_name,
     lora_base_cpu_backup_enabled,
 )
+from miles.backends.megatron_utils.peft_utils import build_peft_sync_spec
 from miles.backends.training_utils.parallel import get_parallel_state
 from miles.utils.distributed_utils import get_gloo_group
 from miles.utils.lora import LORA_ADAPTER_NAME
@@ -24,7 +25,6 @@ from miles.utils.lora import LORA_ADAPTER_NAME
 from ..sglang import FlattenedTensorBucket, MultiprocessingSerializer
 from .common import _check_weight_sync_results, begin_weight_update, end_weight_update, weight_update_selector
 from .hf_weight_iterator_base import HfWeightIteratorBase
-
 from .update_weight_from_distributed.broadcast import (
     connect_rollout_engines_from_distributed,
     disconnect_rollout_engines_from_distributed,
@@ -74,6 +74,15 @@ def _pp_assemble_full_adapter(
     return sorted(merged.items())
 
 
+def _sync_type_label(peft_method: str) -> str:
+    """Return the human-readable label for a sync result's source."""
+    if peft_method == "lora":
+        return "LoRA"
+    if peft_method == "oft":
+        return "OFT"
+    return "Base model"
+
+
 class UpdateWeightFromTensor:
     """
     Update rollout engines from tensor dict:
@@ -102,12 +111,20 @@ class UpdateWeightFromTensor:
         self.quantization_config = quantization_config
         self.weight_version = 0
         self.is_lora = is_lora
+        # Unified PEFT identity: derive from args; legacy is_lora keeps working.
+        peft_method = getattr(args, "peft_method", "none") or "none"
+        if is_lora and peft_method == "none":
+            peft_method = "lora"
+        self.peft_method = peft_method
+        self._peft_args = args
+        if getattr(args, "peft_method", "none") != self.peft_method:
+            self._peft_args = Namespace(**vars(args), peft_method=self.peft_method)
         self._hf_weight_iterator = HfWeightIteratorBase.create(
             args=args,
             model=model,
             model_name=model_name,
             quantization_config=quantization_config,
-            is_lora=self.is_lora,
+            peft_method=self.peft_method,
         )
         if self.is_lora:
             self._lora_config = build_lora_sync_config(args)
@@ -116,6 +133,17 @@ class UpdateWeightFromTensor:
 
         self._mm_tower_cache: list[tuple[str, torch.Tensor]] | None = None
 
+        self._peft_sync_spec = build_peft_sync_spec(self._peft_args) if self.peft_method != "none" else None
+        # Transport is constructed in connect_rollout_engines after use_distribute is known.
+        self._peft_transport = None
+        self._peft_transport_mode = None
+        # Create IPC gather groups within megatron.
+        self._ipc_gather_group = None
+        self._ipc_gather_src = None
+        self._ipc_gather_layout = tuple(
+            (start_rank, self.args.rollout_num_gpus_per_engine)
+            for start_rank in range(0, dist.get_world_size(), self.args.rollout_num_gpus_per_engine)
+        )
         for start_rank in range(0, dist.get_world_size(), self.args.rollout_num_gpus_per_engine):
             end_rank = min(start_rank + self.args.rollout_num_gpus_per_engine, dist.get_world_size())
             group_ranks = list(range(start_rank, end_rank))
@@ -148,6 +176,9 @@ class UpdateWeightFromTensor:
         """
         self.rollout_engines = rollout_engines
         self._connection_stale = False
+        self._all_rollout_engines = list(rollout_engines)
+        self.rollout_engines = list(rollout_engines)
+        self.distributed_rollout_engines = []
 
         if engine_gpu_counts is None:
             engine_gpu_counts = [self.args.rollout_num_gpus_per_engine] * len(rollout_engines)
@@ -227,11 +258,43 @@ class UpdateWeightFromTensor:
             if start <= dist.get_rank() < end:
                 self._ipc_engine = engine
 
-    def pop_metrics(self) -> dict[str, float]:
-        """Return and clear ``update_weight_metrics``. Empty under colocate today; kept symmetric
-        with the distributed updaters so the actor can drain unconditionally."""
-        out = self.__dict__.pop("update_weight_metrics", {})
-        return out
+        if self._peft_sync_spec is not None and self.use_distribute and colocate_engine_nums:
+            raise RuntimeError(
+                "Hybrid colocated+distributed PEFT weight sync is not supported yet. "
+                "Use fully colocated or fully non-colocated rollout placement."
+            )
+
+        if self._peft_sync_spec is not None and self.use_distribute and not self._is_distributed_src_rank:
+            if self._peft_transport is not None:
+                self._peft_transport.disconnect()
+            self._peft_transport = None
+            self._peft_transport_mode = "nccl-non-source"
+            return
+
+        if self._peft_sync_spec is not None:
+            from miles.backends.megatron_utils.peft_transport import build_peft_transport
+
+            desired_mode = "nccl" if self.use_distribute else "ipc"
+            if self._peft_transport is None or self._peft_transport_mode != desired_mode:
+                if self._peft_transport is not None:
+                    self._peft_transport.disconnect()
+                self._peft_transport = build_peft_transport(
+                    args=self._peft_args,
+                    use_distribute=self.use_distribute,
+                    ipc_gather_group=self._ipc_gather_group,
+                    ipc_gather_src=self._ipc_gather_src,
+                )
+                self._peft_transport_mode = desired_mode
+                if dist.get_rank() == 0:
+                    logger.info(self._peft_transport.runtime_mode.log_line())
+        if self._peft_transport is not None:
+            if self.use_distribute:
+                transport_engines = self.distributed_rollout_engines
+                transport_gpu_counts = distributed_gpu_counts
+            else:
+                transport_engines = [self._ipc_engine] if self._ipc_engine is not None else []
+                transport_gpu_counts = []
+            self._peft_transport.connect(transport_engines, rollout_engine_lock, transport_gpu_counts)
 
     @torch.no_grad()
     def update_weights(self) -> None:
@@ -239,6 +302,10 @@ class UpdateWeightFromTensor:
         version++, flush caches, process buckets. Progress on rank 0.
         """
         self.weight_version += 1
+
+        if self._peft_sync_spec is not None:
+            self._update_peft_weights()
+            return
 
         rank = dist.get_rank()
 
@@ -320,6 +387,51 @@ class UpdateWeightFromTensor:
             ray.get([engine.continue_generation.remote() for engine in self.rollout_engines])
         dist.barrier(group=get_gloo_group())
 
+    def _update_peft_weights(self) -> None:
+        """Send only the active LoRA/OFT adapter through the selected PEFT transport."""
+        rank = dist.get_rank()
+        lifecycle_engines = self._all_rollout_engines or list(self.rollout_engines)
+
+        if rank == 0:
+            mode = self.args.pause_generation_mode
+            ray.get([engine.pause_generation.remote(mode=mode) for engine in lifecycle_engines])
+            ray.get([engine.flush_cache.remote() for engine in lifecycle_engines])
+        dist.barrier(group=get_gloo_group())
+
+        weight_chunks = self._hf_weight_iterator.get_hf_weight_chunks(self.weights_getter())
+        if self._peft_sync_spec.method == "lora":
+            from miles.backends.megatron_utils.peft_transport._gather import coalesce_lora_hf_weight_chunks
+
+            source_chunk_count, weight_chunks = coalesce_lora_hf_weight_chunks(weight_chunks)
+        else:
+            from miles.backends.megatron_utils.peft_transport._gather import coalesce_oft_hf_weight_chunks
+
+            source_chunk_count, weight_chunks = coalesce_oft_hf_weight_chunks(weight_chunks)
+
+        sync_chunk_count = 0
+        for hf_named_tensors in weight_chunks:
+            refs, long_lived_tensors, completed_results = self._send_adapter_params(hf_named_tensors)
+            results = completed_results if completed_results is not None else ray.get(refs)
+            _check_weight_sync_results(results, is_lora=self._peft_sync_spec.method == "lora")
+            del long_lived_tensors
+            sync_chunk_count += 1
+
+        if sync_chunk_count == 0:
+            raise RuntimeError(
+                f"{self._peft_sync_spec.method.upper()} weight sync failed: "
+                "the weight iterator produced zero chunks."
+            )
+        if source_chunk_count > 1 and sync_chunk_count != 1:
+            raise RuntimeError(
+                f"Internal {self._peft_sync_spec.method.upper()} sync error: "
+                f"coalesced adapter produced {sync_chunk_count} chunks."
+            )
+
+        dist.barrier(group=get_gloo_group())
+        if rank == 0:
+            ray.get([engine.continue_generation.remote() for engine in lifecycle_engines])
+        dist.barrier(group=get_gloo_group())
+
     def _mm_tower_named_tensors(self) -> list[tuple[str, torch.Tensor]] | None:
         """Frozen vision/audio tower tensors to append to every base sync (see
         __init__ comment). Returns None when the run has no MM towers. EVERY
@@ -363,6 +475,17 @@ class UpdateWeightFromTensor:
             else:
                 self._mm_tower_cache = []
         return self._mm_tower_cache
+
+    def _send_adapter_params(self, hf_named_tensors) -> tuple[list[ObjectRef], Any, list[Any] | None]:
+        if self.use_distribute and not self._is_distributed_src_rank:
+            return [], [], []
+        if self._peft_transport is None:
+            raise RuntimeError("_send_adapter_params called without a PEFT transport")
+        send_result = self._peft_transport.send_adapter(
+            hf_named_tensors,
+            weight_version=self.weight_version,
+        )
+        return send_result.refs, [], send_result.results
 
     def _send_base_params(self, hf_named_tensors) -> tuple[list[ObjectRef], Any]:
         refs, long_lived_tensors = _send_to_colocated_engine(

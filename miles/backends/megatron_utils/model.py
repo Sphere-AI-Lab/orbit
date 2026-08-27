@@ -42,7 +42,7 @@ from ..training_utils.data import DataIterator, get_batch
 from ..training_utils.log_utils import aggregate_forward_results, aggregate_train_losses, log_train_step
 from ..training_utils.loss import loss_function
 from ..training_utils.parallel import get_parallel_state, is_parallel_state_initialized
-from .checkpoint import load_checkpoint, save_checkpoint, save_checkpoint_with_lora
+from .checkpoint import load_checkpoint, save_checkpoint, save_checkpoint_with_lora, save_checkpoint_with_peft
 from .ci_utils import (
     check_model_hashes,
     check_peak_gpu_memory_after_load,
@@ -53,6 +53,7 @@ from .initialize import is_first_replica_megatron_main_rank
 from .lora_utils import is_lora_enabled, is_lora_model
 from .model_provider import get_model_provider_func
 from .parallel import get_packed_seq_params, verify_megatron_parallel_state
+from .peft_utils import is_peft_enabled, is_peft_model
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ def _has_loadable_ckpt(load_dir: str | None) -> bool:
 
 
 from .bridge_lora_helpers import _ensure_model_list, _setup_lora_model_via_bridge  # noqa: F401
+from .bridge_peft_helpers import _setup_peft_model_via_bridge
 
 
 def get_optimizer_param_scheduler(args: Namespace, optimizer: MegatronOptimizer) -> OptimizerParamScheduler:
@@ -143,9 +145,13 @@ def setup_model_and_optimizer(
     assert not args.moe_use_upcycling
     assert args.load is not None or args.pretrained_checkpoint is not None
 
+    # Unified LoRA/OFT uses the Bridge PEFT wrapper; legacy LoRA remains on the
+    # existing Miles path below.
+    if is_peft_enabled(args) and role == "actor" and args.megatron_to_hf_mode == "bridge":
+        model = _setup_peft_model_via_bridge(args, role=role)
     # Multi-LoRA and single-LoRA (actor, bridge) both build via the bridge helper,
     # which picks the adapter type internally.
-    if is_multi_lora_enabled(args) or (
+    elif is_multi_lora_enabled(args) or (
         is_lora_enabled(args) and role == "actor" and args.megatron_to_hf_mode == "bridge"
     ):
         model = _setup_lora_model_via_bridge(args)
@@ -909,7 +915,9 @@ def save(
     if should_disable_forward_pre_hook(args):
         disable_forward_pre_hook(model)
 
-    if is_lora_model(model):
+    if is_peft_model(model):
+        save_checkpoint_with_peft(iteration, model, optimizer, opt_param_scheduler)
+    elif is_lora_model(model):
         save_checkpoint_with_lora(iteration, model, optimizer, opt_param_scheduler)
     else:
         save_checkpoint(

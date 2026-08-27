@@ -43,7 +43,7 @@ from miles.utils.hf_config import is_complete_hf_export
 from miles.utils.http_utils import init_http_client
 from miles.utils.logging_utils import configure_logger
 from miles.utils.metric_checker import MetricChecker
-from miles.utils.misc import load_function
+from miles.utils.misc import load_function, should_run_periodic_action
 from miles.utils.timer import timer
 from miles.utils.tracking_utils.tracking import init_tracking
 
@@ -181,6 +181,18 @@ class RolloutManager:
             data_ref = object_store.get_instance().put(value=data, value_spec=ROLLOUT_DATA_VALUE_SPEC)
         else:
             data_ref = split_train_data_by_dp(self.args, data, self.train_parallel_config)
+        if self.args.rollout_global_dataset:
+            mark_rollout_complete = getattr(self.data_source, "mark_rollout_complete", None)
+            if callable(mark_rollout_complete):
+                mark_rollout_complete(
+                    rollout_id,
+                    snapshot_for_save=should_run_periodic_action(
+                        rollout_id,
+                        self.args.save_interval,
+                        self.get_num_rollout_per_epoch(),
+                        self.args.num_rollout,
+                    ),
+                )
         return dict(sample_indices=sample_indices, data_ref=data_ref)
 
     async def eval(
