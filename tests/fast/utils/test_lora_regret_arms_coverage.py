@@ -507,7 +507,7 @@ class TestOftBlockCeilingUnderRl:
 
         from tools.lora_regret.arms import OFT_MAX_BLOCK_SGLANG
 
-        expected_sha = "51845dc4acca94507ab184b007c8fcfd656b191f"
+        expected_sha = "a6fe249b3d56dde4bf275f98cc3d9f95813b0f44"
         supported = [4, 8, 16, 32, 64, 128, 256, 512, 1024]
         assert supported[0] == 4
         assert all(block & (block - 1) == 0 for block in supported)
@@ -530,7 +530,7 @@ class TestOftBlockCeilingUnderRl:
         bridge_sha = "988d642688b46ccf68796b0eb9c22aacc59593bc"
         assert sources["sglang"]["rev"] == expected_sha
         assert pins["sglang"]["tested-ref"] == expected_sha
-        assert packages["sglang"]["version"] == "0.0.0.dev15484+g51845dc4a"
+        assert packages["sglang"]["version"] == "0.0.0.dev15488+ga6fe249b3"
         assert packages["sglang"]["source"]["git"] == (
             f"{sglang_git}?subdirectory=python&rev={expected_sha}#{expected_sha}"
         )

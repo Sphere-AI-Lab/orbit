@@ -230,8 +230,8 @@ reachable:
 
 ```bash
 git ls-remote https://github.com/Sphere-AI-Lab/Megatron-Bridge.git 988d642688b46ccf68796b0eb9c22aacc59593bc
-git ls-remote https://github.com/Sphere-AI-Lab/Megatron-LM.git 00eb75b0c803b0fc8e5413d736529d9d3b82b6bd
-git ls-remote https://github.com/Sphere-AI-Lab/sglang.git 51845dc4acca94507ab184b007c8fcfd656b191f
+git ls-remote https://github.com/Sphere-AI-Lab/Megatron-LM.git 83879096b7ca4854adfa5f50993bbb728952aaaf
+git ls-remote https://github.com/Sphere-AI-Lab/sglang.git a6fe249b3d56dde4bf275f98cc3d9f95813b0f44
 ```
 
 If a command prints no commit, the release ref has not been published.

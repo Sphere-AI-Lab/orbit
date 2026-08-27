@@ -10,7 +10,7 @@ resolution-markers = [
 overrides = [
     { name = "cuda-python", specifier = "==13.2.0" },
     { name = "flashinfer-python", specifier = "==0.6.15.post1" },
-    { name = "megatron-core", git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git?rev=00eb75b0c803b0fc8e5413d736529d9d3b82b6bd" },
+    { name = "megatron-core", git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git?rev=83879096b7ca4854adfa5f50993bbb728952aaaf" },
     { name = "numpy", specifier = "==2.3.5" },
     { name = "nvidia-cublas", specifier = "==13.4.1.1" },
     { name = "nvidia-cuda-cupti", specifier = "==13.2.75" },
@@ -2240,7 +2240,7 @@ dependencies = [
 [[package]]
 name = "megatron-core"
 version = "0.18.0rc0"
-source = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git?rev=00eb75b0c803b0fc8e5413d736529d9d3b82b6bd#00eb75b0c803b0fc8e5413d736529d9d3b82b6bd" }
+source = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git?rev=83879096b7ca4854adfa5f50993bbb728952aaaf#83879096b7ca4854adfa5f50993bbb728952aaaf" }
 dependencies = [
     { name = "numpy" },
     { name = "packaging" },
@@ -3298,7 +3298,7 @@ requires-dist = [
     { name = "matplotlib", marker = "extra == 'plots'", specifier = ">=3.8" },
     { name = "mcp", extras = ["cli"], specifier = "==1.27.1" },
     { name = "megatron-bridge", git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git?rev=988d642688b46ccf68796b0eb9c22aacc59593bc" },
-    { name = "megatron-core", git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git?rev=00eb75b0c803b0fc8e5413d736529d9d3b82b6bd" },
+    { name = "megatron-core", git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git?rev=83879096b7ca4854adfa5f50993bbb728952aaaf" },
     { name = "memray" },
     { name = "ninja", marker = "extra == 'allinone'" },
     { name = "nvidia-modelopt", marker = "extra == 'allinone'", specifier = "==0.44.0" },
@@ -3316,8 +3316,8 @@ requires-dist = [
     { name = "ray", extras = ["default"], specifier = "==2.55.1" },
     { name = "ring-flash-attn" },
     { name = "scikit-build-core", marker = "extra == 'allinone'" },
-    { name = "sglang", git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=51845dc4acca94507ab184b007c8fcfd656b191f" },
-    { name = "sglang-kernel", marker = "extra == 'allinone'", git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=sgl-kernel&rev=51845dc4acca94507ab184b007c8fcfd656b191f" },
+    { name = "sglang", git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=a6fe249b3d56dde4bf275f98cc3d9f95813b0f44" },
+    { name = "sglang-kernel", marker = "extra == 'allinone'", git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=sgl-kernel&rev=a6fe249b3d56dde4bf275f98cc3d9f95813b0f44" },
     { name = "sglang-router", url = "https://github.com/zhuzilin/sgl-router/releases/download/v0.3.2-5f8d397/sglang_router-0.3.2-cp38-abi3-manylinux_2_28_x86_64.whl" },
     { name = "starlette", specifier = "==0.52.1" },
     { name = "tensorboard", specifier = "==2.20.0" },
@@ -4394,8 +4394,8 @@ wheels = [
 
 [[package]]
 name = "sglang"
-version = "0.0.0.dev15484+g51845dc4a"
-source = { git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=51845dc4acca94507ab184b007c8fcfd656b191f#51845dc4acca94507ab184b007c8fcfd656b191f" }
+version = "0.0.0.dev15488+ga6fe249b3"
+source = { git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=a6fe249b3d56dde4bf275f98cc3d9f95813b0f44#a6fe249b3d56dde4bf275f98cc3d9f95813b0f44" }
 dependencies = [
     { name = "aiohttp" },
     { name = "anthropic" },
@@ -4474,7 +4474,7 @@ dependencies = [
 [[package]]
 name = "sglang-kernel"
 version = "0.4.5"
-source = { git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=sgl-kernel&rev=51845dc4acca94507ab184b007c8fcfd656b191f#51845dc4acca94507ab184b007c8fcfd656b191f" }
+source = { git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=sgl-kernel&rev=a6fe249b3d56dde4bf275f98cc3d9f95813b0f44#a6fe249b3d56dde4bf275f98cc3d9f95813b0f44" }
 
 [[package]]
 name = "sglang-router"
