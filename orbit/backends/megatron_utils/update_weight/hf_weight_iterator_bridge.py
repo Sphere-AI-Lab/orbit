@@ -57,7 +57,12 @@ class HfWeightIteratorBridge(HfWeightIteratorBase):
                 show_progress=False,
             )
         if self.peft_method == "oft":
-            return self._bridge.export_oft_adapter_weights(
+            # Free function (megatron.bridge.orbit namespace, post-reattach),
+            # not a bridge method -- takes the bridge as an explicit first arg.
+            from megatron.bridge.orbit.conversion.oft_export import export_oft_adapter_weights
+
+            return export_oft_adapter_weights(
+                self._bridge,
                 self.model,
                 cpu=False,
                 show_progress=False,

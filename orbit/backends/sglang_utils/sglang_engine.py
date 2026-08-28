@@ -157,7 +157,6 @@ def _launch_server_with_orbit_compat(server_args: ServerArgs, force_native_ops: 
 def launch_server_process(server_args: ServerArgs, force_native_ops: bool = False) -> multiprocessing.Process:
 
     multiprocessing.set_start_method("spawn", force=True)
-    server_args.host = server_args.host.strip("[]")
     _prepare_child_native_ops_env(force_native_ops)
     p = multiprocessing.Process(target=_launch_server_with_orbit_compat, args=(server_args, force_native_ops))
     p.start()
@@ -316,6 +315,11 @@ class SGLangEngine(RayActor):
 
     def _init_normal(self, server_args_dict):
         logger.info(f"Launch HttpServerEngineAdapter at: {self.server_host}:{self.server_port}")
+        # ServerArgs is read-only after __post_init__ resolves it (v0.5.18); the
+        # bracket-stripped host must travel in as a constructor argument, not be
+        # assigned after (self.server_host above keeps the bracketed form -- it's
+        # used for URL construction elsewhere in this class).
+        server_args_dict = {**server_args_dict, "host": server_args_dict["host"].strip("[]")}
         self.process = launch_server_process(
             ServerArgs(**server_args_dict),
             force_native_ops=getattr(self.args, "sglang_force_native_ops", False),
