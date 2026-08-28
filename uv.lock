@@ -3300,7 +3300,7 @@ requires-dist = [
     { name = "ring-flash-attn" },
     { name = "scikit-build-core", marker = "extra == 'allinone'" },
     { name = "sglang", git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python&rev=0ab4a2de7e4e25042d3910396449fe94fc960423" },
-    { name = "sglang-kernel", marker = "extra == 'allinone'", url = "https://github.com/sgl-project/whl/releases/download/v0.4.6.post1/sglang_kernel-0.4.6.post1+cu130-cp310-abi3-manylinux2014_x86_64.whl" },
+    { name = "sglang-kernel", marker = "extra == 'allinone'", git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python%2Fsglang%2Fkernels%2Faot&rev=0ab4a2de7e4e25042d3910396449fe94fc960423" },
     { name = "sglang-router", url = "https://github.com/zhuzilin/sgl-router/releases/download/v0.3.2-5f8d397/sglang_router-0.3.2-cp38-abi3-manylinux_2_28_x86_64.whl" },
     { name = "starlette", specifier = "==0.52.1" },
     { name = "tensorboard", specifier = "==2.20.0" },
@@ -4471,11 +4471,8 @@ dependencies = [
 
 [[package]]
 name = "sglang-kernel"
-version = "0.4.6.post1+cu130"
-source = { url = "https://github.com/sgl-project/whl/releases/download/v0.4.6.post1/sglang_kernel-0.4.6.post1+cu130-cp310-abi3-manylinux2014_x86_64.whl" }
-wheels = [
-    { url = "https://github.com/sgl-project/whl/releases/download/v0.4.6.post1/sglang_kernel-0.4.6.post1+cu130-cp310-abi3-manylinux2014_x86_64.whl", hash = "sha256:98d06fa80123da803d4fdd1eb012bbe4398a8cc8598f7e8ba70a8bb6f3006b32" },
-]
+version = "0.4.6.post1"
+source = { git = "https://github.com/Sphere-AI-Lab/sglang.git?subdirectory=python%2Fsglang%2Fkernels%2Faot&rev=0ab4a2de7e4e25042d3910396449fe94fc960423#0ab4a2de7e4e25042d3910396449fe94fc960423" }
 
 [[package]]
 name = "sglang-router"

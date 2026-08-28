@@ -138,12 +138,13 @@ uv pip install git+https://github.com/fzyzcjy/torch_memory_saver.git@dc687690583
 
 > The kernel package was renamed when the pin moved to the v0.5.16 sglang line
 > (`sgl-kernel` 0.3.21 -> `sglang-kernel` 0.4.5), and the v0.5.18 base bump then
-> removed `sgl-kernel/` from the sglang repo entirely. The current pin needs
-> **`sglang-kernel` 0.4.6.post1**, which resolves to the upstream prebuilt cu130
-> abi3 wheel (see `sglang-kernel` in `[tool.uv.sources]`). Uninstall both names,
-> and note the prebuilt wheel below is the old 0.3.21 build — it does NOT match
-> the current pin. Install the upstream 0.4.6.post1 wheel instead, or let
-> `uv sync --extra allinone` pull it.
+> moved the kernel tree to `python/sglang/kernels/aot/` inside the sglang repo.
+> The current pin needs **`sglang-kernel` 0.4.6.post1** built from that
+> subdirectory (see `sglang-kernel` in `[tool.uv.sources]`). Do NOT use the
+> upstream prebuilt `sglang_kernel-0.4.6.post1+cu130` wheel: it targets the
+> torch 2.13 ABI and fails to import on this stack's torch 2.11. Uninstall both
+> names, and note the prebuilt wheel below is the old 0.3.21 build — it does NOT
+> match the current pin. Let `uv sync --extra allinone` build it from source.
 
 ```bash
 uv pip uninstall sglang_router sgl-kernel sglang-kernel

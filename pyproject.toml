@@ -234,9 +234,10 @@ nvidia-resiliency-ext = { git = "https://github.com/NVIDIA/nvidia-resiliency-ext
 # orbit-side follow-ups (0ab4a2de7 peft/moe gaps from real GPU RL validation,
 # 4e6fe36e3 reject mixed native LoRA and PEFT, fd5f149a1 adapter request
 # annotation cleanup, and three doc alignments). Unlike the previous move,
-# sgl-kernel is affected too: the base bump removes sgl-kernel/ from the repo
-# and requires sglang-kernel==0.4.6.post1, so the sglang-kernel source below
-# switches from the git subdirectory to the upstream prebuilt wheel.
+# sgl-kernel is affected too: the base bump moves the kernel tree from
+# sgl-kernel/ to python/sglang/kernels/aot/ (c32c4ef79) and requires
+# sglang-kernel==0.4.6.post1, so the sglang-kernel subdirectory below moves
+# with it.
 sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "0ab4a2de7e4e25042d3910396449fe94fc960423", subdirectory = "python" }
 # TransformerEngine built from source (verified end-to-end). The orbit-build-wheels
 # prebuilt is cu13/torch-2.11-correct too, but swapping it in perturbed libcudart load
@@ -247,11 +248,14 @@ sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "0ab4a2de7
 transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", rev = "71bbefbf153418f943640df0f7373625dc93fa46" }
 fast-hadamard-transform = { git = "https://github.com/Dao-AILab/fast-hadamard-transform.git", rev = "e7706faf8d1c3b9f241e36860640ad1dac644ede" }
 deep-gemm-official = { git = "https://github.com/liulixinkerry/DeepGEMM.git", rev = "18db30e9db9703b906e9ab3803fbbc1a64be1520" }
-# The v0.5.18 base removed sgl-kernel/ from the sglang repo and publishes no
-# standalone source repo, so the kernel can no longer be source-built from the
-# sglang pin. Use the upstream prebuilt cu130 abi3 wheel instead — the same
-# artifact the cu130 installer profile pins as SGLANG_KERNEL_WHEEL_URL.
-sglang-kernel = { url = "https://github.com/sgl-project/whl/releases/download/v0.4.6.post1/sglang_kernel-0.4.6.post1+cu130-cp310-abi3-manylinux2014_x86_64.whl" }
+# The v0.5.18 base moved the kernel tree from sgl-kernel/ to
+# python/sglang/kernels/aot/ (c32c4ef79), so the source subdirectory moves with
+# the pin. Do NOT swap in the upstream prebuilt cu130 wheel: sgl-project/whl's
+# sglang_kernel-0.4.6.post1+cu130 is built against the torch 2.13 ABI and fails
+# to import on this stack's torch 2.11 (undefined torch::headeronly registration
+# symbols, B200-verified 2026-08-28) — the kernel must be source-built against
+# the pinned torch.
+sglang-kernel = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "0ab4a2de7e4e25042d3910396449fe94fc960423", subdirectory = "python/sglang/kernels/aot" }
 sglang-router = { url = "https://github.com/zhuzilin/sgl-router/releases/download/v0.3.2-5f8d397/sglang_router-0.3.2-cp38-abi3-manylinux_2_28_x86_64.whl" }
 # apex orbit-build-wheels prebuilt is cu13-clean; source build needs fragile --config-settings, so use the public wheel.
 apex = { url = "https://github.com/liulixinkerry/orbit-build-wheels/releases/download/cu132-torch211-ubuntu2204/apex-0.1-cp312-cp312-linux_x86_64.whl" }

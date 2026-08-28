@@ -524,13 +524,11 @@ class TestOftBlockCeilingUnderRl:
             for requirement in packages["orbit"]["metadata"]["requires-dist"]
         }
         sglang_git = "https://github.com/Sphere-AI-Lab/sglang.git"
-        # The v0.5.18 base bump removed sgl-kernel/ from the sglang repo, so the
-        # kernel is no longer built from the sglang rev: it resolves to the
-        # upstream prebuilt cu130 abi3 wheel instead.
-        kernel_wheel = (
-            "https://github.com/sgl-project/whl/releases/download/v0.4.6.post1/"
-            "sglang_kernel-0.4.6.post1+cu130-cp310-abi3-manylinux2014_x86_64.whl"
-        )
+        # The v0.5.18 base bump moved the kernel tree to python/sglang/kernels/
+        # aot/ inside the sglang repo; it stays source-built from the same
+        # pinned rev (the upstream prebuilt cu130 wheel targets the torch 2.13
+        # ABI and cannot load on this stack's torch 2.11).
+        kernel_subdir_enc = "python%2Fsglang%2Fkernels%2Faot"
         bridge_sha = "988d642688b46ccf68796b0eb9c22aacc59593bc"
         assert sources["sglang"]["rev"] == expected_sha
         assert pins["sglang"]["tested-ref"] == expected_sha
@@ -541,9 +539,14 @@ class TestOftBlockCeilingUnderRl:
         assert orbit_requires["sglang"]["git"] == (
             f"{sglang_git}?subdirectory=python&rev={expected_sha}"
         )
-        assert sources["sglang-kernel"]["url"] == kernel_wheel
-        assert packages["sglang-kernel"]["source"]["url"] == kernel_wheel
-        assert orbit_requires["sglang-kernel"]["url"] == kernel_wheel
+        assert sources["sglang-kernel"]["rev"] == expected_sha
+        assert sources["sglang-kernel"]["subdirectory"] == "python/sglang/kernels/aot"
+        assert packages["sglang-kernel"]["source"]["git"] == (
+            f"{sglang_git}?subdirectory={kernel_subdir_enc}&rev={expected_sha}#{expected_sha}"
+        )
+        assert orbit_requires["sglang-kernel"]["git"] == (
+            f"{sglang_git}?subdirectory={kernel_subdir_enc}&rev={expected_sha}"
+        )
         assert sources["megatron-bridge"]["rev"] == bridge_sha
         assert packages["megatron-bridge"]["source"]["git"].endswith(
             f"rev={bridge_sha}#{bridge_sha}"
