@@ -507,7 +507,7 @@ class TestOftBlockCeilingUnderRl:
 
         from tools.lora_regret.arms import OFT_MAX_BLOCK_SGLANG
 
-        expected_sha = "a6fe249b3d56dde4bf275f98cc3d9f95813b0f44"
+        expected_sha = "0ab4a2de7e4e25042d3910396449fe94fc960423"
         supported = [4, 8, 16, 32, 64, 128, 256, 512, 1024]
         assert supported[0] == 4
         assert all(block & (block - 1) == 0 for block in supported)
@@ -524,29 +524,26 @@ class TestOftBlockCeilingUnderRl:
             for requirement in packages["orbit"]["metadata"]["requires-dist"]
         }
         sglang_git = "https://github.com/Sphere-AI-Lab/sglang.git"
-        # sgl-kernel no longer lags sglang: the v0.5.9 -> v0.5.16 move changes the
-        # sgl-kernel tree, so the two must be built from the same rev.
-        kernel_sha = expected_sha
+        # The v0.5.18 base bump removed sgl-kernel/ from the sglang repo, so the
+        # kernel is no longer built from the sglang rev: it resolves to the
+        # upstream prebuilt cu130 abi3 wheel instead.
+        kernel_wheel = (
+            "https://github.com/sgl-project/whl/releases/download/v0.4.6.post1/"
+            "sglang_kernel-0.4.6.post1+cu130-cp310-abi3-manylinux2014_x86_64.whl"
+        )
         bridge_sha = "988d642688b46ccf68796b0eb9c22aacc59593bc"
         assert sources["sglang"]["rev"] == expected_sha
         assert pins["sglang"]["tested-ref"] == expected_sha
-        assert packages["sglang"]["version"] == "0.0.0.dev15488+ga6fe249b3"
+        assert packages["sglang"]["version"] == "0.0.0.dev16812+g0ab4a2de7"
         assert packages["sglang"]["source"]["git"] == (
             f"{sglang_git}?subdirectory=python&rev={expected_sha}#{expected_sha}"
         )
         assert orbit_requires["sglang"]["git"] == (
             f"{sglang_git}?subdirectory=python&rev={expected_sha}"
         )
-        # The sgl-kernel/ subdirectory publishes `sglang-kernel` on the v0.5.16
-        # line (it was `sgl-kernel` on v0.5.9), so the dependency name follows the
-        # pin even though the subdirectory path does not.
-        assert sources["sglang-kernel"]["rev"] == kernel_sha
-        assert packages["sglang-kernel"]["source"]["git"] == (
-            f"{sglang_git}?subdirectory=sgl-kernel&rev={kernel_sha}#{kernel_sha}"
-        )
-        assert orbit_requires["sglang-kernel"]["git"] == (
-            f"{sglang_git}?subdirectory=sgl-kernel&rev={kernel_sha}"
-        )
+        assert sources["sglang-kernel"]["url"] == kernel_wheel
+        assert packages["sglang-kernel"]["source"]["url"] == kernel_wheel
+        assert orbit_requires["sglang-kernel"]["url"] == kernel_wheel
         assert sources["megatron-bridge"]["rev"] == bridge_sha
         assert packages["megatron-bridge"]["source"]["git"].endswith(
             f"rev={bridge_sha}#{bridge_sha}"

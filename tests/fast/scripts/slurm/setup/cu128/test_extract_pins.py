@@ -28,7 +28,7 @@ requires-python = ">=3.12,<3.13"
 dependencies = ["transformers==5.12.1"]
 
 [tool.uv.sources]
-sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "a6fe249b3d56dde4bf275f98cc3d9f95813b0f44", subdirectory = "python" }
+sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "0ab4a2de7e4e25042d3910396449fe94fc960423", subdirectory = "python" }
 megatron-core = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git", rev = "83879096b7ca4854adfa5f50993bbb728952aaaf" }
 megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "988d642688b46ccf68796b0eb9c22aacc59593bc" }
 transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", rev = "71bbefbf153418f943640df0f7373625dc93fa46" }
@@ -36,7 +36,7 @@ deep-ep = { git = "https://github.com/deepseek-ai/DeepEP.git", rev = "d4f41e4e93
 
 [tool.orbit.release.backend-pins.sglang]
 source = "https://github.com/Sphere-AI-Lab/sglang.git"
-tested-ref = "a6fe249b3d56dde4bf275f98cc3d9f95813b0f44"
+tested-ref = "0ab4a2de7e4e25042d3910396449fe94fc960423"
 
 [tool.orbit.release.backend-pins.megatron-core]
 source = "https://github.com/Sphere-AI-Lab/Megatron-LM.git"
@@ -59,7 +59,7 @@ dependencies = ["torch==2.11.0", "flashinfer-python==0.6.14"]
 
     assert pins["CUDA_PROFILE"] == "cu128"
     assert pins["TORCH_VERSION"] == "2.11.0"
-    assert pins["SGLANG_COMMIT"] == "a6fe249b3d56dde4bf275f98cc3d9f95813b0f44"
+    assert pins["SGLANG_COMMIT"] == "0ab4a2de7e4e25042d3910396449fe94fc960423"
     assert pins["MEGATRON_COMMIT"] == "83879096b7ca4854adfa5f50993bbb728952aaaf"
     assert pins["MEGATRON_BRIDGE_COMMIT"] == "988d642688b46ccf68796b0eb9c22aacc59593bc"
     assert pins["NCCL_VERSION"] == "2.30.4"

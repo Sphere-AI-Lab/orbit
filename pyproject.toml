@@ -78,8 +78,8 @@ allinone = [
     "flash-linear-attention==0.5.0",
     "fast-hadamard-transform",
     "deep-gemm-official",
-    "sglang-kernel==0.4.5",
-    # PyPI wheel, not a source build: sglang on the v0.5.16 line needs
+    "sglang-kernel==0.4.6.post1",
+    # PyPI wheel, not a source build: sglang on the v0.5.18 line needs
     # >=0.0.9.post1, and upstream's 0.0.9.post1 is exactly the release that ships
     # cu12 and cu13 .so variants in one abi3 wheel and probes torch.version.cuda
     # at runtime. Building that rev from source instead demands TMS_CUDA_MAJOR
@@ -87,7 +87,7 @@ allinone = [
     # no-build-isolation entries for this package were dropped.
     "torch-memory-saver==0.0.9.post1",
     "apex",
-    # 0.1.11, not 0.1.9: sglang on the v0.5.16 line requires ==0.1.11, and uv will
+    # 0.1.11, not 0.1.9: sglang on the v0.5.18 line requires ==0.1.11, and uv will
     # not resolve otherwise. The libcudart stub fix-up in
     # examples/load_cuda13_2_orbit_env.sh derives its path from the installed
     # package, so it does not care which of the two is present.
@@ -229,7 +229,15 @@ nvidia-resiliency-ext = { git = "https://github.com/NVIDIA/nvidia-resiliency-ext
 # max_new_tokens=0 requests, 9a6b12d5b do not rebind adapter_id in the streamed
 # loader ref scan); sgl-kernel/ is byte-identical across the move, so kernel
 # builds and prebuilt wheels are unaffected.
-sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "a6fe249b3d56dde4bf275f98cc3d9f95813b0f44", subdirectory = "python" }
+# Moved a6fe249b3 -> 0ab4a2de7 (2026-08-28): pin the orbit-main branch head
+# again. The delta is the v0.5.16 -> v0.5.18 base bump (07d5186aa) plus the
+# orbit-side follow-ups (0ab4a2de7 peft/moe gaps from real GPU RL validation,
+# 4e6fe36e3 reject mixed native LoRA and PEFT, fd5f149a1 adapter request
+# annotation cleanup, and three doc alignments). Unlike the previous move,
+# sgl-kernel is affected too: the base bump removes sgl-kernel/ from the repo
+# and requires sglang-kernel==0.4.6.post1, so the sglang-kernel source below
+# switches from the git subdirectory to the upstream prebuilt wheel.
+sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "0ab4a2de7e4e25042d3910396449fe94fc960423", subdirectory = "python" }
 # TransformerEngine built from source (verified end-to-end). The orbit-build-wheels
 # prebuilt is cu13/torch-2.11-correct too, but swapping it in perturbed libcudart load
 # order and exposed a flaky tilelang<->flashinfer find_loaded_library("libcudart")
@@ -239,7 +247,11 @@ sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "a6fe249b3
 transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", rev = "71bbefbf153418f943640df0f7373625dc93fa46" }
 fast-hadamard-transform = { git = "https://github.com/Dao-AILab/fast-hadamard-transform.git", rev = "e7706faf8d1c3b9f241e36860640ad1dac644ede" }
 deep-gemm-official = { git = "https://github.com/liulixinkerry/DeepGEMM.git", rev = "18db30e9db9703b906e9ab3803fbbc1a64be1520" }
-sglang-kernel = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "a6fe249b3d56dde4bf275f98cc3d9f95813b0f44", subdirectory = "sgl-kernel" }
+# The v0.5.18 base removed sgl-kernel/ from the sglang repo and publishes no
+# standalone source repo, so the kernel can no longer be source-built from the
+# sglang pin. Use the upstream prebuilt cu130 abi3 wheel instead — the same
+# artifact the cu130 installer profile pins as SGLANG_KERNEL_WHEEL_URL.
+sglang-kernel = { url = "https://github.com/sgl-project/whl/releases/download/v0.4.6.post1/sglang_kernel-0.4.6.post1+cu130-cp310-abi3-manylinux2014_x86_64.whl" }
 sglang-router = { url = "https://github.com/zhuzilin/sgl-router/releases/download/v0.3.2-5f8d397/sglang_router-0.3.2-cp38-abi3-manylinux_2_28_x86_64.whl" }
 # apex orbit-build-wheels prebuilt is cu13-clean; source build needs fragile --config-settings, so use the public wheel.
 apex = { url = "https://github.com/liulixinkerry/orbit-build-wheels/releases/download/cu132-torch211-ubuntu2204/apex-0.1-cp312-cp312-linux_x86_64.whl" }
@@ -265,7 +277,7 @@ tested-ref = "988d642688b46ccf68796b0eb9c22aacc59593bc"
 [tool.orbit.release.backend-pins.sglang]
 source = "https://github.com/Sphere-AI-Lab/sglang.git"
 subdirectory = "python"
-tested-ref = "a6fe249b3d56dde4bf275f98cc3d9f95813b0f44"
+tested-ref = "0ab4a2de7e4e25042d3910396449fe94fc960423"
 
 [tool.isort]
 profile = "black"  # black-compatible

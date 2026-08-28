@@ -136,12 +136,14 @@ uv pip install git+https://github.com/fzyzcjy/torch_memory_saver.git@dc687690583
 
 ### 12. SGLang router + custom kernel package
 
-> The kernel package was renamed when the pin moved to the v0.5.16 sglang line:
-> the `sgl-kernel/` subdirectory now publishes **`sglang-kernel` 0.4.5** (it was
-> `sgl-kernel` 0.3.21 on v0.5.9). Uninstall both names, and note the prebuilt
-> wheel below is the old 0.3.21 build — it does NOT match the current pin. Either
-> publish a matching `sglang_kernel-0.4.5` wheel to `$ORBIT_BUILD_WHEELS`, or drop
-> the last line and let `uv sync --extra allinone` build it from source.
+> The kernel package was renamed when the pin moved to the v0.5.16 sglang line
+> (`sgl-kernel` 0.3.21 -> `sglang-kernel` 0.4.5), and the v0.5.18 base bump then
+> removed `sgl-kernel/` from the sglang repo entirely. The current pin needs
+> **`sglang-kernel` 0.4.6.post1**, which resolves to the upstream prebuilt cu130
+> abi3 wheel (see `sglang-kernel` in `[tool.uv.sources]`). Uninstall both names,
+> and note the prebuilt wheel below is the old 0.3.21 build — it does NOT match
+> the current pin. Install the upstream 0.4.6.post1 wheel instead, or let
+> `uv sync --extra allinone` pull it.
 
 ```bash
 uv pip uninstall sglang_router sgl-kernel sglang-kernel
@@ -231,7 +233,7 @@ reachable:
 ```bash
 git ls-remote https://github.com/Sphere-AI-Lab/Megatron-Bridge.git 988d642688b46ccf68796b0eb9c22aacc59593bc
 git ls-remote https://github.com/Sphere-AI-Lab/Megatron-LM.git 83879096b7ca4854adfa5f50993bbb728952aaaf
-git ls-remote https://github.com/Sphere-AI-Lab/sglang.git a6fe249b3d56dde4bf275f98cc3d9f95813b0f44
+git ls-remote https://github.com/Sphere-AI-Lab/sglang.git 0ab4a2de7e4e25042d3910396449fe94fc960423
 ```
 
 If a command prints no commit, the release ref has not been published.
