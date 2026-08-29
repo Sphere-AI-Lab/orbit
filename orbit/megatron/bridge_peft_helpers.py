@@ -213,7 +213,7 @@ def _assert_peft_wrapped_modules(
 def _make_value_model_hook(hidden_size: int, sequence_parallel: bool):
     """Create a pre-wrap hook that replaces the output layer with a value head."""
     from megatron.core import parallel_state
-    from miles.backends.megatron_utils.model_provider import replace_output_layer_with_value_head
+    from orbit.critic.value_head import replace_output_layer_with_value_head
 
     value_config = SimpleNamespace(hidden_size=hidden_size, sequence_parallel=sequence_parallel)
 

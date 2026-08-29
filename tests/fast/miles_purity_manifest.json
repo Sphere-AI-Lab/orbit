@@ -113,12 +113,12 @@
    "sha": "afe5a727db063fd072ed2c365082904946d5c1ef3269338a030c4ea79d8192dc"
   },
   "miles/backends/megatron_utils/model.py": {
-   "delta_lines": 374,
-   "sha": "3e6478e348b0063393b6da0b929ad24e6dee3b86407868676b24152d6ab9a3c5"
+   "delta_lines": 292,
+   "sha": "e04af0c8b9b2f307f082a81990f54f109874c9370367195691678b2a418ef17f"
   },
   "miles/backends/megatron_utils/model_provider.py": {
-   "delta_lines": 53,
-   "sha": "23041ab603c884b272e2631cbed51558477f519c7e03214cf16af303a2becc06"
+   "delta_lines": 55,
+   "sha": "5e8497658154a28fa2b5716d1c0b60f11439dd21c75bb8c05bb5ff1db68a04a2"
   },
   "miles/backends/megatron_utils/parallel.py": {
    "delta_lines": 5,
@@ -181,8 +181,8 @@
    "sha": "513b78dbe68f73a2dc3f541b2cfb5f45baf1759ca513203d9250cd40dce0f8a7"
   },
   "miles/backends/training_utils/loss.py": {
-   "delta_lines": 1031,
-   "sha": "a1e19bcdddc919616f459c77be0a86fdc8489ff5a604f573ad3485e24927f10c"
+   "delta_lines": 402,
+   "sha": "8f13f9024dbc4d41af5837b75b4780f1b96c8fa809af078af3c95330dfb18c87"
   },
   "miles/ray/actor_group.py": {
    "delta_lines": 125,
@@ -337,8 +337,8 @@
    "sha": "1d8f9dd98f8138360a3ff253acea0c3759ce9c2ac72c6161bfdebeaca2d7ab12"
   },
   "miles/utils/ppo_utils.py": {
-   "delta_lines": 582,
-   "sha": "206961d794766ac300df61b1e479ecccd67c3e829cc408ca380ed1807379f321"
+   "delta_lines": 319,
+   "sha": "0feaa54beadc0d7526756ea52bc7209ab7415259282b3707b8a3eaf76baf751f"
   },
   "miles/utils/processing_utils.py": {
    "delta_lines": 10,
