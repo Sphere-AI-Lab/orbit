@@ -136,10 +136,18 @@ entangled files are pristine-plus-seams.
 1. Agree this layout + the owned list with the team (the delta report is the
    negotiation document).
 2. Hook verification pass: CPU-trace each of the 14 `--custom-*-path` hooks to
-   confirm it fires where the mapping table needs it; correct the table.
+   confirm it fires where the mapping table needs it; correct the table. **DONE
+   2026-08-29** (verdicts folded into the table above).
 3. Phase 1 (near-mechanical, bitwise-neutral): move orbit-only files that sit
    inside shared directories into the home; stamp the 57 surgical seams with
-   `# ORBIT-SEAM:` marks.
+   `# ORBIT-SEAM:` marks. **Moves DONE 2026-08-29** on branch `miles-isolation`:
+   all 83 orbit-only files moved under `orbit/peft/` (homes: transport, megatron,
+   critic, sglang, opd, rewards, rollout, true_on_policy, ultra, audit, merge,
+   utils), references rewritten 1:1, manifest steady at 107 pristine / 113
+   budgeted, fast suite failure set identical to orbit-main. Enforced from now on:
+   `home_violations()` in the purity ratchet (no orbit file outside orbit/peft/
+   unless miles-shared) and tests/fast/test_import_integrity.py (every static
+   orbit.* import must resolve). Seam stamping still pending.
 4. Phase 2: the `arguments.py` registration refactor (~2k lines back to
    pristine, the loudest signal the approach works).
 5. Phase 3: the heavy files, one at a time, hook-first per the mapping table;
