@@ -44,6 +44,7 @@ def init_wandb_primary(args):
 
     # Prepare wandb init parameters
     # add random 6 length string with characters
+    # ORBIT-SEAM: --wandb-run-name decouples run name from group
     # `--wandb-run-name` separates the run's identity from its group. Without it
     # the name IS the group, so a sweep that groups by method -- every FullFT
     # arm in one group, every LoRA arm in another -- lands N runs under one
@@ -66,6 +67,7 @@ def init_wandb_primary(args):
         "config": _compute_config_for_logging(args),
     }
 
+    # ORBIT-SEAM: --wandb-run-id resumes an existing wandb run
     wandb_run_id = getattr(args, "wandb_run_id", None)
     if wandb_run_id is not None:
         init_kwargs["id"] = wandb_run_id
@@ -174,4 +176,5 @@ def _init_wandb_common():
     wandb.define_metric("eval/step")
     wandb.define_metric("eval/*", step_metric="eval/step")
     wandb.define_metric("perf/*", step_metric="rollout/step")
+    # ORBIT-SEAM: progress/* metric family (orbit/utils/training_eta.py)
     wandb.define_metric("progress/*", step_metric="rollout/step")

@@ -30,6 +30,7 @@ class bdist_wheel(_bdist_wheel):
 
 # Setup configuration
 setup(
+    # ORBIT-SEAM: orbit packaging identity: py3.12 pin, orbit*/tools* packages (dist name comes from pyproject [project])
     author="Orbit Team",
     name="miles",
     version="0.2.1",

@@ -12,6 +12,7 @@ from .qwen3moe import convert_qwen3moe_to_hf
 
 # Follow-up unify w/ `convert_to_hf`
 def postprocess_hf_param(args, megatron_param_name, hf_param_name, param):
+    # ORBIT-SEAM: newer megatron-bridge HFWeightTuple drops the megatron name; pad-strip falls back to the HF name (upstream candidate)
     # Newer megatron-bridge no longer exposes the megatron name in its
     # HFWeightTuple; fall back to the HF name which remove_padding also
     # recognizes for embedding/output layers.
@@ -46,6 +47,7 @@ def _convert_to_hf_core(args, model_name, name, param):
         converted_named_tensors = convert_qwen3moe_to_hf(args, name, param)
     elif "qwen3next" in model_name:
         converted_named_tensors = convert_qwen3_next_to_hf(args, name, param)
+    # ORBIT-SEAM: qwen3_6 reuses the qwen3_5 converter
     elif "qwen3_5" in model_name or "qwen3_6" in model_name:
         converted_named_tensors = convert_qwen3_5_to_hf(args, name, param)
     elif "qwen2" in model_name or "qwen3" in model_name:

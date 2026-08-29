@@ -241,6 +241,7 @@ def convert_fp8(input_path, output_path, strategy, block_size=None, max_workers=
     torch.cuda.empty_cache()
 
 
+# ORBIT-SEAM: importable main(argv) so orbit pipelines and tests call in-process
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-dir", type=str, required=True, help="Path to the directory of the HF safetensors model.")

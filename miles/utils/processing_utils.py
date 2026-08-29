@@ -5,6 +5,7 @@ import os
 
 from transformers import AutoProcessor, AutoTokenizer, PreTrainedTokenizerBase, ProcessorMixin
 
+# ORBIT-SEAM: DSV4 tokenizer wrapper hook
 from orbit.utils.chat_template_utils.deepseek_v4 import maybe_wrap_deepseek_v4_tokenizer
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ def load_tokenizer(name_or_path: str, chat_template_path: str = None, **kwargs):
         with open(chat_template_path) as f:
             tokenizer.chat_template = f.read()
         logger.info("Loaded custom chat template from %s", chat_template_path)
+    # ORBIT-SEAM: wrap DSV4 tokenizers (no-op otherwise)
     return maybe_wrap_deepseek_v4_tokenizer(tokenizer, name_or_path)
 
 

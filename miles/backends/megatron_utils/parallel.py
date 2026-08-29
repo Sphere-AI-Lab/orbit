@@ -76,6 +76,7 @@ def get_packed_seq_params(batch: dict[str, torch.Tensor], args: Namespace) -> Pa
             max_seqlen_kv=batch["max_seqlen"],
             qkv_format="thd",
         )
+        # ORBIT-SEAM: DSV4 sparse-attention cu_seqlens passthrough
         if "dsv4_cu_seqlens" in batch:
             packed_seq_params.dsv4_cu_seqlens = batch["dsv4_cu_seqlens"]
         if "dsv4_valid_cu_seqlens" in batch:

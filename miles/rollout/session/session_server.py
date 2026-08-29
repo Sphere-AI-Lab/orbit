@@ -33,6 +33,7 @@ class SessionServer:
         self.client = httpx.AsyncClient(
             limits=httpx.Limits(max_connections=1024),
             timeout=httpx.Timeout(timeout),
+            # ORBIT-SEAM: keep proxy env out of the in-cluster session HTTP client
             trust_env=False,
         )
 

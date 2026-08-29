@@ -47,6 +47,7 @@ async def abort(state: GenerateState, pendings: set, rollout_id: int) -> list[li
 
 
 async def get_worker_urls(args: Namespace):
+    # ORBIT-SEAM: orbit renamed the inherited miles_router flag family (--use-orbit-router)
     if parse(sglang_router.__version__) <= parse("0.2.1") or args.use_orbit_router:
         response = await get(f"http://{args.sglang_router_ip}:{args.sglang_router_port}/list_workers")
         return response["urls"]

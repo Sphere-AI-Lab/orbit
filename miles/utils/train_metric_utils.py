@@ -16,6 +16,7 @@ def log_perf_data_raw(
     timer_instance = Timer()
     log_dict_raw = deepcopy(timer_instance.log_dict())
     timer_instance.reset()
+    # ORBIT-SEAM: flush perf scalars staged by orbit/megatron/sync_metrics.py
     # Non-time perf scalars staged by instrumentation (e.g. weight-sync payload
     # bytes from update_weight/sync_metrics.py). Snapshot-and-clear mirrors the
     # timer handling above so stale values never leak into the next flush.
@@ -26,6 +27,7 @@ def log_perf_data_raw(
         return
 
     log_dict = {f"perf/{key}_time": val for key, val in log_dict_raw.items()}
+    # ORBIT-SEAM: publish staged perf scalars
     log_dict |= {f"perf/{key}": val for key, val in scalar_dict_raw.items()}
 
     if ("perf/actor_train_time" in log_dict) and (compute_total_fwd_flops is not None):

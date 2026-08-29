@@ -8,6 +8,7 @@ def dict_add_prefix(d: dict[str, Any], prefix: str) -> dict[str, Any]:
     return {f"{prefix}{k}": v for k, v in d.items()}
 
 
+# ORBIT-SEAM: explicit k_values + scale for PEFT-Arena eval reporting
 def compute_pass_rate(
     flat_rewards: list[float],
     group_size: int,

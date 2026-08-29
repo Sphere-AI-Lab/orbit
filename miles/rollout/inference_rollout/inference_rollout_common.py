@@ -147,6 +147,7 @@ async def generate_and_rm_group(
     return group
 
 
+# ORBIT-SEAM: per-call stop/min_new_tokens overrides for per-eval-dataset sampling and OPD scoring
 def compute_sampling_params(
     args,
     *,

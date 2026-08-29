@@ -48,6 +48,7 @@ class TrainRayActor(RayActor):
         # os.environ["LOCAL_RANK"] = str(ray.get_gpu_ids()[0])
         os.environ["LOCAL_RANK"] = str(get_local_gpu_id())
 
+    # ORBIT-SEAM: OPD teacher actors reuse the trainer lifecycle (orbit/opd)
     def init(self, args, role, with_ref=False, with_opd_teacher=False):
         self.args = args
         self.role = role
@@ -125,6 +126,7 @@ class TrainRayActor(RayActor):
     def save_model(self, rollout_id, force_sync=False):
         raise NotImplementedError
 
+    # ORBIT-SEAM: optional held-out NLL API, consumed by orbit/utils/eval_nll.py
     def compute_eval_nll(self, rollout_id):
         """Forward-only held-out NLL. Returns the reduced statistics on exactly
         one rank and None on all others, so the caller can dedupe TP/PP replicas

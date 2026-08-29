@@ -52,6 +52,7 @@ class _TensorBackuperNormal(TensorBackuper):
         return self._backups[tag]
 
     @torch.no_grad()
+    # ORBIT-SEAM: roll back a half-written backup on failure so a retry cannot restore from it
     def backup(self, tag: str) -> None:
         backup_dict = self._backups[tag]
         try:

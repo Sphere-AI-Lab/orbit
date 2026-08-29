@@ -167,6 +167,7 @@ def get_current_node_ip():
 def get_free_port(start_port=10000, consecutive=1):
     # find the port where port, port + 1, port + 2, ... port + consecutive - 1 are all available
     port = start_port
+    # ORBIT-SEAM: cross-process port locking; concurrent launches on one host raced is_port_available
     while not (
         all(is_port_available(port + i) for i in range(consecutive))
         and _try_lock_port_range(port, consecutive)

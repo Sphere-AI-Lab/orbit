@@ -83,6 +83,7 @@ def _get_megatron_full_params(
     if ep_size > 1:
         handles = []
         for info, param in zip(megatron_local_param_infos, params, strict=False):
+            # ORBIT-SEAM: EP-aware param routing must ask the param, not substring-match '.experts.' (upstream candidate)
             if uses_expert_tensor_parallel_group(info.name):
                 src_rank = (
                     info.src_rank
@@ -118,6 +119,7 @@ def _get_megatron_local_param_info_buckets(args: Namespace, model: Sequence[torc
 
     for info in param_infos:
         # Expert-tensor-sharded params use expert-TP size, others use regular-TP size.
+        # ORBIT-SEAM: EP-aware TP sizing (same fix)
         if uses_expert_tensor_parallel_group(info.name):
             tp_size = mpu.get_expert_tensor_parallel_world_size()
         else:

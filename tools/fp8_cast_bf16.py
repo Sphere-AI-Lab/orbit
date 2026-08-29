@@ -107,6 +107,7 @@ def _cast(fp8_path, bf16_path):
         json.dump({"metadata": {}, "weight_map": weight_map}, f, indent=2)
 
 
+# ORBIT-SEAM: importable main(argv) so orbit pipelines and tests call in-process
 def main(argv: list[str] | None = None) -> int:
     parser = ArgumentParser()
     parser.add_argument("--input-fp8-hf-path", type=str, required=True)

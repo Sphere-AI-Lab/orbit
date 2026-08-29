@@ -41,7 +41,54 @@ def test_no_new_entanglement_with_miles_base():
 
 
 def test_no_orbit_code_outside_the_home_layer():
-    """New orbit files inside shared miles directories belong under orbit/."""
+    """New orbit files inside the vendored miles tree belong under orbit/."""
     manifest = json.loads(MANIFEST_PATH.read_text())
     violations = MILES_PURITY.home_violations(manifest)
     assert not violations, "\n  ".join(violations)
+
+
+# Seam files whose entire delta is non-functional (comment-policy rewording,
+# one-line identity docstrings, CI shard lists) — no ORBIT-SEAM mark required.
+COSMETIC_ONLY = {
+    ".github/workflows/pr-test.yml",
+    ".github/workflows/pr-test.yml.j2",
+    "examples/__init__.py",
+    "miles/backends/training_utils/ci_utils.py",
+    "miles/backends/megatron_utils/megatron_to_hf/processors/quantizer_fp8.py",
+    "miles/backends/megatron_utils/megatron_to_hf/processors/quantizer_mxfp8.py",
+    "miles/rollout/base_types.py",
+    "miles/rollout/generate_hub/__init__.py",
+    "miles/rollout/generate_hub/benchmarkers.py",
+    "miles/rollout/generate_utils/tool_call_utils.py",
+    "miles/rollout/session/linear_trajectory.py",
+    "miles/utils/env_report.py",
+    "miles/utils/eval_config.py",
+    "miles/utils/iter_utils.py",
+    "miles/utils/profile_utils.py",
+    "miles/utils/tracking_utils.py",
+    "miles_plugins/__init__.py",
+    "miles_plugins/models/glm5/glm5.py",
+    "miles_plugins/models/hf_attention.py",
+    "tests/__init__.py",
+    "tools/__init__.py",
+}
+
+
+def test_every_functional_seam_is_stamped():
+    """Small budgeted deltas are seams: each must carry an ORBIT-SEAM mark
+    naming why the miles file is modified, unless its delta is purely cosmetic
+    (allowlisted above). Keeps `git grep ORBIT-SEAM` a complete seam inventory."""
+    manifest = json.loads(MANIFEST_PATH.read_text())
+    unstamped = []
+    for path, entry in manifest["budgeted"].items():
+        if entry["delta_lines"] > 30 or path in COSMETIC_ONLY:
+            continue
+        p = REPO_ROOT / path
+        if p.suffix not in (".py", ".yml", ".yaml", ".j2", ".sh"):
+            continue
+        if "ORBIT-SEAM" not in p.read_text(errors="surrogateescape"):
+            unstamped.append(path)
+    assert not unstamped, (
+        "seam files without an ORBIT-SEAM mark (stamp the hunk or add to "
+        "COSMETIC_ONLY):\n  " + "\n  ".join(sorted(unstamped))
+    )

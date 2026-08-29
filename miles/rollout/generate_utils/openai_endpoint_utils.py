@@ -160,6 +160,7 @@ def compute_samples_from_openai_records(
     return samples
 
 
+# ORBIT-SEAM: normalized policy-version extraction for the true-on-policy contract
 def _record_policy_version(sample, meta_info: dict) -> None:
     from miles.utils.types import _extract_policy_version
 

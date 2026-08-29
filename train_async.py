@@ -3,6 +3,7 @@ import asyncio
 from miles.ray.placement_group import create_placement_groups, create_rollout_manager, create_training_models
 from miles.utils.arguments import parse_args, uses_separate_critic, validate_async_off_policy_correction
 from miles.utils.async_utils import eager_create_task
+# ORBIT-SEAM: eval-NLL entrypoint guard (see rejection note below)
 from orbit.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint
 from miles.utils.logging_utils import configure_logger
 from miles.utils.misc import should_run_periodic_action
@@ -12,6 +13,7 @@ from miles.utils.tracking_utils import init_tracking
 # The framework supports other asynchronous approaches such as fully async (which is shown in examples/full_async).
 async def train(args):
     assert not args.colocate, "Colocation is not supported for async training."
+    # ORBIT-SEAM: entrypoint guards: SFT and --eval-nll-data belong to train.py
     assert args.training_mode != "sft", "SFT mode is supported by train.py; train_async.py is RL rollout-only."
     # --eval-nll-data is on the shared parser, so this entrypoint would otherwise
     # accept it and silently emit no metric. Wiring the hook here was considered
@@ -29,6 +31,7 @@ async def train(args):
 
     # create the rollout manager, with sglang engines inside.
     # need to initialize rollout manager first to calculate num_rollout
+    # ORBIT-SEAM: async engines stay resident; documented no-op offload
     # Note: unlike train.py there is deliberately no offload/onload dance here even
     # when --offload-rollout is passed. Actor and rollout GPUs are disjoint in async
     # mode, so start_rollout_servers marks every engine group needs_offload=False and
@@ -56,6 +59,7 @@ async def train(args):
         if rollout_id + 1 < args.num_rollout:
             rollout_data_next_future = rollout_manager.generate.remote(rollout_id + 1)
 
+        # ORBIT-SEAM: one-trunk adapter critic: separate-critic dispatch
         if uses_separate_critic(args):
             critic_task = await eager_create_task(critic_model.train(rollout_id, rollout_data_curr_ref))
             if rollout_id >= args.num_critic_only_steps:
@@ -69,6 +73,7 @@ async def train(args):
                 rollout_id,
                 force_sync=rollout_id == args.num_rollout - 1,
             )
+            # ORBIT-SEAM: one-trunk adapter critic: separate-critic dispatch
             if uses_separate_critic(args):
                 await critic_model.save_model(
                     rollout_id,

@@ -15,6 +15,7 @@ try:
 except ImportError:
     pass
 
+# ORBIT-SEAM: fp32 A_log marking hook (orbit/megatron/fp32_param_utils)
 from orbit.megatron.fp32_param_utils import mark_param_dtype
 from miles.backends.training_utils.cp_utils import build_gdn_cp_context
 
@@ -72,6 +73,7 @@ class Qwen3_5GatedDeltaNet(nn.Module):
         self.dt_bias = nn.Parameter(torch.ones(self.num_v_heads))
 
         A = torch.empty(self.num_v_heads).uniform_(0, 16)
+        # ORBIT-SEAM: hold A_log in fp32 and mark it so precision wrappers preserve the dtype
         # Qwen3.5 ships A_log in fp32; Qwen3.6 reverted the HF weight to bf16.
         # We still hold it in fp32 here for engineering simplicity (no special
         # path for 3.6) — this matches the SGLang implementation, which also

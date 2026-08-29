@@ -29,6 +29,7 @@ jobs:
         with:
           python-version: '3.13'
 
+      # ORBIT-SEAM: docs deploy replaced by a public-release allow-list gate
       - name: Verify public docs allow-list
         run: |
           python - <<'PY'

@@ -12,6 +12,7 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
+# ORBIT-SEAM: sglang version compat: DumperConfig renamed across releases
 try:
     from sglang.srt.debug_utils.dumper import DumperConfig, _get_rank, dumper
 except ImportError:
@@ -143,6 +144,7 @@ def _cleanup_dump_dir(dump_dir: Path) -> None:
 
 def _get_phase_override_configs(args: Namespace, phase: DumperPhase) -> dict[str, Any]:
     raw = getattr(args, f"dumper_{phase.value}")
+    # ORBIT-SEAM: skip kv parsing when the dumper is disabled (older sglang lacks _kv_pairs_to_dict)
     # Older sglang versions (e.g. 0.5.9) do not expose
     # DumperConfig._kv_pairs_to_dict. If the dumper is disabled, we never
     # need to parse the raw kv pairs; short-circuit to avoid the missing

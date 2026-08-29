@@ -47,6 +47,7 @@ async def generate(input: GenerateFnInput) -> GenerateFnOutput:
     for _turn in range(args.generate_max_turns):
         # ----------------------- Call inference endpoint -------------------------
 
+        # ORBIT-SEAM: request rollout logprobs when the true-on-policy contract needs them
         payload, halt_status = compute_request_payload(
             args,
             sample.tokens,

@@ -22,6 +22,7 @@ def convert_qwen3moe_to_hf(args, name, param):
     if match:
         layer_idx, rest = match.groups()
 
+        # ORBIT-SEAM: export grouped-expert FC1 OFT adapters to per-expert HF oft_R (orbit OFT)
         expert_fc1_oft_pattern = r"mlp\.experts\.linear_fc1\.adapter_(gate|up)\.(\d+)\.oft_r"
         match = re.match(expert_fc1_oft_pattern, rest)
         if match:
@@ -111,6 +112,7 @@ def convert_qwen3moe_to_hf(args, name, param):
             return [(f"model.layers.{layer_idx}.mlp.down_proj.weight", param)]
         elif rest == "self_attention.linear_qkv.layer_norm_weight":
             return [(f"model.layers.{layer_idx}.input_layernorm.weight", param)]
+        # ORBIT-SEAM: map bare input_layernorm emitted by non-fused-qkv layouts
         elif rest == "input_layernorm.weight":
             return [(f"model.layers.{layer_idx}.input_layernorm.weight", param)]
         elif rest == "mlp.linear_fc1.layer_norm_weight":

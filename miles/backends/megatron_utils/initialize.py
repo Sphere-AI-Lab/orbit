@@ -53,6 +53,7 @@ def _initialize_distributed(args, get_embedding_ranks=None, get_position_embeddi
         order="tp-cp-ep-dp-pp" if not args.use_tp_pp_dp_mapping else "tp-cp-ep-pp-dp",
         get_embedding_ranks=get_embedding_ranks,
         get_position_embedding_ranks=get_position_embedding_ranks,
+        # ORBIT-SEAM: flag is named --use-gloo-process-groups in orbit's argument set
         create_gloo_process_groups=args.use_gloo_process_groups,
     )
 
@@ -68,6 +69,7 @@ def init(args):
 
     set_parallel_state(create_megatron_parallel_state())
 
+    # ORBIT-SEAM: numpy-2 guard removed; the pinned Sphere Megatron-LM is numpy-2 clean (shared cu13 env)
     # numpy 2.x is OK with this (Sphere-patched) Megatron-LM: NVIDIA/Megatron-LM#1563
     # (np.product in dist_checkpointing/validation.py) is already fixed to np.prod
     # here, and no other numpy-2.0-removed API is used. The old
@@ -101,6 +103,7 @@ def init(args):
         torch.backends.cudnn.benchmark = False
         torch.use_deterministic_algorithms(True, warn_only=False)
 
+    # ORBIT-SEAM: global batch-invariant-kernels switch (orbit determinism mode)
     # Mirror of megatron.training.initialize (orbit does not call it): the
     # TransformerConfig field alone only affects config validation; the kernel
     # overrides are installed by this global switch.

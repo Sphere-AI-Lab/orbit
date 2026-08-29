@@ -34,6 +34,7 @@ async def generate(input: GenerateFnInput) -> GenerateFnOutput:
     else:
         input_ids = prompt_ids
 
+    # ORBIT-SEAM: request rollout logprobs when the true-on-policy contract needs them
     payload, halt_status = compute_request_payload(
         args,
         input_ids=input_ids,

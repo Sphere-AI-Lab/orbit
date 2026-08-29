@@ -3,6 +3,7 @@ import torch
 from miles.backends.megatron_utils.misc_utils import strip_param_name_prefix
 
 
+# ORBIT-SEAM: accept HF param names too — newer megatron-bridge drops megatron names (upstream candidate)
 # Megatron-native names (for legacy 3-tuple code paths).
 _MEGATRON_VOCAB_LAYER_NAMES = {
     "embedding.word_embeddings.weight",
@@ -24,6 +25,7 @@ def remove_padding(name: str, param: torch.Tensor, vocab_size: int) -> torch.Ten
     HF parameter name (for the newer megatron-bridge HFWeightTuple API where
     the megatron name is no longer yielded).
     """
+    # ORBIT-SEAM: HF-name compat, see the name sets above
     stripped = strip_param_name_prefix(name)
     if stripped in _MEGATRON_VOCAB_LAYER_NAMES or stripped in _HF_VOCAB_LAYER_NAMES:
         return param[:vocab_size]

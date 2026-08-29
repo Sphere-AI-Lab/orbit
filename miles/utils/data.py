@@ -78,6 +78,7 @@ def _parse_generalized_path(s: str):
     return s, None
 
 
+# ORBIT-SEAM: text-only batches must not take the processor path (multimodal detection helpers)
 def _has_multimodal_value(value) -> bool:
     if value is None:
         return False
@@ -102,6 +103,7 @@ def filter_long_prompt(origin_samples: list[Sample], tokenizer, processor, max_l
         )
         return False
 
+    # ORBIT-SEAM: use per-sample multimodal_inputs instead of re-running process_vision_info
     has_multimodal_inputs = any(_sample_has_multimodal_inputs(sample) for sample in origin_samples)
     if processor and has_multimodal_inputs:
         filtered_samples = []

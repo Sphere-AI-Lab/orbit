@@ -6,6 +6,7 @@ import aiohttp
 from miles.utils.misc import load_function
 from miles.utils.types import Sample
 
+# ORBIT-SEAM: re-export the gemma math grader
 from .deepscaler import get_deepscaler_rule_based_reward, get_gemma_math_reward
 from .f1 import f1_score
 from .gpqa import compute_gpqa_reward
@@ -35,6 +36,7 @@ async def async_rm(args, sample: Sample, **kwargs):
     return await default_async_rm(args, sample)
 
 
+# ORBIT-SEAM: pass-through RM entry so a --custom-rm-path hijacker (OPD teacher scoring) still reaches the task reward
 async def default_async_rm(args, sample: Sample):
     """The rule-based/remote RM dispatch, bypassing any --custom-rm-path.
 

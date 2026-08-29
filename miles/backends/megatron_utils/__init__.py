@@ -40,6 +40,7 @@ except ImportError:
     pass
 
 try:
+    # ORBIT-SEAM: load orbit's megatron-bridge patches at backend import (best effort)
     import miles_plugins.megatron_bridge.patches.bridges  # noqa: F401
 except Exception as _e:  # best-effort; not every environment uses megatron.bridge
     logging.warning("orbit megatron.bridge plugins failed to load: %s", _e)

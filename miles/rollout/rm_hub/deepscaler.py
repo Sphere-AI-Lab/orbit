@@ -1,6 +1,7 @@
 from .math_utils import extract_answer, grade_answer_mathd, grade_answer_sympy
 
 
+# ORBIT-SEAM: boxed-answer grading factored out so the gemma reward reuses it
 def _grade_boxed_solution(model_solution, label):
     model_answer = extract_answer(model_solution)
     if model_answer is None:
@@ -46,6 +47,7 @@ def get_deepscaler_rule_based_reward(response, label):
     return _grade_boxed_solution(model_solution, label)
 
 
+# ORBIT-SEAM: gemma-4 <channel|> thinking-format math reward
 def get_gemma_math_reward(response, label):
     # Gemma-4 closes thinking with <channel|>; grade text after the last one.
     if "<channel|>" in response:
