@@ -32,11 +32,15 @@ _SUPPORTED_DATASETS = {"math500", "math250", "aime24", "amc23"}
 
 
 def _ensure_vendored_math_eval_on_path() -> None:
-    math_eval_dir = Path(__file__).resolve().parents[3] / "examples" / "peft_arena" / "backend" / "third_party" / "math_eval"
-    if math_eval_dir.is_dir():
-        math_eval_path = str(math_eval_dir)
-        if math_eval_path not in sys.path:
-            sys.path.insert(0, math_eval_path)
+    # Walk up from this file so the anchor survives moves within the repo
+    # (a fixed parents[N] silently broke when this module moved homes).
+    for root in Path(__file__).resolve().parents:
+        math_eval_dir = root / "examples" / "peft_arena" / "backend" / "third_party" / "math_eval"
+        if math_eval_dir.is_dir():
+            math_eval_path = str(math_eval_dir)
+            if math_eval_path not in sys.path:
+                sys.path.insert(0, math_eval_path)
+            return
 
 
 _ensure_vendored_math_eval_on_path()

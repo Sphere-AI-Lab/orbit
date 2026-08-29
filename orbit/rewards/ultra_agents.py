@@ -170,11 +170,18 @@ def grade_structured_output(response: str, schema_str: str, schema_type: str | N
 # Instruction following (open-instruct IFEvalG registry)
 # ---------------------------------------------------------------------------
 
+def _default_open_instruct_repo() -> str:
+    # Walk up from this file: open-instruct is a sibling of the repo root in
+    # the workspace (a fixed parents[N] silently broke when this module moved).
+    for root in Path(__file__).resolve().parents:
+        candidate = root / "open-instruct"
+        if candidate.is_dir():
+            return str(candidate)
+    return str(Path(__file__).resolve().parents[3] / "open-instruct")
+
+
 _OPEN_INSTRUCT_REPO = Path(
-    os.environ.get(
-        "ORBIT_OPEN_INSTRUCT_REPO",
-        str(Path(__file__).resolve().parents[4] / "open-instruct"),
-    )
+    os.environ.get("ORBIT_OPEN_INSTRUCT_REPO", _default_open_instruct_repo())
 )
 
 
