@@ -126,6 +126,22 @@ def build() -> dict:
     }
 
 
+def home_violations(manifest: dict) -> list[str]:
+    """Every file under orbit/ is either miles-shared (in the manifest) or lives in
+    the orbit/peft home layer. New orbit code inside shared miles directories is the
+    entanglement this repo spent a campaign removing; put it under orbit/peft/."""
+    known = set(manifest["pristine"]) | set(manifest["budgeted"])
+    out = []
+    for path in git("ls-files", "orbit/").splitlines():
+        if path in known or path.startswith("orbit/peft/"):
+            continue
+        out.append(
+            f"{path}: orbit-only file inside the shared miles tree; move it "
+            f"under orbit/peft/ (or regenerate the manifest if it is miles code)"
+        )
+    return out
+
+
 def check(manifest: dict) -> list[str]:
     errors = []
     for path, expect in manifest["pristine"].items():
@@ -149,6 +165,7 @@ def check(manifest: dict) -> list[str]:
                 f"tools/miles_purity.py --write and review whether the new "
                 f"delta shrinks or grows the entanglement"
             )
+    errors.extend(home_violations(manifest))
     return errors
 
 
