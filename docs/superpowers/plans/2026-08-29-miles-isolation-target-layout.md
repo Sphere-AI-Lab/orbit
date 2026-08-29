@@ -52,42 +52,79 @@ Rules:
    `pyproject.toml`, `train.py`, `examples/*/README.md`, CI config. Explicitly
    enumerated, so "owned" is never a loophole.
 
-## Hook inventory for the heavy code files
+## The existing miles hook surface — use it first
 
-The ~22 heavy code files reduce to home-layer extractions behind these
-interfaces (per-file verdicts belong in the campaign plan, not here):
+Reference: **slime-agentic** (LMIS-ORG/slime-agentic on THUDM/slime) realizes
+the end state this plan aims for — measured: 136/137 slime-layer blobs
+byte-identical to upstream, exactly **one** modified core file
+(`slime/ray/rollout.py`, +16 lines, insertions only), zero files added inside
+`slime/`, all extensions in a top-level `agentic/` home consuming slime's
+dotted-path plugin hooks. Two rules carry over: **hook-first re-expression**
+(try the existing extension surface before inventing a seam) and
+**additive-only seams** (insertions that call out, never in-place edits — they
+merge cleanly across upstream bumps).
 
-- `utils/arguments.py` (2,027) — namespaced argument registration: the home
-  layer contributes an argparse group; miles file gains one seam call.
-- `training_utils/loss.py` (1,031) + `utils/ppo_utils.py` (582) — loss/advantage
-  strategy object; adapter-critic implementation moves to `orbit/peft/critic/`.
-- `megatron_utils/actor.py` (955) — train/rollout lifecycle callbacks
-  (init, pre/post step, weight-sync points); orbit registers listeners.
-- `megatron_utils/checkpoint.py` (1,028) — pluggable adapter-state
-  save/load path beside the base checkpoint flow.
-- `update_weight/*` (738 across files) — transport already plugin-shaped;
-  finish the registry so PEFT transport is a registered backend, not a diff.
-- `sglang_utils/sglang_engine.py` (606) + `rollout/sglang_rollout.py` (449) —
-  engine wrapper subclass in `orbit/peft/sglang/`; seam = which class to build.
-- `megatron_utils/lora_utils.py` (467, mostly deletions) + `model.py` (374),
-  `ray/rollout.py` (289), `ray/actor_group.py` (125) — case-by-case; several
-  shrink to seams once the callbacks above exist.
+The decisive fact: miles at the fork base ships a *richer* version of that
+hook family than slime, and orbit retains it — 14 `--custom-*-path` dotted
+hooks: `config`, `convert-samples-to-train-data`, `eval-rollout-log-function`,
+`generate-function`, `loss-function`, `megatron-before-log-prob-hook`,
+`megatron-before-train-step-hook`, `megatron-init`, `model-provider`,
+`pg-loss-reducer-function`, `reward-post-process`, `rm`,
+`rollout-log-function`, `tis-function`. Part of the extension interface this
+plan was going to design already exists.
+
+Because these are single-slot hooks and orbit has many features wanting the
+same points, the home layer registers **one orbit dispatcher per hook** that
+fans out internally (a small piece of `orbit/peft/`, not a miles change).
+Before committing any mapping, verify each hook actually fires at the point
+orbit needs (cheap CPU trace per hook).
+
+## Hook mapping for the heavy code files
+
+Per-feature mapping — existing hook first, new seam only where the surface
+runs out:
+
+| Entangled code | Lines | Existing miles hook | Still needs |
+|:--|--:|:--|:--|
+| Verified-reward backends + router | (rm_hub + args) | `--custom-rm-path`, `--custom-reward-post-process-path` | likely nothing (slime-agentic pattern) |
+| OPD/MOPD + adapter-critic losses (`loss.py` 1,031, `ppo_utils.py` 582) | 1,613 | `--custom-loss-function-path`, `--custom-pg-loss-reducer-function-path` | teacher serving/pools stay home-layer; verify hook granularity covers advantage calc |
+| Actor lifecycle (`actor.py` 955) | 955 | `--custom-megatron-init-path`, `--custom-megatron-before-train-step-hook-path`, `--custom-megatron-before-log-prob-hook-path` | weight-sync/double-buffer points likely need 1–2 additive seams |
+| Model wrapping (`model.py` 374, `model_provider.py`) | ~450 | `--custom-model-provider-path` | verify PEFT wrap fits provider signature |
+| Rollout drivers (`sglang_rollout.py` 449) | 449 | `--custom-generate-function-path` | engine construction factory seam |
+| Arguments (`arguments.py` 2,027) | 2,027 | `--custom-config-path` (verify semantics) | else: one registration-loop seam |
+| Checkpoint adapter-state (`checkpoint.py` 1,028) | 1,028 | none | save/load delegate seam |
+| `update_weight/*` + transport | 738 | none | finish the transport registry; double-buffer slots stay home-layer |
+| Engine (`sglang_engine.py` 606) | 606 | none | subclass + factory seam in `orbit/peft/sglang/` |
+| `lora_utils.py` (467), `ray/rollout.py` (289), `ray/actor_group.py` (125) | 881 | partial | case-by-case; several shrink once the hooks above are in use |
 
 Where miles lacks the needed extension point, prefer contributing the generic
 hook upstream (as with sglang) over widening a seam.
 
 ## Migration order
 
+Isolate first, port second: refactoring on the current base gives every step a
+bitwise reference (pure code movement must reproduce today's GPU-qualified
+behavior bit-identically), and isolation collapses the port — git auto-resolves
+any file whose our-side is byte-identical to the base, so the measured 45
+both-modified conflicts against latest miles mostly evaporate once the
+entangled files are pristine-plus-seams.
+
 1. Agree this layout + the owned list with the team (the delta report is the
    negotiation document).
-2. Execute as part of the port to latest miles (`miles-graft` +
-   `git -c merge.renameLimit=20000 merge refs/miles/upstream`, 45 code
-   conflicts measured): resolve each conflict *into* the target structure.
-   Seams extracted against the frozen April base would land on moved upstream
-   code (e.g. miles restructured `ray/rollout/`).
-3. Regenerate the purity manifest against the new base; drive budgeted counts
-   down file by file; pristine set should grow monotonically.
-4. Qualify with a numerical-equivalence campaign (pattern:
+2. Hook verification pass: CPU-trace each of the 14 `--custom-*-path` hooks to
+   confirm it fires where the mapping table needs it; correct the table.
+3. Phase 1 (near-mechanical, bitwise-neutral): move orbit-only files that sit
+   inside shared directories into the home; stamp the 57 surgical seams with
+   `# ORBIT-SEAM:` marks.
+4. Phase 2: the `arguments.py` registration refactor (~2k lines back to
+   pristine, the loudest signal the approach works).
+5. Phase 3: the heavy files, one at a time, hook-first per the mapping table;
+   every extraction commit gated on the frozen-batch/e2e smoke reproducing
+   bit-identically. Regenerate the purity manifest per step; budgeted counts
+   fall monotonically.
+6. Phase 4: merge `refs/miles/upstream` (now cheap), re-anchor the few seam
+   lines upstream moved, regenerate the manifest against the new base.
+7. Qualify with a numerical-equivalence campaign (pattern:
    `docs/reports/2026-08-27-restructure-numerical-equivalence.html`) before the
    result becomes orbit-main.
 
