@@ -81,20 +81,44 @@ orbit needs (cheap CPU trace per hook).
 
 ## Hook mapping for the heavy code files
 
-Per-feature mapping — existing hook first, new seam only where the surface
-runs out:
+**Verified 2026-08-29** (CPU trace of every call site; firing points and
+signatures below are read from code, not inferred). Two additional pluggable
+entry points surfaced beyond the 14 `custom-*` hooks:
+`--rollout-function-path` / `--eval-function-path` make the *entire rollout
+procedure* pluggable (orbit already swaps them for SFT mode), and
+`--custom-agent-function-path` exists in the agentic generate hub. Proof the
+pattern works in production: OPD teacher scoring **already rides
+`--custom-rm-path`** (`default_async_rm` is deliberately exposed for
+pass-through when the reward slot is hijacked).
 
-| Entangled code | Lines | Existing miles hook | Still needs |
+Verified firing points: `custom-megatron-init(args)` fires at the end of
+Megatron init, **before any model exists** — env/patch setup only, not a wrap
+point. `custom-megatron-before-train-step(args, rollout_id, step_id, model,
+optimizer, opt_param_scheduler)` fires per train step after zero-grad.
+`custom-megatron-before-log-prob(args, model, store_prefix)` fires before
+log-prob forwards. `custom-loss-function(args, batch, logits,
+sum_of_sample_mean) -> (loss, log)` is a full per-microbatch loss replacement
+selected by `--loss-type custom_loss` — and the `loss_type` match is exactly
+where orbit's in-place additions (`value_loss`, `opd_jsd_loss`,
+`opd_topk_loss`) sit today, so they migrate behind one dispatcher.
+`custom-model-provider` *replaces* model construction per chunk (pre-DDP);
+orbit's critic value-head wrapping is currently an in-place extension of this
+very hook site and must move into the custom provider.
+`custom-config-path` is a config-file loader (opens a file, overrides args) —
+**not** usable for argument registration; the registration seam stands.
+
+| Entangled code | Lines | Verdict | Still needs |
 |:--|--:|:--|:--|
-| Verified-reward backends + router | (rm_hub + args) | `--custom-rm-path`, `--custom-reward-post-process-path` | likely nothing (slime-agentic pattern) |
-| OPD/MOPD + adapter-critic losses (`loss.py` 1,031, `ppo_utils.py` 582) | 1,613 | `--custom-loss-function-path`, `--custom-pg-loss-reducer-function-path` | teacher serving/pools stay home-layer; verify hook granularity covers advantage calc |
-| Actor lifecycle (`actor.py` 955) | 955 | `--custom-megatron-init-path`, `--custom-megatron-before-train-step-hook-path`, `--custom-megatron-before-log-prob-hook-path` | weight-sync/double-buffer points likely need 1–2 additive seams |
-| Model wrapping (`model.py` 374, `model_provider.py`) | ~450 | `--custom-model-provider-path` | verify PEFT wrap fits provider signature |
-| Rollout drivers (`sglang_rollout.py` 449) | 449 | `--custom-generate-function-path` | engine construction factory seam |
-| Arguments (`arguments.py` 2,027) | 2,027 | `--custom-config-path` (verify semantics) | else: one registration-loop seam |
-| Checkpoint adapter-state (`checkpoint.py` 1,028) | 1,028 | none | save/load delegate seam |
-| `update_weight/*` + transport | 738 | none | finish the transport registry; double-buffer slots stay home-layer |
-| Engine (`sglang_engine.py` 606) | 606 | none | subclass + factory seam in `orbit/peft/sglang/` |
+| Verified-reward backends + router | (rm_hub + args) | **OK, proven in prod** — `custom-rm-path` (async `(args, sample, **kw)`), `custom-reward-post-process-path` | nothing |
+| OPD/MOPD + adapter-critic losses (`loss.py` 1,031) | 1,031 | **OK** — `custom-loss-function-path` + home dispatcher replaces the in-match loss types | teacher serving/pools stay home-layer |
+| Advantage/return calc (`ppo_utils.py` 582) | 582 | **partial** — outside the loss hook | own extraction review; candidate: `convert-samples-to-train-data` + before-train-step |
+| Actor lifecycle (`actor.py` 955) | 955 | **partial** — before-train-step/before-log-prob verified with model+optimizer in scope; init hook is pre-model (env setup only) | weight-sync/double-buffer points need 1–2 additive seams |
+| Model wrapping (`model.py` 374, `model_provider.py`) | ~450 | **plausible** — provider replaces construction per chunk, pre-DDP (PEFT wrap timing fits); verify against the actual wrap call path | move orbit's in-place critic extension into the custom provider |
+| Rollout drivers (`sglang_rollout.py` 449, fully-async) | 449 | **OK** — `rollout-function-path` (whole procedure) + `custom-generate-function-path` (incl. per-eval-dataset override) | engine construction factory seam |
+| Arguments (`arguments.py` 2,027) | 2,027 | **hook ruled out** — `custom-config-path` is a config loader | one registration-loop seam (as planned) |
+| Checkpoint adapter-state (`checkpoint.py` 1,028) | 1,028 | no hook | save/load delegate seam |
+| `update_weight/*` + transport | 738 | no hook | finish the transport registry; double-buffer slots stay home-layer |
+| Engine (`sglang_engine.py` 606) | 606 | no hook | subclass + factory seam in `orbit/peft/sglang/` |
 | `lora_utils.py` (467), `ray/rollout.py` (289), `ray/actor_group.py` (125) | 881 | partial | case-by-case; several shrink once the hooks above are in use |
 
 Where miles lacks the needed extension point, prefer contributing the generic
