@@ -1,0 +1,1786 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit's delta over miles, and the cost of moving it to latest miles</title>
+<script type="application/json" id="report-meta">{"title": "Orbit's delta over miles, and the cost of moving it to latest miles", "kind": "investigation", "date": "2026-08-29", "tags": ["miles", "fork", "lineage", "graft", "delta", "transfer"], "subtitle": "Fork-base recovery, full modification inventory, and a measured transfer dry-run", "generated": "2026-08-29T03:09:12+02:00", "meta": {"date": "2026-08-29", "commit": "884e6d785e76", "branch": "orbit-main", "tree": "clean", "host": "i304", "python": "3.10.12", "miles_clone": "/tmp/miles-bare", "dry_run_log": "/tmp/merge_status", "fork_base": "radixark/miles ef7481ae3 (2026-04-13, \"switch model to actor\")", "miles_upstream": "dbbab156 (2026-08-27)", "graft_branch": "miles-graft (rename 18e96ad, graft 7c5f463)"}}</script>
+<style>
+/* html-reports stylesheet.
+   Modelled closely on the LMSYS blog (lmsys.org/blog) — sticky TOC rail on the
+   left, single measured column of Inter, orange links, bordered tables, quiet
+   captions. Ported from that site's own layout rules, with a dark theme and
+   print styles added.
+
+   The generator inlines this file verbatim into every page, so an edit here
+   lands on the next render. */
+
+/* Light is the default and does not follow the system — these pages are read and
+   printed like paper. Dark is opt-in via the toggle, which sets data-theme on
+   the root element and remembers the choice. */
+:root {
+  color-scheme: light;
+
+  --bg: #ffffff;
+  --ink: rgb(8, 12, 38);
+  --ink-dim: rgba(8, 12, 38, 0.62);
+  --ink-lighter: rgb(100, 104, 122);
+  --border: rgba(8, 12, 38, 0.11);
+  --accent: #ea6a10;
+  --rule-top: rgba(220, 140, 130, 0.4);  /* the hairline across the page top */
+  --wash: rgba(32, 38, 71, 0.04);   /* code blocks, table headers */
+  --wash-strong: rgba(32, 38, 71, 0.06); /* inline code */
+  --wash-hover: rgba(32, 38, 71, 0.02);
+  --shadow: 0 4px 24px rgba(32, 38, 71, 0.1);
+  --ok: #1a7f4b;
+  --warn: #9a6400;
+  --bad: #b02a2a;
+
+  --font-body: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --font-math: "STIX Two Math", "Latin Modern Math", "Cambria Math",
+    "TeX Gyre Termes Math", serif;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0f1216;
+  --ink: rgb(228, 231, 238);
+  --ink-dim: rgba(228, 231, 238, 0.66);
+  --ink-lighter: rgb(150, 156, 170);
+  --border: rgba(228, 231, 238, 0.14);
+  --accent: #f5893c;
+  --rule-top: rgba(220, 140, 130, 0.25);
+  --wash: rgba(228, 231, 238, 0.05);
+  --wash-strong: rgba(228, 231, 238, 0.08);
+  --wash-hover: rgba(228, 231, 238, 0.03);
+  --shadow: none;
+  --ok: #5cbd87;
+  --warn: #d3a34a;
+  --bad: #e07a7a;
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  border-top: 3px solid var(--rule-top);
+}
+
+/* ---------- layout ---------- */
+
+.page { max-width: 1280px; margin: 0 auto; padding: 72px 48px 96px; }
+.doc-layout { display: flex; gap: 0; align-items: flex-start; }
+.doc-layout > main { flex: 1 1; min-width: 0; padding-left: 56px; }
+
+/* ---------- table of contents rail ---------- */
+
+.toc {
+  width: 240px; flex-shrink: 0;
+  position: sticky; top: 32px; align-self: flex-start;
+  border-right: 1px solid var(--border);
+  padding-right: 28px; padding-top: 2px;
+}
+.toc > summary {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--ink-dim);
+  margin-bottom: 14px; cursor: pointer; list-style: none;
+}
+.toc > summary::-webkit-details-marker { display: none; }
+.toc ol { list-style: none; margin: 0; padding: 0; }
+.toc li { margin-bottom: 2px; }
+.toc .lvl-3 { padding-left: 12px; }
+.toc a {
+  font-size: 14px; color: var(--ink-dim); text-decoration: none;
+  line-height: 1.625; display: block; padding: 5px 0;
+  transition: color 0.15s; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.toc a:hover { color: var(--ink); }
+
+/* ---------- document header ---------- */
+
+.doc-kind {
+  display: inline-block; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--accent); margin-bottom: 10px;
+}
+.doc-title {
+  font-size: clamp(30px, 5vw, 36px); font-weight: 700;
+  letter-spacing: -0.025em; line-height: 1.25;
+  margin: 0 0 8px; color: var(--ink);
+}
+.doc-subtitle { font-size: 17px; color: var(--ink-dim); margin: 0 0 16px; line-height: 1.5; }
+.doc-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.doc-tags span { font-size: 12px; color: var(--ink-lighter); }
+.doc-tags span::before { content: "#"; opacity: 0.5; }
+
+.meta {
+  display: flex; flex-wrap: wrap; gap: 6px 24px;
+  font-size: 13px; color: var(--ink-lighter);
+  margin: 0 0 28px; padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.meta div { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.meta dt { margin: 0; opacity: 0.75; }
+.meta dd { margin: 0; font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+.meta dd.flag-dirty { color: var(--warn); font-weight: 600; }
+.meta dd.flag-clean { color: var(--ok); }
+
+/* ---------- prose ---------- */
+
+main { font-size: 16px; font-weight: 400; line-height: 1.625; overflow-wrap: break-word; }
+main > :first-child { margin-top: 0; }
+
+main p { margin: 0 0 1.4em; }
+main a { color: var(--accent); text-decoration: none; }
+main a:hover { text-decoration: underline; text-underline-offset: 2px; }
+main strong { font-weight: 600; color: var(--ink); }
+
+h2, h3, h4, h5, h6 { font-weight: 700; line-height: 1.25; color: var(--ink); scroll-margin-top: 24px; }
+h2 { font-size: 1.5rem; letter-spacing: -0.015em; margin: 2.25em 0 0.65em; }
+h3 { font-size: 1.15rem; margin: 2em 0 0.5em; }
+h4 { font-size: 1rem; margin: 1.5em 0 0.4em; color: var(--ink-lighter); }
+
+.anchor { opacity: 0; text-decoration: none; color: var(--ink-lighter); margin-left: 0.4rem; font-weight: 400; }
+h2:hover .anchor, h3:hover .anchor, h4:hover .anchor { opacity: 1; }
+
+main ul { list-style: disc; margin: 0 0 1.4em 1.5em; padding: 0; }
+main ol { list-style: decimal; margin: 0 0 1.4em 1.5em; padding: 0; }
+main li { margin-bottom: 0.4em; line-height: 1.625; }
+main li > p { margin-bottom: 0.25em; }
+main li > ul, main li > ol { margin-bottom: 0.4em; margin-top: 0.4em; }
+li.task { list-style: none; margin-left: -1.2em; }
+li.task input { margin-right: 0.5em; }
+
+blockquote {
+  border-left: 3px solid var(--border);
+  padding: 0.25em 0 0.25em 1.25em;
+  margin: 1.75em 0; color: var(--ink-lighter); font-style: italic;
+}
+
+hr { border: none; border-top: 1px solid var(--border); margin: 3em 0; }
+
+/* ---------- code ---------- */
+
+code {
+  font-family: var(--font-mono); font-size: 0.85em;
+  background: var(--wash-strong); color: var(--ink);
+  padding: 2px 6px; border-radius: 4px;
+}
+.codeblock {
+  background: var(--wash); border: 1px solid var(--border);
+  border-radius: 8px; margin: 1.75em 0; overflow: hidden;
+}
+.codeblock .lang {
+  font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--ink-lighter);
+  padding: 8px 1.25em; border-bottom: 1px solid var(--border);
+}
+.codeblock pre { margin: 0; padding: 1.1em 1.25em; overflow-x: auto; }
+.codeblock pre code {
+  background: none; padding: 0; font-size: 0.875rem; line-height: 1.7; color: var(--ink);
+}
+
+/* ---------- tables ---------- */
+
+.table-wrap { overflow-x: auto; margin: 1.75em 0; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9em; font-variant-numeric: tabular-nums; }
+th, td { border: 1px solid var(--border); padding: 0.6em 1em; text-align: left; word-wrap: break-word; }
+th { background: var(--wash); font-weight: 500; font-size: 0.875em; letter-spacing: 0.01em; white-space: nowrap; }
+tr:hover td { background: var(--wash-hover); }
+td.num, th.num { text-align: right; }
+td.center, th.center { text-align: center; }
+
+/* ---------- figures ---------- */
+
+main img {
+  max-width: 100%; height: auto; display: block;
+  border-radius: 8px; margin: 3em auto 1em; box-shadow: var(--shadow);
+}
+figure { margin: 0; }
+figure img { margin-bottom: 0.75em; }
+figcaption {
+  display: block; text-align: center; font-size: 13px;
+  color: var(--ink-lighter); line-height: 1.625; margin: 0.75em 0 1.5em;
+}
+
+/* ---------- math ---------- */
+
+math { font-family: var(--font-math); font-size: 1.05em; }
+math[display="block"] { font-size: 1.15em; margin: 0; }
+
+/* MathML Core ignores columnspacing/rowspacing, so aligned environments get
+   their spacing here: no horizontal padding, since the relation operator's own
+   lspace already separates the columns. */
+mtable.align > mtr > mtd { padding-left: 0; padding-right: 0; }
+mtable.align > mtr { line-height: 2.2; }
+
+.math-block {
+  margin: 1.75em 0; overflow-x: auto; overflow-y: hidden;
+  text-align: center; padding: 0.25em 0;
+}
+
+/* shown when an expression could not be compiled; the source is legible at least */
+.math-fallback {
+  font-family: var(--font-mono); font-size: 0.85em;
+  background: var(--wash-strong); border: 1px dashed var(--border);
+  padding: 2px 6px; border-radius: 4px;
+}
+.math-block.unparsed { text-align: left; }
+
+/* ---------- details ---------- */
+
+/* scoped to main so the TOC, which is also a <details>, keeps its bare rail */
+main details { margin: 1.75em 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+main details > summary {
+  cursor: pointer; font-weight: 500; padding: 14px 20px;
+  background: var(--wash-hover); border-bottom: 1px solid transparent;
+}
+main details[open] > summary { border-bottom: 1px solid var(--border); margin-bottom: 1em; }
+main details > :not(summary) { padding-left: 20px; padding-right: 20px; }
+main details .codeblock { margin-left: 0; margin-right: 0; }
+
+/* ---------- callouts ---------- */
+
+.callout {
+  border-left: 3px solid var(--accent); background: var(--wash);
+  padding: 0.9em 1.25em; border-radius: 0 8px 8px 0; margin: 1.75em 0;
+}
+.callout.warn { border-left-color: var(--warn); }
+.callout.bad { border-left-color: var(--bad); }
+.callout > :last-child { margin-bottom: 0; }
+
+/* ---------- index page ---------- */
+
+.index-empty { color: var(--ink-lighter); font-style: italic; }
+td.t-title a { font-weight: 500; }
+td.t-date, td.t-commit { font-family: var(--font-mono); font-size: 12px; color: var(--ink-lighter); white-space: nowrap; }
+td.t-kind { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); white-space: nowrap; }
+
+/* ---------- theme toggle ---------- */
+
+.theme-toggle {
+  position: fixed; top: 16px; right: 16px; z-index: 10;
+  font: inherit; font-size: 12px; color: var(--ink-lighter);
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; padding: 5px 10px; cursor: pointer;
+}
+.theme-toggle:hover { color: var(--ink); }
+
+/* ---------- footer ---------- */
+
+.doc-footer {
+  margin-top: 4em; padding-top: 20px; border-top: 1px solid var(--border);
+  color: var(--ink-lighter); font-size: 13px;
+}
+
+/* ---------- narrow screens: TOC collapses above the content ---------- */
+
+@media (max-width: 900px) {
+  .page { padding: 56px 16px 60px; overflow: hidden; }
+  .doc-layout { flex-direction: column; align-items: stretch; }
+  .doc-layout > main { padding-left: 0; min-width: 0; font-size: 15px; }
+  .toc {
+    position: static; width: auto; border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding-right: 0; padding-bottom: 12px; margin-bottom: 28px;
+  }
+  .toc > summary { margin-bottom: 8px; }
+  main img { margin: 1.5em auto; box-shadow: none; }
+  .codeblock pre { font-size: 13px; }
+}
+
+/* ---------- print ---------- */
+
+@media print {
+  :root { --bg: #fff; --ink: #000; --ink-dim: #333; --ink-lighter: #444; --shadow: none; }
+  body { border-top: none; }
+  .toc, .theme-toggle, .anchor { display: none; }
+  .page { padding: 0; max-width: none; }
+  .doc-layout > main { padding-left: 0; }
+  .codeblock, table, figure, details, .math-block { break-inside: avoid; }
+  a { color: inherit; }
+}
+
+</style>
+</head>
+<body>
+<button class="theme-toggle" type="button">theme</button>
+<div class="page">
+<div class="doc-layout">
+<details class="toc" open><summary>Contents</summary><ol><li class="lvl-2"><a href="#fork-base-miles-ef7481ae3-2026-04-13">Fork base: miles ef7481ae3 (2026-04-13)</a></li><li class="lvl-2"><a href="#the-delta-in-three-layers">The delta, in three layers</a></li><li class="lvl-3"><a href="#layer-1-orbit-only-files-ports-as-is">Layer 1 — orbit-only files (ports as-is)</a></li><li class="lvl-3"><a href="#layer-2-modified-miles-files-the-entangled-layer">Layer 2 — modified miles files (the entangled layer)</a></li><li class="lvl-3"><a href="#layer-3-dropped-miles-files">Layer 3 — dropped miles files</a></li><li class="lvl-2"><a href="#transfer-dry-run-orbits-layer-onto-miles2026-08-27">Transfer dry-run: orbit's layer onto miles@2026-08-27</a></li><li class="lvl-2"><a href="#recommendation">Recommendation</a></li></ol></details>
+<main>
+<header class="doc-header">
+<div class="doc-kind">investigation</div><h1 class="doc-title">Orbit's delta over miles, and the cost of moving it to latest miles</h1>
+<p class="doc-subtitle">Fork-base recovery, full modification inventory, and a measured transfer dry-run</p><div class="doc-tags"><span>miles</span><span>fork</span><span>lineage</span><span>graft</span><span>delta</span><span>transfer</span></div>
+<dl class="meta"><div><dt>date</dt><dd>2026-08-29</dd></div><div><dt>commit</dt><dd>884e6d785e76</dd></div><div><dt>branch</dt><dd>orbit-main</dd></div><div><dt>tree</dt><dd class="flag-clean">clean</dd></div><div><dt>host</dt><dd>i304</dd></div><div><dt>python</dt><dd>3.10.12</dd></div><div><dt>miles_clone</dt><dd>/tmp/miles-bare</dd></div><div><dt>dry_run_log</dt><dd>/tmp/merge_status</dd></div><div><dt>fork_base</dt><dd>radixark/miles ef7481ae3 (2026-04-13, "switch model to actor")</dd></div><div><dt>miles_upstream</dt><dd>dbbab156 (2026-08-27)</dd></div><div><dt>graft_branch</dt><dd>miles-graft (rename 18e96ad, graft 7c5f463)</dd></div></dl>
+</header>
+<p>Orbit's public history is squashed (root <code>dd94c38</code>, 2026-05-28), so what we inherited from
+miles and what we built was not recoverable from git alone. This record answers three
+questions: <strong>where orbit forked from miles</strong>, <strong>exactly what orbit adds or changes</strong>, and
+<strong>what it would cost to move that layer onto the latest miles</strong>.</p>
+<h2 id="fork-base-miles-ef7481ae3-2026-04-13">Fork base: miles <code>ef7481ae3</code> (2026-04-13)<a class="anchor" href="#fork-base-miles-ef7481ae3-2026-04-13" aria-hidden="true">#</a></h2>
+<p>Blob-SHA matching of orbit's root tree against all 1,761 first-parent miles commits peaks at
+112/418 shared blobs on a plateau whose edges are pinned by content evidence: orbit contains
+the post-image of every code commit up to and including <code>ef7481ae3</code> (exact blob match at
+<code>ef228e648</code>; orbit's <code>actor.py</code> carries <code>ef7481ae3</code>'s own hunk) and the pre-image of the next
+commit <code>85fe6519a</code>. Package rename at fork: <code>miles/</code> -> <code>orbit/</code>, <code>miles_plugins/</code> ->
+<code>orbit_plugins/</code>.</p>
+<p>Branch <strong><code>miles-graft</code></strong> rebuilds ancestry non-destructively: miles history (<code>refs/miles/base</code>)
+-> rename commit <code>18e96ad</code> (shared subtrees) -> graft commit <code>7c5f463</code> (release tree) -> all
+orbit commits reparented byte-identically. <code>git merge-base</code>, <code>blame</code>, <code>log --follow</code>, and
+merges now work across the fork boundary. <code>orbit-main</code> itself is untouched.</p>
+<div class="callout">
+<p>The full delta is one native command: <code>git diff 18e96ad orbit-main</code> —
+rename-free, since <code>18e96ad</code> is the miles base already renamed into orbit's
+namespaces.</p>
+</div>
+<h2 id="the-delta-in-three-layers">The delta, in three layers<a class="anchor" href="#the-delta-in-three-layers" aria-hidden="true">#</a></h2>
+<p>Against the fork base, <code>orbit-main</code> is: <strong>789 added files</strong> (the additive layer), <strong>133 modified files, 14,912 changed lines</strong> (the entangled layer), <strong>406 dropped files</strong>, and 87 files still byte-identical.</p>
+<div class="table-wrap"><table><thead><tr><th>Layer</th><th>Size</th><th>How it transfers to a new miles</th></tr></thead><tbody><tr><td>Orbit-only files</td><td>789 files</td><td>Copies as-is — no miles counterpart exists</td></tr><tr><td>Modified miles files</td><td>133 files, ~14.9k lines</td><td>Merge work, re-done per miles version</td></tr><tr><td>Dropped miles files</td><td>406 files</td><td>Keep-or-drop decision list (tests, docker, old launchers)</td></tr></tbody></table></div>
+<h3 id="layer-1-orbit-only-files-ports-as-is">Layer 1 — orbit-only files (ports as-is)<a class="anchor" href="#layer-1-orbit-only-files-ports-as-is" aria-hidden="true">#</a></h3>
+<p>The adapter-first identity lives here: <code>peft_transport/</code> (NCCL/IPC adapter weight sync), OFT support, the FP8/INT4/NVFP4 conversion + parity-checking stack, <code>model_args</code> catalog, PEFT-Arena, and the high/low-precision example suites.</p>
+<details>
+<summary>All 789 orbit-only files, grouped by subsystem</summary>
+<p><strong>(root)</strong> (5)</p>
+<div class="codeblock"><pre><code>CUDA-13-install.md
+INSTALL.md
+SETUP.md
+env.sh
+uv.lock</code></pre></div>
+<p><strong>assets/.gitkeep</strong> (1)</p>
+<div class="codeblock"><pre><code>assets/.gitkeep</code></pre></div>
+<p><strong>assets/license-138438922-4722503.pdf</strong> (1)</p>
+<div class="codeblock"><pre><code>assets/license-138438922-4722503.pdf</code></pre></div>
+<p><strong>assets/orbit-logo.png</strong> (1)</p>
+<div class="codeblock"><pre><code>assets/orbit-logo.png</code></pre></div>
+<p><strong>assets/orbit_logo.png</strong> (1)</p>
+<div class="codeblock"><pre><code>assets/orbit_logo.png</code></pre></div>
+<p><strong>assets/orbital.png</strong> (1)</p>
+<div class="codeblock"><pre><code>assets/orbital.png</code></pre></div>
+<p><strong>assets/orbital.svg</strong> (1)</p>
+<div class="codeblock"><pre><code>assets/orbital.svg</code></pre></div>
+<p><strong>docs/assets</strong> (10)</p>
+<div class="codeblock"><pre><code>docs/assets/kimi-memory.png
+docs/assets/kimi-rl-curves.png
+docs/assets/memory-scaling-lines.png
+docs/assets/memory-scaling.png
+docs/assets/orbit-logo.png
+docs/assets/peftarena-results.png
+docs/assets/qwen3-loravsoft.png
+docs/assets/v4flash-memory.png
+docs/assets/v4flash-rl-curves.png
+docs/assets/v4pro-validation.png</code></pre></div>
+<p><strong>docs/css</strong> (6)</p>
+<div class="codeblock"><pre><code>docs/css/blog-post.css
+docs/css/common.css
+docs/css/fonts.css
+docs/css/syntax.css
+docs/css/typography.css
+docs/css/ui.css</code></pre></div>
+<p><strong>docs/index.html</strong> (1)</p>
+<div class="codeblock"><pre><code>docs/index.html</code></pre></div>
+<p><strong>docs/orbit-adapter-async-db.html</strong> (1)</p>
+<div class="codeblock"><pre><code>docs/orbit-adapter-async-db.html</code></pre></div>
+<p><strong>docs/orbit_icon.png</strong> (1)</p>
+<div class="codeblock"><pre><code>docs/orbit_icon.png</code></pre></div>
+<p><strong>docs/plans</strong> (2)</p>
+<div class="codeblock"><pre><code>docs/plans/2026-08-06-ppo-critic-comparison-design.md
+docs/plans/2026-08-17-adapter-first-experiments-design.md</code></pre></div>
+<p><strong>docs/reports</strong> (15)</p>
+<div class="codeblock"><pre><code>docs/reports/2026-08-10-e4-gsm8k-math-panel.html
+docs/reports/2026-08-10-ppo-critic-comparison.html
+docs/reports/2026-08-19-merged-stack-numerical-equivalence.html
+docs/reports/2026-08-27-restructure-numerical-equivalence.html
+docs/reports/_src/2026-08-10-e4-gsm8k-math-panel.md
+docs/reports/_src/2026-08-10-ppo-critic-comparison.md
+docs/reports/_src/2026-08-19-merged-stack-numerical-equivalence.md
+docs/reports/_src/2026-08-21-phase0-qualification.md
+docs/reports/_src/2026-08-27-restructure-numerical-equivalence.md
+docs/reports/_src/figs/fig1_panels.png
+docs/reports/_src/figs/fig2_matrix.png
+docs/reports/_src/figs/fig3_lr.png
+docs/reports/_src/figs/fig4_systems.png
+docs/reports/_src/figs/fig5_followups.png
+docs/reports/index.html</code></pre></div>
+<p><strong>docs/superpowers</strong> (3)</p>
+<div class="codeblock"><pre><code>docs/superpowers/plans/2026-08-19-adapter-first-phase0-phase1.md
+docs/superpowers/plans/2026-08-19-orbit-cu128-install-pipeline.md
+docs/superpowers/specs/2026-08-19-orbit-cu128-install-pipeline-design.md</code></pre></div>
+<p><strong>examples/adapter_first</strong> (9)</p>
+<div class="codeblock"><pre><code>examples/adapter_first/README.md
+examples/adapter_first/env.sh
+examples/adapter_first/phase0-opd-smokes.sh
+examples/adapter_first/phase0-q25-lora-async.sh
+examples/adapter_first/phase0-q25-oft-arms.sh
+examples/adapter_first/phase1-q25-3b-oft-arms.sh
+examples/adapter_first/phase1-q25-3b-opd-cost-suite.sh
+examples/adapter_first/phase1-q3-30b-arms.sh
+examples/adapter_first/phase1-q3-4b-arms.sh</code></pre></div>
+<p><strong>examples/blend_router</strong> (1)</p>
+<div class="codeblock"><pre><code>examples/blend_router/run-qwen2_5-0_5b-router-smoke.sh</code></pre></div>
+<p><strong>examples/genrm</strong> (1)</p>
+<div class="codeblock"><pre><code>examples/genrm/run-qwen2_5-0_5b-genrm-smoke.sh</code></pre></div>
+<p><strong>examples/high_precision</strong> (49)</p>
+<div class="codeblock"><pre><code>examples/high_precision/README.md
+examples/high_precision/ppo_critic_compare_common.sh
+examples/high_precision/run-llama3_1-8b-bf16-rl-math-gsm8k.sh
+examples/high_precision/run-qwen2_5-0_5b-bf16-math-fullft-async.sh
+examples/high_precision/run-qwen2_5-0_5b-bf16-math-lora-ppo-adapter-critic-smoke.sh
+examples/high_precision/run-qwen2_5-0_5b-bf16-math-lora.sh
+examples/high_precision/run-qwen2_5-0_5b-bf16-math-oft-ppo-adapter-critic.sh
+examples/high_precision/run-qwen2_5-0_5b-bf16-math-oft-ppo.sh
+examples/high_precision/run-qwen2_5-0_5b-bf16-math-oft.sh
+examples/high_precision/run-qwen2_5-0_5b-fullft-head-critic-smoke.sh
+examples/high_precision/run-qwen2_5-3b-bf16-math-fullft-async.sh
+examples/high_precision/run-qwen2_5-3b-bf16-math-lora.sh
+examples/high_precision/run-qwen2_5-3b-bf16-math-oft.sh
+examples/high_precision/run-qwen2_5-3b-math-fullft-grpo.sh
+examples/high_precision/run-qwen2_5-3b-math-fullft-head-critic.sh
+examples/high_precision/run-qwen2_5-3b-math-fullft-ppo.sh
+examples/high_precision/run-qwen2_5-3b-math-oft-adapter-critic-tune.sh
+examples/high_precision/run-qwen2_5-3b-math-oft-grpo.sh
+examples/high_precision/run-qwen2_5-3b-math-oft-ppo-adapter-critic-budget.sh
+examples/high_precision/run-qwen2_5-3b-math-oft-ppo-adapter-critic-controlled.sh
+examples/high_precision/run-qwen2_5-3b-math-oft-ppo-full-critic-budget.sh
+examples/high_precision/run-qwen2_5-3b-math-oft-ppo-full-critic-controlled.sh
+examples/high_precision/run-qwen2_5-3b-math-oft-ppo-lrprobe.sh
+examples/high_precision/run-qwen2_5-7b-bf16-openr1-full-b200.sh
+examples/high_precision/run-qwen2_5-7b-bf16-openr1-full-muon-kimi.sh
+examples/high_precision/run-qwen2_5-7b-bf16-openr1-full.sh
+examples/high_precision/run-qwen2_5-7b-bf16-openr1-lora-b200.sh
+examples/high_precision/run-qwen2_5-7b-bf16-openr1-lora.sh
+examples/high_precision/run-qwen2_5-7b-bf16-openr1-oft-all.sh
+examples/high_precision/run-qwen2_5-7b-bf16-openr1-oft-b32-b200.sh
+examples/high_precision/run-qwen2_5-7b-bf16-openr1-oft-b32-kl-b200.sh
+examples/high_precision/run-qwen2_5-7b-bf16-openr1-oft-b32-kl.sh
+examples/high_precision/run-qwen2_5-7b-bf16-openr1-oft-b32.sh
+examples/high_precision/run-qwen2_5-7b-bf16-openr1-oft-b64-b200.sh
+examples/high_precision/run-qwen2_5-7b-bf16-openr1-oft-b64.sh
+examples/high_precision/run-qwen3-1_7b-bf16-openreasoning-opd-full-vocab-lora-fkl.sh
+examples/high_precision/run-qwen3-30b-a3b-bf16-openr1-full-lr1e6.sh
+examples/high_precision/run-qwen3-30b-a3b-bf16-openr1-full-lr3e6.sh
+examples/high_precision/run-qwen3-30b-a3b-bf16-openr1-fullft-async.sh
+examples/high_precision/run-qwen3-30b-a3b-bf16-openr1-lora.sh
+examples/high_precision/run-qwen3-30b-a3b-bf16-openr1-oft-b32.sh
+examples/high_precision/run-qwen3-30b-a3b-bf16-openr1-oft-b64.sh
+examples/high_precision/run-qwen3-30b-a3b-instruct-2507-bf16-openr1-lora.sh
+examples/high_precision/run-qwen3-30b-a3b-instruct-2507-bf16-openr1-oft.sh
+examples/high_precision/run-qwen3-4b-instruct-2507-bf16-math-fullft-async.sh
+examples/high_precision/run-qwen3-4b-instruct-2507-bf16-math-lora.sh
+examples/high_precision/run-qwen3-4b-instruct-2507-bf16-math-oft-async.sh
+examples/high_precision/run-qwen3-4b-instruct-2507-bf16-math-oft-fully-async.sh
+examples/high_precision/run-qwen3-4b-instruct-2507-bf16-math-oft.sh</code></pre></div>
+<p><strong>examples/judge</strong> (1)</p>
+<div class="codeblock"><pre><code>examples/judge/run-qwen2_5-0_5b-judge-smoke.sh</code></pre></div>
+<p><strong>examples/load_cuda13_2_orbit_env.sh</strong> (1)</p>
+<div class="codeblock"><pre><code>examples/load_cuda13_2_orbit_env.sh</code></pre></div>
+<p><strong>examples/low_precision</strong> (17)</p>
+<div class="codeblock"><pre><code>examples/low_precision/dsv4-common.sh
+examples/low_precision/run-dsv4-mxfp4-math-oft-flash-debug.sh
+examples/low_precision/run-dsv4-mxfp4-math-oft-pro-debug.sh
+examples/low_precision/run-dsv4-mxfp4-openr1-oft-flash.sh
+examples/low_precision/run-dsv4-mxfp4-openr1-oft-pro.sh
+examples/low_precision/run-kimi-k25-int4-math-oft-debug6.sh
+examples/low_precision/run-kimi-k25-int4-math-oft.sh
+examples/low_precision/run-kimi-k25-int4-openr1-oft.sh
+examples/low_precision/run-kimi-k25-nvfp4-math-oft.sh
+examples/low_precision/run-kimi-k26-int4-openr1-oft.sh
+examples/low_precision/run-qwen3-30b-a3b-fp8-math-oft.sh
+examples/low_precision/run-qwen3-30b-a3b-instruct-2507-fp8-math-oft.sh
+examples/low_precision/run-qwen3-30b-a3b-int4-math-oft.sh
+examples/low_precision/run-qwen3-30b-a3b-nvfp4-math-oft.sh
+examples/low_precision/run-qwen3-4b-fp8-math-oft.sh
+examples/low_precision/run-qwen3-4b-int4-math-oft.sh
+examples/low_precision/run-qwen3-4b-nvfp4-math-oft.sh</code></pre></div>
+<p><strong>examples/nemotron</strong> (1)</p>
+<div class="codeblock"><pre><code>examples/nemotron/run-nemotron-3-nano-4b-smoke.sh</code></pre></div>
+<p><strong>examples/on_policy_distillation</strong> (17)</p>
+<div class="codeblock"><pre><code>examples/on_policy_distillation/opd_teacher_cost_common.sh
+examples/on_policy_distillation/run-qwen2_5-0_5b-opd-adapter-swap-smoke.sh
+examples/on_policy_distillation/run-qwen2_5-0_5b-opd-blend-ppo-smoke.sh
+examples/on_policy_distillation/run-qwen2_5-0_5b-opd-ema-smoke.sh
+examples/on_policy_distillation/run-qwen2_5-0_5b-opd-free-teacher-smoke.sh
+examples/on_policy_distillation/run-qwen2_5-0_5b-opd-full-vocab-gsm8k.sh
+examples/on_policy_distillation/run-qwen2_5-0_5b-opd-full-vocab-smoke.sh
+examples/on_policy_distillation/run-qwen2_5-0_5b-opd-mopd-smoke.sh
+examples/on_policy_distillation/run-qwen2_5-0_5b-opd-sglang-smoke.sh
+examples/on_policy_distillation/run-qwen2_5-0_5b-opd-teacher-pool-smoke.sh
+examples/on_policy_distillation/run-qwen2_5-3b-opd-cost-adapter.sh
+examples/on_policy_distillation/run-qwen2_5-3b-opd-cost-base.sh
+examples/on_policy_distillation/run-qwen2_5-3b-opd-cost-ema.sh
+examples/on_policy_distillation/run-qwen2_5-3b-opd-cost-load.sh
+examples/on_policy_distillation/run-qwen2_5-3b-opd-cost-served.sh
+examples/on_policy_distillation/run-qwen3-4B-opd-megatron.sh
+examples/on_policy_distillation/run-qwen3-4B-opd-sglang.sh</code></pre></div>
+<p><strong>examples/optimizers</strong> (2)</p>
+<div class="codeblock"><pre><code>examples/optimizers/muon-kimi.env
+examples/optimizers/run-muon-kimi-smoke.sh</code></pre></div>
+<p><strong>examples/peft_arena</strong> (31)</p>
+<div class="codeblock"><pre><code>examples/peft_arena/backend/LICENSE
+examples/peft_arena/backend/README.md
+examples/peft_arena/backend/eval/eval_math.sh
+examples/peft_arena/backend/third_party/math_eval/data/aime24/test.jsonl
+examples/peft_arena/backend/third_party/math_eval/data/amc23/test.jsonl
+examples/peft_arena/backend/third_party/math_eval/data/math500/test.jsonl
+examples/peft_arena/backend/third_party/math_eval/data_loader.py
+examples/peft_arena/backend/third_party/math_eval/evaluate.py
+examples/peft_arena/backend/third_party/math_eval/examples.py
+examples/peft_arena/backend/third_party/math_eval/grader.py
+examples/peft_arena/backend/third_party/math_eval/latex2sympy/__init__.py
+examples/peft_arena/backend/third_party/math_eval/latex2sympy/gen/PS.interp
+examples/peft_arena/backend/third_party/math_eval/latex2sympy/gen/PS.tokens
+examples/peft_arena/backend/third_party/math_eval/latex2sympy/gen/PSLexer.interp
+examples/peft_arena/backend/third_party/math_eval/latex2sympy/gen/PSLexer.py
+examples/peft_arena/backend/third_party/math_eval/latex2sympy/gen/PSLexer.tokens
+examples/peft_arena/backend/third_party/math_eval/latex2sympy/gen/PSListener.py
+examples/peft_arena/backend/third_party/math_eval/latex2sympy/gen/PSParser.py
+examples/peft_arena/backend/third_party/math_eval/latex2sympy/gen/__init__.py
+examples/peft_arena/backend/third_party/math_eval/latex2sympy/latex2sympy2.py
+examples/peft_arena/backend/third_party/math_eval/math_eval.py
+examples/peft_arena/backend/third_party/math_eval/model_utils.py
+examples/peft_arena/backend/third_party/math_eval/parser.py
+examples/peft_arena/backend/third_party/math_eval/python_executor.py
+examples/peft_arena/backend/third_party/math_eval/sglang_adapter_utils.py
+examples/peft_arena/backend/third_party/math_eval/trajectory.py
+examples/peft_arena/backend/third_party/math_eval/utils.py
+examples/peft_arena/backend/tools/merge_peft.py
+examples/peft_arena/backend/tools/prepare_eval_checkpoint.py
+examples/peft_arena/eval/README.md
+examples/peft_arena/eval/eval-math-peft-arena.sh</code></pre></div>
+<p><strong>examples/sandbox</strong> (1)</p>
+<div class="codeblock"><pre><code>examples/sandbox/run-qwen2_5-0_5b-code-smoke.sh</code></pre></div>
+<p><strong>examples/search_r1</strong> (13)</p>
+<div class="codeblock"><pre><code>examples/search_r1/README.md
+examples/search_r1/__init__.py
+examples/search_r1/generate_with_search.py
+examples/search_r1/local_search_server.py
+examples/search_r1/qa_em_format.py
+examples/search_r1/qwen2_5_3b_search_r1_ppo_common.sh
+examples/search_r1/retrieval_server_jsonl.py
+examples/search_r1/run-qwen2_5-0_5b-bf16-search-r1-ppo-full.sh
+examples/search_r1/run-qwen2_5-0_5b-bf16-search-r1-ppo-lora.sh
+examples/search_r1/run-qwen2_5-0_5b-bf16-search-r1-ppo-oft.sh
+examples/search_r1/run-qwen2_5-3b-bf16-search-r1-ppo-full.sh
+examples/search_r1/run-qwen2_5-3b-bf16-search-r1-ppo-lora.sh
+examples/search_r1/run-qwen2_5-3b-bf16-search-r1-ppo-oft.sh</code></pre></div>
+<p><strong>examples/sft</strong> (11)</p>
+<div class="codeblock"><pre><code>examples/sft/README.md
+examples/sft/run-llama3_1-8b-bf16-lora-sft-tulu3.sh
+examples/sft/run-llama3_1-8b-bf16-oft-sft-commonsenseqa.sh
+examples/sft/run-llama3_1-8b-bf16-oft-sft-magicoder.sh
+examples/sft/run-llama3_1-8b-bf16-oft-sft-numinamath.sh
+examples/sft/run-llama3_1-8b-bf16-oft-sft-scienceqa-text.sh
+examples/sft/run-qwen2_5-0_5b-bf16-sft-commonsenseqa.sh
+examples/sft/run-qwen2_5-0_5b-bf16-sft-magicoder.sh
+examples/sft/run-qwen2_5-0_5b-bf16-sft-numinamath.sh
+examples/sft/run-qwen2_5-0_5b-bf16-sft-scienceqa-text.sh
+examples/sft/run-qwen2_5-0_5b-bf16-sft-socialiqa.sh</code></pre></div>
+<p><strong>examples/swe</strong> (1)</p>
+<div class="codeblock"><pre><code>examples/swe/run-swe-patch-smoke.sh</code></pre></div>
+<p><strong>examples/swe_agent</strong> (1)</p>
+<div class="codeblock"><pre><code>examples/swe_agent/run-swe-agent-smoke.sh</code></pre></div>
+<p><strong>examples/tau_bench</strong> (10)</p>
+<div class="codeblock"><pre><code>examples/tau_bench/README.md
+examples/tau_bench/__init__.py
+examples/tau_bench/generate_with_tau.py
+examples/tau_bench/openai_tool_adapter.py
+examples/tau_bench/qwen3_4b_tau_bench_ppo_common.sh
+examples/tau_bench/run-qwen3-4b-instruct-2507-bf16-tau-bench-ppo-full.sh
+examples/tau_bench/run-qwen3-4b-instruct-2507-bf16-tau-bench-ppo-lora.sh
+examples/tau_bench/run-qwen3-4b-instruct-2507-bf16-tau-bench-ppo-oft.sh
+examples/tau_bench/sglang_tool_parser.py
+examples/tau_bench/tau_tasks.py</code></pre></div>
+<p><strong>examples/true_on_policy</strong> (2)</p>
+<div class="codeblock"><pre><code>examples/true_on_policy/run-qwen3-0_6b-top-smoke.sh
+examples/true_on_policy/run-qwen3-4b-top.sh</code></pre></div>
+<p><strong>orbit/audit</strong> (2)</p>
+<div class="codeblock"><pre><code>orbit/audit/__init__.py
+orbit/audit/peft_wrap.py</code></pre></div>
+<p><strong>orbit/backends</strong> (32)</p>
+<div class="codeblock"><pre><code>orbit/backends/megatron_utils/bridge_peft_helpers.py
+orbit/backends/megatron_utils/bridge_provider_overrides.py
+orbit/backends/megatron_utils/critic_adapter.py
+orbit/backends/megatron_utils/fp32_param_utils.py
+orbit/backends/megatron_utils/low_precision_bootstrap.py
+orbit/backends/megatron_utils/memory_attribution.py
+orbit/backends/megatron_utils/model_state_manager.py
+orbit/backends/megatron_utils/modelopt_state_shim.py
+orbit/backends/megatron_utils/mtp_rl_patches.py
+orbit/backends/megatron_utils/oft_utils.py
+orbit/backends/megatron_utils/peft_offload.py
+orbit/backends/megatron_utils/peft_transport/__init__.py
+orbit/backends/megatron_utils/peft_transport/_gather.py
+orbit/backends/megatron_utils/peft_transport/_payload.py
+orbit/backends/megatron_utils/peft_transport/backends/__init__.py
+orbit/backends/megatron_utils/peft_transport/backends/ipc.py
+orbit/backends/megatron_utils/peft_transport/backends/nccl.py
+orbit/backends/megatron_utils/peft_transport/backends/ray_object.py
+orbit/backends/megatron_utils/peft_transport/interface.py
+orbit/backends/megatron_utils/peft_transport/registry.py
+orbit/backends/megatron_utils/peft_transport/runtime.py
+orbit/backends/megatron_utils/peft_transport/slots.py
+orbit/backends/megatron_utils/peft_utils.py
+orbit/backends/megatron_utils/runtime_device.py
+orbit/backends/megatron_utils/state_mode.py
+orbit/backends/megatron_utils/tensor_semantics.py
+orbit/backends/megatron_utils/update_weight/sync_metrics.py
+orbit/backends/megatron_utils/update_weight/update_weight_from_distributed/bridge.py
+orbit/backends/sglang_utils/compat_site/sitecustomize.py
+orbit/backends/sglang_utils/native_ops.py
+orbit/backends/training_utils/teacher_lm_head.py
+orbit/backends/training_utils/vocab_parallel.py</code></pre></div>
+<p><strong>orbit/merge</strong> (5)</p>
+<div class="codeblock"><pre><code>orbit/merge/__init__.py
+orbit/merge/bake_hf.py
+orbit/merge/megatron_io.py
+orbit/merge/oft_merge.py
+orbit/merge/strategy.py</code></pre></div>
+<p><strong>orbit/rollout</strong> (22)</p>
+<div class="codeblock"><pre><code>orbit/rollout/fully_async_rollout.py
+orbit/rollout/generate_utils/prefill_logprobs.py
+orbit/rollout/genrm_judge.py
+orbit/rollout/grader_errors.py
+orbit/rollout/inference_rollout/eval_logging.py
+orbit/rollout/llm_judge.py
+orbit/rollout/opd_scoring.py
+orbit/rollout/opd_sglang.py
+orbit/rollout/reward_router.py
+orbit/rollout/rm_hub/lean_rm.py
+orbit/rollout/rm_hub/math_alignment.py
+orbit/rollout/rm_hub/peft_arena_reward.py
+orbit/rollout/rm_hub/ultra_agents.py
+orbit/rollout/rm_hub/ultra_longtail.py
+orbit/rollout/sandbox/__init__.py
+orbit/rollout/sandbox/code_rm.py
+orbit/rollout/sandbox/executor.py
+orbit/rollout/sandbox/swe_rm.py
+orbit/rollout/scoring_client.py
+orbit/rollout/swe_agent/__init__.py
+orbit/rollout/swe_agent/container_session.py
+orbit/rollout/swe_agent/episode.py</code></pre></div>
+<p><strong>orbit/true_on_policy</strong> (5)</p>
+<div class="codeblock"><pre><code>orbit/true_on_policy/__init__.py
+orbit/true_on_policy/config.py
+orbit/true_on_policy/contracts.py
+orbit/true_on_policy/model_profiles.py
+orbit/true_on_policy/schema.py</code></pre></div>
+<p><strong>orbit/ultra</strong> (2)</p>
+<div class="codeblock"><pre><code>orbit/ultra/__init__.py
+orbit/ultra/strict_json.py</code></pre></div>
+<p><strong>orbit/utils</strong> (15)</p>
+<div class="codeblock"><pre><code>orbit/utils/adapter_swap.py
+orbit/utils/adapter_tensors.py
+orbit/utils/chat_template_utils/deepseek_v4.py
+orbit/utils/chat_template_utils/templates/llama3.1_pinned.jinja
+orbit/utils/eval_nll.py
+orbit/utils/llama3_chat_template.py
+orbit/utils/logprob_compare.py
+orbit/utils/opd_dump.py
+orbit/utils/opd_teacher_pool.py
+orbit/utils/opd_teacher_spec.py
+orbit/utils/peft_param_match.py
+orbit/utils/reward_normalization.py
+orbit/utils/self_teacher.py
+orbit/utils/self_teacher_checkpoint.py
+orbit/utils/training_eta.py</code></pre></div>
+<p><strong>orbit_plugins/megatron_bridge</strong> (13)</p>
+<div class="codeblock"><pre><code>orbit_plugins/megatron_bridge/README.md
+orbit_plugins/megatron_bridge/patches/__init__.py
+orbit_plugins/megatron_bridge/patches/bridges/__init__.py
+orbit_plugins/megatron_bridge/patches/bridges/nemotron_h.py
+orbit_plugins/megatron_bridge/patches/bridges/qwen3_fp8_bridge.py
+orbit_plugins/megatron_bridge/patches/conversion/__init__.py
+orbit_plugins/megatron_bridge/patches/conversion/convert_checkpoints.py
+orbit_plugins/megatron_bridge/patches/conversion/convert_fp8_checkpoint_direct.py
+orbit_plugins/megatron_bridge/patches/conversion/convert_int4_checkpoint_direct.py
+orbit_plugins/megatron_bridge/patches/conversion/convert_nvfp4_checkpoint_direct.py
+orbit_plugins/megatron_bridge/patches/conversion/quantize_to_int4.py
+orbit_plugins/megatron_bridge/patches/low_precision/__init__.py
+orbit_plugins/megatron_bridge/patches/peft/__init__.py</code></pre></div>
+<p><strong>orbit_plugins/model_args</strong> (56)</p>
+<div class="codeblock"><pre><code>orbit_plugins/model_args/README.md
+orbit_plugins/model_args/deepseek-v3-20layer.sh
+orbit_plugins/model_args/deepseek-v3-5layer.sh
+orbit_plugins/model_args/deepseek-v3.sh
+orbit_plugins/model_args/deepseek-v4-flash-debug.sh
+orbit_plugins/model_args/deepseek-v4-flash.sh
+orbit_plugins/model_args/deepseek-v4-pro.sh
+orbit_plugins/model_args/gemma-4-26b-a4b-it.sh
+orbit_plugins/model_args/gemma-4-31b-it.sh
+orbit_plugins/model_args/glm4-32B.sh
+orbit_plugins/model_args/glm4-9B.sh
+orbit_plugins/model_args/glm4.5-106B-A12B.sh
+orbit_plugins/model_args/glm4.5-355B-A32B.sh
+orbit_plugins/model_args/glm4.7-flash.sh
+orbit_plugins/model_args/glm5-744B-A40B.sh
+orbit_plugins/model_args/glm5-744B-A40B_20layer.sh
+orbit_plugins/model_args/glm5-744B-A40B_4layer.sh
+orbit_plugins/model_args/gpt-oss-20b.sh
+orbit_plugins/model_args/kimi-k2-thinking.sh
+orbit_plugins/model_args/kimi-k2.sh
+orbit_plugins/model_args/kimi-k25-debug-6layer.sh
+orbit_plugins/model_args/kimi-k25.sh
+orbit_plugins/model_args/kimi-k26.sh
+orbit_plugins/model_args/llama3-8B.sh
+orbit_plugins/model_args/llama3.1-8B-Instruct.sh
+orbit_plugins/model_args/llama3.2-3B-Instruct-amd.sh
+orbit_plugins/model_args/llama3.2-3B-Instruct.sh
+orbit_plugins/model_args/mimo-7B-rl.sh
+orbit_plugins/model_args/moonlight.sh
+orbit_plugins/model_args/nemotron-3-nano-30b-a3b.sh
+orbit_plugins/model_args/nemotron-3-nano-4b.sh
+orbit_plugins/model_args/qwen2.5-0.5B.sh
+orbit_plugins/model_args/qwen2.5-1.5B.sh
+orbit_plugins/model_args/qwen2.5-32B.sh
+orbit_plugins/model_args/qwen2.5-3B.sh
+orbit_plugins/model_args/qwen2.5-7B-4layer.sh
+orbit_plugins/model_args/qwen2.5-7B.sh
+orbit_plugins/model_args/qwen3-0.6B.sh
+orbit_plugins/model_args/qwen3-1.7B.sh
+orbit_plugins/model_args/qwen3-14B.sh
+orbit_plugins/model_args/qwen3-235B-A22B.sh
+orbit_plugins/model_args/qwen3-30B-A3B-4layer.sh
+orbit_plugins/model_args/qwen3-30B-A3B-5layer.sh
+orbit_plugins/model_args/qwen3-30B-A3B.sh
+orbit_plugins/model_args/qwen3-32B.sh
+orbit_plugins/model_args/qwen3-4B-Instruct-2507-w4a16.sh
+orbit_plugins/model_args/qwen3-4B-Instruct-2507.sh
+orbit_plugins/model_args/qwen3-4B.sh
+orbit_plugins/model_args/qwen3-8B.sh
+orbit_plugins/model_args/qwen3-next-80B-A3B.sh
+orbit_plugins/model_args/qwen3.5-27B.sh
+orbit_plugins/model_args/qwen3.5-35B-A3B.sh
+orbit_plugins/model_args/qwen3.5-4B.sh
+orbit_plugins/model_args/qwen3.5-9B.sh
+orbit_plugins/model_args/qwen3.6-27B.sh
+orbit_plugins/model_args/qwen3.6-35B-A3B.sh</code></pre></div>
+<p><strong>orbit_plugins/search_r1</strong> (4)</p>
+<div class="codeblock"><pre><code>orbit_plugins/search_r1/__init__.py
+orbit_plugins/search_r1/generate_with_search.py
+orbit_plugins/search_r1/local_search_server.py
+orbit_plugins/search_r1/qa_em_format.py</code></pre></div>
+<p><strong>orbit_plugins/tau_bench</strong> (4)</p>
+<div class="codeblock"><pre><code>orbit_plugins/tau_bench/__init__.py
+orbit_plugins/tau_bench/generate_with_tau.py
+orbit_plugins/tau_bench/openai_tool_adapter.py
+orbit_plugins/tau_bench/sglang_tool_parser.py</code></pre></div>
+<p><strong>results/backfill</strong> (7)</p>
+<div class="codeblock"><pre><code>results/backfill/e4_gsm8k_lr1.jsonl
+results/backfill/e4_gsm8k_lr2.jsonl
+results/backfill/e4_gsm8k_lr3.jsonl
+results/backfill/e4_gsm8k_lr4.jsonl
+results/backfill/e4_gsm8k_lr5.jsonl
+results/backfill/e4_gsm8k_lr6.jsonl
+results/backfill/e4_gsm8k_lr7.jsonl</code></pre></div>
+<p><strong>results/probe</strong> (23)</p>
+<div class="codeblock"><pre><code>results/probe/e1ot-full-na-na-lr6.28e-06-s0.jsonl
+results/probe/e1ot-lora-r1-all-lr6.28e-05-s0.jsonl
+results/probe/e1ot-oftscout-b1024-all-lr1e-05-s0.jsonl
+results/probe/e1short-full-na-na-short-lr8.87e-06-s0.jsonl
+results/probe/e1short-lora-r256-all-short-lr8.87e-05-s0.jsonl
+results/probe/e1short-oftscout-b1024-all-short-lr1e-05-s0.jsonl
+results/probe/e3-lora-r256-attn-lr6.28e-05-s0.jsonl
+results/probe/e3-lora-r92-mlp-lr6.28e-05-s0.jsonl
+results/probe/e3-oftscout-b1024-attn-lr1e-05-s0.jsonl
+results/probe/e3-oftscout-b512-mlp-lr1e-05-s0.jsonl
+results/probe/e4-full-na-na-lr3.16e-07-s0.jsonl
+results/probe/e4-lora-r1-all-lr3.16e-06-s0.jsonl
+results/probe/e4-oftscout-b1024-all-lr1e-06-s0.jsonl
+results/probe/e4-oftscout-b1024-all-lr2.15e-05-s0.jsonl
+results/probe/e4place-lora-r256-attn-lr3.16e-06-s0.jsonl
+results/probe/e4place-lora-r92-mlp-lr3.16e-06-s0.jsonl
+results/probe/e4place-oftscout-b1024-attn-lr1e-06-s0.jsonl
+results/probe/e4place-oftscout-b1024-attn-lr2.15e-05-s0.jsonl
+results/probe/e4place-oftscout-b512-mlp-lr1e-06-s0.jsonl
+results/probe/e4place-oftscout-b512-mlp-lr2.15e-05-s0.jsonl
+results/probe/e5rl-oft-b128-all-lr0.000316-s0.jsonl
+results/probe/e5rl-oft-b32-all-lr0.000316-s0.jsonl
+results/probe/e5rl-oft-b512-all-lr0.000316-s0.jsonl</code></pre></div>
+<p><strong>results/prompt_probe.jsonl</strong> (1)</p>
+<div class="codeblock"><pre><code>results/prompt_probe.jsonl</code></pre></div>
+<p><strong>results/prompt_probe2.jsonl</strong> (1)</p>
+<div class="codeblock"><pre><code>results/prompt_probe2.jsonl</code></pre></div>
+<p><strong>scripts/README.md</strong> (1)</p>
+<div class="codeblock"><pre><code>scripts/README.md</code></pre></div>
+<p><strong>scripts/check_oft_sharding_invariants.py</strong> (1)</p>
+<div class="codeblock"><pre><code>scripts/check_oft_sharding_invariants.py</code></pre></div>
+<p><strong>scripts/condor</strong> (4)</p>
+<div class="codeblock"><pre><code>scripts/condor/setup/README.md
+scripts/condor/setup/install_env.sh
+scripts/condor/setup/install_env.sub
+scripts/condor/setup/verify_env.sh</code></pre></div>
+<p><strong>scripts/conversion</strong> (8)</p>
+<div class="codeblock"><pre><code>scripts/conversion/README.md
+scripts/conversion/common.sh
+scripts/conversion/configuration_deepseek_v4.py
+scripts/conversion/convert_dsv4_hf_to_megatron.sh
+scripts/conversion/convert_fp8_checkpoint_direct.sh
+scripts/conversion/convert_int4_checkpoint_direct.sh
+scripts/conversion/convert_nvfp4_checkpoint_direct.sh
+scripts/conversion/deepseek_v4_chat_template.jinja</code></pre></div>
+<p><strong>scripts/inspect_oft_streamed_audit.py</strong> (1)</p>
+<div class="codeblock"><pre><code>scripts/inspect_oft_streamed_audit.py</code></pre></div>
+<p><strong>scripts/inspect_peft_wrap_audit.py</strong> (1)</p>
+<div class="codeblock"><pre><code>scripts/inspect_peft_wrap_audit.py</code></pre></div>
+<p><strong>scripts/lib</strong> (9)</p>
+<div class="codeblock"><pre><code>scripts/lib/common.sh
+scripts/lib/driver.sh
+scripts/lib/launcher.sh
+scripts/lib/load_cuda13_2_orbit_env.sh
+scripts/lib/paths.sh
+scripts/lib/preflight.sh
+scripts/lib/ray.sh
+scripts/lib/tool_env.sh
+scripts/lib/wandb.sh</code></pre></div>
+<p><strong>scripts/lora_regret</strong> (107)</p>
+<div class="codeblock"><pre><code>scripts/lora_regret/campaign.sh
+scripts/lora_regret/coverage_probe.sh
+scripts/lora_regret/coverage_probe_1gpu.sh
+scripts/lora_regret/coverage_probe_4gpu.sh
+scripts/lora_regret/coverage_probe_8gpu.sh
+scripts/lora_regret/e4_protocol.sh
+scripts/lora_regret/env2_rerun/README.md
+scripts/lora_regret/env2_rerun/columns.sh
+scripts/lora_regret/env2_rerun/condor/e4_gsm8k_ft_lr1_lr7.sub
+scripts/lora_regret/env2_rerun/condor/e4_gsm8k_lora_r16_lr1_lr7.sub
+scripts/lora_regret/env2_rerun/condor/e4_gsm8k_lora_r1_lr1_lr7.sub
+scripts/lora_regret/env2_rerun/condor/e4_gsm8k_lora_r256_lr1_lr7.sub
+scripts/lora_regret/env2_rerun/condor/e4_gsm8k_oft_lr1_lr7.sub
+scripts/lora_regret/env2_rerun/condor/e4_math_ft_lr1_lr7.sub
+scripts/lora_regret/env2_rerun/condor/e4_math_lora_r16_lr1_lr7.sub
+scripts/lora_regret/env2_rerun/condor/e4_math_lora_r1_lr1_lr7.sub
+scripts/lora_regret/env2_rerun/condor/e4_math_lora_r256_lr1_lr7.sub
+scripts/lora_regret/env2_rerun/condor/e4_math_oft_lr1_lr7.sub
+scripts/lora_regret/env2_rerun/condor/job.sh
+scripts/lora_regret/env2_rerun/condor/submit.sh
+scripts/lora_regret/env2_rerun/env.sh
+scripts/lora_regret/env2_rerun/run_column.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_ft_lr1_lr7_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_lora_r16_lr1_lr7_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_lora_r1_lr1_lr7_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_lora_r256_lr1_lr7_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_lr1_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_lr2_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_lr3_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_lr4_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_lr5_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_lr6_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_lr7_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_oft_lr1_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_oft_lr1_lr7_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_oft_lr2_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_oft_lr3_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_oft_lr4_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_oft_lr5_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_oft_lr6_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_gsm8k_oft_lr7_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_ft_lr1_lr7_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_lora_r16_lr1_lr7_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_lora_r1_lr1_lr7_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_lora_r256_lr1_lr7_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_lr1_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_lr2_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_lr3_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_lr4_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_lr5_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_lr6_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_lr7_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_oft_lr1_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_oft_lr1_lr7_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_oft_lr2_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_oft_lr3_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_oft_lr4_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_oft_lr5_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_oft_lr6_8gpu.sh
+scripts/lora_regret/env2_rerun/run_e4_math_oft_lr7_8gpu.sh
+scripts/lora_regret/env2_rerun/run_ft_column.sh
+scripts/lora_regret/env2_rerun/run_lora_column.sh
+scripts/lora_regret/env2_rerun/run_oft_column.sh
+scripts/lora_regret/env2_rerun/sync_wandb.sh
+scripts/lora_regret/env_v0516.sh
+scripts/lora_regret/fetch_models.sh
+scripts/lora_regret/run_e4_ft_8gpu.sh
+scripts/lora_regret/run_e4_gsm8k_lr0_8gpu.sh
+scripts/lora_regret/run_e4_gsm8k_lr1_8gpu.sh
+scripts/lora_regret/run_e4_gsm8k_lr2_8gpu.sh
+scripts/lora_regret/run_e4_gsm8k_lr3_8gpu.sh
+scripts/lora_regret/run_e4_gsm8k_lr4_8gpu.sh
+scripts/lora_regret/run_e4_gsm8k_lr5_8gpu.sh
+scripts/lora_regret/run_e4_gsm8k_lr6_8gpu.sh
+scripts/lora_regret/run_e4_gsm8k_lr7_8gpu.sh
+scripts/lora_regret/run_e4_gsm8k_oft_lr0_8gpu.sh
+scripts/lora_regret/run_e4_gsm8k_oft_lr1_8gpu.sh
+scripts/lora_regret/run_e4_gsm8k_oft_lr2_8gpu.sh
+scripts/lora_regret/run_e4_gsm8k_oft_lr3_8gpu.sh
+scripts/lora_regret/run_e4_gsm8k_oft_lr4_8gpu.sh
+scripts/lora_regret/run_e4_gsm8k_oft_lr5_8gpu.sh
+scripts/lora_regret/run_e4_gsm8k_oft_lr6_8gpu.sh
+scripts/lora_regret/run_e4_lora_8gpu.sh
+scripts/lora_regret/run_e4_math_lora_verify_8gpu.sh
+scripts/lora_regret/run_e4_math_lr0_8gpu.sh
+scripts/lora_regret/run_e4_math_lr1_8gpu.sh
+scripts/lora_regret/run_e4_math_lr2_8gpu.sh
+scripts/lora_regret/run_e4_math_lr3_8gpu.sh
+scripts/lora_regret/run_e4_math_lr4_8gpu.sh
+scripts/lora_regret/run_e4_math_lr5_8gpu.sh
+scripts/lora_regret/run_e4_math_lr6_8gpu.sh
+scripts/lora_regret/run_e4_math_lr7_8gpu.sh
+scripts/lora_regret/run_e4_math_oft_b128_low_lr_8gpu.sh
+scripts/lora_regret/run_e4_math_oft_b128_refine_a_8gpu.sh
+scripts/lora_regret/run_e4_math_oft_b128_refine_b_8gpu.sh
+scripts/lora_regret/run_e4_math_oft_lr0_8gpu.sh
+scripts/lora_regret/run_e4_math_oft_lr1_8gpu.sh
+scripts/lora_regret/run_e4_math_oft_lr2_8gpu.sh
+scripts/lora_regret/run_e4_math_oft_lr3_8gpu.sh
+scripts/lora_regret/run_e4_math_oft_lr4_8gpu.sh
+scripts/lora_regret/run_e4_math_oft_lr5_8gpu.sh
+scripts/lora_regret/run_e4_math_oft_lr6_8gpu.sh
+scripts/lora_regret/run_e4_math_oft_verify_8gpu.sh
+scripts/lora_regret/run_e4place_ft_8gpu.sh
+scripts/lora_regret/run_e4place_lora_8gpu.sh
+scripts/lora_regret/smoke_e4_8gpu.sh
+scripts/lora_regret/sync_wandb.sh</code></pre></div>
+<p><strong>scripts/release</strong> (1)</p>
+<div class="codeblock"><pre><code>scripts/release/clean_room_gate.sh</code></pre></div>
+<p><strong>scripts/slurm</strong> (14)</p>
+<div class="codeblock"><pre><code>scripts/slurm/setup/cu128/BINARY_LAYER.md
+scripts/slurm/setup/cu128/README.md
+scripts/slurm/setup/cu128/extract_pins.py
+scripts/slurm/setup/cu128/install_env.sh
+scripts/slurm/setup/cu128/pins.env
+scripts/slurm/setup/cu128/verify_env.py
+scripts/slurm/setup/cu130/README.md
+scripts/slurm/setup/cu130/extract_pins.py
+scripts/slurm/setup/cu130/install_env.sh
+scripts/slurm/setup/cu130/materialize_env.py
+scripts/slurm/setup/cu130/miles-wheels-cu130-x86_64.sha256
+scripts/slurm/setup/cu130/pins.env
+scripts/slurm/setup/cu130/slurm_h200_runtime.sh
+scripts/slurm/setup/cu130/verify_env.py</code></pre></div>
+<p><strong>tests/fast</strong> (78)</p>
+<div class="codeblock"><pre><code>tests/fast/dist_utils.py
+tests/fast/fixtures/lora_regret/llama3_sample.jsonl
+tests/fast/fixtures/lora_regret/no_robots_sample.jsonl
+tests/fast/fixtures/lora_regret/smoke_lora_r256_eval_lines.log
+tests/fast/rollout/test_sft_loss_mask_parity.py
+tests/fast/rollout/test_sft_loss_mask_parity_llama3.py
+tests/fast/scripts/slurm/setup/cu128/test_extract_pins.py
+tests/fast/scripts/slurm/setup/cu128/test_install_env.py
+tests/fast/scripts/slurm/setup/cu128/test_verify_env.py
+tests/fast/scripts/slurm/setup/cu130/test_materialize_env.py
+tests/fast/test_actor_critic_sync.py
+tests/fast/test_actor_ref_restore.py
+tests/fast/test_aggregate_train_losses_extrema.py
+tests/fast/test_async_off_policy_guard.py
+tests/fast/test_async_offload_noop.py
+tests/fast/test_bake_hf.py
+tests/fast/test_distributed_update_weights_sync_metrics.py
+tests/fast/test_get_responses_temperature.py
+tests/fast/test_launcher_extra_train_args.py
+tests/fast/test_launcher_topology_env.py
+tests/fast/test_log_rollout_data_parity_gate.py
+tests/fast/test_log_rollout_data_topk_keys.py
+tests/fast/test_logprob_compare.py
+tests/fast/test_loss_reduction_microbatch_invariance.py
+tests/fast/test_megatron_bridge_orbit_namespace.py
+tests/fast/test_megatron_merge.py
+tests/fast/test_merge_cli.py
+tests/fast/test_oft_merge.py
+tests/fast/test_opd_cp_data.py
+tests/fast/test_opd_dump.py
+tests/fast/test_opd_teacher_equivalence.py
+tests/fast/test_opd_topk_args.py
+tests/fast/test_opd_topk_loss.py
+tests/fast/test_opd_topk_ray_transport.py
+tests/fast/test_opd_topk_transport.py
+tests/fast/test_orthomerge_bridge.py
+tests/fast/test_ppo_cp_advantages.py
+tests/fast/test_ppo_gae_masks.py
+tests/fast/test_prefill_cuda_graph_policy.py
+tests/fast/test_rollout_timeline_binning.py
+tests/fast/test_rollout_timeline_figure.py
+tests/fast/test_rollout_timeline_probe.py
+tests/fast/test_self_teacher_save_chain.py
+tests/fast/test_sync_metrics.py
+tests/fast/test_unbiased_kl_numerics.py
+tests/fast/test_update_weights_sync_metrics.py
+tests/fast/test_value_explained_var.py
+tests/fast/test_vocab_parallel_topk.py
+tests/fast/utils/test_eval_nll.py
+tests/fast/utils/test_full_model_train_offload.py
+tests/fast/utils/test_llama3_chat_template.py
+tests/fast/utils/test_llama3_loss_mask.py
+tests/fast/utils/test_lora_a_init_method_reaches_adapter.py
+tests/fast/utils/test_lora_regret_analyze.py
+tests/fast/utils/test_lora_regret_arms_coverage.py
+tests/fast/utils/test_lora_regret_e5rl.py
+tests/fast/utils/test_lora_regret_env2_rerun.py
+tests/fast/utils/test_lora_regret_lr_columns.py
+tests/fast/utils/test_lora_regret_models.py
+tests/fast/utils/test_lora_regret_p3_check.py
+tests/fast/utils/test_lora_regret_plot.py
+tests/fast/utils/test_lora_regret_post_protocol.py
+tests/fast/utils/test_lora_regret_preflight.py
+tests/fast/utils/test_lora_regret_prepare_data.py
+tests/fast/utils/test_lora_regret_probe.py
+tests/fast/utils/test_lora_regret_prompt_rendering.py
+tests/fast/utils/test_lora_regret_smoke.py
+tests/fast/utils/test_lora_regret_sweep.py
+tests/fast/utils/test_lora_regret_trace.py
+tests/fast/utils/test_math_oft_b128_low_lr_sweep.py
+tests/fast/utils/test_math_oft_b128_refinement_sweep.py
+tests/fast/utils/test_memory_utils_allocator_counters.py
+tests/fast/utils/test_modelopt_state_shim.py
+tests/fast/utils/test_peft_arguments.py
+tests/fast/utils/test_peft_param_match.py
+tests/fast/utils/test_probe_steady_state.py
+tests/fast/utils/test_train_actor_allocator_env.py
+tests/fast/utils/test_wandb_run_naming.py</code></pre></div>
+<p><strong>tests/test_adapter_swap.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_adapter_swap.py</code></pre></div>
+<p><strong>tests/test_bridge_provider_overrides.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_bridge_provider_overrides.py</code></pre></div>
+<p><strong>tests/test_convert_hf_to_torch_dist.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_convert_hf_to_torch_dist.py</code></pre></div>
+<p><strong>tests/test_critic_build_args.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_critic_build_args.py</code></pre></div>
+<p><strong>tests/test_critic_checkpoint.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_critic_checkpoint.py</code></pre></div>
+<p><strong>tests/test_critic_head_build.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_critic_head_build.py</code></pre></div>
+<p><strong>tests/test_critic_low_precision.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_critic_low_precision.py</code></pre></div>
+<p><strong>tests/test_critic_mode_args.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_critic_mode_args.py</code></pre></div>
+<p><strong>tests/test_critic_peft_build.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_critic_peft_build.py</code></pre></div>
+<p><strong>tests/test_critic_placement.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_critic_placement.py</code></pre></div>
+<p><strong>tests/test_critic_train_phases.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_critic_train_phases.py</code></pre></div>
+<p><strong>tests/test_critic_trunk_alias.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_critic_trunk_alias.py</code></pre></div>
+<p><strong>tests/test_determinism_harness.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_determinism_harness.py</code></pre></div>
+<p><strong>tests/test_distributed_utils.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_distributed_utils.py</code></pre></div>
+<p><strong>tests/test_fp32_param_utils.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_fp32_param_utils.py</code></pre></div>
+<p><strong>tests/test_full_vocab_parity_launcher.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_full_vocab_parity_launcher.py</code></pre></div>
+<p><strong>tests/test_fullft_async_launcher.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_fullft_async_launcher.py</code></pre></div>
+<p><strong>tests/test_gemma4_weight_sync_tolerances.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_gemma4_weight_sync_tolerances.py</code></pre></div>
+<p><strong>tests/test_gemma_math_reward.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_gemma_math_reward.py</code></pre></div>
+<p><strong>tests/test_generate_endpoint_peft_payload.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_generate_endpoint_peft_payload.py</code></pre></div>
+<p><strong>tests/test_genrm_judge.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_genrm_judge.py</code></pre></div>
+<p><strong>tests/test_lean_rm.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_lean_rm.py</code></pre></div>
+<p><strong>tests/test_llm_judge.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_llm_judge.py</code></pre></div>
+<p><strong>tests/test_lora_regret_reward_grading.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_lora_regret_reward_grading.py</code></pre></div>
+<p><strong>tests/test_lora_regret_rl_launcher.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_lora_regret_rl_launcher.py</code></pre></div>
+<p><strong>tests/test_model_provider.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_model_provider.py</code></pre></div>
+<p><strong>tests/test_opd_advantage.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_opd_advantage.py</code></pre></div>
+<p><strong>tests/test_opd_args.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_opd_args.py</code></pre></div>
+<p><strong>tests/test_opd_critic_role.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_opd_critic_role.py</code></pre></div>
+<p><strong>tests/test_opd_full_vocab.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_opd_full_vocab.py</code></pre></div>
+<p><strong>tests/test_opd_jsd_loss.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_opd_jsd_loss.py</code></pre></div>
+<p><strong>tests/test_opd_promotion.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_opd_promotion.py</code></pre></div>
+<p><strong>tests/test_opd_rollout_data.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_opd_rollout_data.py</code></pre></div>
+<p><strong>tests/test_opd_sample_merge.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_opd_sample_merge.py</code></pre></div>
+<p><strong>tests/test_opd_scoring_stage.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_opd_scoring_stage.py</code></pre></div>
+<p><strong>tests/test_opd_serve_teacher.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_opd_serve_teacher.py</code></pre></div>
+<p><strong>tests/test_opd_sglang_postprocess.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_opd_sglang_postprocess.py</code></pre></div>
+<p><strong>tests/test_opd_teacher_pool.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_opd_teacher_pool.py</code></pre></div>
+<p><strong>tests/test_opd_teacher_spec.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_opd_teacher_spec.py</code></pre></div>
+<p><strong>tests/test_opd_topk_scoring.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_opd_topk_scoring.py</code></pre></div>
+<p><strong>tests/test_orbit_router_workers.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_orbit_router_workers.py</code></pre></div>
+<p><strong>tests/test_peft_bridge_preload.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_peft_bridge_preload.py</code></pre></div>
+<p><strong>tests/test_peft_broadcast_shm_refcount.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_peft_broadcast_shm_refcount.py</code></pre></div>
+<p><strong>tests/test_peft_ipc_transport.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_peft_ipc_transport.py</code></pre></div>
+<p><strong>tests/test_peft_ray_transport.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_peft_ray_transport.py</code></pre></div>
+<p><strong>tests/test_peft_two_phase_resume.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_peft_two_phase_resume.py</code></pre></div>
+<p><strong>tests/test_pion_optimizer.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_pion_optimizer.py</code></pre></div>
+<p><strong>tests/test_ppo_critic_compare_launchers.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_ppo_critic_compare_launchers.py</code></pre></div>
+<p><strong>tests/test_ppo_critic_distributed_checkpoint.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_ppo_critic_distributed_checkpoint.py</code></pre></div>
+<p><strong>tests/test_ppo_launch_scripts.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_ppo_launch_scripts.py</code></pre></div>
+<p><strong>tests/test_ppo_peft_distributed_preflight.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_ppo_peft_distributed_preflight.py</code></pre></div>
+<p><strong>tests/test_ppo_peft_distributed_save_coordination.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_ppo_peft_distributed_save_coordination.py</code></pre></div>
+<p><strong>tests/test_ppo_peft_distributed_save_preflight.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_ppo_peft_distributed_save_preflight.py</code></pre></div>
+<p><strong>tests/test_ppo_ratio_numerics.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_ppo_ratio_numerics.py</code></pre></div>
+<p><strong>tests/test_ppo_resume_orchestration.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_ppo_resume_orchestration.py</code></pre></div>
+<p><strong>tests/test_prefill_logprobs.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_prefill_logprobs.py</code></pre></div>
+<p><strong>tests/test_qwen2_true_on_policy_conversion.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_qwen2_true_on_policy_conversion.py</code></pre></div>
+<p><strong>tests/test_response_only_loss_mask.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_response_only_loss_mask.py</code></pre></div>
+<p><strong>tests/test_reward_router.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_reward_router.py</code></pre></div>
+<p><strong>tests/test_rl_fullft_tensor_parallel.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_rl_fullft_tensor_parallel.py</code></pre></div>
+<p><strong>tests/test_rollout_data_source_resume.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_rollout_data_source_resume.py</code></pre></div>
+<p><strong>tests/test_sandbox_code_rm.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_sandbox_code_rm.py</code></pre></div>
+<p><strong>tests/test_sandbox_executor.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_sandbox_executor.py</code></pre></div>
+<p><strong>tests/test_scoring_client.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_scoring_client.py</code></pre></div>
+<p><strong>tests/test_search_r1_example.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_search_r1_example.py</code></pre></div>
+<p><strong>tests/test_search_r1_launch_scripts.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_search_r1_launch_scripts.py</code></pre></div>
+<p><strong>tests/test_self_teacher.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_self_teacher.py</code></pre></div>
+<p><strong>tests/test_sft_dataset_conversion.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_sft_dataset_conversion.py</code></pre></div>
+<p><strong>tests/test_sft_jsonl_partition_split.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_sft_jsonl_partition_split.py</code></pre></div>
+<p><strong>tests/test_sft_launch_scripts.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_sft_launch_scripts.py</code></pre></div>
+<p><strong>tests/test_sft_mode.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_sft_mode.py</code></pre></div>
+<p><strong>tests/test_sglang_native_ops.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_sglang_native_ops.py</code></pre></div>
+<p><strong>tests/test_sglang_true_on_policy_deterministic_fallback.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_sglang_true_on_policy_deterministic_fallback.py</code></pre></div>
+<p><strong>tests/test_swe_agent_episode.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_swe_agent_episode.py</code></pre></div>
+<p><strong>tests/test_swe_rm.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_swe_rm.py</code></pre></div>
+<p><strong>tests/test_tau_bench_example.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_tau_bench_example.py</code></pre></div>
+<p><strong>tests/test_tau_bench_launch_scripts.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_tau_bench_launch_scripts.py</code></pre></div>
+<p><strong>tests/test_training_checkpoint_resume.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_training_checkpoint_resume.py</code></pre></div>
+<p><strong>tests/test_true_on_policy_config.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_true_on_policy_config.py</code></pre></div>
+<p><strong>tests/test_true_on_policy_launch_scripts.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_true_on_policy_launch_scripts.py</code></pre></div>
+<p><strong>tests/test_true_on_policy_logprobs.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_true_on_policy_logprobs.py</code></pre></div>
+<p><strong>tests/test_ultra_agents.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_ultra_agents.py</code></pre></div>
+<p><strong>tests/test_ultra_longtail.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_ultra_longtail.py</code></pre></div>
+<p><strong>tests/test_update_weight_bridge_distributed.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_update_weight_bridge_distributed.py</code></pre></div>
+<p><strong>tests/test_wandb_utils.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tests/test_wandb_utils.py</code></pre></div>
+<p><strong>tools/README_merge_oft.md</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/README_merge_oft.md</code></pre></div>
+<p><strong>tools/adapter_runtime_compare</strong> (5)</p>
+<div class="codeblock"><pre><code>tools/adapter_runtime_compare/__init__.py
+tools/adapter_runtime_compare/analyze_a1.py
+tools/adapter_runtime_compare/run_compare.py
+tools/adapter_runtime_compare/test_analyze_a1.py
+tools/adapter_runtime_compare/test_run_compare.py</code></pre></div>
+<p><strong>tools/bake_oft_to_hf.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/bake_oft_to_hf.py</code></pre></div>
+<p><strong>tools/bench_kimi_int4_oft_gemm_latency.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/bench_kimi_int4_oft_gemm_latency.py</code></pre></div>
+<p><strong>tools/check_checkpoint_parity.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/check_checkpoint_parity.py</code></pre></div>
+<p><strong>tools/check_dsv4_checkpoint_parity.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/check_dsv4_checkpoint_parity.py</code></pre></div>
+<p><strong>tools/check_dsv4_deepgemm_cross_repo_parity.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/check_dsv4_deepgemm_cross_repo_parity.py</code></pre></div>
+<p><strong>tools/check_fp8_checkpoint_parity.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/check_fp8_checkpoint_parity.py</code></pre></div>
+<p><strong>tools/check_fp8_runtime_parity.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/check_fp8_runtime_parity.py</code></pre></div>
+<p><strong>tools/check_int4_checkpoint_parity.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/check_int4_checkpoint_parity.py</code></pre></div>
+<p><strong>tools/check_int4_runtime_parity.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/check_int4_runtime_parity.py</code></pre></div>
+<p><strong>tools/check_nvfp4_checkpoint_parity.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/check_nvfp4_checkpoint_parity.py</code></pre></div>
+<p><strong>tools/check_nvfp4_runtime_parity.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/check_nvfp4_runtime_parity.py</code></pre></div>
+<p><strong>tools/check_runtime_step0_parity.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/check_runtime_step0_parity.py</code></pre></div>
+<p><strong>tools/checkpoint_parity_core.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/checkpoint_parity_core.py</code></pre></div>
+<p><strong>tools/checkpoint_parity_utils.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/checkpoint_parity_utils.py</code></pre></div>
+<p><strong>tools/compare_opd_teacher_logprobs.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/compare_opd_teacher_logprobs.py</code></pre></div>
+<p><strong>tools/convert_checkpoints.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/convert_checkpoints.py</code></pre></div>
+<p><strong>tools/convert_dsv4_hf_to_megatron.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/convert_dsv4_hf_to_megatron.py</code></pre></div>
+<p><strong>tools/convert_fp8_checkpoint_direct.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/convert_fp8_checkpoint_direct.py</code></pre></div>
+<p><strong>tools/convert_hf_to_int4_legacy.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/convert_hf_to_int4_legacy.py</code></pre></div>
+<p><strong>tools/convert_int4_checkpoint_direct.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/convert_int4_checkpoint_direct.py</code></pre></div>
+<p><strong>tools/convert_math_eval_to_orbit.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/convert_math_eval_to_orbit.py</code></pre></div>
+<p><strong>tools/convert_nvfp4_checkpoint_direct.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/convert_nvfp4_checkpoint_direct.py</code></pre></div>
+<p><strong>tools/convert_peftarena_data.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/convert_peftarena_data.py</code></pre></div>
+<p><strong>tools/convert_sft_dataset_to_orbit.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/convert_sft_dataset_to_orbit.py</code></pre></div>
+<p><strong>tools/convert_to_hf_legacy.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/convert_to_hf_legacy.py</code></pre></div>
+<p><strong>tools/convert_torch_dist_to_hf_ray.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/convert_torch_dist_to_hf_ray.py</code></pre></div>
+<p><strong>tools/eval_checkpoints_loop.sh</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/eval_checkpoints_loop.sh</code></pre></div>
+<p><strong>tools/eval_checkpoints_once.sh</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/eval_checkpoints_once.sh</code></pre></div>
+<p><strong>tools/gpu_process_memory_sampler.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/gpu_process_memory_sampler.py</code></pre></div>
+<p><strong>tools/lean_rm_oracle.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/lean_rm_oracle.py</code></pre></div>
+<p><strong>tools/lora_regret</strong> (17)</p>
+<div class="codeblock"><pre><code>tools/lora_regret/__init__.py
+tools/lora_regret/analyze.py
+tools/lora_regret/arms.py
+tools/lora_regret/backfill.py
+tools/lora_regret/g4_hf_nll.py
+tools/lora_regret/models.py
+tools/lora_regret/p3_check.py
+tools/lora_regret/plot.py
+tools/lora_regret/preflight.py
+tools/lora_regret/prepare_data.py
+tools/lora_regret/probe.py
+tools/lora_regret/probe_log.py
+tools/lora_regret/prompt_probe.py
+tools/lora_regret/run_paths.py
+tools/lora_regret/smoke.py
+tools/lora_regret/sweep.py
+tools/lora_regret/trace.py</code></pre></div>
+<p><strong>tools/merge_oft_adapters.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/merge_oft_adapters.py</code></pre></div>
+<p><strong>tools/muon_kimi_equivalence.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/muon_kimi_equivalence.py</code></pre></div>
+<p><strong>tools/orthomerge_bridge.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/orthomerge_bridge.py</code></pre></div>
+<p><strong>tools/prepare_swe_subset.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/prepare_swe_subset.py</code></pre></div>
+<p><strong>tools/quantize_to_int4.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/quantize_to_int4.py</code></pre></div>
+<p><strong>tools/rollout_determinism_harness.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/rollout_determinism_harness.py</code></pre></div>
+<p><strong>tools/rollout_timeline</strong> (4)</p>
+<div class="codeblock"><pre><code>tools/rollout_timeline/__init__.py
+tools/rollout_timeline/binning.py
+tools/rollout_timeline/figure.py
+tools/rollout_timeline/probe.py</code></pre></div>
+<p><strong>tools/runtime_step0_parity_utils.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/runtime_step0_parity_utils.py</code></pre></div>
+<p><strong>tools/split_sft_jsonl_partitions.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/split_sft_jsonl_partitions.py</code></pre></div>
+<p><strong>tools/summarize_eval_results.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/summarize_eval_results.py</code></pre></div>
+<p><strong>tools/swe_agent_oracle.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/swe_agent_oracle.py</code></pre></div>
+<p><strong>tools/swe_rm_oracle.py</strong> (1)</p>
+<div class="codeblock"><pre><code>tools/swe_rm_oracle.py</code></pre></div>
+</details>
+<h3 id="layer-2-modified-miles-files-the-entangled-layer">Layer 2 — modified miles files (the entangled layer)<a class="anchor" href="#layer-2-modified-miles-files-the-entangled-layer" aria-hidden="true">#</a></h3>
+<p>Sorted by lines changed vs the fork base. The <strong>conflicts</strong> column marks the 54 files where
+the transfer dry-run against miles@2026-08-27 produced a both-modified conflict — this column
+is the actual work list for any transfer.</p>
+<div class="table-wrap"><table><thead><tr><th class="num">Changed lines</th><th>File</th><th class="center">Conflicts vs latest miles</th></tr></thead><tbody><tr><td class="num">2,103</td><td><code>orbit/utils/arguments.py</code></td><td class="center"></td></tr><tr><td class="num">1,039</td><td><code>orbit/backends/training_utils/loss.py</code></td><td class="center"></td></tr><tr><td class="num">1,028</td><td><code>orbit/backends/megatron_utils/checkpoint.py</code></td><td class="center"></td></tr><tr><td class="num">987</td><td><code>orbit/backends/megatron_utils/actor.py</code></td><td class="center"></td></tr><tr><td class="num">619</td><td><code>orbit/backends/megatron_utils/update_weight/update_weight_from_tensor.py</code></td><td class="center"></td></tr><tr><td class="num">614</td><td><code>orbit/backends/sglang_utils/sglang_engine.py</code></td><td class="center"></td></tr><tr><td class="num">596</td><td><code>orbit/utils/ppo_utils.py</code></td><td class="center"></td></tr><tr><td class="num">473</td><td><code>orbit/rollout/sglang_rollout.py</code></td><td class="center">yes</td></tr><tr><td class="num">467</td><td><code>orbit/backends/megatron_utils/lora_utils.py</code></td><td class="center"></td></tr><tr><td class="num">397</td><td><code>examples/README.md</code></td><td class="center">yes</td></tr><tr><td class="num">392</td><td><code>orbit/backends/megatron_utils/model.py</code></td><td class="center">yes</td></tr><tr><td class="num">369</td><td><code>examples/on_policy_distillation/README.md</code></td><td class="center">yes</td></tr><tr><td class="num">331</td><td><code>orbit/ray/rollout.py</code></td><td class="center"></td></tr><tr><td class="num">318</td><td><code>.github/workflows/pr-test.yml</code></td><td class="center">yes</td></tr><tr><td class="num">287</td><td><code>pyproject.toml</code></td><td class="center"></td></tr><tr><td class="num">275</td><td><code>orbit/backends/training_utils/data.py</code></td><td class="center">yes</td></tr><tr><td class="num">273</td><td><code>train.py</code></td><td class="center">yes</td></tr><tr><td class="num">246</td><td><code>README.md</code></td><td class="center">yes</td></tr><tr><td class="num">242</td><td><code>orbit/rollout/data_source.py</code></td><td class="center"></td></tr><tr><td class="num">219</td><td><code>orbit/backends/training_utils/log_utils.py</code></td><td class="center">yes</td></tr><tr><td class="num">199</td><td><code>tools/convert_hf_to_torch_dist.py</code></td><td class="center">yes</td></tr><tr><td class="num">199</td><td><code>orbit/utils/mask_utils.py</code></td><td class="center"></td></tr><tr><td class="num">183</td><td><code>orbit/utils/types.py</code></td><td class="center">yes</td></tr><tr><td class="num">174</td><td><code>tests/fast/utils/test_lora_arguments.py</code></td><td class="center"></td></tr><tr><td class="num">137</td><td><code>examples/low_precision/README.md</code></td><td class="center"></td></tr><tr><td class="num">133</td><td><code>orbit/backends/sglang_utils/arguments.py</code></td><td class="center"></td></tr><tr><td class="num">133</td><td><code>orbit/backends/megatron_utils/update_weight/common.py</code></td><td class="center">yes</td></tr><tr><td class="num">125</td><td><code>orbit/ray/actor_group.py</code></td><td class="center"></td></tr><tr><td class="num">123</td><td><code>orbit/backends/megatron_utils/bridge_lora_helpers.py</code></td><td class="center"></td></tr><tr><td class="num">121</td><td><code>orbit/rollout/generate_utils/sample_utils.py</code></td><td class="center"></td></tr><tr><td class="num">119</td><td><code>orbit/router/router.py</code></td><td class="center">yes</td></tr><tr><td class="num">113</td><td><code>orbit/rollout/inference_rollout/inference_rollout_eval.py</code></td><td class="center"></td></tr><tr><td class="num">100</td><td><code>orbit/utils/test_utils/mock_sglang_server.py</code></td><td class="center"></td></tr><tr><td class="num">91</td><td><code>orbit/rollout/generate_utils/generate_endpoint_utils.py</code></td><td class="center"></td></tr><tr><td class="num">90</td><td><code>orbit/utils/http_utils.py</code></td><td class="center">yes</td></tr><tr><td class="num">90</td><td><code>orbit/ray/placement_group.py</code></td><td class="center">yes</td></tr><tr><td class="num">76</td><td><code>orbit/backends/megatron_utils/replay_utils.py</code></td><td class="center"></td></tr><tr><td class="num">75</td><td><code>orbit/backends/megatron_utils/update_weight/hf_weight_iterator_bridge.py</code></td><td class="center"></td></tr><tr><td class="num">63</td><td><code>orbit/backends/megatron_utils/model_provider.py</code></td><td class="center">yes</td></tr><tr><td class="num">61</td><td><code>orbit_plugins/mbridge/qwen3_5.py</code></td><td class="center">yes</td></tr><tr><td class="num">58</td><td><code>orbit/utils/replay_base.py</code></td><td class="center">yes</td></tr><tr><td class="num">54</td><td><code>orbit/utils/external_utils/command_utils.py</code></td><td class="center">yes</td></tr><tr><td class="num">41</td><td><code>orbit/utils/distributed_utils.py</code></td><td class="center">yes</td></tr><tr><td class="num">39</td><td><code>orbit/backends/megatron_utils/update_weight/update_weight_from_distributed/mixin.py</code></td><td class="center">yes</td></tr><tr><td class="num">38</td><td><code>requirements.txt</code></td><td class="center">yes</td></tr><tr><td class="num">38</td><td><code>.github/workflows/pr-test.yml.j2</code></td><td class="center"></td></tr><tr><td class="num">37</td><td><code>orbit/backends/megatron_utils/arguments.py</code></td><td class="center"></td></tr><tr><td class="num">35</td><td><code>orbit/utils/reloadable_process_group.py</code></td><td class="center"></td></tr><tr><td class="num">35</td><td><code>orbit/utils/chat_template_utils/tito_tokenizer.py</code></td><td class="center">yes</td></tr><tr><td class="num">32</td><td><code>train_async.py</code></td><td class="center">yes</td></tr><tr><td class="num">32</td><td><code>orbit/utils/memory_utils.py</code></td><td class="center"></td></tr><tr><td class="num">32</td><td><code>orbit/rollout/inference_rollout/inference_rollout_common.py</code></td><td class="center">yes</td></tr><tr><td class="num">32</td><td><code>.github/workflows/release-docs.yaml</code></td><td class="center"></td></tr><tr><td class="num">28</td><td><code>orbit/ray/train_actor.py</code></td><td class="center">yes</td></tr><tr><td class="num">27</td><td><code>orbit/utils/data.py</code></td><td class="center">yes</td></tr><tr><td class="num">27</td><td><code>orbit/rollout/rm_hub/deepscaler.py</code></td><td class="center"></td></tr><tr><td class="num">25</td><td><code>orbit/ray/utils.py</code></td><td class="center"></td></tr><tr><td class="num">25</td><td><code>orbit/backends/megatron_utils/initialize.py</code></td><td class="center">yes</td></tr><tr><td class="num">24</td><td><code>.gitignore</code></td><td class="center">yes</td></tr><tr><td class="num">22</td><td><code>orbit/rollout/rm_hub/__init__.py</code></td><td class="center">yes</td></tr><tr><td class="num">22</td><td><code>orbit/backends/megatron_utils/megatron_to_hf/processors/padding_remover.py</code></td><td class="center"></td></tr><tr><td class="num">21</td><td><code>orbit/rollout/generate_utils/openai_endpoint_utils.py</code></td><td class="center">yes</td></tr><tr><td class="num">18</td><td><code>orbit/utils/wandb_utils.py</code></td><td class="center"></td></tr><tr><td class="num">18</td><td><code>orbit/rollout/generate_hub/multi_turn.py</code></td><td class="center">yes</td></tr><tr><td class="num">18</td><td><code>orbit/backends/training_utils/cp_utils.py</code></td><td class="center"></td></tr><tr><td class="num">18</td><td><code>orbit/backends/megatron_utils/megatron_to_hf/__init__.py</code></td><td class="center">yes</td></tr><tr><td class="num">16</td><td><code>orbit/utils/dumper_utils.py</code></td><td class="center"></td></tr><tr><td class="num">16</td><td><code>orbit/rollout/inference_rollout/inference_rollout_train.py</code></td><td class="center">yes</td></tr><tr><td class="num">16</td><td><code>orbit/backends/megatron_utils/update_weight/update_weight_from_distributed/broadcast.py</code></td><td class="center">yes</td></tr><tr><td class="num">15</td><td><code>orbit/rollout/session/session_server.py</code></td><td class="center"></td></tr><tr><td class="num">15</td><td><code>orbit/rollout/generate_hub/single_turn.py</code></td><td class="center">yes</td></tr><tr><td class="num">15</td><td><code>orbit/backends/megatron_utils/update_weight/hf_weight_iterator_base.py</code></td><td class="center">yes</td></tr><tr><td class="num">14</td><td><code>orbit/utils/tensor_backper.py</code></td><td class="center"></td></tr><tr><td class="num">14</td><td><code>orbit/router/middleware_hub/radix_tree_middleware.py</code></td><td class="center"></td></tr><tr><td class="num">14</td><td><code>orbit/rollout/base_types.py</code></td><td class="center">yes</td></tr><tr><td class="num">14</td><td><code>orbit/backends/megatron_utils/megatron_to_hf/qwen3moe.py</code></td><td class="center"></td></tr><tr><td class="num">13</td><td><code>tools/fp8_cast_bf16.py</code></td><td class="center"></td></tr><tr><td class="num">13</td><td><code>tools/convert_hf_to_fp8.py</code></td><td class="center"></td></tr><tr><td class="num">12</td><td><code>orbit/utils/train_metric_utils.py</code></td><td class="center">yes</td></tr><tr><td class="num">12</td><td><code>orbit/rollout/generate_hub/agentic_tool_call.py</code></td><td class="center">yes</td></tr><tr><td class="num">12</td><td><code>orbit/backends/megatron_utils/update_weight/hf_weight_iterator_direct.py</code></td><td class="center">yes</td></tr><tr><td class="num">11</td><td><code>orbit/utils/metric_utils.py</code></td><td class="center"></td></tr><tr><td class="num">10</td><td><code>setup.py</code></td><td class="center">yes</td></tr><tr><td class="num">10</td><td><code>orbit_plugins/models/qwen3_5.py</code></td><td class="center">yes</td></tr><tr><td class="num">10</td><td><code>orbit/utils/processing_utils.py</code></td><td class="center">yes</td></tr><tr><td class="num">10</td><td><code>orbit/rollout/session/sessions.py</code></td><td class="center">yes</td></tr><tr><td class="num">10</td><td><code>orbit/rollout/session/linear_trajectory.py</code></td><td class="center">yes</td></tr><tr><td class="num">9</td><td><code>orbit/utils/misc.py</code></td><td class="center">yes</td></tr><tr><td class="num">8</td><td><code>orbit/utils/prometheus_utils.py</code></td><td class="center"></td></tr><tr><td class="num">8</td><td><code>orbit/utils/chat_template_utils/__init__.py</code></td><td class="center">yes</td></tr><tr><td class="num">6</td><td><code>orbit_plugins/megatron_bridge/__init__.py</code></td><td class="center"></td></tr><tr><td class="num">6</td><td><code>orbit/utils/typer_utils.py</code></td><td class="center">yes</td></tr><tr><td class="num">6</td><td><code>orbit/utils/tracking_utils.py</code></td><td class="center"></td></tr><tr><td class="num">6</td><td><code>orbit/utils/test_utils/mock_trajectories.py</code></td><td class="center"></td></tr><tr><td class="num">6</td><td><code>orbit/rollout/inference_rollout/compatibility.py</code></td><td class="center"></td></tr><tr><td class="num">6</td><td><code>orbit/rollout/generate_hub/benchmarkers.py</code></td><td class="center"></td></tr><tr><td class="num">5</td><td><code>orbit/backends/megatron_utils/__init__.py</code></td><td class="center"></td></tr><tr><td class="num">4</td><td><code>tools/convert_torch_dist_to_hf.py</code></td><td class="center">yes</td></tr><tr><td class="num">4</td><td><code>orbit_plugins/models/glm5/glm5.py</code></td><td class="center">yes</td></tr><tr><td class="num">4</td><td><code>orbit/utils/test_utils/mock_tools.py</code></td><td class="center">yes</td></tr><tr><td class="num">4</td><td><code>orbit/utils/test_utils/chat_template_verify.py</code></td><td class="center">yes</td></tr><tr><td class="num">4</td><td><code>orbit/utils/profile_utils.py</code></td><td class="center"></td></tr><tr><td class="num">4</td><td><code>orbit/utils/environ.py</code></td><td class="center">yes</td></tr><tr><td class="num">4</td><td><code>orbit/rollout/sft_rollout.py</code></td><td class="center"></td></tr><tr><td class="num">4</td><td><code>orbit/rollout/generate_utils/tool_call_utils.py</code></td><td class="center"></td></tr><tr><td class="num">4</td><td><code>orbit/rollout/filter_hub/dynamic_sampling_filters.py</code></td><td class="center"></td></tr><tr><td class="num">4</td><td><code>orbit/backends/megatron_utils/update_weight/update_weight_from_distributed/p2p.py</code></td><td class="center"></td></tr><tr><td class="num">4</td><td><code>orbit/backends/megatron_utils/parallel.py</code></td><td class="center"></td></tr><tr><td class="num">4</td><td><code>orbit/backends/megatron_utils/misc_utils.py</code></td><td class="center"></td></tr><tr><td class="num">4</td><td><code>orbit/backends/megatron_utils/megatron_to_hf/qwen2.py</code></td><td class="center"></td></tr><tr><td class="num">4</td><td><code>orbit/backends/megatron_utils/megatron_to_hf/processors/quantizer_fp8.py</code></td><td class="center"></td></tr><tr><td class="num">4</td><td><code>orbit/backends/megatron_utils/megatron_to_hf/glm4.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit_plugins/models/qwen3_next.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit_plugins/models/hf_attention.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit_plugins/models/cp_utils.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit/utils/tensorboard_utils.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit/utils/iter_utils.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit/utils/eval_config.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit/utils/env_report.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit/utils/__init__.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit/rollout/generate_hub/__init__.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit/ray/ray_actor.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit/backends/training_utils/ci_utils.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit/backends/megatron_utils/megatron_to_hf/qwen3_next.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit/backends/megatron_utils/megatron_to_hf/qwen3_5.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit/backends/megatron_utils/megatron_to_hf/processors/quantizer_mxfp8.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit/backends/megatron_utils/megatron_to_hf/llama.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit/backends/megatron_utils/megatron_to_hf/glm4moe.py</code></td><td class="center"></td></tr><tr><td class="num">2</td><td><code>orbit/backends/megatron_utils/ci_utils.py</code></td><td class="center"></td></tr><tr><td class="num">1</td><td><code>tools/__init__.py</code></td><td class="center"></td></tr><tr><td class="num">1</td><td><code>tests/__init__.py</code></td><td class="center"></td></tr><tr><td class="num">1</td><td><code>orbit_plugins/__init__.py</code></td><td class="center"></td></tr><tr><td class="num">1</td><td><code>examples/__init__.py</code></td><td class="center"></td></tr></tbody></table></div>
+<h3 id="layer-3-dropped-miles-files">Layer 3 — dropped miles files<a class="anchor" href="#layer-3-dropped-miles-files" aria-hidden="true">#</a></h3>
+<div class="table-wrap"><table><thead><tr><th class="num">Dropped</th><th>Directory</th></tr></thead><tbody><tr><td class="num">69</td><td><code>tests/fast/</code></td></tr><tr><td class="num">43</td><td><code>tests/e2e/</code></td></tr><tr><td class="num">39</td><td><code>scripts/models/</code></td></tr><tr><td class="num">24</td><td><code>docs/en/</code></td></tr><tr><td class="num">20</td><td><code>examples/eval/</code></td></tr><tr><td class="num">14</td><td><code>orbit/backends/</code></td></tr><tr><td class="num">11</td><td><code>examples/experimental/</code></td></tr><tr><td class="num">9</td><td><code>examples/geo3k_vlm_multi_turn/</code></td></tr><tr><td class="num">8</td><td><code>examples/retool/</code></td></tr><tr><td class="num">8</td><td><code>examples/search-r1/</code></td></tr><tr><td class="num">7</td><td><code>docs/_static/</code></td></tr><tr><td class="num">7</td><td><code>examples/formal_math/</code></td></tr><tr><td class="num">7</td><td><code>examples/tau-bench/</code></td></tr><tr><td class="num">7</td><td><code>examples/true_on_policy/</code></td></tr><tr><td class="num">6</td><td><code>examples/low_precision/</code></td></tr><tr><td class="num">6</td><td><code>examples/multi_agent/</code></td></tr><tr><td class="num">5</td><td><code>examples/train_infer_mismatch_helper/</code></td></tr><tr><td class="num">5</td><td><code>tests/ci/</code></td></tr><tr><td class="num">4</td><td><code>examples/eval_multi_task/</code></td></tr><tr><td class="num">4</td><td><code>examples/geo3k_vlm/</code></td></tr><tr><td class="num">4</td><td><code>examples/strands_sglang/</code></td></tr><tr><td class="num">4</td><td><code>orbit/utils/</code></td></tr><tr><td class="num">3</td><td><code>docker/glm5/</code></td></tr><tr><td class="num">3</td><td><code>docker/patch/</code></td></tr><tr><td class="num">3</td><td><code>examples/fully_async/</code></td></tr><tr><td class="num">3</td><td><code>examples/lora/</code></td></tr><tr><td class="num">3</td><td><code>examples/openai_format/</code></td></tr><tr><td class="num">3</td><td><code>examples/retool_v2/</code></td></tr><tr><td class="num">3</td><td><code>examples/true_on_policy_vlm/</code></td></tr><tr><td class="num">2</td><td><code>docker/amd_patch/</code></td></tr><tr><td class="num">2</td><td><code>examples/DrGRPO/</code></td></tr><tr><td class="num">2</td><td><code>examples/on_policy_distillation/</code></td></tr><tr><td class="num">2</td><td><code>examples/reproducibility/</code></td></tr><tr><td class="num">1</td><td><code>.github/CODEOWNERS/</code></td></tr><tr><td class="num">1</td><td><code>.github/workflows/</code></td></tr><tr><td class="num">1</td><td><code>(root)/</code></td></tr><tr><td class="num">1</td><td><code>docker/Dockerfile/</code></td></tr><tr><td class="num">1</td><td><code>docker/Dockerfile.rocm_MI300/</code></td></tr><tr><td class="num">1</td><td><code>docker/Dockerfile.rocm_MI350-5/</code></td></tr><tr><td class="num">1</td><td><code>docker/Dockerfile_GB300/</code></td></tr><tr><td class="num">1</td><td><code>docker/README.md/</code></td></tr><tr><td class="num">1</td><td><code>docker/build.py/</code></td></tr><tr><td class="num">1</td><td><code>docker/justfile/</code></td></tr><tr><td class="num">1</td><td><code>docker/version.txt/</code></td></tr><tr><td class="num">1</td><td><code>docs/README.md/</code></td></tr><tr><td class="num">1</td><td><code>docs/build.sh/</code></td></tr><tr><td class="num">1</td><td><code>docs/build_all.sh/</code></td></tr><tr><td class="num">1</td><td><code>docs/conf.py/</code></td></tr><tr><td class="num">1</td><td><code>docs/requirements.txt/</code></td></tr><tr><td class="num">1</td><td><code>docs/serve.sh/</code></td></tr><tr><td class="num">1</td><td><code>imgs/arch.png/</code></td></tr><tr><td class="num">1</td><td><code>imgs/miles_logo.png/</code></td></tr><tr><td class="num">1</td><td><code>imgs/miles_square.png/</code></td></tr><tr><td class="num">1</td><td><code>scripts/amd/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-deepseek-r1.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-glm4-9B-4xgpu-radixtree.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-glm4-9B.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-glm4.5-355B-A32B.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-glm4.7-flash.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-gpt-oss-20b-bf16.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-gptoss-20b-fsdp.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-kimi-k2-Instruct.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-kimi-k2-Thinking.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-mimo-7B-rl-eagle.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-moonlight-16B-A3B.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-qwen3-235B-A22B-sft.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-qwen3-235B-A22B.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-qwen3-32B.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-qwen3-4B-base-sft.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-qwen3-4B-fsdp.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-qwen3-4B.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-qwen3-4B_4xgpu-radixtree.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-qwen3-4B_4xgpu.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-qwen3-next-80B-A3B-8gpus.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-qwen3-next-80B-A3B-fsdp.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-qwen3-next-80B-A3B.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-qwen3.5-27B.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-qwen3.5-35B-A3B-mtp.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-qwen3.5-4B.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run-qwen3.5-9B.sh/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run_deepseek.py/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run_glm45_355b_a32b.py/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run_glm47_flash.py/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run_glm5_744b_a40b.py/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run_mcore_fsdp.py/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run_qwen3_30b_a3b.py/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run_qwen3_4b.py/</code></td></tr><tr><td class="num">1</td><td><code>scripts/run_qwen3_5_35b_a3b_mtp_cp2_ep8.py/</code></td></tr><tr><td class="num">1</td><td><code>scripts/tools/</code></td></tr><tr><td class="num">1</td><td><code>tests/test_chunked_gae.py/</code></td></tr><tr><td class="num">1</td><td><code>tests/test_external_rollout.py/</code></td></tr><tr><td class="num">1</td><td><code>tests/test_fsdp_import.py/</code></td></tr><tr><td class="num">1</td><td><code>tests/test_fused_experts_backward.py/</code></td></tr><tr><td class="num">1</td><td><code>tests/test_gspo.sh/</code></td></tr><tr><td class="num">1</td><td><code>tests/utils/</code></td></tr><tr><td class="num">1</td><td><code>tools/convert_hf_to_int4.py/</code></td></tr><tr><td class="num">1</td><td><code>tools/convert_hf_to_int4_direct.py/</code></td></tr><tr><td class="num">1</td><td><code>tools/convert_hf_to_nvfp4.py/</code></td></tr><tr><td class="num">1</td><td><code>tools/convert_to_hf.py/</code></td></tr></tbody></table></div>
+<details>
+<summary>All 406 dropped files</summary>
+<div class="codeblock"><pre><code>.github/CODEOWNERS
+.github/workflows/docker-build.yml
+.gitmodules
+docker/Dockerfile
+docker/Dockerfile.rocm_MI300
+docker/Dockerfile.rocm_MI350-5
+docker/Dockerfile_GB300
+docker/README.md
+docker/amd_patch/latest/megatron.patch
+docker/amd_patch/sglv0.5.10/megatron.patch
+docker/build.py
+docker/glm5/Dockerfile.dev-glm
+docker/glm5/Dockerfile_glm5
+docker/glm5/transformers.patch
+docker/justfile
+docker/patch/cu13/patch_fla_blackwell.py
+docker/patch/latest/megatron.patch
+docker/patch/latest/sglang.patch
+docker/version.txt
+docs/README.md
+docs/_static/css/custom_log.css
+docs/_static/css/readthedocs.css
+docs/_static/image/blogs/release_v0.1.0/cuda_vmm.png
+docs/_static/image/blogs/release_v0.1.0/overrall.png
+docs/_static/image/logo.ico
+docs/_static/image/logo.jpg
+docs/_static/js/lang-toggle.js
+docs/build.sh
+docs/build_all.sh
+docs/conf.py
+docs/en/advanced/arch-support-beyond-megatron.md
+docs/en/advanced/fault-tolerance.md
+docs/en/advanced/miles-router.md
+docs/en/advanced/miles_server_args.md
+docs/en/advanced/p2p-weight-transfer.md
+docs/en/advanced/pd-disaggregation.md
+docs/en/advanced/speculative-decoding.md
+docs/en/agentic/chat_template_verification.md
+docs/en/developer_guide/debug.md
+docs/en/developer_guide/migration.md
+docs/en/examples/deepseek-r1.md
+docs/en/examples/glm4-9B.md
+docs/en/examples/glm4.5-355B-A32B.md
+docs/en/examples/qwen3-30B-A3B.md
+docs/en/examples/qwen3-4B.md
+docs/en/examples/qwen3-4b-base-openhermes.md
+docs/en/get_started/customization.md
+docs/en/get_started/gen_endpoint.md
+docs/en/get_started/oai_endpoint.md
+docs/en/get_started/qa.md
+docs/en/get_started/quick_start.md
+docs/en/get_started/usage.md
+docs/en/index.rst
+docs/en/platform_support/amd_tutorial.md
+docs/requirements.txt
+docs/serve.sh
+examples/DrGRPO/README.md
+examples/DrGRPO/custom_reducer.py
+examples/eval/__init__.py
+examples/eval/eval_delegate.py
+examples/eval/eval_delegate_rollout.py
+examples/eval/nemo_skills/README.md
+examples/eval/nemo_skills/__init__.py
+examples/eval/nemo_skills/config/local_cluster.yaml
+examples/eval/nemo_skills/skills_client.py
+examples/eval/nemo_skills/skills_config.py
+examples/eval/nemo_skills/skills_server.py
+examples/eval/scripts/eval_tb_example.yaml
+examples/eval/scripts/multi_tasks.yaml
+examples/eval/scripts/run-eval-tb-qwen.sh
+examples/eval/scripts/run-qwen3-32B.sh
+examples/eval/scripts/run-qwen3-4B.sh
+examples/eval/terminal_bench/README.md
+examples/eval/terminal_bench/__init__.py
+examples/eval/terminal_bench/requirements.txt
+examples/eval/terminal_bench/tb_client.py
+examples/eval/terminal_bench/tb_config.py
+examples/eval/terminal_bench/tb_server.py
+examples/eval_multi_task/README.md
+examples/eval_multi_task/multi_task.sh
+examples/eval_multi_task/multi_task.yaml
+examples/eval_multi_task/requirements_ifbench.txt
+examples/experimental/README.md
+examples/experimental/swe-agent-v2/README.md
+examples/experimental/swe-agent-v2/download_and_process_data.py
+examples/experimental/swe-agent-v2/generate.py
+examples/experimental/swe-agent-v2/prepare_harbor_tasks.py
+examples/experimental/swe-agent-v2/run.py
+examples/experimental/swe-agent-v2/swe_agent_function.py
+examples/experimental/swe-agent/README.md
+examples/experimental/swe-agent/download_and_process_data.py
+examples/experimental/swe-agent/generate_with_swe_agent.py
+examples/experimental/swe-agent/run-qwen3-4b-instruct.sh
+examples/formal_math/single_round/README.md
+examples/formal_math/single_round/kimina_wrapper.py
+examples/formal_math/single_round/prepare_data.py
+examples/formal_math/single_round/reward_fn.py
+examples/formal_math/single_round/run.py
+examples/formal_math/single_round/run_minimal.py
+examples/formal_math/single_round/run_sft.py
+examples/fully_async/README.md
+examples/fully_async/fully_async_rollout.py
+examples/fully_async/run-qwen3-4b-fully_async.sh
+examples/geo3k_vlm/README.md
+examples/geo3k_vlm/fsdp_vs_megatron.png
+examples/geo3k_vlm/run_geo3k_vlm.sh
+examples/geo3k_vlm/run_geo3k_vlm_sft.sh
+examples/geo3k_vlm_multi_turn/README.md
+examples/geo3k_vlm_multi_turn/__init__.py
+examples/geo3k_vlm_multi_turn/base_env.py
+examples/geo3k_vlm_multi_turn/env_geo3k.py
+examples/geo3k_vlm_multi_turn/geo3k_vlm_multi_turn_config.yaml
+examples/geo3k_vlm_multi_turn/geo3k_vlm_multi_turn_reward.png
+examples/geo3k_vlm_multi_turn/rollout.py
+examples/geo3k_vlm_multi_turn/rollout_experiment_result_megatron.png
+examples/geo3k_vlm_multi_turn/run_geo3k_vlm_multi_turn.py
+examples/lora/run-qwen2.5-0.5B-megatron-lora.sh
+examples/lora/run-qwen3-4B-megatron-lora.sh
+examples/lora/run-qwen3-4b-megatron-lora-result.sh
+examples/low_precision/run-kimi-k2-Thinking-int4.sh
+examples/low_precision/run-moonlight-16B-A3B-int4.sh
+examples/low_precision/run-qwen3-235B-A22B-int4.sh
+examples/low_precision/run-qwen3-30B-A3B-int4.sh
+examples/low_precision/run-qwen3-30b-a3b-fp8-two-nodes.sh
+examples/low_precision/run-qwen3-4b-fp8.sh
+examples/multi_agent/README.md
+examples/multi_agent/__init__.py
+examples/multi_agent/agent_system.py
+examples/multi_agent/prompts.py
+examples/multi_agent/rollout_with_multi_agents.py
+examples/multi_agent/run-qwen3-30B-A3B-multi-agent.sh
+examples/on_policy_distillation/on_policy_distillation.py
+examples/on_policy_distillation/run-qwen3-8B-opd.sh
+examples/openai_format/__init__.py
+examples/openai_format/dapo_math.py
+examples/openai_format/run-qwen3-4B.sh
+examples/reproducibility/README.md
+examples/reproducibility/run-qwen2.5-0.5B-gsm8k.sh
+examples/retool/README.md
+examples/retool/generate_with_retool.py
+examples/retool/requirements.txt
+examples/retool/retool_qwen3_4b_rl.sh
+examples/retool/retool_qwen3_4b_sft.sh
+examples/retool/rl_data_preprocess.py
+examples/retool/sft_data_processing.py
+examples/retool/tool_sandbox.py
+examples/retool_v2/README.md
+examples/retool_v2/run_retool_multi_turn.py
+examples/retool_v2/tool_sandbox.py
+examples/search-r1/README.md
+examples/search-r1/generate_with_search.py
+examples/search-r1/google_search_server.py
+examples/search-r1/local_dense_retriever/download.py
+examples/search-r1/local_dense_retriever/retrieval_server.py
+examples/search-r1/local_search_server.py
+examples/search-r1/qa_em_format.py
+examples/search-r1/run_qwen2.5_3B.sh
+examples/strands_sglang/README.md
+examples/strands_sglang/generate_with_strands.py
+examples/strands_sglang/requirements.txt
+examples/strands_sglang/strands_qwen3_8b.sh
+examples/tau-bench/README.md
+examples/tau-bench/generate_with_tau.py
+examples/tau-bench/openai_tool_adapter.py
+examples/tau-bench/run_qwen3_4B.sh
+examples/tau-bench/sglang_tool_parser.py
+examples/tau-bench/tau1_mock.py
+examples/tau-bench/trainable_agents.py
+examples/train_infer_mismatch_helper/README.md
+examples/train_infer_mismatch_helper/mis.py
+examples/train_infer_mismatch_helper/mis.yaml
+examples/train_infer_mismatch_helper/run-qwen3-4b-fsdp-mis.sh
+examples/train_infer_mismatch_helper/run-qwen3-4b-mis.sh
+examples/true_on_policy/README.md
+examples/true_on_policy/run_simple.py
+examples/true_on_policy/src/aime.png
+examples/true_on_policy/src/raw_reward.png
+examples/true_on_policy/src/rollout_time.png
+examples/true_on_policy/src/step_time.png
+examples/true_on_policy/src/train_rollout_abs_diff.png
+examples/true_on_policy_vlm/README.md
+examples/true_on_policy_vlm/diff.png
+examples/true_on_policy_vlm/run_simple.py
+imgs/arch.png
+imgs/miles_logo.png
+imgs/miles_square.png
+orbit/backends/experimental/__init__.py
+orbit/backends/experimental/fsdp_utils/__init__.py
+orbit/backends/experimental/fsdp_utils/actor.py
+orbit/backends/experimental/fsdp_utils/arguments.py
+orbit/backends/experimental/fsdp_utils/checkpoint.py
+orbit/backends/experimental/fsdp_utils/kernels/__init__.py
+orbit/backends/experimental/fsdp_utils/kernels/fused_experts.py
+orbit/backends/experimental/fsdp_utils/kernels/fused_moe_triton_backward_kernels.py
+orbit/backends/experimental/fsdp_utils/lr_scheduler.py
+orbit/backends/experimental/fsdp_utils/models/__init__.py
+orbit/backends/experimental/fsdp_utils/models/qwen3_moe.py
+orbit/backends/experimental/fsdp_utils/models/qwen3_moe_hf.py
+orbit/backends/experimental/fsdp_utils/parallel.py
+orbit/backends/experimental/fsdp_utils/update_weight_utils.py
+orbit/utils/debug_utils/__init__.py
+orbit/utils/debug_utils/display_debug_rollout_data.py
+orbit/utils/debug_utils/replay_reward_fn.py
+orbit/utils/debug_utils/send_to_sglang.py
+scripts/amd/run-qwen3-4B-amd.sh
+scripts/models/deepseek-v3-20layer.sh
+scripts/models/deepseek-v3-5layer.sh
+scripts/models/deepseek-v3.sh
+scripts/models/glm4-32B.sh
+scripts/models/glm4-9B.sh
+scripts/models/glm4.5-106B-A12B.sh
+scripts/models/glm4.5-355B-A32B.sh
+scripts/models/glm4.7-flash.sh
+scripts/models/glm5-744B-A40B.sh
+scripts/models/glm5-744B-A40B_20layer.sh
+scripts/models/glm5-744B-A40B_4layer.sh
+scripts/models/gpt-oss-20b.sh
+scripts/models/kimi-k2-thinking.sh
+scripts/models/kimi-k2.sh
+scripts/models/llama3.1-8B-Instruct.sh
+scripts/models/llama3.2-3B-Instruct-amd.sh
+scripts/models/llama3.2-3B-Instruct.sh
+scripts/models/mimo-7B-rl.sh
+scripts/models/moonlight.sh
+scripts/models/qwen2.5-0.5B.sh
+scripts/models/qwen2.5-1.5B.sh
+scripts/models/qwen2.5-32B.sh
+scripts/models/qwen2.5-3B.sh
+scripts/models/qwen2.5-7B.sh
+scripts/models/qwen3-0.6B.sh
+scripts/models/qwen3-1.7B.sh
+scripts/models/qwen3-14B.sh
+scripts/models/qwen3-235B-A22B.sh
+scripts/models/qwen3-30B-A3B-5layer.sh
+scripts/models/qwen3-30B-A3B.sh
+scripts/models/qwen3-32B.sh
+scripts/models/qwen3-4B-Instruct-2507.sh
+scripts/models/qwen3-4B.sh
+scripts/models/qwen3-8B.sh
+scripts/models/qwen3-next-80B-A3B.sh
+scripts/models/qwen3.5-27B.sh
+scripts/models/qwen3.5-35B-A3B.sh
+scripts/models/qwen3.5-4B.sh
+scripts/models/qwen3.5-9B.sh
+scripts/run-deepseek-r1.sh
+scripts/run-glm4-9B-4xgpu-radixtree.sh
+scripts/run-glm4-9B.sh
+scripts/run-glm4.5-355B-A32B.sh
+scripts/run-glm4.7-flash.sh
+scripts/run-gpt-oss-20b-bf16.sh
+scripts/run-gptoss-20b-fsdp.sh
+scripts/run-kimi-k2-Instruct.sh
+scripts/run-kimi-k2-Thinking.sh
+scripts/run-mimo-7B-rl-eagle.sh
+scripts/run-moonlight-16B-A3B.sh
+scripts/run-qwen3-235B-A22B-sft.sh
+scripts/run-qwen3-235B-A22B.sh
+scripts/run-qwen3-32B.sh
+scripts/run-qwen3-4B-base-sft.sh
+scripts/run-qwen3-4B-fsdp.sh
+scripts/run-qwen3-4B.sh
+scripts/run-qwen3-4B_4xgpu-radixtree.sh
+scripts/run-qwen3-4B_4xgpu.sh
+scripts/run-qwen3-next-80B-A3B-8gpus.sh
+scripts/run-qwen3-next-80B-A3B-fsdp.sh
+scripts/run-qwen3-next-80B-A3B.sh
+scripts/run-qwen3.5-27B.sh
+scripts/run-qwen3.5-35B-A3B-mtp.sh
+scripts/run-qwen3.5-4B.sh
+scripts/run-qwen3.5-9B.sh
+scripts/run_deepseek.py
+scripts/run_glm45_355b_a32b.py
+scripts/run_glm47_flash.py
+scripts/run_glm5_744b_a40b.py
+scripts/run_mcore_fsdp.py
+scripts/run_qwen3_30b_a3b.py
+scripts/run_qwen3_4b.py
+scripts/run_qwen3_5_35b_a3b_mtp_cp2_ep8.py
+scripts/tools/verify_chat_template.py
+tests/ci/README.md
+tests/ci/github_runner/.env.example
+tests/ci/github_runner/.gitignore
+tests/ci/github_runner/docker-compose.yml
+tests/ci/gpu_lock_exec.py
+tests/e2e/.gitkeep
+tests/e2e/__init__.py
+tests/e2e/ckpt/test_glm47_flash_ckpt.py
+tests/e2e/ckpt/test_qwen3_4B_ckpt.py
+tests/e2e/conftest_dumper.py
+tests/e2e/fsdp/test_qwen3_0.6B_fsdp_distributed.py
+tests/e2e/fsdp/test_qwen3_0.6B_megatron_fsdp_align.py
+tests/e2e/fsdp/test_qwen3_4B_fsdp_true_on_policy.py
+tests/e2e/fsdp/test_qwen3_vl_4B_fsdp.py
+tests/e2e/long/test_qwen2.5_0.5B_gsm8k.py
+tests/e2e/long/test_qwen2.5_0.5B_gsm8k_async.py
+tests/e2e/lora/test_lora_qwen2.5_0.5B.py
+tests/e2e/megatron/test_glm47_flash_r3_mtp.py
+tests/e2e/megatron/test_glm5_744b_a40b_4layer.py
+tests/e2e/megatron/test_mimo_7B_mtp_only_grad.py
+tests/e2e/megatron/test_moonlight_16B_A3B.py
+tests/e2e/megatron/test_moonlight_16B_A3B_r3.py
+tests/e2e/megatron/test_quick_start_glm4_9B.py
+tests/e2e/megatron/test_qwen3_30B_A3B.py
+tests/e2e/megatron/test_qwen3_30B_A3B_r3.py
+tests/e2e/megatron/test_qwen3_4B_p2p.py
+tests/e2e/megatron/test_qwen3_4B_ppo.py
+tests/e2e/megatron/test_qwen3_5_35B_A3B_cp.py
+tests/e2e/megatron/test_qwen3_5_mtp_bridge_mapping.py
+tests/e2e/precision/test_hf_attention_cp_relayout.py
+tests/e2e/precision/test_qwen3_0.6B_parallel_check.py
+tests/e2e/precision/test_qwen3_5_cp_correctness.py
+tests/e2e/sglang/__init__.py
+tests/e2e/sglang/test_chat_input_ids_equivalence.py
+tests/e2e/sglang/test_session_server_tool_call.py
+tests/e2e/sglang/test_tito_logprob_equivalence.py
+tests/e2e/sglang/utils/__init__.py
+tests/e2e/sglang/utils/logprob_verify_generate.py
+tests/e2e/sglang/utils/session_tool_agent.py
+tests/e2e/sglang/utils/sglang_server.py
+tests/e2e/sglang_config/test_sglang_config.py
+tests/e2e/sglang_config/test_sglang_config_mixed_offload.py
+tests/e2e/sglang_config/test_sglang_config_mixed_offload_ft.py
+tests/e2e/short/__init__.py
+tests/e2e/short/test_dumper.py
+tests/e2e/short/test_qwen2.5_0.5B_gsm8k_async_short.py
+tests/e2e/short/test_qwen2.5_0.5B_gsm8k_short.py
+tests/e2e/short/test_qwen3_0.6B_fsdp_colocated_2xGPU.py
+tests/fast/backends/__init__.py
+tests/fast/backends/megatron_utils/__init__.py
+tests/fast/backends/megatron_utils/test_lora_checkpoint_helpers.py
+tests/fast/backends/megatron_utils/test_lora_hf_weight_iterator.py
+tests/fast/backends/megatron_utils/test_lora_model_branches.py
+tests/fast/backends/megatron_utils/test_lora_update_weight.py
+tests/fast/backends/megatron_utils/test_lora_utils.py
+tests/fast/backends/megatron_utils/test_lora_weight_sync_validation.py
+tests/fast/backends/training_utils/__init__.py
+tests/fast/conftest.py
+tests/fast/fixtures/__init__.py
+tests/fast/fixtures/generation_fixtures.py
+tests/fast/fixtures/rollout_fixtures.py
+tests/fast/rollout/generate_hub/__init__.py
+tests/fast/rollout/generate_hub/test_multi_turn.py
+tests/fast/rollout/generate_hub/test_single_turn.py
+tests/fast/rollout/generate_hub/test_tool_call_utils.py
+tests/fast/rollout/generate_utils/__init__.py
+tests/fast/rollout/generate_utils/test_openai_endpoint_utils.py
+tests/fast/rollout/generate_utils/test_sample_utils.py
+tests/fast/rollout/inference_rollout/__init__.py
+tests/fast/rollout/inference_rollout/conftest.py
+tests/fast/rollout/inference_rollout/integration/__init__.py
+tests/fast/rollout/inference_rollout/integration/test_agent_metadata.py
+tests/fast/rollout/inference_rollout/integration/test_basic.py
+tests/fast/rollout/inference_rollout/integration/test_deterministic.py
+tests/fast/rollout/inference_rollout/integration/test_dynamic_filter.py
+tests/fast/rollout/inference_rollout/integration/test_group_rm.py
+tests/fast/rollout/inference_rollout/integration/test_multi_sample.py
+tests/fast/rollout/inference_rollout/integration/test_multi_turn.py
+tests/fast/rollout/inference_rollout/integration/test_over_sampling.py
+tests/fast/rollout/inference_rollout/integration/test_sample_filter.py
+tests/fast/rollout/inference_rollout/integration/test_semaphore.py
+tests/fast/rollout/inference_rollout/integration/utils.py
+tests/fast/rollout/inference_rollout/test_compatibility.py
+tests/fast/rollout/rm_hub/__init__.py
+tests/fast/rollout/rm_hub/test_deepscaler.py
+tests/fast/rollout/rm_hub/test_f1.py
+tests/fast/rollout/rm_hub/test_gpqa.py
+tests/fast/rollout/rm_hub/test_math_dapo_utils.py
+tests/fast/rollout/rm_hub/test_math_utils.py
+tests/fast/rollout/rm_hub/test_rm_hub.py
+tests/fast/router/__init__.py
+tests/fast/router/test_linear_trajectory.py
+tests/fast/router/test_router.py
+tests/fast/router/test_session_pretokenized_e2e.py
+tests/fast/router/test_session_race_conditions.py
+tests/fast/router/test_sessions.py
+tests/fast/test_megatron_cli_flags.py
+tests/fast/utils/__init__.py
+tests/fast/utils/chat_template_utils/__init__.py
+tests/fast/utils/chat_template_utils/test_autofix.py
+tests/fast/utils/chat_template_utils/test_pretokenized_chat.py
+tests/fast/utils/chat_template_utils/test_template.py
+tests/fast/utils/chat_template_utils/test_tito_tokenizer.py
+tests/fast/utils/chat_template_utils/test_token_seq_comparator.py
+tests/fast/utils/test_arguments.py
+tests/fast/utils/test_async_utils.py
+tests/fast/utils/test_dumper_utils.py
+tests/fast/utils/test_env_report.py
+tests/fast/utils/test_http_utils.py
+tests/fast/utils/test_logging_utils.py
+tests/fast/utils/test_mask_utils.py
+tests/fast/utils/test_misc.py
+tests/fast/utils/test_quantizer_ci.py
+tests/fast/utils/test_types.py
+tests/fast/utils/test_utils/__init__.py
+tests/fast/utils/test_utils/test_mock_sglang_server.py
+tests/fast/utils/test_utils/test_mock_tools.py
+tests/test_chunked_gae.py
+tests/test_external_rollout.py
+tests/test_fsdp_import.py
+tests/test_fused_experts_backward.py
+tests/test_gspo.sh
+tests/utils/test_sglang_config.py
+tools/convert_hf_to_int4.py
+tools/convert_hf_to_int4_direct.py
+tools/convert_hf_to_nvfp4.py
+tools/convert_to_hf.py</code></pre></div>
+</details>
+<h2 id="transfer-dry-run-orbits-layer-onto-miles2026-08-27">Transfer dry-run: orbit's layer onto miles@2026-08-27<a class="anchor" href="#transfer-dry-run-orbits-layer-onto-miles2026-08-27" aria-hidden="true">#</a></h2>
+<p>A real merge of <code>refs/miles/upstream</code> (dbbab156) into <code>miles-graft</code> was executed in a
+throwaway worktree and aborted after the census:</p>
+<div class="table-wrap"><table><thead><tr><th>Outcome</th><th class="num">Count</th><th>Meaning</th></tr></thead><tbody><tr><td>Auto-added</td><td class="num">1,094</td><td>New upstream files, taken cleanly</td></tr><tr><td>Auto-merged</td><td class="num">59</td><td>Upstream changes merged into lightly-touched files</td></tr><tr><td><strong>Both-modified conflicts</strong></td><td class="num"><strong>56 (45 code, 11 docs/CI)</strong></td><td>The real merge decisions</td></tr><tr><td>Delete/modify</td><td class="num">216</td><td>Orbit dropped, miles touched — resolve: keep deleted</td></tr><tr><td>Add/delete adjudications</td><td class="num">~326</td><td>Mostly mechanical (renamed-dir placement, upstream adds)</td></tr></tbody></table></div>
+<p>The 45 code conflicts concentrate exactly where orbit rewrote the core: <code>initialize.py</code>,
+<code>model.py</code>, <code>model_provider.py</code>, the <code>update_weight/</code> chain, rollout entry points. Everything
+else the merge machinery handles because the graft gives git true ancestry.</p>
+<p><strong>Recipe</strong> (bounded at ~45 real decisions):</p>
+<div class="codeblock"><pre><code>git checkout -b transfer-to-latest miles-graft
+git -c merge.renameLimit=20000 merge refs/miles/upstream
+# resolve the 45 code conflicts; keep-deleted for the 216 delete/modify</code></pre></div>
+<h2 id="recommendation">Recommendation<a class="anchor" href="#recommendation" aria-hidden="true">#</a></h2>
+<p>Layer 1 needs no disentangling — it is already a clean overlay. The transfer cost is the 54
+bolded files in Layer 2, and it is a bounded, git-assisted merge, not a rewrite. Upstream
+uptake in the other direction stays selective: pick surgical fixes touching the 87 identical</p>
+<ul><li>72 lightly-modified shared files, skip anything in the rewritten core (validated on<p>4152f61<code>, adopted;</code>cd464a1c4`, mostly duplicate of our own v0.5.18 work).</p></li></ul>
+<footer class="doc-footer">Generated 2026-08-29 03:09 CEST by htmlreport</footer>
+</main>
+</div>
+</div>
+<script>
+(function () {
+  var root = document.documentElement, key = 'htmlreport-theme';
+  try { root.setAttribute('data-theme', localStorage.getItem(key) || 'light'); } catch (e) {}
+  var btn = document.querySelector('.theme-toggle');
+  if (!btn) return;
+  btn.addEventListener('click', function () {
+    var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem(key, next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>
