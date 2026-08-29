@@ -36,13 +36,15 @@ namespaces.
 ## What orbit adds, as features
 
 **Orbit is an adapter-first RL infra.** On top of miles — a general RL trainer
-that syncs full model weights — it contributes **three new designs: async RL,
-PPO, and MOPD**, all carried by an adapter substrate that trains and serves
-PEFT adapters on (possibly quantized) frozen base models. The argument surface
-makes the census objective: orbit adds **83 CLI arguments** to the base's 230
-and removes none; the clusters map one-to-one onto what follows.
+that syncs full model weights — its new features span the whole stack: an
+adapter system that trains and serves PEFT adapters on (possibly quantized)
+frozen base models, **new training designs for async RL, PPO, and MOPD**,
+verified-reward backends, and a numerical-verification discipline. The
+argument surface makes the census objective: orbit adds **83 CLI arguments**
+to the base's 230 and removes none; the clusters map one-to-one onto what
+follows.
 
-### The three new designs
+### New training designs
 
 1. **Async RL.** A fully-asynchronous rollout driver
    (`fully_async_rollout.py`) paired with **double-buffered adapter slots**
@@ -69,7 +71,7 @@ and removes none; the clusters map one-to-one onto what follows.
    Supporting modules: `teacher_lm_head.py`, `vocab_parallel.py`,
    `prefill_logprobs.py`.
 
-### The adapter substrate that carries them
+### The adapter stack
 
 - **OFT as a first-class RL method** (6 `--oft-*` args; miles has LoRA only —
   no OFT anywhere at the fork base): Megatron-side training, serving via the
@@ -86,7 +88,7 @@ and removes none; the clusters map one-to-one onto what follows.
   PEFT-safe radix caching (disabled or keyed per adapter, so cached prefixes
   cannot leak stale adapter activations).
 
-### Around them
+### Rewards, verification, evaluation, operations
 
 **Verified-reward backends and routing** (14 args): LLM-judge (`--judge-*`),
 containerized SWE-agent rewards with SIF cache (`--swe-*`), code-execution

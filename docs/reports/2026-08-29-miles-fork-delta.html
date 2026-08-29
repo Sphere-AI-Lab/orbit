@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Orbit's delta over miles, and the cost of moving it to latest miles</title>
-<script type="application/json" id="report-meta">{"title": "Orbit's delta over miles, and the cost of moving it to latest miles", "kind": "investigation", "date": "2026-08-29", "tags": ["miles", "fork", "lineage", "graft", "delta", "transfer"], "subtitle": "Fork-base recovery, full modification inventory, and a measured transfer dry-run", "generated": "2026-08-29T14:28:56+02:00", "meta": {"date": "2026-08-29", "commit": "c8f6e9ec12fb", "branch": "orbit-main", "tree": "dirty", "host": "i401", "python": "3.10.12", "fork_base": "radixark/miles ef7481ae3 (2026-04-13, \"switch model to actor\")", "miles_upstream": "dbbab156 (2026-08-27)", "graft_branch": "miles-graft (rename 18e96ad, graft 7c5f463)"}}</script>
+<script type="application/json" id="report-meta">{"title": "Orbit's delta over miles, and the cost of moving it to latest miles", "kind": "investigation", "date": "2026-08-29", "tags": ["miles", "fork", "lineage", "graft", "delta", "transfer"], "subtitle": "Fork-base recovery, full modification inventory, and a measured transfer dry-run", "generated": "2026-08-29T14:30:20+02:00", "meta": {"date": "2026-08-29", "commit": "436fe2f458a9", "branch": "orbit-main", "tree": "dirty", "host": "i401", "python": "3.10.12", "fork_base": "radixark/miles ef7481ae3 (2026-04-13, \"switch model to actor\")", "miles_upstream": "dbbab156 (2026-08-27)", "graft_branch": "miles-graft (rename 18e96ad, graft 7c5f463)"}}</script>
 <style>
 /* html-reports stylesheet.
    Modelled closely on the LMSYS blog (lmsys.org/blog) — sticky TOC rail on the
@@ -320,12 +320,12 @@ td.t-kind { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; 
 <button class="theme-toggle" type="button">theme</button>
 <div class="page">
 <div class="doc-layout">
-<details class="toc" open><summary>Contents</summary><ol><li class="lvl-2"><a href="#fork-base-miles-ef7481ae3-2026-04-13">Fork base: miles ef7481ae3 (2026-04-13)</a></li><li class="lvl-2"><a href="#what-orbit-adds-as-features">What orbit adds, as features</a></li><li class="lvl-3"><a href="#the-three-new-designs">The three new designs</a></li><li class="lvl-3"><a href="#the-adapter-substrate-that-carries-them">The adapter substrate that carries them</a></li><li class="lvl-3"><a href="#around-them">Around them</a></li><li class="lvl-2"><a href="#the-delta-in-three-layers">The delta, in three layers</a></li><li class="lvl-3"><a href="#layer-1-orbit-only-files-ports-as-is">Layer 1 — orbit-only files (ports as-is)</a></li><li class="lvl-3"><a href="#layer-2-modified-miles-files-the-entangled-layer">Layer 2 — modified miles files (the entangled layer)</a></li><li class="lvl-3"><a href="#layer-3-dropped-miles-files">Layer 3 — dropped miles files</a></li><li class="lvl-2"><a href="#transfer-dry-run-orbits-layer-onto-miles2026-08-27">Transfer dry-run: orbit's layer onto miles@2026-08-27</a></li><li class="lvl-2"><a href="#recommendation">Recommendation</a></li></ol></details>
+<details class="toc" open><summary>Contents</summary><ol><li class="lvl-2"><a href="#fork-base-miles-ef7481ae3-2026-04-13">Fork base: miles ef7481ae3 (2026-04-13)</a></li><li class="lvl-2"><a href="#what-orbit-adds-as-features">What orbit adds, as features</a></li><li class="lvl-3"><a href="#new-training-designs">New training designs</a></li><li class="lvl-3"><a href="#the-adapter-stack">The adapter stack</a></li><li class="lvl-3"><a href="#rewards-verification-evaluation-operations">Rewards, verification, evaluation, operations</a></li><li class="lvl-2"><a href="#the-delta-in-three-layers">The delta, in three layers</a></li><li class="lvl-3"><a href="#layer-1-orbit-only-files-ports-as-is">Layer 1 — orbit-only files (ports as-is)</a></li><li class="lvl-3"><a href="#layer-2-modified-miles-files-the-entangled-layer">Layer 2 — modified miles files (the entangled layer)</a></li><li class="lvl-3"><a href="#layer-3-dropped-miles-files">Layer 3 — dropped miles files</a></li><li class="lvl-2"><a href="#transfer-dry-run-orbits-layer-onto-miles2026-08-27">Transfer dry-run: orbit's layer onto miles@2026-08-27</a></li><li class="lvl-2"><a href="#recommendation">Recommendation</a></li></ol></details>
 <main>
 <header class="doc-header">
 <div class="doc-kind">investigation</div><h1 class="doc-title">Orbit's delta over miles, and the cost of moving it to latest miles</h1>
 <p class="doc-subtitle">Fork-base recovery, full modification inventory, and a measured transfer dry-run</p><div class="doc-tags"><span>miles</span><span>fork</span><span>lineage</span><span>graft</span><span>delta</span><span>transfer</span></div>
-<dl class="meta"><div><dt>date</dt><dd>2026-08-29</dd></div><div><dt>commit</dt><dd>c8f6e9ec12fb</dd></div><div><dt>branch</dt><dd>orbit-main</dd></div><div><dt>tree</dt><dd class="flag-dirty">dirty</dd></div><div><dt>host</dt><dd>i401</dd></div><div><dt>python</dt><dd>3.10.12</dd></div><div><dt>fork_base</dt><dd>radixark/miles ef7481ae3 (2026-04-13, "switch model to actor")</dd></div><div><dt>miles_upstream</dt><dd>dbbab156 (2026-08-27)</dd></div><div><dt>graft_branch</dt><dd>miles-graft (rename 18e96ad, graft 7c5f463)</dd></div></dl>
+<dl class="meta"><div><dt>date</dt><dd>2026-08-29</dd></div><div><dt>commit</dt><dd>436fe2f458a9</dd></div><div><dt>branch</dt><dd>orbit-main</dd></div><div><dt>tree</dt><dd class="flag-dirty">dirty</dd></div><div><dt>host</dt><dd>i401</dd></div><div><dt>python</dt><dd>3.10.12</dd></div><div><dt>fork_base</dt><dd>radixark/miles ef7481ae3 (2026-04-13, "switch model to actor")</dd></div><div><dt>miles_upstream</dt><dd>dbbab156 (2026-08-27)</dd></div><div><dt>graft_branch</dt><dd>miles-graft (rename 18e96ad, graft 7c5f463)</dd></div></dl>
 </header>
 <p>Orbit's public history is squashed (root <code>dd94c38</code>, 2026-05-28), so what we inherited from
 miles and what we built was not recoverable from git alone. This record answers three
@@ -349,12 +349,14 @@ namespaces.</p>
 </div>
 <h2 id="what-orbit-adds-as-features">What orbit adds, as features<a class="anchor" href="#what-orbit-adds-as-features" aria-hidden="true">#</a></h2>
 <p><strong>Orbit is an adapter-first RL infra.</strong> On top of miles — a general RL trainer
-that syncs full model weights — it contributes <strong>three new designs: async RL,
-PPO, and MOPD</strong>, all carried by an adapter substrate that trains and serves
-PEFT adapters on (possibly quantized) frozen base models. The argument surface
-makes the census objective: orbit adds <strong>83 CLI arguments</strong> to the base's 230
-and removes none; the clusters map one-to-one onto what follows.</p>
-<h3 id="the-three-new-designs">The three new designs<a class="anchor" href="#the-three-new-designs" aria-hidden="true">#</a></h3>
+that syncs full model weights — its new features span the whole stack: an
+adapter system that trains and serves PEFT adapters on (possibly quantized)
+frozen base models, <strong>new training designs for async RL, PPO, and MOPD</strong>,
+verified-reward backends, and a numerical-verification discipline. The
+argument surface makes the census objective: orbit adds <strong>83 CLI arguments</strong>
+to the base's 230 and removes none; the clusters map one-to-one onto what
+follows.</p>
+<h3 id="new-training-designs">New training designs<a class="anchor" href="#new-training-designs" aria-hidden="true">#</a></h3>
 <ol><li><strong>Async RL.</strong> A fully-asynchronous rollout driver<p>(<code>fully_async_rollout.py</code>) paired with <strong>double-buffered adapter slots</strong>
 (<code>--adapter-double-buffer</code>, <code>peft_transport/slots.py</code>): rollout keeps
 serving adapter version N from one slot while N+1 streams in over NCCL,
@@ -374,7 +376,7 @@ clipping, EMA teachers, and <strong>self-teacher distillation</strong> — promo
 student's own adapter versions as teacher through the adapter transport.
 Supporting modules: <code>teacher_lm_head.py</code>, <code>vocab_parallel.py</code>,
 <code>prefill_logprobs.py</code>.</p></li></ol>
-<h3 id="the-adapter-substrate-that-carries-them">The adapter substrate that carries them<a class="anchor" href="#the-adapter-substrate-that-carries-them" aria-hidden="true">#</a></h3>
+<h3 id="the-adapter-stack">The adapter stack<a class="anchor" href="#the-adapter-stack" aria-hidden="true">#</a></h3>
 <ul><li><strong>OFT as a first-class RL method</strong> (6 <code>--oft-*</code> args; miles has LoRA only —<p>no OFT anywhere at the fork base): Megatron-side training, serving via the
 sglang fork, COFT/block variants, examples as full-FT vs LoRA vs OFT arms.</p></li><li><strong>Adapter-delta weight sync</strong> (<code>peft_transport/</code>,<p><code>--peft-distributed-transport</code>): only adapter deltas move to rollout
 engines, over pluggable NCCL/IPC/Ray backends behind a registry — what
@@ -382,7 +384,7 @@ makes RL on a Kimi-1T-class frozen base tractable.</p></li><li><strong>RL on qua
 MXFP4 (<code>--dsv4-*</code>), Qwen3-30B FP8 — OFT adapters on the quantized weights.
 Miles had FP8 <em>export</em> quantizers, not a train-on-quantized path.</p></li><li><strong>Adapter-aware serving</strong>: engine-level adapter staging/activation and<p>PEFT-safe radix caching (disabled or keyed per adapter, so cached prefixes
 cannot leak stale adapter activations).</p></li></ul>
-<h3 id="around-them">Around them<a class="anchor" href="#around-them" aria-hidden="true">#</a></h3>
+<h3 id="rewards-verification-evaluation-operations">Rewards, verification, evaluation, operations<a class="anchor" href="#rewards-verification-evaluation-operations" aria-hidden="true">#</a></h3>
 <p><strong>Verified-reward backends and routing</strong> (14 args): LLM-judge (<code>--judge-*</code>),
 containerized SWE-agent rewards with SIF cache (<code>--swe-*</code>), code-execution
 rewards with test/memory/timeout budgets (<code>--code-*</code>), a Lean prover-server
@@ -1814,7 +1816,7 @@ git -c merge.renameLimit=20000 merge refs/miles/upstream
 bolded files in Layer 2, and it is a bounded, git-assisted merge, not a rewrite. Upstream
 uptake in the other direction stays selective: pick surgical fixes touching the 87 identical</p>
 <ul><li>72 lightly-modified shared files, skip anything in the rewritten core (validated on<p>4152f61<code>, adopted;</code>cd464a1c4`, mostly duplicate of our own v0.5.18 work).</p></li></ul>
-<footer class="doc-footer">Generated 2026-08-29 14:28 CEST by htmlreport</footer>
+<footer class="doc-footer">Generated 2026-08-29 14:30 CEST by htmlreport</footer>
 </main>
 </div>
 </div>
