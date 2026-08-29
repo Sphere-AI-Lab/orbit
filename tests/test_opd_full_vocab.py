@@ -9,8 +9,8 @@ import numpy as np
 import pybase64
 import pytest
 
-import orbit.rollout.opd_sglang as opd_sglang
-from orbit.rollout.opd_sglang import (
+import orbit.peft.opd.opd_sglang as opd_sglang
+from orbit.peft.opd.opd_sglang import (
     TEACHER_RESPONSE_METADATA_KEY,
     _full_vocab_payload,
     _teacher_hidden_states_from_payload,
@@ -290,8 +290,8 @@ def _validate_args(**overrides):
         opd_ema_decay=0.999,
         opd_self_teacher_interval=1,
         opd_promote_interval=None,
-        custom_rm_path="orbit.rollout.opd_sglang.reward_func",
-        custom_reward_post_process_path="orbit.rollout.opd_sglang.post_process",
+        custom_rm_path="orbit.peft.opd.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.peft.opd.opd_sglang.post_process",
         loss_type="opd_jsd_loss",
         teacher_score_mode="full_vocab",
         teacher_hf_checkpoint="/fake/teacher",
@@ -346,7 +346,7 @@ def test_reward_func_eval_bypass_uses_real_task_rm(monkeypatch):
 
     monkeypatch.setattr(opd_sglang, "_post_json", explode)
     monkeypatch.setattr(opd_sglang, "post_json", explode)
-    args = _full_vocab_args(custom_rm_path="orbit.rollout.opd_sglang.reward_func", rm_type="math")
+    args = _full_vocab_args(custom_rm_path="orbit.peft.opd.opd_sglang.reward_func", rm_type="math")
     sample = _sample()
     sample.response = "The answer is \\boxed{72}."
     sample.label = "72"
@@ -363,7 +363,7 @@ def test_full_vocab_response_limit_scales_with_teacher_hidden(tmp_path):
     (ckpt / "config.json").write_text(json_mod.dumps({"hidden_size": 3584}))
     args = _full_vocab_args(teacher_hf_checkpoint=str(ckpt))
 
-    from orbit.rollout.scoring_client import SCORING_MAX_RESPONSE_BYTES
+    from orbit.peft.rewards.scoring_client import SCORING_MAX_RESPONSE_BYTES
 
     big = opd_sglang._full_vocab_response_byte_limit(args, 1100)
     assert big > 90 * 1024 * 1024  # 1100 x 3584 values x ~24 B as JSON floats ~ 95MB

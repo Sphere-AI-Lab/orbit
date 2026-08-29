@@ -175,7 +175,7 @@ ROLLOUT_ARGS=(
     --rollout-max-context-len "${ROLLOUT_MAX_CONTEXT_LEN}"
     --balance-data
     --use-rollout-routing-replay
-    --custom-rm-path orbit.rollout.rm_hub.peft_arena_reward.peft_arena_reward
+    --custom-rm-path orbit.peft.rewards.peft_arena_reward.peft_arena_reward
     --reward-key score
     --eval-reward-key score
 )

@@ -44,8 +44,8 @@ import json
 import logging
 import re
 
-from orbit.rollout.sandbox.executor import run_python
-from orbit.rollout.scoring_client import post_chat_completions
+from orbit.peft.rewards.sandbox.executor import run_python
+from orbit.peft.rewards.scoring_client import post_chat_completions
 
 logger = logging.getLogger(__name__)
 

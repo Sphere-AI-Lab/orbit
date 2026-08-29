@@ -13,7 +13,7 @@ episode instead of per-turn concatenation:
 
 Wire-up (dedicated swe runs)::
 
-    --custom-generate-function-path orbit.rollout.swe_agent.episode.generate
+    --custom-generate-function-path orbit.peft.rewards.swe_agent.episode.generate
     --swe-rm-sif-cache /path/to/sif_cache
     [--swe-agent-max-turns 12] [--swe-agent-cmd-timeout-secs 30]
 """
@@ -28,7 +28,7 @@ from argparse import Namespace
 from typing import Any
 
 from orbit.rollout.sglang_rollout import GenerateState
-from orbit.rollout.swe_agent.container_session import ContainerSession, sif_for_instance
+from orbit.peft.rewards.swe_agent.container_session import ContainerSession, sif_for_instance
 from orbit.utils.http_utils import post
 from orbit.utils.types import Sample
 

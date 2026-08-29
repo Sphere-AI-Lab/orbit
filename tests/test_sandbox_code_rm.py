@@ -1,4 +1,4 @@
-"""Unit tests for the code-execution reward (orbit/rollout/sandbox/code_rm.py).
+"""Unit tests for the code-execution reward (orbit/peft/rewards/sandbox/code_rm.py).
 
 Judges a rollout by running its extracted Python program against
 stdin/stdout unit tests (the Nemotron-RL-Ultra ``code_gen_simple_agent``
@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-import orbit.rollout.sandbox.code_rm as code_rm
+import orbit.peft.rewards.sandbox.code_rm as code_rm
 from orbit.utils.types import Sample
 
 

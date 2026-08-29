@@ -28,7 +28,7 @@ import re
 
 import httpx
 
-from orbit.rollout.grader_errors import GraderInfrastructureError, InfrastructureErrorCode
+from orbit.peft.rewards.grader_errors import GraderInfrastructureError, InfrastructureErrorCode
 
 logger = logging.getLogger(__name__)
 

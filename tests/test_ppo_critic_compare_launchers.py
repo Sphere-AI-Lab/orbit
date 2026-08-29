@@ -552,7 +552,7 @@ def test_prepare_only_creates_fresh_metadata_and_records_exact_argv(tmp_path):
         "test_jsonl": str(tmp_path / "smoke-eval.jsonl"),
         "test_jsonl_sha256": _file_sha256(tmp_path / "smoke-eval.jsonl"),
         "disable_eval": "0",
-        "reward_function": "orbit.rollout.rm_hub.peft_arena_reward.peft_arena_reward",
+        "reward_function": "orbit.peft.rewards.peft_arena_reward.peft_arena_reward",
         "reward_timeout_seconds": "60",
         "math_eval_semantics": "math_alignment",
         "num_rollout": "500",

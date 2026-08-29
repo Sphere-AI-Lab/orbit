@@ -4,7 +4,7 @@ Any instruct model served by sglang (or any OpenAI-compatible endpoint) acts as
 the judge; each sample is graded per-request through orbit's custom-reward
 hook::
 
-    --custom-rm-path orbit.rollout.llm_judge.reward_func
+    --custom-rm-path orbit.peft.rewards.llm_judge.reward_func
     --judge-base-url http://<judge-host>:<port>
     --judge-mode equivalence   # or: score
 
@@ -31,8 +31,8 @@ import logging
 import re
 from argparse import Namespace
 
-from orbit.rollout.grader_errors import GraderInfrastructureError, InfrastructureErrorCode
-from orbit.rollout.scoring_client import ScoringProtocolError, post_chat_completions, scoring_transport_error_retryable
+from orbit.peft.rewards.grader_errors import GraderInfrastructureError, InfrastructureErrorCode
+from orbit.peft.rewards.scoring_client import ScoringProtocolError, post_chat_completions, scoring_transport_error_retryable
 from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)

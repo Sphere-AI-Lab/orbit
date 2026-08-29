@@ -2,8 +2,8 @@ from argparse import Namespace
 
 import pytest
 
-from orbit.rollout.opd_scoring import local_scoring_enabled, teacher_lora_path
-from orbit.rollout.opd_sglang import _score_payload
+from orbit.peft.opd.opd_scoring import local_scoring_enabled, teacher_lora_path
+from orbit.peft.opd.opd_sglang import _score_payload
 
 
 def _args(**overrides):

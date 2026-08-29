@@ -27,7 +27,7 @@ import shutil
 import tempfile
 import uuid
 
-from orbit.rollout.sandbox.swe_rm import _apptainer, _find_repo_dir, _sif_path
+from orbit.peft.rewards.sandbox.swe_rm import _apptainer, _find_repo_dir, _sif_path
 
 logger = logging.getLogger(__name__)
 

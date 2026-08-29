@@ -6,7 +6,7 @@ import inspect
 import aiohttp
 import pytest
 
-from orbit.rollout import scoring_client
+from orbit.peft.rewards import scoring_client
 
 
 def _run(coro):

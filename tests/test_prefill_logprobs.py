@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from orbit.rollout.generate_utils import prefill_logprobs
+from orbit.peft.rollout import prefill_logprobs
 from orbit.utils.types import Sample
 
 

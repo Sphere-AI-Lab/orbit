@@ -38,7 +38,7 @@ async def opd_score_sample(args: Namespace, sample) -> None:
     Sets sample.teacher_log_probs (sampled-token path) or
     sample.opd_reverse_kl (top-k path) in place.
     """
-    from .opd_sglang import (
+    from orbit.peft.opd.opd_sglang import (
         STUDENT_TOP_LOGPROBS_METADATA_KEY,
         TeacherTarget,
         _compute_topk_reverse_kl,

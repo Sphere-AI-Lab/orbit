@@ -503,7 +503,7 @@ def add_on_policy_distillation_arguments(parser):
         default=None,
         help=(
             "Base URL of an OpenAI-compatible judge server (e.g. an sglang server: "
-            "http://host:port) used by orbit.rollout.llm_judge.reward_func. "
+            "http://host:port) used by orbit.peft.rewards.llm_judge.reward_func. "
             "Required when --custom-rm-path points at the LLM-judge hook."
         ),
     )
@@ -613,7 +613,7 @@ def _validate_judge_args(args) -> None:
         return
     if not getattr(args, "judge_base_url", None):
         raise ValueError(
-            "--custom-rm-path orbit.rollout.llm_judge.reward_func requires --judge-base-url "
+            "--custom-rm-path orbit.peft.rewards.llm_judge.reward_func requires --judge-base-url "
             "<http://judge-host:port> (an OpenAI-compatible chat-completions server)."
         )
     if getattr(args, "judge_mode", "equivalence") not in ("equivalence", "score"):
@@ -627,7 +627,7 @@ def _validate_reward_router_args(args) -> None:
         return
     if not getattr(args, "group_rm", False):
         raise ValueError(
-            "--custom-rm-path orbit.rollout.reward_router.reward_func is a batch-mode hook: "
+            "--custom-rm-path orbit.peft.rewards.reward_router.reward_func is a batch-mode hook: "
             "it must be combined with --group-rm."
         )
     if not getattr(args, "judge_base_url", None):
@@ -644,12 +644,12 @@ def _validate_genrm_args(args) -> None:
         return
     if not getattr(args, "group_rm", False):
         raise ValueError(
-            "--custom-rm-path orbit.rollout.genrm_judge.reward_func is a batch-mode hook: "
+            "--custom-rm-path orbit.peft.rewards.genrm_judge.reward_func is a batch-mode hook: "
             "it must be combined with --group-rm (otherwise it would receive single samples)."
         )
     if not getattr(args, "judge_base_url", None):
         raise ValueError(
-            "--custom-rm-path orbit.rollout.genrm_judge.reward_func requires --judge-base-url "
+            "--custom-rm-path orbit.peft.rewards.genrm_judge.reward_func requires --judge-base-url "
             "<http://judge-host:port> (an OpenAI-compatible chat-completions server)."
         )
 
@@ -689,7 +689,7 @@ def validate_opd_topk_loss_args(args) -> None:
     if getattr(args, "opd_teacher_urls", None):
         # Local import to keep orbit.utils free of rollout imports at module load
         # (matches the existing --opd-teacher-urls parse above).
-        from orbit.rollout.opd_sglang import parse_teacher_urls
+        from orbit.peft.opd.opd_sglang import parse_teacher_urls
 
         url_map = parse_teacher_urls(args.opd_teacher_urls)
         if any(len(targets) > 1 for targets in url_map.values()):
@@ -717,21 +717,21 @@ def validate_opd_topk_loss_args(args) -> None:
         )
 
     # The managed/same-engine teacher path (a same-base --opd-teacher with no external
-    # teacher URL, orbit.rollout.opd_scoring.opd_score_sample via local_scoring_enabled)
+    # teacher URL, orbit.peft.opd.opd_scoring.opd_score_sample via local_scoring_enabled)
     # scores through _score_top_k too, but only sets sample.opd_reverse_kl -- it never
     # calls opd_sglang._extract_teacher_topk, so teacher_topk_ids/teacher_topk_logprobs
     # would stay None. Only the external-URL path (opd_sglang.post_process's top-k
     # branch, Task 1) retains them.
-    from orbit.rollout.opd_scoring import local_scoring_enabled
+    from orbit.peft.opd.opd_scoring import local_scoring_enabled
 
     if local_scoring_enabled(args):
         raise ValueError(
             "--loss-type opd_topk_loss requires an external teacher (--opd-teacher-url, "
             "--opd-teacher-urls, or --opd-serve-teacher, which resolves to --opd-teacher-url once "
             "its engines are up): the managed/same-engine teacher path (a same-base --opd-teacher "
-            "with no external teacher URL) scores through orbit.rollout.opd_scoring.opd_score_sample, "
+            "with no external teacher URL) scores through orbit.peft.opd.opd_scoring.opd_score_sample, "
             "which does not retain teacher_topk_ids/teacher_topk_logprobs -- that transport lives "
-            "only on the external-URL scoring path (orbit.rollout.opd_sglang.post_process) in v1."
+            "only on the external-URL scoring path (orbit.peft.opd.opd_sglang.post_process) in v1."
         )
 
     temperature = float(getattr(args, "rollout_temperature", 1.0))
@@ -770,8 +770,8 @@ def validate_opd_topk_loss_args(args) -> None:
     # Without this, a missing/wrong hook silently falls through to the default reward
     # path: no teacher_topk_ids/logprobs ever get populated, and the run only dies after
     # a full rollout on a bare KeyError once training reads the missing transport keys.
-    expected_rm = "orbit.rollout.opd_sglang.reward_func"
-    expected_post = "orbit.rollout.opd_sglang.post_process"
+    expected_rm = "orbit.peft.opd.opd_sglang.reward_func"
+    expected_post = "orbit.peft.opd.opd_sglang.post_process"
     if (
         getattr(args, "custom_rm_path", None) != expected_rm
         or getattr(args, "custom_reward_post_process_path", None) != expected_post
@@ -826,7 +826,7 @@ def _validate_opd_args(args) -> None:
         if getattr(args, "opd_type", None) != "sglang":
             raise ValueError("--opd-teacher-urls is only supported with --opd-type=sglang.")
         # Local import to keep orbit.utils free of rollout imports at module load.
-        from orbit.rollout.opd_sglang import parse_teacher_urls
+        from orbit.peft.opd.opd_sglang import parse_teacher_urls
 
         url_map = parse_teacher_urls(args.opd_teacher_urls)  # fail fast on malformed/duplicate entries
         has_ensemble_group = any(len(targets) > 1 for targets in url_map.values())
@@ -953,8 +953,8 @@ def _validate_opd_args(args) -> None:
             )
         # full_vocab bypasses needs_opd_teacher() (no OPD advantage), so the legacy hook
         # check below never runs for it -- enforce the scoring transport here.
-        expected_rm = "orbit.rollout.opd_sglang.reward_func"
-        expected_post = "orbit.rollout.opd_sglang.post_process"
+        expected_rm = "orbit.peft.opd.opd_sglang.reward_func"
+        expected_post = "orbit.peft.opd.opd_sglang.post_process"
         if (
             getattr(args, "custom_rm_path", None) != expected_rm
             or getattr(args, "custom_reward_post_process_path", None) != expected_post
@@ -1118,8 +1118,8 @@ def _validate_opd_args(args) -> None:
         )
         if external:
             # Legacy external-teacher path: unchanged hook requirements.
-            expected_rm = "orbit.rollout.opd_sglang.reward_func"
-            expected_post = "orbit.rollout.opd_sglang.post_process"
+            expected_rm = "orbit.peft.opd.opd_sglang.reward_func"
+            expected_post = "orbit.peft.opd.opd_sglang.post_process"
             if (
                 getattr(args, "custom_rm_path", None) != expected_rm
                 or getattr(args, "custom_reward_post_process_path", None) != expected_post
@@ -1169,10 +1169,10 @@ def _validate_opd_args(args) -> None:
                 if not os.path.isdir(spec.path):
                     raise FileNotFoundError(f"--opd-teacher adapter: {spec.path} does not exist.")
                 _validate_teacher_adapter_config(spec.path, args.peft_method)
-            if getattr(args, "custom_rm_path", None) == "orbit.rollout.opd_sglang.reward_func":
+            if getattr(args, "custom_rm_path", None) == "orbit.peft.opd.opd_sglang.reward_func":
                 raise ValueError(
                     "Local-teacher mode scores through the built-in rollout stage; do not set "
-                    "--custom-rm-path orbit.rollout.opd_sglang.reward_func (it would double-score). "
+                    "--custom-rm-path orbit.peft.opd.opd_sglang.reward_func (it would double-score). "
                     "Leave --custom-rm-path free or point it at a real reward model."
                 )
 

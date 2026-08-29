@@ -76,7 +76,7 @@ ROLLOUT_ARGS=(
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
     --use-rollout-routing-replay
-    --custom-rm-path orbit.rollout.rm_hub.peft_arena_reward.peft_arena_reward
+    --custom-rm-path orbit.peft.rewards.peft_arena_reward.peft_arena_reward
     --reward-key score
     --eval-reward-key score
 )

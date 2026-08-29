@@ -26,7 +26,7 @@ import json
 import sys
 from types import SimpleNamespace
 
-from orbit.rollout.sandbox import swe_rm
+from orbit.peft.rewards.sandbox import swe_rm
 from orbit.utils.types import Sample
 
 

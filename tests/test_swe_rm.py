@@ -1,4 +1,4 @@
-"""Unit tests for the SWE patch reward (orbit/rollout/sandbox/swe_rm.py).
+"""Unit tests for the SWE patch reward (orbit/peft/rewards/sandbox/swe_rm.py).
 
 Rung 2a of the SWE harness (design doc 2026-07-07-swe-harness-scoping.md):
 single-turn patch RL. The model emits a unified diff; the reward applies it
@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import orbit.rollout.sandbox.swe_rm as swe_rm
+import orbit.peft.rewards.sandbox.swe_rm as swe_rm
 from orbit.utils.types import Sample
 
 DIFF = """diff --git a/foo.py b/foo.py
@@ -150,7 +150,7 @@ def test_verification_exception_fails_soft(monkeypatch, tmp_path):
 
 
 def test_router_routes_swe_agent(monkeypatch):
-    import orbit.rollout.reward_router as router
+    import orbit.peft.rewards.reward_router as router
 
     assert router._route_for_agent("swe_agents_train") == "swe"
 

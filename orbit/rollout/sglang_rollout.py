@@ -18,7 +18,7 @@ from packaging.version import parse
 from tqdm import tqdm
 
 from orbit.rollout.base_types import RolloutFnEvalOutput, RolloutFnTrainOutput
-from orbit.rollout.generate_utils.prefill_logprobs import recompute_samples_rollout_logprobs_via_prefill
+from orbit.peft.rollout.prefill_logprobs import recompute_samples_rollout_logprobs_via_prefill
 from orbit.rollout.filter_hub.base_types import MetricGatherer, call_dynamic_filter
 from orbit.rollout.generate_utils.generate_endpoint_utils import (
     attach_peft_request_payload,
@@ -38,7 +38,7 @@ from orbit.utils.processing_utils import (
 )
 from orbit.utils.types import Sample
 
-from .opd_scoring import local_scoring_enabled, opd_score_sample
+from orbit.peft.opd.opd_scoring import local_scoring_enabled, opd_score_sample
 from .rm_hub import async_rm, batched_async_rm
 
 __all__ = ["generate_rollout", "get_model_url"]

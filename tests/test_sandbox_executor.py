@@ -1,4 +1,4 @@
-"""Unit tests for the sandboxed Python executor (orbit/rollout/sandbox/).
+"""Unit tests for the sandboxed Python executor (orbit/peft/rewards/sandbox/).
 
 Pure CPU tests — the executor runs real subprocesses with tiny programs.
 """
@@ -10,7 +10,7 @@ import shutil
 
 import pytest
 
-from orbit.rollout.sandbox.executor import ExecResult, network_isolation_available, run_python
+from orbit.peft.rewards.sandbox.executor import ExecResult, network_isolation_available, run_python
 
 
 def _run(coro):

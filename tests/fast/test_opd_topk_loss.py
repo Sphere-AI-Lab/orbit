@@ -589,7 +589,7 @@ def test_teacher_vocab_overhang_id_masked_like_pad_slot(kl_type):
     silently returns a fake `0 - log_normalizer` value instead. Pins the fix's
     behavior: a slot with an overhang id must produce exactly the same loss and
     diagnostics as the same slot manually replaced by a pad slot (id=0,
-    logprob=-1e4, matching orbit.rollout.opd_sglang's own padding convention)."""
+    logprob=-1e4, matching orbit.peft.opd.opd_sglang's own padding convention)."""
     _single_state()
 
     response_lengths = [2]

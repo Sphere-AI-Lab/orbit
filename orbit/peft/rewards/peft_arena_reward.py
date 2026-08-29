@@ -22,7 +22,7 @@ DATA_SOURCE_ALIASES = {
 
 
 def _compute_math_rlvr_score(solution_str, ground_truth):
-    from .math_alignment import extract_answer, math_equal
+    from orbit.peft.rewards.math_alignment import extract_answer, math_equal
 
     answer = extract_answer(solution_str or "", _GENERIC_MATH_DATASET)
     if isinstance(ground_truth, dict):
@@ -56,7 +56,7 @@ def _score_math_eval_sample(sample, metadata: dict) -> dict[str, object] | None:
     if dataset_name not in SUPPORTED_MATH_EVAL_DATASETS:
         return None
 
-    from .math_alignment import extract_answer, grade_math_alignment
+    from orbit.peft.rewards.math_alignment import extract_answer, grade_math_alignment
 
     response = sample.response or ""
     correct = grade_math_alignment(response, sample.label, metadata)

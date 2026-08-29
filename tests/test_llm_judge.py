@@ -1,4 +1,4 @@
-"""LLM-judge reward hooks (orbit/rollout/llm_judge.py).
+"""LLM-judge reward hooks (orbit/peft/rewards/llm_judge.py).
 
 An external judge model (any instruct model served by sglang) grades each
 sample via the OpenAI-compatible chat endpoint, wired through orbit's
@@ -15,8 +15,8 @@ import json
 import aiohttp
 import pytest
 
-from orbit.rollout import llm_judge, scoring_client
-from orbit.rollout.grader_errors import GraderInfrastructureError, InfrastructureErrorCode
+from orbit.peft.rewards import llm_judge, scoring_client
+from orbit.peft.rewards.grader_errors import GraderInfrastructureError, InfrastructureErrorCode
 from orbit.utils.types import Sample
 
 
@@ -333,20 +333,20 @@ from orbit.utils.arguments import _validate_judge_args  # noqa: E402
 
 def test_validate_judge_requires_base_url():
     args = argparse.Namespace(
-        custom_rm_path="orbit.rollout.llm_judge.reward_func", judge_base_url=None, judge_mode="equivalence"
+        custom_rm_path="orbit.peft.rewards.llm_judge.reward_func", judge_base_url=None, judge_mode="equivalence"
     )
     with pytest.raises(ValueError, match="judge-base-url"):
         _validate_judge_args(args)
 
 
 def test_validate_judge_noop_for_other_rm():
-    args = argparse.Namespace(custom_rm_path="orbit.rollout.opd_sglang.reward_func", judge_base_url=None)
+    args = argparse.Namespace(custom_rm_path="orbit.peft.opd.opd_sglang.reward_func", judge_base_url=None)
     _validate_judge_args(args)
 
 
 def test_validate_judge_passes_when_configured():
     args = argparse.Namespace(
-        custom_rm_path="orbit.rollout.llm_judge.reward_func",
+        custom_rm_path="orbit.peft.rewards.llm_judge.reward_func",
         judge_base_url="http://judge:30600",
         judge_mode="score",
     )

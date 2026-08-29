@@ -7,7 +7,7 @@ from typing import Any
 
 from tqdm import tqdm
 
-from orbit.rollout.inference_rollout.eval_logging import (
+from orbit.peft.rollout.eval_logging import (
     _EvalTaskProgress,
     _log_pending_eval_tasks,
     _update_eval_task_progress,

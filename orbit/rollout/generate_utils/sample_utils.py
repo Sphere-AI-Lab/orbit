@@ -17,7 +17,7 @@ def merge_samples(samples: list[Sample], tokenizer) -> Sample:
 
 def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
     """Merge two samples generated from sibling inference engine calls."""
-    from orbit.rollout.opd_sglang import _TOPK_PAD_LOGPROB, _TOPK_PAD_TOKEN_ID
+    from orbit.peft.opd.opd_sglang import _TOPK_PAD_LOGPROB, _TOPK_PAD_TOKEN_ID
 
     a, b = deepcopy(a), deepcopy(b)
 

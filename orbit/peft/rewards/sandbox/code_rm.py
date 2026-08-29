@@ -8,7 +8,7 @@ short-circuits on the first failing test, so wrong programs are cheap.
 
 Wire-up::
 
-    --custom-rm-path orbit.rollout.sandbox.code_rm.reward_func
+    --custom-rm-path orbit.peft.rewards.sandbox.code_rm.reward_func
     [--code-rm-timeout-secs 6] [--code-rm-memory-mb 512] [--code-rm-max-tests 0]
 """
 
@@ -18,7 +18,7 @@ import logging
 import re
 from argparse import Namespace
 
-from orbit.rollout.sandbox.executor import run_python
+from orbit.peft.rewards.sandbox.executor import run_python
 from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)

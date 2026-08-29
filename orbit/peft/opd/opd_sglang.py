@@ -16,8 +16,8 @@ trainer consumes directly.
 
 Wired via orbit's existing custom-reward hooks::
 
-    --custom-rm-path orbit.rollout.opd_sglang.reward_func
-    --custom-reward-post-process-path orbit.rollout.opd_sglang.post_process
+    --custom-rm-path orbit.peft.opd.opd_sglang.reward_func
+    --custom-reward-post-process-path orbit.peft.opd.opd_sglang.post_process
 
 Design note -- this differs from slime's ``slime/rollout/on_policy_distillation.py``:
 slime's ``reward_func`` stores the raw sglang response dict directly on
@@ -49,7 +49,7 @@ import numpy as np
 import pybase64
 import torch
 
-from orbit.rollout.scoring_client import post_json
+from orbit.peft.rewards.scoring_client import post_json
 from orbit.utils.opd_dump import maybe_dump_teacher_logprobs
 from orbit.utils.types import Sample
 
@@ -154,7 +154,7 @@ def _full_vocab_response_byte_limit(args: Namespace, num_tokens: int) -> int:
     SCORING_MAX_RESPONSE_BYTES, so the cap scales with the request instead; the
     generic cap stays as the floor.
     """
-    from orbit.rollout.scoring_client import SCORING_MAX_RESPONSE_BYTES
+    from orbit.peft.rewards.scoring_client import SCORING_MAX_RESPONSE_BYTES
 
     hidden = _teacher_hidden_size(args.teacher_hf_checkpoint)
     payload = num_tokens * hidden * _HIDDEN_STATE_JSON_BYTES_PER_VALUE + 1024 * 1024
@@ -189,7 +189,7 @@ def _topk_response_byte_limit(args: Namespace, num_tokens: int, entries_per_toke
     rescore, which requests exactly the teacher's reported unique ids -- pass
     that count directly, since it can be far smaller than ``top_k``.
     """
-    from orbit.rollout.scoring_client import SCORING_MAX_RESPONSE_BYTES
+    from orbit.peft.rewards.scoring_client import SCORING_MAX_RESPONSE_BYTES
 
     if entries_per_token is None:
         entries_per_token = _get_opd_top_k(args) + 1

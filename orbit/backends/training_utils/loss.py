@@ -1359,7 +1359,7 @@ def _topk_kl_terms(
     teacher's own top-k support (plus, for the reverse direction, an optional correction
     for the student mass that falls outside that support).
 
-    Padded slots (see `orbit.rollout.opd_sglang._TOPK_PAD_LOGPROB`) carry a teacher
+    Padded slots (see `orbit.peft.opd.opd_sglang._TOPK_PAD_LOGPROB`) carry a teacher
     log-prob of -1e4, so `teacher_topk_logprobs.exp()` underflows to exactly 0.0 in
     float32 -- used below as an exact (not approximate) validity mask over the K
     dimension. Both the forward and the uncorrected-reverse sums only ever touch valid
@@ -1491,7 +1491,7 @@ def _topk_overlap_membership(
 
 
 def _resolve_opd_topk_kl_type(args: Namespace) -> tuple[str, float]:
-    """Local counterpart to `orbit.rollout.opd_sglang._get_kl_type` -- kept independent
+    """Local counterpart to `orbit.peft.opd.opd_sglang._get_kl_type` -- kept independent
     (not imported) so this training-side loss module doesn't reach into rollout code for
     a two-line resolution. Mirrors NeMo-RL's DistillationLossFn `kl_type`/`mixed_kl_weight`
     convention: `reverse` (default), `forward`, or `mixed` with `--opd-mixed-kl-weight` on
@@ -1581,7 +1581,7 @@ def opd_topk_loss_function(
     # TP>1 every rank's ownership mask is False for them, so the gather silently returns
     # a fake `0 - log_normalizer` log-prob instead. Mask them to a pad slot before the
     # gather -- id -> 0, logprob -> -1e4 -- exactly like the transport's own padding
-    # (orbit.rollout.opd_sglang._TOPK_PAD_TOKEN_ID/_TOPK_PAD_LOGPROB): the -1e4 underflows
+    # (orbit.peft.opd.opd_sglang._TOPK_PAD_TOKEN_ID/_TOPK_PAD_LOGPROB): the -1e4 underflows
     # to exact 0 mass under _topk_kl_terms's `valid` mask.
     padded_student_vocab = local_vocab_size * parallel_state.tp.size
     configured_vocab_size = getattr(args, "vocab_size", None)

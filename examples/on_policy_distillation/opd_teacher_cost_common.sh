@@ -49,7 +49,7 @@
 # expects).
 #
 # OPD_COST_EQUIVALENCE (default 0) -- served-only m1-eq equivalence knob.
-# Full-vocab scoring (orbit/rollout/opd_sglang.py's post_process, ~line 1109)
+# Full-vocab scoring (orbit/peft/opd/opd_sglang.py's post_process, ~line 1109)
 # sets .teacher_hidden_states and never .teacher_log_probs, so the Task-6
 # teacher-logprob dump hook (ORBIT_OPD_TEACHER_LOGPROB_DUMP) writes nothing
 # for served and the M1 correctness leg's base<->served comparison cannot
@@ -165,7 +165,7 @@ ROLLOUT_ARGS=(
     --rollout-top-p 1.0
     --rollout-top-k -1
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --custom-rm-path orbit.rollout.rm_hub.peft_arena_reward.peft_arena_reward
+    --custom-rm-path orbit.peft.rewards.peft_arena_reward.peft_arena_reward
     --reward-key score
     --eval-reward-key score
 )
@@ -303,8 +303,8 @@ case "${OPD_COST_VARIANT}" in
                 --lambd 1.0
                 --opd-serve-teacher
                 --opd-teacher-num-gpus "${OPD_TEACHER_NUM_GPUS:-1}"
-                --custom-rm-path orbit.rollout.opd_sglang.reward_func
-                --custom-reward-post-process-path orbit.rollout.opd_sglang.post_process
+                --custom-rm-path orbit.peft.opd.opd_sglang.reward_func
+                --custom-reward-post-process-path orbit.peft.opd.opd_sglang.post_process
                 --rm-type math
                 # The OPD reward hook returns a scalar, not the {"score": ...}
                 # dict the shared ROLLOUT_ARGS' --reward-key score expects.
@@ -325,8 +325,8 @@ case "${OPD_COST_VARIANT}" in
                 # Deviation: --teacher-score-mode full_vocab is validated
                 # (_validate_opd_args) to require the OPD full-vocab reward
                 # hooks, not the base recipe's math task-reward path.
-                --custom-rm-path orbit.rollout.opd_sglang.reward_func
-                --custom-reward-post-process-path orbit.rollout.opd_sglang.post_process
+                --custom-rm-path orbit.peft.opd.opd_sglang.reward_func
+                --custom-reward-post-process-path orbit.peft.opd.opd_sglang.post_process
                 # Deviation: opd_sglang.reward_func's full-vocab branch delegates
                 # every sample to default_async_rm, which dispatches on rm_type
                 # and bypasses custom_rm_path entirely -- the base recipe's

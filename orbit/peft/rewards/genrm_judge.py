@@ -1,12 +1,12 @@
 """Group-wise pairwise GenRM rewards: rank a rollout group with a judge model.
 
-The batch-mode counterpart of ``orbit.rollout.llm_judge`` (which grades one
+The batch-mode counterpart of ``orbit.peft.rewards.llm_judge`` (which grades one
 sample at a time): here the judge compares the *whole n-samples-per-prompt
 group* pairwise and each response's reward is its win-rate. This is the hook
 shape NeMo-RL's ``genrm_simple_agent`` uses for the Nemotron rlhf/ifbench
 blends, whose rows carry the grading rubric in ``metadata["principle"]``::
 
-    --custom-rm-path orbit.rollout.genrm_judge.reward_func
+    --custom-rm-path orbit.peft.rewards.genrm_judge.reward_func
     --group-rm
     --judge-base-url http://<judge-host>:<port>
 
@@ -35,9 +35,9 @@ import asyncio
 import re
 from argparse import Namespace
 
-from orbit.rollout.grader_errors import GraderInfrastructureError, InfrastructureErrorCode
-from orbit.rollout.llm_judge import _extract_question
-from orbit.rollout.scoring_client import ScoringProtocolError, post_chat_completions
+from orbit.peft.rewards.grader_errors import GraderInfrastructureError, InfrastructureErrorCode
+from orbit.peft.rewards.llm_judge import _extract_question
+from orbit.peft.rewards.scoring_client import ScoringProtocolError, post_chat_completions
 from orbit.ultra.strict_json import loads_strict
 from orbit.utils.types import Sample
 

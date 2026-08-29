@@ -7,7 +7,7 @@ router is the missing translation: conversion carries ``agent_ref.name`` into
 ``metadata["agent"]``, and the router maps agent names onto orbit's verified
 graders::
 
-    --custom-rm-path orbit.rollout.reward_router.reward_func
+    --custom-rm-path orbit.peft.rewards.reward_router.reward_func
     --group-rm
     [--judge-base-url ...]        # required for judge/genrm-routed rows
     [--reward-router-unmapped zero|error]
@@ -33,10 +33,10 @@ from __future__ import annotations
 import logging
 from argparse import Namespace
 
-from orbit.rollout.genrm_judge import reward_func as _genrm_reward
-from orbit.rollout.llm_judge import reward_func as _judge_reward
-from orbit.rollout.sandbox.code_rm import reward_func as _code_reward
-from orbit.rollout.sandbox.swe_rm import reward_func as _swe_reward
+from orbit.peft.rewards.genrm_judge import reward_func as _genrm_reward
+from orbit.peft.rewards.llm_judge import reward_func as _judge_reward
+from orbit.peft.rewards.sandbox.code_rm import reward_func as _code_reward
+from orbit.peft.rewards.sandbox.swe_rm import reward_func as _swe_reward
 from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)
@@ -118,45 +118,45 @@ async def reward_func(args: Namespace, samples: list[Sample], **kwargs) -> list[
             elif route == "swe":
                 rewards.append(float(await _swe_reward(args, sample, **kwargs)))
             elif route == "tool_call":
-                from orbit.rollout.rm_hub.ultra_agents import grade_tool_call
+                from orbit.peft.rewards.ultra_agents import grade_tool_call
 
                 rewards.append(grade_tool_call(sample.response, metadata.get("expected_action")))
             elif route == "mcqa":
-                from orbit.rollout.rm_hub.ultra_agents import grade_mcqa
+                from orbit.peft.rewards.ultra_agents import grade_mcqa
 
                 rewards.append(
                     grade_mcqa(sample.response, sample.label or metadata.get("expected_answer"), metadata.get("output_regex"))
                 )
             elif route == "structured":
-                from orbit.rollout.rm_hub.ultra_agents import grade_structured_output
+                from orbit.peft.rewards.ultra_agents import grade_structured_output
 
                 rewards.append(
                     grade_structured_output(sample.response, metadata.get("schema_str") or "", metadata.get("schema_type"))
                 )
             elif route == "boxed":
-                from orbit.rollout.rm_hub.ultra_longtail import grade_boxed_answer
+                from orbit.peft.rewards.ultra_longtail import grade_boxed_answer
 
                 rewards.append(grade_boxed_answer(sample.response, sample.label or metadata.get("expected_answer")))
             elif route == "nvarc_t":
-                from orbit.rollout.rm_hub.ultra_longtail import grade_nvarc_transductive
+                from orbit.peft.rewards.ultra_longtail import grade_nvarc_transductive
 
                 rewards.append(grade_nvarc_transductive(sample.response, metadata.get("expected_output")))
             elif route == "nvarc_i":
-                from orbit.rollout.rm_hub.ultra_longtail import grade_nvarc_inductive
+                from orbit.peft.rewards.ultra_longtail import grade_nvarc_inductive
 
                 rewards.append(
                     float(await grade_nvarc_inductive(sample.response, metadata.get("test_input"), metadata.get("expected_output")))
                 )
             elif route == "verifier_spec":
-                from orbit.rollout.rm_hub.ultra_longtail import grade_verifier_spec
+                from orbit.peft.rewards.ultra_longtail import grade_verifier_spec
 
                 rewards.append(grade_verifier_spec(sample.response, metadata.get("verifier")))
             elif route == "calendar":
-                from orbit.rollout.rm_hub.ultra_longtail import grade_calendar
+                from orbit.peft.rewards.ultra_longtail import grade_calendar
 
                 rewards.append(grade_calendar(sample.response, metadata.get("exp_cal_state")))
             elif route == "lean":
-                from orbit.rollout.rm_hub.lean_rm import grade_lean_proof
+                from orbit.peft.rewards.lean_rm import grade_lean_proof
 
                 rewards.append(
                     float(
@@ -166,13 +166,13 @@ async def reward_func(args: Namespace, samples: list[Sample], **kwargs) -> list[
                     )
                 )
             elif route == "rubric_judge":
-                from orbit.rollout.rm_hub.ultra_longtail import grade_rubric_judge
+                from orbit.peft.rewards.ultra_longtail import grade_rubric_judge
 
                 rewards.append(
                     float(await grade_rubric_judge(args, metadata.get("context") or "", sample.response, metadata.get("rubric") or []))
                 )
             elif route == "policy_judge":
-                from orbit.rollout.rm_hub.ultra_longtail import grade_policy_judge
+                from orbit.peft.rewards.ultra_longtail import grade_policy_judge
 
                 rewards.append(
                     float(
@@ -183,7 +183,7 @@ async def reward_func(args: Namespace, samples: list[Sample], **kwargs) -> list[
                 )
             elif route == "if":
                 # lazy: first use may clone allenai/open-instruct (IFEvalG registry)
-                from orbit.rollout.rm_hub.ultra_agents import grade_instruction_following
+                from orbit.peft.rewards.ultra_agents import grade_instruction_following
 
                 rewards.append(
                     grade_instruction_following(

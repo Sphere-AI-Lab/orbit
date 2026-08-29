@@ -23,7 +23,7 @@ binds $HOME — the host environment must not leak in). SIFs are looked up in
 
 Wire-up (standalone or via the reward router's ``swe_agents_train`` route)::
 
-    --custom-rm-path orbit.rollout.sandbox.swe_rm.reward_func
+    --custom-rm-path orbit.peft.rewards.sandbox.swe_rm.reward_func
     --swe-rm-sif-cache /path/to/sif_cache
     [--swe-rm-timeout-secs 300]
 """

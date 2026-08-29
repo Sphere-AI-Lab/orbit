@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-import orbit.rollout.rm_hub.ultra_agents as ua
+import orbit.peft.rewards.ultra_agents as ua
 
 TOOL_CALL_RESPONSE = (
     "I'll book that for you.\n<tool_call>\n"

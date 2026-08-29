@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Qwen2.5-0.5B-Instruct BF16 GRPO with sandboxed code-execution rewards.
-# Smoke config for orbit.rollout.sandbox.code_rm: the rollout's extracted
+# Smoke config for orbit.peft.rewards.sandbox.code_rm: the rollout's extracted
 # python program runs against metadata.unit_tests {inputs, outputs} in a
 # rlimited subprocess (network-isolated via unshare -rn when available);
 # reward 1.0 iff all executed tests pass. Built for the competitive-coding
 # rows (code_gen_simple_agent) of the Nemotron-RL-Ultra rlvr blends.
 # NOTE: tests execute on the ROLLOUT node as the training user — see the
-# threat model in orbit/rollout/sandbox/__init__.py.
+# threat model in orbit/peft/rewards/sandbox/__init__.py.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -73,7 +73,7 @@ ROLLOUT_ARGS=(
     --rollout-max-response-len "${ROLLOUT_MAX_RESPONSE_LEN}"
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --custom-rm-path orbit.rollout.sandbox.code_rm.reward_func
+    --custom-rm-path orbit.peft.rewards.sandbox.code_rm.reward_func
     --code-rm-timeout-secs "${CODE_RM_TIMEOUT_SECS:-6}"
     --code-rm-memory-mb "${CODE_RM_MEMORY_MB:-512}"
     --code-rm-max-tests "${CODE_RM_MAX_TESTS:-0}"

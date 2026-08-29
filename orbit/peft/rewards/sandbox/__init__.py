@@ -17,6 +17,6 @@ practice (NeMo-Skills/verl-style local executors); use a container-backed
 executor for anything stronger.
 """
 
-from .executor import ExecResult, network_isolation_available, run_python
+from orbit.peft.rewards.sandbox.executor import ExecResult, network_isolation_available, run_python
 
 __all__ = ["ExecResult", "network_isolation_available", "run_python"]

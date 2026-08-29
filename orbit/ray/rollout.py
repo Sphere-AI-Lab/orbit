@@ -24,7 +24,7 @@ from orbit.rollout.base_types import (
     call_rollout_fn,
 )
 from orbit.rollout.inference_rollout.compatibility import call_rollout_function, load_rollout_function
-from orbit.rollout.rm_hub.math_alignment import compute_math_alignment_metrics, is_math_alignment_sample
+from orbit.peft.rewards.math_alignment import compute_math_alignment_metrics, is_math_alignment_sample
 from orbit.utils import dumper_utils, tracking_utils
 from orbit.utils.arguments import uses_rollout_engines
 from orbit.utils.environ import enable_experimental_rollout_refactor
@@ -467,7 +467,7 @@ class RolloutManager:
             self._try_ci_fault_injection()
         data, metrics = self._get_rollout_data(rollout_id=rollout_id)
         if getattr(self.args, "opd_defer_full_vocab_scoring", False):
-            from orbit.rollout.opd_sglang import score_full_vocab_samples
+            from orbit.peft.opd.opd_sglang import score_full_vocab_samples
             from orbit.utils.async_utils import run
 
             run(score_full_vocab_samples(self.args, data))

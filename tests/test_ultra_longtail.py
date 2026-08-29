@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 
-import orbit.rollout.rm_hub.ultra_longtail as lt
-from orbit.rollout.rm_hub.ultra_agents import grade_structured_output
+import orbit.peft.rewards.ultra_longtail as lt
+from orbit.peft.rewards.ultra_agents import grade_structured_output
 
 # ---------------------------------------------------------------------------
 # Boxed answers

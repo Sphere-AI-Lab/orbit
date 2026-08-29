@@ -31,9 +31,9 @@ from copy import deepcopy
 
 import pytest
 
-import orbit.rollout.opd_sglang as opd_sglang
-from orbit.rollout.opd_sglang import _TOPK_PAD_LOGPROB, _TOPK_PAD_TOKEN_ID, _extract_teacher_topk
-from orbit.rollout.scoring_client import SCORING_MAX_RESPONSE_BYTES
+import orbit.peft.opd.opd_sglang as opd_sglang
+from orbit.peft.opd.opd_sglang import _TOPK_PAD_LOGPROB, _TOPK_PAD_TOKEN_ID, _extract_teacher_topk
+from orbit.peft.rewards.scoring_client import SCORING_MAX_RESPONSE_BYTES
 from orbit.utils.types import Sample
 
 

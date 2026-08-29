@@ -28,7 +28,7 @@ import json
 import sys
 from types import SimpleNamespace
 
-import orbit.rollout.swe_agent.episode as episode_mod
+import orbit.peft.rewards.swe_agent.episode as episode_mod
 from orbit.utils.types import Sample
 
 
