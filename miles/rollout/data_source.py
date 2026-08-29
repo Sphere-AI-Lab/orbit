@@ -2,6 +2,8 @@ import abc
 import copy
 import logging
 import os
+# ORBIT-SEAM: re powers the canonical iter_N checkpoint-directory pattern used by the PEFT-aware
+# rollout dataset state resolution below
 import re
 from pathlib import Path
 
@@ -15,6 +17,9 @@ from miles.utils.types import Sample
 logger = logging.getLogger(__name__)
 
 
+# ORBIT-SEAM: strict/validated rollout-dataset-checkpoint state resolution -- locates the correct
+# checkpoint root for a resumed Orbit PEFT adapter (state lives at the actor root, not the adapter dir)
+# vs a full checkpoint, and validates the loaded state dict shape/ranges before trusting it
 _ITERATION_DIRECTORY_RE = re.compile(r"iter_([0-9]+)")
 _MAX_ROLLOUT_COUNTER = 2**63 - 1
 
@@ -161,6 +166,8 @@ class DataSource(abc.ABC):
         Save the state of the data source
         """
 
+    # ORBIT-SEAM: new DataSource hook (default no-op) so save() can be delayed behind a later rollout
+    # without racing an in-place-mutated cursor; RolloutDataSource below overrides it with real snapshotting
     def mark_rollout_complete(self, rollout_id: int, *, snapshot_for_save: bool) -> None:
         """Record a completed rollout before another generate call can mutate state.
 
@@ -178,6 +185,7 @@ class DataSource(abc.ABC):
         """
 
 
+# ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
 # Follow-up may further refactor data-loading part later
 class RolloutDataSource(DataSource):
     def __init__(self, args):
@@ -187,8 +195,10 @@ class RolloutDataSource(DataSource):
         self.sample_group_index = 0
         self.sample_index = 0
         self.sample_offset = 0
+        # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
         # Follow-up remove this
         self.metadata = {}
+        # ORBIT-SEAM: cursor state for the mark_rollout_complete/save delayed-snapshot machinery below
         self._latest_completed_rollout_id = None
         self._rollout_state_snapshots = {}
 
@@ -198,6 +208,7 @@ class RolloutDataSource(DataSource):
             )
             processor = load_processor(args.hf_checkpoint, trust_remote_code=True)
 
+            # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
             # Follow-up move (during the refactor)
             if (d := args.dump_details) is not None:
                 tokenizer.save_pretrained(Path(d) / "tokenizer")
@@ -224,6 +235,7 @@ class RolloutDataSource(DataSource):
             self.dataset = None
 
     def get_samples(self, num_samples):
+        # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
         # Follow-up further improve code
         if self.dataset is not None:
             if self.sample_offset + num_samples <= len(self.dataset):
@@ -256,6 +268,8 @@ class RolloutDataSource(DataSource):
     def add_samples(self, samples: list[list[Sample]]):
         raise RuntimeError(f"Cannot add samples to {self.__class__.__name__}. This is a read-only data source.")
 
+    # ORBIT-SEAM: state-dict assembly factored out of save() so mark_rollout_complete can snapshot it
+    # immutably ahead of a delayed save(); metadata is deep-copied so a later snapshot can't alias/mutate it
     def _state_dict(self):
         return {
             "sample_offset": self.sample_offset,
@@ -265,6 +279,8 @@ class RolloutDataSource(DataSource):
             "metadata": copy.deepcopy(self.metadata),
         }
 
+    # ORBIT-SEAM: real (non-no-op) mark_rollout_complete override -- enforces monotonically increasing
+    # rollout ids and, when snapshot_for_save is set, captures the immutable state for save() to reuse later
     def mark_rollout_complete(self, rollout_id: int, *, snapshot_for_save: bool) -> None:
         if not self.args.rollout_global_dataset:
             return
@@ -281,6 +297,9 @@ class RolloutDataSource(DataSource):
         if snapshot_for_save:
             self._rollout_state_snapshots[rollout_id] = self._state_dict()
 
+    # ORBIT-SEAM: save() now prefers a snapshot captured by mark_rollout_complete (falls back to a
+    # fresh _state_dict() only when none was requested), validates the id, and rejects saving for a
+    # rollout other than the latest completed one when a snapshot was expected
     def save(self, rollout_id):
         if not self.args.rollout_global_dataset:
             return
@@ -300,6 +319,7 @@ class RolloutDataSource(DataSource):
         path = os.path.join(self.args.save, f"rollout/global_dataset_state_dict_{rollout_id}.pt")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         torch.save(state_dict, path)
+        # ORBIT-SEAM: drop stale snapshots (<= the just-saved rollout) to bound _rollout_state_snapshots' size
         for snapshot_rollout_id in tuple(snapshots):
             if snapshot_rollout_id <= rollout_id:
                 snapshots.pop(snapshot_rollout_id)
@@ -308,6 +328,9 @@ class RolloutDataSource(DataSource):
         if not self.args.rollout_global_dataset:
             return
 
+        # ORBIT-SEAM: resolve the checkpoint root via _resolve_rollout_dataset_state_location (PEFT-aware:
+        # adapter checkpoints keep rollout state at the actor root, not the adapter dir) instead of the
+        # raw args.load check, and raise instead of silently no-op-ing when state was required
         state_root, state_required = _resolve_rollout_dataset_state_location(self.args, rollout_id)
         if state_root is None:
             if state_required:
@@ -316,6 +339,8 @@ class RolloutDataSource(DataSource):
                 )
             return
 
+        # ORBIT-SEAM: path built from the resolved state_root Path, and state_required now raises instead
+        # of silently returning when the checkpoint is missing but was expected
         path = state_root / "rollout" / f"global_dataset_state_dict_{rollout_id}.pt"
         if not path.exists():
             if state_required:
@@ -324,6 +349,9 @@ class RolloutDataSource(DataSource):
             return
 
         logger.info(f"load metadata from {path}")
+        # ORBIT-SEAM: load with weights_only=True + map_location="cpu" and validate the loaded dict's
+        # shape/ranges via _validate_rollout_dataset_state before trusting any field (replaces the old
+        # unchecked torch.load + per-field .get() defaults below)
         state_dict = torch.load(path, map_location="cpu", weights_only=True)
         state = _validate_rollout_dataset_state(state_dict, dataset_size=len(self.dataset))
 
@@ -383,10 +411,12 @@ class RolloutDataSourceWithBuffer(RolloutDataSource):
             group = samples[i]  # type: ignore
             self.buffer.append(group)
 
+    # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
     # Follow-up remove
     def update_metadata(self, metadata: dict):
         self.metadata.update(metadata)
 
+    # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
     # Follow-up remove
     def get_metadata(self):
         return self.metadata

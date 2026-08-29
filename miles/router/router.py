@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+# ORBIT-SEAM: os backs the ORBIT_DEBUG_PEFT_REQUEST diagnostic in do_proxy below
 import logging
 import os
 
@@ -46,6 +47,7 @@ class MilesRouter:
         # Quarantined workers excluded from routing pool
         self.dead_workers: set[str] = set()
         self.max_weight_version = None
+        # ORBIT-SEAM: rate-limit counter for the ORBIT_DEBUG_PEFT_REQUEST diagnostic in do_proxy below
         self._debug_peft_request_count = 0
 
         max_connections = getattr(args, "miles_router_max_connections", None)
@@ -73,8 +75,11 @@ class MilesRouter:
         """Setup all the HTTP routes except catch-all proxy"""
         # sglang-router api
         self.app.post("/add_worker")(self.add_worker)
+        # ORBIT-SEAM: expose remove_worker (see below) as a route, matching add_worker
         self.app.post("/remove_worker")(self.remove_worker)
         self.app.get("/list_workers")(self.list_workers)
+        # ORBIT-SEAM: sglang-router-compatible /workers GET (see workers() below) and POST alias to
+        # add_worker, for tooling that expects the sglang-router worker-management API shape
         self.app.get("/workers")(self.workers)
         self.app.post("/workers")(self.add_worker)
         # Catch-all route for proxying to SGLang - must be registered LAST
@@ -103,6 +108,8 @@ class MilesRouter:
             try:
                 await asyncio.sleep(interval)
 
+                # ORBIT-SEAM: only health-check idle workers (active_requests == 0), not every non-dead
+                # worker -- see the comment below for why
                 # SGLang's HTTP health endpoint can be starved while long
                 # generations occupy a worker.  A timeout is therefore only
                 # actionable while the worker is idle; in-flight request
@@ -127,6 +134,7 @@ class MilesRouter:
                                 f"[miles-router] Worker {url} failed {threshold} consecutive health checks. Marking as DEAD."
                             )
                             self.dead_workers.add(url)
+                            # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
                             # Follow-up (chenyang): Connect back 'dead' workers requires a mechanism to sync
                             # model versions to avoid off-policy issues from stale weights, since these
                             # dead workers' parameters may not be refitted.
@@ -167,6 +175,8 @@ class MilesRouter:
         if body is not None:
             headers = {k: v for k, v in headers.items() if k.lower() not in ("content-length", "transfer-encoding")}
 
+        # ORBIT-SEAM: opt-in rate-limited diagnostic logging of PEFT adapter selection on generate
+        # requests passing through the router (LoRA lora_path vs OFT oft_path presence)
         if os.environ.get("ORBIT_DEBUG_PEFT_REQUEST") and path == "generate":
             limit = int(os.environ.get("ORBIT_DEBUG_PEFT_REQUEST_LIMIT", "16"))
             if self._debug_peft_request_count < limit:
@@ -189,6 +199,8 @@ class MilesRouter:
                 "status_code": response.status_code,
                 "headers": dict(response.headers),
             }
+        # ORBIT-SEAM: return a synthesized 502 instead of letting an upstream connection error escape
+        # do_proxy uncaught (the finally below still runs to release the active-request slot)
         except httpx.HTTPError as exc:
             logger.warning(
                 "[miles-router] Upstream request failed path=%s worker_url=%s error=%s",
@@ -250,6 +262,8 @@ class MilesRouter:
 
         return {"status": "success", "worker_urls": self.worker_request_counts}
 
+    # ORBIT-SEAM: new endpoint (registered above) to remove a worker mid-run, clearing its request/
+    # failure counts and dead-worker quarantine so a decommissioned engine stops being routed to
     async def remove_worker(self, request: Request):
         """Remove a worker from the router."""
         worker_url = request.query_params.get("url") or request.query_params.get("worker_url")
@@ -272,6 +286,8 @@ class MilesRouter:
         """List all registered workers"""
         return {"urls": list(self.worker_request_counts.keys())}
 
+    # ORBIT-SEAM: sglang-router-compatible worker listing (registered as GET /workers above), for
+    # tooling that expects that response shape instead of list_workers' plain URL list
     async def workers(self, request: Request):
         """SGLang-router compatible worker listing."""
         workers = [

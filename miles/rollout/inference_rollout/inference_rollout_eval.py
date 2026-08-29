@@ -1,12 +1,16 @@
 import asyncio
 import copy
+# ORBIT-SEAM: json serializes apply_chat_template_kwargs into the dataset cache key below
 import json
 import logging
+# ORBIT-SEAM: suppress wraps the pending-logger task cancellation in the try/finally below
 from contextlib import suppress
 from typing import Any
 
 from tqdm import tqdm
 
+# ORBIT-SEAM: per-task eval progress tracking + periodic "still pending" logging (surfaces stuck eval
+# generations instead of a silent hang until the whole batch completes)
 from orbit.rollout.eval_logging import (
     _EvalTaskProgress,
     _log_pending_eval_tasks,
@@ -26,6 +30,8 @@ from miles.utils.types import Sample
 logger = logging.getLogger(__name__)
 
 
+# ORBIT-SEAM: wraps generate_and_rm with per-task progress-state updates (generate_started/failed/
+# completed) so _log_pending_eval_tasks can report which eval samples are stuck and where
 async def _generate_and_rm_for_eval_with_progress(
     state: GenerateState,
     sample: Sample,
@@ -59,6 +65,8 @@ async def eval_rollout_single_dataset(
     assert not args.group_rm, "Group RM is not supported for eval rollout"
 
     cache_key = dataset_cfg.cache_key + (args.hf_checkpoint, args.apply_chat_template, args.chat_template_path)
+    # ORBIT-SEAM: fold apply_chat_template_kwargs into the dataset cache key so different kwargs don't
+    # collide on a stale cached Dataset
     if args.apply_chat_template_kwargs:
         cache_key += (json.dumps(args.apply_chat_template_kwargs, sort_keys=True),)
     if cache_key not in prompt_dataset_cache:
@@ -87,11 +95,15 @@ async def eval_rollout_single_dataset(
         top_p=dataset_cfg.top_p,
         top_k=dataset_cfg.top_k,
         max_new_tokens=dataset_cfg.max_response_len,
+        # ORBIT-SEAM: pass through the eval dataset's stop/stop_token_ids/min_new_tokens overrides
+        # (previously dropped, so eval sampling ignored these per-dataset config fields)
         stop=dataset_cfg.stop,
         stop_token_ids=dataset_cfg.stop_token_ids,
         min_new_tokens=dataset_cfg.min_new_tokens,
     )
 
+    # ORBIT-SEAM: index-keyed dicts (was a plain list) so _log_pending_eval_tasks can report which
+    # eval sample indices are still outstanding
     tasks_by_index: dict[int, asyncio.Task[Sample | list[Sample]]] = {}
     progress_by_index: dict[int, _EvalTaskProgress] = {}
     # do multiple samples for eval prompts
@@ -107,6 +119,8 @@ async def eval_rollout_single_dataset(
             if getattr(args, "sglang_enable_deterministic_inference", False):
                 sampling_params = base_sampling_params.copy()
                 sampling_params["sampling_seed"] = args.rollout_seed + j
+            # ORBIT-SEAM: keyed by sample.index (not appended) and routed through the progress-tracking
+            # wrapper instead of calling generate_and_rm directly
             tasks_by_index[sample.index] = asyncio.create_task(
                 _generate_and_rm_for_eval_with_progress(
                     state,
@@ -119,6 +133,8 @@ async def eval_rollout_single_dataset(
     data = []
     do_print = True
     pbar = tqdm(total=len(tasks_by_index), desc=f"Eval {dataset_cfg.name}", disable=not do_print)
+    # ORBIT-SEAM: background task periodically logs which eval samples are still pending (stuck-eval
+    # visibility); cancelled and drained in the finally block below regardless of how the loop exits
     pending_logger = asyncio.create_task(
         _log_pending_eval_tasks(
             dataset_name=dataset_cfg.name,

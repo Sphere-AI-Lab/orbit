@@ -1,3 +1,5 @@
+# ORBIT-SEAM: inspect backs _new_process_group_options_kwargs' signature probe below (version-proof
+# pg_options/backend_options kwarg detection)
 import inspect
 from datetime import timedelta
 from typing import Any
@@ -74,6 +76,9 @@ def init_process_group(
 
     # NOTE: The pg_options parameter was renamed into backend_options in PyTorch 2.6.0
     # https://github.com/pytorch/pytorch/commit/a0c7029a75628cd5fa8df83c0de0ea98ee7fd844
+    # ORBIT-SEAM: removed base's version-string comparison (`"backend_options" if str(torch.__version__)
+    # >= "2.6" else "pg_options"`), which breaks on non-numeric-suffixed dev/nightly torch versions;
+    # replaced by _new_process_group_options_kwargs' direct signature inspection below
     pg, _ = _new_process_group_helper(
         world_size,
         rank,
@@ -90,6 +95,9 @@ def init_process_group(
     return pg
 
 
+# ORBIT-SEAM: replaces base's torch-version-string comparison with a direct signature probe of
+# _new_process_group_helper, so the pg_options/backend_options kwarg rename is detected robustly
+# across torch dev/nightly/rc builds whose __version__ doesn't compare cleanly as "2.6"
 def _new_process_group_options_kwargs(pg_options: Any | None) -> dict[str, Any | None]:
     helper_params = inspect.signature(_new_process_group_helper).parameters
     if "backend_options" in helper_params:
@@ -106,6 +114,8 @@ def distributed_masked_whiten(
     shift_mean: bool = True,
     epsilon: float = 1e-8,
 ):
+    # ORBIT-SEAM: docstring below reworded for the process_group parameter (was WORLD-only wording,
+    # now describes an arbitrary selected process group)
     """
     Performs whitening on a tensor using global statistics from all participating GPUs.
 
@@ -124,6 +134,9 @@ def distributed_masked_whiten(
     Returns:
         torch.Tensor: The locally whitened tensor using global statistics.
     """
+    # ORBIT-SEAM: accumulate in fp32 (values may be bf16/fp16) and mask is cast onto values' device;
+    # torch.stack replaces the base's torch.tensor([...]) construction, which forced a host round-trip
+    # and thus didn't correctly support ranks with an empty local shard (CP/DP configs)
     # Accumulate in fp32 and stack the device scalars directly.  In particular,
     # ``sum`` on an empty local shard still produces a device scalar, so ranks
     # with no local tokens can participate in the same all-reduce as their

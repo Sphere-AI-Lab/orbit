@@ -1,10 +1,13 @@
 from copy import deepcopy
 from dataclasses import fields
 
+# ORBIT-SEAM: numpy backs the OPD teacher hidden-states merge (_merge_optional_hidden_states below)
 import numpy as np
 
 from miles.utils.types import Sample
 
+# ORBIT-SEAM: metadata key popped/merged separately by _merge_metadata below (top-k OPD student logprobs
+# don't merge like plain equal-value metadata)
 _OPD_STUDENT_TOP_LOGPROBS_KEY = "opd_student_top_logprobs"
 
 
@@ -17,6 +20,7 @@ def merge_samples(samples: list[Sample], tokenizer) -> Sample:
 
 def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
     """Merge two samples generated from sibling inference engine calls."""
+    # ORBIT-SEAM: pad sentinels for the direct-OPD top-k gap-fill in _merge_optional_topk_pair below
     from orbit.opd.opd_sglang import _TOPK_PAD_LOGPROB, _TOPK_PAD_TOKEN_ID
 
     a, b = deepcopy(a), deepcopy(b)
@@ -33,6 +37,11 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
         if sample.rollout_log_probs is None:
             sample.rollout_log_probs = [0.0] * sample.response_length
 
+    # ORBIT-SEAM: OPD sample-merge helpers -- extend the base per-field merge with OPD-only optional
+    # per-token fields (teacher_log_probs/opd_reverse_kl), full-vocab teacher hidden states, direct-OPD
+    # top-k id/logprob pairs (with pad rows over the injected observation gap), and the
+    # opd_student_top_logprobs metadata sub-key, all merged consistently with the None/zero-fill rules
+    # used by the base rollout_log_probs merge below
     def _merge_optional_per_token(field):
         # Optional OPD per-token lists (teacher_log_probs, opd_reverse_kl): merge like
         # rollout_log_probs when present (zeros over the injected observation span),
@@ -141,6 +150,7 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
 
     obs_len = len(b.tokens) - len(a.tokens) - b.response_length
     obs_tokens = b.tokens[len(a.tokens) : len(a.tokens) + obs_len]
+    # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
     # Follow-up: is this acceptable?
     obs_text = tokenizer.decode(obs_tokens)
 
@@ -153,6 +163,7 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
         if a.rollout_routed_experts is not None:
             assert a.rollout_routed_experts.shape[0] <= b.rollout_routed_experts.shape[0]
         assert a.status == Sample.Status.COMPLETED, f"a.status must be COMPLETED, got {a.status}"
+        # ORBIT-SEAM: resolve direct-OPD top-k merge/consistency-checks before building the merged Sample
         merged_topk_ids, merged_topk_logprobs = _merge_optional_topk_pair()
 
         return _create_with_all_fields(
@@ -170,6 +181,7 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
             loss_mask=a.loss_mask + [0] * obs_len + b.loss_mask,
             weight_versions=a.weight_versions + b.weight_versions,
             rollout_log_probs=a.rollout_log_probs + [0.0] * obs_len + b.rollout_log_probs,
+            # ORBIT-SEAM: OPD-only merged fields, using the helpers defined above
             teacher_log_probs=_merge_optional_per_token("teacher_log_probs"),
             teacher_hidden_states=_merge_optional_hidden_states(),
             opd_reverse_kl=_merge_optional_per_token("opd_reverse_kl"),
@@ -178,6 +190,8 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
             rollout_routed_experts=b.rollout_routed_experts,
             remove_sample=_merge_equal_value("remove_sample"),
             status=b.status,
+            # ORBIT-SEAM: metadata merge routes through _merge_metadata (handles opd_student_top_logprobs)
+            # instead of the plain equal-value merge
             metadata=_merge_metadata(),
             generate_function_path=_merge_equal_value("generate_function_path"),
             train_metadata=_merge_equal_value("train_metadata"),

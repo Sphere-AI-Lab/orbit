@@ -1,4 +1,5 @@
 import asyncio
+# ORBIT-SEAM: fcntl backs the flock-based port-lock helpers below (concurrent-launch port collision fix)
 import fcntl
 import ipaddress
 import json
@@ -8,6 +9,7 @@ import os
 import random
 import socket
 import time
+# ORBIT-SEAM: Path backs the port-lock directory/lock-file handling below
 from pathlib import Path
 
 import httpx
@@ -15,6 +17,9 @@ import httpx
 logger = logging.getLogger(__name__)
 
 MILES_HOST_IP_ENV = "MILES_HOST_IP"
+# ORBIT-SEAM: flock-based port-reservation helpers (used by find_available_port below) -- prevent two
+# concurrently-launching Orbit processes from racing to bind the same "available" port before either
+# one actually opens its socket
 _PORT_LOCK_FDS: dict[int, int] = {}
 _PORT_RANDOM = random.SystemRandom()
 
@@ -62,8 +67,12 @@ def _try_lock_port_range(port: int, consecutive: int = 1) -> bool:
 
 
 def find_available_port(base_port: int):
+    # ORBIT-SEAM: use the module-level SystemRandom (fewer collisions across simultaneously-launched
+    # processes than the global random module's shared, weakly-seeded state)
     port = base_port + _PORT_RANDOM.randint(100, 1000)
     while True:
+        # ORBIT-SEAM: also flock the candidate port (_try_lock_port) so two concurrent callers can't
+        # both observe it as available and return the same port
         if is_port_available(port) and _try_lock_port(port):
             return port
         if port < 60000:
@@ -216,6 +225,9 @@ def terminate_process(process: multiprocessing.Process, timeout: float = 1.0) ->
 _http_client: httpx.AsyncClient | None = None
 _client_concurrency: int = 0
 
+# ORBIT-SEAM: bounded HTTP timeouts (base used httpx.Timeout(None), i.e. no timeout at all) -- see
+# _build_http_timeout below, which replaces the unbounded timeout on both the local and per-node
+# Ray-actor httpx clients
 DEFAULT_HTTP_CONNECT_TIMEOUT_S = 10.0
 DEFAULT_HTTP_READ_TIMEOUT_S = 60.0
 DEFAULT_HTTP_WRITE_TIMEOUT_S = 30.0
@@ -270,6 +282,8 @@ async def _post(client, url, payload, max_retries=60, action="post", headers=Non
     return output
 
 
+# ORBIT-SEAM: read timeout is configurable via args.sglang_router_request_timeout_secs (falls back to
+# DEFAULT_HTTP_READ_TIMEOUT_S); connect/write stay fixed via _build_http_timeout below
 def _rollout_http_read_timeout_s(args=None) -> float:
     return float(getattr(args, "sglang_router_request_timeout_secs", DEFAULT_HTTP_READ_TIMEOUT_S))
 
@@ -295,6 +309,7 @@ def init_http_client(args):
     if _http_client is None:
         _http_client = httpx.AsyncClient(
             limits=httpx.Limits(max_connections=_client_concurrency),
+            # ORBIT-SEAM: bounded timeout (was httpx.Timeout(None)) -- see _build_http_timeout above
             timeout=_build_http_timeout(args),
         )
 
@@ -325,10 +340,13 @@ def _init_ray_distributed_post(args):
     # Define the async actor
     @ray.remote
     class _HttpPosterActor:
+        # ORBIT-SEAM: actor now takes the resolved read_timeout_s (constructed once on the driver, see
+        # below) rather than each actor re-reading args itself
         def __init__(self, concurrency: int, read_timeout_s: float):
             # Lazy creation to this actor's event loop
             self._client = httpx.AsyncClient(
                 limits=httpx.Limits(max_connections=max(1, concurrency)),
+                # ORBIT-SEAM: bounded timeout (was httpx.Timeout(None)) -- see _build_http_timeout above
                 timeout=_build_http_timeout(read_timeout_s=read_timeout_s),
             )
 
@@ -339,6 +357,7 @@ def _init_ray_distributed_post(args):
     created = []
     # Distribute client concurrency across actors (at least 1 per actor)
     per_actor_conc = (_client_concurrency + len(nodes)) // len(nodes)
+    # ORBIT-SEAM: resolve the read timeout once here (from args) and pass it to every actor below
     read_timeout_s = _rollout_http_read_timeout_s(args)
 
     for node in nodes:
@@ -352,12 +371,14 @@ def _init_ray_distributed_post(args):
                 max_concurrency=per_actor_conc,
                 # Use tiny CPU to schedule
                 num_cpus=0.001,
+            # ORBIT-SEAM: pass the resolved read_timeout_s through to the actor constructor above
             ).remote(per_actor_conc, read_timeout_s)
             created.append(actor)
 
     _post_actors = created
 
 
+# ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
 # Follow-up may generalize the name since it now contains http DELETE/GET etc (with retries and remote-execution)
 async def post(url, payload, max_retries=60, action="post", headers=None):
     # If distributed mode is enabled and actors exist, dispatch via Ray.
@@ -373,6 +394,7 @@ async def post(url, payload, max_retries=60, action="post", headers=None):
     return await _post(_http_client, url, payload, max_retries, action=action, headers=headers)
 
 
+# ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
 # Follow-up unify w/ `post` to add retries and remote-execution
 async def get(url):
     response = await _http_client.get(url)

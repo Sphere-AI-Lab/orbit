@@ -32,6 +32,7 @@ def convert_checkpoint(
 ):
     hf_checkpoint = hf_checkpoint or f"/root/models/{model_name}"
 
+    # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
     # Follow-up shall we make it in host-mapped folder and thus can cache it to speedup CI
     path_dst = f"{dir_dst}/{model_name}_torch_dist"
     tracker = Path(path_dst) / "latest_checkpointed_iteration.txt"
@@ -49,6 +50,8 @@ def convert_checkpoint(
         fn = partial(exec_command_all_ray_node, num_nodes=num_nodes)
     else:
         fn = exec_command
+    # ORBIT-SEAM: explains why convert_hf_to_torch_dist.py stays under tools/ (orbit's own
+    # tools/ + miles_plugins/ own conversion, not a vendored miles path)
     # Keep the historical `convert_hf_to_torch_dist.py` entrypoint, but route it
     # through the new root tools wrapper so conversion ownership lives under
     # `tools/` + `miles_plugins/`, not legacy `tools/`.
@@ -116,6 +119,9 @@ def execute_train(
     external_ray = get_bool_env_var("MILES_SCRIPT_EXTERNAL_RAY")
     master_addr = os.environ.get("MASTER_ADDR", "127.0.0.1")
 
+    # ORBIT-SEAM: FSDP train backend dropped (orbit is Megatron-only); replaces base's
+    # train_backend_fsdp inference + consistency assert with a direct rejection of --train-backend fsdp
+    # and a required megatron_model_type
     assert "--train-backend fsdp" not in train_args, "FSDP train backend is no longer supported."
     assert megatron_model_type is not None, "megatron_model_type is required for the Megatron train backend."
 
@@ -125,6 +131,8 @@ def execute_train(
         f"{'' if external_ray else 'ray stop --force; '}"
         f"{'' if external_ray else 'pkill -9 ray; '}"
         # cannot be run in CI, o/w kill the parent script
+        # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass) and "miles" -> "orbit" in
+        # the wording (matches process name below, still literally "miles" -- see the pkill commands)
         # Follow-up: do we really need this kill? (or can we instead kill orbit)
         # "pkill -9 python; "
         "pkill -9 miles; "
@@ -150,6 +158,8 @@ def execute_train(
         {
             "env_vars": {
                 "PYTHONPATH": megatron_path,
+                # ORBIT-SEAM: unconditional now that FSDP is no longer supported (was conditioned on
+                # not train_backend_fsdp, since FSDP's comm overlap could break with this set)
                 "CUDA_DEVICE_MAX_CONNECTIONS": "1",
                 "NCCL_NVLS_ENABLE": os.environ.get("NCCL_NVLS_ENABLE", str(int(check_has_nvlink()))),
                 **{k: os.environ[k] for k in ("NCCL_SOCKET_IFNAME", "GLOO_SOCKET_IFNAME") if k in os.environ},
@@ -172,6 +182,9 @@ def execute_train(
         }
     )
 
+    # ORBIT-SEAM: removed base's `cmd_megatron_model_source = (... if megatron_model_type is not None
+    # else "")` conditional: megatron_model_type is now always required (asserted above), so the model
+    # source line and ${MODEL_ARGS[@]} below are unconditional too
     if get_bool_env_var("MILES_SCRIPT_ENABLE_RAY_SUBMIT", "1"):
         exec_command(
             f"export no_proxy=127.0.0.1 && export PYTHONBUFFERED=16 && "
@@ -240,6 +253,7 @@ def get_bool_env_var(name: str, default: str = "false") -> bool:
 
     if (value not in truthy_values) and (value not in falsy_values):
         if value not in _warned_bool_env_var_keys:
+            # ORBIT-SEAM: wording fix ("unrecognized" instead of "non-understandable"), no functional change
             print(f"get_bool_env_var({name}) see unrecognized value={value} and treat as false")
         _warned_bool_env_var_keys.add(value)
 
@@ -259,6 +273,7 @@ def save_to_temp_file(text: str, ext: str):
 
 NUM_GPUS_OF_HARDWARE = {
     "H100": 8,
+    # ORBIT-SEAM: add the H200/B200/B300 hardware GPU-per-node entries orbit runs on
     "H200": 8,
     "B200": 8,
     "B300": 8,

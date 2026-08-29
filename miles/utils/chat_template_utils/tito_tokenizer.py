@@ -87,6 +87,9 @@ class TITOTokenizer:
             trim_trailing_ids=self.trailing_token_ids or None,
         )
 
+    # ORBIT-SEAM: new base-class hook (identity default) so a length-truncated generation's canonical
+    # expected-ids can drop closing control tokens the model couldn't have emitted; Qwen3TITOTokenizer
+    # below overrides it for the im_end/newline suffix
     def expected_ids_for_finish_reason(
         self,
         expected_ids: list[int],
@@ -204,6 +207,9 @@ class Qwen3TITOTokenizer(TITOTokenizer):
         self._im_end_id: int = tokenizer.convert_tokens_to_ids("<|im_end|>")
         self.trailing_token_ids = frozenset({self._newline_id})
 
+    # ORBIT-SEAM: on a length-truncated finish, strip a trailing newline then a trailing <|im_end|>
+    # from the canonical expected ids (the model can't emit its closing token when generation was cut
+    # off by max_new_tokens)
     def expected_ids_for_finish_reason(
         self,
         expected_ids: list[int],

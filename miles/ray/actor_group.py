@@ -5,6 +5,9 @@ import ray
 from ray.util.placement_group import PlacementGroup
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
+# ORBIT-SEAM: NOSET_VISIBLE_DEVICES_ENV_VARS_LIST replaced by build_noset_visible_devices_env_vars();
+# _uses_dsv4_deepep/_build_train_actor_env add DSV4 DeepEP NCCL symmetric-memory env vars and the PEFT
+# expandable_segments fragmentation workaround (colocated rollout hands the GPU back every step)
 from miles.ray.utils import build_noset_visible_devices_env_vars
 
 
@@ -81,6 +84,7 @@ class RayTrainGroup:
         num_gpus_per_actor: float = 1,
         role: str,
         with_ref: bool,
+        # ORBIT-SEAM: OPD teacher-actor flag, threaded through to init() below
         with_opd_teacher: bool = False,
     ) -> None:
         self.args = args
@@ -88,6 +92,7 @@ class RayTrainGroup:
         self._num_gpus_per_node = num_gpus_per_node
         self.role = role
         self.with_ref = with_ref
+        # ORBIT-SEAM: store the OPD teacher-actor flag for init()
         self.with_opd_teacher = with_opd_teacher
 
         # Allocate the GPUs for actors w/o instantiating them
@@ -100,9 +105,12 @@ class RayTrainGroup:
         assert pg is not None
         pg, reordered_bundle_indices, _reordered_gpu_ids = pg
 
+        # ORBIT-SEAM: per-actor env now built by the shared _build_train_actor_env helper above
         env_vars = _build_train_actor_env(self.args)
 
         backend = self.args.train_backend
+        # ORBIT-SEAM: FSDP train backend dropped (orbit is Megatron-only); the fsdp_utils import branch
+        # is replaced by this assertion
         assert backend == "megatron", f"Only the Megatron train backend is supported (got {backend})."
         from miles.backends.megatron_utils.actor import MegatronTrainRayActor
 
@@ -132,6 +140,7 @@ class RayTrainGroup:
         """
         Allocate GPU resourced and initialize model, optimizer, local ckpt, etc.
         """
+        # ORBIT-SEAM: pass with_opd_teacher through to each actor's init so OPD teacher actors init correctly
         return await self._broadcast(
             "init", self.args, self.role, with_ref=self.with_ref, with_opd_teacher=self.with_opd_teacher
         )
@@ -140,6 +149,8 @@ class RayTrainGroup:
         """Do one rollout training"""
         await self._broadcast("train", rollout_id, rollout_data_ref)
 
+    # ORBIT-SEAM: held-out NLL eval broadcast; result de-duplication (one DP-reduced value, rest None)
+    # delegates to orbit.utils.eval_nll.select_eval_nll_result
     async def compute_eval_nll(self, rollout_id) -> dict:
         """Held-out NLL of the current actor weights, reduced across ranks.
 
@@ -169,6 +180,8 @@ class RayTrainGroup:
     async def offload(self):
         await self._broadcast("sleep")
 
+    # ORBIT-SEAM: async wake-up overlap broadcast — issues frozen-base H2D on the dedicated wake stream
+    # ahead of wake_up() (no-op when offload_train_async is off)
     async def prefetch_train_state(self, rollout_id):
         """Async wake-up overlap: issue frozen-base H2D on each actor's
         dedicated wake stream so wake_up() can wait on the recorded event
@@ -181,6 +194,8 @@ class RayTrainGroup:
         await self._broadcast("clear_memory")
 
     async def connect(self, critic_group):
+        # ORBIT-SEAM: fail fast on an actor/critic worker-count mismatch instead of silently truncating
+        # the shorter side; strict=True below enforces the same invariant on the zip
         if len(self._actor_handles) != len(critic_group._actor_handles):
             raise RuntimeError(
                 "actor and critic groups must have equal worker counts; "

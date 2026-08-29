@@ -11,6 +11,10 @@ def _get_rank():
     return dist.get_rank() if dist.is_initialized() else 0
 
 
+# ORBIT-SEAM: replaces base's inline `top_indices[padding_mask] = arange(...) % num_experts` padding
+# repair (used at the call site below) -- that scheme could reintroduce duplicate/out-of-range expert
+# ids across a token's own topk row; this validates ranges/duplicates up front and repairs each -1 slot
+# by scanning for an expert id that doesn't conflict with anything already assigned to that token
 def _sanitize_replay_top_indices(top_indices: torch.Tensor, num_experts: int) -> torch.Tensor:
     """Keep replayed MoE routes valid for Megatron's sparse dispatch map."""
     if top_indices.numel() == 0:
@@ -142,6 +146,8 @@ class BaseReplayManager:
             if self.enable_check_replay_result:
                 self.check_replay_result(old_topk_fn, scores, topk, top_indices, *args, **kwargs)
 
+            # ORBIT-SEAM: replaces base's inline padding_mask/arange repair with the validated,
+            # conflict-aware _sanitize_replay_top_indices defined above
             top_indices = _sanitize_replay_top_indices(top_indices, scores.shape[1])
 
             if return_probs:

@@ -62,6 +62,9 @@ class MockSGLangServer:
         self.request_log: list[dict] = []
         self._concurrency = Counter()
 
+        # ORBIT-SEAM: mock adapter/weight-version state for the PEFT double-buffer update endpoints
+        # registered below (update_adapter_from_distributed / update_weight_version /
+        # activate_adapter_version), mirroring the real SGLang engine's staged-then-activated adapter model
         self.weight_version = "0"
         self.adapter_version = "0"
         self.staged_adapter_versions = {}
@@ -105,6 +108,10 @@ class MockSGLangServer:
         async def abort_request(_request: Request):
             return JSONResponse(content={"status": "ok"})
 
+        # ORBIT-SEAM: mock endpoints for orbit's PEFT weight/adapter-version protocol -- model_info
+        # exposes the current versions; update_adapter_from_distributed stages (double_buffer=True) or
+        # immediately activates an adapter version; update_weight_version bumps both versions together
+        # (full-FT path); activate_adapter_version promotes a staged version, rejecting an unstaged one
         @self.app.get("/model_info")
         async def model_info():
             return {
@@ -196,6 +203,9 @@ class MockSGLangServer:
             response = compute_fn(payload)
         return JSONResponse(content=response)
 
+    # ORBIT-SEAM: removed base's `assert payload.get("return_logprob", True) is True` -- orbit callers
+    # (e.g. compute_request_payload's return_logprob param) legitimately request return_logprob=False,
+    # which this mock now honors below instead of rejecting
     def _compute_generate_response(self, payload: dict) -> dict:
         input_ids = payload.get("input_ids", [])
 
@@ -217,11 +227,16 @@ class MockSGLangServer:
             "prompt_tokens": prompt_tokens,
             "cached_tokens": process_result.cached_tokens,
             "completion_tokens": completion_tokens,
+            # ORBIT-SEAM: output_token_logprobs moved out of the unconditional dict below -- only
+            # included when the request actually set return_logprob (mirrors real SGLang and the
+            # no-assert relaxation above)
             **process_result.meta_info.to_dict(),
         }
         if payload.get("return_logprob", False):
             meta_info["output_token_logprobs"] = output_token_logprobs
 
+        # ORBIT-SEAM: output_ids now returned at the top level (generate_endpoint_utils prefers
+        # output_ids over deriving tokens from output_token_logprobs when logprobs weren't requested)
         return {"text": process_result.text, "output_ids": output_ids, "meta_info": meta_info}
 
     def _compute_chat_completions_response(self, payload: dict) -> dict:
