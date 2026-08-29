@@ -39,7 +39,7 @@ RAY_NUM_CPUS=64
 
 # === Model args ===
 MODEL_ARGS_ROTARY_BASE="${MODEL_ARGS_ROTARY_BASE:-1000000}"   # Instruct-2507 checkpoints need 10000000
-source "${ORBIT_ROOT}/orbit_plugins/model_args/qwen3-30B-A3B.sh"   # provides MODEL_ARGS=(...)
+source "${ORBIT_ROOT}/miles_plugins/model_args/qwen3-30B-A3B.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
 TOTAL_EPOCHS=1000
@@ -78,7 +78,7 @@ ROLLOUT_ARGS=(
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
     --use-rollout-routing-replay
-    --custom-rm-path orbit.peft.rewards.peft_arena_reward.peft_arena_reward
+    --custom-rm-path orbit.rewards.peft_arena_reward.peft_arena_reward
     --reward-key score
     --eval-reward-key score
 )

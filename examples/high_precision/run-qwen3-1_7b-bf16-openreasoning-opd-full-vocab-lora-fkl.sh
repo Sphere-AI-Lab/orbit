@@ -36,7 +36,7 @@ ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-2}"
 RAY_NUM_CPUS="${RAY_NUM_CPUS:-64}"
 
 # === Model args ===
-MODEL_ARGS_FILE="${MODEL_ARGS_FILE:-${ORBIT_ROOT}/orbit_plugins/model_args/qwen3-1.7B.sh}"
+MODEL_ARGS_FILE="${MODEL_ARGS_FILE:-${ORBIT_ROOT}/miles_plugins/model_args/qwen3-1.7B.sh}"
 source "${MODEL_ARGS_FILE}"
 
 # === Training schedule ===
@@ -72,8 +72,8 @@ ROLLOUT_ARGS=(
     --rollout-max-response-len "${ROLLOUT_MAX_RESPONSE_LEN}"
     --rollout-temperature 0.7
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --custom-rm-path orbit.peft.opd.opd_sglang.reward_func
-    --custom-reward-post-process-path orbit.peft.opd.opd_sglang.post_process
+    --custom-rm-path orbit.opd.opd_sglang.reward_func
+    --custom-reward-post-process-path orbit.opd.opd_sglang.post_process
 )
 
 OPTIMIZER_ARGS=(

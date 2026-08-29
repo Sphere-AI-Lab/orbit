@@ -46,7 +46,7 @@ export SKIP_EVAL_BEFORE_TRAIN="${SKIP_EVAL_BEFORE_TRAIN:-0}"
 export DISABLE_SAVE="${DISABLE_SAVE:-0}"
 
 # === Pro model ===
-export MODEL_ARGS_FILE="${MODEL_ARGS_FILE:-${ORBIT_ROOT}/orbit_plugins/model_args/deepseek-v4-pro.sh}"
+export MODEL_ARGS_FILE="${MODEL_ARGS_FILE:-${ORBIT_ROOT}/miles_plugins/model_args/deepseek-v4-pro.sh}"
 export MODEL_ARGS_NUM_LAYERS="${MODEL_ARGS_NUM_LAYERS:-61}"
 : "${HF_CKPT:?set HF_CKPT to a Hugging Face checkpoint path}"
 : "${MEGATRON_LOAD:?set MEGATRON_LOAD to a Megatron torch_dist checkpoint path}"

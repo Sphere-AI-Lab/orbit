@@ -6,7 +6,7 @@ from argparse import Namespace
 
 import pytest
 
-from orbit.backends.sglang_utils.arguments import apply_prefill_cuda_graph_policy
+from miles.backends.sglang_utils.arguments import apply_prefill_cuda_graph_policy
 
 
 def test_unset_backend_defaults_to_disabled():

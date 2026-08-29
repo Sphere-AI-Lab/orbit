@@ -2,7 +2,7 @@ import argparse
 
 import pytest
 
-from orbit.utils.arguments import (
+from miles.utils.arguments import (
     _validate_opd_args,
     add_on_policy_distillation_arguments,
     needs_opd_teacher,
@@ -233,8 +233,8 @@ def test_validate_allows_peft_with_sglang_teacher():
         opd_type="sglang",
         opd_teacher_url="http://host/generate",
         peft_method="lora",
-        custom_rm_path="orbit.peft.opd.opd_sglang.reward_func",
-        custom_reward_post_process_path="orbit.peft.opd.opd_sglang.post_process",
+        custom_rm_path="orbit.opd.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.opd.opd_sglang.post_process",
     )
     _validate_opd_args(args)
 
@@ -273,8 +273,8 @@ def test_validate_sglang_passes_without_teacher_load():
         opd_type="sglang",
         opd_teacher_load=None,
         opd_teacher_url="http://host/generate",
-        custom_rm_path="orbit.peft.opd.opd_sglang.reward_func",
-        custom_reward_post_process_path="orbit.peft.opd.opd_sglang.post_process",
+        custom_rm_path="orbit.opd.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.opd.opd_sglang.post_process",
     )
     _validate_opd_args(args)
 
@@ -298,7 +298,7 @@ def test_validate_sglang_rejects_foreign_custom_rm():
         opd_type="sglang",
         opd_teacher_url="http://host/generate",
         custom_rm_path="my_pkg.my_rm",
-        custom_reward_post_process_path="orbit.peft.opd.opd_sglang.post_process",
+        custom_reward_post_process_path="orbit.opd.opd_sglang.post_process",
     )
     with pytest.raises(ValueError, match="custom-rm-path"):
         _validate_opd_args(args)
@@ -320,8 +320,8 @@ def test_validate_topk_rejects_negative():
         advantage_estimator="on_policy_distillation",
         opd_type="sglang",
         opd_teacher_url="http://host/generate",
-        custom_rm_path="orbit.peft.opd.opd_sglang.reward_func",
-        custom_reward_post_process_path="orbit.peft.opd.opd_sglang.post_process",
+        custom_rm_path="orbit.opd.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.opd.opd_sglang.post_process",
         opd_log_prob_top_k=-1,
     )
     with pytest.raises(ValueError, match="non-negative"):
@@ -333,8 +333,8 @@ def test_validate_topk_passes_with_sglang(tmp_path):
         advantage_estimator="on_policy_distillation",
         opd_type="sglang",
         opd_teacher_url="http://host/generate",
-        custom_rm_path="orbit.peft.opd.opd_sglang.reward_func",
-        custom_reward_post_process_path="orbit.peft.opd.opd_sglang.post_process",
+        custom_rm_path="orbit.opd.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.opd.opd_sglang.post_process",
         opd_log_prob_top_k=8,
     )
     _validate_opd_args(args)
@@ -357,8 +357,8 @@ def test_validate_teacher_urls_fail_fast_on_malformed():
         opd_type="sglang",
         opd_teacher_url=None,
         opd_teacher_urls=["malformed-entry"],
-        custom_rm_path="orbit.peft.opd.opd_sglang.reward_func",
-        custom_reward_post_process_path="orbit.peft.opd.opd_sglang.post_process",
+        custom_rm_path="orbit.opd.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.opd.opd_sglang.post_process",
     )
     with pytest.raises(ValueError, match="expected NAME=URL"):
         _validate_opd_args(args)
@@ -370,8 +370,8 @@ def test_validate_sglang_passes_with_teacher_urls_instead_of_url():
         opd_type="sglang",
         opd_teacher_url=None,
         opd_teacher_urls=["default=http://h1/generate", "math=http://h2/generate"],
-        custom_rm_path="orbit.peft.opd.opd_sglang.reward_func",
-        custom_reward_post_process_path="orbit.peft.opd.opd_sglang.post_process",
+        custom_rm_path="orbit.opd.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.opd.opd_sglang.post_process",
     )
     _validate_opd_args(args)
 
@@ -381,8 +381,8 @@ def test_validate_kl_type_forward_requires_topk():
         advantage_estimator="on_policy_distillation",
         opd_type="sglang",
         opd_teacher_url="http://host/generate",
-        custom_rm_path="orbit.peft.opd.opd_sglang.reward_func",
-        custom_reward_post_process_path="orbit.peft.opd.opd_sglang.post_process",
+        custom_rm_path="orbit.opd.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.opd.opd_sglang.post_process",
         opd_kl_type="forward",
         opd_log_prob_top_k=0,
     )
@@ -395,8 +395,8 @@ def test_validate_mixed_kl_weight_range():
         advantage_estimator="on_policy_distillation",
         opd_type="sglang",
         opd_teacher_url="http://host/generate",
-        custom_rm_path="orbit.peft.opd.opd_sglang.reward_func",
-        custom_reward_post_process_path="orbit.peft.opd.opd_sglang.post_process",
+        custom_rm_path="orbit.opd.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.opd.opd_sglang.post_process",
         opd_log_prob_top_k=16,
         opd_kl_type="mixed",
         opd_mixed_kl_weight=1.5,
@@ -410,8 +410,8 @@ def test_validate_kl_type_mixed_passes_with_topk():
         advantage_estimator="on_policy_distillation",
         opd_type="sglang",
         opd_teacher_url="http://host/generate",
-        custom_rm_path="orbit.peft.opd.opd_sglang.reward_func",
-        custom_reward_post_process_path="orbit.peft.opd.opd_sglang.post_process",
+        custom_rm_path="orbit.opd.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.opd.opd_sglang.post_process",
         opd_log_prob_top_k=16,
         opd_kl_type="mixed",
         opd_mixed_kl_weight=0.5,
@@ -641,8 +641,8 @@ def test_sglang_external_url_blend_still_rejected():
     args = _base_args(
         advantage_estimator="grpo", use_opd=True, opd_type="sglang",
         opd_teacher_url="http://h:1/generate",
-        custom_rm_path="orbit.peft.opd.opd_sglang.reward_func",
-        custom_reward_post_process_path="orbit.peft.opd.opd_sglang.post_process",
+        custom_rm_path="orbit.opd.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.opd.opd_sglang.post_process",
     )
     with pytest.raises(ValueError, match="blend"):
         _validate_opd_args(args)
@@ -689,9 +689,9 @@ def _valid_force_ratio_args(**overrides):
         "num_steps_per_rollout": 1,
         "opd_type": "sglang",
         "opd_teacher_url": "http://host/generate",
-        "custom_rm_path": "orbit.peft.opd.opd_sglang.reward_func",
+        "custom_rm_path": "orbit.opd.opd_sglang.reward_func",
         "custom_reward_post_process_path": (
-            "orbit.peft.opd.opd_sglang.post_process"
+            "orbit.opd.opd_sglang.post_process"
         ),
     }
     values.update(overrides)

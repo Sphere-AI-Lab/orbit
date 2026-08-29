@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-from orbit.peft.utils.adapter_swap import swap_adapter_tensors
-from orbit.peft.utils.adapter_tensors import (
+from orbit.utils.adapter_swap import swap_adapter_tensors
+from orbit.utils.adapter_tensors import (
     adapter_named_parameters,
     adapter_tensor_key_digest,
 )

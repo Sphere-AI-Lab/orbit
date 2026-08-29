@@ -3,7 +3,7 @@ from argparse import Namespace
 import torch
 import torch.distributed as dist
 
-from orbit.backends.training_utils.data import sync_actor_critic_data
+from miles.backends.training_utils.data import sync_actor_critic_data
 from tests.fast.dist_utils import init_gloo, run_multiprocess
 
 

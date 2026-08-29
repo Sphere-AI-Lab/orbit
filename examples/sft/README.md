@@ -30,7 +30,7 @@ is computed only on assistant target tokens.
 - disables advantage and return computation;
 - forces `--n-samples-per-prompt 1`;
 - switches the default rollout function to
-  `orbit.rollout.sft_rollout.generate_rollout`;
+  `miles.rollout.sft_rollout.generate_rollout`;
 - disables rollout engines for plain training runs without generation eval.
 
 ## Convert Datasets

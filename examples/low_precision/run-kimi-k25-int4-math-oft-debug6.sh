@@ -21,7 +21,7 @@ export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}
 : "${HF_CKPT:?set HF_CKPT to a Hugging Face checkpoint path}"
 : "${MEGATRON_LOAD:?set MEGATRON_LOAD to a Megatron torch_dist checkpoint path}"
 LOAD_CKPT=${LOAD_CKPT:-${MEGATRON_LOAD}}
-MODEL_ARGS_FILE=${MODEL_ARGS_FILE:-"${ORBIT_ROOT}/orbit_plugins/model_args/kimi-k25-debug-6layer.sh"}
+MODEL_ARGS_FILE=${MODEL_ARGS_FILE:-"${ORBIT_ROOT}/miles_plugins/model_args/kimi-k25-debug-6layer.sh"}
 SAVE_DIR=${SAVE_DIR:-${ORBIT_ROOT}/orbit_ckpts/Kimi-K2.5-W4A16_math_oft}
 
 # === Local checkpoint staging ===

@@ -10,7 +10,7 @@ GQA makes the two differ: Llama-3.1-8B fuses 32 query and 2x8 key/value heads at
 128 channels into 6144, against a 4096 hidden size. E3's and E5's
 matched-parameter arithmetic is wrong without it.
 
-Every field is checked against the `orbit_plugins/model_args/*.sh` plugin it
+Every field is checked against the `miles_plugins/model_args/*.sh` plugin it
 names by `tests/fast/utils/test_lora_regret_models.py`, so the registry cannot
 drift from the plugin that actually configures the run.
 """
@@ -24,7 +24,7 @@ HF_MODELS_DIR = "/lustre/fast/fast/zqiu/hf_models"
 # Still under the *old* repo's path -- a cross-repo dependency rather than a
 # break, which is why preflight checks it rather than assuming it.
 MEGATRON_CKPT_DIR = "/lustre/fast/fast/zqiu/orbit-infra/orbit/checkpoints"
-PINNED_LLAMA_TEMPLATE = "orbit/peft/utils/chat_template_utils/templates/llama3.1_pinned.jinja"
+PINNED_LLAMA_TEMPLATE = "orbit/utils/chat_template_utils/templates/llama3.1_pinned.jinja"
 
 # One H100. `HEADROOM_GB` is what a FullFT arm needs for activations, the
 # rollout engine's share and allocator fragmentation on top of optimizer state.
@@ -182,7 +182,7 @@ def model_env(model: Model, repo_root: Path) -> dict[str, str]:
         "MODEL_KEY": model.key,
         "HF_CKPT": model.hf_checkpoint,
         "MEGATRON_LOAD": model.megatron_load,
-        "MODEL_ARGS_FILE": str(repo_root / "orbit_plugins" / "model_args" / model.model_args_plugin),
+        "MODEL_ARGS_FILE": str(repo_root / "miles_plugins" / "model_args" / model.model_args_plugin),
         "LOSS_MASK_TYPE": model.loss_mask_type,
         "CHAT_TEMPLATE_PATH": template,
         "MIN_GPUS_FULLFT": min_gpus,

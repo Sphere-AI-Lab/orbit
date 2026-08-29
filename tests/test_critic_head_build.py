@@ -6,7 +6,7 @@ import argparse
 
 import torch
 
-from orbit.backends.megatron_utils import model as model_mod
+from miles.backends.megatron_utils import model as model_mod
 
 HIDDEN = 4
 

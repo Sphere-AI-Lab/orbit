@@ -18,7 +18,7 @@ import sys
 
 import pytest
 
-from orbit.peft.megatron.modelopt_state_shim import (
+from orbit.megatron.modelopt_state_shim import (
     MODULE_NAME,
     has_modelopt_state,
     install_if_missing,
@@ -101,7 +101,7 @@ class TestInstall:
 
         `install_if_missing` is a process-wide one-shot, so the first call only
         returns True if nothing has already triggered it. Importing anything
-        under `orbit.backends.megatron_utils` does trigger it -- `model.py`
+        under `miles.backends.megatron_utils` does trigger it -- `model.py`
         installs the shim at import -- so whether this test saw a clean slate
         used to depend on which other tests pytest happened to run first. It
         passed for as long as no earlier test in collection order imported that
@@ -140,6 +140,6 @@ def test_orbits_model_module_installs_the_shim_before_get_model_can_run():
     """The import in Megatron is inside `get_model()`, so the shim only has to
     be in sys.modules before that call -- but it must be, on every path that
     reaches it, including inside a Ray actor that imported orbit fresh."""
-    import orbit.backends.megatron_utils.model as model_module
+    import miles.backends.megatron_utils.model as model_module
 
     assert hasattr(model_module, "_MODELOPT_SHIM_INSTALLED")

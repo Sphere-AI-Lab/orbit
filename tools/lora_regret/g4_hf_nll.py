@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     import torch.nn.functional as F
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    from orbit.utils.mask_utils import MultiTurnLossMaskGenerator
+    from miles.utils.mask_utils import MultiTurnLossMaskGenerator
 
     dtype = {"bfloat16": torch.bfloat16, "float32": torch.float32}[args.dtype]
 

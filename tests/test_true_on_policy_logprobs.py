@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from orbit.utils.ppo_utils import (
+from miles.utils.ppo_utils import (
     _calculate_log_probs_and_entropy_true_on_policy,
     _prepare_true_on_policy_full_logits,
     _split_replicated_loss_gather_grad,
@@ -113,7 +113,7 @@ def test_true_on_policy_entropy_no_grad_detaches_only_entropy():
 
 
 def test_rollout_logprob_storage_dtype_pinned_under_true_on_policy():
-    from orbit.backends.training_utils.data import _rollout_logprob_dtype
+    from miles.backends.training_utils.data import _rollout_logprob_dtype
 
     assert _rollout_logprob_dtype(SimpleNamespace(true_on_policy_mode=False, bf16=True)) is torch.float32
     assert _rollout_logprob_dtype(SimpleNamespace(true_on_policy_mode=True, bf16=True)) is torch.bfloat16

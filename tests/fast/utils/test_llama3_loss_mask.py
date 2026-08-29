@@ -14,8 +14,8 @@ pytestmark = pytest.mark.skipif(
 def gen():
     from transformers import AutoTokenizer
 
-    from orbit.peft.utils.llama3_chat_template import ensure_llama3_chat_template
-    from orbit.utils.mask_utils import MultiTurnLossMaskGenerator
+    from orbit.utils.llama3_chat_template import ensure_llama3_chat_template
+    from miles.utils.mask_utils import MultiTurnLossMaskGenerator
 
     tok = AutoTokenizer.from_pretrained(str(LLAMA31_8B))
     ensure_llama3_chat_template(tok)
@@ -214,7 +214,7 @@ def test_dispatch_routes_llama3(gen):
 
 
 def test_unknown_type_still_raises():
-    from orbit.utils.mask_utils import MultiTurnLossMaskGenerator
+    from miles.utils.mask_utils import MultiTurnLossMaskGenerator
 
     obj = MultiTurnLossMaskGenerator.__new__(MultiTurnLossMaskGenerator)
     obj.tokenizer_type = "not_a_real_type"
@@ -231,8 +231,8 @@ def test_argparse_accepts_llama3_and_rejects_junk(monkeypatch):
     """
     import argparse
 
-    import orbit.utils.arguments as arguments
-    from orbit.utils.arguments import get_orbit_extra_args_provider
+    import miles.utils.arguments as arguments
+    from miles.utils.arguments import get_orbit_extra_args_provider
 
     monkeypatch.setattr(arguments, "enable_experimental_rollout_refactor", lambda: False)
     parser = argparse.ArgumentParser()

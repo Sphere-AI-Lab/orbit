@@ -11,8 +11,8 @@ from argparse import Namespace
 import pytest
 import torch
 
-from orbit.peft.megatron import sync_metrics
-from orbit.peft.megatron.sync_metrics import (
+from orbit.megatron import sync_metrics
+from orbit.megatron.sync_metrics import (
     NUM_CHUNKS_KEY,
     PAUSE_TIMER_KEY,
     PAYLOAD_BYTES_KEY,
@@ -26,8 +26,8 @@ from orbit.peft.megatron.sync_metrics import (
     sum_metrics_across_ranks,
     tensor_num_bytes,
 )
-from orbit.utils import train_metric_utils
-from orbit.utils.timer import Timer
+from miles.utils import train_metric_utils
+from miles.utils.timer import Timer
 
 
 @pytest.fixture(autouse=True)

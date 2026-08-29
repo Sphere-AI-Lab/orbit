@@ -3,9 +3,9 @@ from argparse import Namespace
 import pytest
 import torch
 
-from orbit.backends.training_utils.loss import get_responses
-from orbit.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
-from orbit.utils.arguments import validate_rollout_temperature
+from miles.backends.training_utils.loss import get_responses
+from miles.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
+from miles.utils.arguments import validate_rollout_temperature
 
 
 @pytest.fixture(autouse=True)

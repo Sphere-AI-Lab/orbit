@@ -91,9 +91,9 @@ def test_search_r1_oft_launcher_dry_run_has_ppo_and_oft_defaults(tmp_path):
     assert _value_after(argv, "--advantage-estimator") == "ppo"
     assert _value_after(argv, "--n-samples-per-prompt") == "8"
     assert _value_after(argv, "--custom-generate-function-path") == (
-        "orbit_plugins.search_r1.generate_with_search.generate"
+        "miles_plugins.search_r1.generate_with_search.generate"
     )
-    assert _value_after(argv, "--custom-rm-path") == "orbit_plugins.search_r1.generate_with_search.reward_func"
+    assert _value_after(argv, "--custom-rm-path") == "miles_plugins.search_r1.generate_with_search.reward_func"
     assert _value_after(argv, "--custom-config-path").endswith("run.search_r1.yaml")
     assert "--search-r1-timeout" not in argv
     assert _value_after(argv, "--peft-method") == "oft"

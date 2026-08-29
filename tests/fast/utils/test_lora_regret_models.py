@@ -24,7 +24,7 @@ _FLAG = re.compile(r"--([a-z0-9-]+)\s+(?!--)(\S+)")
 
 def _plugin_flags(plugin_name: str) -> dict[str, str]:
     """Every `--flag value` in a model_args plugin, as a dict."""
-    text = (REPO_ROOT / "orbit_plugins" / "model_args" / plugin_name).read_text(encoding="utf-8")
+    text = (REPO_ROOT / "miles_plugins" / "model_args" / plugin_name).read_text(encoding="utf-8")
     return dict(_FLAG.findall(text))
 
 
@@ -60,7 +60,7 @@ def test_qkv_output_size_is_the_gqa_arithmetic_not_hidden_size(key):
 
 @pytest.mark.parametrize("key", sorted(MODELS))
 def test_every_named_plugin_exists(key):
-    assert (REPO_ROOT / "orbit_plugins" / "model_args" / MODELS[key].model_args_plugin).is_file()
+    assert (REPO_ROOT / "miles_plugins" / "model_args" / MODELS[key].model_args_plugin).is_file()
 
 
 def test_llama_names_the_plugin_the_launcher_already_defaults_to():
@@ -115,5 +115,5 @@ def test_model_env_carries_the_mask_type_and_the_gpu_floor():
     env = model_env(get("llama3.1-8b"), REPO_ROOT)
     assert env["LOSS_MASK_TYPE"] == "llama3"
     assert env["MIN_GPUS_FULLFT"] == "4"
-    assert env["MODEL_ARGS_FILE"].endswith("orbit_plugins/model_args/llama3.1-8B-Instruct.sh")
+    assert env["MODEL_ARGS_FILE"].endswith("miles_plugins/model_args/llama3.1-8B-Instruct.sh")
     assert model_env(get("qwen3-4b"), REPO_ROOT)["LOSS_MASK_TYPE"] == "qwen"

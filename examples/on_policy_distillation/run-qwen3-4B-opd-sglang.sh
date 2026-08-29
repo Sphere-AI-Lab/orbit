@@ -15,18 +15,18 @@
 #
 # Teacher production is selected with `--opd-type sglang --opd-teacher-url`,
 # wired through orbit's custom-reward hooks:
-#   --custom-rm-path orbit.peft.opd.opd_sglang.reward_func                  (scores via the teacher server)
-#   --custom-reward-post-process-path orbit.peft.opd.opd_sglang.post_process (extracts teacher_log_probs)
+#   --custom-rm-path orbit.opd.opd_sglang.reward_func                  (scores via the teacher server)
+#   --custom-reward-post-process-path orbit.opd.opd_sglang.post_process (extracts teacher_log_probs)
 #
 # Note: pure MOPD (`--advantage-estimator on_policy_distillation`) and the
 # blend (`--use-opd`) are mutually exclusive -- do not pass `--use-opd` here.
 # The blend form is not supported at all with the sglang teacher (see README /
-# orbit/utils/arguments.py::_validate_opd_args) -- the sglang teacher already
+# miles/utils/arguments.py::_validate_opd_args) -- the sglang teacher already
 # occupies the single `--custom-rm-path` reward slot and always returns 0.0,
 # so blend requires `--opd-type megatron` instead.
 #
 # CAVEAT -- eval/pass-rate is not meaningful in this mode: `reward_func`
-# (orbit.peft.opd.opd_sglang.reward_func) always returns `0.0` -- it is shared
+# (orbit.opd.opd_sglang.reward_func) always returns `0.0` -- it is shared
 # between train and eval, so any task-accuracy or pass-rate metric derived
 # from `sample.reward` (eval/<dataset>, pass@k, --log-passrate) reports 0
 # regardless of student quality. The actual training signal is
@@ -67,7 +67,7 @@ RAY_NUM_CPUS=64
 
 # === Model args ===
 MODEL_ARGS_ROTARY_BASE=5000000
-source "${ORBIT_ROOT}/orbit_plugins/model_args/qwen3-4B-Instruct-2507.sh"   # provides MODEL_ARGS=(...)
+source "${ORBIT_ROOT}/miles_plugins/model_args/qwen3-4B-Instruct-2507.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-15}"
@@ -96,8 +96,8 @@ ROLLOUT_ARGS=(
     --label-key label
     --apply-chat-template
     --rollout-shuffle
-    --custom-rm-path orbit.peft.opd.opd_sglang.reward_func
-    --custom-reward-post-process-path orbit.peft.opd.opd_sglang.post_process
+    --custom-rm-path orbit.opd.opd_sglang.reward_func
+    --custom-reward-post-process-path orbit.opd.opd_sglang.post_process
     --num-rollout "${NUM_ROLLOUT}"
     --rollout-batch-size "${ROLLOUT_BATCH_SIZE}"
     --n-samples-per-prompt "${N_SAMPLES_PER_PROMPT}"

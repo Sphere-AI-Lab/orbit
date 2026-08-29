@@ -29,7 +29,7 @@ import types
 
 import pytest
 
-from orbit.utils.arguments import _is_peft_enabled
+from miles.utils.arguments import _is_peft_enabled
 
 
 def _args(**overrides):
@@ -53,7 +53,7 @@ def _args(**overrides):
 
 class TestTheRefusalIsGone:
     def test_full_fine_tuning_may_now_offload_train_state(self):
-        from orbit.utils.arguments import _finalize_train_offload_args as finalize_train_offload_args
+        from miles.utils.arguments import _finalize_train_offload_args as finalize_train_offload_args
 
         args = _args()
         finalize_train_offload_args(args)  # must not raise
@@ -63,7 +63,7 @@ class TestTheRefusalIsGone:
         """LoRA and OFT keep the frozen-base path they already use. This change
         must be invisible to them -- every RL PEFT arm measured tonight went
         through it."""
-        from orbit.utils.arguments import _finalize_train_offload_args as finalize_train_offload_args
+        from miles.utils.arguments import _finalize_train_offload_args as finalize_train_offload_args
 
         for method in ("lora", "oft"):
             args = _args(peft_method=method)
@@ -76,7 +76,7 @@ class TestTheSubFlagsAreForcedOn:
         """The load-bearing assertion. Under FullFT the frozen-base path can
         free nothing, so these two are the only things that release memory. If
         they are left off, `sleep()` is a no-op that logs as a success."""
-        from orbit.utils.arguments import _finalize_train_offload_args as finalize_train_offload_args
+        from miles.utils.arguments import _finalize_train_offload_args as finalize_train_offload_args
 
         args = _args()
         finalize_train_offload_args(args)
@@ -87,7 +87,7 @@ class TestTheSubFlagsAreForcedOn:
         """Turning either off under FullFT re-creates the original bug with no
         error message. Better to refuse: the operator asked for an offload that
         would not offload."""
-        from orbit.utils.arguments import _finalize_train_offload_args as finalize_train_offload_args
+        from miles.utils.arguments import _finalize_train_offload_args as finalize_train_offload_args
 
         for flag in ("offload_train_grad_buffers", "offload_train_optimizer"):
             args = _args(**{flag: False})
@@ -98,7 +98,7 @@ class TestTheSubFlagsAreForcedOn:
         """PEFT frees memory through the frozen base, so these stay opt-in --
         forcing them on would change the memory and timing profile of every
         LoRA and OFT arm already measured."""
-        from orbit.utils.arguments import _finalize_train_offload_args as finalize_train_offload_args
+        from miles.utils.arguments import _finalize_train_offload_args as finalize_train_offload_args
 
         args = _args(peft_method="lora")
         finalize_train_offload_args(args)
@@ -109,7 +109,7 @@ class TestTheSubFlagsAreForcedOn:
         """No offload requested, nothing forced -- otherwise the existing
         '--offload-train-grad-buffers requires --offload-train' guard fires on
         an argument the operator never passed."""
-        from orbit.utils.arguments import _finalize_train_offload_args as finalize_train_offload_args
+        from miles.utils.arguments import _finalize_train_offload_args as finalize_train_offload_args
 
         args = _args(offload_train=False)
         finalize_train_offload_args(args)
@@ -122,14 +122,14 @@ class TestParamsStayResident:
         """`update_weights` reads the params every rollout without waking the
         train state. Anything that resized `param_data` to zero would surface as
         corrupt rollouts rather than an error."""
-        from orbit.utils.arguments import _finalize_train_offload_args as finalize_train_offload_args
+        from miles.utils.arguments import _finalize_train_offload_args as finalize_train_offload_args
 
         args = _args()
         finalize_train_offload_args(args)
         assert getattr(args, "offload_train_params", False) is False
 
     def test_adapter_offload_is_off_because_there_is_no_adapter(self):
-        from orbit.utils.arguments import _finalize_train_offload_args as finalize_train_offload_args
+        from miles.utils.arguments import _finalize_train_offload_args as finalize_train_offload_args
 
         args = _args()
         finalize_train_offload_args(args)
@@ -143,7 +143,7 @@ class TestTheFrozenBasePathIsSkipped:
         loses nothing."""
         import torch
 
-        from orbit.peft.megatron.peft_offload import _iter_frozen_named_params
+        from orbit.megatron.peft_offload import _iter_frozen_named_params
 
         model = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.Linear(4, 4))
         assert list(_iter_frozen_named_params(model)) == []
@@ -155,7 +155,7 @@ class TestTheFrozenBasePathIsSkipped:
     def test_peft_still_reaches_the_frozen_base_path(self):
         """Guards the skip from over-reaching: a frozen base under LoRA must
         still be offloaded, which is the only thing that frees memory there."""
-        from orbit.backends.megatron_utils.actor import _should_offload_frozen_base
+        from miles.backends.megatron_utils.actor import _should_offload_frozen_base
 
         assert _should_offload_frozen_base(types.SimpleNamespace(peft_method="lora"))
         assert _should_offload_frozen_base(types.SimpleNamespace(peft_method="oft"))

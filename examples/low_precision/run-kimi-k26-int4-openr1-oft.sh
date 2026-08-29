@@ -60,7 +60,7 @@ OFFLOAD_TRAIN_ASYNC=${OFFLOAD_TRAIN_ASYNC:-0}
 OFFLOAD_ROLLOUT=${OFFLOAD_ROLLOUT:-1}
 
 # === Model spec ===
-MODEL_ARGS_FILE=${MODEL_ARGS_FILE:-"${ORBIT_ROOT}/orbit_plugins/model_args/kimi-k26.sh"}
+MODEL_ARGS_FILE=${MODEL_ARGS_FILE:-"${ORBIT_ROOT}/miles_plugins/model_args/kimi-k26.sh"}
 
 # === Data ===
 DATASET=${DATASET:-peft_arena_openr1_50k}
@@ -175,7 +175,7 @@ ROLLOUT_ARGS=(
     --rollout-max-context-len "${ROLLOUT_MAX_CONTEXT_LEN}"
     --balance-data
     --use-rollout-routing-replay
-    --custom-rm-path orbit.peft.rewards.peft_arena_reward.peft_arena_reward
+    --custom-rm-path orbit.rewards.peft_arena_reward.peft_arena_reward
     --reward-key score
     --eval-reward-key score
 )

@@ -5,10 +5,10 @@ import numpy as np
 import pytest
 import torch
 
-from orbit.backends.training_utils import log_utils
-from orbit.backends.training_utils.loss import get_values, loss_function
-from orbit.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
-from orbit.utils.ppo_utils import (
+from miles.backends.training_utils import log_utils
+from miles.backends.training_utils.loss import get_values, loss_function
+from miles.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
+from miles.utils.ppo_utils import (
     VALUE_EV_METRIC_KEY,
     VALUE_EV_STAT_KEYS,
     compute_value_explained_var,

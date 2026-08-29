@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 def main(argv: list[str] | None = None) -> int:
-    from orbit_plugins.megatron_bridge.patches.conversion.quantize_to_int4 import main as patch_main
+    from miles_plugins.megatron_bridge.patches.conversion.quantize_to_int4 import main as patch_main
 
     return patch_main(argv)
 

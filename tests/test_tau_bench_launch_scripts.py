@@ -67,7 +67,7 @@ def test_tau_bench_oft_launcher_dry_run_has_ppo_and_oft_defaults(tmp_path):
 
     assert _value_after(argv, "--advantage-estimator") == "ppo"
     assert _value_after(argv, "--custom-generate-function-path") == (
-        "orbit_plugins.tau_bench.generate_with_tau.generate"
+        "miles_plugins.tau_bench.generate_with_tau.generate"
     )
     assert _value_after(argv, "--custom-config-path").endswith("run.tau_bench.yaml")
     assert _value_after(argv, "--input-key") == "index"
@@ -94,7 +94,7 @@ def test_tau_bench_launcher_uses_default_dynamic_sampling_filter(tmp_path):
     argv = _dry_run(LAUNCHERS["lora"], tmp_path)
 
     assert _value_after(argv, "--dynamic-sampling-filter-path") == (
-        "orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
+        "miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
     )
 
 

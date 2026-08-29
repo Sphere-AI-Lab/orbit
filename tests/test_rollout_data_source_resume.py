@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from orbit.rollout.data_source import DataSource, RolloutDataSource, _resolve_rollout_dataset_state_location
+from miles.rollout.data_source import DataSource, RolloutDataSource, _resolve_rollout_dataset_state_location
 
 
 class _Dataset:
@@ -323,7 +323,7 @@ def test_delayed_save_without_snapshot_rejects_later_live_cursor(tmp_path):
 
 
 def test_rollout_manager_marks_completed_state_before_next_generate(monkeypatch):
-    import orbit.ray.rollout as rollout_module
+    import miles.ray.rollout as rollout_module
 
     class _RecordingDataSource:
         def __init__(self):

@@ -31,9 +31,9 @@ class bdist_wheel(_bdist_wheel):
 # Setup configuration
 setup(
     author="Orbit Team",
-    name="orbit",
+    name="miles",
     version="0.2.1",
-    packages=find_packages(include=["orbit*", "orbit_plugins*", "tools*"]),
+    packages=find_packages(include=["miles*", "miles_plugins*", "orbit*", "tools*"]),
     include_package_data=True,
     install_requires=_fetch_requirements("requirements.txt"),
     extras_require={

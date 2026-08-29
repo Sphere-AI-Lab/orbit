@@ -2,13 +2,13 @@ from types import SimpleNamespace
 
 import pytest
 
-import orbit.peft.audit.peft_wrap as peft_audit
-import orbit.peft.megatron.bridge_peft_helpers as bridge_peft_helpers
-from orbit.peft.megatron.bridge_peft_helpers import (
+import orbit.audit.peft_wrap as peft_audit
+import orbit.megatron.bridge_peft_helpers as bridge_peft_helpers
+from orbit.megatron.bridge_peft_helpers import (
     _make_peft_pre_wrap_hook,
     _propagate_preloaded_checkpoint_identity,
 )
-from orbit.peft.megatron.low_precision_bootstrap import _dist_checkpoint_already_loaded
+from orbit.megatron.low_precision_bootstrap import _dist_checkpoint_already_loaded
 
 
 def test_peft_replacement_model_inherits_preloaded_checkpoint_identity():

@@ -35,7 +35,7 @@ GPUS_PER_NODE=${GPUS_PER_NODE:-1}
 RAY_NUM_CPUS=${RAY_NUM_CPUS:-16}
 
 # === Model args ===
-MODEL_ARGS_FILE="${MODEL_ARGS_FILE:-${ORBIT_ROOT}/orbit_plugins/model_args/llama3.1-8B-Instruct.sh}"
+MODEL_ARGS_FILE="${MODEL_ARGS_FILE:-${ORBIT_ROOT}/miles_plugins/model_args/llama3.1-8B-Instruct.sh}"
 source "${MODEL_ARGS_FILE}"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
@@ -62,7 +62,7 @@ ROLLOUT_ARGS=(
     --prompt-data "${TRAIN_JSONL}"
     --input-key messages
     --rollout-shuffle
-    --rollout-function-path orbit.rollout.sft_rollout.generate_rollout
+    --rollout-function-path miles.rollout.sft_rollout.generate_rollout
     --loss-mask-type "${LOSS_MASK_TYPE:-response_only}"
     --num-rollout "${NUM_ROLLOUT}"
     --rollout-batch-size "${ROLLOUT_BATCH_SIZE}"

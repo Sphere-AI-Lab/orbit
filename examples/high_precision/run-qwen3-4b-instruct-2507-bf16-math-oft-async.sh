@@ -31,7 +31,7 @@ RAY_NUM_CPUS=64
 
 # === Model args ===
 MODEL_ARGS_ROTARY_BASE=5000000
-source "${ORBIT_ROOT}/orbit_plugins/model_args/qwen3-4B-Instruct-2507.sh"   # provides MODEL_ARGS=(...)
+source "${ORBIT_ROOT}/miles_plugins/model_args/qwen3-4B-Instruct-2507.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"

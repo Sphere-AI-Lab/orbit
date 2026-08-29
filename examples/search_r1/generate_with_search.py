@@ -13,7 +13,7 @@ from copy import deepcopy
 from typing import Any
 
 from examples.search_r1.qa_em_format import compute_score_em
-from orbit.utils.types import Sample
+from miles.utils.types import Sample
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ def append_environment_observation(sample: Sample, observation: str, tokenizer, 
 
 
 def build_generation_payload(args, input_ids: list[int], sampling_params: dict, *, evaluation: bool = False):
-    from orbit.rollout.generate_utils.generate_endpoint_utils import (
+    from miles.rollout.generate_utils.generate_endpoint_utils import (
         compute_request_payload,
         should_request_rollout_logprobs,
     )
@@ -131,13 +131,13 @@ def build_generation_payload(args, input_ids: list[int], sampling_params: dict, 
 async def generate(args, sample: Sample, sampling_params: dict, evaluation: bool = False) -> Sample:
     assert not args.partial_rollout, "Partial rollout is not supported for Search-R1."
 
-    from orbit.rollout.generate_utils.generate_endpoint_utils import (
+    from miles.rollout.generate_utils.generate_endpoint_utils import (
         compute_prompt_ids_from_sample,
         should_request_rollout_logprobs,
         update_sample_from_response,
     )
-    from orbit.rollout.sglang_rollout import GenerateState
-    from orbit.utils.http_utils import post
+    from miles.rollout.sglang_rollout import GenerateState
+    from miles.utils.http_utils import post
 
     state = GenerateState(args)
     tokenizer = state.tokenizer
@@ -200,7 +200,7 @@ def _ground_truth_from_label(label: Any) -> dict:
 
 def _score_sample(args, sample: Sample) -> float:
     if not isinstance(sample, Sample):
-        raise TypeError("sample must be an orbit.utils.types.Sample")
+        raise TypeError("sample must be an miles.utils.types.Sample")
 
     return compute_score_em(
         solution_str=sample.prompt + sample.response,

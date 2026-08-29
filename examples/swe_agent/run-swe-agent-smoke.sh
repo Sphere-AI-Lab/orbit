@@ -1,6 +1,6 @@
 # Agentic SWE smoke (rung 2b): the model works real GitHub issues inside
 # their instance containers via run_shell tool calls over multiple turns
-# (orbit.peft.rewards.swe_agent.episode.generate); SWE-bench verification of the
+# (orbit.rewards.swe_agent.episode.generate); SWE-bench verification of the
 # final repo state grades each episode IN-EPISODE (no RM hook). Data rows:
 # user message = problem_statement; metadata.swe = verification contract.
 set -euo pipefail
@@ -32,7 +32,7 @@ ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-2}"
 RAY_NUM_CPUS="${RAY_NUM_CPUS:-32}"
 
 # === Model args ===
-source "${ORBIT_ROOT}/orbit_plugins/model_args/${MODEL_ARGS_FILE:-qwen2.5-0.5B}.sh"   # provides MODEL_ARGS=(...)
+source "${ORBIT_ROOT}/miles_plugins/model_args/${MODEL_ARGS_FILE:-qwen2.5-0.5B}.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
@@ -69,7 +69,7 @@ ROLLOUT_ARGS=(
     --rollout-max-response-len "${ROLLOUT_MAX_RESPONSE_LEN}"
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --custom-generate-function-path "${CUSTOM_GENERATE_PATH:-orbit.peft.rewards.swe_agent.episode.generate}"
+    --custom-generate-function-path "${CUSTOM_GENERATE_PATH:-orbit.rewards.swe_agent.episode.generate}"
     --swe-rm-sif-cache "${SWE_SIF_CACHE:?set SWE_SIF_CACHE to the pre-pulled SIF dir}"
     --swe-rm-timeout-secs "${SWE_RM_TIMEOUT_SECS:-300}"
     --swe-agent-max-turns "${SWE_AGENT_MAX_TURNS:-10}"

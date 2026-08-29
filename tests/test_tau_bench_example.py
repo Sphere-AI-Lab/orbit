@@ -3,13 +3,13 @@ import types
 from argparse import Namespace
 from types import SimpleNamespace
 
-from orbit_plugins.tau_bench.generate_with_tau import (
+from miles_plugins.tau_bench.generate_with_tau import (
     _task_index_from_sample,
     append_environment_delta,
     build_generation_payload,
 )
-from orbit_plugins.tau_bench.openai_tool_adapter import OpenAICompatibleToolCallAdapter
-from orbit.utils.types import Sample
+from miles_plugins.tau_bench.openai_tool_adapter import OpenAICompatibleToolCallAdapter
+from miles.utils.types import Sample
 
 
 class FakeTokenizer:
@@ -27,7 +27,7 @@ def _args(peft_method="none"):
         rollout_max_response_len=8,
         use_rollout_routing_replay=False,
         use_orbit_router=False,
-        orbit_router_middleware_paths=[],
+        miles_router_middleware_paths=[],
         eval_return_rollout_logprobs=False,
     )
 
@@ -68,7 +68,7 @@ def test_tau_append_environment_delta_flags_non_append_mismatch():
 
 
 def test_tau_build_generation_payload_requests_logprobs(monkeypatch):
-    module_name = "orbit.rollout.generate_utils.generate_endpoint_utils"
+    module_name = "miles.rollout.generate_utils.generate_endpoint_utils"
     fake_module = types.ModuleType(module_name)
     captured = {}
 

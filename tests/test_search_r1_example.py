@@ -12,7 +12,7 @@ from examples.search_r1.generate_with_search import (
     reward_func,
 )
 from examples.search_r1.qa_em_format import compute_score_em, extract_information_blocks
-from orbit.utils.types import Sample
+from miles.utils.types import Sample
 
 
 class FakeTokenizer:
@@ -27,7 +27,7 @@ def _args(peft_method="none"):
         rollout_max_response_len=8,
         use_rollout_routing_replay=False,
         use_orbit_router=False,
-        orbit_router_middleware_paths=[],
+        miles_router_middleware_paths=[],
         eval_return_rollout_logprobs=False,
         search_r1_format_score=0.2,
     )
@@ -123,7 +123,7 @@ def test_append_environment_observation_masks_tokens_and_aligns_logprobs():
 
 
 def test_build_generation_payload_requests_rollout_logprobs(monkeypatch):
-    module_name = "orbit.rollout.generate_utils.generate_endpoint_utils"
+    module_name = "miles.rollout.generate_utils.generate_endpoint_utils"
     fake_module = types.ModuleType(module_name)
     captured = {}
 

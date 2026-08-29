@@ -6,7 +6,7 @@ launcher under ORBIT_DRY_RUN_ARGV=1 (scripts/lib/launcher.sh validates the
 launcher contract -- required arrays/env vars -- then prints the python argv
 and exits 0 before touching Ray or GPUs) and assert on the resulting argv.
 Additionally resolves the true-on-policy contract for Qwen3-4B directly via
-orbit/peft/true_on_policy/, the way test_true_on_policy_config.py does, using the
+orbit/true_on_policy/, the way test_true_on_policy_config.py does, using the
 exact topology this launcher emits, to confirm the profile lookup succeeds
 and the certified-layout constraints hold.
 """
@@ -18,7 +18,7 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
-from orbit.peft.true_on_policy import build_true_on_policy_launch_plan, get_true_on_policy_model_profile
+from orbit.true_on_policy import build_true_on_policy_launch_plan, get_true_on_policy_model_profile
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

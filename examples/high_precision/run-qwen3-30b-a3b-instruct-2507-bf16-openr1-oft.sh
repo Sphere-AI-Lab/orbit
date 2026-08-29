@@ -35,7 +35,7 @@ RAY_NUM_CPUS=64
 # The Instruct-2507 checkpoint is loaded via MEGATRON_LOAD; HF_CKPT uses the
 # base model architecture which has rotary_base=1e6.
 MODEL_ARGS_ROTARY_BASE=1000000
-source "${ORBIT_ROOT}/orbit_plugins/model_args/qwen3-30B-A3B.sh"   # provides MODEL_ARGS=(...)
+source "${ORBIT_ROOT}/miles_plugins/model_args/qwen3-30B-A3B.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
 NUM_ROLLOUT="${NUM_ROLLOUT:-500}"
@@ -69,7 +69,7 @@ ROLLOUT_ARGS=(
     --rollout-max-response-len 1024
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --custom-rm-path orbit.peft.rewards.peft_arena_reward.peft_arena_reward
+    --custom-rm-path orbit.rewards.peft_arena_reward.peft_arena_reward
     --reward-key score
     --eval-reward-key score
 )

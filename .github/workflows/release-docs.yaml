@@ -17,7 +17,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    if: github.repository == 'radixark/orbit'
+    if: github.repository == 'radixark/miles'
     permissions:
       contents: write
     steps:

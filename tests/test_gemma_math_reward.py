@@ -1,4 +1,4 @@
-from orbit.rollout.rm_hub.deepscaler import get_deepscaler_rule_based_reward, get_gemma_math_reward
+from miles.rollout.rm_hub.deepscaler import get_deepscaler_rule_based_reward, get_gemma_math_reward
 
 
 def test_gemma_reward_grades_text_after_channel_marker():

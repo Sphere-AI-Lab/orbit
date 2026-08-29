@@ -1,7 +1,7 @@
 import argparse
 
-from orbit.peft.opd import opd_sglang
-from orbit.utils.types import Sample
+from orbit.opd import opd_sglang
+from miles.utils.types import Sample
 
 
 def _fake_response(logprobs, token_ids):

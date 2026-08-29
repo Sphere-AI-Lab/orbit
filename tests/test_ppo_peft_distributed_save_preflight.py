@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-import orbit.peft.megatron.peft_utils as peft_utils
+import orbit.megatron.peft_utils as peft_utils
 
 
 class _Scheduler:
@@ -102,7 +102,7 @@ def _distributed_save_worker(
             world_size=world_size,
             timeout=timedelta(seconds=10),
         )
-        from orbit.utils import distributed_utils
+        from miles.utils import distributed_utils
 
         distributed_utils.GLOO_GROUP = None
         optimizer = _DistributedSaveLeaf(rank, world_size)

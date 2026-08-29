@@ -1,6 +1,6 @@
 from argparse import Namespace
 
-from orbit.rollout.generate_utils.generate_endpoint_utils import attach_peft_request_payload, compute_request_payload
+from miles.rollout.generate_utils.generate_endpoint_utils import attach_peft_request_payload, compute_request_payload
 
 
 def _args(peft_method: str) -> Namespace:

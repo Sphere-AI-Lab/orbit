@@ -45,7 +45,7 @@ ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-4}"
 RAY_NUM_CPUS="${RAY_NUM_CPUS:-32}"
 
 # === Model args ===
-MODEL_ARGS_FILE="${MODEL_ARGS_FILE:-${ORBIT_ROOT}/orbit_plugins/model_args/qwen3-4B-Instruct-2507.sh}"
+MODEL_ARGS_FILE="${MODEL_ARGS_FILE:-${ORBIT_ROOT}/miles_plugins/model_args/qwen3-4B-Instruct-2507.sh}"
 source "${MODEL_ARGS_FILE}"
 
 # === Training schedule ===
@@ -72,7 +72,7 @@ TAU_BENCH_USER_MODEL_PROVIDER="${TAU_BENCH_USER_MODEL_PROVIDER:-${TAU_USER_MODEL
 TAU_BENCH_USER_MODEL="${TAU_BENCH_USER_MODEL:-${TAU_USER_MODEL:-gemini-2.5-flash-lite}}"
 TAU_BENCH_AGENT_MAX_STEPS="${TAU_BENCH_AGENT_MAX_STEPS:-30}"
 TAU_BENCH_TOOL_PARSER="${TAU_BENCH_TOOL_PARSER:-qwen25}"
-TAU_BENCH_DYNAMIC_SAMPLING_FILTER_PATH="${TAU_BENCH_DYNAMIC_SAMPLING_FILTER_PATH:-orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std}"
+TAU_BENCH_DYNAMIC_SAMPLING_FILTER_PATH="${TAU_BENCH_DYNAMIC_SAMPLING_FILTER_PATH:-miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std}"
 TAU_BENCH_CONFIG_PATH="${TAU_BENCH_CONFIG_PATH:-${RUN_LOG%.log}.tau_bench.yaml}"
 
 # Keep the provider selection visible to child processes that inherit env vars.
@@ -116,7 +116,7 @@ ROLLOUT_ARGS=(
     --rollout-temperature "${ROLLOUT_TEMPERATURE:-1.0}"
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
     --balance-data
-    --custom-generate-function-path orbit_plugins.tau_bench.generate_with_tau.generate
+    --custom-generate-function-path miles_plugins.tau_bench.generate_with_tau.generate
 )
 
 if [[ -n "${TAU_BENCH_DYNAMIC_SAMPLING_FILTER_PATH}" && "${TAU_BENCH_DYNAMIC_SAMPLING_FILTER_PATH}" != "none" ]]; then

@@ -1,18 +1,18 @@
 import pytest
 import torch
 
-import orbit.backends.training_utils.loss as training_loss
+import miles.backends.training_utils.loss as training_loss
 
 
 _ORIGINAL_VANILLA_TIS = training_loss.vanilla_tis_function
 
-from orbit.utils.ppo_utils import (
+from miles.utils.ppo_utils import (
     apply_opd_icepop_gate,
     apply_opd_kl_to_advantages,
     icepop_gate,
     opd_mopd_advantages,
 )
-from orbit.utils.types import Sample
+from miles.utils.types import Sample
 
 
 def test_sample_declares_teacher_log_probs_default_none():

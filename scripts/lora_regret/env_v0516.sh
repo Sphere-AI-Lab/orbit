@@ -64,7 +64,7 @@ export PYTHONPATH="${ORBIT_ICLR_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 # Disable the prefill CUDA graph. Two independent failures on this sglang line
 # converge on the same flag:
 #
-#   * `orbit/ray/rollout.py` injects SGLANG_MEMORY_SAVER_CUDA_GRAPH=true into
+#   * `miles/ray/rollout.py` injects SGLANG_MEMORY_SAVER_CUDA_GRAPH=true into
 #     every engine, and v0.5.16's BreakableCudaGraphBackend refuses it outright
 #     -- "Breakable CUDA graph is not compatible with memory saver mode"
 #     (measured 2026-08-17: killed every LoRA and OFT arm at engine init).

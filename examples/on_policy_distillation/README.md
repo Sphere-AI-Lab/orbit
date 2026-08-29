@@ -27,8 +27,8 @@ teacher does **not** generate). The producer is chosen with `--opd-type`:
 - `--opd-type sglang`: rollout-side scoring (no in-process second
   checkpoint). With `--opd-teacher-url <http://host:port/generate>` an
   external SGLang teacher server scores the samples; that mode requires
-  `--custom-rm-path orbit.peft.opd.opd_sglang.reward_func
-  --custom-reward-post-process-path orbit.peft.opd.opd_sglang.post_process` to
+  `--custom-rm-path orbit.opd.opd_sglang.reward_func
+  --custom-reward-post-process-path orbit.opd.opd_sglang.post_process` to
   wire the scoring call into orbit's reward pipeline (see below). Without a
   URL (local mode), the rollout engine scores a same-base teacher itself and
   those hooks must be left unset (see "Teacher-as-Adapter-Slot" below).
@@ -88,13 +88,13 @@ At each rollout, the trainer POSTs the student's sampled token sequence to
 `OPD_TEACHER_URL` for prefill-only scoring (`max_new_tokens=0,
 return_logprob=True, temperature=0` -- the teacher does not generate), then
 trims the returned per-token log-probs to the response span and stores them on
-`teacher_log_probs`. This is implemented in `orbit/peft/opd/opd_sglang.py` and
+`teacher_log_probs`. This is implemented in `orbit/opd/opd_sglang.py` and
 wired through **two** hooks (both required):
 
-- `--custom-rm-path orbit.peft.opd.opd_sglang.reward_func`: performs the
+- `--custom-rm-path orbit.opd.opd_sglang.reward_func`: performs the
   scoring POST per sample during rollout generation and returns `0.0` (pure
   distillation has no task reward).
-- `--custom-reward-post-process-path orbit.peft.opd.opd_sglang.post_process`:
+- `--custom-reward-post-process-path orbit.opd.opd_sglang.post_process`:
   extracts and trims the teacher log-probs and sets `sample.teacher_log_probs`.
 
 (`reward_func` stashes the raw teacher response in `sample.metadata` rather
@@ -266,7 +266,7 @@ make the ratio identically 1).
   for the extra host memory. Same-base specs
   (`--opd-teacher base/adapter:<path>/self:*`) require PEFT instead and load
   no second model.
-- With an external `--opd-teacher-url`, `orbit.peft.opd.opd_sglang.reward_func`
+- With an external `--opd-teacher-url`, `orbit.opd.opd_sglang.reward_func`
   always returns `0.0` and occupies the single `--custom-rm-path` slot.
   Combining that external-teacher mode with the **blend** form (`--use-opd`)
   is rejected by `_validate_opd_args` with a `ValueError`: it would require a

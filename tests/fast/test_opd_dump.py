@@ -1,6 +1,6 @@
-"""Tests for orbit.peft.opd.opd_dump (M1 correctness leg, GPU side of I-5).
+"""Tests for orbit.opd.opd_dump (M1 correctness leg, GPU side of I-5).
 
-``tokens`` here matches the real ``orbit.utils.types.Sample.tokens`` field
+``tokens`` here matches the real ``miles.utils.types.Sample.tokens`` field
 (full prompt+response token ids) -- the brief's ``response_token_ids`` name
 does not exist on the real Sample dataclass, so the record uses the real
 attribute name instead, consistently across the dump writer, the compare
@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-from orbit.peft.opd.opd_dump import (
+from orbit.opd.opd_dump import (
     ENV_LIMIT,
     ENV_PATH,
     dump_teacher_logprob_records,

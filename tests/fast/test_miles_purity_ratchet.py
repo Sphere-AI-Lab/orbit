@@ -41,7 +41,7 @@ def test_no_new_entanglement_with_miles_base():
 
 
 def test_no_orbit_code_outside_the_home_layer():
-    """New orbit files inside shared miles directories belong under orbit/peft/."""
+    """New orbit files inside shared miles directories belong under orbit/."""
     manifest = json.loads(MANIFEST_PATH.read_text())
     violations = MILES_PURITY.home_violations(manifest)
     assert not violations, "\n  ".join(violations)

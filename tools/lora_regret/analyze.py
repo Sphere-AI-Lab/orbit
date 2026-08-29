@@ -342,7 +342,7 @@ def placement_deltas(
     the two disagree, the disagreement is parameter accounting rather than
     physics, and collapsing them to one number would hide exactly that.
     """
-    from orbit.peft.utils.peft_param_match import ATTENTION_MODULES, MLP_MODULES
+    from orbit.utils.peft_param_match import ATTENTION_MODULES, MLP_MODULES
 
     best = argmins(records, metric)
     return _pairwise_deltas(
@@ -372,7 +372,7 @@ def all_modules_deltas(
     claim is that the extra capacity buys nothing, so equalising it first would
     ask a different question.
     """
-    from orbit.peft.utils.peft_param_match import ATTENTION_MODULES, MLP_MODULES
+    from orbit.utils.peft_param_match import ATTENTION_MODULES, MLP_MODULES
 
     best = argmins(records, metric)
     return _pairwise_deltas(

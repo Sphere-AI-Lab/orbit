@@ -25,7 +25,7 @@ OFFLOAD_TRAIN_ASYNC=${OFFLOAD_TRAIN_ASYNC:-1}
 OFFLOAD_ROLLOUT=${OFFLOAD_ROLLOUT:-1}
 
 # === Model spec ===
-MODEL_ARGS_FILE=${MODEL_ARGS_FILE:-"${ORBIT_ROOT}/orbit_plugins/model_args/kimi-k25.sh"}
+MODEL_ARGS_FILE=${MODEL_ARGS_FILE:-"${ORBIT_ROOT}/miles_plugins/model_args/kimi-k25.sh"}
 
 # === Data ===
 DATASET=${DATASET:-math}

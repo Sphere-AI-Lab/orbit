@@ -16,7 +16,7 @@ import math
 import pytest
 import torch
 
-from orbit.peft.utils.eval_nll import (
+from orbit.utils.eval_nll import (
     NllStats,
     accumulate_nll,
     build_eval_nll_metrics,
@@ -431,7 +431,7 @@ def _parse(extra_argv):
     import sys
     from unittest.mock import patch
 
-    from orbit.utils.arguments import get_orbit_extra_args_provider
+    from miles.utils.arguments import get_orbit_extra_args_provider
 
     required = ["--rollout-batch-size", "64"]
     with patch.object(sys, "argv", ["test"] + required):
@@ -537,7 +537,7 @@ def _parallel_state(*, tp_rank=0, tp_size=1, cp_rank=0, cp_size=1, dp_rank=0, dp
     GroupInfo.__post_init__ short-circuits when group is None, so the real
     dataclass can be built on CPU with no torch.distributed initialisation.
     """
-    from orbit.backends.training_utils.parallel import GroupInfo, ParallelState
+    from miles.backends.training_utils.parallel import GroupInfo, ParallelState
 
     return ParallelState(
         intra_dp=GroupInfo(rank=dp_rank, size=dp_size, group=None),
@@ -589,7 +589,7 @@ def test_pp_last_stage_is_actually_consulted():
     assert is_eval_nll_reporting_rank(_parallel_state(is_pp_last_stage=True))
     assert not is_eval_nll_reporting_rank(_parallel_state(is_pp_last_stage=False))
 
-    from orbit.backends.training_utils.parallel import ParallelState
+    from miles.backends.training_utils.parallel import ParallelState
 
     # A declared dataclass field, not a method/property. If it ever became a
     # method, the CLASS attribute would be a function -- and `and`-ing a bound
@@ -642,7 +642,7 @@ def test_ray_train_group_compute_eval_nll_dedupes():
     a subclass so no Ray actors are allocated."""
     import asyncio
 
-    from orbit.ray.actor_group import RayTrainGroup
+    from miles.ray.actor_group import RayTrainGroup
 
     class _StubGroup(RayTrainGroup):
         def __init__(self, results):
@@ -669,7 +669,7 @@ def test_ray_train_group_returns_its_result_unlike_train():
     not -- the number is the entire point."""
     import inspect
 
-    from orbit.ray.actor_group import RayTrainGroup
+    from miles.ray.actor_group import RayTrainGroup
 
     assert "return" in inspect.getsource(RayTrainGroup.compute_eval_nll)
 
@@ -710,7 +710,7 @@ def test_before_train_adds_its_own_key_without_dropping_the_primary():
 
 
 def test_metric_key_constants_match_the_emitted_strings():
-    from orbit.peft.utils.eval_nll import EVAL_NLL_BEFORE_TRAIN_METRIC_KEY, EVAL_NLL_METRIC_KEY
+    from orbit.utils.eval_nll import EVAL_NLL_BEFORE_TRAIN_METRIC_KEY, EVAL_NLL_METRIC_KEY
 
     metrics = build_eval_nll_metrics(_stats(), step=0, before_train=True)
     assert EVAL_NLL_METRIC_KEY == "eval/test_nll"
@@ -733,7 +733,7 @@ def test_step_key_is_present_for_tracking_utils():
 def test_unsupported_entrypoint_refuses_when_flag_is_set():
     from argparse import Namespace
 
-    from orbit.peft.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint
+    from orbit.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint
 
     with pytest.raises(ValueError, match="not supported by train_async.py"):
         reject_eval_nll_on_unsupported_entrypoint(
@@ -744,7 +744,7 @@ def test_unsupported_entrypoint_refuses_when_flag_is_set():
 def test_unsupported_entrypoint_names_the_supported_one():
     from argparse import Namespace
 
-    from orbit.peft.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint
+    from orbit.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint
 
     with pytest.raises(ValueError, match="train.py"):
         reject_eval_nll_on_unsupported_entrypoint(Namespace(eval_nll_data="/tmp/x.jsonl"), "other.py")
@@ -754,7 +754,7 @@ def test_unsupported_entrypoint_names_the_supported_one():
 def test_unsupported_entrypoint_is_a_noop_when_flag_is_unset(value):
     from argparse import Namespace
 
-    from orbit.peft.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint
+    from orbit.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint
 
     reject_eval_nll_on_unsupported_entrypoint(Namespace(eval_nll_data=value), "train_async.py")
     reject_eval_nll_on_unsupported_entrypoint(Namespace(), "train_async.py")
@@ -767,7 +767,7 @@ def test_train_async_calls_the_refusal():
 
     source = (Path(__file__).resolve().parents[3] / "train_async.py").read_text(encoding="utf-8")
     assert "reject_eval_nll_on_unsupported_entrypoint(args, \"train_async.py\")" in source
-    assert "from orbit.peft.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint" in source
+    assert "from orbit.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint" in source
 
 
 # --------------------------------------------------------------------------
@@ -789,7 +789,7 @@ def _compute_eval_nll_source() -> str:
     from pathlib import Path
 
     source = (
-        Path(__file__).resolve().parents[3] / "orbit/backends/megatron_utils/actor.py"
+        Path(__file__).resolve().parents[3] / "miles/backends/megatron_utils/actor.py"
     ).read_text(encoding="utf-8")
     start = source.index("    def compute_eval_nll(")
     end = source.index("\n    def ", start + 1)

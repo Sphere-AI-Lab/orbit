@@ -2,13 +2,13 @@ import torch
 import pytest
 from pathlib import Path
 
-import orbit.peft.merge  # noqa: F401  (registers strategies)
-from orbit.peft.merge.megatron_io import (
+import orbit.merge  # noqa: F401  (registers strategies)
+from orbit.merge.megatron_io import (
     merge_megatron_adapters,
     write_megatron_adapter,
     list_megatron_shards,
 )
-from orbit.peft.merge.oft_merge import magnitude_corrected_merge
+from orbit.merge.oft_merge import magnitude_corrected_merge
 
 _KEY = "module.module.decoder.layers.0.self_attention.linear_proj.adapter.oft_r"
 

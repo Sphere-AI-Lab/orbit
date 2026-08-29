@@ -2,7 +2,7 @@ import argparse
 
 import pytest
 
-from orbit.utils.arguments import (
+from miles.utils.arguments import (
     _apply_critic_args,
     _validate_ppo_args,
     uses_adapter_critic,
@@ -152,7 +152,7 @@ def _head_args(**overrides):
 
 
 def test_head_mode_allows_full_ft_actor():
-    from orbit.utils.arguments import uses_head_critic, uses_one_trunk_critic
+    from miles.utils.arguments import uses_head_critic, uses_one_trunk_critic
 
     args = _head_args(peft_method="none")
     _apply_critic_args(args)
@@ -167,7 +167,7 @@ def test_head_mode_allows_full_ft_actor():
 
 
 def test_head_mode_allows_peft_actor():
-    from orbit.utils.arguments import uses_head_critic
+    from miles.utils.arguments import uses_head_critic
 
     args = _head_args(peft_method="oft")
     _apply_critic_args(args)
@@ -194,7 +194,7 @@ def test_head_mode_rejects_critic_gpu_request():
 
 
 def test_adapter_mode_is_one_trunk_too():
-    from orbit.utils.arguments import uses_one_trunk_critic
+    from miles.utils.arguments import uses_one_trunk_critic
 
     args = _base_args(critic_mode="adapter")
     _apply_critic_args(args)

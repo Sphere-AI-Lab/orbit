@@ -349,10 +349,10 @@ def extract_boxed(solution: str) -> str | None:
     mis-drops as "no boxed answer".
 
     This follows ``last_boxed_only_string`` / ``remove_boxed`` in
-    `orbit/rollout/rm_hub/math_utils.py` (the same extraction the RL reward path
+    `miles/rollout/rm_hub/math_utils.py` (the same extraction the RL reward path
     uses to grade rollouts, so ground-truth extraction here stays consistent with
     how answers are later graded) rather than importing them: importing that
-    module pulls in the whole `orbit.rollout.rm_hub` package, which transitively
+    module pulls in the whole `miles.rollout.rm_hub` package, which transitively
     imports torch and ray (~2400 extra modules, ~9s just to import) — heavy
     runtime deps this CPU-only, dependency-light dataset-prep script has no
     other reason to need.

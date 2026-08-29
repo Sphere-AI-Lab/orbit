@@ -4,7 +4,7 @@ from types import MethodType, SimpleNamespace
 
 import pytest
 
-from orbit.backends.megatron_utils import actor as actor_utils
+from miles.backends.megatron_utils import actor as actor_utils
 
 
 @contextmanager

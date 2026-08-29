@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from orbit.backends.megatron_utils.arguments import _is_muon_optimizer, _is_pion_optimizer
+from miles.backends.megatron_utils.arguments import _is_muon_optimizer, _is_pion_optimizer
 
 
 def test_is_pion_predicate():
@@ -30,7 +30,7 @@ def test_pion_and_muon_predicates_disjoint():
 def test_zero_disabled_for_pion():
     from types import SimpleNamespace
 
-    from orbit.backends.megatron_utils import arguments as A
+    from miles.backends.megatron_utils import arguments as A
 
     # exercise just the ZeRO-disable line the shim runs
     for opt, expect_dist in (("adam", True), ("muon", False), ("pion", False), ("pion_msign", False)):
@@ -67,7 +67,7 @@ def test_build_optimizer_routes_pion():
     # pion getters for pion/pion_msign and fall through otherwise
     import inspect
 
-    from orbit.backends.megatron_utils import model
+    from miles.backends.megatron_utils import model
 
     src = inspect.getsource(model._build_optimizer_and_scheduler)
     assert 'if "pion" in optimizer_type' in src

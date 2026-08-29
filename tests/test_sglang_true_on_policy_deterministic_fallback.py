@@ -1,9 +1,9 @@
 """Pins the --true-on-policy-mode direct-flag fallback in validate_args.
 
-orbit/peft/true_on_policy/config.py::apply_true_on_policy_parse_defaults forces
+orbit/true_on_policy/config.py::apply_true_on_policy_parse_defaults forces
 sglang_enable_deterministic_inference at parse time, but that expansion only
 runs through the --true-on-policy entry point. --true-on-policy-mode is also
-an independently settable CLI flag (orbit/utils/arguments.py), and setting it
+an independently settable CLI flag (miles/utils/arguments.py), and setting it
 directly bypasses that expansion. validate_args must force determinism too,
 as a fallback net (miles parity: backends/sglang_utils/arguments.py:146-147).
 """
@@ -17,7 +17,7 @@ from types import SimpleNamespace
 def _import_validate_args(monkeypatch):
     """Import the real validate_args, stubbing sglang for this test only.
 
-    orbit.backends.sglang_utils.arguments imports the real sglang package at
+    miles.backends.sglang_utils.arguments imports the real sglang package at
     module level, which isn't installed in this CPU test environment; stub
     the one symbol it needs (validate_args itself never touches ServerArgs).
     Everything is done via monkeypatch so sys.modules is restored after the
@@ -25,14 +25,14 @@ def _import_validate_args(monkeypatch):
     the rest of the pytest process and break later tests that need the real
     (absent) sglang to hit their normal ImportError fallback path.
     """
-    monkeypatch.delitem(sys.modules, "orbit.backends.sglang_utils.arguments", raising=False)
+    monkeypatch.delitem(sys.modules, "miles.backends.sglang_utils.arguments", raising=False)
     monkeypatch.setitem(sys.modules, "sglang", types.ModuleType("sglang"))
     monkeypatch.setitem(sys.modules, "sglang.srt", types.ModuleType("sglang.srt"))
     stub_server_args_module = types.ModuleType("sglang.srt.server_args")
     stub_server_args_module.ServerArgs = object
     monkeypatch.setitem(sys.modules, "sglang.srt.server_args", stub_server_args_module)
 
-    module = importlib.import_module("orbit.backends.sglang_utils.arguments")
+    module = importlib.import_module("miles.backends.sglang_utils.arguments")
     return module.validate_args
 
 

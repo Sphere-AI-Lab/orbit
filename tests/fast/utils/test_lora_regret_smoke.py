@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.utils.misc import should_run_periodic_action
+from miles.utils.misc import should_run_periodic_action
 from tools.lora_regret import backfill, smoke
 from tools.lora_regret.probe_log import (
     RUN_START_MARKER,

@@ -9,8 +9,8 @@ from argparse import Namespace
 import pytest
 import torch
 
-import orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin as mixin_mod
-from orbit.peft.megatron.sync_metrics import (
+import miles.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin as mixin_mod
+from orbit.megatron.sync_metrics import (
     NUM_CHUNKS_KEY,
     PAUSE_TIMER_KEY,
     PAYLOAD_BYTES_KEY,
@@ -18,10 +18,10 @@ from orbit.peft.megatron.sync_metrics import (
     TIMELINE_EVENTS_ENV_VAR,
     get_payload_tracker,
 )
-from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin import (
+from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin import (
     DistBucketedWeightUpdateMixin,
 )
-from orbit.utils.timer import Timer
+from miles.utils.timer import Timer
 
 
 @pytest.fixture(autouse=True)

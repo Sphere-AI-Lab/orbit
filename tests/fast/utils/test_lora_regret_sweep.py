@@ -5,7 +5,7 @@ with a regex (``eval/test_nll step=(\\d+) nll=([0-9.]+)``) that matches zero
 lines against the format ``train.py`` actually emits, which would have made
 the entire 82-run sweep look like a total failure after burning the compute.
 So every fixture line here is built from templates pinned, by a source-text
-assertion, to ``train.py`` and ``orbit/utils/logging_utils.py`` themselves --
+assertion, to ``train.py`` and ``miles/utils/logging_utils.py`` themselves --
 not hand-typed strings that would trivially satisfy this module's own regex.
 """
 
@@ -129,7 +129,7 @@ class TestSftArms:
         assert len(oft) == 40
 
     def test_oft_block_sizes_come_from_the_solver(self):
-        from orbit.peft.utils.peft_param_match import matched_oft_block_size
+        from orbit.utils.peft_param_match import matched_oft_block_size
 
         oft = [a for a in sft_arms(H, FFN) if a.method == "oft"]
         blocks = {a.oft_block_size for a in oft}
@@ -295,7 +295,7 @@ class TestE3Matrix:
         assert mlp == {92, 128}
 
     def test_the_matched_ranks_really_are_matched(self):
-        from orbit.peft.utils.peft_param_match import lora_param_count
+        from orbit.utils.peft_param_match import lora_param_count
 
         attn = lora_param_count(256, 4096, 6144) + lora_param_count(256, 4096, 4096)
         mlp = lora_param_count(92, 4096, 2 * 14336) + lora_param_count(92, 14336, 4096)
@@ -350,14 +350,14 @@ class TestLogFormatPins:
         assert '"before_train" if before_train else "after_train"' in train_py
 
     def test_log_prefix_matches_logging_utils_source(self):
-        logging_utils = (REPO_ROOT / "orbit" / "utils" / "logging_utils.py").read_text()
+        logging_utils = (REPO_ROOT / "miles" / "utils" / "logging_utils.py").read_text()
         assert _LOG_PREFIX_FRAGMENT in logging_utils
 
     def test_metric_key_constant_matches_the_wire_format(self):
         # sweep.py builds its regex from this constant instead of re-spelling
         # "eval/test_nll" -- confirm the constant is in fact the literal text
         # train.py's format string starts with.
-        from orbit.peft.utils.eval_nll import EVAL_NLL_METRIC_KEY
+        from orbit.utils.eval_nll import EVAL_NLL_METRIC_KEY
 
         assert _TRAIN_PY_LOG_TEMPLATE.startswith(EVAL_NLL_METRIC_KEY + " ")
 
@@ -646,7 +646,7 @@ class TestEvalAccuracyFormatPins:
     nothing turns a whole sweep into uniform 'failed'."""
 
     def _rollout_py(self) -> str:
-        return (REPO_ROOT / "orbit" / "ray" / "rollout.py").read_text(encoding="utf-8")
+        return (REPO_ROOT / "miles" / "ray" / "rollout.py").read_text(encoding="utf-8")
 
     def test_log_line_template_matches_rollout_py_source(self):
         assert 'logger.info(f"eval {rollout_id}: {log_dict}")' in self._rollout_py()
@@ -988,9 +988,9 @@ class TestE5Matrix:
         # launcher takes. Importing it unaliased here shadows the string and every
         # `target_modules ==` comparison silently becomes string-vs-tuple, i.e.
         # always False.
-        from orbit.peft.utils.peft_param_match import ATTENTION_MODULES as ATTN_NAMES
-        from orbit.peft.utils.peft_param_match import MLP_MODULES as MLP_NAMES
-        from orbit.peft.utils.peft_param_match import megatron_module_shapes, oft_param_count_for_modules
+        from orbit.utils.peft_param_match import ATTENTION_MODULES as ATTN_NAMES
+        from orbit.utils.peft_param_match import MLP_MODULES as MLP_NAMES
+        from orbit.utils.peft_param_match import megatron_module_shapes, oft_param_count_for_modules
 
         arms = self._arms()
         shapes = megatron_module_shapes(LLAMA_H, LLAMA_FFN, 6144)

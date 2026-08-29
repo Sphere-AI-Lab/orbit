@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-shot SWE patch RL smoke (rung 2a): the model emits a unified diff for
-# a real GitHub issue; orbit.peft.rewards.sandbox.swe_rm applies it + the row's
+# a real GitHub issue; orbit.rewards.sandbox.swe_rm applies it + the row's
 # test_patch inside the instance's Apptainer image and runs the SWE-bench
 # FAIL_TO_PASS/PASS_TO_PASS suites (binary reward). Data + SIF cache from
 # tools/prepare_swe_subset.py. Golden-patch oracle: tools/swe_rm_oracle.py.
@@ -33,7 +33,7 @@ ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-2}"
 RAY_NUM_CPUS="${RAY_NUM_CPUS:-32}"
 
 # === Model args ===
-source "${ORBIT_ROOT}/orbit_plugins/model_args/${MODEL_ARGS_FILE:-qwen2.5-0.5B}.sh"   # provides MODEL_ARGS=(...)
+source "${ORBIT_ROOT}/miles_plugins/model_args/${MODEL_ARGS_FILE:-qwen2.5-0.5B}.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
@@ -70,7 +70,7 @@ ROLLOUT_ARGS=(
     --rollout-max-response-len "${ROLLOUT_MAX_RESPONSE_LEN}"
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --custom-rm-path orbit.peft.rewards.sandbox.swe_rm.reward_func
+    --custom-rm-path orbit.rewards.sandbox.swe_rm.reward_func
     --swe-rm-sif-cache "${SWE_SIF_CACHE:?set SWE_SIF_CACHE to the pre-pulled SIF dir}"
     --swe-rm-timeout-secs "${SWE_RM_TIMEOUT_SECS:-300}"
 )

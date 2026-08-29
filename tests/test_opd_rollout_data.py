@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from orbit.backends.training_utils import cp_utils, data
+from miles.backends.training_utils import cp_utils, data
 
 
 class _Axis:

@@ -33,7 +33,7 @@ def main(argv: list[str] | None = None, import_fn=None) -> int:
     args, ignored = parse_legacy_args(argv)
 
     if import_fn is None:
-        from orbit_plugins.megatron_bridge.patches.conversion.convert_checkpoints import (
+        from miles_plugins.megatron_bridge.patches.conversion.convert_checkpoints import (
             import_hf_to_megatron as import_fn,
         )
 

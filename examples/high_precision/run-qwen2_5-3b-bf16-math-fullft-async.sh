@@ -34,7 +34,7 @@ ROLLOUT_NUM_GPUS_PER_ENGINE="${ROLLOUT_NUM_GPUS_PER_ENGINE:-2}"
 RAY_NUM_CPUS=64
 
 # === Model args ===
-source "${ORBIT_ROOT}/orbit_plugins/model_args/qwen2.5-3B.sh"   # provides MODEL_ARGS=(...)
+source "${ORBIT_ROOT}/miles_plugins/model_args/qwen2.5-3B.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-15}"

@@ -22,7 +22,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from orbit.peft.utils.peft_param_match import match_report
+from orbit.utils.peft_param_match import match_report
 from tools.lora_regret.arms import (  # noqa: F401  (sft_arms re-exported)
     MATRICES,
     MATRICES_REQUIRING_OFT_CENTRE,
@@ -405,7 +405,7 @@ def parse_final_nll(log_text: str) -> tuple[float | None, int | None]:
 
 
 # The RL eval logs a Python dict repr rather than a formatted metric line:
-# orbit/ray/rollout.py's `logger.info(f"eval {rollout_id}: {log_dict}")`. So this
+# miles/ray/rollout.py's `logger.info(f"eval {rollout_id}: {log_dict}")`. So this
 # matches the prefix for ordering, then picks dataset scores out of the repr.
 #
 # `eval/<name>` is a dataset score; `eval/<name>/<metric>` and

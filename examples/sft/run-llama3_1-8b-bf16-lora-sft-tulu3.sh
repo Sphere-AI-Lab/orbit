@@ -7,7 +7,7 @@
 #   LoRA r256 attn:     PEFT_METHOD=lora  LORA_RANK=256 TARGET_MODULES=linear_qkv,linear_proj
 #   LoRA r256 mlp:      PEFT_METHOD=lora  LORA_RANK=256 TARGET_MODULES=linear_fc1,linear_fc2
 #   OFT matched-r256:   PEFT_METHOD=oft   OFT_BLOCK_SIZE=$(python -c 'from
-#                       orbit.peft.utils.peft_param_match import matched_oft_block_size as m;
+#                       orbit.utils.peft_param_match import matched_oft_block_size as m;
 #                       print(m(256, 4096, 4096))')
 #   E2 (batch study):   TRAIN_JSONL=.../openthoughts3_train.jsonl
 #                       GLOBAL_BATCH_SIZE=512 ROLLOUT_BATCH_SIZE=512
@@ -55,7 +55,7 @@ GPUS_PER_NODE=${GPUS_PER_NODE:-1}
 RAY_NUM_CPUS=${RAY_NUM_CPUS:-16}
 
 # === Model args ===
-MODEL_ARGS_FILE="${MODEL_ARGS_FILE:-${ORBIT_ROOT}/orbit_plugins/model_args/llama3.1-8B-Instruct.sh}"
+MODEL_ARGS_FILE="${MODEL_ARGS_FILE:-${ORBIT_ROOT}/miles_plugins/model_args/llama3.1-8B-Instruct.sh}"
 source "${MODEL_ARGS_FILE}"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
@@ -65,7 +65,7 @@ GLOBAL_BATCH_SIZE="${GLOBAL_BATCH_SIZE:-32}"
 TRAIN_ROWS=${TRAIN_ROWS:-$(wc -l < "${TRAIN_JSONL}")}
 NUM_ROLLOUT=${NUM_ROLLOUT:-$(( (TRAIN_ROWS * TOTAL_EPOCHS + ROLLOUT_BATCH_SIZE - 1) / ROLLOUT_BATCH_SIZE ))}
 
-# === Rollout-shaped knobs, restating orbit/utils/arguments.py's own defaults ===
+# === Rollout-shaped knobs, restating miles/utils/arguments.py's own defaults ===
 # LOSS_TYPE / LOSS_MASK_TYPE / APPLY_CHAT_TEMPLATE take this recipe's values
 # rather than argparse's, because this launcher IS the recipe; they stay
 # overridable so a sweep can vary them.
@@ -121,7 +121,7 @@ ROLLOUT_ARGS=(
     --prompt-data "${TRAIN_JSONL}"
     --input-key prompt
     --rollout-shuffle
-    --rollout-function-path orbit.rollout.sft_rollout.generate_rollout
+    --rollout-function-path miles.rollout.sft_rollout.generate_rollout
     --loss-mask-type "${LOSS_MASK_TYPE}"
     --num-rollout "${NUM_ROLLOUT}"
     --rollout-batch-size "${ROLLOUT_BATCH_SIZE}"
@@ -137,7 +137,7 @@ ROLLOUT_ARGS=(
 # The no-colon form distinguishes "unset" (use the pinned default) from "set to
 # empty" (the model has its own -- omit the flag); the colon form would collapse
 # both, which is the LABEL_KEY bug one flag over.
-CHAT_TEMPLATE_PATH=${CHAT_TEMPLATE_PATH-${ORBIT_ROOT}/orbit/peft/utils/chat_template_utils/templates/llama3.1_pinned.jinja}
+CHAT_TEMPLATE_PATH=${CHAT_TEMPLATE_PATH-${ORBIT_ROOT}/orbit/utils/chat_template_utils/templates/llama3.1_pinned.jinja}
 if [[ -n "${CHAT_TEMPLATE_PATH}" ]]; then
     ROLLOUT_ARGS+=( --chat-template-path "${CHAT_TEMPLATE_PATH}" )
 fi
@@ -247,7 +247,7 @@ case "${PEFT_METHOD}" in
     none)
         # Full fine-tuning. Adam state for 8.03B params: bf16 weights 16.1 GB +
         # fp32 master 32.1 + moments 64.2 + bf16 grads 16.1 = 128 GB before
-        # activations. orbit/backends/megatron_utils/arguments.py forces
+        # activations. miles/backends/megatron_utils/arguments.py forces
         # use_distributed_optimizer=True, so master+moments shard across DP and
         # the per-GPU cost is 32 GB + 96 GB/N: N=1 is 128 GB, N=2 is 80 GB with
         # nothing left for activations, N=4 is 56 GB. Fail here rather than OOM
@@ -279,20 +279,20 @@ case "${PEFT_METHOD}" in
         )
         ;;
     oft)
-        # No LoRA flags here: orbit/utils/arguments.py cross-validates the two
+        # No LoRA flags here: miles/utils/arguments.py cross-validates the two
         # families (OFT flags must sit at their defaults unless --peft-method is
         # oft), and an OFT arm carrying --lora-rank would read in the log as if
         # rank meant something to it.
         #
         # OFT_BLOCK_SIZE is required, not defaulted. The block size IS the
         # parameter budget for the matched comparison E5 exists to make, and it
-        # must come from orbit.peft.utils.peft_param_match.matched_oft_block_size --
+        # must come from orbit.utils.peft_param_match.matched_oft_block_size --
         # a silent 32 here would quietly compare unmatched models.
         PEFT_ARGS=(
             --peft-method oft
             --peft-variant standard
             --oft-type canonical_oft
-            --oft-block-size "${OFT_BLOCK_SIZE:?set OFT_BLOCK_SIZE from orbit.peft.utils.peft_param_match.matched_oft_block_size; there is no safe default}"
+            --oft-block-size "${OFT_BLOCK_SIZE:?set OFT_BLOCK_SIZE from orbit.utils.peft_param_match.matched_oft_block_size; there is no safe default}"
             --oft-eps "${OFT_EPS:-6e-5}"
             --target-modules "${TARGET_MODULES:-${TARGET_MODULES_DEFAULT}}"
         )

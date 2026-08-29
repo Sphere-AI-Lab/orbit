@@ -6,10 +6,10 @@ import pytest
 
 pytest.importorskip("ray")
 
-import orbit.backends.megatron_utils.actor as actor_mod
-import orbit.backends.megatron_utils.checkpoint as checkpoint_mod
-from orbit.ray.actor_group import RayTrainGroup
-from orbit.ray.placement_group import _single_start_rollout_id
+import miles.backends.megatron_utils.actor as actor_mod
+import miles.backends.megatron_utils.checkpoint as checkpoint_mod
+from miles.ray.actor_group import RayTrainGroup
+from miles.ray.placement_group import _single_start_rollout_id
 
 
 def test_model_only_bridge_load_starts_at_rollout_zero():

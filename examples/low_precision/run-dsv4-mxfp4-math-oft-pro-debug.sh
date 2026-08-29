@@ -67,7 +67,7 @@ DISABLE_SAVE=${DISABLE_SAVE:-0}
 # === Pro model ===
 DEFAULT_DSV4_PRO_DEBUG_HF_CKPT=${DEFAULT_DSV4_PRO_DEBUG_HF_CKPT:-${ORBIT_CACHE_DIR:-${HOME}/.cache/orbit}/stage/DeepSeek-V4-Pro-debug-inference-mp1}
 DEFAULT_DSV4_PRO_DEBUG_MEGATRON_LOAD=${DEFAULT_DSV4_PRO_DEBUG_MEGATRON_LOAD:-${ORBIT_CACHE_DIR:-${HOME}/.cache/orbit}/stage/megatron_checkpoint/DeepSeek-V4-Pro-debug-torchdist}
-MODEL_ARGS_FILE=${MODEL_ARGS_FILE:-"${ORBIT_ROOT}/orbit_plugins/model_args/deepseek-v4-pro.sh"}
+MODEL_ARGS_FILE=${MODEL_ARGS_FILE:-"${ORBIT_ROOT}/miles_plugins/model_args/deepseek-v4-pro.sh"}
 MODEL_ARGS_NUM_LAYERS=${MODEL_ARGS_NUM_LAYERS:-6}
 : "${HF_CKPT:?set HF_CKPT to a Hugging Face checkpoint path}"
 : "${MEGATRON_LOAD:?set MEGATRON_LOAD to a Megatron torch_dist checkpoint path}"

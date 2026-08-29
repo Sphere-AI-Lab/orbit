@@ -48,7 +48,7 @@ export DISABLE_SAVE="${DISABLE_SAVE:-0}"
 # === Flash model ===
 export DEFAULT_REAL_DSV4_FLASH_HF_CKPT="${DEFAULT_REAL_DSV4_FLASH_HF_CKPT:-${ORBIT_CACHE_DIR:-${HOME}/.cache/orbit}/stage/DeepSeek-V4-Flash-inference-mp1}"
 export DEFAULT_REAL_DSV4_FLASH_MEGATRON_LOAD="${DEFAULT_REAL_DSV4_FLASH_MEGATRON_LOAD:-${ORBIT_CACHE_DIR:-${HOME}/.cache/orbit}/stage/megatron_checkpoint/DeepSeek-V4-Flash-ep8-torchdist}"
-export MODEL_ARGS_FILE="${MODEL_ARGS_FILE:-${ORBIT_ROOT}/orbit_plugins/model_args/deepseek-v4-flash.sh}"
+export MODEL_ARGS_FILE="${MODEL_ARGS_FILE:-${ORBIT_ROOT}/miles_plugins/model_args/deepseek-v4-flash.sh}"
 export MODEL_ARGS_NUM_LAYERS="${MODEL_ARGS_NUM_LAYERS:-43}"
 : "${HF_CKPT:?set HF_CKPT to a Hugging Face checkpoint path}"
 : "${MEGATRON_LOAD:?set MEGATRON_LOAD to a Megatron torch_dist checkpoint path}"

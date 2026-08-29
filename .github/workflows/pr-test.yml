@@ -38,15 +38,15 @@ on:
         type: boolean
         default: false
       ci_megatron_pr:
-        description: 'Megatron-LM branch/commit (default: orbit-main)'
+        description: 'Megatron-LM branch/commit (default: miles-main)'
         required: false
         type: string
-        default: 'orbit-main'
+        default: 'miles-main'
       ci_sglang_pr:
-        description: 'SGLang branch/commit (default: sglang-orbit)'
+        description: 'SGLang branch/commit (default: sglang-miles)'
         required: false
         type: string
-        default: 'sglang-orbit'
+        default: 'sglang-miles'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -58,7 +58,7 @@ jobs:
     if: (github.event_name == 'workflow_dispatch') || (github.event.pull_request)
     runs-on: self-hosted
     container:
-      image: radixark/orbit:dev
+      image: radixark/miles:dev
       options: >
         --gpus all
         --ipc=host
@@ -67,9 +67,9 @@ jobs:
         --ulimit stack=67108864
         --memory=0
         --memory-swap=0
-        -v /mnt/nvme0n1/orbit_ci:/data/orbit_ci
-        -v /mnt/nvme0n1/orbit_ci/models:/root/models
-        -v /mnt/nvme0n1/orbit_ci/datasets:/root/datasets
+        -v /mnt/nvme0n1/miles_ci:/data/miles_ci
+        -v /mnt/nvme0n1/miles_ci/models:/root/models
+        -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
         --privileged
         --ulimit nofile=65535:65535
         -v /tmp:/tmp
@@ -84,13 +84,13 @@ jobs:
       GITHUB_COMMIT_NAME: ${{ github.sha }}_${{ github.event.pull_request.number || 'non-pr' }}
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      ORBIT_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
-      ORBIT_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
-      ORBIT_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
-      ORBIT_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
-      ORBIT_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
-      ORBIT_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
-      ORBIT_TEST_FEW_GPU: '0'
+      MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
+      MILES_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
+      MILES_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
+      MILES_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
+      MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
+      MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
+      MILES_TEST_FEW_GPU: '0'
       SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
@@ -131,8 +131,8 @@ jobs:
           fi
 
           # Defaults
-          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="orbit-main"
-          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-orbit"
+          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="miles-main"
+          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-miles"
 
           # Convert "#N" PR syntax to git fetch ref: "pull/N/head"
           resolve_fetch_ref() {
@@ -170,7 +170,7 @@ jobs:
     if: (github.event_name == 'workflow_dispatch') || (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'run-ci-sglang'))
     runs-on: self-hosted
     container:
-      image: radixark/orbit:dev
+      image: radixark/miles:dev
       options: >
         --gpus all
         --ipc=host
@@ -179,9 +179,9 @@ jobs:
         --ulimit stack=67108864
         --memory=0
         --memory-swap=0
-        -v /mnt/nvme0n1/orbit_ci:/data/orbit_ci
-        -v /mnt/nvme0n1/orbit_ci/models:/root/models
-        -v /mnt/nvme0n1/orbit_ci/datasets:/root/datasets
+        -v /mnt/nvme0n1/miles_ci:/data/miles_ci
+        -v /mnt/nvme0n1/miles_ci/models:/root/models
+        -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
         --privileged
         --ulimit nofile=65535:65535
         -v /tmp:/tmp
@@ -196,13 +196,13 @@ jobs:
       GITHUB_COMMIT_NAME: ${{ github.sha }}_${{ github.event.pull_request.number || 'non-pr' }}
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      ORBIT_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
-      ORBIT_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
-      ORBIT_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
-      ORBIT_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
-      ORBIT_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
-      ORBIT_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
-      ORBIT_TEST_FEW_GPU: '0'
+      MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
+      MILES_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
+      MILES_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
+      MILES_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
+      MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
+      MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
+      MILES_TEST_FEW_GPU: '0'
       SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
@@ -243,8 +243,8 @@ jobs:
           fi
 
           # Defaults
-          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="orbit-main"
-          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-orbit"
+          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="miles-main"
+          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-miles"
 
           # Convert "#N" PR syntax to git fetch ref: "pull/N/head"
           resolve_fetch_ref() {
@@ -282,7 +282,7 @@ jobs:
     if: (github.event_name == 'workflow_dispatch') || (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'run-ci-short'))
     runs-on: self-hosted
     container:
-      image: radixark/orbit:dev
+      image: radixark/miles:dev
       options: >
         --gpus all
         --ipc=host
@@ -291,9 +291,9 @@ jobs:
         --ulimit stack=67108864
         --memory=0
         --memory-swap=0
-        -v /mnt/nvme0n1/orbit_ci:/data/orbit_ci
-        -v /mnt/nvme0n1/orbit_ci/models:/root/models
-        -v /mnt/nvme0n1/orbit_ci/datasets:/root/datasets
+        -v /mnt/nvme0n1/miles_ci:/data/miles_ci
+        -v /mnt/nvme0n1/miles_ci/models:/root/models
+        -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
         --privileged
         --ulimit nofile=65535:65535
         -v /tmp:/tmp
@@ -308,13 +308,13 @@ jobs:
       GITHUB_COMMIT_NAME: ${{ github.sha }}_${{ github.event.pull_request.number || 'non-pr' }}
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      ORBIT_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
-      ORBIT_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
-      ORBIT_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
-      ORBIT_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
-      ORBIT_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
-      ORBIT_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
-      ORBIT_TEST_FEW_GPU: '0'
+      MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
+      MILES_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
+      MILES_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
+      MILES_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
+      MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
+      MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
+      MILES_TEST_FEW_GPU: '0'
       SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
@@ -355,8 +355,8 @@ jobs:
           fi
 
           # Defaults
-          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="orbit-main"
-          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-orbit"
+          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="miles-main"
+          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-miles"
 
           # Convert "#N" PR syntax to git fetch ref: "pull/N/head"
           resolve_fetch_ref() {
@@ -394,7 +394,7 @@ jobs:
     if: (github.event_name == 'workflow_dispatch') || (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'run-ci-fsdp'))
     runs-on: self-hosted
     container:
-      image: radixark/orbit:dev
+      image: radixark/miles:dev
       options: >
         --gpus all
         --ipc=host
@@ -403,9 +403,9 @@ jobs:
         --ulimit stack=67108864
         --memory=0
         --memory-swap=0
-        -v /mnt/nvme0n1/orbit_ci:/data/orbit_ci
-        -v /mnt/nvme0n1/orbit_ci/models:/root/models
-        -v /mnt/nvme0n1/orbit_ci/datasets:/root/datasets
+        -v /mnt/nvme0n1/miles_ci:/data/miles_ci
+        -v /mnt/nvme0n1/miles_ci/models:/root/models
+        -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
         --privileged
         --ulimit nofile=65535:65535
         -v /tmp:/tmp
@@ -420,13 +420,13 @@ jobs:
       GITHUB_COMMIT_NAME: ${{ github.sha }}_${{ github.event.pull_request.number || 'non-pr' }}
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      ORBIT_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
-      ORBIT_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
-      ORBIT_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
-      ORBIT_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
-      ORBIT_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
-      ORBIT_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
-      ORBIT_TEST_FEW_GPU: '0'
+      MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
+      MILES_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
+      MILES_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
+      MILES_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
+      MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
+      MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
+      MILES_TEST_FEW_GPU: '0'
       SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
@@ -467,8 +467,8 @@ jobs:
           fi
 
           # Defaults
-          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="orbit-main"
-          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-orbit"
+          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="miles-main"
+          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-miles"
 
           # Convert "#N" PR syntax to git fetch ref: "pull/N/head"
           resolve_fetch_ref() {
@@ -506,7 +506,7 @@ jobs:
     if: (github.event_name == 'workflow_dispatch') || (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'run-ci-megatron'))
     runs-on: self-hosted
     container:
-      image: radixark/orbit:dev
+      image: radixark/miles:dev
       options: >
         --gpus all
         --ipc=host
@@ -515,9 +515,9 @@ jobs:
         --ulimit stack=67108864
         --memory=0
         --memory-swap=0
-        -v /mnt/nvme0n1/orbit_ci:/data/orbit_ci
-        -v /mnt/nvme0n1/orbit_ci/models:/root/models
-        -v /mnt/nvme0n1/orbit_ci/datasets:/root/datasets
+        -v /mnt/nvme0n1/miles_ci:/data/miles_ci
+        -v /mnt/nvme0n1/miles_ci/models:/root/models
+        -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
         --privileged
         --ulimit nofile=65535:65535
         -v /tmp:/tmp
@@ -532,13 +532,13 @@ jobs:
       GITHUB_COMMIT_NAME: ${{ github.sha }}_${{ github.event.pull_request.number || 'non-pr' }}
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      ORBIT_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
-      ORBIT_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
-      ORBIT_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
-      ORBIT_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
-      ORBIT_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
-      ORBIT_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
-      ORBIT_TEST_FEW_GPU: '0'
+      MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
+      MILES_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
+      MILES_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
+      MILES_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
+      MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
+      MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
+      MILES_TEST_FEW_GPU: '0'
       SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
@@ -579,8 +579,8 @@ jobs:
           fi
 
           # Defaults
-          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="orbit-main"
-          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-orbit"
+          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="miles-main"
+          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-miles"
 
           # Convert "#N" PR syntax to git fetch ref: "pull/N/head"
           resolve_fetch_ref() {
@@ -618,7 +618,7 @@ jobs:
     if: (github.event_name == 'workflow_dispatch') || (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'run-ci-precision'))
     runs-on: self-hosted
     container:
-      image: radixark/orbit:dev
+      image: radixark/miles:dev
       options: >
         --gpus all
         --ipc=host
@@ -627,9 +627,9 @@ jobs:
         --ulimit stack=67108864
         --memory=0
         --memory-swap=0
-        -v /mnt/nvme0n1/orbit_ci:/data/orbit_ci
-        -v /mnt/nvme0n1/orbit_ci/models:/root/models
-        -v /mnt/nvme0n1/orbit_ci/datasets:/root/datasets
+        -v /mnt/nvme0n1/miles_ci:/data/miles_ci
+        -v /mnt/nvme0n1/miles_ci/models:/root/models
+        -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
         --privileged
         --ulimit nofile=65535:65535
         -v /tmp:/tmp
@@ -644,13 +644,13 @@ jobs:
       GITHUB_COMMIT_NAME: ${{ github.sha }}_${{ github.event.pull_request.number || 'non-pr' }}
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      ORBIT_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
-      ORBIT_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
-      ORBIT_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
-      ORBIT_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
-      ORBIT_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
-      ORBIT_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
-      ORBIT_TEST_FEW_GPU: '0'
+      MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
+      MILES_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
+      MILES_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
+      MILES_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
+      MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
+      MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
+      MILES_TEST_FEW_GPU: '0'
       SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
@@ -691,8 +691,8 @@ jobs:
           fi
 
           # Defaults
-          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="orbit-main"
-          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-orbit"
+          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="miles-main"
+          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-miles"
 
           # Convert "#N" PR syntax to git fetch ref: "pull/N/head"
           resolve_fetch_ref() {
@@ -730,7 +730,7 @@ jobs:
     if: (github.event_name == 'workflow_dispatch') || (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'run-ci-ckpt'))
     runs-on: self-hosted
     container:
-      image: radixark/orbit:dev
+      image: radixark/miles:dev
       options: >
         --gpus all
         --ipc=host
@@ -739,9 +739,9 @@ jobs:
         --ulimit stack=67108864
         --memory=0
         --memory-swap=0
-        -v /mnt/nvme0n1/orbit_ci:/data/orbit_ci
-        -v /mnt/nvme0n1/orbit_ci/models:/root/models
-        -v /mnt/nvme0n1/orbit_ci/datasets:/root/datasets
+        -v /mnt/nvme0n1/miles_ci:/data/miles_ci
+        -v /mnt/nvme0n1/miles_ci/models:/root/models
+        -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
         --privileged
         --ulimit nofile=65535:65535
         -v /tmp:/tmp
@@ -756,13 +756,13 @@ jobs:
       GITHUB_COMMIT_NAME: ${{ github.sha }}_${{ github.event.pull_request.number || 'non-pr' }}
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      ORBIT_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
-      ORBIT_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
-      ORBIT_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
-      ORBIT_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
-      ORBIT_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
-      ORBIT_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
-      ORBIT_TEST_FEW_GPU: '0'
+      MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
+      MILES_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
+      MILES_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
+      MILES_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
+      MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
+      MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
+      MILES_TEST_FEW_GPU: '0'
       SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
@@ -803,8 +803,8 @@ jobs:
           fi
 
           # Defaults
-          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="orbit-main"
-          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-orbit"
+          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="miles-main"
+          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-miles"
 
           # Convert "#N" PR syntax to git fetch ref: "pull/N/head"
           resolve_fetch_ref() {
@@ -842,7 +842,7 @@ jobs:
     if: (github.event_name == 'workflow_dispatch') || (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'run-ci-long'))
     runs-on: self-hosted
     container:
-      image: radixark/orbit:dev
+      image: radixark/miles:dev
       options: >
         --gpus all
         --ipc=host
@@ -851,9 +851,9 @@ jobs:
         --ulimit stack=67108864
         --memory=0
         --memory-swap=0
-        -v /mnt/nvme0n1/orbit_ci:/data/orbit_ci
-        -v /mnt/nvme0n1/orbit_ci/models:/root/models
-        -v /mnt/nvme0n1/orbit_ci/datasets:/root/datasets
+        -v /mnt/nvme0n1/miles_ci:/data/miles_ci
+        -v /mnt/nvme0n1/miles_ci/models:/root/models
+        -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
         --privileged
         --ulimit nofile=65535:65535
         -v /tmp:/tmp
@@ -868,13 +868,13 @@ jobs:
       GITHUB_COMMIT_NAME: ${{ github.sha }}_${{ github.event.pull_request.number || 'non-pr' }}
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      ORBIT_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
-      ORBIT_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
-      ORBIT_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
-      ORBIT_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
-      ORBIT_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
-      ORBIT_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
-      ORBIT_TEST_FEW_GPU: '0'
+      MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
+      MILES_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
+      MILES_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
+      MILES_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
+      MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
+      MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
+      MILES_TEST_FEW_GPU: '0'
       SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
@@ -915,8 +915,8 @@ jobs:
           fi
 
           # Defaults
-          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="orbit-main"
-          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-orbit"
+          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="miles-main"
+          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-miles"
 
           # Convert "#N" PR syntax to git fetch ref: "pull/N/head"
           resolve_fetch_ref() {
@@ -954,7 +954,7 @@ jobs:
     if: (github.event_name == 'workflow_dispatch') || (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'run-ci-lora'))
     runs-on: self-hosted
     container:
-      image: radixark/orbit:dev
+      image: radixark/miles:dev
       options: >
         --gpus all
         --ipc=host
@@ -963,9 +963,9 @@ jobs:
         --ulimit stack=67108864
         --memory=0
         --memory-swap=0
-        -v /mnt/nvme0n1/orbit_ci:/data/orbit_ci
-        -v /mnt/nvme0n1/orbit_ci/models:/root/models
-        -v /mnt/nvme0n1/orbit_ci/datasets:/root/datasets
+        -v /mnt/nvme0n1/miles_ci:/data/miles_ci
+        -v /mnt/nvme0n1/miles_ci/models:/root/models
+        -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
         --privileged
         --ulimit nofile=65535:65535
         -v /tmp:/tmp
@@ -980,13 +980,13 @@ jobs:
       GITHUB_COMMIT_NAME: ${{ github.sha }}_${{ github.event.pull_request.number || 'non-pr' }}
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      ORBIT_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
-      ORBIT_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
-      ORBIT_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
-      ORBIT_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
-      ORBIT_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
-      ORBIT_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
-      ORBIT_TEST_FEW_GPU: '0'
+      MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
+      MILES_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
+      MILES_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
+      MILES_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
+      MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
+      MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
+      MILES_TEST_FEW_GPU: '0'
       SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
@@ -1027,8 +1027,8 @@ jobs:
           fi
 
           # Defaults
-          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="orbit-main"
-          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-orbit"
+          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="miles-main"
+          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-miles"
 
           # Convert "#N" PR syntax to git fetch ref: "pull/N/head"
           resolve_fetch_ref() {
@@ -1066,7 +1066,7 @@ jobs:
     if: (github.event_name == 'workflow_dispatch') || (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'run-ci-low-precision'))
     runs-on: self-hosted
     container:
-      image: radixark/orbit:dev
+      image: radixark/miles:dev
       options: >
         --gpus all
         --ipc=host
@@ -1075,9 +1075,9 @@ jobs:
         --ulimit stack=67108864
         --memory=0
         --memory-swap=0
-        -v /mnt/nvme0n1/orbit_ci:/data/orbit_ci
-        -v /mnt/nvme0n1/orbit_ci/models:/root/models
-        -v /mnt/nvme0n1/orbit_ci/datasets:/root/datasets
+        -v /mnt/nvme0n1/miles_ci:/data/miles_ci
+        -v /mnt/nvme0n1/miles_ci/models:/root/models
+        -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
         --privileged
         --ulimit nofile=65535:65535
         -v /tmp:/tmp
@@ -1092,13 +1092,13 @@ jobs:
       GITHUB_COMMIT_NAME: ${{ github.sha }}_${{ github.event.pull_request.number || 'non-pr' }}
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      ORBIT_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
-      ORBIT_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
-      ORBIT_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
-      ORBIT_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
-      ORBIT_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
-      ORBIT_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
-      ORBIT_TEST_FEW_GPU: '0'
+      MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
+      MILES_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
+      MILES_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
+      MILES_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
+      MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
+      MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
+      MILES_TEST_FEW_GPU: '0'
       SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
@@ -1139,8 +1139,8 @@ jobs:
           fi
 
           # Defaults
-          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="orbit-main"
-          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-orbit"
+          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="miles-main"
+          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-miles"
 
           # Convert "#N" PR syntax to git fetch ref: "pull/N/head"
           resolve_fetch_ref() {
@@ -1178,7 +1178,7 @@ jobs:
     if: (github.event_name == 'workflow_dispatch') || (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'run-ci-glm5'))
     runs-on: self-hosted
     container:
-      image: radixark/orbit:glm5
+      image: radixark/miles:glm5
       options: >
         --gpus all
         --ipc=host
@@ -1187,9 +1187,9 @@ jobs:
         --ulimit stack=67108864
         --memory=0
         --memory-swap=0
-        -v /mnt/nvme0n1/orbit_ci:/data/orbit_ci
-        -v /mnt/nvme0n1/orbit_ci/models:/root/models
-        -v /mnt/nvme0n1/orbit_ci/datasets:/root/datasets
+        -v /mnt/nvme0n1/miles_ci:/data/miles_ci
+        -v /mnt/nvme0n1/miles_ci/models:/root/models
+        -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
         --privileged
         --ulimit nofile=65535:65535
         -v /tmp:/tmp
@@ -1204,13 +1204,13 @@ jobs:
       GITHUB_COMMIT_NAME: ${{ github.sha }}_${{ github.event.pull_request.number || 'non-pr' }}
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      ORBIT_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
-      ORBIT_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
-      ORBIT_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
-      ORBIT_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
-      ORBIT_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
-      ORBIT_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
-      ORBIT_TEST_FEW_GPU: '0'
+      MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
+      MILES_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
+      MILES_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
+      MILES_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
+      MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
+      MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
+      MILES_TEST_FEW_GPU: '0'
       SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
@@ -1245,7 +1245,7 @@ jobs:
     if: (github.event_name == 'workflow_dispatch') || (github.event.pull_request && contains(github.event.pull_request.labels.*.name, 'run-ci-image'))
     runs-on: self-hosted
     container:
-      image: radixark/orbit:dev
+      image: radixark/miles:dev
       options: >
         --gpus all
         --ipc=host
@@ -1254,9 +1254,9 @@ jobs:
         --ulimit stack=67108864
         --memory=0
         --memory-swap=0
-        -v /mnt/nvme0n1/orbit_ci:/data/orbit_ci
-        -v /mnt/nvme0n1/orbit_ci/models:/root/models
-        -v /mnt/nvme0n1/orbit_ci/datasets:/root/datasets
+        -v /mnt/nvme0n1/miles_ci:/data/miles_ci
+        -v /mnt/nvme0n1/miles_ci/models:/root/models
+        -v /mnt/nvme0n1/miles_ci/datasets:/root/datasets
         --privileged
         --ulimit nofile=65535:65535
         -v /tmp:/tmp
@@ -1271,13 +1271,13 @@ jobs:
       GITHUB_COMMIT_NAME: ${{ github.sha }}_${{ github.event.pull_request.number || 'non-pr' }}
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      ORBIT_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
-      ORBIT_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
-      ORBIT_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
-      ORBIT_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
-      ORBIT_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
-      ORBIT_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
-      ORBIT_TEST_FEW_GPU: '0'
+      MILES_TEST_ENABLE_INFINITE_RUN: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.infinite_run) || 'false' }}
+      MILES_TEST_USE_DEEPEP: ${{ matrix.info.use_deepep || '0' }}
+      MILES_TEST_USE_FP8_ROLLOUT: ${{ matrix.info.use_fp8_rollout || '0' }}
+      MILES_TEST_USE_INT4_ROLLOUT: ${{ matrix.info.use_int4_rollout || '0' }}
+      MILES_TEST_USE_BRIDGE: ${{ matrix.info.use_bridge || '0' }}
+      MILES_TEST_ENABLE_EVAL: ${{ matrix.info.enable_eval || '1' }}
+      MILES_TEST_FEW_GPU: '0'
       SESSION_TEST_MODEL_FAMILY: ${{ matrix.info.model_family || '' }}
 
     steps:
@@ -1318,8 +1318,8 @@ jobs:
           fi
 
           # Defaults
-          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="orbit-main"
-          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-orbit"
+          [ -z "$MEGATRON_PR" ] && MEGATRON_PR="miles-main"
+          [ -z "$SGLANG_PR" ] && SGLANG_PR="sglang-miles"
 
           # Convert "#N" PR syntax to git fetch ref: "pull/N/head"
           resolve_fetch_ref() {

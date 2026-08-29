@@ -9,7 +9,7 @@
 # TOP=0 run. Exact parity is not claimed until the Phase-5
 # SGLang-in-Megatron backend is available and enabled by the contract.
 #
-# Certified layouts for qwen3_dense (orbit/peft/true_on_policy/model_profiles.py):
+# Certified layouts for qwen3_dense (orbit/true_on_policy/model_profiles.py):
 #   train:   dp, tp, pp   (no cp -- the CP loss-scaling correction is unported)
 #   rollout: dp, tp
 # This recipe stays inside that set: --tensor-model-parallel-size 2 for
@@ -56,7 +56,7 @@ ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-4}"
 RAY_NUM_CPUS="${RAY_NUM_CPUS:-32}"
 
 # === Model args ===
-source "${ORBIT_ROOT}/orbit_plugins/model_args/qwen3-4B.sh"   # provides MODEL_ARGS=(...)
+source "${ORBIT_ROOT}/miles_plugins/model_args/qwen3-4B.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
 NUM_ROLLOUT="${NUM_ROLLOUT:-2}"

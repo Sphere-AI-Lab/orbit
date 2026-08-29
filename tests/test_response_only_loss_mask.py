@@ -1,4 +1,4 @@
-from orbit.utils.mask_utils import MultiTurnLossMaskGenerator
+from miles.utils.mask_utils import MultiTurnLossMaskGenerator
 
 
 class FakeChatTokenizer:

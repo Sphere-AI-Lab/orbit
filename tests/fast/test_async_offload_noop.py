@@ -17,8 +17,8 @@ import pytest
 
 pytest.importorskip("ray")
 
-import orbit.ray.placement_group as pg_mod
-from orbit.ray.rollout import (
+import miles.ray.placement_group as pg_mod
+from miles.ray.rollout import (
     RolloutServer,
     ServerGroup,
     _compute_megatron_num_gpus,

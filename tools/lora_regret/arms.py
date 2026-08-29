@@ -40,7 +40,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from orbit.peft.utils.peft_param_match import (
+from orbit.utils.peft_param_match import (
     ATTENTION_MODULES,
     lora_param_count_for_modules,
     matched_mlp_rank,
@@ -50,7 +50,7 @@ from orbit.peft.utils.peft_param_match import (
     oft_lora_match_report,
     oft_param_count_for_modules,
 )
-from orbit.peft.utils.peft_param_match import MLP_MODULES as PEFT_MLP_MODULES
+from orbit.utils.peft_param_match import MLP_MODULES as PEFT_MLP_MODULES
 
 ALL_MODULES = "linear_qkv,linear_proj,linear_fc1,linear_fc2"
 ATTN_MODULES = "linear_qkv,linear_proj"
@@ -66,7 +66,7 @@ OFT_SCOUT_GRID = [1e-5, 3e-5, 1e-4, 3e-4, 1e-3]
 
 LORA_ALPHA = 32
 # LORA_A_INIT_METHOD is fixed at "kaiming" for the whole sweep, never
-# "uniform" -- orbit/utils/arguments.py registers
+# "uniform" -- miles/utils/arguments.py registers
 # choices=["xavier","normal","kaiming","zero"], so "uniform" is rejected by
 # argparse outright. Orbit's own default is "xavier"; PEFT-compatible init is
 # "kaiming", and the two differ by ~2.4x in std (see the launcher's comment),
@@ -440,7 +440,7 @@ def sft_arms(hidden_size: int, ffn_size: int, seed: int = 0) -> list[Arm]:
     `OFT_BLOCK_SIZE` knob per arm; Megatron-Bridge's `OFTRotationModule`
     silently snaps it to a divisor of each layer's own `d_in`, so the MLP
     layers still end up with a valid, if not perfectly matched, block size).
-    See `orbit.peft.utils.peft_param_match`'s module docstring for the accounting.
+    See `orbit.utils.peft_param_match`'s module docstring for the accounting.
     """
     if hidden_size <= 0 or ffn_size <= 0:
         raise ValueError(f"hidden_size and ffn_size must be positive, got {hidden_size}, {ffn_size}")
@@ -1331,7 +1331,7 @@ def e5_arms(
 
     The pairing runs this direction -- fix the block size, solve for the rank --
     because a single global block size provably cannot match LoRA across mixed
-    shapes (see `orbit.peft.utils.peft_param_match`'s module docstring: the best
+    shapes (see `orbit.utils.peft_param_match`'s module docstring: the best
     all-modules ratio is 0.764). Rank is the finer lattice, so inverting gets
     within a few percent, and each arm carries the realized ratio it achieved.
 

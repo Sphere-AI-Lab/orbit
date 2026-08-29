@@ -2,7 +2,7 @@ import argparse
 
 import pytest
 
-from orbit.peft.critic.critic_adapter import _critic_build_args
+from orbit.critic.critic_adapter import _critic_build_args
 
 
 def _args():

@@ -9,7 +9,7 @@ on the first weight-sync cycle.
 
 import dataclasses
 
-from orbit.backends.megatron_utils.update_weight.hf_weight_iterator_bridge import _process_conversion_tasks
+from miles.backends.megatron_utils.update_weight.hf_weight_iterator_bridge import _process_conversion_tasks
 
 
 @dataclasses.dataclass

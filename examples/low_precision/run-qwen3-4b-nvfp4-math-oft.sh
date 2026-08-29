@@ -20,7 +20,7 @@ RUN_LOG="${RUN_LOG:-${ORBIT_ROOT}/logs/${LAUNCHER_NAME}_$(date +%Y%m%d_%H%M%S).l
 
 # === Model spec ===
 MODEL_ARGS_ROTARY_BASE=${MODEL_ARGS_ROTARY_BASE:-5000000}
-MODEL_ARGS_FILE=${MODEL_ARGS_FILE:-"${ORBIT_ROOT}/orbit_plugins/model_args/qwen3-4B-Instruct-2507.sh"}
+MODEL_ARGS_FILE=${MODEL_ARGS_FILE:-"${ORBIT_ROOT}/miles_plugins/model_args/qwen3-4B-Instruct-2507.sh"}
 
 # === Data ===
 DATASET=${DATASET:-math}

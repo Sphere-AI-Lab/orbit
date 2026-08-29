@@ -38,7 +38,7 @@ import json
 import sys
 from types import SimpleNamespace
 
-import orbit.peft.rewards.lean_rm as lr
+import orbit.rewards.lean_rm as lr
 
 
 def _load_lean_row(path: str) -> dict | None:

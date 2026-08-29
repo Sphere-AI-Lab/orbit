@@ -31,10 +31,10 @@ from copy import deepcopy
 
 import pytest
 
-import orbit.peft.opd.opd_sglang as opd_sglang
-from orbit.peft.opd.opd_sglang import _TOPK_PAD_LOGPROB, _TOPK_PAD_TOKEN_ID, _extract_teacher_topk
-from orbit.peft.rewards.scoring_client import SCORING_MAX_RESPONSE_BYTES
-from orbit.utils.types import Sample
+import orbit.opd.opd_sglang as opd_sglang
+from orbit.opd.opd_sglang import _TOPK_PAD_LOGPROB, _TOPK_PAD_TOKEN_ID, _extract_teacher_topk
+from orbit.rewards.scoring_client import SCORING_MAX_RESPONSE_BYTES
+from miles.utils.types import Sample
 
 
 def _entry(logprob: float, token_id: int) -> list:

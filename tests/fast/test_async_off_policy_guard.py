@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from orbit.utils.arguments import validate_async_off_policy_correction
+from miles.utils.arguments import validate_async_off_policy_correction
 
 
 def _args(**overrides) -> SimpleNamespace:

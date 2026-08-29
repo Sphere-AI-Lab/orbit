@@ -8,7 +8,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-import orbit.peft.megatron.peft_utils as peft_utils
+import orbit.megatron.peft_utils as peft_utils
 
 
 class _AdapterModel(torch.nn.Module):
@@ -124,7 +124,7 @@ def _distributed_load_worker(
             world_size=world_size,
             timeout=timedelta(seconds=10),
         )
-        from orbit.utils import distributed_utils
+        from miles.utils import distributed_utils
 
         distributed_utils.GLOO_GROUP = None
         peft_utils.mpu.get_tensor_model_parallel_rank = lambda: rank

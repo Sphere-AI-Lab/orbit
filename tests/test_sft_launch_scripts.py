@@ -43,7 +43,7 @@ def test_qwen_sft_launchers_use_messages_sft_mode_and_no_sglang_args():
         assert "--loss-type sft_loss" in content
         assert "--input-key messages" in content
         assert "SGLANG_ARGS=()" in content
-        assert "--rollout-function-path orbit.rollout.sft_rollout.generate_rollout" in content
+        assert "--rollout-function-path miles.rollout.sft_rollout.generate_rollout" in content
         assert "--loss-mask-type \"${LOSS_MASK_TYPE:-qwen}\"" in content
 
 
@@ -130,7 +130,7 @@ def test_lora_regret_launcher_pins_the_llama31_chat_template():
     """Llama-3.1-8B *base* ships no chat_template, so apply_chat_template would
     raise and MultiTurnLossMaskGenerator could not even be constructed."""
     content = _lora_regret_launcher_text()
-    assert "orbit/peft/utils/chat_template_utils/templates/llama3.1_pinned.jinja" in content
+    assert "orbit/utils/chat_template_utils/templates/llama3.1_pinned.jinja" in content
 
 
 def test_lora_regret_launcher_uses_the_llama3_loss_mask_and_raw_messages():
@@ -202,7 +202,7 @@ def test_lora_regret_launcher_dispatches_lora_oft_and_full_finetune():
 
 
 def test_lora_regret_launcher_oft_arm_passes_no_lora_flags():
-    """orbit/utils/arguments.py cross-validates the two flag families: OFT flags
+    """miles/utils/arguments.py cross-validates the two flag families: OFT flags
     must be at their defaults unless --peft-method is oft. Keep the converse
     true too, so an OFT arm's command line carries no LoRA rank/alpha that
     would read as if it had one."""
@@ -233,7 +233,7 @@ def test_lora_regret_launcher_rejects_an_unknown_peft_method():
 
 def test_lora_regret_launcher_guards_full_finetune_against_too_few_gpus():
     """P0's arithmetic: 32 GB + 96 GB/N per GPU under the distributed optimizer
-    (forced on in orbit/backends/megatron_utils/arguments.py), so N=1 is 128 GB
+    (forced on in miles/backends/megatron_utils/arguments.py), so N=1 is 128 GB
     and N=2 is 80 GB before activations. Failing at launch beats OOMing twenty
     minutes into a reserved node.
 

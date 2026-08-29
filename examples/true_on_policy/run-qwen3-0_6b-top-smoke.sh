@@ -36,7 +36,7 @@ ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-2}"
 RAY_NUM_CPUS="${RAY_NUM_CPUS:-32}"
 
 # === Model args ===
-source "${ORBIT_ROOT}/orbit_plugins/model_args/qwen3-0.6B.sh"   # provides MODEL_ARGS=(...)
+source "${ORBIT_ROOT}/miles_plugins/model_args/qwen3-0.6B.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
 NUM_ROLLOUT="${NUM_ROLLOUT:-2}"

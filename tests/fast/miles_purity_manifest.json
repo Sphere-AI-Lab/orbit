@@ -1,16 +1,16 @@
 {
  "budgeted": {
   ".github/workflows/pr-test.yml": {
-   "delta_lines": 74,
-   "sha": "32d2decd65cb19aaf51b477ee98d59dcc968159c05af21605496818a685236dc"
+   "delta_lines": 2,
+   "sha": "2ce67f439ea617d6c86efef049a94a55430f606d6d28a4541215ee6d3844ad48"
   },
   ".github/workflows/pr-test.yml.j2": {
-   "delta_lines": 8,
-   "sha": "2359eab8f7d05a7851f6a8759facf833bf5508c19398b64bb57f3c8c9e6a60d0"
+   "delta_lines": 2,
+   "sha": "294b8d36897ec111343fed9675775d622b3cb592cb4e30fcf95565ccd6d0905b"
   },
   ".github/workflows/release-docs.yaml": {
    "delta_lines": 30,
-   "sha": "7723bfa63ca8c622370e3b6c589fdff8cb62b641f73156f1878ab6b25146b24c"
+   "sha": "6d0cb458c2cffa7727ca75654ca64d8d8f5c09b44ddfb5060cfa47f8ddd2452c"
   },
   ".gitignore": {
    "delta_lines": 24,
@@ -18,11 +18,11 @@
   },
   "README.md": {
    "delta_lines": 246,
-   "sha": "e9ee416ef4ae6ddb100124a296ecb8a96781d7d2f0ef8dc1bd86a4ff0d23dc03"
+   "sha": "82483855305b689779a28fbb7558ec4c1686f97539357a363025ec53b829e4b7"
   },
   "examples/README.md": {
    "delta_lines": 397,
-   "sha": "7c4bb6909aeaa173d06c39dc9e9b6a9b82766edf83248d2122630af21143cd83"
+   "sha": "5c94fc9330a741511911607ac41565b1c827d18246344c9e33ae80a326e8b97f"
   },
   "examples/__init__.py": {
    "delta_lines": 1,
@@ -34,383 +34,379 @@
   },
   "examples/on_policy_distillation/README.md": {
    "delta_lines": 369,
-   "sha": "1f9fc8a3b2655f2253ae341af8058935d52639f10782c0a8d31e75e419c26243"
+   "sha": "18b143b216df0e213cf5327df0fdbb50da49c173f90c2ebaffff68ff0d0411bf"
   },
-  "orbit/backends/megatron_utils/__init__.py": {
+  "miles/backends/megatron_utils/__init__.py": {
    "delta_lines": 5,
-   "sha": "fcf916edb62c3c0b2c71f84d63dfb8c1b6b718900b3d27ed3265ddcc0c1de9c5"
+   "sha": "d34008c3b40106a9e038e169a82c762cbd4ea19664f0b073dd7243a44729cd06"
   },
-  "orbit/backends/megatron_utils/actor.py": {
+  "miles/backends/megatron_utils/actor.py": {
    "delta_lines": 955,
-   "sha": "470abb2cfb01c44d61e7f156b9d1f4c27a48667d6f1be51e6de3545de4e40b45"
+   "sha": "e96dc2515baeb330be11309f1ad4dc964c6fdbf2d354cd42dd53dcea53071a9c"
   },
-  "orbit/backends/megatron_utils/arguments.py": {
+  "miles/backends/megatron_utils/arguments.py": {
    "delta_lines": 37,
    "sha": "7c7c1719132822f870be9d6b765e114ed93b34ce4ea16253cde1e9b4efbe5c87"
   },
-  "orbit/backends/megatron_utils/bridge_lora_helpers.py": {
+  "miles/backends/megatron_utils/bridge_lora_helpers.py": {
    "delta_lines": 123,
-   "sha": "6d77a895e9117cb6d2cd83522e4d873b6a3324f71d0933b6e4f41c5816450268"
+   "sha": "e39f6d46051a767bf0c52c393beb98a4a33369c35e2ab667b6b4fd282879f62b"
   },
-  "orbit/backends/megatron_utils/checkpoint.py": {
+  "miles/backends/megatron_utils/checkpoint.py": {
    "delta_lines": 1028,
-   "sha": "73ace4bf9211bad1f79e983348c8234b018afa045c66b0cf032e1ca782bf4589"
+   "sha": "4d20f9c5b8cd1fa0755788950c18f412c174479058b6895af1e53deb6be5a5b5"
   },
-  "orbit/backends/megatron_utils/initialize.py": {
+  "miles/backends/megatron_utils/initialize.py": {
    "delta_lines": 21,
-   "sha": "9d0d53ae789de52dfef91c4ebf4b5892ae1a702f4baed2484171caf03553f386"
+   "sha": "1f883b3cb07f0108708dbdae6d75e20ae06b7be5bbd3e15e18bfb5de45f82d86"
   },
-  "orbit/backends/megatron_utils/lora_utils.py": {
-   "delta_lines": 467,
-   "sha": "0be7cf2be48ee2609c0434b2e9f38cb033f36666ed066c266a8ad0303fdebcd5"
+  "miles/backends/megatron_utils/lora_utils.py": {
+   "delta_lines": 465,
+   "sha": "c581f5417e40f31bbf030a7baea52d499f193d83a9c4e4e62e02781ac473516c"
   },
-  "orbit/backends/megatron_utils/megatron_to_hf/__init__.py": {
+  "miles/backends/megatron_utils/megatron_to_hf/__init__.py": {
    "delta_lines": 18,
    "sha": "c1e0e16f63463e03c420e3198d1d8672663242adb966a0dc607ddadc21761cec"
   },
-  "orbit/backends/megatron_utils/megatron_to_hf/glm4.py": {
+  "miles/backends/megatron_utils/megatron_to_hf/glm4.py": {
    "delta_lines": 4,
    "sha": "775e1bb0da231ae571687d4d4a4d721c4bee359bde2a20b11237ed0a60c91139"
   },
-  "orbit/backends/megatron_utils/megatron_to_hf/glm4moe.py": {
+  "miles/backends/megatron_utils/megatron_to_hf/glm4moe.py": {
    "delta_lines": 2,
    "sha": "0cfdff3c2cd67ea6ff1bbe8aa22f680004bfe3fcbd00ad6cc510db9bc91212b6"
   },
-  "orbit/backends/megatron_utils/megatron_to_hf/llama.py": {
+  "miles/backends/megatron_utils/megatron_to_hf/llama.py": {
    "delta_lines": 2,
    "sha": "184e1ce8fad1c11213475bdc97178aacd2b0bbe7f4cf4f4bcfe5c572e6d4bd01"
   },
-  "orbit/backends/megatron_utils/megatron_to_hf/processors/padding_remover.py": {
+  "miles/backends/megatron_utils/megatron_to_hf/processors/padding_remover.py": {
    "delta_lines": 20,
-   "sha": "6ff6af2ec6249c020db2808fe0068814c5c19da3be29a1dd802b9d0044896057"
+   "sha": "948dfbb62f7c13ab8c72896c4da3cfc814c6b0f1e4b42eea7880c4ea28c7c89d"
   },
-  "orbit/backends/megatron_utils/megatron_to_hf/processors/quantizer_fp8.py": {
+  "miles/backends/megatron_utils/megatron_to_hf/processors/quantizer_fp8.py": {
    "delta_lines": 2,
-   "sha": "a093ac4e85de3d95697525c94957432691b9551477bcdf66a8f2234f90a8b3e6"
+   "sha": "2608211e6de2384a728e41c8a0464d16f90dda05329a220ae09d0b1e477db367"
   },
-  "orbit/backends/megatron_utils/megatron_to_hf/processors/quantizer_mxfp8.py": {
+  "miles/backends/megatron_utils/megatron_to_hf/processors/quantizer_mxfp8.py": {
    "delta_lines": 2,
    "sha": "9dd41c51e9a164022e3bc1883928bce0abc0eba1c2581401e7904fa141c6401c"
   },
-  "orbit/backends/megatron_utils/megatron_to_hf/qwen2.py": {
+  "miles/backends/megatron_utils/megatron_to_hf/qwen2.py": {
    "delta_lines": 4,
    "sha": "312660a94ba4d4d390acd62f0cda2756428ca07ce72fdc65af1e2d53a4bf1904"
   },
-  "orbit/backends/megatron_utils/megatron_to_hf/qwen3_5.py": {
+  "miles/backends/megatron_utils/megatron_to_hf/qwen3_5.py": {
    "delta_lines": 2,
    "sha": "d3897d01831fb43fce13b9f1fc225beb656b47811eb1795d966e945fc70a6539"
   },
-  "orbit/backends/megatron_utils/megatron_to_hf/qwen3_next.py": {
+  "miles/backends/megatron_utils/megatron_to_hf/qwen3_next.py": {
    "delta_lines": 2,
    "sha": "539f0a13b25e227c278ab34249a9c3c2062db658d4ccbe0ad389b61f6bdef702"
   },
-  "orbit/backends/megatron_utils/megatron_to_hf/qwen3moe.py": {
+  "miles/backends/megatron_utils/megatron_to_hf/qwen3moe.py": {
    "delta_lines": 14,
    "sha": "1545bd2bb9d140f0f29934efd9fe6380136c895a0102ce5e5d2146b90a200a7e"
   },
-  "orbit/backends/megatron_utils/misc_utils.py": {
+  "miles/backends/megatron_utils/misc_utils.py": {
    "delta_lines": 4,
    "sha": "10566d9583fd9e593213e42b22c232264b9da70adfb9af2f7a91f08aaa695d64"
   },
-  "orbit/backends/megatron_utils/model.py": {
+  "miles/backends/megatron_utils/model.py": {
    "delta_lines": 374,
-   "sha": "50b1d7a5297778f09e6cb2eb7ad61d030fcf17a070f3e95a25e1daab24d5f7f9"
+   "sha": "3e6478e348b0063393b6da0b929ad24e6dee3b86407868676b24152d6ab9a3c5"
   },
-  "orbit/backends/megatron_utils/model_provider.py": {
+  "miles/backends/megatron_utils/model_provider.py": {
    "delta_lines": 53,
-   "sha": "301b007259537aac2a2443bc87cf48d19036f4a8eff4704a7ae643eb07c0ddee"
+   "sha": "23041ab603c884b272e2631cbed51558477f519c7e03214cf16af303a2becc06"
   },
-  "orbit/backends/megatron_utils/parallel.py": {
+  "miles/backends/megatron_utils/parallel.py": {
    "delta_lines": 4,
    "sha": "c2ab8378720b19988fab881d37f15578260318459eab3d2e813d0bb9bc7c6198"
   },
-  "orbit/backends/megatron_utils/replay_utils.py": {
+  "miles/backends/megatron_utils/replay_utils.py": {
    "delta_lines": 76,
-   "sha": "d063de9b66167795acf947b5aa0f688f69ace53b12044fa0140633640bf4169d"
+   "sha": "d0f8ec56cab71e3b010344ff5fc02482792c1bdff37768d6d70db80a2d318f88"
   },
-  "orbit/backends/megatron_utils/update_weight/common.py": {
+  "miles/backends/megatron_utils/update_weight/common.py": {
    "delta_lines": 127,
-   "sha": "09bfcf90cd64c5d07bd8c1c01e6027785e6bbcc6b31b92e872fbeaab51e5173e"
+   "sha": "75a6d86fd873bd533ca6ab8555646c679b04dbf3ca69c7e18186edc1962403fe"
   },
-  "orbit/backends/megatron_utils/update_weight/hf_weight_iterator_base.py": {
+  "miles/backends/megatron_utils/update_weight/hf_weight_iterator_base.py": {
    "delta_lines": 15,
    "sha": "0efa6e4460247ce35a38c0e7a0ff102ba652e3cbec4465c138bd3910704bd3e0"
   },
-  "orbit/backends/megatron_utils/update_weight/hf_weight_iterator_bridge.py": {
+  "miles/backends/megatron_utils/update_weight/hf_weight_iterator_bridge.py": {
    "delta_lines": 71,
-   "sha": "83c8a6d1c6782dcfd697bbb2c41a2d1b2261fb056107e30fbe68eb1ead6dafce"
+   "sha": "97640f0605cd735ef21c41ca384991cfb86ed7931bb5abe62088a1b0843d50ca"
   },
-  "orbit/backends/megatron_utils/update_weight/hf_weight_iterator_direct.py": {
+  "miles/backends/megatron_utils/update_weight/hf_weight_iterator_direct.py": {
    "delta_lines": 8,
-   "sha": "348d4af092310156244c4aeac0dc01e46423ec5ae030efdfe64afdab6ef398a1"
+   "sha": "dfc966004031c379fd4f0b2010b349c7eafa35b7e1aa9cf5b0536eb2fc7c8839"
   },
-  "orbit/backends/megatron_utils/update_weight/update_weight_from_distributed/broadcast.py": {
+  "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/broadcast.py": {
    "delta_lines": 6,
-   "sha": "5009c59426fad77d9fc62c2c40e53c7768e84019e0197153b97067dcba772860"
+   "sha": "12e04676436e68cc1e2fcdbb4938ebfd469153f0a95bf08df6b012e7a36e6251"
   },
-  "orbit/backends/megatron_utils/update_weight/update_weight_from_distributed/mixin.py": {
+  "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/mixin.py": {
    "delta_lines": 37,
-   "sha": "911feb94d8005de775937512c4916f9cf1b95361b3c844c7ebe2cba5f77d7140"
+   "sha": "13ace5b8d0445159a9e8bf828acdda8ba4ef697e563ddc4d94697c5cffc2a6eb"
   },
-  "orbit/backends/megatron_utils/update_weight/update_weight_from_tensor.py": {
+  "miles/backends/megatron_utils/update_weight/update_weight_from_tensor.py": {
    "delta_lines": 611,
-   "sha": "05c19e65d57406c2d37eee64a99358028d49d595cccfa8cbb071c9d338c10911"
+   "sha": "287fe5e5e3a376f2e7c0f0edf5f4ca62066827f75edd75197cd8d887f0dea5ec"
   },
-  "orbit/backends/sglang_utils/arguments.py": {
+  "miles/backends/sglang_utils/arguments.py": {
    "delta_lines": 123,
-   "sha": "a545e4ad23e8d5051670e21c8c5073decd9878948df922ba336ea9be4ccc8522"
+   "sha": "c60993320abd18b8b81c7fbd9dd9da7328207dd8cbe83194cded2bc501c09e33"
   },
-  "orbit/backends/sglang_utils/sglang_engine.py": {
+  "miles/backends/sglang_utils/sglang_engine.py": {
    "delta_lines": 608,
-   "sha": "f8baef795b4281ce3df0ac58094ced4d9911bc2d30f4ff1f8f9e86f0a6389261"
+   "sha": "5bcb536552eb1403458357acb0fca18eefe8cf4f1893adf3f0ad0ed59c9fed5f"
   },
-  "orbit/backends/training_utils/ci_utils.py": {
+  "miles/backends/training_utils/ci_utils.py": {
    "delta_lines": 2,
    "sha": "4a8e40295307a67282c2c75af5dd024e875bb02333f8753bdfef97f976f9ef07"
   },
-  "orbit/backends/training_utils/cp_utils.py": {
+  "miles/backends/training_utils/cp_utils.py": {
    "delta_lines": 18,
    "sha": "4470a0ac829595fb50879f0e872ccd7142b4d86e757e100d55fde8e7f9e1d233"
   },
-  "orbit/backends/training_utils/data.py": {
+  "miles/backends/training_utils/data.py": {
    "delta_lines": 269,
-   "sha": "e3dad84ed369a53ec1aa0ea688b6c2e7868d46d32a9c59eae513700a71214d2c"
+   "sha": "11e3030c53303ae70c156c63c602826fa449a8e0948a01a6f9abc0329db00b15"
   },
-  "orbit/backends/training_utils/log_utils.py": {
+  "miles/backends/training_utils/log_utils.py": {
    "delta_lines": 211,
-   "sha": "e37d0b234c19a0b2c37fbf886edf389e21235cdbb6197714ce89d327581d0991"
+   "sha": "513b78dbe68f73a2dc3f541b2cfb5f45baf1759ca513203d9250cd40dce0f8a7"
   },
-  "orbit/backends/training_utils/loss.py": {
+  "miles/backends/training_utils/loss.py": {
    "delta_lines": 1031,
-   "sha": "a87cc0576a6ea1c37ab61b3df46019af1f01c20231f5a3e7a6ce59218344cb91"
+   "sha": "a1e19bcdddc919616f459c77be0a86fdc8489ff5a604f573ad3485e24927f10c"
   },
-  "orbit/ray/actor_group.py": {
+  "miles/ray/actor_group.py": {
    "delta_lines": 125,
-   "sha": "39e73b2281407f55153144c89aa4d8437f97d775b671e840abfeaaac47610531"
+   "sha": "c92fefcc910c9dc044e721c4a8e7de612ba0cf7977210922af455eb87978b1b5"
   },
-  "orbit/ray/placement_group.py": {
+  "miles/ray/placement_group.py": {
    "delta_lines": 88,
-   "sha": "6f2fee7247272ed21340a299ba6c241050ec4238e1d2f6d936364fbb99a9f485"
+   "sha": "18361fbadd0e03e34ce1428f690bc1f890e900eadaf15d43a1f42f91b18d62c0"
   },
-  "orbit/ray/rollout.py": {
+  "miles/ray/rollout.py": {
    "delta_lines": 289,
-   "sha": "f36c423b53d00c8b48e4929ed5ecc385dcbaecfe2453951d976dbc09623d50a5"
+   "sha": "f8c8b4fdb74206029c62bb926fbf0d42f045bd8c221fa46387c43e7e832962da"
   },
-  "orbit/ray/train_actor.py": {
+  "miles/ray/train_actor.py": {
    "delta_lines": 14,
-   "sha": "6b98aa65a80559291ffb68d21e44d43d3d0ddafb74ddaf70b366dc676a918c9b"
+   "sha": "79721b440c839610c153cad87a6aa1f38bd265699ef552b962886b6dfef98f36"
   },
-  "orbit/ray/utils.py": {
+  "miles/ray/utils.py": {
    "delta_lines": 23,
-   "sha": "8ef8367658e1e2d665f5c2e790d52f183d2b79781c549b6896738acc656616d3"
+   "sha": "5a38778d4d3a40a24b6ded40c2284603315c00d0607f0b54ece811c34968d6e9"
   },
-  "orbit/rollout/base_types.py": {
+  "miles/rollout/base_types.py": {
    "delta_lines": 6,
-   "sha": "71bfcf20131ea2ab823ea19dc5a17c058ded93fcf060dee829b74e6c9e4cf576"
+   "sha": "138ea97efa05013be7abf6b5f3f0519b8464347cffea33202125dee1865ffab2"
   },
-  "orbit/rollout/data_source.py": {
+  "miles/rollout/data_source.py": {
    "delta_lines": 234,
-   "sha": "ab416d936b578f9780627e1f62cbd7fc9308eb720860acd936a9e2535ff4e97b"
+   "sha": "085df2e6af46fd1dee67063a275c838071430f2b12db0072f752c1cf8d70c56d"
   },
-  "orbit/rollout/generate_hub/__init__.py": {
+  "miles/rollout/generate_hub/__init__.py": {
    "delta_lines": 2,
    "sha": "6dd9e89c464305609e611749ddf9670fb78a308cae12639570c84a46ca3a7355"
   },
-  "orbit/rollout/generate_hub/benchmarkers.py": {
+  "miles/rollout/generate_hub/benchmarkers.py": {
    "delta_lines": 2,
-   "sha": "77ad14d445656012df99909d6340b8e1a72e152e0467bcc90e376260ad36ecd2"
+   "sha": "516cc2945f0b9a32324b83e6d25c35634e73cbfb161eff8393a23c8ea6bfd3ab"
   },
-  "orbit/rollout/generate_hub/multi_turn.py": {
+  "miles/rollout/generate_hub/multi_turn.py": {
    "delta_lines": 8,
-   "sha": "29c0201d25fae34a18bf0b1874124770c87374e81ac6a5e8b043947ff386fff7"
+   "sha": "dfd2c6e599568581fafe988787ec2358c7e007070aa86f3012a1896b34876dd3"
   },
-  "orbit/rollout/generate_hub/single_turn.py": {
+  "miles/rollout/generate_hub/single_turn.py": {
    "delta_lines": 7,
-   "sha": "aa0e39d7eebc60dae43fbae502cc87dd2c0d889718523a65802dbc62335e5006"
+   "sha": "06773b535fd2a6cc017e64b3086aea8d0e0c289aee2903bc1d4c1b114c9a11ea"
   },
-  "orbit/rollout/generate_utils/generate_endpoint_utils.py": {
+  "miles/rollout/generate_utils/generate_endpoint_utils.py": {
    "delta_lines": 85,
-   "sha": "6c65e48a867b20a01cb6979fde85f53910c485093b9349bcd526aa7a4b8d1d1b"
+   "sha": "fcf0cbcec4f61fccc5c4f981b55feeb6766aaa45183b24c75fd1411e4df9b0ce"
   },
-  "orbit/rollout/generate_utils/openai_endpoint_utils.py": {
+  "miles/rollout/generate_utils/openai_endpoint_utils.py": {
    "delta_lines": 13,
-   "sha": "6fb8da4ec37916cc2ac27abbd40bb757f74c137ed9711c953bfe61a62b68fc32"
+   "sha": "7acf023ffeeaf199330367a639f0ec3e65a5f08f649b9fa217caa9df5ab2e6b6"
   },
-  "orbit/rollout/generate_utils/sample_utils.py": {
+  "miles/rollout/generate_utils/sample_utils.py": {
    "delta_lines": 119,
-   "sha": "8f6f9e7c7c69a394428124547d1d9e5f41af77cbb6ab10e769d263b3a0a09844"
+   "sha": "18a4f87c8b336afd2444c7ec5223a271f4fa473b872538cd43390806d40764d1"
   },
-  "orbit/rollout/generate_utils/tool_call_utils.py": {
+  "miles/rollout/generate_utils/tool_call_utils.py": {
    "delta_lines": 2,
-   "sha": "9ac7e7e024143ef5416154bc1f501c492193875df24d5ff1494735dbe263df24"
+   "sha": "5c94a91fdb720fa04facc8ec4936d3699de7623bf53b21f7eddb5d9cc1ba1bfa"
   },
-  "orbit/rollout/inference_rollout/inference_rollout_common.py": {
+  "miles/rollout/inference_rollout/inference_rollout_common.py": {
    "delta_lines": 16,
-   "sha": "f04bbc63ef0dbb967b8e0ae6dd7b729f21ee958dbdb19556091398a77f640ea2"
+   "sha": "c470203d8b853c1c95e24395600514a0f36ad6eeb17abc7bea98ebe87f403988"
   },
-  "orbit/rollout/inference_rollout/inference_rollout_eval.py": {
+  "miles/rollout/inference_rollout/inference_rollout_eval.py": {
    "delta_lines": 101,
-   "sha": "32f854cf44e8130f1088b6bb118a8a7aa8f936d5fc236f7e139b0acfc7375777"
+   "sha": "e7ef0d14c5fd6129389b7ce052c96ab9999a962b2b1fc9e88fcb180f1881e33f"
   },
-  "orbit/rollout/inference_rollout/inference_rollout_train.py": {
+  "miles/rollout/inference_rollout/inference_rollout_train.py": {
    "delta_lines": 2,
-   "sha": "2f9ecb766df8128e0f5031f54cb91806484e644ce9046c74673bf229c100f682"
+   "sha": "9cec51207350a96157d07e2b53e73d95619e1338bbf065728ebf8126e6bb0d44"
   },
-  "orbit/rollout/rm_hub/__init__.py": {
+  "miles/rollout/rm_hub/__init__.py": {
    "delta_lines": 18,
-   "sha": "4b29b0bff23818cf76bf6dad1c58a6c99b543749b6fd12ab85181d5d915a2bd9"
+   "sha": "c3ad92c334ea8ae08090d1ee79a90271aa0ca8cf915f74ca8b743f0f5230d837"
   },
-  "orbit/rollout/rm_hub/deepscaler.py": {
+  "miles/rollout/rm_hub/deepscaler.py": {
    "delta_lines": 27,
    "sha": "fbb4c714c13b0f91ad1de0841f68d80bd9ad37f45d2169d65cd6f1031ea0057c"
   },
-  "orbit/rollout/session/linear_trajectory.py": {
+  "miles/rollout/session/linear_trajectory.py": {
    "delta_lines": 2,
-   "sha": "059f12b297c14731f7247c9b8058d9a713399ca3ca9f21084ad74fa9b4321d43"
+   "sha": "e89a1bc78bff088157c80bf84de935bf07f9bf15b89c3aff856404ccdd3ea3a5"
   },
-  "orbit/rollout/session/session_server.py": {
-   "delta_lines": 3,
-   "sha": "683a97ab9008bffce425ff30eb1b5a6a83c4f23f59bc6fdf96a77d2da1bfb4e1"
+  "miles/rollout/session/session_server.py": {
+   "delta_lines": 1,
+   "sha": "f57baa69c2438789e0044cfeeeb41b73c2a87146a98384742404d74c9b3c3ac5"
   },
-  "orbit/rollout/sglang_rollout.py": {
+  "miles/rollout/sglang_rollout.py": {
    "delta_lines": 449,
-   "sha": "a4b3188e003e1643b9971c647780faf48d555ccbc26b2bfc1576193efca35cb1"
+   "sha": "3a62ac40912d36da0ce7153aa9e76725efc27ad3c7d67dd413e98a0530ca53aa"
   },
-  "orbit/router/router.py": {
-   "delta_lines": 91,
-   "sha": "c0c2cc64f716e7ba30c7af1e8dc0a64ded9190a3a883348cf5a61ceb25b67d19"
+  "miles/router/router.py": {
+   "delta_lines": 71,
+   "sha": "7bef787a133edb91c5b50138a94951039cf333d1f838b00dba00f7cac4955092"
   },
-  "orbit/utils/arguments.py": {
-   "delta_lines": 2027,
-   "sha": "8c20b35d7704f2885bbc2387f06bc107b7d9dbe3c56280f87669fb53a262f8a2"
+  "miles/utils/arguments.py": {
+   "delta_lines": 2015,
+   "sha": "7cfab4f220fd10fa4dae0c93c3b2f12e32b3017bd75c6e64dbfbd0e5cfb60add"
   },
-  "orbit/utils/chat_template_utils/tito_tokenizer.py": {
+  "miles/utils/chat_template_utils/tito_tokenizer.py": {
    "delta_lines": 31,
-   "sha": "a553de6b657ff4e32c51809985904d5207c9a92c4b60fdd77a3d323e0985730e"
+   "sha": "0a166af0e7377635e8a220d1d00c8a6b10e071da8c6301bea65e670b13f8ed4f"
   },
-  "orbit/utils/data.py": {
+  "miles/utils/data.py": {
    "delta_lines": 23,
-   "sha": "f69a6dec5803e8b82406012ef865058e33e4f3b660e0b780c1dd1f30291739d8"
+   "sha": "a95893fe0484b8c0ecf88dde00e4189c0dd296f468b7a17b97c45e0ce4ff3207"
   },
-  "orbit/utils/distributed_utils.py": {
+  "miles/utils/distributed_utils.py": {
    "delta_lines": 41,
    "sha": "1e76968f07cbe4e7a4b3edc2d82fd0e759349a4913327ec39701cb55096b165e"
   },
-  "orbit/utils/dumper_utils.py": {
+  "miles/utils/dumper_utils.py": {
    "delta_lines": 12,
-   "sha": "96f8c184ba408b2562454627263af091e3f7aa35d769d6e8981e3d0f0209d645"
+   "sha": "7003f282415a0880594160313eb6ffeed705f1bc700ca54ff4e960a97a28b251"
   },
-  "orbit/utils/env_report.py": {
+  "miles/utils/env_report.py": {
    "delta_lines": 2,
    "sha": "df75ee18ee327825acdefaff09c578737eff551a9d4cf3361598aa7fbe6fff31"
   },
-  "orbit/utils/eval_config.py": {
+  "miles/utils/eval_config.py": {
    "delta_lines": 2,
    "sha": "5befdf23d7b3910f61dd54394550a836193d0b348c3ddfea16487a769fec30b3"
   },
-  "orbit/utils/external_utils/command_utils.py": {
-   "delta_lines": 36,
-   "sha": "5f8a6f13698f39be1f043728f90102d78792a9c8362a6b4e0fb4b175ccd6b2d5"
+  "miles/utils/external_utils/command_utils.py": {
+   "delta_lines": 34,
+   "sha": "4b6e16b9dba017a85b5209cff325cc4b365806c5b0877937159f549f6f70501f"
   },
-  "orbit/utils/http_utils.py": {
+  "miles/utils/http_utils.py": {
    "delta_lines": 82,
-   "sha": "39f77bd62257baf05fe9c7110c5161aace719fe76b94ef76f0891519ed31813f"
+   "sha": "2e5eadee7d2c3efcb4300e186dede17eb012cdab9deead32e6455388ff09ea3c"
   },
-  "orbit/utils/iter_utils.py": {
+  "miles/utils/iter_utils.py": {
    "delta_lines": 2,
    "sha": "e7fbb40cd7e23e370af3c398f130f50af543db95343f5d4e32606be35da63c47"
   },
-  "orbit/utils/mask_utils.py": {
+  "miles/utils/mask_utils.py": {
    "delta_lines": 199,
    "sha": "a09fce8b68b92298a269e45bfd244c81f0428380cda68d04e7a4fe36fcd992b5"
   },
-  "orbit/utils/memory_utils.py": {
+  "miles/utils/memory_utils.py": {
    "delta_lines": 32,
    "sha": "00e593027dbefa9bfd5cca2f42fe6058a20f4111f845959c92bf5d84a8539180"
   },
-  "orbit/utils/metric_utils.py": {
+  "miles/utils/metric_utils.py": {
    "delta_lines": 11,
    "sha": "84001aff9faf1f31fc829ece4dd7f438f5b650b8c462584a18c85f274a60187d"
   },
-  "orbit/utils/misc.py": {
+  "miles/utils/misc.py": {
    "delta_lines": 9,
-   "sha": "baa72ed5f0d830bbe6a619d80fa6d63152e2e0fbc6d85d6b41663225234e548a"
+   "sha": "6adbcafab3a9d92c41b4b2bd23d033c44e066f7895a2e65bcf1090fdecadbe9e"
   },
-  "orbit/utils/ppo_utils.py": {
+  "miles/utils/ppo_utils.py": {
    "delta_lines": 582,
-   "sha": "82fc6aa3dfc431caba72e51f64239ae9ae7e8f0dce0545c77fd61807d83387ed"
+   "sha": "206961d794766ac300df61b1e479ecccd67c3e829cc408ca380ed1807379f321"
   },
-  "orbit/utils/processing_utils.py": {
+  "miles/utils/processing_utils.py": {
    "delta_lines": 8,
-   "sha": "5a94c82c6aeebe0929ebc73346ccebe5b1a284ce1fa3e5cb23eb9a855120a3aa"
+   "sha": "862c2ec4ff3e607237ac8063da189c287672a29bbec9cdd44953a45acf619bea"
   },
-  "orbit/utils/profile_utils.py": {
+  "miles/utils/profile_utils.py": {
    "delta_lines": 2,
-   "sha": "32e9cf0bc0a6e33fd0c184b77555889c9384c3c7a0d6ada49111dfd051abea3b"
+   "sha": "efaf3e1398dadc27e78abaf37662e8405f081ce7fbb5118c3a154d4d1b7bad85"
   },
-  "orbit/utils/prometheus_utils.py": {
-   "delta_lines": 6,
-   "sha": "0addd0e828eb8005dcb660b53acb83ed26e643a23af93dad75c36d8a2c738fc0"
-  },
-  "orbit/utils/reloadable_process_group.py": {
+  "miles/utils/reloadable_process_group.py": {
    "delta_lines": 33,
-   "sha": "a50e5690c77c4c754589ae6e1b9ab458859797be285b7682a0f38fbf8bb41b0e"
+   "sha": "9635273402f9ccfa7161cff0f7ee516de23630ec3d04804fce04f440e3fe0dc7"
   },
-  "orbit/utils/replay_base.py": {
+  "miles/utils/replay_base.py": {
    "delta_lines": 56,
-   "sha": "53092c7912dd0cb0245b21418dba9badf75e03bc2ddd225fba81d58362c928fd"
+   "sha": "a25ac947f14ba4e092ea17b890cf685fd841b99a4f61ab5163d33d4590e2d67a"
   },
-  "orbit/utils/tensor_backper.py": {
+  "miles/utils/tensor_backper.py": {
    "delta_lines": 14,
    "sha": "da919c5c828b5c72db7ebf16009b56c1e811e044a42fa502978ee563cfb97c1e"
   },
-  "orbit/utils/test_utils/mock_sglang_server.py": {
+  "miles/utils/test_utils/mock_sglang_server.py": {
    "delta_lines": 94,
-   "sha": "58b864c8c373fae43f2c5360fc8f0139fb7f0108a3f5dfb62ce68e8afeb4e44b"
+   "sha": "8f983da5f1812e122a93e0767347be02aad6c0ab90febf3e9d64c2406fb04921"
   },
-  "orbit/utils/tracking_utils.py": {
-   "delta_lines": 4,
-   "sha": "083f6af284c8e4b488ca4c1dce3858dc0a5939dedde8e8a763b1fe7b4e9b158e"
+  "miles/utils/tracking_utils.py": {
+   "delta_lines": 2,
+   "sha": "0832a995f589152c0c8c3402ed8fea3f5454661b84df4623769dbbc0cc065345"
   },
-  "orbit/utils/train_metric_utils.py": {
+  "miles/utils/train_metric_utils.py": {
    "delta_lines": 6,
-   "sha": "040b39334baf83475fdcc37d0af4ce03539e0d5eac5feddd47d51cb291fb94d6"
+   "sha": "143b43bf50a2fb466bf17713ea966f44adf74c14ec8cc3495f18ea44be841052"
   },
-  "orbit/utils/types.py": {
+  "miles/utils/types.py": {
    "delta_lines": 183,
    "sha": "1b251652c268ecc34bd466f64b98e9c98236e56c4d5b322317fd7ad35e2f0ca0"
   },
-  "orbit/utils/wandb_utils.py": {
+  "miles/utils/wandb_utils.py": {
    "delta_lines": 16,
-   "sha": "cd0952f42e077a9470b77710363a0f422d83fe761deecf08e55ca1c20b31fff1"
+   "sha": "b1241a8610161219be33ad69e08c7c37d1f9d099c02b8fb64ed0590648852043"
   },
-  "orbit_plugins/__init__.py": {
+  "miles_plugins/__init__.py": {
    "delta_lines": 1,
    "sha": "6f88dd6f47d77e8eb8ec3ddd92506f48a9909bed5a72a0773d816724eb1985b6"
   },
-  "orbit_plugins/mbridge/qwen3_5.py": {
+  "miles_plugins/mbridge/qwen3_5.py": {
    "delta_lines": 61,
    "sha": "4a82e6a31173c7374da705cbb93287fa4e7f6f512c063d3bf71db1e40a391ca6"
   },
-  "orbit_plugins/megatron_bridge/__init__.py": {
+  "miles_plugins/megatron_bridge/__init__.py": {
    "delta_lines": 6,
    "sha": "d5215ca5885fc55c792bb358eb6c25181387bf5e5323f16878fd1b45e9c0d17f"
   },
-  "orbit_plugins/models/glm5/glm5.py": {
+  "miles_plugins/models/glm5/glm5.py": {
    "delta_lines": 4,
    "sha": "d921cfe340caf4a3ee9d5303d4a5b9dd09ccb3527e0f657f56217292b0b4f529"
   },
-  "orbit_plugins/models/hf_attention.py": {
+  "miles_plugins/models/hf_attention.py": {
    "delta_lines": 2,
    "sha": "95a5325e69a36de71b17194f3b1aa9123e39f522700a7615c27b5425b017a56a"
   },
-  "orbit_plugins/models/qwen3_5.py": {
+  "miles_plugins/models/qwen3_5.py": {
    "delta_lines": 8,
-   "sha": "c9954cfeaee83040d566cec319697c53e5ea09e84370dbc56d8dad9f84493d54"
+   "sha": "d6b48bff7589597f534fbc4926384f9fdb0916ad5b1a8b37079e827007ea0cbe"
   },
   "pyproject.toml": {
-   "delta_lines": 283,
-   "sha": "a3d97a9df6d5de46c5a65e27529cbfa24d3744554f0857ece1c08e43f4a22e0b"
+   "delta_lines": 288,
+   "sha": "3d837f0083f42bac3857096ce8c18721b15017d809fe94b338e501392fae8b89"
   },
   "requirements.txt": {
    "delta_lines": 38,
@@ -418,7 +414,7 @@
   },
   "setup.py": {
    "delta_lines": 8,
-   "sha": "9195c04ef287b809b308cb7f1866a2eb0d45f8da171d3be0c39e9cf6353ca60c"
+   "sha": "57dc3253151c38fd7018cfa9cab54faea5600f74c11e2c2cf34d478b4944e38f"
   },
   "tests/__init__.py": {
    "delta_lines": 1,
@@ -426,7 +422,7 @@
   },
   "tests/fast/utils/test_lora_arguments.py": {
    "delta_lines": 174,
-   "sha": "87708cbc1cb6d315ce8e46c88a244f35a27542b0a9c1f06ebc3edde1bd5b6f67"
+   "sha": "b46bc827147b0f86a91635a4c4b3013d51c209695b4d7a9d7c0c7e8f2c7d6895"
   },
   "tools/__init__.py": {
    "delta_lines": 1,
@@ -438,7 +434,7 @@
   },
   "tools/convert_hf_to_torch_dist.py": {
    "delta_lines": 199,
-   "sha": "cbb6505213d22d8fd39bf6547f92e6927b121c75b2545cdff6b9360b9e08f9ba"
+   "sha": "01aa32ff11251c207495e80bbb7e682d4f04594d92cd7045a8417eea7756e062"
   },
   "tools/fp8_cast_bf16.py": {
    "delta_lines": 13,
@@ -446,11 +442,11 @@
   },
   "train.py": {
    "delta_lines": 263,
-   "sha": "cdfc37982bdb9bb854c0fc0cd130c7bb0727b8f2cedc7285de6e9819d2aa3261"
+   "sha": "fcb78ba3730fc4c86d2432d0bbf9c555f50cd94184f93bb9637b0394fe242200"
   },
   "train_async.py": {
    "delta_lines": 22,
-   "sha": "d1c226953cedcca757b23c7ef8b0e68fde20b8458dc9e2eb0e1d3b0ff1187cef"
+   "sha": "832ed84fb2e789b436b2565c897716e92e6bac87bb17b07c696fc7cdd884da54"
   }
  },
  "dropped": [
@@ -640,24 +636,24 @@
   "imgs/arch.png",
   "imgs/miles_logo.png",
   "imgs/miles_square.png",
-  "orbit/backends/experimental/__init__.py",
-  "orbit/backends/experimental/fsdp_utils/__init__.py",
-  "orbit/backends/experimental/fsdp_utils/actor.py",
-  "orbit/backends/experimental/fsdp_utils/arguments.py",
-  "orbit/backends/experimental/fsdp_utils/checkpoint.py",
-  "orbit/backends/experimental/fsdp_utils/kernels/__init__.py",
-  "orbit/backends/experimental/fsdp_utils/kernels/fused_experts.py",
-  "orbit/backends/experimental/fsdp_utils/kernels/fused_moe_triton_backward_kernels.py",
-  "orbit/backends/experimental/fsdp_utils/lr_scheduler.py",
-  "orbit/backends/experimental/fsdp_utils/models/__init__.py",
-  "orbit/backends/experimental/fsdp_utils/models/qwen3_moe.py",
-  "orbit/backends/experimental/fsdp_utils/models/qwen3_moe_hf.py",
-  "orbit/backends/experimental/fsdp_utils/parallel.py",
-  "orbit/backends/experimental/fsdp_utils/update_weight_utils.py",
-  "orbit/utils/debug_utils/__init__.py",
-  "orbit/utils/debug_utils/display_debug_rollout_data.py",
-  "orbit/utils/debug_utils/replay_reward_fn.py",
-  "orbit/utils/debug_utils/send_to_sglang.py",
+  "miles/backends/experimental/__init__.py",
+  "miles/backends/experimental/fsdp_utils/__init__.py",
+  "miles/backends/experimental/fsdp_utils/actor.py",
+  "miles/backends/experimental/fsdp_utils/arguments.py",
+  "miles/backends/experimental/fsdp_utils/checkpoint.py",
+  "miles/backends/experimental/fsdp_utils/kernels/__init__.py",
+  "miles/backends/experimental/fsdp_utils/kernels/fused_experts.py",
+  "miles/backends/experimental/fsdp_utils/kernels/fused_moe_triton_backward_kernels.py",
+  "miles/backends/experimental/fsdp_utils/lr_scheduler.py",
+  "miles/backends/experimental/fsdp_utils/models/__init__.py",
+  "miles/backends/experimental/fsdp_utils/models/qwen3_moe.py",
+  "miles/backends/experimental/fsdp_utils/models/qwen3_moe_hf.py",
+  "miles/backends/experimental/fsdp_utils/parallel.py",
+  "miles/backends/experimental/fsdp_utils/update_weight_utils.py",
+  "miles/utils/debug_utils/__init__.py",
+  "miles/utils/debug_utils/display_debug_rollout_data.py",
+  "miles/utils/debug_utils/replay_reward_fn.py",
+  "miles/utils/debug_utils/send_to_sglang.py",
   "scripts/amd/run-qwen3-4B-amd.sh",
   "scripts/models/deepseek-v3-20layer.sh",
   "scripts/models/deepseek-v3-5layer.sh",
@@ -862,134 +858,113 @@
   "tools/convert_to_hf.py"
  ],
  "miles_base": "ef7481ae3bfbcc641d031e7e6113b646bb764382",
- "normalize": [
-  [
-   "\\bmiles_plugins\\b",
-   "orbit_plugins"
-  ],
-  [
-   "\\bmiles\\b",
-   "orbit"
-  ],
-  [
-   "\\bMILES_",
-   "ORBIT_"
-  ],
-  [
-   "\\bMiles\\b",
-   "Orbit"
-  ],
-  [
-   "\\bMILES\\b",
-   "ORBIT"
-  ]
- ],
  "pristine": {
   ".github/workflows/bot-slash-lint.yaml": "d0a27b4f9381d4878f646c052fe86be0d5a98127d59a46d5a809e8cd6ac4ef1b",
   ".github/workflows/generate_github_workflows.py": "1e810036d3a20c2cbcd1eea39ad4b5b92a08381ef11ec1abc3c73a825cfe1eda",
   ".github/workflows/pre-commit.yml": "26db81d91a4db000b3a1beeda746f635b74b2408f26e363ec994e2aee64d1217",
   ".pre-commit-config.yaml": "baf736b5540091a6393af105accb562a392cfc1c55d5dddf83fe058bcb1adaf5",
   "LICENSE": "bf917707c1e0ffdfe653d63aebc188a48f738f3faad9acc188c346d3618694af",
-  "orbit/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit/backends/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
-  "orbit/backends/megatron_utils/ci_utils.py": "b95f17f320db95d7d597c81d8139e6ea84e7aae3d466c2c24a31379dcd31b298",
-  "orbit/backends/megatron_utils/kernels/int4_qat/fake_int4_quant_cuda.cu": "d2b291133d84cd824b0e2b0fbbb539b2d2e62b969f0a097a37a1551766c6bcb7",
-  "orbit/backends/megatron_utils/kernels/int4_qat/setup.py": "f8a9389797532d24701698e96222ca35d6a81236fe02a4a0dbcc04515614cde6",
-  "orbit/backends/megatron_utils/megatron_to_hf/deepseekv3.py": "dfab14f4b938525798fb4bd05195e43b8f267de34671808a5d0cfeb64019341f",
-  "orbit/backends/megatron_utils/megatron_to_hf/mimo.py": "1704cc6e76262273a54ee41e1dbbe85d0af8cc06676d0291eb313ba2f0bc939f",
-  "orbit/backends/megatron_utils/megatron_to_hf/processors/__init__.py": "abd236e0b45f098cb84b37ab6ba9ac11b027648961f8d90e0c47b206ff796499",
-  "orbit/backends/megatron_utils/megatron_to_hf/processors/quantizer_compressed_tensors.py": "5f667343d552e02058507d6a408b6a9e1fe2c7c686ce14db2ce4ba1064410aa9",
-  "orbit/backends/megatron_utils/megatron_to_hf/processors/quantizer_nvfp4.py": "1b00fde8208b077654f37307560dbc6ce6473d557363d9ab5aaf57f4591c4a43",
-  "orbit/backends/megatron_utils/sglang.py": "ab1010b886238582ebe1879f3a29b4ae074363d6a1f06fd2921748d678e509cf",
-  "orbit/backends/megatron_utils/update_weight/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit/backends/megatron_utils/update_weight/update_weight_from_distributed/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit/backends/megatron_utils/update_weight/update_weight_from_distributed/p2p.py": "a003fc469f45a2d66bce44336ff8ff57df32230f27859e8461d75278192bc661",
-  "orbit/backends/megatron_utils/update_weight/update_weight_from_distributed/p2p_transfer_utils.py": "628b2989a457daae99671c7c49564ab20c920cbd84b8c48f389f2435ccb04908",
-  "orbit/backends/sglang_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit/backends/sglang_utils/sglang_config.py": "13877f58ea1c9225992f7ab2484a848ce4689a7faed293dcc806eba8fff40e11",
-  "orbit/backends/training_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit/backends/training_utils/parallel.py": "5b7c666b8bdb602331efb9a53d6670908e6c844c9d723d6681b26648831fe4e5",
-  "orbit/ray/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit/ray/ray_actor.py": "dae0402e7b0bc8051ee887c5442ba9a0d476b3c418b4bbffa9dba79c762a9e1f",
-  "orbit/rollout/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit/rollout/filter_hub/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit/rollout/filter_hub/base_types.py": "7eedd8d000dcd9cdb930f05ce23e19d08269b5bb672a4a521d70d537f548c654",
-  "orbit/rollout/filter_hub/dynamic_sampling_filters.py": "e48ab63c5976a81ae6acd1d921c9269b40163f8d2d2bd8ae3fa9db840fb86283",
-  "orbit/rollout/generate_hub/agentic_tool_call.py": "2a679d53560aff216449a0a8bfd59ec50f00dabff12e71fdcd5928daa5ae9789",
-  "orbit/rollout/generate_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit/rollout/inference_rollout/__init__.py": "49d49c5fe0d19ae701f62bc444c661a63d62b9495cca9459d1bf2d037cdc0da6",
-  "orbit/rollout/inference_rollout/compatibility.py": "6d23047a161e588c8f5dee7e1e88e35c8c26c87fe3c0d7d4fb64bddbf9fc1db0",
-  "orbit/rollout/rm_hub/f1.py": "89457e8e95d7acdacd52a39044dd0a4b0c5d4cfa638dc1cdb8ce96e03620de6b",
-  "orbit/rollout/rm_hub/gpqa.py": "cc79c1d6ddebabbe6d7c2a40c32e35151eddfe737a1efccb106d690b8756a4b1",
-  "orbit/rollout/rm_hub/ifbench.py": "fa3e2475b676714dedd0bef56ef45febe694f673eb331c3dcddf6b3bfb2ebb83",
-  "orbit/rollout/rm_hub/math_dapo_utils.py": "3d6b61357e2ee8f1704ba0eb1726ea2dd65dbf9c76e963f20d5ff6598b8f7b23",
-  "orbit/rollout/rm_hub/math_utils.py": "db83eabd2941fb21253c9f733752d775d80488797582e093f2b94bb29d3d39cc",
-  "orbit/rollout/session/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit/rollout/session/session_errors.py": "71cabf28163c01da1c51acbf80e58ab95a2dd9e1fbc753e65fbdfd25aac905af",
-  "orbit/rollout/session/session_types.py": "d91a315dc4a0e052b19b62868210ce277d16583a46df3d480f108755b00c7298",
-  "orbit/rollout/session/sessions.py": "71122856b1090df63c463c9204f03bc9f848215b0592ed764e91ad69f7713259",
-  "orbit/rollout/sft_rollout.py": "29bda200ec0e32543a71f396f0e4fb3a8f22ce35cad2c5aa368944254f0c6412",
-  "orbit/rollout/sleep_rollout.py": "5c3dbcc2e9a595e785446ea8e3ff470a198396815216724a03d879375f6b4b9d",
-  "orbit/router/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit/router/middleware_hub/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit/router/middleware_hub/radix_tree.py": "6c10957d93873caf7a8215ef6d4fbaa92e944779aad9bd7bbef449e3e8280574",
-  "orbit/router/middleware_hub/radix_tree_middleware.py": "488c189a146eeaf8c47bd4cf384f498387f80ce825643908c26786e8aeba18dc",
-  "orbit/utils/__init__.py": "3c41bd0ee634692a88534ccd777205804f0eb58790d62c4531455da9de125b1f",
-  "orbit/utils/async_utils.py": "9f2cd0ba1c3fde0dd0e5fdf15970757b06fecd7f619e0bb2e0fac2a7197705f9",
-  "orbit/utils/chat_template_utils/__init__.py": "b98f73b8f127748ea701df2937cf89a69e79412e2af751ab165ac21b494e49bb",
-  "orbit/utils/chat_template_utils/autofix.py": "0898665fe5bb305579c62aa6c302c590b3d720ea030474a1c41f14cd1b46307a",
-  "orbit/utils/chat_template_utils/template.py": "40a76041e5033ccf0697b1aff45d79d16e918fedc9438270a06ef741dc3e677f",
-  "orbit/utils/chat_template_utils/templates/qwen3.5_fixed.jinja": "e25cca2d229186384970e8d8bdbb02f5f74d90ffde54060d47e19ab23d8d3c48",
-  "orbit/utils/chat_template_utils/templates/qwen3_fixed.jinja": "88714a95dbee13411b47d3fe449b2496731c60ba0f88b942db32cb95222054d2",
-  "orbit/utils/chat_template_utils/templates/qwen3_thinking_2507_and_next_fixed.jinja": "d597cebd327a5acb1c3996af8c3a5643a5fd9326e70bb0100074ac1277406ae6",
-  "orbit/utils/chat_template_utils/token_seq_comparator.py": "c949fcae1602f8de5994249236689437e4bc6605c28c7d40428dd5f31a502808",
-  "orbit/utils/context_utils.py": "a78c2ccc365119d0859764a533b4258c5f40888f396ab75c4b71d03f458a89d8",
-  "orbit/utils/environ.py": "5c5a5ff8ab6de3cced5c400a182093c946b2f87e72442a180700333833012df4",
-  "orbit/utils/external_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit/utils/flops_utils.py": "1c28167d20159ce45129a59d84cfb619995fd4aaf123fc20508b6dbdf54c0f53",
-  "orbit/utils/fp8_kernel.py": "0c3f8121d9423de9b5109c9015f1b5e4bb0622574fa00b38c267e900ac4bd487",
-  "orbit/utils/health_monitor.py": "72983f0c294264c8186a5580d8f55213b6eabbd7dbdc77c6e4334492ad6a428f",
-  "orbit/utils/logging_utils.py": "cfc53a302e8feac7afde17ed8e8fcf27f3cc64a92f918c2eb8ee906eafa776ed",
-  "orbit/utils/megatron_bridge_utils.py": "de8abf036db3bc73f99d76b4a3314c9fb708870e3ad7ce62ebd2e99a37516296",
-  "orbit/utils/metric_checker.py": "13d407e4df672592e9e959cf673efa9cb5bfa738eb2ad3545246469edf32bb6d",
-  "orbit/utils/ray_utils.py": "3bdf5470e5a56318b50c44e6d320b226dacdf532e48fe5c23d3230b4852b542d",
-  "orbit/utils/rocm_checkpoint_writer.py": "6f29a85785a5b40e09e3b28b34e4dfb8007730039ba059863d7bbacef557e6a4",
-  "orbit/utils/seqlen_balancing.py": "2054f39c167898c104824666b514647c31008ed6be4cb90c07b3869f75550984",
-  "orbit/utils/tensorboard_utils.py": "066a57532b4dd5cdaf1bd868ae515ca446fb9f7aa906871339a0448724953b5a",
-  "orbit/utils/test_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit/utils/test_utils/chat_template_verify.py": "6fe0f1b4d7f80af3983bc71f11d4c0fcb1abf9d55d4e3d2c60cbf7e14d41b6e8",
-  "orbit/utils/test_utils/mock_tools.py": "1eb91760f67cf947ac7f2732870a8a516d2f9fae9e23cf985c788a3b02ef155f",
-  "orbit/utils/test_utils/mock_trajectories.py": "358e0a42f0001a18a96f4ef8eea18f657f34476ff7ba376aafd525f0277fc367",
-  "orbit/utils/test_utils/uvicorn_thread_server.py": "08b1df265c4e87c812c6bae72851b164baf7ac429ab8b4c10c34ce450d1254c5",
-  "orbit/utils/timer.py": "12d1ec2dcc7eb38ba2866efd0f0bc1f7566799af9f668e6b018dae328e150fdd",
-  "orbit/utils/train_dump_utils.py": "e22bf1ba45802670ca78ab1f0d9934b8c9c0450c65455b85604b80fc1ba6c5e6",
-  "orbit/utils/typer_utils.py": "fff1556a44cb8bcc4a23aeb2986c8b2a16025a9f868341b8c7562f0bb4625745",
-  "orbit_plugins/mbridge/__init__.py": "869197f148bd29ddd4330045b6ceef91b9578f81bf39a1bb5a6f9fac06800a1f",
-  "orbit_plugins/mbridge/deepseek_v32.py": "107300ed388683ff3b1c11ab1135728a12632559186770347120c555e5517eaa",
-  "orbit_plugins/mbridge/glm4.py": "33c69f9093eea91f8dffd0755143414cd92bcb223342ab4323af687f69c6b691",
-  "orbit_plugins/mbridge/glm4moe.py": "ef1a9aadadf619e4033d1d07052a3466b7116f09674d6e97a05cdd96fd99242d",
-  "orbit_plugins/mbridge/glm4moe_lite.py": "09b18332d210ab4b0ab0acdf14df24a971a9847c49ce5ce4ff188d012e13ac6b",
-  "orbit_plugins/mbridge/mimo.py": "b43cf010814262721ed561ccf28f3786a464eb03d959bf0ca7aede24f9f28df5",
-  "orbit_plugins/mbridge/qwen3_next.py": "86110c106bb61c468765eccb57e81645bc30cc653c29dc0cce609f284354e67e",
-  "orbit_plugins/models/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit_plugins/models/cp_utils.py": "3a96d42d0c358b9a134884abf4f85c455b9424b60009adc8fc81c3cdc52025e3",
-  "orbit_plugins/models/glm4.py": "3c4d2bab8e433f70f2687ef29117b9b7267a69f6b6f369f308965213bb782ff3",
-  "orbit_plugins/models/glm5/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit_plugins/models/glm5/ops/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "orbit_plugins/models/glm5/ops/indexer.py": "0646ac8e355554eadc73e096346ba9bcfe583d68b963c2d6691c375dad4b6514",
-  "orbit_plugins/models/glm5/ops/sparse_mla.py": "d79d169c899250c7efdf82a4c3b638e3aa751069e528189f6682e234c67fc1f4",
-  "orbit_plugins/models/glm5/ops/tilelang_indexer_bwd.py": "62deb53a37524c308640923ab35a2b515b2171d0d45ff634aea9c88fc7607b7d",
-  "orbit_plugins/models/glm5/ops/tilelang_indexer_fwd.py": "39e78f7b5e0e79cb213cca1951aecf7bb826ac6dca5020172aea986d8e81223e",
-  "orbit_plugins/models/glm5/ops/tilelang_sparse_mla_bwd.py": "80a8b0eb0158dd2f6d5e975521d56e1dbe9a23f0cf6bfd493f137e116b369179",
-  "orbit_plugins/models/glm5/ops/tilelang_sparse_mla_fwd.py": "a9f6f99d826dc3d173594d703c56ac109810f3b5fb67157661b399ca741a7da0",
-  "orbit_plugins/models/qwen3_next.py": "655d3ca79501d75a66403e955777d8b6e21aea7bf166e8c39052c9b52ee0cc29",
+  "miles/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/backends/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+  "miles/backends/megatron_utils/ci_utils.py": "03a1209522d11d8f4edc844cd5386bb08b2c8fd73a1772eaa173b8c22ab21677",
+  "miles/backends/megatron_utils/kernels/int4_qat/fake_int4_quant_cuda.cu": "d2b291133d84cd824b0e2b0fbbb539b2d2e62b969f0a097a37a1551766c6bcb7",
+  "miles/backends/megatron_utils/kernels/int4_qat/setup.py": "f8a9389797532d24701698e96222ca35d6a81236fe02a4a0dbcc04515614cde6",
+  "miles/backends/megatron_utils/megatron_to_hf/deepseekv3.py": "dfab14f4b938525798fb4bd05195e43b8f267de34671808a5d0cfeb64019341f",
+  "miles/backends/megatron_utils/megatron_to_hf/mimo.py": "1704cc6e76262273a54ee41e1dbbe85d0af8cc06676d0291eb313ba2f0bc939f",
+  "miles/backends/megatron_utils/megatron_to_hf/processors/__init__.py": "abd236e0b45f098cb84b37ab6ba9ac11b027648961f8d90e0c47b206ff796499",
+  "miles/backends/megatron_utils/megatron_to_hf/processors/quantizer_compressed_tensors.py": "5f667343d552e02058507d6a408b6a9e1fe2c7c686ce14db2ce4ba1064410aa9",
+  "miles/backends/megatron_utils/megatron_to_hf/processors/quantizer_nvfp4.py": "1b00fde8208b077654f37307560dbc6ce6473d557363d9ab5aaf57f4591c4a43",
+  "miles/backends/megatron_utils/sglang.py": "ab1010b886238582ebe1879f3a29b4ae074363d6a1f06fd2921748d678e509cf",
+  "miles/backends/megatron_utils/update_weight/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/p2p.py": "d70f27df4d709ecffa399d82d1c7de26555af4c026778609d06fe255f852dd37",
+  "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/p2p_transfer_utils.py": "628b2989a457daae99671c7c49564ab20c920cbd84b8c48f389f2435ccb04908",
+  "miles/backends/sglang_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/backends/sglang_utils/sglang_config.py": "13877f58ea1c9225992f7ab2484a848ce4689a7faed293dcc806eba8fff40e11",
+  "miles/backends/training_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/backends/training_utils/parallel.py": "5b7c666b8bdb602331efb9a53d6670908e6c844c9d723d6681b26648831fe4e5",
+  "miles/ray/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/ray/ray_actor.py": "f01d53cf01d248878261db7929790b96bc63d25705b33546b5ca26ab96c7662f",
+  "miles/rollout/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/rollout/filter_hub/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/rollout/filter_hub/base_types.py": "7eedd8d000dcd9cdb930f05ce23e19d08269b5bb672a4a521d70d537f548c654",
+  "miles/rollout/filter_hub/dynamic_sampling_filters.py": "434c02d3231b5ecb2cf3c9ffea4902e3a84cff6a8c96c82bb5571af10c7c6a0e",
+  "miles/rollout/generate_hub/agentic_tool_call.py": "cf668cee669c233aefddc1acf7e76f568212ef2fbb718b058f72348ce2ded8f4",
+  "miles/rollout/generate_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/rollout/inference_rollout/__init__.py": "49d49c5fe0d19ae701f62bc444c661a63d62b9495cca9459d1bf2d037cdc0da6",
+  "miles/rollout/inference_rollout/compatibility.py": "d55d682bf15673cd90aefee59ad174b82d77497c880fd2537b577c2faf3feca0",
+  "miles/rollout/rm_hub/f1.py": "89457e8e95d7acdacd52a39044dd0a4b0c5d4cfa638dc1cdb8ce96e03620de6b",
+  "miles/rollout/rm_hub/gpqa.py": "cc79c1d6ddebabbe6d7c2a40c32e35151eddfe737a1efccb106d690b8756a4b1",
+  "miles/rollout/rm_hub/ifbench.py": "fa3e2475b676714dedd0bef56ef45febe694f673eb331c3dcddf6b3bfb2ebb83",
+  "miles/rollout/rm_hub/math_dapo_utils.py": "3d6b61357e2ee8f1704ba0eb1726ea2dd65dbf9c76e963f20d5ff6598b8f7b23",
+  "miles/rollout/rm_hub/math_utils.py": "db83eabd2941fb21253c9f733752d775d80488797582e093f2b94bb29d3d39cc",
+  "miles/rollout/session/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/rollout/session/session_errors.py": "71cabf28163c01da1c51acbf80e58ab95a2dd9e1fbc753e65fbdfd25aac905af",
+  "miles/rollout/session/session_types.py": "d91a315dc4a0e052b19b62868210ce277d16583a46df3d480f108755b00c7298",
+  "miles/rollout/session/sessions.py": "ed0b9dae6fbd25fd51bf7a4ee7384ded8239c29973dc0bb6a4611d7ec82d44a1",
+  "miles/rollout/sft_rollout.py": "f9b49c6b1d801ccaa87d4f8a7be72ce0d5890a88cb37b3d9a480b213c45e3d09",
+  "miles/rollout/sleep_rollout.py": "5c3dbcc2e9a595e785446ea8e3ff470a198396815216724a03d879375f6b4b9d",
+  "miles/router/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/router/middleware_hub/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/router/middleware_hub/radix_tree.py": "6c10957d93873caf7a8215ef6d4fbaa92e944779aad9bd7bbef449e3e8280574",
+  "miles/router/middleware_hub/radix_tree_middleware.py": "763b9d6d2cc4caa1b5dcc299fb0fbc03bce32af34e6b36425cd7215781e6f097",
+  "miles/utils/__init__.py": "a0c0be3dea3fb3d27d098fcc618db4c50c4ddbbc9df0927240fe619ab9ae4931",
+  "miles/utils/async_utils.py": "9f2cd0ba1c3fde0dd0e5fdf15970757b06fecd7f619e0bb2e0fac2a7197705f9",
+  "miles/utils/chat_template_utils/__init__.py": "83152c45d52075f354a6025c1bccef3376ac1f72b4312687d421780d88b104b4",
+  "miles/utils/chat_template_utils/autofix.py": "0898665fe5bb305579c62aa6c302c590b3d720ea030474a1c41f14cd1b46307a",
+  "miles/utils/chat_template_utils/template.py": "40a76041e5033ccf0697b1aff45d79d16e918fedc9438270a06ef741dc3e677f",
+  "miles/utils/chat_template_utils/templates/qwen3.5_fixed.jinja": "e25cca2d229186384970e8d8bdbb02f5f74d90ffde54060d47e19ab23d8d3c48",
+  "miles/utils/chat_template_utils/templates/qwen3_fixed.jinja": "88714a95dbee13411b47d3fe449b2496731c60ba0f88b942db32cb95222054d2",
+  "miles/utils/chat_template_utils/templates/qwen3_thinking_2507_and_next_fixed.jinja": "d597cebd327a5acb1c3996af8c3a5643a5fd9326e70bb0100074ac1277406ae6",
+  "miles/utils/chat_template_utils/token_seq_comparator.py": "c949fcae1602f8de5994249236689437e4bc6605c28c7d40428dd5f31a502808",
+  "miles/utils/context_utils.py": "a78c2ccc365119d0859764a533b4258c5f40888f396ab75c4b71d03f458a89d8",
+  "miles/utils/environ.py": "a96b4291824b98e926c294a1c51b838cb479e8aa5492cfa018a77a8f671f9cff",
+  "miles/utils/external_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/utils/flops_utils.py": "1c28167d20159ce45129a59d84cfb619995fd4aaf123fc20508b6dbdf54c0f53",
+  "miles/utils/fp8_kernel.py": "0c3f8121d9423de9b5109c9015f1b5e4bb0622574fa00b38c267e900ac4bd487",
+  "miles/utils/health_monitor.py": "72983f0c294264c8186a5580d8f55213b6eabbd7dbdc77c6e4334492ad6a428f",
+  "miles/utils/logging_utils.py": "cfc53a302e8feac7afde17ed8e8fcf27f3cc64a92f918c2eb8ee906eafa776ed",
+  "miles/utils/megatron_bridge_utils.py": "de8abf036db3bc73f99d76b4a3314c9fb708870e3ad7ce62ebd2e99a37516296",
+  "miles/utils/metric_checker.py": "13d407e4df672592e9e959cf673efa9cb5bfa738eb2ad3545246469edf32bb6d",
+  "miles/utils/prometheus_utils.py": "3a165daf154f0dfcd686bb6da19af8526c88cc89bd3038b47b6e8d2d4accc63f",
+  "miles/utils/ray_utils.py": "3bdf5470e5a56318b50c44e6d320b226dacdf532e48fe5c23d3230b4852b542d",
+  "miles/utils/rocm_checkpoint_writer.py": "6f29a85785a5b40e09e3b28b34e4dfb8007730039ba059863d7bbacef557e6a4",
+  "miles/utils/seqlen_balancing.py": "2054f39c167898c104824666b514647c31008ed6be4cb90c07b3869f75550984",
+  "miles/utils/tensorboard_utils.py": "6f919b68fd2378f9489398e2655040761cc93bfd09b53dcc5f4b3f8619c9b683",
+  "miles/utils/test_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/utils/test_utils/chat_template_verify.py": "836c2936b3db0d8d85d2e916b61d4095b4252b5fa3d12dcfb7cb65607efab00d",
+  "miles/utils/test_utils/mock_tools.py": "1d5d7a0ceb618de51d511e6b04deb3a077ddf541ca6641109122e4ada6082382",
+  "miles/utils/test_utils/mock_trajectories.py": "39b8a461e7b8c878516a18f3fbe24b412e53b0dbaa60e6124e772981d829ad61",
+  "miles/utils/test_utils/uvicorn_thread_server.py": "08b1df265c4e87c812c6bae72851b164baf7ac429ab8b4c10c34ce450d1254c5",
+  "miles/utils/timer.py": "12d1ec2dcc7eb38ba2866efd0f0bc1f7566799af9f668e6b018dae328e150fdd",
+  "miles/utils/train_dump_utils.py": "e22bf1ba45802670ca78ab1f0d9934b8c9c0450c65455b85604b80fc1ba6c5e6",
+  "miles/utils/typer_utils.py": "c6ff11ad7b7dddddb5df8b16f38d3bb812d151d407a1ff5bc8761fd97b7e6ebd",
+  "miles_plugins/mbridge/__init__.py": "869197f148bd29ddd4330045b6ceef91b9578f81bf39a1bb5a6f9fac06800a1f",
+  "miles_plugins/mbridge/deepseek_v32.py": "107300ed388683ff3b1c11ab1135728a12632559186770347120c555e5517eaa",
+  "miles_plugins/mbridge/glm4.py": "33c69f9093eea91f8dffd0755143414cd92bcb223342ab4323af687f69c6b691",
+  "miles_plugins/mbridge/glm4moe.py": "ef1a9aadadf619e4033d1d07052a3466b7116f09674d6e97a05cdd96fd99242d",
+  "miles_plugins/mbridge/glm4moe_lite.py": "09b18332d210ab4b0ab0acdf14df24a971a9847c49ce5ce4ff188d012e13ac6b",
+  "miles_plugins/mbridge/mimo.py": "b43cf010814262721ed561ccf28f3786a464eb03d959bf0ca7aede24f9f28df5",
+  "miles_plugins/mbridge/qwen3_next.py": "86110c106bb61c468765eccb57e81645bc30cc653c29dc0cce609f284354e67e",
+  "miles_plugins/models/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles_plugins/models/cp_utils.py": "1e6eb160c1952247f895478dd9f2676038cd2205d7ba1568513e776346ec2eca",
+  "miles_plugins/models/glm4.py": "3c4d2bab8e433f70f2687ef29117b9b7267a69f6b6f369f308965213bb782ff3",
+  "miles_plugins/models/glm5/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles_plugins/models/glm5/ops/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles_plugins/models/glm5/ops/indexer.py": "0646ac8e355554eadc73e096346ba9bcfe583d68b963c2d6691c375dad4b6514",
+  "miles_plugins/models/glm5/ops/sparse_mla.py": "d79d169c899250c7efdf82a4c3b638e3aa751069e528189f6682e234c67fc1f4",
+  "miles_plugins/models/glm5/ops/tilelang_indexer_bwd.py": "62deb53a37524c308640923ab35a2b515b2171d0d45ff634aea9c88fc7607b7d",
+  "miles_plugins/models/glm5/ops/tilelang_indexer_fwd.py": "39e78f7b5e0e79cb213cca1951aecf7bb826ac6dca5020172aea986d8e81223e",
+  "miles_plugins/models/glm5/ops/tilelang_sparse_mla_bwd.py": "80a8b0eb0158dd2f6d5e975521d56e1dbe9a23f0cf6bfd493f137e116b369179",
+  "miles_plugins/models/glm5/ops/tilelang_sparse_mla_fwd.py": "a9f6f99d826dc3d173594d703c56ac109810f3b5fb67157661b399ca741a7da0",
+  "miles_plugins/models/qwen3_next.py": "99c443f7e1a829f33058c1f5cd5b94c83620a27b1901125637cb4145925088c5",
   "tests/fast/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "tests/fast/rollout/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "tools/convert_fsdp_to_hf.py": "610f84d754892b32a80dffaea36793913bc48fbad4aa87f0d6f96083757a7489",
   "tools/convert_hf_to_hf_int4.py": "e51165a25e942c5ae28da87511f700adab0a7c4a9f755afc6299adbef1f0e935",
   "tools/convert_hf_to_mxfp8.py": "2e4088218a2ad940cd69863cb2ced09192a204b878e556f4aff9f24ac1fd292f",
   "tools/convert_k2_thinking_int4_to_bf16.py": "97125ca9629a4b6fccf076ad7cffb6cb59c3f1a2d0d841523d170ad6c50e5f8d",
-  "tools/convert_torch_dist_to_hf.py": "f7692d66433cf8e6b465c721ed946fdfd580ad51e1e1a72221786dc0437b8451",
+  "tools/convert_torch_dist_to_hf.py": "a8ac94a5b99ae6b521388a9a504a3a19f7e94e682506cf584868e2b10986bfc6",
   "tools/cpu_memory_profiler.py": "ad7a9dc7eed50647ef60803db7b514c173dee5173b0f4e93bfcd276b4d472988",
   "tools/visualize/cpu_memory_profiler_visualize.py": "d98346c6c0038f10776f5dea7aaee20ecc2c9a51334e28f223a4f11e4f54b350"
  }

@@ -1,4 +1,4 @@
-"""Unit tests for orbit.peft.utils.logprob_compare (teacher-equivalence harness leg).
+"""Unit tests for orbit.utils.logprob_compare (teacher-equivalence harness leg).
 
 The comparison utility is shared between these CPU tests and the future
 GPU/SGLang leg of the teacher-logprob equivalence harness (see the runbook in
@@ -12,7 +12,7 @@ import math
 import pytest
 import torch
 
-from orbit.peft.utils.logprob_compare import (
+from orbit.utils.logprob_compare import (
     LogprobCompareReport,
     compare_logprob_dicts,
     compare_logprobs,

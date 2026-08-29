@@ -8,9 +8,9 @@ merge_samples call raised "Sample field mismatch. Missing: {'teacher_log_probs'}
 
 import pytest
 
-from orbit.rollout.generate_utils.sample_utils import merge_samples
-from orbit.peft.opd.opd_sglang import _TOPK_PAD_LOGPROB, _TOPK_PAD_TOKEN_ID
-from orbit.utils.types import Sample
+from miles.rollout.generate_utils.sample_utils import merge_samples
+from orbit.opd.opd_sglang import _TOPK_PAD_LOGPROB, _TOPK_PAD_TOKEN_ID
+from miles.utils.types import Sample
 
 
 class _FakeTokenizer:

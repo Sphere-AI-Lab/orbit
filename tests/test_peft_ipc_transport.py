@@ -5,12 +5,12 @@ import pytest
 import torch
 import torch.multiprocessing as torch_mp
 
-from orbit.peft.transport.backends import ipc as ipc_backend
-from orbit.peft.transport.backends.ipc import IpcBackend
-from orbit.peft.transport.registry import PeftMethodSpec
-from orbit.peft.megatron.peft_utils import PeftSyncSpec
-from orbit.backends.sglang_utils import sglang_engine as engine_module
-from orbit.backends.sglang_utils.sglang_engine import SGLangEngine
+from orbit.transport.backends import ipc as ipc_backend
+from orbit.transport.backends.ipc import IpcBackend
+from orbit.transport.registry import PeftMethodSpec
+from orbit.megatron.peft_utils import PeftSyncSpec
+from miles.backends.sglang_utils import sglang_engine as engine_module
+from miles.backends.sglang_utils.sglang_engine import SGLangEngine
 
 
 class _RemoteMethod:

@@ -51,7 +51,7 @@ ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-4}"
 RAY_NUM_CPUS="${RAY_NUM_CPUS:-32}"
 
 # === Model args ===
-source "${ORBIT_ROOT}/orbit_plugins/model_args/${SEARCH_R1_MODEL_ARGS_FILE}"
+source "${ORBIT_ROOT}/miles_plugins/model_args/${SEARCH_R1_MODEL_ARGS_FILE}"
 
 # === Training schedule ===
 NUM_ROLLOUT="${NUM_ROLLOUT:-3000}"
@@ -130,8 +130,8 @@ ROLLOUT_ARGS=(
     --rollout-temperature "${ROLLOUT_TEMPERATURE:-1.0}"
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
     --balance-data
-    --custom-generate-function-path orbit_plugins.search_r1.generate_with_search.generate
-    --custom-rm-path orbit_plugins.search_r1.generate_with_search.reward_func
+    --custom-generate-function-path miles_plugins.search_r1.generate_with_search.generate
+    --custom-rm-path miles_plugins.search_r1.generate_with_search.reward_func
 )
 
 SEARCH_R1_DYNAMIC_SAMPLING_FILTER_PATH="${SEARCH_R1_DYNAMIC_SAMPLING_FILTER_PATH:-}"

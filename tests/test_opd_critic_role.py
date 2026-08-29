@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from orbit.backends.training_utils import loss
+from miles.backends.training_utils import loss
 
 
 class _Axis:

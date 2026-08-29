@@ -28,8 +28,8 @@ import json
 import sys
 from types import SimpleNamespace
 
-import orbit.peft.rewards.swe_agent.episode as episode_mod
-from orbit.utils.types import Sample
+import orbit.rewards.swe_agent.episode as episode_mod
+from miles.utils.types import Sample
 
 
 def _load_instance(path: str, instance_id: str | None) -> dict:
@@ -100,7 +100,7 @@ def main() -> int:
     # GenerateState is the full rollout singleton (needs many args); the
     # episode only uses .tokenizer — substitute a light state with the REAL
     # tokenizer so the true chat template exercises the prefix assertion.
-    from orbit.utils.processing_utils import load_tokenizer
+    from miles.utils.processing_utils import load_tokenizer
 
     tokenizer = load_tokenizer(args.hf_checkpoint, chat_template_path=None, trust_remote_code=True)
 

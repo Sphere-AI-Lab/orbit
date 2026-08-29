@@ -1,1 +1,1 @@
-"""Utility package root for Orbit."""
+"""Small orbit-only utilities."""

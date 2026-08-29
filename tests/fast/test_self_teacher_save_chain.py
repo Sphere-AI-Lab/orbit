@@ -6,13 +6,13 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from orbit.backends.megatron_utils import actor as actor_utils
-from orbit.backends.megatron_utils import checkpoint as checkpoint_utils
-from orbit.backends.megatron_utils import lora_utils
-from orbit.backends.megatron_utils import model as model_utils
-from orbit.peft.megatron import peft_utils
-from orbit.peft.opd.self_teacher import SelfTeacherBuffer
-from orbit.peft.opd.self_teacher_checkpoint import (
+from miles.backends.megatron_utils import actor as actor_utils
+from miles.backends.megatron_utils import checkpoint as checkpoint_utils
+from miles.backends.megatron_utils import lora_utils
+from miles.backends.megatron_utils import model as model_utils
+from orbit.megatron import peft_utils
+from orbit.opd.self_teacher import SelfTeacherBuffer
+from orbit.opd.self_teacher_checkpoint import (
     TeacherCheckpointError,
     has_self_teacher_sidecar,
     load_self_teacher_sidecar,
@@ -109,7 +109,7 @@ def test_native_peft_save_without_teacher_writes_no_sidecar(monkeypatch, tmp_pat
 
 def test_hf_peft_save_threads_teacher_to_actual_adapter_checkpoint(monkeypatch, tmp_path: Path) -> None:
     from megatron import bridge as megatron_bridge
-    from orbit.utils import megatron_bridge_utils
+    from miles.utils import megatron_bridge_utils
 
     calls = []
     args = Namespace(
@@ -162,7 +162,7 @@ def test_hf_peft_save_threads_teacher_to_actual_adapter_checkpoint(monkeypatch, 
 
 def test_hf_peft_save_does_not_suppress_adapter_or_sidecar_failure(monkeypatch, tmp_path: Path) -> None:
     from megatron import bridge as megatron_bridge
-    from orbit.utils import megatron_bridge_utils
+    from miles.utils import megatron_bridge_utils
 
     class DummyBridge:
         @classmethod
@@ -241,7 +241,7 @@ def test_actor_save_forwards_teacher_and_separate_critic_stays_teacher_free(monk
 
 
 def test_peft_save_propagates_self_teacher_sidecar_failure(monkeypatch, tmp_path: Path) -> None:
-    from orbit.peft.opd import self_teacher_checkpoint
+    from orbit.opd import self_teacher_checkpoint
 
     adapter_dir = tmp_path / "adapter"
     adapter_dir.mkdir()
@@ -267,7 +267,7 @@ def test_self_teacher_restore_rejects_partial_rank_set_on_every_rank(monkeypatch
     monkeypatch.setattr(actor_utils.dist, "get_world_size", lambda: 2)
     monkeypatch.setattr(actor_utils, "get_gloo_group", lambda: object())
     monkeypatch.setattr(
-        "orbit.peft.opd.self_teacher_checkpoint.has_self_teacher_sidecar",
+        "orbit.opd.self_teacher_checkpoint.has_self_teacher_sidecar",
         lambda adapter_dir, *, rank: True,
     )
 
@@ -312,7 +312,7 @@ def test_self_teacher_save_synchronizes_remote_rank_failure(monkeypatch, tmp_pat
     monkeypatch.setattr(peft_utils.dist, "get_rank", lambda: 0)
     monkeypatch.setattr(peft_utils.dist, "get_world_size", lambda group=None: 2)
     monkeypatch.setattr(peft_utils.dist, "get_backend", lambda: "gloo")
-    monkeypatch.setattr("orbit.utils.distributed_utils.get_gloo_group", lambda: object())
+    monkeypatch.setattr("miles.utils.distributed_utils.get_gloo_group", lambda: object())
 
     def _gather_errors(output, value, *, group):
         if group is None:

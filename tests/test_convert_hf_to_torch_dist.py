@@ -47,7 +47,7 @@ def test_import_hf_to_megatron_disables_gradient_accumulation_fusion(monkeypatch
     monkeypatch.setitem(sys.modules, "megatron", fake_megatron)
     monkeypatch.setitem(sys.modules, "megatron.bridge", fake_bridge_module)
 
-    from orbit_plugins.megatron_bridge.patches.conversion.convert_checkpoints import import_hf_to_megatron
+    from miles_plugins.megatron_bridge.patches.conversion.convert_checkpoints import import_hf_to_megatron
 
     import_hf_to_megatron(
         hf_model="/tmp/hf",

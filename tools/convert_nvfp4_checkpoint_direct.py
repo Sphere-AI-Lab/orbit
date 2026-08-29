@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 def main(argv: list[str] | None = None) -> int:
-    from orbit_plugins.megatron_bridge.patches.conversion.convert_nvfp4_checkpoint_direct import (
+    from miles_plugins.megatron_bridge.patches.conversion.convert_nvfp4_checkpoint_direct import (
         main as patch_main,
     )
 

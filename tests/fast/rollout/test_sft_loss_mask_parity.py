@@ -9,7 +9,7 @@ Skipped unless the Qwen3-4B tokenizer is present locally.
 FIXED (fix round 1, see task-8-report.md): this gate originally FAILED on the
 multi-turn conversation below. Root cause: Orbit's
 ``MultiTurnLossMaskGenerator.gen_multi_turn_loss_mask_qwen3``
-(`orbit/utils/mask_utils.py`) used to render each message in isolation,
+(`miles/utils/mask_utils.py`) used to render each message in isolation,
 paired with a synthetic single-user "prefix" message, to work out that
 message's token span. For Qwen3's *base* chat template this was unsafe: the
 template decides whether to wrap an assistant turn in an empty
@@ -116,7 +116,7 @@ def _hf_label_mask(tokenizer, messages: list[dict]) -> tuple[list[int], list[int
 
 
 def test_orbit_and_hf_tokenize_to_the_same_ids(tokenizer, conversations):
-    from orbit.utils.mask_utils import MultiTurnLossMaskGenerator
+    from miles.utils.mask_utils import MultiTurnLossMaskGenerator
 
     gen = MultiTurnLossMaskGenerator(tokenizer, tokenizer_type="qwen3")
     for messages in conversations:
@@ -126,7 +126,7 @@ def test_orbit_and_hf_tokenize_to_the_same_ids(tokenizer, conversations):
 
 
 def test_orbit_and_hf_score_the_same_tokens(tokenizer, conversations):
-    from orbit.utils.mask_utils import MultiTurnLossMaskGenerator
+    from miles.utils.mask_utils import MultiTurnLossMaskGenerator
 
     gen = MultiTurnLossMaskGenerator(tokenizer, tokenizer_type="qwen3")
     for messages in conversations:
@@ -140,7 +140,7 @@ def test_orbit_and_hf_score_the_same_tokens(tokenizer, conversations):
 
 
 def test_system_prompt_is_not_scored(tokenizer, conversations):
-    from orbit.utils.mask_utils import MultiTurnLossMaskGenerator
+    from miles.utils.mask_utils import MultiTurnLossMaskGenerator
 
     gen = MultiTurnLossMaskGenerator(tokenizer, tokenizer_type="qwen3")
     messages = conversations[2]  # the one with a system turn
@@ -174,7 +174,7 @@ def test_non_final_assistant_turn_is_not_wrapped_in_think_tags(tokenizer, conver
     scored with that wrapper -- if it is, `mask_utils.py` has regressed to rendering
     turns in isolation again.
     """
-    from orbit.utils.mask_utils import MultiTurnLossMaskGenerator
+    from miles.utils.mask_utils import MultiTurnLossMaskGenerator
 
     gen = MultiTurnLossMaskGenerator(tokenizer, tokenizer_type="qwen3")
     messages = conversations[1]  # multi-turn: user, assistant, user, assistant
@@ -202,7 +202,7 @@ def test_step_loss_mask_zero_zeroes_the_turn(tokenizer, conversations):
     """
     import copy
 
-    from orbit.utils.mask_utils import MultiTurnLossMaskGenerator
+    from miles.utils.mask_utils import MultiTurnLossMaskGenerator
 
     gen = MultiTurnLossMaskGenerator(tokenizer, tokenizer_type="qwen3")
     baseline_messages = conversations[1]  # user, assistant, user, assistant

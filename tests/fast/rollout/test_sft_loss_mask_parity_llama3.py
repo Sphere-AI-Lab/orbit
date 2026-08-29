@@ -113,7 +113,7 @@ pytestmark = pytest.mark.skipif(
 def tokenizer():
     from transformers import AutoTokenizer
 
-    from orbit.peft.utils.llama3_chat_template import ensure_llama3_chat_template
+    from orbit.utils.llama3_chat_template import ensure_llama3_chat_template
 
     # Llama-3.1-8B *base* ships no chat_template, so apply_chat_template would raise
     # and MultiTurnLossMaskGenerator could not even be constructed. Must happen before
@@ -130,7 +130,7 @@ def conversations():
 
 @pytest.fixture(scope="module")
 def generator(tokenizer):
-    from orbit.utils.mask_utils import MultiTurnLossMaskGenerator
+    from miles.utils.mask_utils import MultiTurnLossMaskGenerator
 
     return MultiTurnLossMaskGenerator(tokenizer, tokenizer_type="llama3")
 

@@ -176,7 +176,7 @@ each leaf launcher may pin its own values for the recipe.
 
 | Knob | Meaning |
 |---|---|
-| `MODEL_ARGS_FILE` | Path to the per-model arg shim under `orbit_plugins/model_args/`. Sets `MODEL_ARGS=(...)` consumed by Megatron-Bridge. |
+| `MODEL_ARGS_FILE` | Path to the per-model arg shim under `miles_plugins/model_args/`. Sets `MODEL_ARGS=(...)` consumed by Megatron-Bridge. |
 | `MODEL_ARGS_ROTARY_BASE` | Rotary base (theta). Qwen3 family: `1e4`. Qwen3-Instruct-2507: `5e6`. |
 
 ### Data

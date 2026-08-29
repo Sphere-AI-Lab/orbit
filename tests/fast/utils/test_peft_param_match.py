@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from orbit.peft.utils.peft_param_match import (
+from orbit.utils.peft_param_match import (
     lora_param_count,
     match_report,
     matched_oft_block_size,
@@ -159,7 +159,7 @@ class TestAgreesWithBridgeFindNearestDivisor:
 # so these pin the accounting that decides whether "matched" is true.
 # ---------------------------------------------------------------------------
 
-from orbit.peft.utils.peft_param_match import (  # noqa: E402
+from orbit.utils.peft_param_match import (  # noqa: E402
     ATTENTION_MODULES,
     MLP_MODULES,
     lora_param_count_for_modules,
@@ -195,7 +195,7 @@ def test_block_size_snap_error_is_worst_at_small_rank():
     """The module docstring's claim, pinned as behaviour: the ideal block is
     1+4*rank, so the absolute gap to a divisor stays O(1) while the relative gap
     goes as 1/(1+4*rank)."""
-    from orbit.peft.utils.peft_param_match import match_report
+    from orbit.utils.peft_param_match import match_report
 
     ratios = [match_report(rank, 4096, 4096)["ratio"] for rank in (1, 4, 16, 64, 256)]
     assert ratios[0] < 0.8

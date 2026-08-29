@@ -37,7 +37,7 @@ def _args(**overrides):
 
 def _init_kwargs(args) -> dict:
     """Run `init_wandb_primary` with wandb stubbed, and return its init kwargs."""
-    from orbit.utils import wandb_utils
+    from miles.utils import wandb_utils
 
     captured = {}
 
@@ -104,7 +104,7 @@ def test_missing_attribute_does_not_raise():
 def test_the_flag_is_registered(flag):
     from pathlib import Path
 
-    source = (Path(__file__).resolve().parents[3] / "orbit" / "utils" / "arguments.py").read_text(
+    source = (Path(__file__).resolve().parents[3] / "miles" / "utils" / "arguments.py").read_text(
         encoding="utf-8"
     )
     assert f'"{flag}"' in source

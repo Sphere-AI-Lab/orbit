@@ -10,7 +10,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-import orbit.peft.megatron.peft_utils as peft_utils
+import orbit.megatron.peft_utils as peft_utils
 
 
 class _InlineOptimizer:
@@ -76,7 +76,7 @@ def _distributed_adapter_save_worker(
         )
         import megatron.bridge as bridge_module
 
-        from orbit.utils import distributed_utils, megatron_bridge_utils
+        from miles.utils import distributed_utils, megatron_bridge_utils
 
         distributed_utils.GLOO_GROUP = None
         peft_utils.get_parallel_state = lambda: SimpleNamespace(

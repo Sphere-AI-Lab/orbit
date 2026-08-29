@@ -333,13 +333,13 @@ def source_revision_inputs(
     return source_paths, expected_commits
 
 
-def metadata_checks(pins: Mapping[str, str], orbit_root: Path, workspace: Path) -> list[Check]:
+def metadata_checks(pins: Mapping[str, str], miles_root: Path, workspace: Path) -> list[Check]:
     """Build the deterministic, GPU-free audit check set."""
     installed = {name: _installed_version(name) for name, _, _, _ in PACKAGE_VERSION_SPECS}
     checks = check_versions(pins, installed)
 
     editable_paths = {
-        "orbit": orbit_root,
+        "orbit": miles_root,
         "sglang": workspace / "sglang" / "python",
         "megatron-core": workspace / "Megatron-LM",
         "megatron-bridge": workspace / "Megatron-Bridge",
@@ -348,7 +348,7 @@ def metadata_checks(pins: Mapping[str, str], orbit_root: Path, workspace: Path) 
         check_editables(editable_paths, {name: _direct_url(name) for name in editable_paths})
     )
 
-    checks.append(check_source_clean("orbit", orbit_root))
+    checks.append(check_source_clean("orbit", miles_root))
     source_paths, expected_commits = source_revision_inputs(pins, workspace)
     checks.extend(check_sources(source_paths, expected_commits))
 
@@ -475,10 +475,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    source_root = args.source_root or default_workspace(args.orbit_root)
+    source_root = args.source_root or default_workspace(args.miles_root)
     try:
         pins = load_pins(args.pins)
-        checks = metadata_checks(pins, args.orbit_root.resolve(), source_root.resolve())
+        checks = metadata_checks(pins, args.miles_root.resolve(), source_root.resolve())
         if args.full_h200:
             checks.extend(check_h200_runtime(pins))
     except (OSError, VerificationError, subprocess.CalledProcessError, json.JSONDecodeError) as error:

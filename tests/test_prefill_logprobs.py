@@ -9,8 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from orbit.peft.rollout import prefill_logprobs
-from orbit.utils.types import Sample
+from orbit.rollout import prefill_logprobs
+from miles.utils.types import Sample
 
 
 async def test_recompute_rollout_logprobs_via_prefill_uses_response_tail(monkeypatch):

@@ -4,9 +4,9 @@ import torch.distributed as dist
 
 from tests.fast.dist_utils import init_gloo, run_multiprocess
 
-from orbit.backends.training_utils import log_utils
-from orbit.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
-from orbit.utils.ppo_utils import VALUE_EV_METRIC_KEY, VALUE_EV_STAT_KEYS
+from miles.backends.training_utils import log_utils
+from miles.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
+from miles.utils.ppo_utils import VALUE_EV_METRIC_KEY, VALUE_EV_STAT_KEYS
 
 
 def _single_process_state() -> None:

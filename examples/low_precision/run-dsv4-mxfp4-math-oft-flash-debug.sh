@@ -25,7 +25,7 @@ ORBIT_ENTRYPOINT="${ORBIT_ENTRYPOINT:-${ORBIT_ROOT}/train.py}"
 RUN_LOG="${RUN_LOG:-${ORBIT_ROOT}/logs/${LAUNCHER_NAME}_$(date +%Y%m%d_%H%M%S).log}"
 
 # === Model spec ===
-MODEL_ARGS_FILE=${MODEL_ARGS_FILE:-"${ORBIT_ROOT}/orbit_plugins/model_args/deepseek-v4-flash-debug.sh"}
+MODEL_ARGS_FILE=${MODEL_ARGS_FILE:-"${ORBIT_ROOT}/miles_plugins/model_args/deepseek-v4-flash-debug.sh"}
 MODEL_ARGS_NUM_LAYERS=${MODEL_ARGS_NUM_LAYERS:-6}
 MEGATRON_PATH=${MEGATRON_PATH:-${ORBIT_WORKSPACE_ROOT:-${HOME}/.cache/orbit/workspace}/software/proj/Megatron-LM}
 

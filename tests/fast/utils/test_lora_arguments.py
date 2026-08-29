@@ -19,7 +19,7 @@ from copy import deepcopy
 
 import pytest
 
-from orbit.utils.arguments import _normalize_peft_args
+from miles.utils.arguments import _normalize_peft_args
 
 
 def _make_args(**overrides) -> Namespace:

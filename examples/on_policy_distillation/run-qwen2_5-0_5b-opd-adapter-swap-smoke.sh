@@ -9,7 +9,7 @@
 # NOTE: the student here is LoRA rank-16 all-linear (see PEFT_ARGS below), so
 # OPD_TEACHER_ADAPTER must be a MATCHING LoRA adapter checkpoint -- same peft
 # config as this smoke's student -- or _validate_teacher_adapter_config
-# (orbit/utils/arguments.py) rejects it on a peft_type mismatch (e.g. an OFT
+# (miles/utils/arguments.py) rejects it on a peft_type mismatch (e.g. an OFT
 # adapter). Use the saved actor adapter from a run of
 # run-qwen2_5-0_5b-opd-free-teacher-smoke.sh (also LoRA rank-16 all-linear,
 # 0.5B), e.g. its "${SAVE_DIR}/actor" checkpoint.
@@ -43,7 +43,7 @@ ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-2}"
 RAY_NUM_CPUS="${RAY_NUM_CPUS:-32}"
 
 # === Model args ===
-source "${ORBIT_ROOT}/orbit_plugins/model_args/qwen2.5-0.5B.sh"   # provides MODEL_ARGS=(...)
+source "${ORBIT_ROOT}/miles_plugins/model_args/qwen2.5-0.5B.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"

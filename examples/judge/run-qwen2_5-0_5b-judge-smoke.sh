@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Qwen2.5-0.5B-Instruct BF16 GRPO on math with LLM-judge rewards.
-# Smoke config for orbit.peft.rewards.llm_judge: an external judge model grades each
+# Smoke config for orbit.rewards.llm_judge: an external judge model grades each
 # rollout (JUDGE_MODE=equivalence vs sample.label, or JUDGE_MODE=score).
 # Requires a running judge: point JUDGE_BASE_URL at its base URL (the hook
 # calls {JUDGE_BASE_URL}/v1/chat/completions).
@@ -35,7 +35,7 @@ ROLLOUT_NUM_GPUS="${ROLLOUT_NUM_GPUS:-2}"
 RAY_NUM_CPUS="${RAY_NUM_CPUS:-32}"
 
 # === Model args ===
-source "${ORBIT_ROOT}/orbit_plugins/model_args/qwen2.5-0.5B.sh"   # provides MODEL_ARGS=(...)
+source "${ORBIT_ROOT}/miles_plugins/model_args/qwen2.5-0.5B.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
@@ -72,7 +72,7 @@ ROLLOUT_ARGS=(
     --rollout-max-response-len "${ROLLOUT_MAX_RESPONSE_LEN}"
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --custom-rm-path orbit.peft.rewards.llm_judge.reward_func
+    --custom-rm-path orbit.rewards.llm_judge.reward_func
     --judge-base-url "${JUDGE_BASE_URL}"
     --judge-mode "${JUDGE_MODE}"
 )

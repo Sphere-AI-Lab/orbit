@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/orbit-logo.png" alt="Orbit" width="500"/>
+  <img src="assets/miles-logo.png" alt="Orbit" width="500"/>
 </div>
 
 <p align="center">

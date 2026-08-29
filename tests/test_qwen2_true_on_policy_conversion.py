@@ -1,7 +1,7 @@
 """Ported from miles ``tests/fast/backends/megatron_utils/test_qwen2_true_on_policy_conversion.py``,
 then generalized to cover every megatron_to_hf converter.
 
---true-on-policy forces --transformer-impl local (orbit/peft/true_on_policy/config.py),
+--true-on-policy forces --transformer-impl local (orbit/true_on_policy/config.py),
 under which Megatron emits layernorm params as bare "input_layernorm.weight" /
 "pre_mlp_layernorm.weight" instead of the TE-fused
 "self_attention.linear_qkv.layer_norm_weight" / "mlp.linear_fc1.layer_norm_weight"
@@ -13,15 +13,15 @@ from argparse import Namespace
 import pytest
 import torch
 
-from orbit.backends.megatron_utils.megatron_to_hf.deepseekv3 import convert_deepseekv3_to_hf
-from orbit.backends.megatron_utils.megatron_to_hf.glm4 import convert_glm4_to_hf
-from orbit.backends.megatron_utils.megatron_to_hf.glm4moe import convert_glm4moe_to_hf
-from orbit.backends.megatron_utils.megatron_to_hf.llama import convert_llama_to_hf
-from orbit.backends.megatron_utils.megatron_to_hf.mimo import convert_mimo_to_hf
-from orbit.backends.megatron_utils.megatron_to_hf.qwen2 import convert_qwen2_to_hf
-from orbit.backends.megatron_utils.megatron_to_hf.qwen3_5 import convert_qwen3_5_to_hf
-from orbit.backends.megatron_utils.megatron_to_hf.qwen3_next import convert_qwen3_next_to_hf
-from orbit.backends.megatron_utils.megatron_to_hf.qwen3moe import convert_qwen3moe_to_hf
+from miles.backends.megatron_utils.megatron_to_hf.deepseekv3 import convert_deepseekv3_to_hf
+from miles.backends.megatron_utils.megatron_to_hf.glm4 import convert_glm4_to_hf
+from miles.backends.megatron_utils.megatron_to_hf.glm4moe import convert_glm4moe_to_hf
+from miles.backends.megatron_utils.megatron_to_hf.llama import convert_llama_to_hf
+from miles.backends.megatron_utils.megatron_to_hf.mimo import convert_mimo_to_hf
+from miles.backends.megatron_utils.megatron_to_hf.qwen2 import convert_qwen2_to_hf
+from miles.backends.megatron_utils.megatron_to_hf.qwen3_5 import convert_qwen3_5_to_hf
+from miles.backends.megatron_utils.megatron_to_hf.qwen3_next import convert_qwen3_next_to_hf
+from miles.backends.megatron_utils.megatron_to_hf.qwen3moe import convert_qwen3moe_to_hf
 
 ARGS = Namespace(
     hidden_size=4,

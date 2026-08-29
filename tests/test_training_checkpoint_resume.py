@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from orbit.backends.megatron_utils import checkpoint as checkpoint_module
-from orbit.backends.megatron_utils import model as model_module
+from miles.backends.megatron_utils import checkpoint as checkpoint_module
+from miles.backends.megatron_utils import model as model_module
 
 
 def _make_distributed_checkpoint(tmp_path, *, iteration: int, common_state: dict) -> tuple:
@@ -356,7 +356,7 @@ def test_unmarked_numeric_zero_full_restore_is_proven_and_starts_rollout_one(tmp
         load_training_state=True,
     )
 
-    from orbit.backends.megatron_utils.actor import _start_rollout_id_from_checkpoint
+    from miles.backends.megatron_utils.actor import _start_rollout_id_from_checkpoint
 
     assert result == (0, 0)
     assert optimizer.loads == 1

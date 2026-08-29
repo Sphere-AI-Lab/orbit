@@ -12,8 +12,8 @@ from argparse import Namespace
 
 import torch
 
-from orbit.backends.training_utils import log_utils
-from orbit.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
+from miles.backends.training_utils import log_utils
+from miles.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
 
 
 def _single_process_state() -> None:

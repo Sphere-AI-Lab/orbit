@@ -9,8 +9,8 @@ teacher score modes, managed teacher serving, teacher pools, one-trunk PPO).
 |---|---|---|---|
 | orbit | `Sphere-AI-Lab/orbit-develop` | `feat/mopd` | `pip install -e .` |
 | SGLang | `Sphere-AI-Lab/sglang-develop` | `feat/dev` | `pip install -e python/` |
-| Megatron-LM | `Sphere-AI-Lab/Megatron-LM` | `orbit-main` | `pip install -e .` (provides `megatron-core`) |
-| Megatron-Bridge | `Sphere-AI-Lab/Megatron-Bridge` | `orbit-main` | `pip install -e .` |
+| Megatron-LM | `Sphere-AI-Lab/Megatron-LM` | `miles-main` | `pip install -e .` (provides `megatron-core`) |
+| Megatron-Bridge | `Sphere-AI-Lab/Megatron-Bridge` | `miles-main` | `pip install -e .` |
 
 `sglang-develop @ feat/dev` = the v0.5.9 Sphere base plus the tensor hidden-states
 encoding. Plain `main` also works for full-vocab, but teachers fall back to a slow

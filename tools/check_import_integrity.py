@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static import integrity: every orbit.*/orbit_plugins.* import in tracked .py files
+"""Static import integrity: every orbit.*/miles_plugins.* import in tracked .py files
 must resolve to a real module file, and `from X import name` must name a submodule
 or a top-level binding in X. Catches the classic file-move failure where the old
 package still resolves but the submodule is gone. Exits 1 on any dangler."""
@@ -10,11 +10,11 @@ REPO = Path(__file__).resolve().parents[1]
 tracked = subprocess.run(
     ["git", "-C", str(REPO), "ls-files", "*.py"], capture_output=True, text=True
 ).stdout.splitlines()
-ROOTS = ("orbit", "orbit_plugins")
+ROOTS = ("miles", "miles_plugins", "orbit")
 
 # Pre-existing danglers, tolerated but not expanded (file, dotted module, name).
 ALLOWLIST = {
-    ("tools/convert_to_hf_legacy.py", "orbit.backends.megatron_utils", "update_weight_utils"),
+    ("tools/convert_to_hf_legacy.py", "miles.backends.megatron_utils", "update_weight_utils"),
 }
 
 def module_file(dotted: str):

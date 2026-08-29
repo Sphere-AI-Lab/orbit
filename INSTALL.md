@@ -1,7 +1,7 @@
 # Building the orbit environment
 
 > **Status (2026-08-19): `orbit_env` is the PRE-MERGE stack** (sglang `b52394d22`,
-> v0.5.9 line). Merged `orbit-main` code cannot run on it — it dies at argument
+> v0.5.9 line). Merged `miles-main` code cannot run on it — it dies at argument
 > parsing with `AttributeError: 'Namespace' object has no attribute
 > 'sglang_dp_size'`. The campaign runs on **`orbit_env_v2`** (sglang `05cd76b4d`,
 > v0.5.16 line): `source scripts/lora_regret/env_v0516.sh`, which activates it,

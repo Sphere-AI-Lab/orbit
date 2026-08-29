@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 from typing import NamedTuple
 
-from orbit.peft.utils.eval_nll import EVAL_NLL_METRIC_KEY
+from orbit.utils.eval_nll import EVAL_NLL_METRIC_KEY
 
 # train.py:_log_eval_nll emits one line per held-out NLL measurement, e.g.:
 #

@@ -23,7 +23,7 @@ import pytest
 import torch
 import torch.multiprocessing as torch_mp
 
-from orbit.backends.sglang_utils.sglang_engine import _balance_broadcast_shm_refcounts
+from miles.backends.sglang_utils.sglang_engine import _balance_broadcast_shm_refcounts
 
 # Rebuilds the payload the way tp_worker.load_lora_adapter_from_tensors does:
 # torch already imported, weights read out, then the payload explicitly
@@ -169,7 +169,7 @@ def test_consumer_count_is_the_engines_tp_size(num_gpus_per_engine, arg_value, e
     the original bug; counting the whole node's GPUs leaks."""
     from argparse import Namespace
 
-    from orbit.backends.sglang_utils.sglang_engine import SGLangEngine
+    from miles.backends.sglang_utils.sglang_engine import SGLangEngine
 
     engine = SGLangEngine.__new__(SGLangEngine)
     engine.num_gpus_per_engine = num_gpus_per_engine

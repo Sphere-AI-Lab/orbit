@@ -24,7 +24,7 @@ from __future__ import annotations
 import pytest
 import torch
 
-from orbit.utils import memory_utils
+from miles.utils import memory_utils
 
 
 def _patch_cuda(monkeypatch, stats):

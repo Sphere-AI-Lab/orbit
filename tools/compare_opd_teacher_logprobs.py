@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare two OPD teacher-logprob dumps (see orbit/peft/opd/opd_dump.py).
+"""Compare two OPD teacher-logprob dumps (see orbit/opd/opd_dump.py).
 
 Records are keyed by ``(rollout, sample_index)``. A matched pair whose
 ``tokens`` (the real ``Sample.tokens`` field -- full prompt+response ids)
@@ -14,7 +14,7 @@ import argparse
 import json
 import sys
 
-from orbit.peft.utils.logprob_compare import compare_logprobs, summarize_reports
+from orbit.utils.logprob_compare import compare_logprobs, summarize_reports
 
 
 def load(path: str) -> dict:

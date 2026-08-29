@@ -113,7 +113,7 @@ class TestE4Place:
         """Comparing attention r256 against MLP r256 would compare placement and
         capacity at once. Orbit fuses qkv and gate+up, so the post's own
         attention-256/MLP-128 pair is not matched in this layout either."""
-        from orbit.peft.utils.peft_param_match import matched_mlp_rank
+        from orbit.utils.peft_param_match import matched_mlp_rank
         from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT, e4place_arms
 
         expected = matched_mlp_rank(256, HIDDEN, FFN, LLAMA31_8B_QKV_OUTPUT)
@@ -187,7 +187,7 @@ class TestE4OftCapacityLadder:
 
     def test_the_capacity_reports_remain_visible_and_stable(self):
         """A wrong rung changes adapter capacity even when every arm still runs."""
-        from orbit.peft.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
+        from orbit.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
         from tools.lora_regret.arms import E4_OFT_BLOCK_LADDER
 
         shapes = megatron_module_shapes(HIDDEN, FFN, QKV)
@@ -296,7 +296,7 @@ class TestMethodCoverage:
         Asking for one and taking the nearest would ship a 24%-undersized
         adapter labelled 'matched'. The next test pins the neighbourhood instead.
         """
-        from orbit.peft.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
+        from orbit.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
         from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT
 
         shapes = megatron_module_shapes(HIDDEN, FFN, LLAMA31_8B_QKV_OUTPUT)
@@ -330,7 +330,7 @@ class TestMethodCoverage:
         which reached only r28 against its r256 attention cell. The kernel fix
         removed that cap, so it is checked like every other matrix again.
         """
-        from orbit.peft.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
+        from orbit.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
         from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT
 
         shapes = megatron_module_shapes(HIDDEN, FFN, LLAMA31_8B_QKV_OUTPUT)
@@ -484,7 +484,7 @@ class TestOftBlockCeilingUnderRl:
 
     def test_every_e4_rung_records_an_implied_lora_partner(self):
         """Each fixed block stays auditable even where the rank lattice is coarse."""
-        from orbit.peft.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
+        from orbit.utils.peft_param_match import megatron_module_shapes, oft_lora_match_report
         from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT
 
         shapes = megatron_module_shapes(HIDDEN, FFN, LLAMA31_8B_QKV_OUTPUT)

@@ -4,13 +4,13 @@ import numpy as np
 import pytest
 import torch
 
-from orbit.backends.training_utils import cp_utils
-from orbit.backends.training_utils import data as data_utils
-from orbit.peft.opd import teacher_lm_head as teacher_lm_head_module
-from orbit.backends.training_utils.data import DataIterator, get_batch
-from orbit.backends.training_utils.loss import opd_jsd_loss_function
-from orbit.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
-from orbit.utils.ppo_utils import apply_opd_kl_to_advantages
+from miles.backends.training_utils import cp_utils
+from miles.backends.training_utils import data as data_utils
+from orbit.opd import teacher_lm_head as teacher_lm_head_module
+from miles.backends.training_utils.data import DataIterator, get_batch
+from miles.backends.training_utils.loss import opd_jsd_loss_function
+from miles.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
+from miles.utils.ppo_utils import apply_opd_kl_to_advantages
 
 _ROLLOUT_LOG_PROBS = torch.tensor([-0.2, -1.3, -0.7, -2.1, -0.4, -3.2, -1.8])
 _OPD_VALUES = torch.tensor([0.1, 0.9, -0.3, 1.7, -1.1, 0.4, 2.3])

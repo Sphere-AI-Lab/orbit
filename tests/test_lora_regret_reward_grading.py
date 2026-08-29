@@ -23,8 +23,8 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
-from orbit.rollout.rm_hub import async_rm
-from orbit.utils.types import Sample
+from miles.rollout.rm_hub import async_rm
+from miles.utils.types import Sample
 
 RL_LAUNCHER = Path(__file__).resolve().parents[1] / "examples" / "high_precision" / "run-llama3_1-8b-bf16-rl-math-gsm8k.sh"
 

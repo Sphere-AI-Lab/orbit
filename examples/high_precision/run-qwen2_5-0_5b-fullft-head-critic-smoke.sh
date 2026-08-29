@@ -41,7 +41,7 @@ RAY_NUM_CPUS="${RAY_NUM_CPUS:-32}"
 export PYTHONHASHSEED="${SEED}"
 
 # === Model args ===
-source "${ORBIT_ROOT}/orbit_plugins/model_args/qwen2.5-0.5B.sh"   # provides MODEL_ARGS=(...)
+source "${ORBIT_ROOT}/miles_plugins/model_args/qwen2.5-0.5B.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule (matches ppo_critic_compare_common.sh benchmark mode) ===
 NUM_ROLLOUT="${NUM_ROLLOUT:-2}"
@@ -83,7 +83,7 @@ ROLLOUT_ARGS=(
     --rollout-top-p 1.0
     --rollout-top-k -1
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --custom-rm-path orbit.peft.rewards.peft_arena_reward.peft_arena_reward
+    --custom-rm-path orbit.rewards.peft_arena_reward.peft_arena_reward
     --reward-key score
     --eval-reward-key score
 )

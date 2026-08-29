@@ -5,15 +5,15 @@ import httpx
 from fastapi.testclient import TestClient
 import pytest
 
-from orbit.router.router import OrbitRouter
+from miles.router.router import MilesRouter
 
 
 def _router_args():
     return Namespace(
-        orbit_router_health_check_failure_threshold=3,
-        orbit_router_max_connections=4,
-        orbit_router_middleware_paths=[],
-        orbit_router_timeout=5,
+        miles_router_health_check_failure_threshold=3,
+        miles_router_max_connections=4,
+        miles_router_middleware_paths=[],
+        miles_router_timeout=5,
         rollout_health_check_interval=3600,
         rollout_num_gpus=1,
         rollout_num_gpus_per_engine=1,
@@ -22,7 +22,7 @@ def _router_args():
 
 
 def test_orbit_router_worker_compat_endpoints():
-    router = OrbitRouter(_router_args())
+    router = MilesRouter(_router_args())
     client = TestClient(router.app)
 
     worker_url = "http://127.0.0.1:10090"
@@ -45,7 +45,7 @@ def test_orbit_router_proxy_returns_502_for_upstream_transport_error():
         async def request(self, *args, **kwargs):
             raise httpx.ReadError("backend disconnected")
 
-    router = OrbitRouter(_router_args())
+    router = MilesRouter(_router_args())
     client = TestClient(router.app)
 
     worker_url = "http://127.0.0.1:10090"
@@ -71,7 +71,7 @@ async def test_orbit_router_health_evicts_only_idle_workers(
     expected_failures,
     expected_dead,
 ):
-    router = OrbitRouter(_router_args())
+    router = MilesRouter(_router_args())
     worker_url = "http://127.0.0.1:10090"
     router.worker_request_counts[worker_url] = active_requests
     router.worker_failure_counts[worker_url] = 2

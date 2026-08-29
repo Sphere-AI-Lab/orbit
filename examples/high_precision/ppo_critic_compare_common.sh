@@ -232,7 +232,7 @@ fi
 unset -f require_local_directory require_local_file
 
 # === Model args ===
-source "${ORBIT_ROOT}/orbit_plugins/model_args/${MODEL_ARGS_FILE}"
+source "${ORBIT_ROOT}/miles_plugins/model_args/${MODEL_ARGS_FILE}"
 
 # === ARGS arrays ===
 COLOCATE_ARGS=()
@@ -270,7 +270,7 @@ ROLLOUT_ARGS=(
     --rollout-top-p 1.0
     --rollout-top-k -1
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --custom-rm-path orbit.peft.rewards.peft_arena_reward.peft_arena_reward
+    --custom-rm-path orbit.rewards.peft_arena_reward.peft_arena_reward
     --reward-key score
     --eval-reward-key score
 )
@@ -562,7 +562,7 @@ render_benchmark_metadata() {
         test_jsonl "${TEST_JSONL}" \
         test_jsonl_sha256 "$(file_sha256_or_missing "${TEST_JSONL}")" \
         disable_eval "${DISABLE_EVAL:-0}" \
-        reward_function orbit.peft.rewards.peft_arena_reward.peft_arena_reward \
+        reward_function orbit.rewards.peft_arena_reward.peft_arena_reward \
         reward_timeout_seconds "${PEFT_ARENA_REWARD_TIMEOUT_S}" \
         math_eval_semantics math_alignment \
         num_rollout "${NUM_ROLLOUT}" \

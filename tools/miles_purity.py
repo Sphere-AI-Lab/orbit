@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Miles purity manifest: generate and check the orbit-vs-miles entanglement ratchet.
 
-Orbit is a fork of radixark/miles at MILES_BASE, package-renamed miles/ -> orbit/
-and miles_plugins/ -> orbit_plugins/. The manifest records, for every file orbit
-shares with that base, which purity class it is in and a content hash. The
-companion test (tests/fast/test_miles_purity_ratchet.py) needs only the manifest
-and the working tree, so CI never touches the miles repository.
+This repo vendors radixark/miles at MILES_BASE verbatim: the miles/ and
+miles_plugins/ packages keep upstream's names and, wherever possible, upstream's
+exact bytes. All orbit code lives in the top-level orbit/ home (plus the
+orbit-only trees: tools/, scripts/, examples/, docs/, tests/). The manifest
+records, for every file shared with the base, which purity class it is in and a
+content hash. The companion test (tests/fast/test_miles_purity_ratchet.py) needs
+only the manifest and the working tree, so CI never touches the miles repository.
 
 Classes:
-  pristine    -- byte-identical to the miles base after NORMALIZE (the mechanical
-                 miles->orbit token rewrite). Must stay that way.
+  pristine    -- byte-identical to the miles base. Must stay that way.
   budgeted    -- carries orbit modifications. Any further edit changes the
                  recorded hash and fails the ratchet until the manifest is
                  deliberately regenerated and the new delta reviewed.
@@ -25,7 +26,6 @@ import argparse
 import difflib
 import hashlib
 import json
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -33,22 +33,6 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 MANIFEST = REPO / "tests" / "fast" / "miles_purity_manifest.json"
 MILES_BASE = "ef7481ae3bfbcc641d031e7e6113b646bb764382"
-
-PATH_MAP = (("miles_plugins/", "orbit_plugins/"), ("miles/", "orbit/"))
-
-NORMALIZE = (
-    (r"\bmiles_plugins\b", "orbit_plugins"),
-    (r"\bmiles\b", "orbit"),
-    (r"\bMILES_", "ORBIT_"),
-    (r"\bMiles\b", "Orbit"),
-    (r"\bMILES\b", "ORBIT"),
-)
-
-
-def normalize(text: str) -> str:
-    for pat, rep in NORMALIZE:
-        text = re.sub(pat, rep, text)
-    return text
 
 
 def sha(text: str) -> str:
@@ -65,18 +49,13 @@ def git(*args: str) -> str:
 
 
 def miles_tree() -> dict[str, str]:
-    """Miles base files as {orbit-mapped path: blob sha}."""
+    """Miles base files as {path: blob sha}; paths match this repo's verbatim."""
     out = {}
     for line in git("ls-tree", "-r", MILES_BASE).splitlines():
         meta, path = line.split("\t", 1)
         _mode, typ, blob = meta.split()
-        if typ != "blob":
-            continue
-        for src, dst in PATH_MAP:
-            if path.startswith(src):
-                path = dst + path[len(src):]
-                break
-        out[path] = blob
+        if typ == "blob":
+            out[path] = blob
     return out
 
 
@@ -105,21 +84,20 @@ def build() -> dict:
         if current is None:
             dropped.append(path)
             continue
-        base_norm = normalize(blob_text(blob))
-        if current == base_norm:
-            pristine[path] = sha(base_norm)
+        base_text = blob_text(blob)
+        if current == base_text:
+            pristine[path] = sha(base_text)
         else:
             delta = sum(
                 1
                 for d in difflib.unified_diff(
-                    base_norm.splitlines(), current.splitlines(), n=0
+                    base_text.splitlines(), current.splitlines(), n=0
                 )
                 if d[:1] in "+-" and d[:3] not in ("+++", "---")
             )
             budgeted[path] = {"sha": sha(current), "delta_lines": delta}
     return {
         "miles_base": MILES_BASE,
-        "normalize": [list(p) for p in NORMALIZE],
         "pristine": pristine,
         "budgeted": budgeted,
         "dropped": dropped,
@@ -127,17 +105,17 @@ def build() -> dict:
 
 
 def home_violations(manifest: dict) -> list[str]:
-    """Every file under orbit/ is either miles-shared (in the manifest) or lives in
-    the orbit/peft home layer. New orbit code inside shared miles directories is the
-    entanglement this repo spent a campaign removing; put it under orbit/peft/."""
+    """Every file under miles/ traces to the base. Orbit code never lands there
+    without going through the seam workflow; new orbit modules live in orbit/."""
     known = set(manifest["pristine"]) | set(manifest["budgeted"])
     out = []
-    for path in git("ls-files", "orbit/").splitlines():
-        if path in known or path.startswith("orbit/peft/"):
+    for path in git("ls-files", "miles/").splitlines():
+        if path in known:
             continue
         out.append(
-            f"{path}: orbit-only file inside the shared miles tree; move it "
-            f"under orbit/peft/ (or regenerate the manifest if it is miles code)"
+            f"{path}: file under miles/ that is not part of the vendored miles "
+            f"base; orbit code belongs in orbit/ (regenerate the manifest only "
+            f"if this really is upstreamed miles code)"
         )
     return out
 
@@ -151,8 +129,8 @@ def check(manifest: dict) -> list[str]:
         elif sha(current) != expect:
             errors.append(
                 f"{path}: was pristine miles code and has been modified; keep "
-                f"miles-derived files pristine, or move the change into the "
-                f"orbit home layer and regenerate the manifest"
+                f"miles files pristine, or move the change into the orbit/ "
+                f"home layer and regenerate the manifest"
             )
     for path, entry in manifest["budgeted"].items():
         current = working_text(path)

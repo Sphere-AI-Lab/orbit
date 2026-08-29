@@ -5,9 +5,9 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-import orbit.peft.megatron.peft_utils as peft_utils
-import orbit.backends.megatron_utils.checkpoint as checkpoint_mod
-from orbit.peft.megatron.peft_utils import (
+import orbit.megatron.peft_utils as peft_utils
+import miles.backends.megatron_utils.checkpoint as checkpoint_mod
+from orbit.megatron.peft_utils import (
     load_training_state,
     restore_peft_training_state_after_optimizer_build,
     save_training_state,
@@ -598,7 +598,7 @@ def test_peft_checkpoint_save_threads_no_save_optim_from_args(monkeypatch, tmp_p
             return ()
 
     import megatron.bridge as bridge_module
-    from orbit.utils import megatron_bridge_utils
+    from miles.utils import megatron_bridge_utils
 
     monkeypatch.setattr(bridge_module, "AutoBridge", _Bridge, raising=False)
     monkeypatch.setattr(megatron_bridge_utils, "patch_megatron_model", lambda model: nullcontext())

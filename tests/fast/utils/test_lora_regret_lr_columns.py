@@ -523,7 +523,7 @@ def test_a_periodic_action_without_the_rollout_count_never_fires_on_the_last_rol
     """The behaviour the pin above protects, stated directly: at the protocol's
     own settings -- 150 rollouts, interval 100000 -- the fourth argument is the
     only thing standing between one eval and none."""
-    from orbit.utils.misc import should_run_periodic_action
+    from miles.utils.misc import should_run_periodic_action
 
     fires = [
         rollout_id

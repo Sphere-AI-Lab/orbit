@@ -35,7 +35,7 @@ GPUS_PER_NODE=${GPUS_PER_NODE:-4}
 RAY_NUM_CPUS=${RAY_NUM_CPUS:-32}
 
 # === Model args ===
-source "${ORBIT_ROOT}/orbit_plugins/model_args/qwen2.5-0.5B.sh"   # provides MODEL_ARGS=(...)
+source "${ORBIT_ROOT}/miles_plugins/model_args/qwen2.5-0.5B.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-${SFT_TOTAL_EPOCHS:-3}}"
@@ -61,7 +61,7 @@ ROLLOUT_ARGS=(
     --prompt-data "${TRAIN_JSONL}"
     --input-key messages
     --rollout-shuffle
-    --rollout-function-path orbit.rollout.sft_rollout.generate_rollout
+    --rollout-function-path miles.rollout.sft_rollout.generate_rollout
     --loss-mask-type "${LOSS_MASK_TYPE:-qwen}"
     --num-rollout "${NUM_ROLLOUT}"
     --rollout-batch-size "${ROLLOUT_BATCH_SIZE}"

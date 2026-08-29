@@ -27,7 +27,7 @@ OFFLOAD_ROLLOUT=${OFFLOAD_ROLLOUT:-1}
 
 # === Model spec ===
 MODEL_ARGS_ROTARY_BASE=${MODEL_ARGS_ROTARY_BASE:-1000000}
-MODEL_ARGS_FILE=${MODEL_ARGS_FILE:-"${ORBIT_ROOT}/orbit_plugins/model_args/qwen3-30B-A3B.sh"}
+MODEL_ARGS_FILE=${MODEL_ARGS_FILE:-"${ORBIT_ROOT}/miles_plugins/model_args/qwen3-30B-A3B.sh"}
 
 # === Data ===
 DATASET=${DATASET:-math}

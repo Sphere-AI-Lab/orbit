@@ -1,4 +1,4 @@
-from orbit.utils import distributed_utils
+from miles.utils import distributed_utils
 
 
 def test_new_process_group_options_kwargs_prefers_backend_options(monkeypatch):

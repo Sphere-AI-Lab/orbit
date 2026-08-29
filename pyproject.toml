@@ -168,7 +168,7 @@ deep-ep = { git = "https://github.com/deepseek-ai/DeepEP.git", rev = "d4f41e4e93
 megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "988d642688b46ccf68796b0eb9c22aacc59593bc" }
 megatron-core = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git", rev = "83879096b7ca4854adfa5f50993bbb728952aaaf" }
 nvidia-resiliency-ext = { git = "https://github.com/NVIDIA/nvidia-resiliency-ext.git", rev = "63154570cea17f8805a7fd15cc3b8cc2919ba575" }
-# orbit-main-oft-tiny = sglang's orbit-main (v0.5.16 + the modularized OFT/LoRA
+# orbit-main-oft-tiny = sglang's miles-main (v0.5.16 + the modularized OFT/LoRA
 # single-active peft framework) with the tiny-block OFT work ported on top. The
 # tiny-block series previously rode the v0.5.9 line (9c83ae8be + 48 commits);
 # it moved here because orbit's own peft transport speaks the v0.5.16 unified
@@ -222,14 +222,14 @@ nvidia-resiliency-ext = { git = "https://github.com/NVIDIA/nvidia-resiliency-ext
 # scripts/lora_regret/env_v0516.sh calls the gap equivalent: it was written when
 # the tip was a5def08d0, and it is no longer true of the current tip.
 #
-# Moved 51845dc4a -> a6fe249b3 (2026-08-27): pin the orbit-main branch head so
+# Moved 51845dc4a -> a6fe249b3 (2026-08-27): pin the miles-main branch head so
 # the manifest matches the published stack. The delta is three serving fixes
 # plus the merge (e679123c5 bind adapter batch_info before breakable prefill
 # CUDA-graph capture, 3748b2494 keep the prefill hidden-state block for
 # max_new_tokens=0 requests, 9a6b12d5b do not rebind adapter_id in the streamed
 # loader ref scan); sgl-kernel/ is byte-identical across the move, so kernel
 # builds and prebuilt wheels are unaffected.
-# Moved a6fe249b3 -> 0ab4a2de7 (2026-08-28): pin the orbit-main branch head
+# Moved a6fe249b3 -> 0ab4a2de7 (2026-08-28): pin the miles-main branch head
 # again. The delta is the v0.5.16 -> v0.5.18 base bump (07d5186aa) plus the
 # orbit-side follow-ups (0ab4a2de7 peft/moe gaps from real GPU RL validation,
 # 4e6fe36e3 reject mixed native LoRA and PEFT, fd5f149a1 adapter request
@@ -265,8 +265,9 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 include = [
+    "miles*",
+    "miles_plugins*",
     "orbit*",
-    "orbit_plugins*",
     "tools*",
 ]
 
@@ -291,9 +292,9 @@ py_version = 310  # python 3.10 as a target version
 sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 default_section = "THIRDPARTY"
 extend_skip = ["setup.py"]
-known_first_party = ["orbit", "orbit_plugins"]
+known_first_party = ["orbit", "miles_plugins"]
 known_third_party = ["megatron", "wandb", "ray", "transformers"]
-src_paths = ["orbit", "orbit_plugins"]
+src_paths = ["orbit", "miles_plugins"]
 
 
 [tool.black]

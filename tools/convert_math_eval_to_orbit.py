@@ -74,8 +74,8 @@ def _convert(src_path: str, dst_path: str, dataset_name: str, mode: str, append_
 
 def main() -> None:
     here = os.path.dirname(os.path.abspath(__file__))
-    orbit_root = os.path.dirname(here)
-    default_src = os.path.join(orbit_root, "examples/peft_arena/backend/third_party/math_eval/data")
+    miles_root = os.path.dirname(here)
+    default_src = os.path.join(miles_root, "examples/peft_arena/backend/third_party/math_eval/data")
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--source_dir", default=default_src, help="Root of math_eval/data with <name>/test.jsonl subdirs.")

@@ -45,7 +45,7 @@ GPUS_PER_NODE=8
 RAY_NUM_CPUS=16
 
 # === Model args ===
-source "${ORBIT_ROOT}/orbit_plugins/model_args/qwen2.5-7B.sh"   # provides MODEL_ARGS=(...)
+source "${ORBIT_ROOT}/miles_plugins/model_args/qwen2.5-7B.sh"   # provides MODEL_ARGS=(...)
 
 # === Training schedule (identical to base recipe) ===
 TOTAL_EPOCHS=1000
@@ -82,7 +82,7 @@ ROLLOUT_ARGS=(
     --rollout-max-response-len 8192
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --custom-rm-path orbit.peft.rewards.peft_arena_reward.peft_arena_reward
+    --custom-rm-path orbit.rewards.peft_arena_reward.peft_arena_reward
     --reward-key score
     --eval-reward-key score
 )

@@ -26,8 +26,8 @@ import json
 import sys
 from types import SimpleNamespace
 
-from orbit.peft.rewards.sandbox import swe_rm
-from orbit.utils.types import Sample
+from orbit.rewards.sandbox import swe_rm
+from miles.utils.types import Sample
 
 
 def _load_instance(path: str, instance_id: str | None) -> dict:

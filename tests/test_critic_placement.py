@@ -5,7 +5,7 @@ import pytest
 
 pytest.importorskip("ray")
 
-import orbit.ray.placement_group as pg_mod
+import miles.ray.placement_group as pg_mod
 
 
 def test_pgs_dict_has_no_critic_entry_in_adapter_mode():
@@ -45,7 +45,7 @@ def test_adapter_mode_zeroes_the_gpu_offset_inputs():
     """The untouched offset arithmetic (placement_group.py:90-108, rollout.py:1035,
     sglang_engine.py:36) adds critic_num_nodes * critic_num_gpus_per_node — verify
     _apply_critic_args forces that product to 0 in adapter mode."""
-    from orbit.utils.arguments import _apply_critic_args
+    from miles.utils.arguments import _apply_critic_args
 
     args = argparse.Namespace(
         advantage_estimator="ppo",

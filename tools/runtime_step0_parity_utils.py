@@ -339,7 +339,7 @@ class HttpServerAdapter:
     def __init__(self, *, first_rank_in_node: bool = False, **kwargs: Any) -> None:
         from sglang.srt.server_args import ServerArgs
 
-        from orbit.backends.sglang_utils.sglang_engine import launch_server_process
+        from miles.backends.sglang_utils.sglang_engine import launch_server_process
 
         self.server_args = ServerArgs(**kwargs)
         self.node_rank = self.server_args.node_rank
@@ -399,7 +399,7 @@ def _build_actor_override_transformer_config(
 
 
 def _tokenize_prompts(tokenizer_path: str, prompts: list[str]) -> list[list[int]]:
-    from orbit.utils.processing_utils import load_tokenizer
+    from miles.utils.processing_utils import load_tokenizer
 
     tokenizer = load_tokenizer(tokenizer_path, trust_remote_code=True)
     if tokenizer.pad_token_id is None and tokenizer.eos_token_id is not None:

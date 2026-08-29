@@ -1,6 +1,6 @@
 import pytest
 
-from orbit.utils.types import Sample, collect_teacher_topk_data
+from miles.utils.types import Sample, collect_teacher_topk_data
 
 
 def _sample(ids=None, logprobs=None, response_length: int = 2) -> Sample:

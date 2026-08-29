@@ -102,7 +102,7 @@ job executes.
 
 ```bash
 cd /path/to/orbit
-run_dir=${XDG_STATE_HOME:-$HOME/.local/state}/remote-cluster-runs/mpi1/orbit/orbit-main/EXECUTION_ID/install-env
+run_dir=${XDG_STATE_HOME:-$HOME/.local/state}/remote-cluster-runs/mpi1/orbit/miles-main/EXECUTION_ID/install-env
 mkdir -p "$run_dir"
 
 condor_submit_bid BID \

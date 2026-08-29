@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import orbit.backends.megatron_utils.model as model_mod
-from orbit.peft.megatron.bridge_peft_helpers import _bridge_is_value_model
+import miles.backends.megatron_utils.model as model_mod
+from orbit.megatron.bridge_peft_helpers import _bridge_is_value_model
 
 
 def _args(**overrides):

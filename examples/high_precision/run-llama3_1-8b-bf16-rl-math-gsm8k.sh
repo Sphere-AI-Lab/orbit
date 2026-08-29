@@ -58,7 +58,7 @@ GPUS_PER_NODE=${GPUS_PER_NODE:-8}
 RAY_NUM_CPUS=${RAY_NUM_CPUS:-16}
 
 # === Model args ===
-MODEL_ARGS_FILE="${MODEL_ARGS_FILE:-${ORBIT_ROOT}/orbit_plugins/model_args/llama3.1-8B-Instruct.sh}"
+MODEL_ARGS_FILE="${MODEL_ARGS_FILE:-${ORBIT_ROOT}/miles_plugins/model_args/llama3.1-8B-Instruct.sh}"
 source "${MODEL_ARGS_FILE}"   # provides MODEL_ARGS=(...)
 
 # === Training schedule ===
@@ -163,7 +163,7 @@ ROLLOUT_ARGS=(
     # before training starts (prerequisite P2). Pinned byte-identical to the
     # LLAMA3_CHAT_TEMPLATE constant the loss-mask gate exercises -- do not
     # hand-write a substitute.
-    --chat-template-path "${ORBIT_ROOT}/orbit/peft/utils/chat_template_utils/templates/llama3.1_pinned.jinja"
+    --chat-template-path "${ORBIT_ROOT}/orbit/utils/chat_template_utils/templates/llama3.1_pinned.jinja"
 )
 
 # === Optimizer: constant LR, no warmup, no cooldown -- the blog's protocol ===
@@ -369,7 +369,7 @@ case "${PEFT_METHOD}" in
             --peft-method oft
             --peft-variant standard
             --oft-type canonical_oft
-            --oft-block-size "${OFT_BLOCK_SIZE:?set OFT_BLOCK_SIZE from orbit.peft.utils.peft_param_match.matched_oft_block_size; there is no safe default}"
+            --oft-block-size "${OFT_BLOCK_SIZE:?set OFT_BLOCK_SIZE from orbit.utils.peft_param_match.matched_oft_block_size; there is no safe default}"
             --oft-eps "${OFT_EPS:-6e-5}"
             --target-modules "${TARGET_MODULES:-${TARGET_MODULES_DEFAULT}}"
         )

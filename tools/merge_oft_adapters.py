@@ -16,8 +16,8 @@ sys.path.insert(0, _repo_root)
 import torch
 from safetensors.torch import load_file, save_file
 
-from orbit.peft.merge import get_strategy  # light: pulls only torch
-from orbit.utils.logging_utils import configure_logger
+from orbit.merge import get_strategy  # light: pulls only torch
+from miles.utils.logging_utils import configure_logger
 
 _COMPAT_KEYS = ("oft_type", "oft_block_size", "target_modules", "base_model_name_or_path")
 
@@ -25,7 +25,7 @@ _COMPAT_KEYS = ("oft_type", "oft_block_size", "target_modules", "base_model_name
 def read_oft_config(adapter_dir: str) -> dict:
     """Read adapter_config.json and assert it is an OFT adapter; return the config.
 
-    Reimplemented locally (NOT orbit.backends.megatron_utils) to keep this tool
+    Reimplemented locally (NOT miles.backends.megatron_utils) to keep this tool
     CPU-only: that module's import chain pulls deep_ep, which requires CUDA.
     """
     cfg_path = Path(adapter_dir) / "adapter_config.json"
@@ -106,13 +106,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[merge] {len(args.adapters)} adapters -> {merged_dir} ({len(merged)} tensors)")
 
     if args.save_megatron:
-        from orbit.peft.merge.megatron_io import merge_megatron_adapters, write_megatron_adapter
+        from orbit.merge.megatron_io import merge_megatron_adapters, write_megatron_adapter
         merged_meg = merge_megatron_adapters(args.adapters, args.weights, args.method)
         meg_dir = write_megatron_adapter(merged_meg, args.adapters[0], str(Path(args.output) / "merged_megatron"))
         print(f"[merge] Megatron-native adapter -> {meg_dir} ({len(merged_meg)} shard(s))")
 
     if args.save_hf:
-        from orbit.peft.merge.bake_hf import bake_hf_model
+        from orbit.merge.bake_hf import bake_hf_model
         base = args.base or cfg.get("base_model_name_or_path")
         if not base:
             raise ValueError("--save-hf needs a base model: pass --base or ensure adapter_config has base_model_name_or_path")

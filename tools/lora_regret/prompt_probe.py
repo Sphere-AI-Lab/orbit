@@ -3,7 +3,7 @@
 This is the plan's Phase 0 gate, and it is the only way to know that a rendering
 works: every argument for one frame over another is an argument about a
 distribution nobody has sampled. It runs the real reward function
-(`orbit.rollout.rm_hub.async_rm`) against real problems, so a number out of here
+(`miles.rollout.rm_hub.async_rm`) against real problems, so a number out of here
 is the same number the campaign would earn on rollout 0.
 
     python -m tools.lora_regret.prompt_probe --style completion --style chat
@@ -38,8 +38,8 @@ import random
 from pathlib import Path
 from types import SimpleNamespace
 
-from orbit.rollout.rm_hub import async_rm
-from orbit.utils.types import Sample
+from miles.rollout.rm_hub import async_rm
+from miles.utils.types import Sample
 
 from tools.lora_regret.prepare_data import ANSWER_INSTRUCTION, COMPLETION_STOP, render_prompt
 

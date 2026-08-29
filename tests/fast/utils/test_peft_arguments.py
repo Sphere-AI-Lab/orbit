@@ -19,8 +19,8 @@ import argparse
 
 import pytest
 
-import orbit.utils.arguments as arguments
-from orbit.utils.arguments import get_orbit_extra_args_provider
+import miles.utils.arguments as arguments
+from miles.utils.arguments import get_orbit_extra_args_provider
 
 
 class _RecordingParser:
@@ -55,7 +55,7 @@ class _RecordingParser:
     def parse_known_args(self, *args, **kwargs):
         return (
             argparse.Namespace(
-                rollout_function_path="orbit.rollout.sglang_rollout.generate_rollout",
+                rollout_function_path="miles.rollout.sglang_rollout.generate_rollout",
                 custom_generate_function_path=None,
             ),
             [],

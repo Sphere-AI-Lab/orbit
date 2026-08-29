@@ -8,7 +8,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-from orbit.peft.critic.critic_adapter import (
+from orbit.critic.critic_adapter import (
     load_critic_checkpoint,
     save_critic_checkpoint,
 )
@@ -183,7 +183,7 @@ def _worker(rank: int, world_size: int, init_file: str, root: str, result_dir: s
             world_size=world_size,
             timeout=timedelta(seconds=10),
         )
-        from orbit.utils import distributed_utils
+        from miles.utils import distributed_utils
 
         distributed_utils.GLOO_GROUP = None
 
