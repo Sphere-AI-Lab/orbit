@@ -1,26 +1,39 @@
+# ORBIT-SEAM: logging backs the logger below (phase-timing + eval-NLL log lines)
 import logging
 import asyncio
+# ORBIT-SEAM: contextlib/time back the _timed_phase/_timed_block instrumentation helpers below
 import contextlib
 import time
 
 from sglang.srt.constants import GPU_MEMORY_TYPE_CUDA_GRAPH, GPU_MEMORY_TYPE_KV_CACHE, GPU_MEMORY_TYPE_WEIGHTS
 
+# ORBIT-SEAM: tqdm backs the rollout progress bar added below
 from tqdm.auto import tqdm
 
+# ORBIT-SEAM: tracking_utils module import backs startup/progress metric logging below (init_tracking
+# import further down is base's, kept as-is)
 from miles.utils import tracking_utils
 from miles.ray.placement_group import create_placement_groups, create_rollout_manager, create_training_models
+# ORBIT-SEAM: uses_rollout_engines/uses_separate_critic replace base's raw args.use_critic checks and
+# gate the rollout-engine-optional (SFT-mode) code paths added throughout train() below
 from miles.utils.arguments import parse_args, uses_rollout_engines, uses_separate_critic
 from miles.utils.async_utils import eager_create_task
+# ORBIT-SEAM: held-out NLL eval feature (gate G4) - metric builder for the eval-NLL blocks below
 from orbit.utils.eval_nll import build_eval_nll_metrics
 from miles.utils.logging_utils import configure_logger
+# ORBIT-SEAM: computes the tracking-log step number for eval-NLL and progress metrics below
 from miles.utils.metric_utils import compute_rollout_step
 from miles.utils.misc import should_run_periodic_action
+# ORBIT-SEAM: ETA tracking + duration formatting for the progress bar / progress metrics below
 from orbit.utils.training_eta import TrainingETA, format_duration
 from miles.utils.tracking_utils import init_tracking
 
 logger = logging.getLogger(__name__)
 
 
+# ORBIT-SEAM: new top-level helpers - held-out NLL eval feature (gate G4: config check +
+# metric/log emission) and two phase-timing context managers (_timed_phase/_timed_block below),
+# used throughout train() to wrap every startup/loop phase with elapsed-time logging + accumulation
 def _eval_nll_enabled(args) -> bool:
     return bool(args.eval_nll_data) and args.eval_nll_interval > 0
 
@@ -83,6 +96,9 @@ def _timed_block(prefix: str, name: str, *, timing_raw: dict | None = None, star
 
 async def train(args):
     configure_logger()
+    # ORBIT-SEAM: startup_timing accumulates the _timed_block/_timed_phase elapsed times below into
+    # the startup_metrics log emitted further down; rollout_engines_enabled gates every rollout-engine
+    # call in this function (SFT/no-rollout-engine mode support), replacing base's unconditional calls
     startup_timing: dict[str, float] = {}
     rollout_engines_enabled = uses_rollout_engines(args)
 
@@ -92,6 +108,8 @@ async def train(args):
     with _timed_block("startup", "init tracking", timing_raw=startup_timing):
         init_tracking(args)
 
+    # ORBIT-SEAM: startup phases below wrapped in _timed_block/_timed_phase (elapsed-time
+    # instrumentation, see note above); rollout-engine calls gated by rollout_engines_enabled
     # create the rollout manager, with sglang engines inside.
     # need to initialize rollout manager first to calculate num_rollout
     with _timed_block("startup", "create rollout manager", timing_raw=startup_timing):
@@ -101,15 +119,18 @@ async def train(args):
     async with _timed_phase("startup", "create training models", timing_raw=startup_timing):
         actor_model, critic_model = await create_training_models(args, pgs, rollout_manager)
 
+    # ORBIT-SEAM: guard + timing wrap (see note above)
     if rollout_engines_enabled and args.offload_rollout:
         async with _timed_phase("startup", "onload rollout weights", timing_raw=startup_timing):
             await rollout_manager.onload_weights.remote()
 
     # always update weight first so that sglang has the loaded weights from training.
+    # ORBIT-SEAM: guard + timing wrap (see note above)
     if rollout_engines_enabled:
         async with _timed_phase("startup", "actor update_weights", timing_raw=startup_timing):
             await actor_model.update_weights()
 
+    # ORBIT-SEAM: rollout_engines_enabled guard added (see note above)
     if rollout_engines_enabled and args.check_weight_update_equal:
         await rollout_manager.check_weights.remote(action="compare")
 
@@ -117,6 +138,8 @@ async def train(args):
         async with _timed_phase("startup", "onload rollout kv", timing_raw=startup_timing):
             await rollout_manager.onload_kv.remote()
 
+    # ORBIT-SEAM: emits the accumulated startup_timing as tracking metrics (new; base had no
+    # startup-phase timing at all)
     if startup_timing:
         startup_metrics = {f"timing_s_startup/{k}": v for k, v in startup_timing.items()}
         startup_metrics["timing_s_startup/total"] = sum(startup_timing.values())
@@ -137,6 +160,8 @@ async def train(args):
         _log_eval_nll(args, args.start_rollout_id, nll_stats, before_train=True)
 
     async def offload_train():
+        # ORBIT-SEAM: uses_separate_critic(args) replaces base's raw args.use_critic check here and
+        # in save() below
         if args.offload_train:
             if uses_separate_critic(args):
                 await critic_model.offload()
@@ -148,6 +173,7 @@ async def train(args):
             await actor_model.clear_memory()
 
     async def save(rollout_id):
+        # ORBIT-SEAM: uses_separate_critic(args) replaces args.use_critic here too (see note above)
         if (not uses_separate_critic(args)) or (rollout_id >= args.num_critic_only_steps):
             await actor_model.save_model(
                 rollout_id,
@@ -163,6 +189,8 @@ async def train(args):
 
     # train loop.
     # note that for async training, one can change the position of the sync operation(ray.get).
+    # ORBIT-SEAM: new ETA tracker + tqdm progress bar, driven by eta.mark_rollout_start/done below
+    # and rendered in the progress-metrics block at the end of each loop iteration
     eta = TrainingETA(start_rollout_id=args.start_rollout_id, num_rollout=args.num_rollout)
     rollout_pbar = tqdm(
         total=max(args.num_rollout - args.start_rollout_id, 0),
@@ -174,6 +202,8 @@ async def train(args):
         mininterval=1.0,
     )
     for rollout_id in range(args.start_rollout_id, args.num_rollout):
+        # ORBIT-SEAM: per-rollout ETA/timing bookkeeping (timing_raw feeds the _timed_phase calls
+        # below and the progress-metrics timing_s/* keys at the end of the loop body)
         eta.mark_rollout_start(rollout_id)
         timing_raw: dict[str, float] = {}
         prefix = f"rollout {rollout_id}"
@@ -182,6 +212,7 @@ async def train(args):
             async with _timed_phase(prefix, "eval-before-train", timing_raw=timing_raw):
                 await rollout_manager.eval.remote(rollout_id)
 
+        # ORBIT-SEAM: held-out NLL before-train block (new) + generate wrap (timing instrumentation)
         # Held-out NLL of the untouched starting weights. Gate G4 compares this
         # against HF's step-0 number, so it has to be measured before any
         # optimizer step -- the periodic block below only ever sees post-update
@@ -194,6 +225,7 @@ async def train(args):
         async with _timed_phase(prefix, "generate", timing_raw=timing_raw):
             rollout_data_ref = await rollout_manager.generate.remote(rollout_id)
 
+        # ORBIT-SEAM: rollout_engines_enabled guard + timing wrap; new prefetch_train_state block below
         if rollout_engines_enabled and args.offload_rollout:
             offload_tags = [GPU_MEMORY_TYPE_CUDA_GRAPH]
             if "kv_cache" in args.offload_rollout_level:
@@ -209,6 +241,8 @@ async def train(args):
             async with _timed_phase(prefix, "prefetch train state", timing_raw=timing_raw):
                 await actor_model.prefetch_train_state(rollout_id)
 
+        # ORBIT-SEAM: uses_separate_critic(args) replaces args.use_critic; both branches' actor
+        # train call wrapped in _timed_phase below (timing instrumentation)
         if uses_separate_critic(args):
             critic_task = await eager_create_task(critic_model.train(rollout_id, rollout_data_ref))
             if rollout_id >= args.num_critic_only_steps:
@@ -219,6 +253,8 @@ async def train(args):
             async with _timed_phase(prefix, "actor train", timing_raw=timing_raw):
                 await actor_model.train(rollout_id, rollout_data_ref)
 
+        # ORBIT-SEAM: periodic held-out NLL block (new; num_rollout arg documented below); save wrap
+        # further down adds _timed_phase instrumentation to base's plain save(rollout_id) call
         # Must sit between `actor train` and `offload_train()`: held-out NLL is a
         # forward pass through the TRAINING model, so unlike the generation eval
         # further down (which goes through the SGLang rollout engine) it cannot
@@ -237,10 +273,12 @@ async def train(args):
                 nll_stats = await actor_model.compute_eval_nll(rollout_id)
             _log_eval_nll(args, rollout_id, nll_stats)
 
+        # ORBIT-SEAM: timing wrap around base's plain save(rollout_id) call
         if should_run_periodic_action(rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout):
             async with _timed_phase(prefix, "save", timing_raw=timing_raw):
                 await save(rollout_id)
 
+        # ORBIT-SEAM: timing wraps + rollout_engines_enabled guards, same pattern as startup above
         async with _timed_phase(prefix, "offload/clear train", timing_raw=timing_raw):
             await offload_train()
         if rollout_engines_enabled and args.offload_rollout:
@@ -253,6 +291,8 @@ async def train(args):
             async with _timed_phase(prefix, "onload rollout kv", timing_raw=timing_raw):
                 await rollout_manager.onload_kv.remote()
 
+        # ORBIT-SEAM: num_rollout arg + timing wrap added to the base periodic-eval call (comment
+        # below explains why num_rollout is passed)
         # num_rollout is passed for the same reason the held-out NLL eval above
         # passes it: the final rollout must always produce a measurement. An RL
         # arm's headline number is its accuracy after the last update, and
@@ -267,6 +307,8 @@ async def train(args):
             async with _timed_phase(prefix, "eval", timing_raw=timing_raw):
                 await rollout_manager.eval.remote(rollout_id)
 
+        # ORBIT-SEAM: new progress reporting - ETA/tqdm postfix update, plus per-phase timing_raw
+        # entries merged into the tracking-log progress metrics below (base logged nothing here)
         eta_report = eta.mark_rollout_done(rollout_id)
         logger.info("progress %s", eta_report.to_log_message())
         rollout_pbar.set_postfix(
@@ -282,6 +324,7 @@ async def train(args):
             progress_metrics[f"timing_s/{phase_name.replace(' ', '_')}"] = elapsed
         tracking_utils.log(args, progress_metrics, step_key="rollout/step")
 
+    # ORBIT-SEAM: closes the progress bar opened above; dispose wrapped in _timed_phase
     rollout_pbar.close()
     async with _timed_phase("shutdown", "dispose rollout"):
         await rollout_manager.dispose.remote()

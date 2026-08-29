@@ -1,3 +1,4 @@
+# ORBIT-SEAM: math import backs Sample.validate_teacher_topk's math.isfinite check on teacher logprobs
 import math
 from dataclasses import dataclass, field
 from enum import Enum
@@ -7,6 +8,9 @@ import numpy
 import torch
 
 
+# ORBIT-SEAM: new helper - resolves the policy version tag from meta_info, preferring
+# adapter_version (PEFT) over weight_version and asserting the v1 invariant that they agree when
+# both are present; used by Sample.update_from_meta_info below instead of base's plain weight_version read
 def _extract_policy_version(meta_info: dict) -> str | None:
     adapter_version = meta_info.get("adapter_version")
     weight_version = meta_info.get("weight_version")
@@ -41,6 +45,8 @@ class Sample:
     loss_mask: list[int] | None = None
     weight_versions: list[str] = field(default_factory=list)
     rollout_log_probs: list[float] | None = None  # Log probabilities from rollout engine
+    # ORBIT-SEAM: OPD teacher-scoring fields on the Sample type - teacher logprobs/hidden-states,
+    # reverse-KL, and retained direct top-k transport, mirrored through strip/reset/validate below
     teacher_log_probs: list[float] | None = None  # per-response-token teacher logprobs (OPD)
     # Teacher's last-layer hidden state per response position, shape (response_length, hidden);
     # full-vocab OPD (--teacher-score-mode full_vocab) sets this instead of teacher_log_probs.
@@ -71,6 +77,7 @@ class Sample:
     train_metadata: dict | None = None
 
     # Session ID for consistent hashing routing (used when router policy is consistent_hashing)
+    # ORBIT-SEAM: repo-wide comment-style pass (TODO -> Follow-up), no functional change
     # Follow-up: Its definition needs to merge with the session server's session id in the new rollout function.
     session_id: str | None = None
 
@@ -176,6 +183,9 @@ class Sample:
     def effective_response_length(self):
         return sum(self.loss_mask) if self.loss_mask is not None else self.response_length
 
+    # ORBIT-SEAM: new method - validates the retained direct-OPD top-k transport (teacher_topk_ids
+    # / teacher_topk_logprobs): row-count/response_length agreement, uniform row width, padding
+    # convention (logprob == -1e4 <=> token id 0), and duplicate-id detection per row
     def validate_teacher_topk(self, expected_top_k: int | None = None) -> int | None:
         """Validate the retained direct-OPD top-k pair and return its row width.
 
@@ -273,6 +283,8 @@ class Sample:
             assert (
                 len(self.rollout_log_probs) == self.response_length
             ), f"rollout_log_probs length ({len(self.rollout_log_probs)}) != response_length ({self.response_length})"
+        # ORBIT-SEAM: length-parity asserts for the OPD teacher fields above, plus a
+        # validate_teacher_topk() call for the retained direct top-k transport
         if self.teacher_log_probs is not None:
             assert (
                 len(self.teacher_log_probs) == self.response_length
@@ -303,6 +315,8 @@ class Sample:
         self.response_length -= n
         if self.rollout_log_probs is not None:
             self.rollout_log_probs = self.rollout_log_probs[:-n]
+        # ORBIT-SEAM: strip the OPD teacher fields (and the OPD student top-logprobs metadata key)
+        # in lockstep with the base fields above, so a stripped sample's per-token arrays stay aligned
         if self.teacher_log_probs is not None:
             self.teacher_log_probs = self.teacher_log_probs[:-n]
         if self.teacher_hidden_states is not None:
@@ -336,6 +350,8 @@ class Sample:
         self.loss_mask = None
         self.weight_versions = []
         self.rollout_log_probs = None
+        # ORBIT-SEAM: reset the OPD teacher fields (and pop OPD scoring artifacts from metadata,
+        # which is otherwise kept across retries) alongside base's reset-to-defaults above
         self.teacher_log_probs = None
         self.teacher_hidden_states = None
         self.opd_reverse_kl = None
@@ -372,6 +388,8 @@ class Sample:
         # Collect prefix cache statistics
         self.prefix_cache_info.add(meta_info=meta_info)
 
+        # ORBIT-SEAM: delegates to _extract_policy_version above (adapter_version-or-weight_version,
+        # with the v1 agreement check) instead of base's plain meta_info["weight_version"] read
         version = _extract_policy_version(meta_info)
         if version is not None:
             self.weight_versions.append(version)
@@ -385,6 +403,8 @@ class Sample:
                 self.status = Sample.Status.COMPLETED
 
 
+# ORBIT-SEAM: new function - validates and gathers a batch's retained direct-OPD top-k rows
+# (requires every sample carry the fields once any sample does, and a consistent top-k width)
 def collect_teacher_topk_data(samples: list[Sample], expected_top_k: int | None) -> dict[str, list] | None:
     """Validate and collect a batch of retained direct-OPD top-k rows."""
     if not any(sample.teacher_topk_ids is not None or sample.teacher_topk_logprobs is not None for sample in samples):

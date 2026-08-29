@@ -2,6 +2,8 @@ import logging
 from argparse import Namespace
 from collections.abc import Sequence
 
+# ORBIT-SEAM: numpy backs _tensorize_cp_sliced_teacher_hidden_states below (OPD full-vocab teacher
+# hidden states arrive as numpy arrays)
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -19,6 +21,10 @@ from .parallel import get_parallel_state
 logger = logging.getLogger(__name__)
 
 
+# ORBIT-SEAM: three new helpers - DSV4's THD context-parallel path needs each sample's local KV
+# chunk aligned to a multiple (chunk-size gate below), the per-sample max_seq_lens padding that
+# alignment implies (_align_dsv4_cp_max_seq_lens), and a rank-0 warning when padding actually
+# changed a length (_warn_if_dsv4_cp_padding_changes_lengths); used from get_rollout_data below
 def _dsv4_cp_chunk_size_multiple(args: Namespace, cp_size: int) -> int:
     if cp_size <= 1:
         return 1
@@ -115,6 +121,7 @@ def get_rollout_data(args: Namespace, rollout_data_ref: Box) -> RolloutBatch:
             for mm_dict in rollout_data["multimodal_train_inputs"]
         ]
 
+    # ORBIT-SEAM: repo-wide comment-style pass (TODO -> Follow-up) below, no functional change
     if args.qkv_format == "bshd":
         # Follow-up: micro-batch wise dynamic, possibly move to @data.py:get_data_iterator
         max_seq_len = max(rollout_data["total_lengths"])
@@ -125,6 +132,8 @@ def get_rollout_data(args: Namespace, rollout_data_ref: Box) -> RolloutBatch:
 
         rollout_data["max_seq_lens"] = [max_seq_len] * len(rollout_data["tokens"])
     else:
+        # ORBIT-SEAM: THD-path DSV4 CP chunk alignment (see the three helpers above); no-op
+        # (dsv4_cp_multiple == 1) for every non-DSV4 model, base had no else branch here at all
         dsv4_cp_multiple = _dsv4_cp_chunk_size_multiple(args, parallel_state.cp.size)
         if dsv4_cp_multiple > 1:
             rollout_data["max_seq_lens"] = _align_dsv4_cp_max_seq_lens(
@@ -140,6 +149,9 @@ def get_rollout_data(args: Namespace, rollout_data_ref: Box) -> RolloutBatch:
                 parallel_state=parallel_state,
             )
 
+    # ORBIT-SEAM: base's single inline rollout_log_probs tensorize-block replaced by
+    # _tensorize_cp_sliced_log_probs (below) called once per OPD/rollout field, plus the OPD
+    # teacher-hidden-states tensorizer; dtype now configurable (true-on-policy bf16/fp16 parity)
     # rollout_log_probs always arrive as raw list[list[float]]; teacher_log_probs
     # arrive raw only from the sglang OPD teacher (the megatron OPD teacher
     # populates tensors *later* via compute_log_prob, so the key is absent here
@@ -155,6 +167,10 @@ def get_rollout_data(args: Namespace, rollout_data_ref: Box) -> RolloutBatch:
     return rollout_data
 
 
+# ORBIT-SEAM: three new helpers backing the tensorize calls above - the true-on-policy wire dtype
+# rule, a generalized (key, dtype)-parameterized version of base's inline rollout_log_probs
+# tensorize logic (now reused for teacher_log_probs/opd_reverse_kl/teacher_topk_*), and its 2D
+# (hidden-state) counterpart for full-vocab OPD
 def _rollout_logprob_dtype(args: Namespace) -> torch.dtype:
     # Parity contract: under true-on-policy the stored rollout log-probs must
     # be exactly what SGLang computed (bf16/fp16), not an fp32 widening.
@@ -279,6 +295,8 @@ def get_batch(
     batch["unconcat_tokens"] = tokens
 
     cp_size = parallel_state.cp.size
+    # ORBIT-SEAM: per-sample max_seq_lens lookup (DSV4 CP alignment sets one per sample; every
+    # other path leaves max_seq_lens unset and this degrades to base's single shared max_seqlen)
     sample_max_seq_lens = batch.get("max_seq_lens")
 
     def sample_max_seq_len(index: int) -> int | None:
@@ -313,6 +331,8 @@ def get_batch(
             cu_seqlens = torch.tensor(cu_seqlens_list, dtype=torch.int, device=torch.cuda.current_device())
             tokens = tokens.chunk(cp_size, dim=0)[cp_rank]
         else:
+            # ORBIT-SEAM: slice_with_cp now takes each sample's own max_seq_len (per-sample DSV4
+            # padding) instead of base's single shared max_seqlen for the whole micro-batch
             tokens = [
                 slice_with_cp(t, pad_token_id, qkv_format, sample_max_seq_len(i))
                 for i, t in enumerate(tokens)
@@ -322,6 +342,10 @@ def get_batch(
             for t in tokens:
                 cu_seqlens.append(cu_seqlens[-1] + t.size(0))
 
+            # ORBIT-SEAM: dsv4_cu_seqlens/dsv4_valid_cu_seqlens - DSV4's attention kernel needs both
+            # the CP-padded cu_seqlens (dsv4_cu_seqlens) and the true unpadded ones
+            # (dsv4_valid_cu_seqlens) to mask out the DSV4 CP alignment padding; assigned onto
+            # batch below only when not allgather_cp (DSA path doesn't use per-sample padding)
             dsv4_cu_seqlens = torch.tensor(cu_seqlens, dtype=torch.int, device=torch.cuda.current_device()) * cp_size
             dsv4_valid_cu_seqlens = [0]
             for total_length in batch["total_lengths"]:
@@ -347,6 +371,7 @@ def get_batch(
 
         batch["cu_seqlens"] = cu_seqlens
         batch["max_seqlen"] = max_seqlen
+        # ORBIT-SEAM: exposes the DSV4 cu_seqlens pair computed above on the batch dict
         if not allgather_cp:
             batch["dsv4_cu_seqlens"] = dsv4_cu_seqlens
             batch["dsv4_valid_cu_seqlens"] = dsv4_valid_cu_seqlens
@@ -367,6 +392,7 @@ def get_batch(
             position_ids = [slice_with_cp(p, 0, qkv_format, max_seqlen) for p in position_ids_list]
             position_ids = torch.stack(position_ids)
         elif qkv_format == "thd":
+            # ORBIT-SEAM: per-sample max_seq_len, same reasoning as the tokens slice_with_cp above
             position_ids = [
                 slice_with_cp(p, 0, qkv_format, sample_max_seq_len(i))
                 for i, p in enumerate(position_ids_list)
@@ -380,6 +406,7 @@ def get_batch(
 
     # loss masks
     loss_masks = []
+    # ORBIT-SEAM: enumerate(...) added so the loop index can drive sample_max_seq_len(i) below
     for i, (loss_mask, total_length, response_length) in enumerate(
         zip(
             batch["loss_masks"],
@@ -394,6 +421,7 @@ def get_batch(
         if allgather_cp:
             loss_masks.append(loss_mask)
             continue
+        # ORBIT-SEAM: per-sample max_seq_len instead of base's single shared max_seqlen
         loss_mask = slice_with_cp(loss_mask, 0, qkv_format, sample_max_seq_len(i))
         loss_masks.append(loss_mask)
 
@@ -546,6 +574,9 @@ def get_data_iterator(
         data_iterator = _generate_data_iterator(rollout_data, args.micro_batch_size)
     else:
         assert args.max_tokens_per_gpu is not None
+        # ORBIT-SEAM: batching_lengths prefers max_seq_lens (DSV4 CP-padded lengths) over
+        # total_lengths when present, so microbatch sizing/balancing below sees the actual padded
+        # token count instead of base's raw total_lengths
         max_tokens_per_microbatch = args.max_tokens_per_gpu * cp_size
         batching_lengths = rollout_data.get("max_seq_lens", rollout_data["total_lengths"])
         # calculate the number of mirobatches for each step
@@ -553,6 +584,7 @@ def get_data_iterator(
         num_microbatches = []
         for i in range(num_steps_per_rollout):
             start, end = i * num_local_gbs, (i + 1) * num_local_gbs
+            # ORBIT-SEAM: batching_lengths/max_tokens_per_microbatch, see note above
             num_microbatches.append(
                 get_minimum_num_micro_batch_size(batching_lengths[start:end], max_tokens_per_microbatch)
             )
@@ -569,8 +601,12 @@ def get_data_iterator(
 
         num_microbatches = num_microbatches.tolist()
 
+        # ORBIT-SEAM: removed base's redundant `samples = rollout_data["total_lengths"]` re-assignment
+        # here (batching_lengths from above is reused in the loop below instead)
         # balance the each micro batch
         # balance the number of mirobatches across steps
+        # ORBIT-SEAM: reuses batching_lengths from above instead of re-reading
+        # rollout_data["total_lengths"] (base's now-redundant re-assignment removed)
         micro_batch_indices = []
         for i, num_mbs in enumerate(num_microbatches):
             start, end = i * num_local_gbs, (i + 1) * num_local_gbs
@@ -596,6 +632,9 @@ def sync_actor_critic_data(
     rollout_data: RolloutBatch | None = None,
     group: dist.ProcessGroup | None = None,
 ) -> None:
+    # ORBIT-SEAM: docstring below documents the explicit wire dtypes added further down (base's
+    # torch.empty_like calls implicitly matched the other tensor's dtype, always fp32 in practice);
+    # value_wire_dtype/logprob_wire_dtype blocks make that explicit and add true-on-policy bf16/fp16 parity
     """
     Broadcast `values` (from critic) and optionally `log_probs`/`ref_log_probs`
     (from actor) across PP ranks to align data dependencies.
@@ -615,6 +654,8 @@ def sync_actor_critic_data(
 
     handles = []
 
+    # ORBIT-SEAM: explicit fp32 wire dtype for values (base relied on empty_like's implicit
+    # dtype match, and never cast an already-fp32 `values` list at all)
     value_wire_dtype = torch.float32
     if values:
         values = [value.to(dtype=value_wire_dtype) for value in values]
@@ -624,6 +665,8 @@ def sync_actor_critic_data(
         handles.append(dist.broadcast(value, src=1, group=group, async_op=True))
 
     if args.kl_coef != 0 or args.use_kl_loss:
+        # ORBIT-SEAM: explicit log-prob wire dtype (true-on-policy bf16/fp16 parity, see
+        # _rollout_logprob_dtype above), replacing base's implicit empty_like dtype match
         logprob_wire_dtype = _rollout_logprob_dtype(args)
         if log_probs:
             log_probs = [log_prob.to(dtype=logprob_wire_dtype) for log_prob in log_probs]

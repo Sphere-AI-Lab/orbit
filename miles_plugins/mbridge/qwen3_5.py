@@ -7,6 +7,8 @@ from mbridge.core import register_model
 from mbridge.models import Qwen2MoEBridge
 
 
+# ORBIT-SEAM: registers this bridge for Qwen3.6 too (shares the qwen3_5_moe HF config schema);
+# docstring below documents the one structural difference (MTP expert packing, autodetected)
 @register_model(["qwen3_5", "qwen3_5_moe", "qwen3_6", "qwen3_6_moe"])
 class Qwen3_5Bridge(Qwen2MoEBridge):
     """
@@ -95,6 +97,8 @@ class Qwen3_5Bridge(Qwen2MoEBridge):
         "mlp.experts.linear_fc2": ["model.language_model.layers.{layer_number}.mlp.experts.down_proj"],
     }
 
+    # ORBIT-SEAM: base's single _MTP_MLP_MAPPING (unfused-only) split into UNFUSED/FUSED variants,
+    # selected at runtime by the _MTP_MLP_MAPPING property below (Qwen3.6 packs MTP experts fused)
     # MTP MLP expert mapping — the format depends on the HF weights.
     # Qwen3.5-35B-A3B ships MTP experts as individual per-expert tensors;
     # Qwen3.6-35B-A3B packs them as fused 3-D tensors (like regular layers).
@@ -106,6 +110,7 @@ class Qwen3_5Bridge(Qwen2MoEBridge):
         ],
         "mlp.experts.linear_fc2": ["mtp.layers.{layer_number}.mlp.experts.{expert_id}.down_proj.weight"],
     }
+    # ORBIT-SEAM: fused counterpart of _MTP_MLP_MAPPING_UNFUSED above, for Qwen3.6's packed MTP experts
     _MTP_MLP_MAPPING_FUSED = {
         "mlp.experts.linear_fc1": ["mtp.layers.{layer_number}.mlp.experts.gate_up_proj"],
         "mlp.experts.linear_fc2": ["mtp.layers.{layer_number}.mlp.experts.down_proj"],
@@ -198,6 +203,8 @@ class Qwen3_5Bridge(Qwen2MoEBridge):
             raise NotImplementedError(f"Unsupported parameter name: {name}")
         return convert_names
 
+    # ORBIT-SEAM: new method + property - autodetects fused vs. unfused MTP expert weights from
+    # the safetensor index and makes _MTP_MLP_MAPPING resolve to the matching variant above
     def _mtp_experts_fused(self) -> bool:
         """Detect whether MTP expert weights are stored in fused 3-D tensors.
 
@@ -226,6 +233,8 @@ class Qwen3_5Bridge(Qwen2MoEBridge):
     def _MTP_MLP_MAPPING(self):
         return self._MTP_MLP_MAPPING_FUSED if self._mtp_experts_fused() else self._MTP_MLP_MAPPING_UNFUSED
 
+    # ORBIT-SEAM: docstring updated - per-expert vs. fused format is now runtime-detected (see
+    # _mtp_experts_fused above), not hardcoded to always-unfused as base's docstring claimed
     def _weight_name_mapping_mtp_mlp(self, name: str) -> list[str]:
         """Handle MTP MLP mappings; per-expert format is detected from HF weights."""
         layer_number = name.split(".")[2]
@@ -295,6 +304,8 @@ class Qwen3_5Bridge(Qwen2MoEBridge):
     def _weight_to_mcore_format(
         self, mcore_weights_name: str, hf_weights: list[torch.Tensor]
     ) -> tuple[list[str], list[torch.Tensor]]:
+        # ORBIT-SEAM: keep linear-attention A_log in fp32 through TP scatter, bypassing Bridge's
+        # global pre-cast to self.dtype that would otherwise lose precision on this parameter
         if mcore_weights_name.endswith("self_attention.linear_attn.A_log"):
             assert len(hf_weights) == 1
             # Keep A_log in fp32 before TP scatter; this avoids precision loss

@@ -1,3 +1,4 @@
+# ORBIT-SEAM: time import backs the pause-window timing instrumentation added to update_weights below
 import time
 from collections.abc import Callable
 
@@ -12,6 +13,8 @@ from miles.utils.distributed_utils import get_gloo_group
 
 from ...megatron_to_hf import convert_to_hf
 from ..common import all_gather_param, collect_named_tensors_for_weight_transfer, post_process_weights
+# ORBIT-SEAM: orbit's update-weights perf/timeline instrumentation (payload tracker, timeline
+# markers, cross-rank metric sums) wired into this distributed-broadcast update path below
 from orbit.megatron.sync_metrics import (
     emit_timeline_event,
     emit_update_weights_metrics,
@@ -187,6 +190,8 @@ class DistBucketedWeightUpdateMixin:
         """
         self.weight_version += 1
 
+        # ORBIT-SEAM: rank-0 pause-window timing + A2 timeline event start, mirroring
+        # UpdateWeightFromTensor.update_weights's instrumentation for this distributed path
         # Sync-cost instrumentation (perf/update_weights_*) and A2 timeline
         # markers, mirroring UpdateWeightFromTensor.update_weights: the
         # broadcasting source rank records each bucket's payload (broadcast.py),
@@ -209,6 +214,8 @@ class DistBucketedWeightUpdateMixin:
         dist.barrier(group=get_gloo_group())
 
         self._finalize_and_resume_engines()
+        # ORBIT-SEAM: closes the pause-window timer and emits the A2 timeline end marker started
+        # above; the cross-rank metric sum + emit_update_weights_metrics call below reports totals
         if pause_started is not None:
             pause_seconds = time.perf_counter() - pause_started
             emit_timeline_event("update_end", weight_version=self.weight_version, mode="full")

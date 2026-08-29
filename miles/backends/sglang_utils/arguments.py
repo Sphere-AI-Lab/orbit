@@ -2,6 +2,7 @@ from sglang.srt.server_args import ServerArgs
 from miles.utils.http_utils import _wrap_ipv6
 
 
+# ORBIT-SEAM: repo-wide comment-style pass (TODO -> Follow-up), no functional change
 # Follow-up: use all sglang router arguments with `--sglang-router` prefix
 def add_sglang_router_arguments(parser):
     """
@@ -61,6 +62,8 @@ def add_sglang_arguments(parser):
         "nccl_port",
         "skip_server_warmup",
         "enable_return_routed_experts",
+        # ORBIT-SEAM: skip auto-mirroring sglang's --enforce-piecewise-cuda-graph so orbit's own
+        # manually-added --sglang-enforce-piecewise-cuda-graph override (added below) doesn't collide
         # sglang v0.5.14 upstream (PR #28919) added --enforce-piecewise-cuda-graph
         # to ServerArgs; orbit also manually adds --sglang-enforce-piecewise-cuda-graph
         # below as a colocate override. Skip the auto-mirror so the manual override
@@ -72,6 +75,9 @@ def add_sglang_arguments(parser):
         """
         Add arguments to the parser, ensuring that the server arguments are prefixed and skippable.
         """
+        # ORBIT-SEAM: base only checked the flag-derived name; this now also checks the explicit
+        # dest (any() over both) so a deprecated-alias arg whose dest points at a different real
+        # field (e.g. --enforce-piecewise-cuda-graph -> cuda_graph_backend_prefill) can be skipped too
         # Determine the canonical name(s) for skip check (e.g., "model_path").
         # Check BOTH the explicit dest AND the flag-derived name: sglang v0.5.14
         # deprecated-alias args (e.g. --enforce-piecewise-cuda-graph) carry an
@@ -121,6 +127,8 @@ def add_sglang_arguments(parser):
     ServerArgs.add_cli_args(parser)
     parser.add_argument = old_add_argument
 
+    # ORBIT-SEAM: two orbit-only CLI overrides - a colocate piecewise-cuda-graph keep-enabled flag,
+    # and a force-native-ops compatibility flag for spawned rollout servers
     parser.add_argument(
         "--sglang-enforce-piecewise-cuda-graph",
         action="store_true",
@@ -156,6 +164,8 @@ def add_sglang_arguments(parser):
     return parser
 
 
+# ORBIT-SEAM: new function - defaults prefill CUDA graphs off (unusable with orbit's colocate
+# memory-saver mode and OFT adapters; see docstring) and enforces the restriction under OFT
 def apply_prefill_cuda_graph_policy(args) -> None:
     """Default ``--sglang-cuda-graph-backend-prefill`` to "disabled"; reject any
     other backend under ``--peft-method oft``.
@@ -183,6 +193,9 @@ def apply_prefill_cuda_graph_policy(args) -> None:
 def validate_args(args):
     args.sglang_tp_size = args.rollout_num_gpus_per_engine
 
+    # ORBIT-SEAM: applies the prefill-cuda-graph default/OFT guard above; the true-on-policy
+    # fallback and attn_cp/moe_dp derivation below replace base's direct
+    # sglang_dp_size/pp_size/ep_size assignments (v0.5.14's auto-mirror now produces those directly)
     apply_prefill_cuda_graph_policy(args)
 
     # Fallback net: --true-on-policy-mode can be set directly, bypassing the
@@ -209,6 +222,8 @@ def validate_args(args):
     if args.sglang_dp_size > 1:
         assert args.sglang_enable_dp_attention
 
+    # ORBIT-SEAM: attention/MoE topology divisibility checks + effective-tp-size bookkeeping, new
+    # for the attn_cp_size/moe_dp_size dimensions added above (base validated only dp_attention)
     sglang_attention_dp_size = args.sglang_dp_size if args.sglang_enable_dp_attention else 1
     sglang_attention_group_size = sglang_attention_dp_size * args.sglang_attn_cp_size
     if args.sglang_tp_size % sglang_attention_group_size != 0:

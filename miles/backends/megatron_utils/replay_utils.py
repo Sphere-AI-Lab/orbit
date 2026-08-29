@@ -1,8 +1,13 @@
+# ORBIT-SEAM: logging import backs the R3 MoE-router wiring block added below
 import logging
 
 from megatron.core.transformer.transformer_block import get_num_layers_to_build
 from megatron.core.transformer.transformer_layer import get_transformer_layer_offset
 
+# ORBIT-SEAM: orbit's R3 (routing replay) wiring - an adapter that routes Megatron's per-layer
+# TopKRouter/DeepSeekV4Gate replay hook through orbit's routing_replay_manager instead of the
+# base's inference-only RouterReplay, plus the post-build pass that installs it on every non-MTP
+# MoE router (wire_routing_replay_to_models, called once after initialize_model_and_optimizer)
 from miles.utils.replay_base import BaseReplayManager, RoutingReplayManager, routing_replay_manager
 
 logger = logging.getLogger(__name__)

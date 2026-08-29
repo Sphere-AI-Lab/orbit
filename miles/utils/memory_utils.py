@@ -18,6 +18,8 @@ def clear_memory(clear_host_memory: bool = False):
 def available_memory():
     device = torch.cuda.current_device()
     free, total = torch.cuda.mem_get_info(device)
+    # ORBIT-SEAM: available_memory() enriched with allocator-fragmentation diagnostics (single
+    # memory_stats() snapshot, inactive_split/active/segments/alloc_retries) for OOM debugging.
     # `.get(key, 0)` on every lookup below is not a guard against an empty
     # dict -- current_device() above already forced CUDA's lazy init, so by
     # this point memory_stats() always returns the full stats dict (zeros for
@@ -31,6 +33,8 @@ def available_memory():
         "total_GB": _byte_to_gb(total),
         "free_GB": _byte_to_gb(free),
         "used_GB": _byte_to_gb(total - free),
+        # ORBIT-SEAM: allocated_GB/reserved_GB now read off the single `stats` snapshot above
+        # instead of separate torch.cuda.memory_allocated()/memory_reserved() calls
         # Single snapshot: torch.cuda.memory_allocated()/memory_reserved() each
         # rebuild this same stats dict under their own mutex acquisition, which
         # would take three separate instants for numbers this module reasons

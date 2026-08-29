@@ -1,4 +1,6 @@
 import logging
+# ORBIT-SEAM: math import backs the inlined _vocab_size_with_padding below (upstream Megatron
+# dropped the module it used to live in).
 import math
 import os
 
@@ -28,6 +30,9 @@ __all__ = ["validate_args", "parse_args", "set_default_megatron_args"]
 logger = logging.getLogger(__name__)
 
 
+# ORBIT-SEAM: Muon/Pion optimizers own their own sharding and reject Megatron's distributed
+# optimizer, so set_default_megatron_args below now conditions use_distributed_optimizer on the
+# selected optimizer instead of always forcing it on.
 def _is_muon_optimizer(optimizer: str | None) -> bool:
     return optimizer is not None and "muon" in optimizer.lower()
 
@@ -36,6 +41,8 @@ def _is_pion_optimizer(optimizer: str | None) -> bool:
     return optimizer is not None and "pion" in optimizer.lower()
 
 
+# ORBIT-SEAM: use_distributed_optimizer now conditioned on _is_muon_optimizer/_is_pion_optimizer
+# above instead of base's unconditional True; comment style pass (TODO -> Follow-up) below
 def set_default_megatron_args(args):
     # Muon and Pion each own their own sharding path and raise on Megatron's
     # distributed optimizer; Adam/SGD keep the historical ZeRO default.

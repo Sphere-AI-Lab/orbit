@@ -1,3 +1,6 @@
+# ORBIT-SEAM: whole-file rewrite - base's target-module/exclude-module parsing tests (covered by
+# this port's test_peft_arguments.py sibling suite instead) replaced by lora_a_init_method
+# normalization/rejection tests against the real _normalize_peft_args helper (see docstring below)
 """`--lora-a-init-method` survives PEFT arg normalization.
 
 Scoped deliberately: this file carries only the LoRA-A-init assertions the
@@ -19,6 +22,8 @@ from copy import deepcopy
 
 import pytest
 
+# ORBIT-SEAM: tests exercise the production _normalize_peft_args (LoRA + OFT) directly, instead of
+# base's local re-implementation of the target-module parsing snippet from arguments.py
 from miles.utils.arguments import _normalize_peft_args
 
 
@@ -71,6 +76,8 @@ class TestLoraAInitMethod:
         `--peft-method oft`. If the entry is ever dropped, a `--lora-a-init-method`
         passed alongside OFT is silently accepted and silently ignored.
         """
+        # ORBIT-SEAM: asserts the OFT/LoRA cross-validation added to _normalize_peft_args rejects a
+        # non-default LoRA-only flag under --peft-method oft
         args = _make_args(
             peft_method="oft",
             lora_rank=0,

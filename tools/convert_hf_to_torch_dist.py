@@ -1,3 +1,7 @@
+# ORBIT-SEAM: whole-file rewrite - base's do-everything conversion script (Megatron arg parsing,
+# distributed process-group init, model build, HF weight load via bridge, torch_dist checkpoint
+# save) moved to miles_plugins.megatron_bridge.patches.conversion.convert_checkpoints.
+# import_hf_to_megatron; this file keeps only a legacy-flag-compatible CLI wrapper around it.
 """Legacy CLI wrapper for HF -> Megatron checkpoint conversion.
 
 This keeps orbit's historical `--hf-checkpoint` / `--save` interface while
@@ -7,16 +11,22 @@ path.
 
 from __future__ import annotations
 
+# ORBIT-SEAM: stdlib-only imports replace base's heavy megatron/mbridge/miles imports, which now
+# live in the extracted import_hf_to_megatron implementation and are imported lazily inside main()
 import argparse
 import sys
 from pathlib import Path
 
 
+# ORBIT-SEAM: ensures the repo root precedes any other sys.path entry, so `import miles_plugins...`
+# below resolves to this checkout rather than an installed/site-packages copy
 _repo_root = str(Path(__file__).resolve().parents[1])
 sys.path = [p for p in sys.path if p != _repo_root]
 sys.path.insert(0, _repo_root)
 
 
+# ORBIT-SEAM: translates orbit's historical --hf-checkpoint/--save CLI flags to
+# import_hf_to_megatron()'s kwarg names, keeping backward CLI compatibility
 def parse_legacy_args(argv: list[str] | None = None):
     parser = argparse.ArgumentParser(
         description="Convert a HuggingFace checkpoint to Megatron torch_dist format.",
@@ -43,6 +53,8 @@ def main(argv: list[str] | None = None, import_fn=None) -> int:
             + " ".join(ignored)
         )
 
+    # ORBIT-SEAM: delegates the actual conversion to the home implementation; legacy Megatron CLI
+    # flags this parser doesn't recognize are only warned about above, not rejected
     import_fn(
         hf_model=args.hf_model,
         megatron_path=args.megatron_path,
@@ -53,5 +65,7 @@ def main(argv: list[str] | None = None, import_fn=None) -> int:
     return 0
 
 
+# ORBIT-SEAM: raises SystemExit(main()) for a real process exit code, instead of base's bare
+# main() call which never propagated a non-zero status
 if __name__ == "__main__":
     raise SystemExit(main())

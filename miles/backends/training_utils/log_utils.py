@@ -10,10 +10,13 @@ import torch.distributed as dist
 from miles.utils import train_metric_utils
 from miles.utils.flops_utils import calculate_fwd_flops
 from miles.utils.metric_utils import compute_pass_rate, compute_rollout_step
+# ORBIT-SEAM: value-explained-var finalizer (aggregate_train_losses below) backed by these imports
 from miles.utils.ppo_utils import VALUE_EV_METRIC_KEY, VALUE_EV_STAT_KEYS, compute_value_explained_var
 from miles.utils.types import RolloutBatch
 
 from ...utils import tracking_utils
+# ORBIT-SEAM: get_logits_and_tokens_offset_with_cp backs the true-on-policy parity checker's
+# local-response-mask alignment below
 from .cp_utils import get_logits_and_tokens_offset_with_cp, get_sum_of_sample_mean
 from .data import DataIterator
 from .parallel import get_parallel_state
@@ -21,6 +24,11 @@ from .parallel import get_parallel_state
 logger = logging.getLogger(__name__)
 
 
+# ORBIT-SEAM: three new helpers backing the true-on-policy log-prob parity CI gate (--ci-test +
+# --true-on-policy-mode + --true-on-policy-megatron-uses-sglang-backend, wired into
+# log_rollout_data below) - CP-aware local loss-mask alignment, the per-token equality assertion
+# against the masked response positions, and a synchronized wrapper that all-gathers failures
+# across the intra_dp_cp group so one rank's assertion doesn't strand its peers in a collective
 def _local_response_loss_masks(
     *,
     total_lengths: list[int],
@@ -240,6 +248,7 @@ def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatc
         total_lengths = rollout_data["total_lengths"]
         max_seq_lens = rollout_data.get("max_seq_lens", None)
 
+        # ORBIT-SEAM: new CI gate - see the three helpers above for the parity check itself
         if (
             getattr(args, "ci_test", False)
             and not getattr(args, "ci_disable_logprobs_checker", False)
@@ -264,6 +273,8 @@ def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatc
                 "loss_masks",
                 "sample_indices",
                 "rollout_routed_experts",
+                # ORBIT-SEAM: OPD retained top-k transport is per-position/ragged, not a per-sample
+                # scalar-reducible metric; excluded from the per-rollout mean logging below
                 "teacher_topk_ids",
                 "teacher_topk_logprobs",
                 "max_seq_lens",
@@ -280,6 +291,8 @@ def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatc
                     # NOTE: Here we have to do the clone().detach(), otherwise the tensor will be
                     # modified in place and will cause problem for the next rollout.
                     val = torch.cat(val).clone().detach()
+                    # ORBIT-SEAM: some OPD tensors (e.g. teacher_log_probs from the sglang teacher)
+                    # can land on a different device than loss_masks; align before sum_of_sample_mean
                     if val.device != loss_masks[0].device:
                         val = val.to(loss_masks[0].device)
                     if key in [
@@ -289,6 +302,8 @@ def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatc
                         "returns",
                         "advantages",
                         "values",
+                        # ORBIT-SEAM: OPD teacher log-probs/reverse-KL added to the per-sample-mean
+                        # reduction path above (same treatment as base's log_probs/values/etc.)
                         "teacher_log_probs",
                         "opd_reverse_kl",
                         "entropy",
@@ -345,6 +360,9 @@ def log_rollout_data(rollout_id: int, args: Namespace, rollout_data: RolloutBatc
             if "rollout/entropy" in reduced_log_dict:
                 assert 0 < reduced_log_dict["rollout/entropy"] < 0.7
 
+    # ORBIT-SEAM: removed base's scalar `log_dict["log_probs"] == log_dict["rollout_log_probs"]`
+    # CI assert here - superseded by the per-token _assert_true_on_policy_logprob_parity_synchronized
+    # gate above, which catches equal-and-opposite token errors a reduced mean would hide
     if args.log_multi_turn:
         log_multi_turn_data(rollout_id, args, rollout_data)
     if args.log_passrate:
@@ -524,6 +542,9 @@ def aggregate_train_losses(
 
     keys = losses_reduced[0]["keys"]
 
+    # ORBIT-SEAM: any "*_max"/"*_min"-suffixed metric key now aggregates via max/min instead of
+    # base's uniform sum - values[0] (the sample/token count) always sums; max_values/min_values
+    # accumulate locally per micro-batch, then all-reduce with MAX/MIN below (not SUM)
     max_metric_indices = {i + 1 for i, key in enumerate(keys) if key.endswith("_max")}
     min_metric_indices = {i + 1 for i, key in enumerate(keys) if key.endswith("_min")}
     values = None
@@ -531,6 +552,7 @@ def aggregate_train_losses(
     min_values = None
     for log_dict in losses_reduced:
         log_values = log_dict["values"]
+        # ORBIT-SEAM: max_values/min_values accumulators, see note above
         if values is None:
             values = torch.zeros_like(log_values)
             max_values = torch.full_like(log_values, -torch.inf)
@@ -548,6 +570,8 @@ def aggregate_train_losses(
     assert len(keys) + 1 == values.numel(), f"Expected {len(keys) + 1} values, got {values.numel()}"
 
     dist.all_reduce(values, op=dist.ReduceOp.SUM, group=parallel_state.intra_dp_cp.group)
+    # ORBIT-SEAM: separate MAX/MIN all-reduces for the max/min-tagged metrics (see note above),
+    # overwriting their SUM-reduced slots in `values`
     if max_metric_indices:
         dist.all_reduce(max_values, op=dist.ReduceOp.MAX, group=parallel_state.intra_dp_cp.group)
         for i in max_metric_indices:
@@ -562,14 +586,19 @@ def aggregate_train_losses(
     num_samples_or_tokens = values[0]
 
     for key, value in zip(keys, values[1:], strict=False):
+        # ORBIT-SEAM: max/min metrics bypass the cp_size/num_samples_or_tokens normalization below
+        # (already-reduced extrema, not a sum), unlike base's uniform per-key normalization
         if key.endswith(("_max", "_min")):
             loss_reduced[key] = value
         else:
             loss_reduced[key] = value * parallel_state.cp.size / num_samples_or_tokens
 
+    # ORBIT-SEAM: folds VALUE_EV_STAT_KEYS into value_explained_var before returning (see helper
+    # below), replacing base's plain `return loss_reduced`
     return _finalize_value_explained_var(loss_reduced)
 
 
+# ORBIT-SEAM: new function - see call site above
 def _finalize_value_explained_var(loss_reduced: dict[str, float]) -> dict[str, float]:
     """Fold EV sufficient statistics into the value_explained_var metric.
 

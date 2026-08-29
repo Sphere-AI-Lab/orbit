@@ -9,6 +9,10 @@ def get_response_lengths(loss_masks: list[list[int]]) -> list[int]:
 class MultiTurnLossMaskGenerator:
     def __init__(self, tokenizer: AutoTokenizer, tokenizer_type: str = "qwen"):
         self.tokenizer = tokenizer
+        # ORBIT-SEAM: tokenizer_type assigned before computing system-message length (was after in
+        # base) so the response_only branch below can check it; response_only skips
+        # get_system_message_length() entirely since gen_response_only_loss_mask renders the prompt
+        # via chat-template/fallback rendering, not per-message offset splicing
         self.tokenizer_type = tokenizer_type
         if tokenizer_type == "response_only":
             self.system_message_length = 0
@@ -49,6 +53,9 @@ class MultiTurnLossMaskGenerator:
         system_message_length = idx_1 - ((idx_2 - idx_1) - end_interval - len(raw_token_ids))
         return system_message_length, gen_token_length
 
+    # ORBIT-SEAM: two new helpers - render via the tokenizer's chat_template when it has one,
+    # falling back to a hardcoded Llama-3 template string when it doesn't; used by
+    # gen_response_only_loss_mask below to build the prompt half of a response-only sample
     def _format_llama_messages_without_chat_template(
         self,
         messages: list[dict],
@@ -119,6 +126,9 @@ class MultiTurnLossMaskGenerator:
     def gen_multi_turn_loss_mask_qwen3(
         self, messages: list[dict], tools: list[dict] = None
     ) -> tuple[list[int], list[int]]:
+        # ORBIT-SEAM: whole-method rewrite (P4 override) - single whole-conversation tokenization +
+        # header-position scanning replaces base's per-message/prefix tokenization, which silently
+        # mis-triggered Qwen3's <think> wrapper; see the comment immediately below for the bug
         # Tokenize the WHOLE conversation exactly once. Qwen3's chat template decides
         # whether to wrap an assistant turn in an empty "<think>\n\n</think>\n\n" block
         # based on whether that turn is the LAST assistant response following the LAST
@@ -134,6 +144,8 @@ class MultiTurnLossMaskGenerator:
         )
         all_loss_masks = [0] * len(all_token_ids)
 
+        # ORBIT-SEAM: header_ids below locates each assistant turn's start in the single tokenized
+        # conversation above (see the class-of-method rationale a few lines up)
         # "<|im_start|>assistant\n" rendered on its own: a content-independent marker for
         # where an assistant turn's header ends and its scorable content begins. Rendered
         # as the sole message in a length-1 list so no think-wrapper logic can apply to
@@ -146,6 +158,8 @@ class MultiTurnLossMaskGenerator:
         im_end_id = self.tokenizer.convert_tokens_to_ids("<|im_end|>")
         trailing_newline_id = header_ids[-1]
 
+        # ORBIT-SEAM: replaces base's implicit per-message alignment with an explicit header-count
+        # check, failing loudly on a header/assistant-message mismatch instead of silently misaligning
         header_positions = self.find_all_sublist_indices(all_token_ids, header_ids)
         assistant_messages = [message for message in messages if message["role"] == "assistant"]
 
@@ -156,6 +170,8 @@ class MultiTurnLossMaskGenerator:
                 "in `messages`; cannot align loss-mask spans to messages."
             )
 
+        # ORBIT-SEAM: per-turn loss-mask span located by scanning forward to <|im_end|> in the
+        # single tokenized conversation, instead of base's per-message loss_mask slicing
         for message, header_pos in zip(assistant_messages, header_positions, strict=True):
             start = header_pos + self.gen_token_length
             end = start
@@ -166,12 +182,17 @@ class MultiTurnLossMaskGenerator:
             if end < len(all_token_ids) and all_token_ids[end] == trailing_newline_id:
                 end += 1  # include the "\n" that follows <|im_end|>
 
+            # ORBIT-SEAM: writes 1s directly into the pre-sized all_loss_masks array over [start,end)
+            # instead of base's per-message loss_mask list construction
             if message.get("step_loss_mask", 1) == 1:
                 for k in range(start, min(end, len(all_token_ids))):
                     all_loss_masks[k] = 1
 
         return all_token_ids, all_loss_masks
 
+    # ORBIT-SEAM: new method - Llama-3 counterpart of gen_multi_turn_loss_mask_qwen3 above, same
+    # single-tokenization + header-scan strategy (Llama-3's template has no think-wrapper bug, but
+    # its unconditional system-block injection would still break per-message rendering)
     def gen_multi_turn_loss_mask_llama3(
         self, messages: list[dict], tools: list[dict] = None
     ) -> tuple[list[int], list[int]]:
@@ -241,6 +262,8 @@ class MultiTurnLossMaskGenerator:
             loss_mask = [0] * len(token_ids)
         return token_ids, loss_mask
 
+    # ORBIT-SEAM: new method - masks the whole prompt as loss=0 and the final assistant turn as
+    # loss=1, for the response_only tokenizer type (no per-turn splicing, single completion only)
     def gen_response_only_loss_mask(
         self, messages: list[dict], tools: list[dict] = None
     ) -> tuple[list[int], list[int]]:
@@ -271,6 +294,7 @@ class MultiTurnLossMaskGenerator:
             return self.gen_multi_turn_loss_mask_qwen3(messages, tools)
         elif self.tokenizer_type == "distill_qwen":
             return self.gen_multi_turn_loss_mask_distill_qwen(messages, tools)
+        # ORBIT-SEAM: dispatches to the two new tokenizer types added above (llama3, response_only)
         elif self.tokenizer_type == "llama3":
             return self.gen_multi_turn_loss_mask_llama3(messages, tools)
         elif self.tokenizer_type == "response_only":
