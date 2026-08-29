@@ -37,40 +37,66 @@ namespaces.
 
 Miles is a general RL trainer that syncs full model weights. Orbit turns it into
 an **adapter-first RL system**: it trains and serves PEFT adapters on (possibly
-quantized) frozen base models, with a verification discipline around it.
+quantized) frozen base models, with a verification discipline around it. The
+argument surface makes the census objective: orbit adds **83 CLI arguments** to
+the base's 230 (and removes none); the clusters below map one-to-one onto the
+feature set.
 
-1. **OFT as a first-class RL method.** Miles has LoRA only — its tree contains
-   no OFT at the fork base. Orbit adds Orthogonal Finetuning end-to-end
-   (`oft_utils.py` in the Megatron backend, OFT serving via the sglang fork),
-   and the example matrix is structured as full-FT vs LoRA vs OFT arms.
-2. **Adapter-delta weight sync** (`peft_transport/`). Instead of pushing full
-   model weights to rollout engines each update, orbit streams only adapter
-   deltas over a pluggable transport (NCCL and IPC backends behind a registry).
-   This is what makes RL on a Kimi-1T-class frozen base tractable.
-3. **One-trunk adapter critic for PPO.** The critic shares the actor's frozen
-   trunk by parameter aliasing — no second trunk copy; only adapters and the
-   value head are critic-owned. Benchmarked indistinguishable from a full
-   critic at ~23% faster per step. This is why `loss.py` and `ppo_utils.py`
-   carry ~1.6k changed lines: the rewrite is algorithmic, not wiring.
-4. **RL on quantized base models.** Direct INT4/NVFP4/FP8 checkpoint
-   converters and bridges plus recipes for Kimi-K2.5/K2.6 INT4 and NVFP4,
-   DSv4 MXFP4, and Qwen3-30B FP8 — all with OFT adapters on the quantized
-   weights. Miles had FP8 *export* quantizers, not a train-on-quantized path.
-5. **Numerical verification tooling.** ~30 parity checkers with no miles
-   counterpart: checkpoint and runtime parity per precision, cross-repo
-   DeepGEMM parity, step-0 parity, adapter runtime comparison.
-6. **Adapter-aware serving integration.** The `sglang_engine.py` rewrite:
-   adapter staging/activation through the engine and PEFT-safe caching (radix
-   cache disabled or keyed per adapter so cached prefixes cannot leak stale
-   adapter activations).
-7. **PEFT-Arena.** Self-contained eval framework: vendored math_eval with
-   AIME24/AMC23/MATH500, an arena reward, data converters.
-8. **Model catalog as plugin config.** 50 per-model launch profiles in
-   `orbit_plugins/model_args` (DSv3/v4 with TITO tokenizer support, GLM4–5,
-   Kimi K2–K2.6, gpt-oss, Qwen families), replacing miles' script zoo.
-9. **Smaller but real:** a fully-async rollout driver, MTP-under-RL patches,
-   reward normalization, training-ETA and eval logging, pinned cu128/cu130
-   install contracts with ratchet tests.
+**The adapter stack** (the thesis):
+
+1. **OFT as a first-class RL method** (6 `--oft-*` args). Miles has LoRA only —
+   no OFT anywhere at the fork base. Orbit adds Orthogonal Finetuning
+   end-to-end: Megatron-side training, serving via the sglang fork, COFT/block
+   variants, and an example matrix structured as full-FT vs LoRA vs OFT arms.
+2. **Adapter-delta weight sync with double-buffered slots**
+   (`peft_transport/`, `--peft-distributed-transport`,
+   `--adapter-double-buffer`). Instead of pushing full weights each update,
+   orbit streams adapter deltas over pluggable NCCL/IPC/Ray transports; NCCL
+   double-buffering keeps rollout serving adapter version N while N+1 streams
+   in, then atomically activates. This enables async RL on a Kimi-1T-class
+   frozen base, paired with the async rollout driver
+   (`fully_async_rollout.py`).
+3. **Adapter/trainer offload suite** (6 `--offload-*` args): rollout adapter,
+   train adapter, frozen-base mode, grad buffers, optimizer, async offload.
+4. **One-trunk adapter critic for PPO** (`--critic-mode`, `--training-mode`).
+   PPO itself is miles'; orbit's critic shares the actor's frozen trunk by
+   parameter aliasing — no second trunk copy; only adapters and the value head
+   are critic-owned. Benchmarked indistinguishable from a full critic at ~23%
+   faster per step. This is why `loss.py`/`ppo_utils.py` carry ~1.6k changed
+   lines: algorithmic, not wiring.
+
+**MOPD — managed on-policy distillation** (33 `--opd-*` args, the largest
+cluster; near-zero OPD at the fork base): sampled-token and full-vocab teacher
+score modes, managed teacher serving and teacher pools (`--teacher-*`,
+placement-group integration), JSD/KL loss variants with pointwise clipping,
+EMA teachers, and **self-teacher distillation** — promoting the student's own
+adapter versions as teacher through the adapter transport. Supporting modules:
+`teacher_lm_head.py`, `vocab_parallel.py`, `prefill_logprobs.py`.
+
+**Verified-reward backends and routing** (14 args): an LLM-judge reward
+(`--judge-*`), a containerized SWE-agent reward with SIF cache (`--swe-*`),
+a code-execution reward with test/memory/timeout budgets (`--code-*`), a Lean
+theorem-prover server reward (`--lean-*`), and a reward router
+(`--reward-router-unmapped`) dispatching across them.
+
+**Train–inference consistency**: the true-on-policy contract
+(`--true-on-policy`, `--true-on-policy-contract`, `--force-on-policy-ratio`,
+`--recompute-logprobs-via-prefill`) — enforcing, not assuming, that rollout
+and trainer agree.
+
+**RL on quantized base models.** Direct INT4/NVFP4/FP8 checkpoint converters
+and bridges plus recipes for Kimi-K2.5/K2.6 INT4 and NVFP4, DSv4 MXFP4
+(`--dsv4-*` knobs), and Qwen3-30B FP8 — with OFT adapters on the quantized
+weights. Miles had FP8 *export* quantizers, not a train-on-quantized path.
+
+**The discipline and the rest:** ~30 parity checkers (checkpoint and runtime
+per precision, cross-repo DeepGEMM, step-0, adapter runtime compare);
+adapter-aware serving integration (engine-level adapter staging/activation,
+PEFT-safe radix caching); PEFT-Arena (vendored math_eval: AIME24/AMC23/
+MATH500, arena reward); NLL and pass@k eval extensions (`--eval-nll-*`,
+`--eval-pass-k-values`); 50 per-model launch profiles in
+`orbit_plugins/model_args` (DSv3/v4, GLM4–5, Kimi K2–K2.6, gpt-oss, Qwen);
+MTP-under-RL patches; pinned cu128/cu130 install contracts with ratchet tests.
 
 Equally telling is what orbit **drops** (406 files): VLM and tool-use examples,
 experimental FSDP, AMD support, docker/CI — breadth traded for depth on the
