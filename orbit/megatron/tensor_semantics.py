@@ -174,3 +174,34 @@ def should_skip_named_tensor_for_tracking(module: nn.Module, name: str, tensor: 
 
 def should_skip_named_tensor_for_meta_validation(module: nn.Module, name: str, tensor: torch.Tensor) -> bool:
     return describe_named_tensor(module, name, tensor).skip_for_meta_validation
+
+
+DSV4_GROUPED_MOE_OFT_PARAM_NAMES = frozenset({"w1_oft_r", "w2_oft_r", "w3_oft_r"})
+DSV4_SHARED_EXPERT_TP_PARAM_FRAGMENTS = (
+    ".mlp.shared_experts.w1.",
+    ".mlp.shared_experts.w2.",
+    ".mlp.shared_experts.w3.",
+    ".mlp.shared_experts.linear_fc1.",
+    ".mlp.shared_experts.linear_fc2.",
+    ".ffn.shared_experts.w1.",
+    ".ffn.shared_experts.w2.",
+    ".ffn.shared_experts.w3.",
+    ".ffn.shared_experts.linear_fc1.",
+    ".ffn.shared_experts.linear_fc2.",
+)
+
+
+def is_dsv4_grouped_moe_oft_param_name(name: str) -> bool:
+    return name.rsplit(".", 1)[-1] in DSV4_GROUPED_MOE_OFT_PARAM_NAMES
+
+
+def uses_expert_tensor_parallel_group(name: str) -> bool:
+    matchable = name.replace("._orig_module.", ".").replace(".to_wrap.", ".")
+    return (
+        ".experts." in matchable
+        or any(
+            fragment in matchable or matchable.endswith(fragment[:-1])
+            for fragment in DSV4_SHARED_EXPERT_TP_PARAM_FRAGMENTS
+        )
+        or is_dsv4_grouped_moe_oft_param_name(matchable)
+    )

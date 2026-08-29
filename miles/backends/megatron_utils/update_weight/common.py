@@ -4,46 +4,7 @@ import re
 from argparse import Namespace
 from collections.abc import Iterator, Sequence
 
-import torch
-import torch.distributed as dist
-
-from miles.backends.megatron_utils.misc_utils import strip_param_name_prefix
-from orbit.megatron.tensor_semantics import should_skip_named_tensor_for_tracking
-from miles.utils.types import ParamInfo
-
-logger = logging.getLogger(__name__)
-
-DSV4_GROUPED_MOE_OFT_PARAM_NAMES = frozenset({"w1_oft_r", "w2_oft_r", "w3_oft_r"})
-DSV4_SHARED_EXPERT_TP_PARAM_FRAGMENTS = (
-    ".mlp.shared_experts.w1.",
-    ".mlp.shared_experts.w2.",
-    ".mlp.shared_experts.w3.",
-    ".mlp.shared_experts.linear_fc1.",
-    ".mlp.shared_experts.linear_fc2.",
-    ".ffn.shared_experts.w1.",
-    ".ffn.shared_experts.w2.",
-    ".ffn.shared_experts.w3.",
-    ".ffn.shared_experts.linear_fc1.",
-    ".ffn.shared_experts.linear_fc2.",
-)
-
-
-def is_dsv4_grouped_moe_oft_param_name(name: str) -> bool:
-    return name.rsplit(".", 1)[-1] in DSV4_GROUPED_MOE_OFT_PARAM_NAMES
-
-
-def uses_expert_tensor_parallel_group(name: str) -> bool:
-    matchable = name.replace("._orig_module.", ".").replace(".to_wrap.", ".")
-    return (
-        ".experts." in matchable
-        or any(
-            fragment in matchable or matchable.endswith(fragment[:-1])
-            for fragment in DSV4_SHARED_EXPERT_TP_PARAM_FRAGMENTS
-        )
-        or is_dsv4_grouped_moe_oft_param_name(matchable)
-    )
-
-
+# ORBIT-SEAM: ray made an optional import so this module is importable in CPU-only test envs without it installed
 try:
     import ray
     from ray.actor import ActorHandle
@@ -51,6 +12,10 @@ except Exception:  # pragma: no cover - test environments may not ship ray
     ray = None
     ActorHandle = object
 
+import torch
+import torch.distributed as dist
+
+# ORBIT-SEAM: megatron-core made an optional import (same CPU-only test-env rationale as ray above)
 try:
     from megatron.core import mpu
     from megatron.core.transformer.transformer_layer import get_transformer_layer_offset
@@ -63,6 +28,18 @@ except Exception:  # pragma: no cover - test environments may not ship megatron-
 
     def get_transformer_layer_offset(*args, **kwargs):
         raise RuntimeError("megatron.core is required for global weight enumeration")
+
+from miles.backends.megatron_utils.misc_utils import strip_param_name_prefix
+# ORBIT-SEAM: expert-TP / DSV4-OFT name predicates and adapter-param enumeration moved to orbit/megatron (P1 lift-out); re-exported here so existing importers of this module keep working
+from orbit.megatron.adapter_params import is_named_adapter_tensor, named_adapter_params, named_adapter_params_and_buffers  # noqa: F401
+from orbit.megatron.tensor_semantics import (
+    is_dsv4_grouped_moe_oft_param_name,  # noqa: F401
+    should_skip_named_tensor_for_tracking,
+    uses_expert_tensor_parallel_group,
+)
+from miles.utils.types import ParamInfo
+
+logger = logging.getLogger(__name__)
 
 
 def _gather_with_stride(
@@ -84,13 +61,11 @@ def _check_and_fix_partition(args: Namespace, name: str, partition_stride: int, 
     (GLU/SwiGLU interleaved [gate, up]), so assert partition_stride==2 is removed.
     But TEGroupedLinear still does not set partition_stride/partition_dim correctly for grouped moe gemm
     """
-    # PEFT wraps base modules: OFT-specific layers expose the original module
-    # as `_orig_module`, while AdapterWrapper (used by both LoRA and OFT for
-    # linear modules) exposes it as `to_wrap`. Strip both so substring checks
-    # match the underlying parameter path.
+    # ORBIT-SEAM: PEFT wraps base modules under _orig_module (OFT) / to_wrap (AdapterWrapper); strip both so substring checks match the underlying param path
     matchable = name.replace("._orig_module.", ".").replace(".to_wrap.", ".")
     if "linear_fc1.weight" in matchable and args.swiglu:
         partition_stride = 2
+    # ORBIT-SEAM: same to_wrap/_orig_module stripping as above
     elif "linear_fc2.weight" in matchable:
         assert partition_stride == 1, f"Expected partition_stride=1 for {name}, got {partition_stride}"
         if partition_dim == 0:
@@ -101,6 +76,7 @@ def _check_and_fix_partition(args: Namespace, name: str, partition_stride: int, 
 
 
 def all_gather_param(args: Namespace, name: str, param: torch.nn.Parameter) -> torch.Tensor:
+    # ORBIT-SEAM: docstring reworded for uses_expert_tensor_parallel_group (DSV4 shared-expert / grouped-MoE-OFT routing), not just ".experts."
     """
     All-gather TP-sharded param to full tensor. expert_bias→param, non-TP/duplicated→param.data.
     Uses expert-TP for expert-tensor-sharded params, else regular-TP.
@@ -113,6 +89,7 @@ def all_gather_param(args: Namespace, name: str, param: torch.nn.Parameter) -> t
     if not param.tensor_model_parallel or getattr(param, "parallel_mode", None) == "duplicated":
         return param.data
 
+    # ORBIT-SEAM: route expert-TP grouping through uses_expert_tensor_parallel_group (DSV4 shared-expert / grouped-MoE-OFT param routing), not a bare ".experts." substring check
     if uses_expert_tensor_parallel_group(name):
         tp_size = mpu.get_expert_tensor_parallel_world_size()
         tp_group = mpu.get_expert_tensor_parallel_group()
@@ -153,6 +130,7 @@ def all_gather_params_async(
             handles.append(None)
         else:
             # Start async all_gather
+            # ORBIT-SEAM: same expert-TP routing as all_gather_param
             if uses_expert_tensor_parallel_group(info.name):
                 tp_size = mpu.get_expert_tensor_parallel_world_size()
                 tp_group = mpu.get_expert_tensor_parallel_group()
@@ -205,45 +183,6 @@ def named_params_and_buffers(
     return ans
 
 
-def is_named_adapter_tensor(name: str) -> bool:
-    stripped_name = strip_param_name_prefix(name)
-    return (
-        "lora_" in stripped_name
-        or ".adapter." in stripped_name
-        or stripped_name.startswith("adapter.")
-        or ".oft_" in stripped_name
-        or stripped_name.startswith("oft_")
-        or is_dsv4_grouped_moe_oft_param_name(stripped_name)
-    )
-
-
-def named_adapter_params_and_buffers(model: Sequence[torch.nn.Module]) -> Iterator[tuple[str, torch.Tensor]]:
-    use_vp_prefix = len(model) > 1
-
-    for vp_stage, model_module in enumerate(model):
-        def _compute_name(name: str, vp_stage=vp_stage) -> str:
-            stripped_name = strip_param_name_prefix(name)
-            if use_vp_prefix:
-                return f"vp_stages.{vp_stage}.{stripped_name}"
-            return stripped_name
-
-        for name, param in model_module.named_parameters():
-            if not is_named_adapter_tensor(name):
-                continue
-            yield _compute_name(name), param
-
-        for name, buffer in model_module.named_buffers():
-            if not is_named_adapter_tensor(name):
-                continue
-            yield _compute_name(name), buffer
-
-
-def named_adapter_params(model: Sequence[torch.nn.Module]) -> Iterator[tuple[str, torch.Tensor]]:
-    for name, tensor in named_adapter_params_and_buffers(model):
-        if isinstance(tensor, torch.nn.Parameter):
-            yield name, tensor
-
-
 def _maybe_get_cpu_backup(x: torch.Tensor):
     from torch_memory_saver import torch_memory_saver
 
@@ -260,14 +199,17 @@ def _named_params_and_buffers_vanilla(model: Sequence[torch.nn.Module]) -> Itera
             return f"vp_stages.{vp_stage}.{strip_param_name_prefix(name)}"
 
         for name, param in model_module.named_parameters():
+            # ORBIT-SEAM: skip quantization-placeholder tensors (int4/nvfp4 triplets) from weight-sync tracking
             if should_skip_named_tensor_for_tracking(model_module, name, param):
                 continue
             yield _compute_fqn(name), param
 
         for name, buffer in model_module.named_buffers():
+            # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
             # Follow-up shall we handle (almost) all buffers like Megatron Bridge
             if "expert_bias" not in name:
                 continue
+            # ORBIT-SEAM: same quantization-placeholder skip as above, for buffers
             if should_skip_named_tensor_for_tracking(model_module, name, buffer):
                 continue
             yield _compute_fqn(name), buffer
@@ -294,6 +236,7 @@ def _named_params_and_buffers_global(
         else:
             layer_offset = get_transformer_layer_offset(model_module.config)
         for name, param in model_module.named_parameters():
+            # ORBIT-SEAM: skip quantization-placeholder tensors (int4/nvfp4 triplets) from weight-sync tracking
             if should_skip_named_tensor_for_tracking(model_module, name, param):
                 continue
             # for model without ddp wrap
@@ -338,9 +281,11 @@ def _named_params_and_buffers_global(
 
         # treat expert bias as normal parameters
         for name, buffer in model_module.named_buffers():
+            # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
             # Follow-up shall we handle (almost) all buffers like Megatron Bridge
             if "expert_bias" not in name:
                 continue
+            # ORBIT-SEAM: same quantization-placeholder skip as above, for buffers
             if should_skip_named_tensor_for_tracking(model_module, name, buffer):
                 continue
             # for model without ddp wrap
@@ -371,6 +316,7 @@ def collect_named_tensors_for_weight_transfer(
         convert_to_global_name,
         translate_gpu_to_cpu,
     ):
+        # ORBIT-SEAM: route expert-TP grouping through uses_expert_tensor_parallel_group, not a bare ".experts." substring check
         if is_expert == uses_expert_tensor_parallel_group(name):
             yield name, tensor
 
@@ -387,6 +333,7 @@ def post_process_weights(
         - int4/fp4 quantization
         - post_load_weights (should be enabled when using p2p weights updating)
     """
+    # ORBIT-SEAM: ray is optional-imported above; fail loudly if this path is hit without it
     if ray is None:
         raise RuntimeError("ray is required for post_process_weights")
     ray.get(

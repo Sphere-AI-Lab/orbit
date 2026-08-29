@@ -24,8 +24,16 @@ from miles.rollout.base_types import (
     call_rollout_fn,
 )
 from miles.rollout.inference_rollout.compatibility import call_rollout_function, load_rollout_function
+# ORBIT-SEAM: OPD teacher-pool/server config builders moved to orbit/opd/teacher_servers.py (P1 lift-out)
+from orbit.opd.teacher_servers import (
+    OPD_TEACHER_MODEL_NAME,
+    _opd_teacher_model_config,
+    _opd_teacher_pool,
+    _opd_teacher_pool_model_configs,
+)
 from orbit.rewards.math_alignment import compute_math_alignment_metrics, is_math_alignment_sample
 from miles.utils import dumper_utils, tracking_utils
+# ORBIT-SEAM: gate rollout-engine bootstrap on debug_rollout_only-style configs too (uses_rollout_engines), not just debug_train_only
 from miles.utils.arguments import uses_rollout_engines
 from miles.utils.environ import enable_experimental_rollout_refactor
 from miles.utils.health_monitor import RolloutHealthMonitor
@@ -41,14 +49,18 @@ from miles.utils.iter_utils import group_by
 from miles.utils.logging_utils import configure_logger
 from miles.utils.metric_checker import MetricChecker
 from miles.utils.metric_utils import compute_pass_rate, compute_rollout_step, compute_statistics, dict_add_prefix
+# ORBIT-SEAM: should_run_periodic_action drives the rollout_global_dataset save-snapshot check in generate()
 from miles.utils.misc import load_function, should_run_periodic_action
 from miles.utils.ray_utils import Box
+# ORBIT-SEAM: grouped reward normalization extracted to orbit/rewards/reward_normalization.py
 from orbit.rewards.reward_normalization import normalize_grouped_rewards
 from miles.utils.seqlen_balancing import get_seqlen_balanced_partitions
 from miles.utils.tracking_utils import init_tracking
+# ORBIT-SEAM: collect_teacher_topk_data supports the OPD top-k teacher-scoring train-data assembly
 from miles.utils.types import Sample, collect_teacher_topk_data
 
 from ..utils.metric_utils import has_repetition
+# ORBIT-SEAM: NOSET_VISIBLE_DEVICES_ENV_VARS_LIST replaced by build_noset_visible_devices_env_vars() (same env vars, function form)
 from .utils import Lock, build_noset_visible_devices_env_vars
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -57,6 +69,7 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 
+# ORBIT-SEAM: OFT rollout needs Orbit's pass-through router (preserves oft_path); consumed by _start_router below
 def _requires_orbit_router_passthrough(args) -> bool:
     return getattr(args, "peft_method", "none") == "oft" and not getattr(args, "use_orbit_router", False)
 
@@ -134,6 +147,7 @@ class ServerGroup:
                 placement_group_bundle_index=reordered_bundle_indices[gpu_index],
             )
 
+            # ORBIT-SEAM: NOSET_VISIBLE_DEVICES_ENV_VARS_LIST replaced by build_noset_visible_devices_env_vars() (same env vars, function form)
             env_vars = build_noset_visible_devices_env_vars() | {
                 key: os.environ.get(key, default_val)
                 for key, default_val in {
@@ -141,12 +155,14 @@ class ServerGroup:
                     "SGL_DISABLE_TP_MEMORY_INBALANCE_CHECK": "true",
                     "SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK": "true",
                     "SGLANG_MEMORY_SAVER_CUDA_GRAPH": "true",
+                    # ORBIT-SEAM: batch-invariant-ops / DSV4 tile-kernel engine env var defaults (orbit determinism + DSV4 support)
                     "SGLANG_BATCH_INVARIANT_OPS_ENABLE_MM_DEEPGEMM": "1",
                     "SGLANG_BATCH_INVARIANT_OPS_ENABLE_MM_FALLBACK_VARIANT": "0",
                     "SGLANG_DSV4_USE_TILEKERNELS": "1",
                     "SGLANG_DSV4_GATE_LINEAR_IMPL": "persistent",
                     "SGLANG_ENABLE_HEALTH_ENDPOINT_GENERATION": "false",
                     "SGLANG_ENABLE_STRICT_MEM_CHECK_DURING_IDLE": "false",
+                    # ORBIT-SEAM: OFT rollout engine env var defaults (expert parity / Triton / Marlin / MLA KV-cache / adapter block size)
                     "SGLANG_OFT_EXPERT_PARITY_MODE": "0",
                     "SGLANG_FORCE_OFT_TRITON_MOE": "0",
                     "SGLANG_OFT_MARLIN_MOE": "0",
@@ -155,6 +171,7 @@ class ServerGroup:
                 }.items()
             }
             env_vars.update(dumper_utils.get_sglang_env(self.args))
+            # ORBIT-SEAM: propagate the launcher's PYTHONPATH into rollout engines (needed for editable orbit/miles installs)
             if "PYTHONPATH" in os.environ:
                 env_vars["PYTHONPATH"] = os.environ["PYTHONPATH"]
 
@@ -357,6 +374,7 @@ class RolloutManager:
 
         self.pg = pg
         self.args = args
+        # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
         # Follow-up make args immutable
         init_tracking(args, primary=False, router_addr=f"http://{args.sglang_router_ip}:{args.sglang_router_port}")
 
@@ -382,6 +400,7 @@ class RolloutManager:
         logger.info(f"import {self.args.rollout_function_path} as generate_rollout function.")
         logger.info(f"import {self.args.eval_function_path} as eval_generate_rollout function.")
 
+        # ORBIT-SEAM: skip rollout-server bootstrap for configs that never use rollout engines (e.g. debug_rollout_only variants), not just debug_train_only
         if self.args.debug_train_only or not uses_rollout_engines(self.args):
             self.servers: dict[str, RolloutServer] = {}
         else:
@@ -466,6 +485,7 @@ class RolloutManager:
         if self.args.ci_test and self.args.use_fault_tolerance and rollout_id >= 2:
             self._try_ci_fault_injection()
         data, metrics = self._get_rollout_data(rollout_id=rollout_id)
+        # ORBIT-SEAM: OPD deferred full-vocab teacher scoring hook (scores after rollout, before training-data conversion)
         if getattr(self.args, "opd_defer_full_vocab_scoring", False):
             from orbit.opd.opd_sglang import score_full_vocab_samples
             from miles.utils.async_utils import run
@@ -475,6 +495,7 @@ class RolloutManager:
         _log_rollout_data(rollout_id, self.args, data, metrics, time.time() - start_time)
         data = self._convert_samples_to_train_data(data)
         split_data = self._split_train_data_by_dp(data, self.train_parallel_config["dp_size"])
+        # ORBIT-SEAM: notify the global-dataset source that this rollout is consumed, for periodic snapshotting
         if self.args.rollout_global_dataset:
             mark_rollout_complete = getattr(self.data_source, "mark_rollout_complete", None)
             if callable(mark_rollout_complete):
@@ -609,6 +630,7 @@ class RolloutManager:
                 global_batch_size = self.args.global_batch_size
                 if self.args.use_dynamic_global_batch_size:
                     logger.info(f"Collected {len(data)} samples from rollout to train with dynamic global batch size")
+                    # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
                     # Follow-up: this is a temporary solution, we should directly save dynamic_global_batch_size to rollout data
                     self._dynamic_global_batch_size = self._compute_dynamic_global_batch_size(len(data))
                     global_batch_size = self._dynamic_global_batch_size
@@ -654,12 +676,14 @@ class RolloutManager:
         return dynamic_gbs
 
     def _save_debug_rollout_data(self, data, rollout_id, evaluation: bool):
+        # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
         # Follow-up pending cleanup (originally Buffer._set_data)
         if (path_template := self.args.save_debug_rollout_data) is not None:
             path = Path(path_template.format(rollout_id=("eval_" if evaluation else "") + str(rollout_id)))
             logger.info(f"Save debug rollout data to {path}")
             path.parent.mkdir(parents=True, exist_ok=True)
 
+            # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
             # Follow-up may improve the format
             if evaluation:
                 dump_data = dict(
@@ -681,6 +705,7 @@ class RolloutManager:
             self.args.advantage_estimator in ["grpo", "gspo", "reinforce_plus_plus_baseline"]
             and self.args.rewards_normalization
         ):
+            # ORBIT-SEAM: group-norm routed through orbit's normalize_grouped_rewards when group_index is populated
             group_indices = [sample.group_index for sample in samples]
             if all(group_index is not None for group_index in group_indices):
                 rewards = normalize_grouped_rewards(
@@ -697,6 +722,7 @@ class RolloutManager:
             if rewards.shape[-1] == self.args.n_samples_per_prompt * self.args.rollout_batch_size:
                 rewards = rewards.reshape(-1, self.args.n_samples_per_prompt)
             else:
+                # ORBIT-SEAM: legacy shape-inference branch retained as the group_index-less fallback (see above)
                 rewards = rewards.view(-1, rewards.shape[-1])
             mean = rewards.mean(dim=-1, keepdim=True)
             rewards = rewards - mean
@@ -733,6 +759,7 @@ class RolloutManager:
         }
 
         # loss mask
+        # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
         # Follow-up: compress the loss mask
         loss_masks = []
         for sample in samples:
@@ -772,6 +799,7 @@ class RolloutManager:
         if any(sample.weight_versions for sample in samples):
             train_data["weight_versions"] = [sample.weight_versions for sample in samples]
 
+        # ORBIT-SEAM: sample.teacher_log_probs replaces the __dict__ membership check; validate every sample was scored, not just the first
         if any(sample.teacher_log_probs is not None for sample in samples):
             missing = sum(1 for sample in samples if sample.teacher_log_probs is None)
             if missing:
@@ -781,6 +809,7 @@ class RolloutManager:
                 )
             train_data["teacher_log_probs"] = [sample.teacher_log_probs for sample in samples]
 
+        # ORBIT-SEAM: OPD reverse-KL / top-k teacher-logprob / full-vocab teacher-hidden-state train-data assembly
         if any(sample.opd_reverse_kl is not None for sample in samples):
             missing = sum(1 for sample in samples if sample.opd_reverse_kl is None)
             if missing:
@@ -852,6 +881,7 @@ class RolloutManager:
                 "rollout_routed_experts",
                 "prompt",
                 "teacher_log_probs",
+                # ORBIT-SEAM: OPD teacher/top-k train-data keys are per-DP-partition split like the rest
                 "teacher_hidden_states",
                 "opd_reverse_kl",
                 "teacher_topk_ids",
@@ -924,6 +954,7 @@ def _allocate_rollout_engine_addr_and_ports_normal(
         if node_index in visited_nodes:
             continue
         visited_nodes.add(node_index)
+        # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
         # Follow-up: currently when restarting engines, we will set port for all engines on this node starting with this rank.
         # e.g. for 8 gpus, if we are restarting engine on gpu 3, we will set port for engine 3,4,5,6,7 on this node.
         num_engines_on_this_node = num_engines_per_node - (local_rank % num_engines_per_node)
@@ -995,6 +1026,7 @@ def _start_router(args, *, has_pd_disaggregation: bool = False, force_new: bool 
     If ``args.sglang_router_ip`` is already set and ``force_new`` is False,
     skip launching and return the existing values.
     """
+    # ORBIT-SEAM: force Orbit's pass-through router for OFT rollout (sglang_router does not preserve oft_path)
     if _requires_orbit_router_passthrough(args):
         if has_pd_disaggregation:
             raise RuntimeError(
@@ -1016,6 +1048,7 @@ def _start_router(args, *, has_pd_disaggregation: bool = False, force_new: bool 
         if router_port is None:
             router_port = find_available_port(random.randint(3000, 4000))
 
+    # ORBIT-SEAM: use_miles_router flag renamed use_orbit_router (orbit's own pass-through router, see above)
     if args.use_orbit_router:
         import copy
 
@@ -1088,97 +1121,7 @@ def _compute_megatron_num_gpus(args) -> int:
     return num
 
 
-OPD_TEACHER_MODEL_NAME = "opd_teacher"
-
-
-def _opd_teacher_pool(args):
-    """Parsed --opd-teacher-pool manifest, or None. Cached on args: the pool is
-    read by placement sizing, engine injection, and validation."""
-    path = getattr(args, "opd_teacher_pool", None)
-    if path is None:
-        return None
-    cached = getattr(args, "_opd_teacher_pool_parsed", None)
-    if cached is None:
-        from orbit.opd.opd_teacher_pool import parse_teacher_pool
-
-        cached = parse_teacher_pool(path)
-        args._opd_teacher_pool_parsed = cached
-    return cached
-
-
-def _teacher_server_overrides(
-    mem_fraction: float | None,
-    max_running_requests: int | None = None,
-    max_prefill_tokens: int | None = None,
-) -> dict:
-    overrides = {
-        "enable_return_hidden_states": True,
-        "disable_radix_cache": True,
-        "chunked_prefill_size": -1,
-    }
-    if mem_fraction is not None:
-        overrides["mem_fraction_static"] = mem_fraction
-    if max_running_requests is not None:
-        overrides["max_running_requests"] = max_running_requests
-    if max_prefill_tokens is not None:
-        overrides["max_prefill_tokens"] = max_prefill_tokens
-    return overrides
-
-
-def _opd_teacher_model_config(args) -> "ModelConfig | None":
-    """ModelConfig for the managed frozen OPD teacher (--opd-serve-teacher), or None.
-
-    Served like any other sglang_config model -- own router, own ServerGroup, riding the
-    same offload/health machinery -- but never weight-synced (update_weights=False). The
-    scoring-correctness server flags are baked in: radix cache off (a cache hit skips the
-    forward pass, so no hidden states / input logprobs for the matched prefix) and chunked
-    prefill off (only the last chunk of a chunked prefill returns hidden states,
-    sgl-project/sglang#8066).
-    """
-    if not getattr(args, "opd_serve_teacher", False):
-        return None
-    return ModelConfig(
-        name=OPD_TEACHER_MODEL_NAME,
-        model_path=args.teacher_hf_checkpoint,
-        update_weights=False,
-        num_gpus_per_engine=args.opd_teacher_num_gpus,
-        server_groups=[
-            ServerGroupConfig(
-                worker_type="regular",
-                num_gpus=args.opd_teacher_num_gpus,
-                overrides=_teacher_server_overrides(
-                    args.opd_teacher_mem_fraction,
-                    getattr(args, "opd_teacher_max_running_requests", None),
-                    getattr(args, "opd_teacher_max_prefill_tokens", None),
-                ),
-            )
-        ],
-    )
-
-
-def _opd_teacher_pool_model_configs(args) -> "list[ModelConfig]":
-    """One sglang model entry per served pool teacher (--opd-teacher-pool)."""
-    pool = _opd_teacher_pool(args)
-    if pool is None:
-        return []
-    return [
-        ModelConfig(
-            name=entry.served_model_name,
-            model_path=entry.model_path,
-            update_weights=False,
-            num_gpus_per_engine=entry.num_gpus_per_engine or entry.num_gpus,
-            server_groups=[
-                ServerGroupConfig(
-                    worker_type="regular",
-                    num_gpus=entry.num_gpus,
-                    overrides=_teacher_server_overrides(entry.mem_fraction),
-                )
-            ],
-        )
-        for entry in pool.served
-    ]
-
-
+# ORBIT-SEAM: docstring extended to describe the --opd-serve-teacher managed teacher entry (see the model-list assembly below)
 def start_rollout_servers(args, pg) -> dict[str, RolloutServer]:
     """Start rollout servers: one per model, each with its own router.
 
@@ -1190,6 +1133,7 @@ def start_rollout_servers(args, pg) -> dict[str, RolloutServer]:
     """
     config = _resolve_sglang_config(args)
 
+    # ORBIT-SEAM: append the managed OPD teacher (--opd-serve-teacher) and teacher-pool (--opd-teacher-pool) model entries
     models = list(config.models)
     teacher_cfg = _opd_teacher_model_config(args)
     if teacher_cfg is not None:
@@ -1205,9 +1149,11 @@ def start_rollout_servers(args, pg) -> dict[str, RolloutServer]:
     rollout_pg_offset = _compute_rollout_offset(args)
     megatron_num_gpus = _compute_megatron_num_gpus(args)
 
+    # ORBIT-SEAM: iterate the extended model list (rollout + OPD teacher entries), not just config.models
     for model_idx, model_cfg in enumerate(models):
         model_cfg.resolve(args)
 
+        # ORBIT-SEAM: colocate mode shares actor/rollout GPUs with the teacher entries instead of extending the bucket
         if (model_cfg.name == OPD_TEACHER_MODEL_NAME or model_cfg.name in pool_model_names) and args.colocate:
             # In --colocate mode the teacher shares the actor/rollout GPUs (bundle 0
             # onward, relying on the shared offload/onload dance) instead of extending
@@ -1276,6 +1222,7 @@ def start_rollout_servers(args, pg) -> dict[str, RolloutServer]:
 
     args.sglang_model_routers = {name: (srv.router_ip, srv.router_port) for name, srv in servers.items()}
 
+    # ORBIT-SEAM: publish the managed OPD teacher / teacher-pool routing URLs onto args for the custom-rm scoring hooks to read
     if teacher_cfg is not None:
         teacher_srv = servers[OPD_TEACHER_MODEL_NAME]
         args.opd_teacher_url = f"http://{teacher_srv.router_ip}:{teacher_srv.router_port}/generate"
@@ -1367,11 +1314,14 @@ def _log_eval_rollout_data(rollout_id, args, data, extra_metrics: dict[str, Any]
             return
 
     log_dict = extra_metrics or {}
+    # ORBIT-SEAM: accumulate per-dataset scores for the cross-dataset average below
     per_dataset_scores = []
     for key in data.keys():
         rewards = data[key]["rewards"]
+        # ORBIT-SEAM: unconditional eval/{key} = mean(rewards) removed; scoring now happens in the math-alignment / else branches below
         if (samples := data[key].get("samples")) is not None:
             log_dict |= dict_add_prefix(compute_metrics_from_samples(args, samples), f"eval/{key}/")
+        # ORBIT-SEAM: math-alignment datasets score via compute_math_alignment_metrics (pass@k over verified answers), not a flat mean; eval/{key} assignment moved into this branch
         if samples and is_math_alignment_sample(samples[0]):
             math_alignment_metrics = compute_math_alignment_metrics(
                 rewards,
@@ -1389,6 +1339,7 @@ def _log_eval_rollout_data(rollout_id, args, data, extra_metrics: dict[str, Any]
         if "truncated" in data[key]:
             truncated = data[key]["truncated"]
             log_dict[f"eval/{key}-truncated_ratio"] = sum(truncated) / len(truncated)
+        # ORBIT-SEAM: skip the generic pass-rate metric for math-alignment datasets (compute_math_alignment_metrics already reports pass@k); add eval_pass_k_values and mirror under both the legacy "-" and new "/" key prefixes
         if args.log_passrate and not (samples and is_math_alignment_sample(samples[0])):
             passrate_metrics = compute_pass_rate(
                 flat_rewards=rewards,
@@ -1398,6 +1349,7 @@ def _log_eval_rollout_data(rollout_id, args, data, extra_metrics: dict[str, Any]
             log_dict |= dict_add_prefix(passrate_metrics, f"eval/{key}-")
             log_dict |= dict_add_prefix(passrate_metrics, f"eval/{key}/")
 
+    # ORBIT-SEAM: report a cross-dataset average score when multiple --eval-prompt-data datasets are configured
     # Cross-dataset average — useful when multiple eval datasets are configured
     # via --eval-prompt-data (e.g., math500/aime24/amc23 in-loop). With a single
     # dataset, avg equals that dataset's score.
