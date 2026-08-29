@@ -82,8 +82,12 @@ follows.
   makes RL on a Kimi-1T-class frozen base tractable.
 - **RL on quantized base models**: direct INT4/NVFP4/FP8 checkpoint
   converters and bridges, recipes for Kimi-K2.5/K2.6 INT4 and NVFP4, DSv4
-  MXFP4 (`--dsv4-*`), Qwen3-30B FP8 — OFT adapters on the quantized weights.
-  Miles had FP8 *export* quantizers, not a train-on-quantized path.
+  MXFP4 (`--dsv4-*`), Qwen3-30B FP8 — OFT adapters on the quantized weights,
+  with per-dtype parity verification. The miles base has *export-side*
+  quantizers (FP8/MXFP8/NVFP4/compressed-tensors) and INT4-QAT fake-quant
+  kernels; orbit adds the opposite direction — the RL loop running on real
+  quantized checkpoints (W4A16 INT4, NVFP4, FP8) — plus MXFP4, absent from
+  the base entirely.
 - **Adapter-aware serving**: engine-level adapter staging/activation and
   PEFT-safe radix caching (disabled or keyed per adapter, so cached prefixes
   cannot leak stale adapter activations).
