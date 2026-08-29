@@ -21,36 +21,41 @@ After normalizing the mechanical rename (`miles`->`orbit`, `miles_plugins`->
 | Orbit-only files | 789 | — | Already isolated; some need moving into the home |
 | Dropped miles files | 406 | — | Keep-or-drop list; not purity-relevant |
 
-## Target layout
+## Target layout (REALIZED 2026-08-29, amended: upstream names restored)
+
+The original draft kept the fork-time `miles->orbit` package rename and nested
+the home at `orbit/peft/`. Both were superseded the same day: the rename was
+undone (it taxed every future upstream interaction and made "pristine" mean
+"identical modulo a 5-regex normalization" instead of byte-identical), and the
+home moved to a top-level `orbit/` package, slime-agentic style.
 
 ```
-orbit/                          # package keeps its name; most files pristine miles
-  peft/                         # THE home layer (mirrors sglang's srt/peft)
-    transport/                  #   <- backends/megatron_utils/peft_transport/*
-    megatron/                   #   <- oft_utils, peft_offload, bridge_peft_helpers,
-    sglang/                     #      lora extraction from lora_utils, engine-side
-    audit/                      #      helpers, audit/peft_wrap, low_precision_bootstrap
-    critic/                     #   <- adapter-critic logic extracted from
-                                #      training_utils/loss.py and utils/ppo_utils.py
-  ...everything else            # pristine miles (purity-enforced) + marked seams
-orbit_plugins/                  # unchanged: mbridge patches, model_args, conversion
-tools/ scripts/ examples/ docs/ # already orbit-only at the top level
+miles/                          # upstream package, verbatim name, mostly verbatim bytes
+miles_plugins/                  # upstream plugin package (orbit additions allowed here)
+orbit/                          # THE home: all orbit code, one top-level package
+  transport/  megatron/  critic/  sglang/  opd/  rewards/  rollout/
+  true_on_policy/  ultra/  audit/  merge/  utils/
+tools/ scripts/ examples/ docs/ # orbit-only top-level trees
 ```
 
 Rules:
 
-1. **Pristine layer.** Any file with a miles counterpart that is not on the seam
-   or owned list must be byte-identical to the pinned miles base after the
-   rename normalization. New orbit code never lands in these files.
-2. **Home layer.** All orbit logic lives under `orbit/peft/`, `orbit_plugins/`,
-   or the orbit-only top-level trees. New orbit features start here.
+1. **Pristine layer.** Any file with a miles counterpart that is not budgeted
+   must be BYTE-IDENTICAL to the pinned miles base. No normalization, no
+   exceptions. New orbit code never lands in these files.
+2. **Home layer.** All orbit logic lives under `orbit/`, `miles_plugins/`, or
+   the orbit-only top-level trees. New orbit features start here. Nothing
+   orbit-only ever lives under `miles/`.
 3. **Seam layer.** A miles file may carry a bounded hook, marked
    `# ORBIT-SEAM:` with one line of rationale, calling into the home layer.
    Budgets are recorded in the purity manifest; a seam growing past its budget
    fails CI until deliberately re-recorded.
 4. **Owned list.** Files orbit owns outright and diffs freely: `README.md`,
-   `pyproject.toml`, `train.py`, `examples/*/README.md`, CI config. Explicitly
-   enumerated, so "owned" is never a loophole.
+   `pyproject.toml`, `examples/*/README.md`. Explicitly enumerated, so "owned"
+   is never a loophole.
+5. **Naming split.** `miles.*` imports, `MILES_*` env vars, `miles_*`
+   identifiers = inherited surface. `orbit.*` imports and `ORBIT_*` env vars =
+   orbit's own surface (e.g. `ORBIT_ROOT`, `ORBIT_SGLANG_FORCE_NATIVE_OPS`).
 
 ## The existing miles hook surface — use it first
 
@@ -141,13 +146,24 @@ entangled files are pristine-plus-seams.
 3. Phase 1 (near-mechanical, bitwise-neutral): move orbit-only files that sit
    inside shared directories into the home; stamp the 57 surgical seams with
    `# ORBIT-SEAM:` marks. **Moves DONE 2026-08-29** on branch `miles-isolation`:
-   all 83 orbit-only files moved under `orbit/peft/` (homes: transport, megatron,
-   critic, sglang, opd, rewards, rollout, true_on_policy, ultra, audit, merge,
-   utils), references rewritten 1:1, manifest steady at 107 pristine / 113
-   budgeted, fast suite failure set identical to orbit-main. Enforced from now on:
-   `home_violations()` in the purity ratchet (no orbit file outside orbit/peft/
-   unless miles-shared) and tests/fast/test_import_integrity.py (every static
-   orbit.* import must resolve). Seam stamping still pending.
+   all 83 orbit-only files moved into the home (commits 33c1ce18, e083078e,
+   941ae6ab), guards added (e16ca06b): `home_violations()` in the purity
+   ratchet and tests/fast/test_import_integrity.py (every static import must
+   resolve). Seam stamping still pending.
+3b. **Phase 1.5 DONE 2026-08-29 (commit 3b73c162): upstream names restored.**
+   `orbit/`->`miles/`, `orbit_plugins/`->`miles_plugins/`, home flattened from
+   `orbit/peft/` to top-level `orbit/`. Pristine files restored from raw base
+   blobs (byte-verbatim); budgeted files rebuilt by line replay (base lines from
+   the raw base, orbit delta lines kept); inherited identifiers/env vars
+   reverted where the miles-form exists in the base. The rename normalization
+   is deleted from tools/miles_purity.py — pristine now means byte-identical.
+   Side effect: purity improved for free (108 pristine / 112 budgeted / 13,859
+   delta lines; prometheus_utils.py's whole delta was a rename artifact).
+   Fast-suite failure set identical to orbit-main (7 pre-existing).
+   Post-merge action for env users: re-run `uv pip install -e .` (the editable
+   finder must learn the new top-level packages miles/miles_plugins/orbit);
+   old checkpoints holding pickled `orbit.*` module paths need a sys.modules
+   alias shim if resumed.
 4. Phase 2: the `arguments.py` registration refactor (~2k lines back to
    pristine, the loudest signal the approach works).
 5. Phase 3: the heavy files, one at a time, hook-first per the mapping table;
