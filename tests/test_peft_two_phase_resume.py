@@ -7,6 +7,7 @@ import torch
 
 import orbit.megatron.peft_utils as peft_utils
 import miles.backends.megatron_utils.checkpoint as checkpoint_mod
+import orbit.megatron.checkpointing as orbit_checkpointing
 from orbit.megatron.peft_utils import (
     load_training_state,
     restore_peft_training_state_after_optimizer_build,
@@ -531,18 +532,18 @@ def test_normal_precision_adapter_load_syncs_main_params_only_without_training_s
 
     monkeypatch.setattr(checkpoint_mod, "get_args", lambda: args)
     monkeypatch.setattr(checkpoint_mod, "is_distributed_checkpoint", lambda _path: True)
-    monkeypatch.setattr(checkpoint_mod, "_resolve_selected_distributed_checkpoint", lambda _args: tmp_path)
-    monkeypatch.setattr(checkpoint_mod, "_load_checkpoint_dist", lambda **_kwargs: (0, 0))
+    monkeypatch.setattr(orbit_checkpointing, "_resolve_selected_distributed_checkpoint", lambda _args: tmp_path)
+    monkeypatch.setattr(orbit_checkpointing, "_load_checkpoint_dist", lambda **_kwargs: (0, 0))
     monkeypatch.setattr(checkpoint_mod, "is_peft_enabled", lambda _args: True)
     monkeypatch.setattr(checkpoint_mod, "is_peft_model", lambda _model: True, raising=False)
     checkpoint_preflight = peft_utils.preflight_peft_adapter_checkpoint(adapter_dir)
     monkeypatch.setattr(
-        checkpoint_mod,
+        orbit_checkpointing,
         "preflight_peft_adapter_checkpoint",
         lambda _path: checkpoint_preflight,
     )
     monkeypatch.setattr(
-        checkpoint_mod,
+        orbit_checkpointing,
         "load_peft_adapter",
         lambda *args, **kwargs: (True, loaded_iteration),
     )

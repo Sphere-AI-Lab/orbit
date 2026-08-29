@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from miles.backends.megatron_utils import checkpoint as checkpoint_module
+from orbit.megatron import checkpointing as orbit_checkpointing
 from miles.backends.megatron_utils import model as model_module
 
 
@@ -53,7 +54,7 @@ def _load_with_spies(
         observed_kwargs["_observed_ckpt_step"] = args.ckpt_step
         observed_kwargs["_observed_ckpt_step_truthy"] = bool(args.ckpt_step)
         observed_root = checkpoint_module.Path(args.load)
-        tracker_path = observed_root / checkpoint_module._MEGATRON_TRACKER_FILE
+        tracker_path = observed_root / orbit_checkpointing._MEGATRON_TRACKER_FILE
         observed_kwargs["_observed_tracker"] = tracker_path.read_text().strip()
         selected_path = observed_root / f"iter_{int(args.ckpt_step):07d}"
         observed_kwargs["_observed_selected_path"] = str(selected_path.resolve(strict=True))
@@ -67,7 +68,7 @@ def _load_with_spies(
     monkeypatch.setattr(checkpoint_module, "get_args", lambda: args)
     monkeypatch.setattr(checkpoint_module, "is_peft_enabled", lambda _args: False)
     monkeypatch.setattr(checkpoint_module, "_load_checkpoint_megatron", full_loader)
-    monkeypatch.setattr(checkpoint_module, "_load_checkpoint_dist", model_only_loader)
+    monkeypatch.setattr(orbit_checkpointing, "_load_checkpoint_dist", model_only_loader)
     result = checkpoint_module.load_checkpoint(
         _model(role),
         object(),
@@ -86,7 +87,7 @@ def test_marked_actor_checkpoint_routes_to_megatron_full_loader(tmp_path, monkey
         iteration=17,
         common_state={"checkpoint_version": 3.0, "iteration": 17},
     )
-    checkpoint_module._write_orbit_training_checkpoint_marker(
+    orbit_checkpointing._write_orbit_training_checkpoint_marker(
         checkpoint_root,
         17,
         "actor",
@@ -125,7 +126,7 @@ def test_explicit_model_only_load_ignores_training_marker(tmp_path, monkeypatch)
         iteration=6,
         common_state={"checkpoint_version": 3.0, "iteration": 6},
     )
-    checkpoint_module._write_orbit_training_checkpoint_marker(
+    orbit_checkpointing._write_orbit_training_checkpoint_marker(
         checkpoint_root,
         6,
         "actor",
@@ -194,7 +195,7 @@ def test_legacy_megatron_resume_flag_requires_training_iteration_intent(
 
 def test_legacy_megatron_complete_actor_marker_allows_numeric_zero_resume(tmp_path, monkeypatch):
     (tmp_path / "latest_checkpointed_iteration.txt").write_text("0")
-    checkpoint_module._write_orbit_training_checkpoint_marker(
+    orbit_checkpointing._write_orbit_training_checkpoint_marker(
         tmp_path,
         0,
         "actor",
@@ -239,7 +240,7 @@ def test_legacy_megatron_rejects_wrong_role_or_incomplete_marker_before_loader_m
     error_match,
 ):
     (tmp_path / "latest_checkpointed_iteration.txt").write_text("0")
-    checkpoint_module._write_orbit_training_checkpoint_marker(
+    orbit_checkpointing._write_orbit_training_checkpoint_marker(
         tmp_path,
         0,
         marker_role,
@@ -421,12 +422,12 @@ def test_numeric_zero_preflight_requires_training_state_on_every_rank(tmp_path, 
         return [value, value]
 
     monkeypatch.setattr(
-        checkpoint_module,
+        orbit_checkpointing,
         "_all_gather_legacy_checkpoint_object",
         simulated_two_rank_gather,
     )
 
-    preflight = checkpoint_module._preflight_legacy_megatron_checkpoint(
+    preflight = orbit_checkpointing._preflight_legacy_megatron_checkpoint(
         args,
         load_training_state=True,
         expected_role="actor",
@@ -466,12 +467,12 @@ def test_numeric_zero_preflight_forces_all_ranks_model_only_if_one_cannot_restor
         return [value, value]
 
     monkeypatch.setattr(
-        checkpoint_module,
+        orbit_checkpointing,
         "_all_gather_legacy_checkpoint_object",
         simulated_two_rank_gather,
     )
 
-    preflight = checkpoint_module._preflight_legacy_megatron_checkpoint(
+    preflight = orbit_checkpointing._preflight_legacy_megatron_checkpoint(
         args,
         load_training_state=True,
         expected_role="actor",
@@ -486,7 +487,7 @@ def test_numeric_zero_preflight_forces_all_ranks_model_only_if_one_cannot_restor
 
 def test_legacy_megatron_incomplete_wrong_role_release_marker_remains_model_bootstrap(tmp_path, monkeypatch):
     (tmp_path / "latest_checkpointed_iteration.txt").write_text("release")
-    checkpoint_module._write_orbit_training_checkpoint_marker(
+    orbit_checkpointing._write_orbit_training_checkpoint_marker(
         tmp_path,
         0,
         "critic",
@@ -602,7 +603,7 @@ def test_actor_training_checkpoint_is_model_only_for_critic_bootstrap(tmp_path, 
             "opt_param_scheduler": {"num_steps": 13},
         },
     )
-    checkpoint_module._write_orbit_training_checkpoint_marker(
+    orbit_checkpointing._write_orbit_training_checkpoint_marker(
         checkpoint_root,
         13,
         "actor",
@@ -622,7 +623,7 @@ def test_marked_checkpoint_without_optimizer_fails_resume_explicitly(tmp_path, m
         iteration=4,
         common_state={"checkpoint_version": 3.0, "iteration": 4},
     )
-    checkpoint_module._write_orbit_training_checkpoint_marker(
+    orbit_checkpointing._write_orbit_training_checkpoint_marker(
         checkpoint_root,
         4,
         "actor",
@@ -651,7 +652,7 @@ def test_marked_checkpoint_without_optimizer_allows_explicit_model_warm_start(tm
         iteration=4,
         common_state={"checkpoint_version": 3.0, "iteration": 4},
     )
-    checkpoint_module._write_orbit_training_checkpoint_marker(
+    orbit_checkpointing._write_orbit_training_checkpoint_marker(
         checkpoint_root,
         4,
         "actor",
@@ -681,7 +682,7 @@ def test_marked_complete_checkpoint_honors_explicit_model_only_warm_start(
         iteration=10,
         common_state={"checkpoint_version": 3.0, "iteration": 10},
     )
-    checkpoint_module._write_orbit_training_checkpoint_marker(
+    orbit_checkpointing._write_orbit_training_checkpoint_marker(
         checkpoint_root,
         10,
         "actor",
@@ -705,7 +706,7 @@ def test_invalid_training_marker_fails_closed(tmp_path, monkeypatch):
         iteration=3,
         common_state={"checkpoint_version": 3.0, "iteration": 3},
     )
-    marker_path = checkpoint_dir / checkpoint_module._ORBIT_TRAINING_CHECKPOINT_MARKER
+    marker_path = checkpoint_dir / orbit_checkpointing._ORBIT_TRAINING_CHECKPOINT_MARKER
     marker_path.write_text("{not-json")
     monkeypatch.setattr(checkpoint_module, "get_args", lambda: _args(checkpoint_root))
 
@@ -737,7 +738,7 @@ def test_save_wrapper_writes_atomic_role_marker(tmp_path, monkeypatch):
 
     assert result == "saved"
     assert len(calls) == 1
-    marker_path = tmp_path / "iter_0000005" / checkpoint_module._ORBIT_TRAINING_CHECKPOINT_MARKER
+    marker_path = tmp_path / "iter_0000005" / orbit_checkpointing._ORBIT_TRAINING_CHECKPOINT_MARKER
     marker = json.loads(marker_path.read_text())
     assert marker == {
         "format": "orbit.training_checkpoint",
@@ -752,7 +753,7 @@ def test_save_wrapper_writes_atomic_role_marker(tmp_path, monkeypatch):
 def test_marker_helper_accepts_direct_iteration_directory(tmp_path):
     checkpoint_dir = tmp_path / "iter_0000005"
 
-    marker_path = checkpoint_module._write_orbit_training_checkpoint_marker(
+    marker_path = orbit_checkpointing._write_orbit_training_checkpoint_marker(
         checkpoint_dir,
         5,
         "actor",
@@ -770,7 +771,7 @@ def test_direct_iteration_training_checkpoint_is_pinned_for_full_load(tmp_path, 
         iteration=17,
         common_state={"checkpoint_version": 3.0, "iteration": 17},
     )
-    checkpoint_module._write_orbit_training_checkpoint_marker(
+    orbit_checkpointing._write_orbit_training_checkpoint_marker(
         checkpoint_dir,
         17,
         "actor",
@@ -797,7 +798,7 @@ def test_explicit_checkpoint_step_zero_is_selected_and_pinned(tmp_path, monkeypa
         iteration=0,
         common_state={"checkpoint_version": 3.0, "iteration": 0},
     )
-    checkpoint_module._write_orbit_training_checkpoint_marker(
+    orbit_checkpointing._write_orbit_training_checkpoint_marker(
         checkpoint_root,
         0,
         "actor",
@@ -853,7 +854,7 @@ def test_unfinalized_async_marker_does_not_override_tracked_checkpoint(tmp_path,
     )
     # An async save can write its Orbit marker before torch_dist finalizes
     # .metadata and advances the tracker. The incomplete directory is ignored.
-    checkpoint_module._write_orbit_training_checkpoint_marker(
+    orbit_checkpointing._write_orbit_training_checkpoint_marker(
         checkpoint_root,
         6,
         "actor",
@@ -874,7 +875,7 @@ def test_full_load_ignores_parent_release_tracker(tmp_path, monkeypatch, selecti
         iteration=17,
         common_state={"checkpoint_version": 3.0, "iteration": 17},
     )
-    checkpoint_module._write_orbit_training_checkpoint_marker(
+    orbit_checkpointing._write_orbit_training_checkpoint_marker(
         checkpoint_root,
         17,
         "actor",
@@ -912,7 +913,7 @@ def test_incomplete_direct_distributed_checkpoint_fails_closed(
     checkpoint_dir = tmp_path / "iter_0000003"
     checkpoint_dir.mkdir()
     if remnant == "marker":
-        checkpoint_module._write_orbit_training_checkpoint_marker(
+        orbit_checkpointing._write_orbit_training_checkpoint_marker(
             checkpoint_dir,
             3,
             "actor",
@@ -977,7 +978,7 @@ def test_symlink_alias_to_marked_iteration_resumes(tmp_path, monkeypatch):
         iteration=17,
         common_state={"checkpoint_version": 3.0, "iteration": 17},
     )
-    checkpoint_module._write_orbit_training_checkpoint_marker(
+    orbit_checkpointing._write_orbit_training_checkpoint_marker(
         checkpoint_dir,
         17,
         "actor",
@@ -1003,7 +1004,7 @@ def test_failed_full_load_restores_args_and_removes_temporary_tracker(tmp_path, 
         iteration=17,
         common_state={"checkpoint_version": 3.0, "iteration": 17},
     )
-    checkpoint_module._write_orbit_training_checkpoint_marker(
+    orbit_checkpointing._write_orbit_training_checkpoint_marker(
         checkpoint_root,
         17,
         "actor",

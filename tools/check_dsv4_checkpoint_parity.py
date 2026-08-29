@@ -605,7 +605,7 @@ def verify_disk(hf_path: Path, megatron_path: Path) -> int:
          parameters from the saved torch_dist via
          ``dist_checkpointing.load(sharded_state_dict, resolved_dist_path)``.
          This is the same code path
-         ``miles/backends/megatron_utils/checkpoint.py:_load_checkpoint_dist``
+         ``orbit/megatron/checkpointing.py:_load_checkpoint_dist``
          takes when ``LOAD_CKPT`` points at a torch_dist dir.
       3. Stream Megatron -> HF and byte-compare with the source safetensors.
 

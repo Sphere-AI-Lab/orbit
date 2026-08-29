@@ -8,6 +8,7 @@ pytest.importorskip("ray")
 
 import miles.backends.megatron_utils.actor as actor_mod
 import miles.backends.megatron_utils.checkpoint as checkpoint_mod
+import orbit.megatron.checkpointing as orbit_checkpointing
 from miles.ray.actor_group import RayTrainGroup
 from miles.ray.placement_group import _single_start_rollout_id
 
@@ -60,21 +61,21 @@ def test_distributed_critic_resume_uses_full_megatron_loader(monkeypatch, tmp_pa
     calls = []
 
     monkeypatch.setattr(checkpoint_mod, "get_args", lambda: args)
-    monkeypatch.setattr(checkpoint_mod, "validate_low_precision_bootstrap_args", lambda _args: None)
+    monkeypatch.setattr(orbit_checkpointing, "validate_low_precision_bootstrap_args", lambda _args: None)
     monkeypatch.setattr(checkpoint_mod, "is_distributed_checkpoint", lambda _path: True)
-    monkeypatch.setattr(checkpoint_mod, "_resolve_selected_distributed_checkpoint", lambda _args: tmp_path)
+    monkeypatch.setattr(orbit_checkpointing, "_resolve_selected_distributed_checkpoint", lambda _args: tmp_path)
     monkeypatch.setattr(
-        checkpoint_mod,
+        orbit_checkpointing,
         "_select_megatron_training_checkpoint",
         lambda _args, expected_role, checkpoint_dir: checkpoint_dir,
     )
     monkeypatch.setattr(
-        checkpoint_mod,
+        orbit_checkpointing,
         "_load_selected_megatron_training_checkpoint",
         lambda *_args, **_kwargs: calls.append("megatron") or (6, 0),
     )
     monkeypatch.setattr(
-        checkpoint_mod,
+        orbit_checkpointing,
         "_load_checkpoint_dist",
         lambda **kwargs: calls.append("model-only") or (0, 0),
     )
@@ -99,14 +100,14 @@ def test_full_critic_does_not_load_actor_peft_adapter(monkeypatch, tmp_path):
     args = _checkpoint_args(tmp_path)
 
     monkeypatch.setattr(checkpoint_mod, "get_args", lambda: args)
-    monkeypatch.setattr(checkpoint_mod, "validate_low_precision_bootstrap_args", lambda _args: None)
+    monkeypatch.setattr(orbit_checkpointing, "validate_low_precision_bootstrap_args", lambda _args: None)
     monkeypatch.setattr(checkpoint_mod, "is_distributed_checkpoint", lambda _path: False)
     monkeypatch.setattr(checkpoint_mod, "_is_megatron_checkpoint", lambda _path: False)
     monkeypatch.setattr(checkpoint_mod, "_load_checkpoint_hf", lambda **kwargs: (0, 0))
     monkeypatch.setattr(checkpoint_mod, "is_peft_enabled", lambda _args: True)
     monkeypatch.setattr(checkpoint_mod, "is_peft_model", lambda _model: False)
     monkeypatch.setattr(
-        checkpoint_mod,
+        orbit_checkpointing,
         "load_peft_adapter",
         lambda *args, **kwargs: pytest.fail("full critic attempted to load actor PEFT adapter"),
     )
