@@ -15,7 +15,7 @@ try:
 except ImportError:
     pass
 
-from orbit.backends.megatron_utils.fp32_param_utils import mark_param_dtype
+from orbit.peft.megatron.fp32_param_utils import mark_param_dtype
 from orbit.backends.training_utils.cp_utils import build_gdn_cp_context
 
 from .hf_attention import HuggingfaceAttention, _load_hf_config

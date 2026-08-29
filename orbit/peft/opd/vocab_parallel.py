@@ -10,7 +10,7 @@ normalize and reduce across the shards itself -- that is what these helpers prov
 import torch
 import torch.distributed as dist
 
-from .parallel import get_parallel_state
+from orbit.backends.training_utils.parallel import get_parallel_state
 
 
 def vocab_shard_start(local_vocab_size: int) -> int:

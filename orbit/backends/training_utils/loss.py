@@ -37,8 +37,8 @@ from .cp_utils import (
     get_sum_of_sample_mean,
 )
 from .parallel import get_parallel_state
-from .teacher_lm_head import load_teacher_lm_head
-from .vocab_parallel import (
+from orbit.peft.opd.teacher_lm_head import load_teacher_lm_head
+from orbit.peft.opd.vocab_parallel import (
     compute_vocab_parallel_topk_log_probs,
     compute_vocab_parallel_topk_log_probs_and_entropy,
     vocab_parallel_log_softmax,

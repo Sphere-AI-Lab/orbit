@@ -1,7 +1,7 @@
 import os
 from types import SimpleNamespace
 
-from orbit.backends.sglang_utils.native_ops import force_native_forward_after_init
+from orbit.peft.sglang.native_ops import force_native_forward_after_init
 from orbit.backends.sglang_utils.sglang_engine import (
     _compute_server_args,
     _configure_peft_cache_kwargs,

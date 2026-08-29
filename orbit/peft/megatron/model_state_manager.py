@@ -6,7 +6,7 @@ from collections.abc import Callable, Iterable
 
 import torch
 
-from orbit.backends.megatron_utils.state_mode import resolve_training_state_mode
+from orbit.peft.megatron.state_mode import resolve_training_state_mode
 from orbit.backends.megatron_utils.update_weight.common import is_named_adapter_tensor
 from orbit.utils.tensor_backper import TensorBackuper
 

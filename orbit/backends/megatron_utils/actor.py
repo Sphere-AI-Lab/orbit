@@ -48,9 +48,9 @@ from ..training_utils.data import DataIterator, get_data_iterator, get_rollout_d
 from ..training_utils.log_utils import log_cpu_memory, log_perf_data, log_rollout_data
 from ..training_utils.loss import compute_advantages_and_returns, get_log_probs_and_entropy, get_values
 from ..training_utils.parallel import get_parallel_state
-from ..training_utils.teacher_lm_head import load_teacher_lm_head, offload_teacher_lm_head, onload_teacher_lm_head
+from orbit.peft.opd.teacher_lm_head import load_teacher_lm_head, offload_teacher_lm_head, onload_teacher_lm_head
 from .checkpoint import load_checkpoint
-from .critic_adapter import (
+from orbit.peft.critic.critic_adapter import (
     _expected_critic_resume_iteration,
     build_critic_instance,
     save_critic_checkpoint,
@@ -59,9 +59,9 @@ from .critic_adapter import (
 from .initialize import init, is_megatron_main_rank
 from .lora_utils import is_lora_enabled
 from .model import forward_only, initialize_model_and_optimizer, save, train
-from .model_state_manager import create_model_state_manager
+from orbit.peft.megatron.model_state_manager import create_model_state_manager
 from .parallel import verify_megatron_parallel_state
-from .peft_offload import (
+from orbit.peft.megatron.peft_offload import (
     load_megatron_adapter_to_gpu,
     load_megatron_frozen_base_to_gpu,
     load_megatron_grad_buffers,
@@ -71,7 +71,7 @@ from .peft_offload import (
     offload_megatron_grad_buffers,
     offload_megatron_optimizer,
 )
-from .peft_utils import (
+from orbit.peft.megatron.peft_utils import (
     create_peft_instance,
     get_peft_method,
     is_adapter_param_name,
@@ -79,9 +79,9 @@ from .peft_utils import (
     load_adapter_tensors_for_teacher,
 )
 from .replay_utils import get_register_replay_list_func
-from .state_mode import should_backup_actor_after_train, uses_adapter_state
+from orbit.peft.megatron.state_mode import should_backup_actor_after_train, uses_adapter_state
 from .update_weight.common import named_adapter_params, named_params_and_buffers
-from .update_weight.update_weight_from_distributed.bridge import UpdateWeightFromDistributedBridge
+from orbit.peft.megatron.update_weight_bridge import UpdateWeightFromDistributedBridge
 from .update_weight.update_weight_from_distributed.broadcast import UpdateWeightFromDistributed
 
 try:
@@ -219,7 +219,7 @@ class MegatronTrainRayActor(TrainRayActor):
                 m.enabled = getattr(self.args, f"use_{m.name}_replay")
                 m.enable_check_replay_result = m.enabled and self.args.ci_test
 
-        from orbit.backends.megatron_utils.mtp_rl_patches import apply_mtp_in_rl_patches
+        from orbit.peft.megatron.mtp_rl_patches import apply_mtp_in_rl_patches
 
         apply_mtp_in_rl_patches(self.args)
 

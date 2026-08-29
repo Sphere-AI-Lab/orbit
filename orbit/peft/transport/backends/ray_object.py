@@ -15,13 +15,13 @@ import torch
 from ray import ObjectRef
 from ray.actor import ActorHandle
 
-from orbit.backends.megatron_utils.peft_utils import PeftSyncSpec
-from orbit.backends.megatron_utils.update_weight.sync_metrics import get_payload_tracker
+from orbit.peft.megatron.peft_utils import PeftSyncSpec
+from orbit.peft.megatron.sync_metrics import get_payload_tracker
 
-from .._gather import peft_adapter_preloaded, validate_adapter_weight_chunk
-from ..interface import PeftSendResult, PeftWeightTransport
-from ..registry import PeftMethodSpec
-from ..runtime import PeftRuntimeMode, resolve_peft_runtime_mode
+from orbit.peft.transport._gather import peft_adapter_preloaded, validate_adapter_weight_chunk
+from orbit.peft.transport.interface import PeftSendResult, PeftWeightTransport
+from orbit.peft.transport.registry import PeftMethodSpec
+from orbit.peft.transport.runtime import PeftRuntimeMode, resolve_peft_runtime_mode
 
 
 def _cpu_tensor(tensor: torch.Tensor) -> torch.Tensor:

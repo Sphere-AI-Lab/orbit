@@ -15,15 +15,17 @@ from sglang.srt.utils import MultiprocessingSerializer, kill_process_tree
 from urllib3.exceptions import NewConnectionError
 
 from orbit.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME
-from orbit.backends.megatron_utils.oft_utils import OFT_ADAPTER_NAME
-from orbit.backends.megatron_utils.peft_utils import convert_target_modules_to_hf, get_peft_method
-from orbit.backends.sglang_utils.native_ops import patch_sglang_native_ops
+from orbit.peft.megatron.oft_utils import OFT_ADAPTER_NAME
+from orbit.peft.megatron.peft_utils import convert_target_modules_to_hf, get_peft_method
+from orbit.peft.sglang.native_ops import patch_sglang_native_ops
 from orbit.ray.ray_actor import RayActor
 from orbit.utils.env_report import collect_and_print_node_env_report
 from orbit.utils.http_utils import get_host_info
 
 logger = logging.getLogger(__name__)
-_COMPAT_SITE_DIR = Path(__file__).resolve().parent / "compat_site"
+from orbit.peft import sglang as _peft_sglang
+
+_COMPAT_SITE_DIR = Path(_peft_sglang.__file__).resolve().parent / "compat_site"
 
 
 def _balance_broadcast_shm_refcounts(tensors: dict, consumer_count: int) -> int:

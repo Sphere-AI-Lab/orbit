@@ -18,8 +18,8 @@ from argparse import Namespace
 import torch
 from safetensors import safe_open
 
-from .parallel import get_parallel_state
-from .vocab_parallel import vocab_shard_start
+from orbit.backends.training_utils.parallel import get_parallel_state
+from orbit.peft.opd.vocab_parallel import vocab_shard_start
 
 logger = logging.getLogger(__name__)
 

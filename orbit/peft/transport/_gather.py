@@ -15,7 +15,7 @@ from collections.abc import Iterable
 
 import torch
 
-from .registry import PeftMethodSpec
+from orbit.peft.transport.registry import PeftMethodSpec
 
 
 def peft_adapter_preloaded(args: Namespace, peft_method: str) -> bool:

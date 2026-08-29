@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 import torch
 
-import orbit.backends.megatron_utils.critic_adapter as critic_adapter
-from orbit.backends.megatron_utils.critic_adapter import (
+import orbit.peft.critic.critic_adapter as critic_adapter
+from orbit.peft.critic.critic_adapter import (
     _check_resume_iteration,
     _expected_critic_resume_iteration,
     load_critic_checkpoint,

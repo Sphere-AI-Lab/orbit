@@ -5,10 +5,10 @@ import pytest
 import torch
 import torch.multiprocessing as torch_mp
 
-from orbit.backends.megatron_utils.peft_transport.backends import ipc as ipc_backend
-from orbit.backends.megatron_utils.peft_transport.backends.ipc import IpcBackend
-from orbit.backends.megatron_utils.peft_transport.registry import PeftMethodSpec
-from orbit.backends.megatron_utils.peft_utils import PeftSyncSpec
+from orbit.peft.transport.backends import ipc as ipc_backend
+from orbit.peft.transport.backends.ipc import IpcBackend
+from orbit.peft.transport.registry import PeftMethodSpec
+from orbit.peft.megatron.peft_utils import PeftSyncSpec
 from orbit.backends.sglang_utils import sglang_engine as engine_module
 from orbit.backends.sglang_utils.sglang_engine import SGLangEngine
 

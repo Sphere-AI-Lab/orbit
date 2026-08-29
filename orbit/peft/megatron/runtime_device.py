@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from .tensor_semantics import should_skip_named_tensor_for_meta_validation
+from orbit.peft.megatron.tensor_semantics import should_skip_named_tensor_for_meta_validation
 
 
 def _resolve_target_device(target_device: torch.device | None) -> torch.device:

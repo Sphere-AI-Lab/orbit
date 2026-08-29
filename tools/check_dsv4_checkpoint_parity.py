@@ -650,7 +650,7 @@ def verify_disk(hf_path: Path, megatron_path: Path) -> int:
     t0 = time.monotonic()
     # Same loader orbit's _load_checkpoint_dist calls. ORBIT_ROOT must be on
     # PYTHONPATH; the shell wrapper handles that via scripts/lib/tool_env.sh.
-    from orbit.backends.megatron_utils.low_precision_bootstrap import load_dist_checkpoint
+    from orbit.peft.megatron.low_precision_bootstrap import load_dist_checkpoint
 
     load_dist_checkpoint(model, str(megatron_path))
     print(f"  loaded in {time.monotonic() - t0:.1f}s", flush=True)

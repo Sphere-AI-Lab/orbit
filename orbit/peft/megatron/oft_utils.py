@@ -7,7 +7,7 @@ from typing import Any
 
 import torch
 
-from .peft_utils import (
+from orbit.peft.megatron.peft_utils import (
     PeftCheckpointPreflight,
     convert_target_modules_to_megatron,
     detect_peft_variant,
@@ -164,7 +164,7 @@ def save_oft_checkpoint(
     iteration: int | None = None,
     active_student_version: str | None = None,
 ) -> str:
-    from . import peft_utils
+    from orbit.peft.megatron import peft_utils
 
     return peft_utils.save_peft_adapter_checkpoint(
         model,
@@ -189,7 +189,7 @@ def load_oft_adapter(
     expected_active_student_version: str | None = None,
     checkpoint_preflight: PeftCheckpointPreflight | None = None,
 ) -> tuple[bool, int | None]:
-    from . import peft_utils
+    from orbit.peft.megatron import peft_utils
 
     return peft_utils.load_peft_adapter_checkpoint(
         model,

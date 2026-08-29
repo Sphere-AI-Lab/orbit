@@ -10,7 +10,7 @@ from orbit.backends.megatron_utils import actor as actor_utils
 from orbit.backends.megatron_utils import checkpoint as checkpoint_utils
 from orbit.backends.megatron_utils import lora_utils
 from orbit.backends.megatron_utils import model as model_utils
-from orbit.backends.megatron_utils import peft_utils
+from orbit.peft.megatron import peft_utils
 from orbit.utils.self_teacher import SelfTeacherBuffer
 from orbit.utils.self_teacher_checkpoint import (
     TeacherCheckpointError,

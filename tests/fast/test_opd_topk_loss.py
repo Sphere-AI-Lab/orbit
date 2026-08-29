@@ -20,7 +20,7 @@ import torch.nn.functional as F
 
 from tests.fast.dist_utils import find_free_port, init_gloo
 
-from orbit.backends.training_utils import teacher_lm_head as teacher_lm_head_module
+from orbit.peft.opd import teacher_lm_head as teacher_lm_head_module
 from orbit.backends.training_utils.cp_utils import get_sum_of_sample_mean
 from orbit.backends.training_utils.loss import (
     _TOPK_LOG_INF,

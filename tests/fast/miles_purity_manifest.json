@@ -42,7 +42,7 @@
   },
   "orbit/backends/megatron_utils/actor.py": {
    "delta_lines": 955,
-   "sha": "374f0cd75ffe420099e15c41397a178da6799886ae62f60bdd69235c0cfd9ebd"
+   "sha": "b726bb7d6a656aea1580b9ba88cc07a21b2a0958a930c919a22b9f9f58e137f7"
   },
   "orbit/backends/megatron_utils/arguments.py": {
    "delta_lines": 37,
@@ -50,11 +50,11 @@
   },
   "orbit/backends/megatron_utils/bridge_lora_helpers.py": {
    "delta_lines": 123,
-   "sha": "d344e4429963a880a586e4c171ac73b81f8fe4b55637718d284699c96f844ce6"
+   "sha": "6d77a895e9117cb6d2cd83522e4d873b6a3324f71d0933b6e4f41c5816450268"
   },
   "orbit/backends/megatron_utils/checkpoint.py": {
    "delta_lines": 1028,
-   "sha": "91b243130b359f36f9a61640389b4d9b730e418aa37c4ddeb9c102da43d5de9a"
+   "sha": "73ace4bf9211bad1f79e983348c8234b018afa045c66b0cf032e1ca782bf4589"
   },
   "orbit/backends/megatron_utils/initialize.py": {
    "delta_lines": 21,
@@ -62,7 +62,7 @@
   },
   "orbit/backends/megatron_utils/lora_utils.py": {
    "delta_lines": 467,
-   "sha": "e7bd0ef1d32cfb8e33fcf21552420cddb407e3ae97af342ec7f99fafa5c006f3"
+   "sha": "0be7cf2be48ee2609c0434b2e9f38cb033f36666ed066c266a8ad0303fdebcd5"
   },
   "orbit/backends/megatron_utils/megatron_to_hf/__init__.py": {
    "delta_lines": 18,
@@ -114,11 +114,11 @@
   },
   "orbit/backends/megatron_utils/model.py": {
    "delta_lines": 374,
-   "sha": "11e28714a7fa4b8e97e0f2324490fabd68f261513f272c892ae14ca209040d11"
+   "sha": "50b1d7a5297778f09e6cb2eb7ad61d030fcf17a070f3e95a25e1daab24d5f7f9"
   },
   "orbit/backends/megatron_utils/model_provider.py": {
    "delta_lines": 53,
-   "sha": "acf034f9e9cb12da10d5eaaf936ba8182eb65bf368d02458c815d5cd7cd4c2fa"
+   "sha": "301b007259537aac2a2443bc87cf48d19036f4a8eff4704a7ae643eb07c0ddee"
   },
   "orbit/backends/megatron_utils/parallel.py": {
    "delta_lines": 4,
@@ -130,7 +130,7 @@
   },
   "orbit/backends/megatron_utils/update_weight/common.py": {
    "delta_lines": 127,
-   "sha": "72f5a38fe0a95d80e60167dbf335af0459d329fe662668896fc2d4a3db020208"
+   "sha": "09bfcf90cd64c5d07bd8c1c01e6027785e6bbcc6b31b92e872fbeaab51e5173e"
   },
   "orbit/backends/megatron_utils/update_weight/hf_weight_iterator_base.py": {
    "delta_lines": 15,
@@ -146,23 +146,23 @@
   },
   "orbit/backends/megatron_utils/update_weight/update_weight_from_distributed/broadcast.py": {
    "delta_lines": 6,
-   "sha": "de491aadeb87d393a28e94b7dee83bca968473d75475310ae765ea95c94b7fda"
+   "sha": "5009c59426fad77d9fc62c2c40e53c7768e84019e0197153b97067dcba772860"
   },
   "orbit/backends/megatron_utils/update_weight/update_weight_from_distributed/mixin.py": {
    "delta_lines": 37,
-   "sha": "a880917b08cd601e740c06bf5eead2f3d76487014173b9f7b9e44b16bdbbcfdc"
+   "sha": "911feb94d8005de775937512c4916f9cf1b95361b3c844c7ebe2cba5f77d7140"
   },
   "orbit/backends/megatron_utils/update_weight/update_weight_from_tensor.py": {
    "delta_lines": 611,
-   "sha": "c2399de61d29a3a6364f0ee1a134a6286434e7572ba3f3f56d182ebebf130f44"
+   "sha": "70d811850b3ba30e9ae91bd1ec60cbecb4770222c349fca3a6c3c8f4636fc51d"
   },
   "orbit/backends/sglang_utils/arguments.py": {
    "delta_lines": 123,
    "sha": "11b690e6d38a454e59fbaaebb702b635a4e2b624b3d22678d6af8c3386109250"
   },
   "orbit/backends/sglang_utils/sglang_engine.py": {
-   "delta_lines": 606,
-   "sha": "ab015fa07be36159faaf9f002bb1541bebc56fdadcd14215476383634a56acf1"
+   "delta_lines": 608,
+   "sha": "61c63e62a3018e26064333ef0c0532038ef63cb60e4461e8b43c1f80409e17ff"
   },
   "orbit/backends/training_utils/ci_utils.py": {
    "delta_lines": 2,
@@ -182,7 +182,7 @@
   },
   "orbit/backends/training_utils/loss.py": {
    "delta_lines": 1031,
-   "sha": "8d025698a69730e8e43698fce9a1e5bac7c357ec7f530a433769a03b181c5037"
+   "sha": "1a003b1ed2f634a06b0778e2ef58fe2b512feeb308d3f91925d3be2872e8dad3"
   },
   "orbit/ray/actor_group.py": {
    "delta_lines": 125,
@@ -230,7 +230,7 @@
   },
   "orbit/rollout/generate_utils/generate_endpoint_utils.py": {
    "delta_lines": 85,
-   "sha": "7594a78ab6d7e0602462bc696768c64cdadcd04f72b45c5789d39efd6f46ad72"
+   "sha": "6c65e48a867b20a01cb6979fde85f53910c485093b9349bcd526aa7a4b8d1d1b"
   },
   "orbit/rollout/generate_utils/openai_endpoint_utils.py": {
    "delta_lines": 13,
@@ -282,7 +282,7 @@
   },
   "orbit/utils/arguments.py": {
    "delta_lines": 2027,
-   "sha": "bb18bb2c8420f960acd31158c8ded38b2f4965d02999cbf6248ee2b7de1c332a"
+   "sha": "9fc0921f97d7002920e94d78fd0238bcd4492f22370f4ffba4883a305d69f348"
   },
   "orbit/utils/chat_template_utils/tito_tokenizer.py": {
    "delta_lines": 31,
@@ -406,7 +406,7 @@
   },
   "orbit_plugins/models/qwen3_5.py": {
    "delta_lines": 8,
-   "sha": "da5890e2c9562df5f52a7a08cefbad37926f6b7ec1c80fb8db42828a4ece312a"
+   "sha": "c9954cfeaee83040d566cec319697c53e5ea09e84370dbc56d8dad9f84493d54"
   },
   "pyproject.toml": {
    "delta_lines": 283,

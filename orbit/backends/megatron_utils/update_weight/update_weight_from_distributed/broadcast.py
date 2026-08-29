@@ -14,7 +14,7 @@ from tqdm import tqdm
 from orbit.backends.training_utils.parallel import get_parallel_state
 from orbit.utils.distributed_utils import init_process_group
 
-from ..sync_metrics import get_payload_tracker
+from orbit.peft.megatron.sync_metrics import get_payload_tracker
 from .mixin import DistBucketedWeightUpdateMixin
 
 

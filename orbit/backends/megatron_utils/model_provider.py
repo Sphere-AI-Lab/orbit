@@ -17,8 +17,8 @@ from megatron.core.transformer.spec_utils import import_module
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.training.arguments import core_transformer_config_from_args
 
-from .low_precision_bootstrap import configure_provider_for_low_precision, load_hf_config, resolve_bridge_load_path
-from .bridge_provider_overrides import apply_bridge_provider_overrides
+from orbit.peft.megatron.low_precision_bootstrap import configure_provider_for_low_precision, load_hf_config, resolve_bridge_load_path
+from orbit.peft.megatron.bridge_provider_overrides import apply_bridge_provider_overrides
 from orbit.utils.misc import load_function
 from orbit.utils.replay_base import routing_replay_manager
 

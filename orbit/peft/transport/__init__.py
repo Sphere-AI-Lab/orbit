@@ -3,11 +3,11 @@ from __future__ import annotations
 from argparse import Namespace
 from typing import TYPE_CHECKING
 
-from orbit.backends.megatron_utils.peft_utils import build_peft_sync_spec
+from orbit.peft.megatron.peft_utils import build_peft_sync_spec
 
-from .interface import PeftPayload, PeftSendResult, PeftWeightTransport
-from .registry import PEFT_METHODS, PeftMethodSpec
-from .runtime import PeftRuntimeMode, resolve_peft_runtime_mode
+from orbit.peft.transport.interface import PeftPayload, PeftSendResult, PeftWeightTransport
+from orbit.peft.transport.registry import PEFT_METHODS, PeftMethodSpec
+from orbit.peft.transport.runtime import PeftRuntimeMode, resolve_peft_runtime_mode
 
 if TYPE_CHECKING:
     import torch.distributed as dist
@@ -47,19 +47,19 @@ def build_peft_transport(
     )
     if use_distribute:
         if runtime_mode.transport == "ray":
-            from .backends.ray_object import RayObjectBackend
+            from orbit.peft.transport.backends.ray_object import RayObjectBackend
 
             return RayObjectBackend(**common_kwargs)
         # Late import — NcclBackend imported lazily so colocate-only deployments
         # never need to touch torch.distributed init paths.
-        from .backends.nccl import NcclBackend
+        from orbit.peft.transport.backends.nccl import NcclBackend
         return NcclBackend(**common_kwargs)
     if ipc_gather_group is None or ipc_gather_src is None:
         raise ValueError(
             "IpcBackend requires ipc_gather_group and ipc_gather_src "
             "(set use_distribute=True for distributed engines)."
         )
-    from .backends.ipc import IpcBackend
+    from orbit.peft.transport.backends.ipc import IpcBackend
     return IpcBackend(
         **common_kwargs,
         ipc_gather_group=ipc_gather_group,

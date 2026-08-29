@@ -7,7 +7,7 @@ import torch
 
 from orbit.backends.megatron_utils.sglang import FlattenedTensorBucket
 
-from .interface import PeftPayload
+from orbit.peft.transport.interface import PeftPayload
 
 
 def build_oft_flattened_payload(

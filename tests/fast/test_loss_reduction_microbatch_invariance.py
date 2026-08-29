@@ -3,7 +3,7 @@ from argparse import Namespace
 import pytest
 import torch
 
-from orbit.backends.training_utils import teacher_lm_head as teacher_lm_head_module
+from orbit.peft.opd import teacher_lm_head as teacher_lm_head_module
 from orbit.backends.training_utils.cp_utils import get_sum_of_sample_mean
 from orbit.backends.training_utils.loss import loss_function
 from orbit.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state

@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 from torch import nn
 
-from .tensor_semantics import should_skip_named_tensor_for_meta_validation
+from orbit.peft.megatron.tensor_semantics import should_skip_named_tensor_for_meta_validation
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-import orbit.backends.megatron_utils.peft_utils as peft_utils
+import orbit.peft.megatron.peft_utils as peft_utils
 
 
 class _Scheduler:

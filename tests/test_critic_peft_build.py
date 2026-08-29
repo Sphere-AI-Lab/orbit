@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 import orbit.backends.megatron_utils.model as model_mod
-from orbit.backends.megatron_utils.bridge_peft_helpers import _bridge_is_value_model
+from orbit.peft.megatron.bridge_peft_helpers import _bridge_is_value_model
 
 
 def _args(**overrides):

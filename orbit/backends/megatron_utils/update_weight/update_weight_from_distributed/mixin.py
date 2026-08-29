@@ -12,7 +12,7 @@ from orbit.utils.distributed_utils import get_gloo_group
 
 from ...megatron_to_hf import convert_to_hf
 from ..common import all_gather_param, collect_named_tensors_for_weight_transfer, post_process_weights
-from ..sync_metrics import (
+from orbit.peft.megatron.sync_metrics import (
     emit_timeline_event,
     emit_update_weights_metrics,
     get_payload_tracker,

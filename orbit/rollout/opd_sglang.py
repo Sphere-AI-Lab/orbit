@@ -852,7 +852,7 @@ def _full_vocab_payload(input_ids: list[int]) -> dict[str, Any]:
 
     No ``return_logprob``: full-vocab mode reconstructs the whole teacher
     distribution trainer-side from the hidden states and the teacher's LM head
-    (orbit/backends/training_utils/teacher_lm_head.py). The teacher server must
+    (orbit/peft/opd/teacher_lm_head.py). The teacher server must
     run with ``--enable-return-hidden-states``, ``--disable-radix-cache`` (a
     cache hit skips the forward pass, so no hidden states for the matched
     prefix) and ``--chunked-prefill-size -1`` (only the last chunk of a chunked

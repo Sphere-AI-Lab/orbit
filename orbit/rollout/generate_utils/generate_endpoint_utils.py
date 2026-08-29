@@ -10,8 +10,8 @@ from typing import Any
 import numpy as np
 import pybase64
 
-from orbit.backends.megatron_utils.oft_utils import OFT_ADAPTER_NAME
-from orbit.backends.megatron_utils.peft_utils import get_peft_method
+from orbit.peft.megatron.oft_utils import OFT_ADAPTER_NAME
+from orbit.peft.megatron.peft_utils import get_peft_method
 from orbit.utils.processing_utils import encode_image_for_rollout_engine
 from orbit.utils.types import Sample
 

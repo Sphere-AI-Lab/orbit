@@ -17,7 +17,7 @@ from typing import Any
 import torch
 import torch.distributed as dist
 
-from . import peft_utils
+from orbit.peft.megatron import peft_utils
 
 logger = logging.getLogger(__name__)
 
@@ -554,7 +554,7 @@ def build_critic_instance(args, actor_model, expected_iteration: int | None = No
     iteration (see ``_check_resume_iteration``) so the actor and critic never
     silently train from different points in the run.
     """
-    from .model import clear_memory, initialize_model_and_optimizer
+    from orbit.backends.megatron_utils.model import clear_memory, initialize_model_and_optimizer
 
     with _critic_build_args(args):
         model, optimizer, opt_param_scheduler, _ = initialize_model_and_optimizer(args, role="critic")

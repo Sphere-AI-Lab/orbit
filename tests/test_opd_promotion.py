@@ -2,7 +2,7 @@ from argparse import Namespace
 
 import pytest
 
-from orbit.backends.megatron_utils.peft_utils import PeftSyncSpec
+from orbit.peft.megatron.peft_utils import PeftSyncSpec
 from orbit.backends.megatron_utils.update_weight.update_weight_from_tensor import (
     UpdateWeightFromTensor,
 )

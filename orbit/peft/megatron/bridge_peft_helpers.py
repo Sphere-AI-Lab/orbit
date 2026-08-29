@@ -12,14 +12,14 @@ import logging
 from types import SimpleNamespace
 import torch
 
-from .bridge_provider_overrides import apply_bridge_provider_overrides
-from .low_precision_bootstrap import (
+from orbit.peft.megatron.bridge_provider_overrides import apply_bridge_provider_overrides
+from orbit.peft.megatron.low_precision_bootstrap import (
     configure_provider_for_low_precision,
     is_distributed_checkpoint,
     load_dist_checkpoint,
     resolve_bridge_load_path,
 )
-from .peft_utils import detect_peft_variant
+from orbit.peft.megatron.peft_utils import detect_peft_variant
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +213,7 @@ def _assert_peft_wrapped_modules(
 def _make_value_model_hook(hidden_size: int, sequence_parallel: bool):
     """Create a pre-wrap hook that replaces the output layer with a value head."""
     from megatron.core import parallel_state
-    from .model_provider import replace_output_layer_with_value_head
+    from orbit.backends.megatron_utils.model_provider import replace_output_layer_with_value_head
 
     value_config = SimpleNamespace(hidden_size=hidden_size, sequence_parallel=sequence_parallel)
 
@@ -315,7 +315,7 @@ def _setup_peft_model_via_bridge(args: Namespace, role: str = "actor") -> list:
     from megatron.bridge import AutoBridge
     from megatron.bridge.training.config import DistributedDataParallelConfig
     from transformers import AutoConfig
-    from .peft_utils import (
+    from orbit.peft.megatron.peft_utils import (
         convert_target_modules_to_megatron,
         create_peft_instance,
     )

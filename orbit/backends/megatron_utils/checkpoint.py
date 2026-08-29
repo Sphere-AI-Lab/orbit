@@ -17,14 +17,14 @@ from megatron.training.global_vars import get_args
 
 from orbit.utils import distributed_utils, megatron_bridge_utils
 
-from .low_precision_bootstrap import (
+from orbit.peft.megatron.low_precision_bootstrap import (
     is_distributed_checkpoint,
     is_legacy_megatron_checkpoint,
     load_dist_checkpoint,
     resolve_distributed_checkpoint_dir,
     validate_low_precision_bootstrap_args,
 )
-from .peft_utils import (
+from orbit.peft.megatron.peft_utils import (
     is_peft_enabled,
     is_peft_model,
     load_peft_adapter,

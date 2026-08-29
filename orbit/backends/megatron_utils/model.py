@@ -22,7 +22,7 @@ from megatron.core.utils import get_model_config
 from megatron.training.global_vars import get_args
 from megatron.training.training import get_model
 
-from .modelopt_state_shim import install_if_missing as _install_modelopt_shim
+from orbit.peft.megatron.modelopt_state_shim import install_if_missing as _install_modelopt_shim
 
 # Megatron's `get_model()` imports `megatron.post_training.checkpointing` at
 # call time, and this environment ships megatron.{bridge,core,training} only --
@@ -53,12 +53,12 @@ from .ci_utils import (
     compute_model_hashes_by_layer,
     save_model_hashes,
 )
-from .fp32_param_utils import enforce_marked_param_dtypes
+from orbit.peft.megatron.fp32_param_utils import enforce_marked_param_dtypes
 from .initialize import is_megatron_main_rank
-from .low_precision_bootstrap import should_preload_low_precision_model_before_optimizer
+from orbit.peft.megatron.low_precision_bootstrap import should_preload_low_precision_model_before_optimizer
 from .model_provider import get_model_provider_func
 from .parallel import get_packed_seq_params
-from .peft_utils import (
+from orbit.peft.megatron.peft_utils import (
     is_peft_enabled,
     is_peft_model,
     restore_peft_training_state_after_optimizer_build,
@@ -67,7 +67,7 @@ from .peft_utils import (
 
 logger = logging.getLogger(__name__)
 
-from .bridge_peft_helpers import _ensure_model_list, _setup_peft_model_via_bridge  # noqa: F401
+from orbit.peft.megatron.bridge_peft_helpers import _ensure_model_list, _setup_peft_model_via_bridge  # noqa: F401
 
 
 def _iter_critic_output_layers(model: Sequence[DDP]):
@@ -223,7 +223,7 @@ def _head_critic_provider(provider):
     later re-pointed at the actor's storage via ``alias_trunk_storage``)."""
 
     def wrapped(*p_args, **p_kwargs):
-        from .critic_adapter import prepare_head_critic
+        from orbit.peft.critic.critic_adapter import prepare_head_critic
 
         module = provider(*p_args, **p_kwargs)
         prepare_head_critic([module])

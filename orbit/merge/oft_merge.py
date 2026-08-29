@@ -65,7 +65,7 @@ def _local_name(key: StateKey) -> str:
 
 
 def _is_oft_key(name: StateKey) -> bool:
-    # Mirrors orbit.backends.megatron_utils.oft_utils.is_oft_weight_name without
+    # Mirrors orbit.peft.megatron.oft_utils.is_oft_weight_name without
     # importing the megatron-coupled module.
     return ".oft_" in _local_name(name)
 

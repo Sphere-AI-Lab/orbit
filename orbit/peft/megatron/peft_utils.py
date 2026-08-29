@@ -620,11 +620,11 @@ def validate_peft_checkpoint_type(adapter_dir: Path, expected_method: str) -> di
 def create_peft_instance(args):
     method = get_peft_method(args)
     if method == "oft":
-        from .oft_utils import create_oft_instance
+        from orbit.peft.megatron.oft_utils import create_oft_instance
 
         return create_oft_instance(args)
     if method == "lora":
-        from .lora_utils import create_lora_instance
+        from orbit.backends.megatron_utils.lora_utils import create_lora_instance
 
         return create_lora_instance(args)
     return None
@@ -633,7 +633,7 @@ def create_peft_instance(args):
 def build_peft_sync_spec(args) -> PeftSyncSpec | None:
     method = get_peft_method(args)
     if method == "oft":
-        from .oft_utils import OFT_ADAPTER_NAME, build_oft_sync_config
+        from orbit.peft.megatron.oft_utils import OFT_ADAPTER_NAME, build_oft_sync_config
 
         return PeftSyncSpec(
             method="oft",
@@ -642,7 +642,7 @@ def build_peft_sync_spec(args) -> PeftSyncSpec | None:
             sync_transport=OFT_SYNC_TRANSPORT,
         )
     if method == "lora":
-        from .lora_utils import LORA_ADAPTER_NAME, build_lora_sync_config
+        from orbit.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME, build_lora_sync_config
 
         return PeftSyncSpec(
             method="lora",
@@ -676,7 +676,7 @@ def save_peft_checkpoint(
         raise RuntimeError(f"PEFT save dispatch differs across ranks: {dispatches}")
     method = local_dispatch[0]
     if method == "lora":
-        from .lora_utils import save_lora_checkpoint
+        from orbit.backends.megatron_utils.lora_utils import save_lora_checkpoint
 
         adapter_dir = save_lora_checkpoint(
             model,
@@ -688,7 +688,7 @@ def save_peft_checkpoint(
             active_student_version=active_student_version,
         )
     elif method == "oft":
-        from .oft_utils import save_oft_checkpoint
+        from orbit.peft.megatron.oft_utils import save_oft_checkpoint
 
         adapter_dir = save_oft_checkpoint(
             model,
@@ -758,7 +758,7 @@ def load_peft_adapter(
     )
 
     if method == "lora":
-        from .lora_utils import load_lora_adapter
+        from orbit.backends.megatron_utils.lora_utils import load_lora_adapter
 
         return load_lora_adapter(
             model,
@@ -770,7 +770,7 @@ def load_peft_adapter(
             checkpoint_preflight=checkpoint_preflight,
         )
     if method == "oft":
-        from .oft_utils import load_oft_adapter
+        from orbit.peft.megatron.oft_utils import load_oft_adapter
 
         return load_oft_adapter(
             model,

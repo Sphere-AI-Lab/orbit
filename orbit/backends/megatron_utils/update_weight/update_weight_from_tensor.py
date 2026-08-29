@@ -13,10 +13,10 @@ from megatron.core import mpu
 from ray import ObjectRef
 from ray.actor import ActorHandle
 
-from orbit.backends.megatron_utils.peft_utils import (
+from orbit.peft.megatron.peft_utils import (
     build_peft_sync_spec,
 )
-from orbit.backends.megatron_utils.peft_transport.slots import (
+from orbit.peft.transport.slots import (
     MutationPurpose,
     authorize_adapter_destination,
 )
@@ -27,7 +27,7 @@ from ..sglang import FlattenedTensorBucket, MultiprocessingSerializer
 
 from .common import post_process_weights
 from .hf_weight_iterator_base import HfWeightIteratorBase
-from .sync_metrics import (
+from orbit.peft.megatron.sync_metrics import (
     emit_timeline_event,
     emit_update_weights_metrics,
     get_payload_tracker,
@@ -253,7 +253,7 @@ class UpdateWeightFromTensor:
             return
 
         if self._peft_sync_spec is not None:
-            from orbit.backends.megatron_utils.peft_transport import build_peft_transport
+            from orbit.peft.transport import build_peft_transport
             desired_mode = "nccl" if self.use_distribute else "ipc"
             if self._peft_transport is None or self._peft_transport_mode != desired_mode:
                 if self._peft_transport is not None:
@@ -357,7 +357,7 @@ class UpdateWeightFromTensor:
         weight_chunks = self._hf_weight_iterator.get_hf_weight_chunks(megatron_local_weights)
         source_chunk_count = None
         if self._peft_sync_spec is not None and self._peft_sync_spec.method == "lora":
-            from orbit.backends.megatron_utils.peft_transport._gather import (
+            from orbit.peft.transport._gather import (
                 coalesce_lora_hf_weight_chunks,
             )
             source_chunk_count, weight_chunks = coalesce_lora_hf_weight_chunks(weight_chunks)
@@ -367,7 +367,7 @@ class UpdateWeightFromTensor:
                     source_chunk_count,
                 )
         if self._peft_sync_spec is not None and self._peft_sync_spec.method == "oft":
-            from orbit.backends.megatron_utils.peft_transport._gather import (
+            from orbit.peft.transport._gather import (
                 coalesce_oft_hf_weight_chunks,
             )
             source_chunk_count, weight_chunks = coalesce_oft_hf_weight_chunks(weight_chunks)
@@ -604,12 +604,12 @@ class UpdateWeightFromTensor:
         megatron_local_weights = self.weights_getter()
         weight_chunks = self._hf_weight_iterator.get_hf_weight_chunks(megatron_local_weights)
         if self._peft_sync_spec.method == "lora":
-            from orbit.backends.megatron_utils.peft_transport._gather import (
+            from orbit.peft.transport._gather import (
                 coalesce_lora_hf_weight_chunks,
             )
             _source_chunk_count, weight_chunks = coalesce_lora_hf_weight_chunks(weight_chunks)
         elif self._peft_sync_spec.method == "oft":
-            from orbit.backends.megatron_utils.peft_transport._gather import (
+            from orbit.peft.transport._gather import (
                 coalesce_oft_hf_weight_chunks,
             )
             _source_chunk_count, weight_chunks = coalesce_oft_hf_weight_chunks(weight_chunks)

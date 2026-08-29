@@ -42,7 +42,7 @@ def _install_stub_peft_utils(monkeypatch):
     # The real peft_utils.py does `from megatron.core import mpu` at module
     # scope, which needs a sourced CUDA env. Fake just the names lora_utils.py
     # imports from it; create_lora_instance only actually calls the first two.
-    stub = ModuleType("orbit.backends.megatron_utils.peft_utils")
+    stub = ModuleType("orbit.peft.megatron.peft_utils")
 
     # lora_utils imports this for a type annotation only
     # (checkpoint_preflight: PeftCheckpointPreflight | None). The name still has
@@ -61,7 +61,7 @@ def _install_stub_peft_utils(monkeypatch):
     stub.parse_exclude_modules = lambda *a, **k: None
     stub.resolve_target_modules_hf = lambda *a, **k: []
     stub.save_peft_adapter_checkpoint = lambda *a, **k: None
-    monkeypatch.setitem(sys.modules, "orbit.backends.megatron_utils.peft_utils", stub)
+    monkeypatch.setitem(sys.modules, "orbit.peft.megatron.peft_utils", stub)
 
 
 class _RecordingLoRA:

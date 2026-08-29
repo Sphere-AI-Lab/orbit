@@ -29,7 +29,7 @@ import pytest
 import torch
 import torch.nn as nn
 
-from orbit.backends.megatron_utils.fp32_param_utils import (
+from orbit.peft.megatron.fp32_param_utils import (
     FORCED_PARAM_DTYPE_ATTR,
     enforce_marked_param_dtypes,
     mark_param_dtype,

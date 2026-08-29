@@ -6,7 +6,7 @@ import torch
 
 from orbit.backends.training_utils import cp_utils
 from orbit.backends.training_utils import data as data_utils
-from orbit.backends.training_utils import teacher_lm_head as teacher_lm_head_module
+from orbit.peft.opd import teacher_lm_head as teacher_lm_head_module
 from orbit.backends.training_utils.data import DataIterator, get_batch
 from orbit.backends.training_utils.loss import opd_jsd_loss_function
 from orbit.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state

@@ -7,7 +7,7 @@ from typing import Any
 
 import torch
 
-from .peft_utils import (
+from orbit.peft.megatron.peft_utils import (
     PeftCheckpointPreflight,
     convert_target_modules_to_megatron,
     get_peft_method,

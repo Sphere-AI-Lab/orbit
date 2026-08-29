@@ -8,7 +8,7 @@ import torch
 import torch.distributed as dist
 
 from orbit.backends.megatron_utils.misc_utils import strip_param_name_prefix
-from orbit.backends.megatron_utils.tensor_semantics import should_skip_named_tensor_for_tracking
+from orbit.peft.megatron.tensor_semantics import should_skip_named_tensor_for_tracking
 from orbit.utils.types import ParamInfo
 
 logger = logging.getLogger(__name__)

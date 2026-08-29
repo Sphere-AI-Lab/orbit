@@ -12,18 +12,18 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-import orbit.backends.megatron_utils.peft_transport.backends.ipc as ipc_mod
-import orbit.backends.megatron_utils.peft_transport.backends.nccl as nccl_mod
-import orbit.backends.megatron_utils.peft_transport.backends.ray_object as ray_mod
+import orbit.peft.transport.backends.ipc as ipc_mod
+import orbit.peft.transport.backends.nccl as nccl_mod
+import orbit.peft.transport.backends.ray_object as ray_mod
 import orbit.backends.megatron_utils.update_weight.update_weight_from_tensor as uw_mod
-from orbit.backends.megatron_utils.peft_transport.backends.ipc import IpcBackend
-from orbit.backends.megatron_utils.peft_transport.backends.nccl import NcclBackend
-from orbit.backends.megatron_utils.peft_transport.backends.ray_object import RayObjectBackend
-from orbit.backends.megatron_utils.peft_transport.interface import PeftPayload
-from orbit.backends.megatron_utils.peft_transport.registry import PeftMethodSpec
-from orbit.backends.megatron_utils.peft_transport.runtime import PeftRuntimeMode
-from orbit.backends.megatron_utils.peft_utils import PeftSyncSpec
-from orbit.backends.megatron_utils.update_weight.sync_metrics import (
+from orbit.peft.transport.backends.ipc import IpcBackend
+from orbit.peft.transport.backends.nccl import NcclBackend
+from orbit.peft.transport.backends.ray_object import RayObjectBackend
+from orbit.peft.transport.interface import PeftPayload
+from orbit.peft.transport.registry import PeftMethodSpec
+from orbit.peft.transport.runtime import PeftRuntimeMode
+from orbit.peft.megatron.peft_utils import PeftSyncSpec
+from orbit.peft.megatron.sync_metrics import (
     NUM_CHUNKS_KEY,
     PAUSE_TIMER_KEY,
     PAYLOAD_BYTES_KEY,

@@ -5,9 +5,9 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-import orbit.backends.megatron_utils.peft_utils as peft_utils
+import orbit.peft.megatron.peft_utils as peft_utils
 import orbit.backends.megatron_utils.checkpoint as checkpoint_mod
-from orbit.backends.megatron_utils.peft_utils import (
+from orbit.peft.megatron.peft_utils import (
     load_training_state,
     restore_peft_training_state_after_optimizer_build,
     save_training_state,

@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from orbit.backends.megatron_utils.lora_utils import is_lora_weight_name
-from orbit.backends.megatron_utils.oft_utils import is_oft_weight_name
+from orbit.peft.megatron.oft_utils import is_oft_weight_name
 
 if TYPE_CHECKING:
-    from .interface import PeftPayload
+    from orbit.peft.transport.interface import PeftPayload
 
 
 @dataclass(frozen=True)
@@ -26,7 +26,7 @@ class PeftMethodSpec:
 def _build_oft_payload_shaper():
     # Late import — _payload imports sglang.srt.peft.oft.streamed_weight_loader, which
     # is an optional heavy dependency that may not be present at registry-load time.
-    from ._payload import build_oft_flattened_payload
+    from orbit.peft.transport._payload import build_oft_flattened_payload
     return build_oft_flattened_payload
 
 

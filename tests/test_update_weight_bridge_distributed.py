@@ -12,9 +12,9 @@ from types import SimpleNamespace
 import pytest
 
 import orbit.backends.megatron_utils.actor as actor_mod
-import orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.bridge as bridge_mod
+import orbit.peft.megatron.update_weight_bridge as bridge_mod
 from orbit.backends.megatron_utils.actor import _select_update_weight_cls
-from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.bridge import (
+from orbit.peft.megatron.update_weight_bridge import (
     UpdateWeightFromDistributedBridge,
 )
 

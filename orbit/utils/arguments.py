@@ -1228,7 +1228,7 @@ def _apply_training_mode_args(args) -> None:
 def _is_peft_enabled(args) -> bool:
     """Local PEFT-enabled predicate.
 
-    Avoids importing orbit.backends.megatron_utils.peft_utils here (that
+    Avoids importing orbit.peft.megatron.peft_utils here (that
     module pulls in megatron-core, which would force CPU CI to install
     GPU-only deps just to validate args).
     """
@@ -3690,7 +3690,7 @@ def _common_orbit_validate_args(args):
 
     # Follow-up: During loading, we need to set the start_rollout_id here.
     if args.megatron_to_hf_mode == "bridge":
-        from orbit.backends.megatron_utils.low_precision_bootstrap import (
+        from orbit.peft.megatron.low_precision_bootstrap import (
             load_hf_config,
             resolve_bridge_load_path,
             validate_low_precision_bootstrap_args,

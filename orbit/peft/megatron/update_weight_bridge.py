@@ -30,13 +30,13 @@ from tqdm import tqdm
 
 from orbit.utils.distributed_utils import get_gloo_group
 
-from ..hf_weight_iterator_base import HfWeightIteratorBase
-from .broadcast import (
+from orbit.backends.megatron_utils.update_weight.hf_weight_iterator_base import HfWeightIteratorBase
+from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
     connect_rollout_engines_from_distributed,
     disconnect_rollout_engines_from_distributed,
     update_weights_from_distributed,
 )
-from .mixin import DistBucketedWeightUpdateMixin
+from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin import DistBucketedWeightUpdateMixin
 
 
 class UpdateWeightFromDistributedBridge(DistBucketedWeightUpdateMixin):
