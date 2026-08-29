@@ -5,7 +5,7 @@ import os
 
 from transformers import AutoProcessor, AutoTokenizer, PreTrainedTokenizerBase, ProcessorMixin
 
-from orbit.utils.chat_template_utils.deepseek_v4 import maybe_wrap_deepseek_v4_tokenizer
+from orbit.peft.utils.chat_template_utils.deepseek_v4 import maybe_wrap_deepseek_v4_tokenizer
 
 logger = logging.getLogger(__name__)
 

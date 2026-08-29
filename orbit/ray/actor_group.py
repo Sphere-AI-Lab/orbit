@@ -151,7 +151,7 @@ class RayTrainGroup:
         replicas (which hold the same samples) and would mis-weight DP shards
         (which hold different token counts).
         """
-        from orbit.utils.eval_nll import select_eval_nll_result
+        from orbit.peft.utils.eval_nll import select_eval_nll_result
 
         return select_eval_nll_result(await self._broadcast("compute_eval_nll", rollout_id))
 

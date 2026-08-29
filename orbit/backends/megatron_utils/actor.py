@@ -12,8 +12,8 @@ from transformers import AutoConfig
 
 from orbit.ray.train_actor import TrainRayActor
 from orbit.utils import train_dump_utils
-from orbit.utils.adapter_swap import swap_adapter_tensors
-from orbit.utils.adapter_tensors import AdapterTensorKey, adapter_named_parameters
+from orbit.peft.utils.adapter_swap import swap_adapter_tensors
+from orbit.peft.utils.adapter_tensors import AdapterTensorKey, adapter_named_parameters
 from orbit.utils.arguments import (
     uses_one_trunk_critic,
     uses_rollout_engines,
@@ -22,7 +22,7 @@ from orbit.utils.arguments import (
 )
 from orbit.utils.context_utils import with_defer
 from orbit.utils.distributed_utils import get_gloo_group, init_process_group
-from orbit.utils.eval_nll import (
+from orbit.peft.utils.eval_nll import (
     NllStats,
     accumulate_nll,
     build_eval_nll_batch,
@@ -31,13 +31,13 @@ from orbit.utils.eval_nll import (
     plan_eval_nll_shards,
 )
 from orbit.utils.memory_utils import clear_memory, print_memory
-from orbit.utils.opd_dump import maybe_dump_teacher_logprobs
-from orbit.utils.opd_teacher_spec import should_promote_teacher, teacher_forward_plan
+from orbit.peft.opd.opd_dump import maybe_dump_teacher_logprobs
+from orbit.peft.opd.opd_teacher_spec import should_promote_teacher, teacher_forward_plan
 from orbit.utils.processing_utils import load_tokenizer
 from orbit.utils.ray_utils import Box
 from orbit.utils.reloadable_process_group import destroy_process_groups, monkey_patch_torch_dist, reload_process_groups
 from orbit.utils.replay_base import all_replay_managers
-from orbit.utils.self_teacher import SelfTeacherBuffer
+from orbit.peft.opd.self_teacher import SelfTeacherBuffer
 from orbit.utils.timer import Timer, inverse_timer, timer
 from orbit.utils.tracking_utils import init_tracking
 from orbit.utils.types import RolloutBatch
@@ -309,7 +309,7 @@ class MegatronTrainRayActor(TrainRayActor):
         self._self_teacher = None
         if with_opd_teacher:
             if self._opd_teacher_spec is None:
-                from orbit.utils.opd_teacher_spec import parse_teacher_spec
+                from orbit.peft.opd.opd_teacher_spec import parse_teacher_spec
 
                 self._opd_teacher_spec = parse_teacher_spec(
                     getattr(self.args, "opd_teacher", None), self.args.opd_teacher_load
@@ -806,7 +806,7 @@ class MegatronTrainRayActor(TrainRayActor):
         resumed student, losing the teacher's lag. Absence is legal (checkpoints
         predating sidecars); corruption is not.
         """
-        from orbit.utils.self_teacher_checkpoint import (
+        from orbit.peft.opd.self_teacher_checkpoint import (
             TeacherCheckpointError,
             has_self_teacher_sidecar,
             load_self_teacher_sidecar,

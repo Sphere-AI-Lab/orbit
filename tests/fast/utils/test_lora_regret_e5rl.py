@@ -76,7 +76,7 @@ class TestTheMatchedPairing:
         starts passing at a tight tolerance, the constraint changed and the
         ladder should be revisited."""
         from tools.lora_regret.arms import LLAMA31_8B_QKV_OUTPUT, _e5_shapes
-        from orbit.utils.peft_param_match import oft_lora_match_report
+        from orbit.peft.utils.peft_param_match import oft_lora_match_report
 
         shapes = _e5_shapes(HIDDEN, FFN, LLAMA31_8B_QKV_OUTPUT)
         # The blocks bracketing E4's r16: neither is close.

@@ -1,7 +1,7 @@
 """Ported from miles ``tests/fast/backends/megatron_utils/test_qwen2_true_on_policy_conversion.py``,
 then generalized to cover every megatron_to_hf converter.
 
---true-on-policy forces --transformer-impl local (orbit/true_on_policy/config.py),
+--true-on-policy forces --transformer-impl local (orbit/peft/true_on_policy/config.py),
 under which Megatron emits layernorm params as bare "input_layernorm.weight" /
 "pre_mlp_layernorm.weight" instead of the TE-fused
 "self_attention.linear_qkv.layer_norm_weight" / "mlp.linear_fc1.layer_norm_weight"

@@ -271,7 +271,7 @@ def _make_peft_pre_wrap_hook(
             requested_target_modules=requested_target_modules,
         )
         # Optional structural audit dump (env-gated; no-op in production).
-        from orbit.audit.peft_wrap import dump_megatron_audit
+        from orbit.peft.audit.peft_wrap import dump_megatron_audit
         dump_megatron_audit(transformed)
         _materialize_runtime_device(transformed)
         peft.set_params_to_save(transformed)

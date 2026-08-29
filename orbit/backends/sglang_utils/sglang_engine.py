@@ -1097,7 +1097,7 @@ def _compute_server_args(
     if engine_info_bootstrap_port is not None:
         kwargs["engine_info_bootstrap_port"] = engine_info_bootstrap_port
 
-    from orbit.utils.opd_teacher_spec import (
+    from orbit.peft.opd.opd_teacher_spec import (
         OPD_TEACHER_ADAPTER_NAME,
         needs_engine_teacher_slot,
         parse_teacher_spec,

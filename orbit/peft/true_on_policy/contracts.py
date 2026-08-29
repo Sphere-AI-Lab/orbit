@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .schema import (
+from orbit.peft.true_on_policy.schema import (
     QWEN3_DENSE_TRUE_ON_POLICY_V1_SCHEMA,
     KernelContract,
     LogprobContract,

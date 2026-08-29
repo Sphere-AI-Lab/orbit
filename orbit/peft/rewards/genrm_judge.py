@@ -38,7 +38,7 @@ from argparse import Namespace
 from orbit.peft.rewards.grader_errors import GraderInfrastructureError, InfrastructureErrorCode
 from orbit.peft.rewards.llm_judge import _extract_question
 from orbit.peft.rewards.scoring_client import ScoringProtocolError, post_chat_completions
-from orbit.ultra.strict_json import loads_strict
+from orbit.peft.ultra.strict_json import loads_strict
 from orbit.utils.types import Sample
 
 _WINNER_RE = re.compile(r"WINNER: (A|B|TIE)")

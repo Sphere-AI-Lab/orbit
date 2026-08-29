@@ -11,7 +11,7 @@ from pathlib import Path
 
 import torch
 
-from orbit.merge.oft_merge import _is_oft_key
+from orbit.peft.merge.oft_merge import _is_oft_key
 
 
 def skew_from_vec(oft_r: torch.Tensor, block_size: int) -> torch.Tensor:

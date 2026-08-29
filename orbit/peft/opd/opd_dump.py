@@ -4,7 +4,7 @@ Enabled by ORBIT_OPD_TEACHER_LOGPROB_DUMP=<path>. Only the first
 ORBIT_OPD_TEACHER_LOGPROB_DUMP_LIMIT rollouts (default 1) are dumped, on
 rank 0 only -- this is a fixed-batch equivalence probe, not telemetry.
 
-Pure stdlib module (mirrors orbit.utils.logprob_compare) so it is cheap to
+Pure stdlib module (mirrors orbit.peft.utils.logprob_compare) so it is cheap to
 import unconditionally at the top of the instrumented files.
 
 Record shape: ``{"rollout": int, "sample_index": int, "tokens": [int...],

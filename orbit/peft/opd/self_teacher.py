@@ -13,7 +13,7 @@ from collections.abc import Mapping
 
 import torch
 
-from orbit.utils.adapter_tensors import AdapterTensorKey, adapter_tensor_key_digest
+from orbit.peft.utils.adapter_tensors import AdapterTensorKey, adapter_tensor_key_digest
 
 
 SELF_TEACHER_STATE_SCHEMA_VERSION = 1

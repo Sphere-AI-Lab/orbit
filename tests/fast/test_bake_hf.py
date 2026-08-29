@@ -1,6 +1,6 @@
 import torch
 import pytest
-from orbit.merge.bake_hf import skew_from_vec, cayley_neumann, bake_linear_weight
+from orbit.peft.merge.bake_hf import skew_from_vec, cayley_neumann, bake_linear_weight
 
 
 def test_skew_is_antisymmetric():
@@ -38,7 +38,7 @@ def test_bake_rejects_dim_mismatch():
 
 
 def test_hf_weight_key_mapping():
-    from orbit.merge.bake_hf import _hf_weight_key
+    from orbit.peft.merge.bake_hf import _hf_weight_key
     ok = "base_model.model.model.layers.0.self_attn.q_proj.oft_R.weight"
     assert _hf_weight_key(ok) == "model.layers.0.self_attn.q_proj.weight"
 

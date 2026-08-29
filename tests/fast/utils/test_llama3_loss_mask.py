@@ -14,7 +14,7 @@ pytestmark = pytest.mark.skipif(
 def gen():
     from transformers import AutoTokenizer
 
-    from orbit.utils.llama3_chat_template import ensure_llama3_chat_template
+    from orbit.peft.utils.llama3_chat_template import ensure_llama3_chat_template
     from orbit.utils.mask_utils import MultiTurnLossMaskGenerator
 
     tok = AutoTokenizer.from_pretrained(str(LLAMA31_8B))

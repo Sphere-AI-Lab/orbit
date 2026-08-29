@@ -43,7 +43,7 @@ from orbit.utils.metric_checker import MetricChecker
 from orbit.utils.metric_utils import compute_pass_rate, compute_rollout_step, compute_statistics, dict_add_prefix
 from orbit.utils.misc import load_function, should_run_periodic_action
 from orbit.utils.ray_utils import Box
-from orbit.utils.reward_normalization import normalize_grouped_rewards
+from orbit.peft.rewards.reward_normalization import normalize_grouped_rewards
 from orbit.utils.seqlen_balancing import get_seqlen_balanced_partitions
 from orbit.utils.tracking_utils import init_tracking
 from orbit.utils.types import Sample, collect_teacher_topk_data
@@ -1099,7 +1099,7 @@ def _opd_teacher_pool(args):
         return None
     cached = getattr(args, "_opd_teacher_pool_parsed", None)
     if cached is None:
-        from orbit.utils.opd_teacher_pool import parse_teacher_pool
+        from orbit.peft.opd.opd_teacher_pool import parse_teacher_pool
 
         cached = parse_teacher_pool(path)
         args._opd_teacher_pool_parsed = cached

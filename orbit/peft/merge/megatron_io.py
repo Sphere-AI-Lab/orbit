@@ -11,8 +11,8 @@ from pathlib import Path
 
 import torch
 
-from orbit.merge import get_strategy
-from orbit.merge.strategy import StateDict
+from orbit.peft.merge import get_strategy
+from orbit.peft.merge.strategy import StateDict
 
 _SHARD_GLOB = "adapter_megatron_tp*_pp*.pt"
 

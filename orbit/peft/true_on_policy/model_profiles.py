@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from .contracts import QWEN3_DENSE_TRUE_ON_POLICY_V1, LogprobContract, ModelFamily, TrueOnPolicyContract
+from orbit.peft.true_on_policy.contracts import QWEN3_DENSE_TRUE_ON_POLICY_V1, LogprobContract, ModelFamily, TrueOnPolicyContract
 
 ParallelLayout = str
 

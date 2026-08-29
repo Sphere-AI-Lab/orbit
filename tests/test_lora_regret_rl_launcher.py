@@ -123,7 +123,7 @@ def test_rl_launcher_pins_the_llama31_chat_template():
     """Llama-3.1-8B *base* ships no chat_template, so load_tokenizer raises
     before training starts (prerequisite P2)."""
     content = _text()
-    assert "orbit/utils/chat_template_utils/templates/llama3.1_pinned.jinja" in content
+    assert "orbit/peft/utils/chat_template_utils/templates/llama3.1_pinned.jinja" in content
 
 
 def test_rl_launcher_ties_rollout_seed_to_seed():

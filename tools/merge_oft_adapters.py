@@ -16,7 +16,7 @@ sys.path.insert(0, _repo_root)
 import torch
 from safetensors.torch import load_file, save_file
 
-from orbit.merge import get_strategy  # light: pulls only torch
+from orbit.peft.merge import get_strategy  # light: pulls only torch
 from orbit.utils.logging_utils import configure_logger
 
 _COMPAT_KEYS = ("oft_type", "oft_block_size", "target_modules", "base_model_name_or_path")
@@ -106,13 +106,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[merge] {len(args.adapters)} adapters -> {merged_dir} ({len(merged)} tensors)")
 
     if args.save_megatron:
-        from orbit.merge.megatron_io import merge_megatron_adapters, write_megatron_adapter
+        from orbit.peft.merge.megatron_io import merge_megatron_adapters, write_megatron_adapter
         merged_meg = merge_megatron_adapters(args.adapters, args.weights, args.method)
         meg_dir = write_megatron_adapter(merged_meg, args.adapters[0], str(Path(args.output) / "merged_megatron"))
         print(f"[merge] Megatron-native adapter -> {meg_dir} ({len(merged_meg)} shard(s))")
 
     if args.save_hf:
-        from orbit.merge.bake_hf import bake_hf_model
+        from orbit.peft.merge.bake_hf import bake_hf_model
         base = args.base or cfg.get("base_model_name_or_path")
         if not base:
             raise ValueError("--save-hf needs a base model: pass --base or ensure adapter_config has base_model_name_or_path")

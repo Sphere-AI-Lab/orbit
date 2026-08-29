@@ -1,7 +1,7 @@
 """Regression tests for the true-on-policy exact train/rollout parity CI gate.
 
 orbit ported true-on-policy Phases 1-4 but not Phase 5 (SGLang kernels running
-inside Megatron via the fork rebase; orbit/true_on_policy/contracts.py pins
+inside Megatron via the fork rebase; orbit/peft/true_on_policy/contracts.py pins
 ``megatron_uses_sglang_backend: False`` until then). The inherited miles assert
 in ``log_rollout_data`` compared ``log_probs`` and ``rollout_log_probs`` for
 exact equality unconditionally, which is only valid once Phase 5 closes the
@@ -9,7 +9,7 @@ kernel gap; with Phase 5 absent, Megatron and SGLang legitimately run
 different kernels and the arrays differ (measured, not asserted, via
 ``train_rollout_logprob_abs_diff{,_max}``). The assert is now gated on
 ``args.true_on_policy_megatron_uses_sglang_backend``, plumbed onto ``args`` by
-``apply_true_on_policy_parse_defaults`` (orbit/true_on_policy/config.py) from
+``apply_true_on_policy_parse_defaults`` (orbit/peft/true_on_policy/config.py) from
 the contract's ``megatron_uses_sglang_backend`` kernel-policy field.
 
 These tests simulate both states of that flag directly on a hand-built

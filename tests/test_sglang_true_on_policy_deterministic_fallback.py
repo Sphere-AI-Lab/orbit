@@ -1,6 +1,6 @@
 """Pins the --true-on-policy-mode direct-flag fallback in validate_args.
 
-orbit/true_on_policy/config.py::apply_true_on_policy_parse_defaults forces
+orbit/peft/true_on_policy/config.py::apply_true_on_policy_parse_defaults forces
 sglang_enable_deterministic_inference at parse time, but that expansion only
 runs through the --true-on-policy entry point. --true-on-policy-mode is also
 an independently settable CLI flag (orbit/utils/arguments.py), and setting it

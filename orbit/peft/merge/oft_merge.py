@@ -6,7 +6,7 @@ import math
 
 import torch
 
-from orbit.merge.strategy import MergeStrategy, StateDict, StateKey, register
+from orbit.peft.merge.strategy import MergeStrategy, StateDict, StateKey, register
 
 logger = logging.getLogger(__name__)
 

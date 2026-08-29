@@ -1,6 +1,6 @@
 import pytest
 
-from orbit.utils.opd_teacher_spec import (
+from orbit.peft.opd.opd_teacher_spec import (
     OPD_TEACHER_ADAPTER_NAME,
     TeacherSpec,
     is_same_base,

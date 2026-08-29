@@ -24,7 +24,7 @@ HF_MODELS_DIR = "/lustre/fast/fast/zqiu/hf_models"
 # Still under the *old* repo's path -- a cross-repo dependency rather than a
 # break, which is why preflight checks it rather than assuming it.
 MEGATRON_CKPT_DIR = "/lustre/fast/fast/zqiu/orbit-infra/orbit/checkpoints"
-PINNED_LLAMA_TEMPLATE = "orbit/utils/chat_template_utils/templates/llama3.1_pinned.jinja"
+PINNED_LLAMA_TEMPLATE = "orbit/peft/utils/chat_template_utils/templates/llama3.1_pinned.jinja"
 
 # One H100. `HEADROOM_GB` is what a FullFT arm needs for activations, the
 # rollout engine's share and allocator fragmentation on top of optimizer state.

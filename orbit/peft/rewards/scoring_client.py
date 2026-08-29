@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 import aiohttp
 
-from orbit.ultra.strict_json import loads_strict
+from orbit.peft.ultra.strict_json import loads_strict
 
 try:
     import orjson as _orjson

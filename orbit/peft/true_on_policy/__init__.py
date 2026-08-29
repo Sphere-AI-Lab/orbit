@@ -7,7 +7,7 @@ precision/adapter parity-matrix fields, and the qwen3-dense v1 contract pins
 the triton attention backend (fa3 is impossible on B200).
 """
 
-from .config import (
+from orbit.peft.true_on_policy.config import (
     TrueOnPolicyArgList,
     TrueOnPolicyKernelPolicy,
     TrueOnPolicyLaunchPlan,
@@ -16,8 +16,8 @@ from .config import (
     build_true_on_policy_config,
     build_true_on_policy_launch_plan,
 )
-from .contracts import QWEN3_DENSE_TRUE_ON_POLICY_V1, TrueOnPolicyContract, get_true_on_policy_contract
-from .model_profiles import (
+from orbit.peft.true_on_policy.contracts import QWEN3_DENSE_TRUE_ON_POLICY_V1, TrueOnPolicyContract, get_true_on_policy_contract
+from orbit.peft.true_on_policy.model_profiles import (
     TrueOnPolicyModelProfile,
     get_true_on_policy_model_profile,
     resolve_true_on_policy_model_name,

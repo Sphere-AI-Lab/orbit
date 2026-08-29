@@ -8,7 +8,7 @@ rewards (blend) and keeping eval metrics meaningful.
 
 from argparse import Namespace
 
-from orbit.utils.opd_teacher_spec import (
+from orbit.peft.opd.opd_teacher_spec import (
     OPD_TEACHER_ADAPTER_NAME,
     is_same_base,
     needs_engine_teacher_slot,

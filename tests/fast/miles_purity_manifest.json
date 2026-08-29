@@ -42,7 +42,7 @@
   },
   "orbit/backends/megatron_utils/actor.py": {
    "delta_lines": 955,
-   "sha": "b726bb7d6a656aea1580b9ba88cc07a21b2a0958a930c919a22b9f9f58e137f7"
+   "sha": "470abb2cfb01c44d61e7f156b9d1f4c27a48667d6f1be51e6de3545de4e40b45"
   },
   "orbit/backends/megatron_utils/arguments.py": {
    "delta_lines": 37,
@@ -154,15 +154,15 @@
   },
   "orbit/backends/megatron_utils/update_weight/update_weight_from_tensor.py": {
    "delta_lines": 611,
-   "sha": "70d811850b3ba30e9ae91bd1ec60cbecb4770222c349fca3a6c3c8f4636fc51d"
+   "sha": "05c19e65d57406c2d37eee64a99358028d49d595cccfa8cbb071c9d338c10911"
   },
   "orbit/backends/sglang_utils/arguments.py": {
    "delta_lines": 123,
-   "sha": "11b690e6d38a454e59fbaaebb702b635a4e2b624b3d22678d6af8c3386109250"
+   "sha": "a545e4ad23e8d5051670e21c8c5073decd9878948df922ba336ea9be4ccc8522"
   },
   "orbit/backends/sglang_utils/sglang_engine.py": {
    "delta_lines": 608,
-   "sha": "61c63e62a3018e26064333ef0c0532038ef63cb60e4461e8b43c1f80409e17ff"
+   "sha": "f8baef795b4281ce3df0ac58094ced4d9911bc2d30f4ff1f8f9e86f0a6389261"
   },
   "orbit/backends/training_utils/ci_utils.py": {
    "delta_lines": 2,
@@ -186,7 +186,7 @@
   },
   "orbit/ray/actor_group.py": {
    "delta_lines": 125,
-   "sha": "4cb2743627ad841ec9c1db80426f15b9813d12d32c9572c0af3c53ed7bb2706d"
+   "sha": "39e73b2281407f55153144c89aa4d8437f97d775b671e840abfeaaac47610531"
   },
   "orbit/ray/placement_group.py": {
    "delta_lines": 88,
@@ -194,7 +194,7 @@
   },
   "orbit/ray/rollout.py": {
    "delta_lines": 289,
-   "sha": "97682e19f0cde1954dcd09aee7198d640491876a847fbab5b14ac146eca880e8"
+   "sha": "f36c423b53d00c8b48e4929ed5ecc385dcbaecfe2453951d976dbc09623d50a5"
   },
   "orbit/ray/train_actor.py": {
    "delta_lines": 14,
@@ -282,7 +282,7 @@
   },
   "orbit/utils/arguments.py": {
    "delta_lines": 2027,
-   "sha": "6aff132ccef88bc252f23e3f2e957ba8eb2fa6f77321b2619d0919c7e235fc45"
+   "sha": "8c20b35d7704f2885bbc2387f06bc107b7d9dbe3c56280f87669fb53a262f8a2"
   },
   "orbit/utils/chat_template_utils/tito_tokenizer.py": {
    "delta_lines": 31,
@@ -342,7 +342,7 @@
   },
   "orbit/utils/processing_utils.py": {
    "delta_lines": 8,
-   "sha": "604ff0715b708c1d0dcfb765a243b85725781fc3457053b2d9a9a70ada625a5c"
+   "sha": "5a94c82c6aeebe0929ebc73346ccebe5b1a284ce1fa3e5cb23eb9a855120a3aa"
   },
   "orbit/utils/profile_utils.py": {
    "delta_lines": 2,
@@ -446,11 +446,11 @@
   },
   "train.py": {
    "delta_lines": 263,
-   "sha": "89526b2662aa6acc8e53a772b84837410022c40b9cafdffb0a399a4ace1ae1b3"
+   "sha": "cdfc37982bdb9bb854c0fc0cd130c7bb0727b8f2cedc7285de6e9819d2aa3261"
   },
   "train_async.py": {
    "delta_lines": 22,
-   "sha": "b30dff1091fc23563c69a554509a22cee1d97f4f2ed88f05ea7bc281a3e17597"
+   "sha": "d1c226953cedcca757b23c7ef8b0e68fde20b8458dc9e2eb0e1d3b0ff1187cef"
   }
  },
  "dropped": [

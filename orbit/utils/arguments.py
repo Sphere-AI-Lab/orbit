@@ -805,7 +805,7 @@ def validate_opd_topk_loss_args(args) -> None:
 
 def _validate_opd_args(args) -> None:
     """Validate on-policy distillation args. Mirrors slime arguments.py:1761-1791."""
-    from orbit.utils.opd_teacher_spec import is_same_base, is_self_teacher, parse_teacher_spec
+    from orbit.peft.opd.opd_teacher_spec import is_same_base, is_self_teacher, parse_teacher_spec
 
     opd_top_k = getattr(args, "opd_log_prob_top_k", 0) or 0
     if opd_top_k < 0:
@@ -883,7 +883,7 @@ def _validate_opd_args(args) -> None:
                 "trainer-side LM head per member; use --opd-serve-teacher/--opd-teacher-url for "
                 "a single full-vocab teacher."
             )
-        from orbit.utils.opd_teacher_pool import parse_teacher_pool
+        from orbit.peft.opd.opd_teacher_pool import parse_teacher_pool
 
         parse_teacher_pool(args.opd_teacher_pool)  # fail fast on a malformed manifest
 
@@ -1565,7 +1565,7 @@ def get_orbit_extra_args_provider(add_custom_arguments=None):
                 default=False,
                 help=(
                     "Enable the deterministic true-on-policy ladder via a named contract "
-                    "(orbit/true_on_policy/). The current Phase 1-4 implementation aligns "
+                    "(orbit/peft/true_on_policy/). The current Phase 1-4 implementation aligns "
                     "scoring and measures the remaining train/rollout kernel gap; it does not "
                     "claim bit-exact parity until a contract enables the Phase-5 "
                     "SGLang-in-Megatron backend. Expands at parse time into rollout and "
@@ -3742,7 +3742,7 @@ def _common_orbit_validate_args(args):
     # Expand --true-on-policy into its derived flags/env vars (no-op when off).
     # After PEFT normalization (the contract validates the adapter) and before
     # megatron/sglang validation (it mutates their dests).
-    from orbit.true_on_policy import apply_true_on_policy_parse_defaults
+    from orbit.peft.true_on_policy import apply_true_on_policy_parse_defaults
 
     apply_true_on_policy_parse_defaults(args)
 

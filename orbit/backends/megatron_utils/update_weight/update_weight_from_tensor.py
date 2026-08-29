@@ -591,7 +591,7 @@ class UpdateWeightFromTensor:
         the live adapter params, so the existing Megatron->HF adapter export
         picks up the teacher tensors unchanged.
         """
-        from orbit.utils.opd_teacher_spec import OPD_TEACHER_ADAPTER_NAME
+        from orbit.peft.opd.opd_teacher_spec import OPD_TEACHER_ADAPTER_NAME
 
         authorized_name = authorize_adapter_destination(
             self._peft_args,

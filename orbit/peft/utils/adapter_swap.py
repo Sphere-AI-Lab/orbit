@@ -11,7 +11,7 @@ from contextlib import contextmanager
 
 import torch
 
-from orbit.utils.adapter_tensors import AdapterTensorKey, adapter_named_parameters
+from orbit.peft.utils.adapter_tensors import AdapterTensorKey, adapter_named_parameters
 
 
 @contextmanager

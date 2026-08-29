@@ -16,7 +16,7 @@ from safetensors.torch import save_file as safetensors_save_file
 
 from orbit.backends.megatron_utils.update_weight.common import is_dsv4_grouped_moe_oft_param_name
 from orbit.backends.training_utils.parallel import get_parallel_state
-from orbit.utils.adapter_tensors import AdapterTensorKey, adapter_named_parameters, adapter_tensor_key_digest
+from orbit.peft.utils.adapter_tensors import AdapterTensorKey, adapter_named_parameters, adapter_tensor_key_digest
 
 logger = logging.getLogger(__name__)
 
@@ -703,7 +703,7 @@ def save_peft_checkpoint(
         raise AssertionError(f"unreachable PEFT save method: {method!r}")
 
     if self_teacher is not None:
-        from orbit.utils.self_teacher_checkpoint import TeacherCheckpointError, save_self_teacher_sidecar
+        from orbit.peft.opd.self_teacher_checkpoint import TeacherCheckpointError, save_self_teacher_sidecar
 
         rank = dist.get_rank() if dist.is_initialized() else 0
         world_size = dist.get_world_size() if dist.is_initialized() else 1

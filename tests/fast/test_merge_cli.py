@@ -9,7 +9,7 @@ import torch
 from safetensors.torch import load_file, save_file
 
 import tools.merge_oft_adapters as cli
-from orbit.merge.oft_merge import magnitude_corrected_merge, orthomerge_original_merge
+from orbit.peft.merge.oft_merge import magnitude_corrected_merge, orthomerge_original_merge
 
 
 def _write_adapter(

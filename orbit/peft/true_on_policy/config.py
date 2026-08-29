@@ -5,8 +5,8 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Any
 
-from .contracts import TrueOnPolicyContract, get_true_on_policy_contract
-from .model_profiles import (
+from orbit.peft.true_on_policy.contracts import TrueOnPolicyContract, get_true_on_policy_contract
+from orbit.peft.true_on_policy.model_profiles import (
     TrueOnPolicyModelProfile,
     get_true_on_policy_model_profile,
     resolve_true_on_policy_model_name,

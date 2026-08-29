@@ -2,7 +2,7 @@
 """Cross-rank sharding invariant checker for split OFT audits.
 
 Consumes:
-  - PEFT wrap audit JSONL files written by ``orbit/audit/peft_wrap.py``:
+  - PEFT wrap audit JSONL files written by ``orbit/peft/audit/peft_wrap.py``:
     ``<wrap-base>.megatron.tp{T}_pp{P}.jsonl`` (one file per TP/PP rank).
     Each file contains module records (no per-record tp_rank field) plus
     one summary record with ``summary: true`` and ``tp_rank``/``tp_size``/

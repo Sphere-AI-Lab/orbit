@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import orbit.audit.peft_wrap as peft_audit
+import orbit.peft.audit.peft_wrap as peft_audit
 import orbit.peft.megatron.bridge_peft_helpers as bridge_peft_helpers
 from orbit.peft.megatron.bridge_peft_helpers import (
     _make_peft_pre_wrap_hook,

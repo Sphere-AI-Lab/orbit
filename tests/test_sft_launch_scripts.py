@@ -130,7 +130,7 @@ def test_lora_regret_launcher_pins_the_llama31_chat_template():
     """Llama-3.1-8B *base* ships no chat_template, so apply_chat_template would
     raise and MultiTurnLossMaskGenerator could not even be constructed."""
     content = _lora_regret_launcher_text()
-    assert "orbit/utils/chat_template_utils/templates/llama3.1_pinned.jinja" in content
+    assert "orbit/peft/utils/chat_template_utils/templates/llama3.1_pinned.jinja" in content
 
 
 def test_lora_regret_launcher_uses_the_llama3_loss_mask_and_raw_messages():

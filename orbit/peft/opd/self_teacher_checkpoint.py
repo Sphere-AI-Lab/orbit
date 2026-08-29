@@ -23,8 +23,8 @@ from pathlib import Path
 
 import torch
 
-from orbit.ultra.strict_json import loads_strict
-from orbit.utils.self_teacher import SELF_TEACHER_STATE_SCHEMA_VERSION, SelfTeacherBuffer
+from orbit.peft.ultra.strict_json import loads_strict
+from orbit.peft.opd.self_teacher import SELF_TEACHER_STATE_SCHEMA_VERSION, SelfTeacherBuffer
 
 
 def has_self_teacher_sidecar(adapter_dir, *, rank: int) -> bool:

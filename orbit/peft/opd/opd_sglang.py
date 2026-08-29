@@ -50,7 +50,7 @@ import pybase64
 import torch
 
 from orbit.peft.rewards.scoring_client import post_json
-from orbit.utils.opd_dump import maybe_dump_teacher_logprobs
+from orbit.peft.opd.opd_dump import maybe_dump_teacher_logprobs
 from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)
