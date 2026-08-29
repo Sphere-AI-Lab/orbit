@@ -33,6 +33,50 @@ rename-free, since <code>18e96ad</code> is the miles base already renamed into o
 namespaces.
 </div>
 
+## What orbit adds, as features
+
+Miles is a general RL trainer that syncs full model weights. Orbit turns it into
+an **adapter-first RL system**: it trains and serves PEFT adapters on (possibly
+quantized) frozen base models, with a verification discipline around it.
+
+1. **OFT as a first-class RL method.** Miles has LoRA only — its tree contains
+   no OFT at the fork base. Orbit adds Orthogonal Finetuning end-to-end
+   (`oft_utils.py` in the Megatron backend, OFT serving via the sglang fork),
+   and the example matrix is structured as full-FT vs LoRA vs OFT arms.
+2. **Adapter-delta weight sync** (`peft_transport/`). Instead of pushing full
+   model weights to rollout engines each update, orbit streams only adapter
+   deltas over a pluggable transport (NCCL and IPC backends behind a registry).
+   This is what makes RL on a Kimi-1T-class frozen base tractable.
+3. **One-trunk adapter critic for PPO.** The critic shares the actor's frozen
+   trunk by parameter aliasing — no second trunk copy; only adapters and the
+   value head are critic-owned. Benchmarked indistinguishable from a full
+   critic at ~23% faster per step. This is why `loss.py` and `ppo_utils.py`
+   carry ~1.6k changed lines: the rewrite is algorithmic, not wiring.
+4. **RL on quantized base models.** Direct INT4/NVFP4/FP8 checkpoint
+   converters and bridges plus recipes for Kimi-K2.5/K2.6 INT4 and NVFP4,
+   DSv4 MXFP4, and Qwen3-30B FP8 — all with OFT adapters on the quantized
+   weights. Miles had FP8 *export* quantizers, not a train-on-quantized path.
+5. **Numerical verification tooling.** ~30 parity checkers with no miles
+   counterpart: checkpoint and runtime parity per precision, cross-repo
+   DeepGEMM parity, step-0 parity, adapter runtime comparison.
+6. **Adapter-aware serving integration.** The `sglang_engine.py` rewrite:
+   adapter staging/activation through the engine and PEFT-safe caching (radix
+   cache disabled or keyed per adapter so cached prefixes cannot leak stale
+   adapter activations).
+7. **PEFT-Arena.** Self-contained eval framework: vendored math_eval with
+   AIME24/AMC23/MATH500, an arena reward, data converters.
+8. **Model catalog as plugin config.** 50 per-model launch profiles in
+   `orbit_plugins/model_args` (DSv3/v4 with TITO tokenizer support, GLM4–5,
+   Kimi K2–K2.6, gpt-oss, Qwen families), replacing miles' script zoo.
+9. **Smaller but real:** a fully-async rollout driver, MTP-under-RL patches,
+   reward normalization, training-ETA and eval logging, pinned cu128/cu130
+   install contracts with ratchet tests.
+
+Equally telling is what orbit **drops** (406 files): VLM and tool-use examples,
+experimental FSDP, AMD support, docker/CI — breadth traded for depth on the
+adapter-first thesis. Features 1–4 are that thesis; 5 is the discipline wrapped
+around it.
+
 ## The delta, in three layers
 
 Against the fork base, `orbit-main` is: **789 added files** (the additive layer), **133 modified files, 14,912 changed lines** (the entangled layer), **406 dropped files**, and 87 files still byte-identical.

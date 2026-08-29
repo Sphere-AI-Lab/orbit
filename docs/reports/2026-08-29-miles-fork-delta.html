@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Orbit's delta over miles, and the cost of moving it to latest miles</title>
-<script type="application/json" id="report-meta">{"title": "Orbit's delta over miles, and the cost of moving it to latest miles", "kind": "investigation", "date": "2026-08-29", "tags": ["miles", "fork", "lineage", "graft", "delta", "transfer"], "subtitle": "Fork-base recovery, full modification inventory, and a measured transfer dry-run", "generated": "2026-08-29T03:09:12+02:00", "meta": {"date": "2026-08-29", "commit": "884e6d785e76", "branch": "orbit-main", "tree": "clean", "host": "i304", "python": "3.10.12", "miles_clone": "/tmp/miles-bare", "dry_run_log": "/tmp/merge_status", "fork_base": "radixark/miles ef7481ae3 (2026-04-13, \"switch model to actor\")", "miles_upstream": "dbbab156 (2026-08-27)", "graft_branch": "miles-graft (rename 18e96ad, graft 7c5f463)"}}</script>
+<script type="application/json" id="report-meta">{"title": "Orbit's delta over miles, and the cost of moving it to latest miles", "kind": "investigation", "date": "2026-08-29", "tags": ["miles", "fork", "lineage", "graft", "delta", "transfer"], "subtitle": "Fork-base recovery, full modification inventory, and a measured transfer dry-run", "generated": "2026-08-29T13:57:38+02:00", "meta": {"date": "2026-08-29", "commit": "929c035ce49a", "branch": "orbit-main", "tree": "dirty", "host": "i401", "python": "3.10.12", "miles_clone": "/tmp/miles-bare", "dry_run_log": "/tmp/merge_status", "fork_base": "radixark/miles ef7481ae3 (2026-04-13, \"switch model to actor\")", "miles_upstream": "dbbab156 (2026-08-27)", "graft_branch": "miles-graft (rename 18e96ad, graft 7c5f463)"}}</script>
 <style>
 /* html-reports stylesheet.
    Modelled closely on the LMSYS blog (lmsys.org/blog) — sticky TOC rail on the
@@ -320,12 +320,12 @@ td.t-kind { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; 
 <button class="theme-toggle" type="button">theme</button>
 <div class="page">
 <div class="doc-layout">
-<details class="toc" open><summary>Contents</summary><ol><li class="lvl-2"><a href="#fork-base-miles-ef7481ae3-2026-04-13">Fork base: miles ef7481ae3 (2026-04-13)</a></li><li class="lvl-2"><a href="#the-delta-in-three-layers">The delta, in three layers</a></li><li class="lvl-3"><a href="#layer-1-orbit-only-files-ports-as-is">Layer 1 — orbit-only files (ports as-is)</a></li><li class="lvl-3"><a href="#layer-2-modified-miles-files-the-entangled-layer">Layer 2 — modified miles files (the entangled layer)</a></li><li class="lvl-3"><a href="#layer-3-dropped-miles-files">Layer 3 — dropped miles files</a></li><li class="lvl-2"><a href="#transfer-dry-run-orbits-layer-onto-miles2026-08-27">Transfer dry-run: orbit's layer onto miles@2026-08-27</a></li><li class="lvl-2"><a href="#recommendation">Recommendation</a></li></ol></details>
+<details class="toc" open><summary>Contents</summary><ol><li class="lvl-2"><a href="#fork-base-miles-ef7481ae3-2026-04-13">Fork base: miles ef7481ae3 (2026-04-13)</a></li><li class="lvl-2"><a href="#what-orbit-adds-as-features">What orbit adds, as features</a></li><li class="lvl-2"><a href="#the-delta-in-three-layers">The delta, in three layers</a></li><li class="lvl-3"><a href="#layer-1-orbit-only-files-ports-as-is">Layer 1 — orbit-only files (ports as-is)</a></li><li class="lvl-3"><a href="#layer-2-modified-miles-files-the-entangled-layer">Layer 2 — modified miles files (the entangled layer)</a></li><li class="lvl-3"><a href="#layer-3-dropped-miles-files">Layer 3 — dropped miles files</a></li><li class="lvl-2"><a href="#transfer-dry-run-orbits-layer-onto-miles2026-08-27">Transfer dry-run: orbit's layer onto miles@2026-08-27</a></li><li class="lvl-2"><a href="#recommendation">Recommendation</a></li></ol></details>
 <main>
 <header class="doc-header">
 <div class="doc-kind">investigation</div><h1 class="doc-title">Orbit's delta over miles, and the cost of moving it to latest miles</h1>
 <p class="doc-subtitle">Fork-base recovery, full modification inventory, and a measured transfer dry-run</p><div class="doc-tags"><span>miles</span><span>fork</span><span>lineage</span><span>graft</span><span>delta</span><span>transfer</span></div>
-<dl class="meta"><div><dt>date</dt><dd>2026-08-29</dd></div><div><dt>commit</dt><dd>884e6d785e76</dd></div><div><dt>branch</dt><dd>orbit-main</dd></div><div><dt>tree</dt><dd class="flag-clean">clean</dd></div><div><dt>host</dt><dd>i304</dd></div><div><dt>python</dt><dd>3.10.12</dd></div><div><dt>miles_clone</dt><dd>/tmp/miles-bare</dd></div><div><dt>dry_run_log</dt><dd>/tmp/merge_status</dd></div><div><dt>fork_base</dt><dd>radixark/miles ef7481ae3 (2026-04-13, "switch model to actor")</dd></div><div><dt>miles_upstream</dt><dd>dbbab156 (2026-08-27)</dd></div><div><dt>graft_branch</dt><dd>miles-graft (rename 18e96ad, graft 7c5f463)</dd></div></dl>
+<dl class="meta"><div><dt>date</dt><dd>2026-08-29</dd></div><div><dt>commit</dt><dd>929c035ce49a</dd></div><div><dt>branch</dt><dd>orbit-main</dd></div><div><dt>tree</dt><dd class="flag-dirty">dirty</dd></div><div><dt>host</dt><dd>i401</dd></div><div><dt>python</dt><dd>3.10.12</dd></div><div><dt>miles_clone</dt><dd>/tmp/miles-bare</dd></div><div><dt>dry_run_log</dt><dd>/tmp/merge_status</dd></div><div><dt>fork_base</dt><dd>radixark/miles ef7481ae3 (2026-04-13, "switch model to actor")</dd></div><div><dt>miles_upstream</dt><dd>dbbab156 (2026-08-27)</dd></div><div><dt>graft_branch</dt><dd>miles-graft (rename 18e96ad, graft 7c5f463)</dd></div></dl>
 </header>
 <p>Orbit's public history is squashed (root <code>dd94c38</code>, 2026-05-28), so what we inherited from
 miles and what we built was not recoverable from git alone. This record answers three
@@ -347,6 +347,29 @@ merges now work across the fork boundary. <code>orbit-main</code> itself is unto
 rename-free, since <code>18e96ad</code> is the miles base already renamed into orbit's
 namespaces.</p>
 </div>
+<h2 id="what-orbit-adds-as-features">What orbit adds, as features<a class="anchor" href="#what-orbit-adds-as-features" aria-hidden="true">#</a></h2>
+<p>Miles is a general RL trainer that syncs full model weights. Orbit turns it into
+an <strong>adapter-first RL system</strong>: it trains and serves PEFT adapters on (possibly
+quantized) frozen base models, with a verification discipline around it.</p>
+<ol><li><strong>OFT as a first-class RL method.</strong> Miles has LoRA only — its tree contains<p>no OFT at the fork base. Orbit adds Orthogonal Finetuning end-to-end
+(<code>oft_utils.py</code> in the Megatron backend, OFT serving via the sglang fork),
+and the example matrix is structured as full-FT vs LoRA vs OFT arms.</p></li><li><strong>Adapter-delta weight sync</strong> (<code>peft_transport/</code>). Instead of pushing full<p>model weights to rollout engines each update, orbit streams only adapter
+deltas over a pluggable transport (NCCL and IPC backends behind a registry).
+This is what makes RL on a Kimi-1T-class frozen base tractable.</p></li><li><strong>One-trunk adapter critic for PPO.</strong> The critic shares the actor's frozen<p>trunk by parameter aliasing — no second trunk copy; only adapters and the
+value head are critic-owned. Benchmarked indistinguishable from a full
+critic at ~23% faster per step. This is why <code>loss.py</code> and <code>ppo_utils.py</code>
+carry ~1.6k changed lines: the rewrite is algorithmic, not wiring.</p></li><li><strong>RL on quantized base models.</strong> Direct INT4/NVFP4/FP8 checkpoint<p>converters and bridges plus recipes for Kimi-K2.5/K2.6 INT4 and NVFP4,
+DSv4 MXFP4, and Qwen3-30B FP8 — all with OFT adapters on the quantized
+weights. Miles had FP8 <em>export</em> quantizers, not a train-on-quantized path.</p></li><li><strong>Numerical verification tooling.</strong> ~30 parity checkers with no miles<p>counterpart: checkpoint and runtime parity per precision, cross-repo
+DeepGEMM parity, step-0 parity, adapter runtime comparison.</p></li><li><strong>Adapter-aware serving integration.</strong> The <code>sglang_engine.py</code> rewrite:<p>adapter staging/activation through the engine and PEFT-safe caching (radix
+cache disabled or keyed per adapter so cached prefixes cannot leak stale
+adapter activations).</p></li><li><strong>PEFT-Arena.</strong> Self-contained eval framework: vendored math_eval with<p>AIME24/AMC23/MATH500, an arena reward, data converters.</p></li><li><strong>Model catalog as plugin config.</strong> 50 per-model launch profiles in<p><code>orbit_plugins/model_args</code> (DSv3/v4 with TITO tokenizer support, GLM4–5,
+Kimi K2–K2.6, gpt-oss, Qwen families), replacing miles' script zoo.</p></li><li><strong>Smaller but real:</strong> a fully-async rollout driver, MTP-under-RL patches,<p>reward normalization, training-ETA and eval logging, pinned cu128/cu130
+install contracts with ratchet tests.</p></li></ol>
+<p>Equally telling is what orbit <strong>drops</strong> (406 files): VLM and tool-use examples,
+experimental FSDP, AMD support, docker/CI — breadth traded for depth on the
+adapter-first thesis. Features 1–4 are that thesis; 5 is the discipline wrapped
+around it.</p>
 <h2 id="the-delta-in-three-layers">The delta, in three layers<a class="anchor" href="#the-delta-in-three-layers" aria-hidden="true">#</a></h2>
 <p>Against the fork base, <code>orbit-main</code> is: <strong>789 added files</strong> (the additive layer), <strong>133 modified files, 14,912 changed lines</strong> (the entangled layer), <strong>406 dropped files</strong>, and 87 files still byte-identical.</p>
 <div class="table-wrap"><table><thead><tr><th>Layer</th><th>Size</th><th>How it transfers to a new miles</th></tr></thead><tbody><tr><td>Orbit-only files</td><td>789 files</td><td>Copies as-is — no miles counterpart exists</td></tr><tr><td>Modified miles files</td><td>133 files, ~14.9k lines</td><td>Merge work, re-done per miles version</td></tr><tr><td>Dropped miles files</td><td>406 files</td><td>Keep-or-drop decision list (tests, docker, old launchers)</td></tr></tbody></table></div>
@@ -1765,7 +1788,7 @@ git -c merge.renameLimit=20000 merge refs/miles/upstream
 bolded files in Layer 2, and it is a bounded, git-assisted merge, not a rewrite. Upstream
 uptake in the other direction stays selective: pick surgical fixes touching the 87 identical</p>
 <ul><li>72 lightly-modified shared files, skip anything in the rewritten core (validated on<p>4152f61<code>, adopted;</code>cd464a1c4`, mostly duplicate of our own v0.5.18 work).</p></li></ul>
-<footer class="doc-footer">Generated 2026-08-29 03:09 CEST by htmlreport</footer>
+<footer class="doc-footer">Generated 2026-08-29 13:57 CEST by htmlreport</footer>
 </main>
 </div>
 </div>
