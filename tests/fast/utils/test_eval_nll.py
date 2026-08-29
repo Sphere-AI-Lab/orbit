@@ -777,9 +777,14 @@ def test_train_async_calls_the_refusal():
 # default WORLD group -- silently, with no exception. Any collective outside the
 # wake_up()..sleep() window therefore reduces over the wrong communicator.
 #
-# actor.py is not importable without CUDA (megatron_utils/__init__.py imports
+# The actor is not importable without CUDA (megatron_utils/__init__.py imports
 # deep_ep), so this is pinned by source order. Weaker than executing it, but it
 # guards the exact regression, which nothing else does.
+#
+# compute_eval_nll moved out of miles/backends/megatron_utils/actor.py into the
+# orbit home mixin (Phase 3 isolation, slice 3g); MegatronTrainRayActor still
+# gets it as a base. Only the file this reads changed -- the assertions below
+# are untouched.
 # --------------------------------------------------------------------------
 
 
@@ -789,7 +794,7 @@ def _compute_eval_nll_source() -> str:
     from pathlib import Path
 
     source = (
-        Path(__file__).resolve().parents[3] / "miles/backends/megatron_utils/actor.py"
+        Path(__file__).resolve().parents[3] / "orbit/megatron/actor_ext.py"
     ).read_text(encoding="utf-8")
     start = source.index("    def compute_eval_nll(")
     end = source.index("\n    def ", start + 1)

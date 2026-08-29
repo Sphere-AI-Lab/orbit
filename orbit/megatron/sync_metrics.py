@@ -1,5 +1,5 @@
 """Weight-sync instrumentation: payload byte accounting, engine-pause timing,
-and rollout-timeline event markers.
+rollout-timeline event markers, and the ORBIT_LOG_WEIGHT_SYNC debug trace.
 
 Metric emission rides the existing perf-metrics flow (``Timer`` singleton ->
 ``log_perf_data_raw`` -> ``tracking_utils.log``):
@@ -14,9 +14,16 @@ to the file named by the ``ORBIT_TIMELINE_EVENTS_FILE`` env var; when it is
 unset the emitters are no-ops.
 
 Nothing in this module may raise into the weight-update path: every entry
-point swallows exceptions and logs them loudly instead. The only exception is
-``sum_metrics_across_ranks``, which is a collective and therefore must run in
-lockstep on every rank (same contract as the barriers in the update path).
+point swallows exceptions and logs them loudly instead. The two exceptions are
+``sum_metrics_across_ranks`` and ``_barrier_with_logging``, which are
+collectives and therefore must run in lockstep on every rank (same contract as
+the barriers in the update path).
+
+The ``_weight_sync_debug_enabled`` / ``_log_weight_sync_event`` /
+``_barrier_with_logging`` / ``_sync_type_label`` group was lifted verbatim out
+of miles/backends/megatron_utils/update_weight/update_weight_from_tensor.py
+(Phase 3 isolation, slice 3g); the miles file keeps a stamped import seam and
+calls them unchanged, which is why they keep their underscore names.
 """
 
 from __future__ import annotations
@@ -43,6 +50,46 @@ PAYLOAD_NUM_TENSORS_KEY = "update_weights_payload_num_tensors"
 NUM_CHUNKS_KEY = "update_weights_num_chunks"
 
 _METRICS_FAILURE_MSG = "weight-sync metric instrumentation failed (metrics only; the sync itself is unaffected)"
+
+
+# ---------------------------------------------------------------------------
+# ORBIT_LOG_WEIGHT_SYNC debug trace + result labelling (lifted from the miles
+# updater module, slice 3g; bodies verbatim).
+# ---------------------------------------------------------------------------
+
+
+def _weight_sync_debug_enabled() -> bool:
+    value = os.getenv("ORBIT_LOG_WEIGHT_SYNC", "")
+    return value.strip().lower() not in {"", "0", "false", "no"}
+
+
+def _log_weight_sync_event(stage: str, **fields) -> None:
+    if not _weight_sync_debug_enabled():
+        return
+
+    parts = [f"stage={stage}"]
+    for key, value in fields.items():
+        if value is None:
+            continue
+        parts.append(f"{key}={value}")
+    logger.info("weight_sync %s", " ".join(parts))
+
+
+def _barrier_with_logging(stage: str, *, group, rank: int, world_size: int, **fields) -> None:
+    import torch.distributed as dist
+
+    _log_weight_sync_event(f"{stage}_enter", rank=rank, world_size=world_size, **fields)
+    dist.barrier(group=group)
+    _log_weight_sync_event(f"{stage}_exit", rank=rank, world_size=world_size, **fields)
+
+
+def _sync_type_label(peft_method: str) -> str:
+    """Return the human-readable label for a sync result's source."""
+    if peft_method == "lora":
+        return "LoRA"
+    if peft_method == "oft":
+        return "OFT"
+    return "Base model"
 
 
 def tensor_num_bytes(tensor: Any) -> int:

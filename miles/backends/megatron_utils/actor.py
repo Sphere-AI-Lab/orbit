@@ -1,6 +1,7 @@
 import logging
 import random
 import socket
+# ORBIT-SEAM: SimpleNamespace stand-ins for the OPD teacher-logprob dump in train_actor below
 import types
 from argparse import Namespace
 
@@ -12,8 +13,10 @@ from transformers import AutoConfig
 
 from miles.ray.train_actor import TrainRayActor
 from miles.utils import train_dump_utils
-from orbit.utils.adapter_swap import swap_adapter_tensors
-from orbit.utils.adapter_tensors import AdapterTensorKey, adapter_named_parameters
+# ORBIT-SEAM: (vp_stage, name) adapter keys for the OPD teacher/self-teacher state built in init
+from orbit.utils.adapter_tensors import AdapterTensorKey
+# ORBIT-SEAM: orbit-added argument predicates (one-trunk vs separate critic, rollout-engine
+# presence, OPD top-k vocab validation) consumed by init/train_actor/update_weights below
 from miles.utils.arguments import (
     uses_one_trunk_critic,
     uses_rollout_engines,
@@ -22,21 +25,16 @@ from miles.utils.arguments import (
 )
 from miles.utils.context_utils import with_defer
 from miles.utils.distributed_utils import get_gloo_group, init_process_group
-from orbit.utils.eval_nll import (
-    NllStats,
-    accumulate_nll,
-    build_eval_nll_batch,
-    is_eval_nll_reporting_rank,
-    plan_eval_nll_microbatches,
-    plan_eval_nll_shards,
-)
 from miles.utils.memory_utils import clear_memory, print_memory
+# ORBIT-SEAM: OPD self-distillation support used by train_actor/update_weights (the dump is
+# env-gated and no-ops unless ORBIT_OPD_TEACHER_LOGPROB_DUMP is set)
 from orbit.opd.opd_dump import maybe_dump_teacher_logprobs
-from orbit.opd.opd_teacher_spec import should_promote_teacher, teacher_forward_plan
+from orbit.opd.opd_teacher_spec import should_promote_teacher
 from miles.utils.processing_utils import load_tokenizer
 from miles.utils.ray_utils import Box
 from miles.utils.reloadable_process_group import destroy_process_groups, monkey_patch_torch_dist, reload_process_groups
 from miles.utils.replay_base import all_replay_managers
+# ORBIT-SEAM: the EMA/lag self-teacher buffer init seeds below
 from orbit.opd.self_teacher import SelfTeacherBuffer
 from miles.utils.timer import Timer, inverse_timer, timer
 from miles.utils.tracking_utils import init_tracking
@@ -48,8 +46,11 @@ from ..training_utils.data import DataIterator, get_data_iterator, get_rollout_d
 from ..training_utils.log_utils import log_cpu_memory, log_perf_data, log_rollout_data
 from ..training_utils.loss import compute_advantages_and_returns, get_log_probs_and_entropy, get_values
 from ..training_utils.parallel import get_parallel_state
+# ORBIT-SEAM: the OPD teacher LM head is resident state sleep/wake_up must move (opd_jsd_loss)
 from orbit.opd.teacher_lm_head import load_teacher_lm_head, offload_teacher_lm_head, onload_teacher_lm_head
 from .checkpoint import load_checkpoint
+# ORBIT-SEAM: the one-trunk (adapter) critic - build, save and the value-loss phase context - is an
+# orbit addition to this actor; the critic itself lives in orbit.critic
 from orbit.critic.critic_adapter import (
     _expected_critic_resume_iteration,
     build_critic_instance,
@@ -59,9 +60,16 @@ from orbit.critic.critic_adapter import (
 from .initialize import init, is_megatron_main_rank
 from .lora_utils import is_lora_enabled
 from .model import forward_only, initialize_model_and_optimizer, save, train
+# ORBIT-SEAM: orbit's model-state manager generalises base's TensorBackuper (adapter-only state,
+# multiple tags); removed base's `from ...utils.tensor_backper import TensorBackuper` with it, and
+# every `self.weights_backuper.<op>(...)` call below is the same op on self.model_state_manager
 from orbit.megatron.model_state_manager import create_model_state_manager
 from .parallel import verify_megatron_parallel_state
+# ORBIT-SEAM: orbit's explicit PEFT offload replaces base's torch_memory_saver pause/resume in
+# sleep/wake_up below (frozen base, adapter, grad buffers and optimizer move separately); removed
+# base's `torch_memory_saver` and `contextlib.nullcontext` imports, which only served that path
 from orbit.megatron.peft_offload import (
+    _should_offload_frozen_base,
     load_megatron_adapter_to_gpu,
     load_megatron_frozen_base_to_gpu,
     load_megatron_grad_buffers,
@@ -71,19 +79,26 @@ from orbit.megatron.peft_offload import (
     offload_megatron_grad_buffers,
     offload_megatron_optimizer,
 )
+# ORBIT-SEAM: PEFT (LoRA + OFT) predicates for init. LOAD-BEARING BEYOND THIS MODULE: the home
+# mixin re-reads `create_peft_instance` and `is_adapter_param_name` off THIS module at call time
+# (see orbit/megatron/actor_ext.py), so neither is dead even where nothing below names it.
 from orbit.megatron.peft_utils import (
     create_peft_instance,
-    get_peft_method,
     is_adapter_param_name,
     is_peft_enabled,
     load_adapter_tensors_for_teacher,
 )
 from .replay_utils import get_register_replay_list_func
+# ORBIT-SEAM: adapter-state mode decides whether the CPU snapshot holds adapters or full weights
 from orbit.megatron.state_mode import should_backup_actor_after_train, uses_adapter_state
 from .update_weight.common import named_adapter_params, named_params_and_buffers
+# ORBIT-SEAM: bridge-export weight updater for models without a megatron_to_hf name map; selected
+# by orbit.megatron.actor_helpers._select_update_weight_cls, which reads it back off this module
 from orbit.megatron.update_weight_bridge import UpdateWeightFromDistributedBridge
 from .update_weight.update_weight_from_distributed.broadcast import UpdateWeightFromDistributed
 
+# ORBIT-SEAM: base imports p2p unconditionally; guard it so importing this module still works on
+# sglang builds without ParallelismContext (the p2p transfer mode then fails at use, not at import)
 try:
     from .update_weight.update_weight_from_distributed.p2p import UpdateWeightP2P
 except ImportError:
@@ -92,81 +107,35 @@ except ImportError:
     # we leave it undefined and fail only if that code path is actually taken.
     UpdateWeightP2P = None
 from .update_weight.update_weight_from_tensor import UpdateWeightFromTensor
+# ORBIT-SEAM: orbit's added actor methods and module helpers live in the home layer (P2 mixin + P1
+# lift-out, Phase 3 slice 3g); re-exported here because callers import them off this module
+from orbit.megatron.actor_ext import OrbitTrainActorExtensions
+from orbit.megatron.actor_helpers import (
+    _get_weight_updater_kwargs,
+    _select_update_weight_cls,
+    _start_rollout_id_from_checkpoint,
+    _validate_train_offload_role,
+)
 
 logging.getLogger("megatron").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
 
-def _get_weight_updater_kwargs(args: Namespace, update_weight_cls: type) -> dict[str, object]:
-    if update_weight_cls is UpdateWeightFromTensor:
-        return {"peft_method": get_peft_method(args)}
-    return {"is_lora": is_lora_enabled(args)}
-
-
-def _should_offload_frozen_base(args: Namespace) -> bool:
-    """Is there a frozen base to offload at all?
-
-    Only under PEFT. `offload_megatron_frozen_base_to_cpu` selects parameters
-    with `requires_grad == False`; full fine-tuning has none, so calling it
-    plans empty flat groups, allocates nothing, and frees nothing. Skipping it
-    there loses no memory and avoids a misleading "after offload frozen_base"
-    line in the log claiming an offload that did not happen.
-
-    Full fine-tuning frees its train state through `offload_train_grad_buffers`
-    and `offload_train_optimizer` instead, which argument finalisation forces on
-    whenever `--offload-train` is set without PEFT.
-    """
-    return getattr(args, "peft_method", "none") != "none"
-
-
-def _select_update_weight_cls(args: Namespace) -> type:
-    """Pick the weight updater for this run's (colocate, PEFT, transfer, to-hf) combo."""
-    if args.colocate or get_peft_method(args) != "none":
-        # PEFT (LoRA/OFT) routes through UpdateWeightFromTensor regardless
-        # of colocate, so the unified PeftWeightTransport (IPC for colocate,
-        # NCCL for async) is the only adapter sync path.
-        return UpdateWeightFromTensor
-    if args.update_weight_transfer_mode == "broadcast":
-        # Bridge-loaded models (Nemotron-H, Gemma-4) have no megatron_to_hf
-        # name mapping; their disaggregated sync streams the bridge export.
-        if args.megatron_to_hf_mode == "bridge":
-            return UpdateWeightFromDistributedBridge
-        return UpdateWeightFromDistributed
-    return UpdateWeightP2P
-
-
-def _validate_train_offload_role(args: Namespace, role: str) -> None:
-    if role == "critic" and getattr(args, "offload_train", False):
-        raise NotImplementedError(
-            "Megatron critic --offload-train is not supported. Critic models are full-model even when "
-            "actor PEFT is enabled, so they cannot use the PEFT frozen-base offload path."
-        )
-
-
-def _start_rollout_id_from_checkpoint(args: Namespace, loaded_iteration: int) -> int:
-    """Translate checkpoint iteration into the next rollout id.
-
-    Bridge startup commonly loads a model-only HF/distributed base checkpoint,
-    whose synthetic iteration is zero.  That is initialization, not an Orbit
-    training resume, and must start at rollout zero.  The checkpoint loader sets
-    ``_orbit_training_checkpoint_loaded`` only when it restored actual training
-    state (a Megatron actor/critic checkpoint or PEFT training sidecar).
-    """
-    if getattr(args, "_orbit_training_checkpoint_loaded", False):
-        return loaded_iteration + 1
-    return 0
-
-
-class MegatronTrainRayActor(TrainRayActor):
+# ORBIT-SEAM: the mixin carries orbit's added methods (ref/teacher log-probs, held-out eval NLL,
+# self-teacher restore/promotion, adapter-param view, train-state prefetch)
+class MegatronTrainRayActor(OrbitTrainActorExtensions, TrainRayActor):
     @with_defer(lambda: Timer().start("train_wait"))
     def init(
         self,
         args: Namespace,
         role: str,
         with_ref: bool = False,
+        # ORBIT-SEAM: OPD adds a second optional companion model alongside base's `with_ref`;
+        # threaded to TrainRayActor.init and consumed by the teacher block below
         with_opd_teacher: bool = False,
     ) -> int | None:
+        # ORBIT-SEAM: refuse the unsupported critic + --offload-train combination up front
         _validate_train_offload_role(args, role)
 
         monkey_patch_torch_dist()
@@ -206,6 +175,9 @@ class MegatronTrainRayActor(TrainRayActor):
         }
         dist.barrier(group=get_gloo_group())
 
+        # ORBIT-SEAM: removed base's torch_memory_saver.memory_margin_bytes tuning here: orbit
+        # offloads the train state explicitly (orbit.megatron.peft_offload) rather than through
+        # torch_memory_saver, so --train-memory-margin-bytes has nothing to tune
         if self.args.debug_rollout_only:
             return 0
 
@@ -219,6 +191,7 @@ class MegatronTrainRayActor(TrainRayActor):
                 m.enabled = getattr(self.args, f"use_{m.name}_replay")
                 m.enable_check_replay_result = m.enabled and self.args.ci_test
 
+        # ORBIT-SEAM: MTP-in-RL patches must be applied before the model is built (home layer)
         from orbit.megatron.mtp_rl_patches import apply_mtp_in_rl_patches
 
         apply_mtp_in_rl_patches(self.args)
@@ -226,8 +199,11 @@ class MegatronTrainRayActor(TrainRayActor):
         (self.model, self.optimizer, self.opt_param_scheduler, loaded_rollout_id) = initialize_model_and_optimizer(
             args, role
         )
+        # ORBIT-SEAM: base resumes at loaded_rollout_id + 1 unconditionally; a model-only bridge/HF
+        # load is initialization, not a resume, and must start at rollout 0 (helper in the home)
         start_rollout_id = _start_rollout_id_from_checkpoint(self.args, loaded_rollout_id)
 
+        # ORBIT-SEAM: wire rollout routing replay into the freshly built model chunks
         if role != "critic" and getattr(self.args, "use_rollout_routing_replay", False):
             from miles.backends.megatron_utils.replay_utils import wire_routing_replay_to_models
 
@@ -244,6 +220,8 @@ class MegatronTrainRayActor(TrainRayActor):
 
         verify_megatron_parallel_state(self.model)
 
+        # ORBIT-SEAM: side stream + event for the async train-state prefetch (prefetch_train_state
+        # in the home mixin records on it, wake_up waits on it)
         if self.args.offload_train and getattr(self.args, "offload_train_async", False):
             self._wake_up_stream = torch.cuda.Stream()
         else:
@@ -253,8 +231,11 @@ class MegatronTrainRayActor(TrainRayActor):
         if role == "critic":
             if self.args.offload_train:
                 self.sleep()
+            # ORBIT-SEAM: base returns None for the critic; a resumed critic needs its rollout id
             return start_rollout_id
 
+        # ORBIT-SEAM: one-trunk (adapter) critic shares this actor's trunk, so it is built here
+        # rather than in a separate critic actor
         self.critic_model = None
         self.critic_optimizer = None
         self.critic_opt_param_scheduler = None
@@ -269,6 +250,9 @@ class MegatronTrainRayActor(TrainRayActor):
                 expected_iteration=_expected_critic_resume_iteration(self.args, loaded_rollout_id),
             )
 
+        # ORBIT-SEAM: base always snapshots the full parameter set; under PEFT only the adapter is
+        # trainable, so the snapshot source becomes mode-dependent and moves behind
+        # create_model_state_manager (base built a TensorBackuper directly)
         if uses_adapter_state(self.args):
 
             def state_source_getter():
@@ -290,12 +274,19 @@ class MegatronTrainRayActor(TrainRayActor):
             single_tag=None if args.enable_weights_backuper else "actor",
         )
         self._active_model_tag: str | None = "actor"
+        # ORBIT-SEAM: base always takes the startup snapshot; skip it in the modes that never
+        # restore or copy from it (nothing reads the tag, and the copy is not free)
         if should_backup_actor_after_train(self.args):
             self.model_state_manager.backup("actor")
 
+        # ORBIT-SEAM: under PEFT the reference policy IS the base with adapters disabled, so no
+        # second checkpoint is loaded (compute_ref_log_probs takes the disable_adapter path)
         if with_ref and not is_peft_enabled(self.args):
             self.load_other_checkpoint("ref", args.ref_load)
 
+        # ORBIT-SEAM: OPD teacher setup - the teacher LM head for opd_jsd_loss, then the in-process
+        # teacher (load:/adapter:/self:*) and the sglang-side self-teacher shadow, then the
+        # checkpoint sidecar restore. All orbit; base has no distillation teacher.
         if self.args.loss_type == "opd_jsd_loss":
             # Eagerly load now (onto CPU) so the first train step doesn't stall on a
             # safetensors read; wake_up() moves it to GPU before use.
@@ -366,10 +357,13 @@ class MegatronTrainRayActor(TrainRayActor):
 
         if self.args.vocab_size is None:
             self.args.vocab_size = self.tokenizer.vocab_size
+        # ORBIT-SEAM: OPD top-k K depends on the vocab size the tokenizer just filled in
         # Argument validation commonly runs before the tokenizer has filled the
         # real vocab size. Recheck K here, before the first rollout is launched.
         validate_opd_topk_vocab_size(self.args)
 
+        # ORBIT-SEAM: base picks the updater inline from (colocate, transfer mode); orbit adds the
+        # PEFT and bridge-export cases, so the choice and its kwargs live in the home helper
         update_weight_cls = _select_update_weight_cls(self.args)
         self.weight_updater = update_weight_cls(
             self.args,
@@ -407,6 +401,9 @@ class MegatronTrainRayActor(TrainRayActor):
         print_memory("before offload model")
         destroy_process_groups()
 
+        # ORBIT-SEAM: base pauses the whole allocator with torch_memory_saver.pause(); orbit
+        # offloads the train state piece by piece (grad buffers, optimizer, frozen base, and the
+        # OPD teacher LM head) so PEFT runs can keep the adapter resident on GPU
         if self.args.offload_train_grad_buffers:
             offload_megatron_grad_buffers(self.model)
             print_memory("after offload grad_buffers")
@@ -429,37 +426,14 @@ class MegatronTrainRayActor(TrainRayActor):
         if self._is_main_rank and hasattr(self, "_last_rollout_id"):
             log_cpu_memory(self._last_rollout_id, self.args, "after_offload_train")
 
-    def prefetch_train_state(self, rollout_id: int) -> None:
-        """Issue train-state H2D wake-up on a dedicated stream so the
-        train kernels can wait on it instead of blocking on a synchronous load.
-
-        Called from train.py between 'offload rollout done' and 'actor train start'
-        when args.offload_train_async is on. No-op otherwise.
-        """
-        if not self.args.offload_train:
-            return
-        if not getattr(self.args, "offload_train_async", False):
-            return
-        if self._wake_up_stream is None:
-            return
-        if not _should_offload_frozen_base(self.args):
-            # Nothing was offloaded, so there is nothing to prefetch. Recording
-            # no event leaves wake_up() on its synchronous branch, which is also
-            # a no-op here -- rather than waiting on an event for a copy that
-            # never ran.
-            return
-        load_megatron_frozen_base_to_gpu(self.model, stream=self._wake_up_stream)
-        if self.args.offload_train_adapter:
-            load_megatron_adapter_to_gpu(self.model, stream=self._wake_up_stream)
-        event = torch.cuda.Event()
-        event.record(self._wake_up_stream)
-        self._wake_up_event = event
-
     @timer
     def wake_up(self) -> None:
         assert self.args.offload_train
         print_memory("before wake_up model")
 
+        # ORBIT-SEAM: mirror image of sleep() above - base resumes the allocator with
+        # torch_memory_saver.resume(); orbit either waits on the prefetch event
+        # prefetch_train_state recorded (home mixin) or reloads each piece synchronously
         wake_up_event = getattr(self, "_wake_up_event", None)
         if wake_up_event is not None:
             torch.cuda.current_stream().wait_event(wake_up_event)
@@ -487,6 +461,8 @@ class MegatronTrainRayActor(TrainRayActor):
         self._train_state_awake = True
 
     def _switch_model(self, target_tag: str) -> None:
+        # ORBIT-SEAM: skip the restore when the tag is already resident; adapter-state restores are
+        # frequent enough (ref/teacher toggling per step) that the no-op case must be free
         if target_tag == self._active_model_tag:
             return
         if target_tag not in self.model_state_manager.backup_tags:
@@ -538,9 +514,12 @@ class MegatronTrainRayActor(TrainRayActor):
                 assert a.shape[0] == b.shape[0] - 1, f"{a.shape}, {b.shape}"
 
             # We need to pad the experts to the last token. We won't calculate loss on this token so this should be fine.
+            # ORBIT-SEAM: repo-wide comment-style pass (TODO -> Follow-up), no functional change
             # Follow-up: fuse this padding with the following slice_with_cp to reduce memory copy.
             replay_data = [pad_func(r, 1) for r in replay_data]
             # Follow-up: maybe extract a common process function for here and get_batch?
+            # ORBIT-SEAM: slice_with_cp gained a per-sample max_seq_len argument; supply it in the
+            # non-bshd branch below (None keeps base's behaviour when the batch has no lengths)
             max_seq_lens = batch.get("max_seq_lens")
 
             def sample_max_seq_len(index: int, max_seq_lens=max_seq_lens) -> int | None:
@@ -592,368 +571,6 @@ class MegatronTrainRayActor(TrainRayActor):
                 store_prefix=store_prefix,
             )
 
-    def compute_ref_log_probs(
-        self,
-        data_iterator: list[DataIterator],
-        num_microbatches: list[int],
-    ) -> dict[str, list[torch.Tensor]] | None:
-        """Compute reference log-probs for the KL term.
-
-        Returns a dict ready to merge into rollout_data (with "ref_log_probs"),
-        or None if no ref forward should run this cycle.
-
-        Routing:
-          * (kl_coef == 0 AND not use_kl_loss)  -> return None.
-          * is_peft_enabled(args)               -> fallthrough replay; run forward
-                                                  inside create_peft_instance(args).disable_adapter(self.model).
-          * "ref" in model_state_manager        -> fallthrough replay; _switch_model("ref"); run forward.
-          * otherwise                           -> return None.
-        """
-        if self.args.kl_coef == 0 and not self.args.use_kl_loss:
-            return None
-
-        if is_peft_enabled(self.args):
-            peft = create_peft_instance(self.args)
-            if peft is None:
-                raise RuntimeError("PEFT reference log-probs requested but no PEFT instance could be created.")
-            self._set_replay_stage("fallthrough")
-            with peft.disable_adapter(self.model):
-                return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="ref_")
-
-        if "ref" not in self.model_state_manager.backup_tags:
-            return None
-
-        self._set_replay_stage("fallthrough")
-        self._switch_model("ref")
-        return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="ref_")
-
-    def _build_eval_nll_local_batch(
-        self, rows: list[tuple[int, bool]], full_batch: dict
-    ) -> RolloutBatch:
-        """Materialise this rank's shard of the held-out set on the GPU.
-
-        Mirrors ``get_rollout_data``: token/mask tensors on the current device,
-        plus the ``bshd`` max-sequence-length padding. Deliberately does NOT go
-        through ``process_rollout_data`` -- the held-out set is not a rollout
-        and must not be resharded a second time.
-        """
-        device = torch.cuda.current_device()
-        indices = [index for index, _ in rows]
-        rollout_data: RolloutBatch = {
-            "tokens": [
-                torch.tensor(full_batch["tokens"][i], dtype=torch.long, device=device) for i in indices
-            ],
-            "loss_masks": [
-                torch.tensor(full_batch["loss_masks"][i], dtype=torch.int, device=device) for i in indices
-            ],
-            "total_lengths": [full_batch["total_lengths"][i] for i in indices],
-            "response_lengths": [full_batch["response_lengths"][i] for i in indices],
-        }
-        if self.args.qkv_format == "bshd":
-            pad_size = get_parallel_state().tp.size * self.args.data_pad_size_multiplier
-            max_seq_len = max(rollout_data["total_lengths"])
-            max_seq_len = (max_seq_len + pad_size - 1) // pad_size * pad_size
-            rollout_data["max_seq_lens"] = [max_seq_len] * len(indices)
-        return rollout_data
-
-    def compute_eval_nll(self, rollout_id: int) -> dict[str, float] | None:
-        """Token-weighted held-out NLL of the current (adapted) model.
-
-        Forward-only: no optimizer state is touched and no weights change. Runs
-        through ``compute_log_prob`` so there is exactly one forward path in the
-        actor, and reuses ``sft_rollout``'s masking so train and eval score the
-        identical tokens.
-
-        Two things this method exists to get right:
-
-        * **Coverage.** It bypasses ``get_data_iterator``, whose
-          ``num_local_samples // num_local_gbs`` floor division would silently
-          drop the remainder of the held-out file and make the reported NLL a
-          function of ``--global-batch-size``. The micro-batch schedule here
-          keeps the short final group, and the sample count is asserted against
-          the number of rows read.
-        * **Cross-rank reduction.** ``RayTrainGroup._broadcast`` returns one
-          value per actor across the whole TP x PP x DP grid. TP/PP replicas
-          hold the SAME samples and DP shards hold DIFFERENT token counts, so
-          neither averaging per-actor floats nor summing them is correct. This
-          method sums the *accumulators* over the DP group and then returns a
-          value from exactly one rank; every other rank returns ``None``.
-
-        Returns:
-            On the single reporting rank (DP 0, TP 0, CP 0, last PP stage), the
-            dict from :meth:`NllStats.as_dict`. ``None`` everywhere else.
-        """
-        parallel_state = get_parallel_state()
-
-        # Refusals, not silent approximations. Both would need CP-chunked mask
-        # slicing / VPP-divisible micro-batch counts that cannot be validated
-        # without a multi-GPU run, and a quiet wrong NLL is worse than a stop.
-        assert parallel_state.cp.size == 1, (
-            f"--eval-nll-data does not support context parallelism (cp_size={parallel_state.cp.size}); "
-            "log-probs would be CP-chunked while the loss masks are not."
-        )
-        assert (parallel_state.vpp_size or 1) == 1, (
-            f"--eval-nll-data does not support virtual pipeline parallelism (vpp_size={parallel_state.vpp_size})."
-        )
-        assert self.role != "critic", "--eval-nll-data is an actor-only eval"
-        assert self.args.eval_nll_data, "compute_eval_nll called without --eval-nll-data"
-
-        full_batch = getattr(self, "_eval_nll_batch", None)
-        if full_batch is None:
-            full_batch = build_eval_nll_batch(self.args, tokenizer=self.tokenizer)
-            self._eval_nll_batch = full_batch
-        num_rows = len(full_batch["total_lengths"])
-
-        dp_size = parallel_state.intra_dp.size
-        shards = plan_eval_nll_shards(num_rows, dp_size, pad_index=full_batch["shortest_row_index"])
-        rows = shards[parallel_state.intra_dp.rank]
-        is_padding = [padded for _, padded in rows]
-
-        micro_batch_size = self.args.eval_nll_micro_batch_size or self.args.micro_batch_size or 1
-        micro_batch_indices = plan_eval_nll_microbatches(len(rows), micro_batch_size)
-        num_microbatches = [len(micro_batch_indices)]
-
-        # Both DP collectives below MUST execute between wake_up() and sleep().
-        # sleep() calls destroy_process_groups(), which sets
-        # ReloadableProcessGroup.group = None; the monkeypatched dist.all_reduce
-        # then unwraps `group=parallel_state.intra_dp.group` to `group=None`,
-        # which torch reads as the default WORLD group. No exception is raised,
-        # so a reduction placed outside this window silently reduces over the
-        # wrong communicator (over-counting by tp_size once tp > 1).
-        woke_here = False
-        if self.args.offload_train and not getattr(self, "_train_state_awake", True):
-            self.wake_up()
-            woke_here = True
-
-        # The held-out NLL is defined at temperature 1; args.rollout_temperature
-        # is applied inside get_responses and would otherwise silently rescale
-        # every logit on an RL run.
-        previous_temperature = self.args.rollout_temperature
-        try:
-            if dp_size > 1:
-                # The pipeline schedule is a collective: DP ranks disagreeing on
-                # the micro-batch count would hang rather than fail.
-                # plan_eval_nll_shards equalises shard sizes so this cannot
-                # happen; assert it anyway.
-                counts = torch.tensor(
-                    [len(micro_batch_indices), -len(micro_batch_indices)],
-                    dtype=torch.int64,
-                    device=torch.cuda.current_device(),
-                )
-                dist.all_reduce(counts, op=dist.ReduceOp.MAX, group=parallel_state.intra_dp.group)
-                assert counts[0].item() == -counts[1].item() == len(micro_batch_indices), (
-                    f"DP ranks disagree on eval NLL micro-batch count: local={len(micro_batch_indices)}, "
-                    f"max={counts[0].item()}, min={-counts[1].item()}"
-                )
-
-            self.args.rollout_temperature = 1.0
-            rollout_data = self._build_eval_nll_local_batch(rows, full_batch)
-            data_iterator = [
-                DataIterator(rollout_data, None, micro_batch_indices) for _ in range(parallel_state.vpp_size or 1)
-            ]
-            self._set_replay_stage("fallthrough")
-            with timer("eval_nll"):
-                out = self.compute_log_prob(data_iterator, num_microbatches, store_prefix="eval_")
-
-            log_probs = out.get("eval_log_probs")
-            if log_probs is None:
-                # Not the last pipeline stage: this rank ran the forward but
-                # holds no logits. It still participates in the all-reduce below.
-                local = NllStats.zero()
-            else:
-                assert len(log_probs) == len(rows), (
-                    f"eval NLL scored {len(log_probs)} samples but was given {len(rows)}"
-                )
-                local = accumulate_nll(log_probs, rollout_data["loss_masks"], is_padding=is_padding)
-
-            if dp_size > 1:
-                values = torch.tensor(
-                    local.to_values(), dtype=torch.float64, device=torch.cuda.current_device()
-                )
-                dist.all_reduce(values, op=dist.ReduceOp.SUM, group=parallel_state.intra_dp.group)
-                total = NllStats.from_values(values.tolist())
-            else:
-                total = local
-        finally:
-            # Still a finally: the model must go back to sleep even if the
-            # forward or a collective raises.
-            self.args.rollout_temperature = previous_temperature
-            if woke_here:
-                self.sleep()
-
-        if not is_eval_nll_reporting_rank(parallel_state):
-            return None
-
-        assert total.num_samples == num_rows, (
-            f"eval NLL scored {total.num_samples} samples but the held-out file "
-            f"{self.args.eval_nll_data} has {num_rows} rows"
-        )
-        logger.info(
-            "eval_nll rollout_id=%s nll=%.6f sample_mean_nll=%.6f tokens=%d samples=%d",
-            rollout_id,
-            total.mean_nll,
-            total.sample_mean_nll,
-            total.num_tokens,
-            total.num_samples,
-        )
-        return total.as_dict()
-
-    def _restore_checkpoint_teacher_state(self) -> None:
-        """Resume the EMA/lag self-teacher from its checkpoint sidecar, if present.
-
-        The sidecar is written next to the PEFT adapter checkpoint (model.save);
-        without it a resumed run silently re-seeds the self-teacher from the
-        resumed student, losing the teacher's lag. Absence is legal (checkpoints
-        predating sidecars); corruption is not.
-        """
-        from orbit.opd.self_teacher_checkpoint import (
-            TeacherCheckpointError,
-            has_self_teacher_sidecar,
-            load_self_teacher_sidecar,
-        )
-
-        rank = dist.get_rank() if dist.is_initialized() else 0
-        world_size = dist.get_world_size() if dist.is_initialized() else 1
-        adapter_dir = getattr(self.args, "_peft_resume_adapter_dir", None)
-
-        # Adapter loading is shard-local.  A missing TP/PP shard can therefore
-        # leave only some ranks with a resume directory.  Reach consensus before
-        # any early return so those ranks cannot diverge at the sidecar
-        # collectives below and hang the job.
-        local_restore_state = (
-            self._self_teacher is not None,
-            str(adapter_dir) if adapter_dir is not None else None,
-        )
-        if world_size > 1:
-            restore_states = [None] * world_size
-            dist.all_gather_object(restore_states, local_restore_state, group=get_gloo_group())
-        else:
-            restore_states = [local_restore_state]
-
-        teacher_enabled = [state[0] for state in restore_states]
-        if any(teacher_enabled) and not all(teacher_enabled):
-            raise TeacherCheckpointError("self-teacher initialization differs across distributed ranks")
-        if not any(teacher_enabled):
-            return
-
-        adapter_dirs = [state[1] for state in restore_states]
-        adapter_loaded = [path is not None for path in adapter_dirs]
-        if any(adapter_loaded) and not all(adapter_loaded):
-            missing = [str(missing_rank) for missing_rank, path in enumerate(adapter_dirs) if path is None]
-            raise TeacherCheckpointError(
-                "PEFT adapter checkpoint loaded on only some ranks; missing adapter shards on ranks "
-                + ", ".join(missing)
-            )
-        if not any(adapter_loaded):
-            return
-        if len(set(adapter_dirs)) != 1:
-            raise TeacherCheckpointError(
-                "PEFT adapter resume directory differs across distributed ranks: "
-                + ", ".join(f"rank {state_rank}: {path}" for state_rank, path in enumerate(adapter_dirs))
-            )
-        adapter_dir = adapter_dirs[0]
-
-        local_present = has_self_teacher_sidecar(adapter_dir, rank=rank)
-        if world_size > 1:
-            presence = [None] * world_size
-            dist.all_gather_object(presence, local_present, group=get_gloo_group())
-        else:
-            presence = [local_present]
-
-        if any(presence) and not all(presence):
-            missing = [str(missing_rank) for missing_rank, present in enumerate(presence) if not present]
-            raise TeacherCheckpointError(
-                "self-teacher checkpoint is only partially present; missing sidecars for ranks " + ", ".join(missing)
-            )
-        if not any(presence):
-            logger.info(f"No self-teacher sidecar at {adapter_dir}; keeping freshly seeded teacher state.")
-            return
-
-        local_error = None
-        try:
-            load_self_teacher_sidecar(adapter_dir, self._self_teacher, rank=rank, world_size=world_size)
-        except Exception as exc:  # surface a corrupt shard consistently on all ranks
-            local_error = f"{type(exc).__name__}: {exc}"
-        if world_size > 1:
-            errors: list[str | None] = [None] * world_size
-            dist.all_gather_object(errors, local_error, group=get_gloo_group())
-        else:
-            errors = [local_error]
-        failures = [f"rank {failed_rank}: {error}" for failed_rank, error in enumerate(errors) if error]
-        if failures:
-            raise TeacherCheckpointError(
-                "self-teacher checkpoint load failed on one or more ranks; " + "; ".join(failures)
-            )
-        logger.info(f"Restored self-teacher state from checkpoint sidecar at {adapter_dir}")
-
-    def _adapter_named_params(self) -> dict[AdapterTensorKey, torch.nn.Parameter]:
-        # (vp_stage, name) keys: plain names collide across virtual-pipeline chunks,
-        # silently merging distinct adapter tensors in self-teacher/transport flows.
-        return adapter_named_parameters(self.model, is_adapter_param_name)
-
-    def compute_teacher_log_probs(
-        self,
-        data_iterator: list[DataIterator],
-        num_microbatches: list[int],
-        ref_data: dict[str, list[torch.Tensor]] | None = None,
-    ) -> dict[str, list[torch.Tensor]] | None:
-        """Compute in-process teacher log-probs for on-policy distillation.
-
-        Teacher-forcing forward on the student's sampled tokens, producing
-        "teacher_log_probs". Routing follows teacher_forward_plan: same-base
-        specs toggle adapters on the resident model (no second model); base
-        aliases the already-computed ref forward when available; load: keeps
-        the legacy full second model. Under --opd-type sglang the teacher is
-        scored on the rollout engine, so this returns None (plan "none").
-        """
-        plan = teacher_forward_plan(
-            self._opd_teacher_spec,
-            is_peft_enabled(self.args),
-            ref_data is not None,
-            opd_type=getattr(self.args, "opd_type", None),
-        )
-        if plan == "none":
-            return None
-        if plan == "alias_ref":
-            return {"teacher_log_probs": ref_data["ref_log_probs"]}
-        if plan == "adapter_off":
-            peft = create_peft_instance(self.args)
-            if peft is None:
-                raise RuntimeError("OPD base teacher requested but no PEFT instance could be created.")
-            self._set_replay_stage("fallthrough")
-            with peft.disable_adapter(self.model):
-                return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="teacher_")
-        if plan == "adapter_swap":
-            tensors = self._opd_teacher_tensors
-            if tensors is None and self._self_teacher is not None:
-                tensors = self._self_teacher.tensors
-            if tensors is None:
-                raise RuntimeError(f"OPD teacher {self._opd_teacher_spec.source} has no tensors loaded.")
-            self._set_replay_stage("fallthrough")
-            with swap_adapter_tensors(self.model, tensors, is_adapter_param_name):
-                return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="teacher_")
-        # switch_model (legacy load:)
-        if "teacher" not in self.model_state_manager.backup_tags:
-            return None
-        self._set_replay_stage("fallthrough")
-        self._switch_model("teacher")
-        return self.compute_log_prob(data_iterator, num_microbatches, store_prefix="teacher_")
-
-    def _promote_self_teacher(self) -> None:
-        """Push the EMA/lag buffer to the engine's orbit_teacher slot.
-
-        Swap buffer tensors into the live adapter params so the existing
-        megatron->HF conversion + transport applies unchanged, sync to the
-        teacher slot name, restore. Failure keeps the previous teacher slot
-        (never silently distill from a half-loaded adapter).
-        """
-        with swap_adapter_tensors(self.model, self._self_teacher.tensors, is_adapter_param_name):
-            try:
-                self.weight_updater.push_teacher_adapter()
-            except Exception:
-                logger.exception("OPD self-teacher promotion FAILED; engine keeps the previous teacher slot.")
-                raise
-
     def train(self, rollout_id: int, rollout_data_ref: Box) -> None:
         self._last_rollout_id = rollout_id
         if self.args.offload_train:
@@ -986,6 +603,7 @@ class MegatronTrainRayActor(TrainRayActor):
         if rollout_id >= self.args.num_critic_only_steps:
             sync_actor_critic_data(self.args, rollout_data, self._actor_critic_groups)
 
+        # ORBIT-SEAM: role tells the advantage/return pipeline it is running for the critic
         compute_advantages_and_returns(self.args, rollout_data, role="critic")
 
         self.args.loss_type = "value_loss"
@@ -1002,6 +620,8 @@ class MegatronTrainRayActor(TrainRayActor):
         return getattr(self.args, f"use_rollout_{m.name}_replay")
 
     def train_actor(self, rollout_id: int, rollout_data: RolloutBatch) -> None:
+        # ORBIT-SEAM: one-trunk-critic iterator/microbatch counts, built inside the advantages
+        # block below and consumed by the critic train phase at the end of this method
         critic_data_iterator = None
         critic_num_microbatches = None
         # Create data iterator for log_probs and train.
@@ -1020,6 +640,9 @@ class MegatronTrainRayActor(TrainRayActor):
                 )
 
         with inverse_timer("train_wait"), timer("train"):
+            # ORBIT-SEAM: base does its ref forward inline inside the advantages block; orbit hoists
+            # it into compute_ref_log_probs (home mixin) so PEFT can serve the reference by
+            # disabling adapters, and so a direct loss can still request it
             # Outside the advantages block so loss types that skip the PPO
             # advantage/returns pipeline (opd_jsd_loss) can still opt into
             # --use-kl-loss; compute_ref_log_probs returns None when neither
@@ -1028,6 +651,8 @@ class MegatronTrainRayActor(TrainRayActor):
             if ref_data is not None:
                 rollout_data.update(ref_data)
             if self.args.compute_advantages_and_returns:
+                # ORBIT-SEAM: on-policy-distillation teacher forward (home mixin) plus the env-gated
+                # correctness dump of what it produced; returns None when no in-process teacher runs
                 teacher_data = self.compute_teacher_log_probs(data_iterator, num_microbatches, ref_data=ref_data)
                 if teacher_data is not None:
                     rollout_data.update(teacher_data)
@@ -1073,6 +698,9 @@ class MegatronTrainRayActor(TrainRayActor):
                         if self._use_rollout_replay(m):
                             m.clear_all_forward()
 
+                # ORBIT-SEAM: base's single `use_critic` splits in two - the separate critic actor
+                # still syncs over the actor/critic groups, while the one-trunk critic runs its
+                # value forward right here on this actor's own trunk
                 if uses_separate_critic(self.args):
                     sync_actor_critic_data(
                         self.args,
@@ -1096,6 +724,7 @@ class MegatronTrainRayActor(TrainRayActor):
                 # because we may need normalize the whole rollout.
                 compute_advantages_and_returns(self.args, rollout_data)
 
+            # ORBIT-SEAM: hoisted out of the advantages block (base restores inside it)
             # A full-FT reference forward switches the resident parameters to
             # the "ref" backup. Direct losses such as opd_jsd_loss skip the
             # advantages block above, so restoration must not live inside it.
@@ -1109,6 +738,9 @@ class MegatronTrainRayActor(TrainRayActor):
 
             # Train
             self._set_replay_stage("replay_backward")
+            # ORBIT-SEAM: base always runs the policy step; with a one-trunk critic the first
+            # --num-critic-only-steps rollouts train the value head alone, so the policy step (and
+            # with it the self-teacher EMA/lag update and its promotion) is gated
             run_policy_phase = not uses_one_trunk_critic(self.args) or rollout_id >= self.args.num_critic_only_steps
             with timer("actor_train"):
                 if run_policy_phase:
@@ -1132,6 +764,7 @@ class MegatronTrainRayActor(TrainRayActor):
                         ):
                             self._promote_self_teacher()
 
+            # ORBIT-SEAM: second train phase for the one-trunk critic, under the value-loss context
             if uses_one_trunk_critic(self.args) and critic_data_iterator is not None:
                 with timer("critic_train"), value_loss_phase(self.args):
                     train(
@@ -1151,6 +784,7 @@ class MegatronTrainRayActor(TrainRayActor):
             if m.enabled:
                 m.clear_all()
 
+        # ORBIT-SEAM: base backs up unconditionally; skip it in the modes nothing restores from
         # update the CPU actor snapshot when a later restore/copy path needs it
         if should_backup_actor_after_train(self.args):
             self.model_state_manager.backup("actor")
@@ -1182,6 +816,8 @@ class MegatronTrainRayActor(TrainRayActor):
 
             maybe_finalize_async_save(blocking=True)
 
+        # ORBIT-SEAM: the save chain carries the self-teacher so its checkpoint sidecar is written
+        # beside the adapter (here and in the save_hf_model call below)
         # getattr: the separate-critic actor shares this method but never runs the
         # OPD teacher init that creates _self_teacher.
         save(
@@ -1192,6 +828,7 @@ class MegatronTrainRayActor(TrainRayActor):
             self_teacher=getattr(self, "_self_teacher", None),
         )
 
+        # ORBIT-SEAM: the one-trunk critic lives on this actor, so its checkpoint is written here
         if uses_one_trunk_critic(self.args) and self.args.critic_save:
             save_critic_checkpoint(
                 self.args,
@@ -1219,6 +856,7 @@ class MegatronTrainRayActor(TrainRayActor):
 
     @timer
     def update_weights(self) -> None:
+        # ORBIT-SEAM: engine-free runs (SFT/eval-only) have nothing to sync to
         if self.args.debug_train_only or self.args.debug_rollout_only or not uses_rollout_engines(self.args):
             return
 
@@ -1245,10 +883,15 @@ class MegatronTrainRayActor(TrainRayActor):
             if dist.get_rank() == 0:
                 ray.get(self.rollout_manager.clear_updatable_num_new_engines.remote())
 
+        # ORBIT-SEAM: removed base's torch_memory_saver resume()/disable() wrapper around this whole
+        # block (and the LoRA-specific resume before it): orbit never pauses the allocator, so the
+        # adapter/base params the export reads are already backed by real GPU memory
         print_memory("before update_weights")
         self.weight_updater.update_weights()
         print_memory("after update_weights")
 
+        # ORBIT-SEAM: fill the engine's OPD teacher slot, then release the adapter to CPU if the run
+        # offloads it - both must happen after the sync and before anything else touches the params
         # Startup fill of the engine's orbit_teacher slot for sglang self:*
         # teachers (Task 6 reserves it EMPTY; the local scoring stage fires
         # unconditionally during the FIRST generate, and scoring an empty slot
@@ -1288,6 +931,8 @@ class MegatronTrainRayActor(TrainRayActor):
                 # First copy rollout_actor to old_actor
                 self.model_state_manager.copy(src_tag="rollout_actor", dst_tag="old_actor")
                 # Then copy current actor to rollout_actor
+                # ORBIT-SEAM: in adapter-state mode the "actor" snapshot is already current (the
+                # adapter is the whole state), so the queue advances by copy instead of re-backup
                 if uses_adapter_state(self.args):
                     self.model_state_manager.copy(src_tag="actor", dst_tag="rollout_actor")
                 else:
@@ -1299,6 +944,8 @@ class MegatronTrainRayActor(TrainRayActor):
                     self.model_state_manager.backup("old_actor")
 
         if self.args.offload_train:
+            # ORBIT-SEAM: base pauses torch_memory_saver here; orbit instead frees the export's
+            # scratch allocations so the offloaded state actually stays offloaded
             destroy_process_groups()
             clear_memory()
             print_memory("after update_weights destroy_process_groups")

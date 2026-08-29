@@ -3,6 +3,7 @@ from __future__ import annotations
 import gc
 import logging
 import os
+from argparse import Namespace
 from collections.abc import Iterable, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -98,6 +99,22 @@ def _resolve_load_device(device: torch.device | str | int | None) -> torch.devic
 def _empty_cuda_cache_if_available() -> None:
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+
+def _should_offload_frozen_base(args: Namespace) -> bool:
+    """Is there a frozen base to offload at all?
+
+    Only under PEFT. `offload_megatron_frozen_base_to_cpu` selects parameters
+    with `requires_grad == False`; full fine-tuning has none, so calling it
+    plans empty flat groups, allocates nothing, and frees nothing. Skipping it
+    there loses no memory and avoids a misleading "after offload frozen_base"
+    line in the log claiming an offload that did not happen.
+
+    Full fine-tuning frees its train state through `offload_train_grad_buffers`
+    and `offload_train_optimizer` instead, which argument finalisation forces on
+    whenever `--offload-train` is set without PEFT.
+    """
+    return getattr(args, "peft_method", "none") != "none"
 
 
 def offload_megatron_grad_buffers(model: Sequence[torch.nn.Module]) -> None:
@@ -866,6 +883,7 @@ def load_megatron_adapter_to_gpu(
 
 
 __all__ = [
+    "_should_offload_frozen_base",
     "load_megatron_adapter_to_gpu",
     "load_megatron_frozen_base_to_gpu",
     "load_megatron_grad_buffers",
