@@ -75,13 +75,15 @@ COSMETIC_ONLY = {
 
 
 def test_every_functional_seam_is_stamped():
-    """Small budgeted deltas are seams: each must carry an ORBIT-SEAM mark
-    naming why the miles file is modified, unless its delta is purely cosmetic
-    (allowlisted above). Keeps `git grep ORBIT-SEAM` a complete seam inventory."""
+    """Every budgeted code file must carry at least one ORBIT-SEAM mark naming
+    why the miles file is modified, unless its delta is purely cosmetic
+    (allowlisted above). As of Phase 3 the whole fork delta is annotated, so
+    there is no size threshold: `git grep ORBIT-SEAM` is the complete seam
+    inventory."""
     manifest = json.loads(MANIFEST_PATH.read_text())
     unstamped = []
     for path, entry in manifest["budgeted"].items():
-        if entry["delta_lines"] > 30 or path in COSMETIC_ONLY:
+        if path in COSMETIC_ONLY:
             continue
         p = REPO_ROOT / path
         if p.suffix not in (".py", ".yml", ".yaml", ".j2", ".sh"):
