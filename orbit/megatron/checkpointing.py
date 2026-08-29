@@ -1031,6 +1031,20 @@ def load_peft_adapter_state(
     return result
 
 
+def _preprocess_common_state_dict_for_megatron_save(common_state_dict: dict) -> dict:
+    """Normalize Megatron common checkpoint metadata before rank consistency checks."""
+    processed_common_state_dict = dict(common_state_dict)
+    args = processed_common_state_dict.get("args")
+    if args is None:
+        return processed_common_state_dict
+
+    args_dict = dict(args) if isinstance(args, dict) else vars(args).copy()
+    args_dict.pop("local_rank", None)
+    args_dict.pop("rank", None)
+    processed_common_state_dict["args"] = args_dict
+    return processed_common_state_dict
+
+
 def record_training_checkpoint_marker(
     runtime_args,
     iteration,

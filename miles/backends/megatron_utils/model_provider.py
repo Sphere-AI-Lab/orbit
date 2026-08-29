@@ -17,8 +17,11 @@ from megatron.core.transformer.spec_utils import import_module
 from megatron.core.transformer.transformer_config import TransformerConfig
 from megatron.training.arguments import core_transformer_config_from_args
 
+# ORBIT-SEAM: base's inline bridge-provider overrides and orbit's low-precision provider config live in the home layer
 from orbit.megatron.low_precision_bootstrap import configure_provider_for_low_precision, load_hf_config, resolve_bridge_load_path
 from orbit.megatron.bridge_provider_overrides import apply_bridge_provider_overrides
+# ORBIT-SEAM: critic value-head swap lifted to orbit/critic/value_head.py (P1); re-exported here for base's call sites and this module's importers
+from orbit.critic.value_head import replace_output_layer_with_value_head
 from miles.utils.misc import load_function
 from miles.utils.replay_base import routing_replay_manager
 
@@ -57,11 +60,6 @@ class LinearForLastLayer(torch.nn.Linear):
         return logits, None
 
 
-def replace_output_layer_with_value_head(model: torch.nn.Module, config: TransformerConfig) -> torch.nn.Module:
-    model.output_layer = LinearForLastLayer(input_size=config.hidden_size, output_size=1, config=config)
-    return model
-
-
 def get_model_provider_func(
     args: argparse.Namespace,
     role: Literal["actor", "critic"] = "actor",
@@ -86,6 +84,7 @@ def get_model_provider_func(
                 model = custom_model_provider(pre_process=pre_process, post_process=post_process)
             # Apply critic output layer if needed
             if post_process and role == "critic":
+                # ORBIT-SEAM: base builds LinearForLastLayer inline here; all three providers share one home helper now
                 replace_output_layer_with_value_head(model, model.config)
             return model
 
@@ -94,6 +93,7 @@ def get_model_provider_func(
     if args.megatron_to_hf_mode == "bridge":
         from megatron.bridge import AutoBridge
 
+        # ORBIT-SEAM: base's 18-line inline provider-override block is the home apply_bridge_provider_overrides, plus orbit's low-precision (int4/nvfp4) provider config before finalize()
         hf_config = load_hf_config(args)
         bridge = AutoBridge.from_hf_pretrained(args.hf_checkpoint, trust_remote_code=True)
         provider = bridge.to_megatron_provider(load_weights=False)
@@ -109,6 +109,7 @@ def get_model_provider_func(
             pg_collection=None,
         ) -> GPTModel:
             assert config is None, "miles builds the config from args, so it expects config to be None"
+            # ORBIT-SEAM: base returns provider.provide(...) directly; orbit forwards pg_collection, unwraps the bridge forward, and adds the critic head
             # PP>1 paths in megatron.bridge providers (e.g. mamba_provider) read
             # self._pg_collection.pp during provide(); without forwarding the
             # caller's pg_collection here, those code paths hit AttributeError.
@@ -248,6 +249,7 @@ def get_model_provider_func(
             model = GPTModel(**kwargs)
 
         if post_process and role == "critic":
+            # ORBIT-SEAM: same home value-head helper as the other two providers (base built LinearForLastLayer inline)
             replace_output_layer_with_value_head(model, config)
 
         return model

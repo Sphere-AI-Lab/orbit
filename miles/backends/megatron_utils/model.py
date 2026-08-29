@@ -1,7 +1,8 @@
-import dataclasses
+# ORBIT-SEAM: removed base's `import dataclasses`: optimizer construction moved to orbit/megatron/optim_build.py
 import gc
 import logging
 import math
+# ORBIT-SEAM: os is read by the memory-history snapshot seam in train() (ORBIT_MEMORY_SNAPSHOT_DIR)
 import os
 from argparse import Namespace
 from collections.abc import Callable, Sequence
@@ -14,7 +15,7 @@ from megatron.core.distributed import DistributedDataParallel as DDP
 from megatron.core.distributed import finalize_model_grads
 from megatron.core.enums import ModelType
 from megatron.core.models.gpt import GPTModel
-from megatron.core.optimizer import OptimizerConfig, get_megatron_optimizer
+# ORBIT-SEAM: removed base's `from megatron.core.optimizer import OptimizerConfig, get_megatron_optimizer`: both are used only by the optimizer builder, now in orbit/megatron/optim_build.py
 from megatron.core.optimizer.optimizer import MegatronOptimizer
 from megatron.core.optimizer_param_scheduler import OptimizerParamScheduler
 from megatron.core.pipeline_parallel import get_forward_backward_func
@@ -22,6 +23,7 @@ from megatron.core.utils import get_model_config
 from megatron.training.global_vars import get_args
 from megatron.training.training import get_model
 
+# ORBIT-SEAM: install orbit's megatron.post_training.checkpointing shim at import of the module that owns the only get_model() call site
 from orbit.megatron.modelopt_state_shim import install_if_missing as _install_modelopt_shim
 
 # Megatron's `get_model()` imports `megatron.post_training.checkpointing` at
@@ -32,11 +34,7 @@ from orbit.megatron.modelopt_state_shim import install_if_missing as _install_mo
 # in place inside a Ray actor no matter which entry point reached it.
 _MODELOPT_SHIM_INSTALLED = _install_modelopt_shim()
 
-try:
-    from megatron.core.pipeline_parallel.utils import unwrap_model
-except ImportError:
-    from megatron.core.utils import unwrap_model
-
+# ORBIT-SEAM: --critic-mode predicates route the adapter/head critic builds below
 from miles.utils.arguments import uses_adapter_critic, uses_head_critic, uses_one_trunk_critic
 from miles.utils.dumper_utils import DumperMegatronUtil, DumperPhase
 from miles.utils.memory_utils import clear_memory
@@ -46,6 +44,7 @@ from ..training_utils.data import DataIterator, get_batch
 from ..training_utils.log_utils import aggregate_forward_results, aggregate_train_losses, log_train_step
 from ..training_utils.loss import loss_function
 from ..training_utils.parallel import get_parallel_state
+# ORBIT-SEAM: base's LoRA-only save is orbit's PEFT save (LoRA + OFT), aliased under the base name in checkpoint.py
 from .checkpoint import load_checkpoint, save_checkpoint, save_checkpoint_with_peft
 from .ci_utils import (
     check_model_hashes,
@@ -53,11 +52,14 @@ from .ci_utils import (
     compute_model_hashes_by_layer,
     save_model_hashes,
 )
+# ORBIT-SEAM: model-declared parameter dtype overrides (e.g. Qwen3.5 A_log pinned to fp32) are applied before the optimizer maps params
 from orbit.megatron.fp32_param_utils import enforce_marked_param_dtypes
 from .initialize import is_megatron_main_rank
+# ORBIT-SEAM: low-precision PEFT picks the build order in initialize_model_and_optimizer (base has one order)
 from orbit.megatron.low_precision_bootstrap import should_preload_low_precision_model_before_optimizer
 from .model_provider import get_model_provider_func
 from .parallel import get_packed_seq_params
+# ORBIT-SEAM: base's .lora_utils predicates and adapter writer are orbit's PEFT (LoRA + OFT) layer in the home
 from orbit.megatron.peft_utils import (
     is_peft_enabled,
     is_peft_model,
@@ -67,69 +69,22 @@ from orbit.megatron.peft_utils import (
 
 logger = logging.getLogger(__name__)
 
+# ORBIT-SEAM: base's .bridge_lora_helpers / .lora_utils re-exports are orbit's PEFT bridge helpers in the home layer; removed base's `from .lora_utils import save_lora_checkpoint` (save_peft_checkpoint above supersedes it)
 from orbit.megatron.bridge_peft_helpers import _ensure_model_list, _setup_peft_model_via_bridge  # noqa: F401
 
+# ORBIT-SEAM: critic value-head helpers lifted to orbit/critic/value_head.py (P1); re-exported here because base's builders below call them and the fast tests monkeypatch them on this module
+from orbit.critic.value_head import (
+    _critic_output_layer_needs_reinit,
+    _head_critic_provider,
+    _reinitialize_critic_output_layer,
+)
 
-def _iter_critic_output_layers(model: Sequence[DDP]):
-    for chunk_id, module in enumerate(unwrap_model(model)):
-        output_layer = getattr(module, "output_layer", None)
-        if output_layer is not None:
-            yield chunk_id, output_layer
+# ORBIT-SEAM: optimizer+scheduler construction (incl. orbit's pion dispatch) lifted to orbit/megatron/optim_build.py (P1); re-exported for the two builders below
+from orbit.megatron.optim_build import _build_optimizer_and_scheduler
 
-
-def _critic_output_layer_needs_reinit(args: Namespace, model: Sequence[DDP], role: str) -> bool:
-    if role != "critic" or args.load is None:
-        return False
-
-    from megatron.core.dist_checkpointing.serialization import load_tensors_metadata
-    from megatron.training.checkpointing import get_load_checkpoint_path_by_args
-
-    checkpoint_path = Path(get_load_checkpoint_path_by_args(args))
-    if not (checkpoint_path / ".metadata").is_file():
-        return False
-
-    checkpoint_metadata = load_tensors_metadata(str(checkpoint_path))
-    for _chunk_id, output_layer in _iter_critic_output_layers(model):
-        for name in ("weight", "bias"):
-            param = getattr(output_layer, name, None)
-            if param is None:
-                continue
-
-            param_name = f"output_layer.{name}"
-            ckpt_tensor_metadata = next(
-                (
-                    tensor_metadata
-                    for key, tensor_metadata in checkpoint_metadata.items()
-                    if key == param_name or key.endswith(f".{param_name}")
-                ),
-                None,
-            )
-            expected_shape = tuple(param.shape)
-            checkpoint_shape = tuple(ckpt_tensor_metadata.global_shape) if ckpt_tensor_metadata is not None else None
-            if checkpoint_shape == expected_shape:
-                continue
-
-            reason = (
-                "missing from checkpoint metadata"
-                if checkpoint_shape is None
-                else f"shape mismatch checkpoint={checkpoint_shape} runtime={expected_shape}"
-            )
-            logger.warning(
-                "Will reinitialize critic %s after checkpoint load because it is %s",
-                param_name,
-                reason,
-            )
-            return True
-
-    return False
-
-
-@torch.no_grad()
-def _reinitialize_critic_output_layer(model: Sequence[DDP]) -> None:
-    for _chunk_id, output_layer in _iter_critic_output_layers(model):
-        output_layer.weight.data.normal_(mean=0.0, std=0.02)
-        if output_layer.bias is not None:
-            output_layer.bias.data.zero_()
+# ORBIT-SEAM: save-time common-state normalization and the memory-history snapshot writer lifted to the home layer (P1); the seams below only call them
+from orbit.megatron.checkpointing import _preprocess_common_state_dict_for_megatron_save
+from orbit.megatron.memory_snapshot import _dump_memory_history_snapshot
 
 
 def get_optimizer_param_scheduler(args: Namespace, optimizer: MegatronOptimizer) -> OptimizerParamScheduler:
@@ -202,6 +157,7 @@ def setup_model_and_optimizer(
             - The learning-rate/weight-decay scheduler tied to the optimizer.
     """
     assert not args.moe_use_upcycling
+    # ORBIT-SEAM: base asserts a checkpoint source unconditionally
     # One-trunk critics (adapter and head modes) get trunk weights via aliasing
     # the actor's tensors — they are the builds with no Megatron checkpoint
     # source by design (the adapter variant additionally primes via the PEFT
@@ -209,6 +165,8 @@ def setup_model_and_optimizer(
     if not (role == "critic" and uses_one_trunk_critic(args)):
         assert args.load is not None or args.pretrained_checkpoint is not None
 
+    # ORBIT-SEAM: base inlines the PEFT-vs-plain build and the optimizer build here; both are named
+    # steps now because initialize_model_and_optimizer's low-precision path runs them out of order
     model = _build_model(args, role)
     # Apply parameter-level dtype overrides declared in model definitions
     # (e.g. Qwen3.5 A_log pinned to fp32) before the optimizer maps params.
@@ -217,21 +175,8 @@ def setup_model_and_optimizer(
     return model, optimizer, opt_param_scheduler
 
 
-def _head_critic_provider(provider):
-    """Freeze all-but-value-head inside the provider, BEFORE the DDP wrap, so
-    grad buffers and optimizer state cover only the value head (the trunk is
-    later re-pointed at the actor's storage via ``alias_trunk_storage``)."""
-
-    def wrapped(*p_args, **p_kwargs):
-        from orbit.critic.critic_adapter import prepare_head_critic
-
-        module = provider(*p_args, **p_kwargs)
-        prepare_head_critic([module])
-        return module
-
-    return wrapped
-
-
+# ORBIT-SEAM: base's inline `is_lora_enabled(args) and role == "actor"` bridge branch is orbit's PEFT
+# (LoRA + OFT) build, widened to the adapter-mode critic, plus the head-mode critic provider wrap
 def _build_model(args: Namespace, role: str = "actor") -> list[DDP]:
     peft_bridge = is_peft_enabled(args) and args.megatron_to_hf_mode == "bridge"
     if peft_bridge and (role == "actor" or (role == "critic" and uses_adapter_critic(args))):
@@ -240,43 +185,6 @@ def _build_model(args: Namespace, role: str = "actor") -> list[DDP]:
     if role == "critic" and uses_head_critic(args):
         provider = _head_critic_provider(provider)
     return get_model(provider, ModelType.encoder_or_decoder)
-
-
-def _build_optimizer_and_scheduler(
-    args: Namespace, model: list[DDP]
-) -> tuple[MegatronOptimizer, OptimizerParamScheduler]:
-    kwargs = {}
-    for f in dataclasses.fields(OptimizerConfig):
-        if hasattr(args, f.name):
-            kwargs[f.name] = getattr(args, f.name)
-    config = OptimizerConfig(**kwargs)
-    config.timers = None
-    # Pion has its own getters (own sharding; ZeRO already disabled upstream by
-    # the arguments shim). Muon/Adam/SGD are dispatched inside
-    # get_megatron_optimizer, so they fall through here. Mirrors the Sphere-AI
-    # pion fork's training.py dispatch.
-    optimizer_type = (config.optimizer or "").lower()
-    if "pion" in optimizer_type:
-        if optimizer_type == "pion_msign":
-            from megatron.core.optimizer.pion_msign import get_megatron_pion_ortho_exp_optimizer
-
-            optimizer = get_megatron_pion_ortho_exp_optimizer(
-                config, model, use_gloo_process_groups=args.use_gloo_process_groups
-            )
-        else:
-            from megatron.core.optimizer.pion import get_megatron_pion_optimizer
-
-            optimizer = get_megatron_pion_optimizer(
-                config, model, use_gloo_process_groups=args.use_gloo_process_groups
-            )
-    else:
-        optimizer = get_megatron_optimizer(
-            config=config,
-            model_chunks=model,
-            use_gloo_process_groups=args.use_gloo_process_groups,
-        )
-    opt_param_scheduler = get_optimizer_param_scheduler(args, optimizer)
-    return optimizer, opt_param_scheduler
 
 
 # ---------------------------------------------------------------------------
@@ -310,20 +218,6 @@ def disable_forward_pre_hook(model_chunks: Sequence[DDP], param_sync: bool = Tru
 def should_disable_forward_pre_hook(args: Namespace) -> bool:
     """Block forward pre-hook for certain configurations."""
     return args.use_distributed_optimizer and args.overlap_param_gather
-
-
-def _preprocess_common_state_dict_for_megatron_save(common_state_dict: dict) -> dict:
-    """Normalize Megatron common checkpoint metadata before rank consistency checks."""
-    processed_common_state_dict = dict(common_state_dict)
-    args = processed_common_state_dict.get("args")
-    if args is None:
-        return processed_common_state_dict
-
-    args_dict = dict(args) if isinstance(args, dict) else vars(args).copy()
-    args_dict.pop("local_rank", None)
-    args_dict.pop("rank", None)
-    processed_common_state_dict["args"] = args_dict
-    return processed_common_state_dict
 
 
 # ---------------------------------------------------------------------------
@@ -466,16 +360,6 @@ def forward_only(
     return rollout_data
 
 
-def _dump_memory_history_snapshot(snapshot_dir: str, rollout_id: int, step_id: int, suffix: str = "") -> None:
-    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
-    os.makedirs(snapshot_dir, exist_ok=True)
-    suffix_part = f"_{suffix}" if suffix else ""
-    pkl_path = os.path.join(snapshot_dir, f"mem_rank{rank}_rollout{rollout_id}_step{step_id}{suffix_part}.pickle")
-    torch.cuda.memory._dump_snapshot(pkl_path)
-    if rank == 0:
-        print(f"[mem] snapshot dumped to {pkl_path}", flush=True)
-
-
 def train_one_step(
     args: Namespace,
     rollout_id: int,
@@ -551,6 +435,7 @@ def train_one_step(
                 "advantages",
                 "returns",
                 "rollout_log_probs",
+                # ORBIT-SEAM: OPD/MOPD teacher tensors travel with the train batch (orbit distillation)
                 "teacher_hidden_states",
                 "teacher_topk_ids",
                 "teacher_topk_logprobs",
@@ -655,6 +540,7 @@ def train_one_step(
 
 
 def finalize_model_grads_with_empty_cache(*args, **kwargs):
+    # ORBIT-SEAM: repo-wide comment-style pass (TODO -> Follow-up), no functional change
     # Follow-up: this is an ad-hoc method and we should figure out why the oom happens in the first place.
     device = torch.cuda.current_device()
     free, total = torch.cuda.mem_get_info(device)
@@ -755,6 +641,8 @@ def train(
     for step_id in range(num_steps_per_rollout):
 
         # Run training step.
+        # ORBIT-SEAM: base calls train_one_step bare; orbit optionally records a CUDA memory history
+        # around the step and dumps it (also on OOM, before re-raising) via the home writer
         _mem_snapshot_dir = os.environ.get("ORBIT_MEMORY_SNAPSHOT_DIR")
         _mem_snapshot_step = int(os.environ.get("ORBIT_MEMORY_SNAPSHOT_STEP", "0"))
         _mem_profile_this_step = _mem_snapshot_dir is not None and rollout_id == 0 and step_id == _mem_snapshot_step
@@ -861,6 +749,8 @@ def train(
         disable_forward_pre_hook(model)
 
 
+# ORBIT-SEAM: self_teacher sidecar added to base's signature (orbit OPD self-distillation state is
+# saved beside the adapter); keyword-only, so base call sites are unchanged
 def save(
     iteration: int,
     model: Sequence[DDP],
@@ -884,6 +774,7 @@ def save(
     if should_disable_forward_pre_hook(args):
         disable_forward_pre_hook(model)
 
+    # ORBIT-SEAM: PEFT (LoRA + OFT) predicate and saver replace base's LoRA-only pair, plus the self-teacher sidecar
     if is_peft_model(model):
         save_checkpoint_with_peft(
             iteration,
@@ -901,6 +792,7 @@ def save(
             num_floating_point_operations_so_far=0,
             checkpointing_context=None,
             train_data_iterator=None,
+            # ORBIT-SEAM: base passes None; rank-consistency checks must not see rank/local_rank in args
             preprocess_common_state_dict_fn=_preprocess_common_state_dict_for_megatron_save,
         )
 
@@ -910,6 +802,8 @@ def save(
         enable_forward_pre_hook(model)
 
 
+# ORBIT-SEAM: same self_teacher sidecar as save() above; docstring/log wording follows orbit's PEFT
+# (LoRA + OFT) naming where base says LoRA
 def save_hf_model(args, rollout_id: int, model: Sequence[DDP], *, self_teacher=None) -> None:
     """Save Megatron model in HuggingFace format.
 
@@ -955,6 +849,8 @@ def save_hf_model(args, rollout_id: int, model: Sequence[DDP], *, self_teacher=N
         if should_log:
             logger.error(f"Failed to save HuggingFace format: {e}")
 
+    # ORBIT-SEAM: base's LoRA-only adapter export is orbit's PEFT export, and a requested
+    # self-teacher sidecar makes the failure fatal instead of best-effort (see comment below)
     # Additionally save adapter-only checkpoint for PEFT models.
     if is_peft_model(model):
         try:
@@ -996,6 +892,8 @@ def initialize_model_and_optimizer(
         filesystem_async_module.FileSystemWriterAsync = ROCmFileSystemWriterAsync
         print("[ROCm] Applied FileSystemWriterAsync patch for HIP compatibility")
 
+    # ORBIT-SEAM: base runs one build->load order; orbit splits it in two because low-precision PEFT
+    # must load base weights before the optimizer exists (the else-branch is base's order)
     # Low-precision PEFT actors build the base model first, preload base
     # weights, finalize runtime device placement, and only then create the
     # optimizer. This keeps frozen bridge/OFT base tensors and optimizer-owned
@@ -1035,6 +933,8 @@ def initialize_model_and_optimizer(
     else:
         model, optimizer, opt_param_scheduler = setup_model_and_optimizer(args, role)
         model[0].role = role
+        # ORBIT-SEAM: base always loads a checkpoint; orbit tolerates args.load=None (one-trunk critic
+        # builds) and reinitializes a value head the checkpoint cannot supply
         reinit_critic_output_layer = _critic_output_layer_needs_reinit(args, model, role)
         clear_memory()
         if args.load is not None:
@@ -1062,6 +962,8 @@ def initialize_model_and_optimizer(
         if args.load is not None:
             check_model_hashes(args, model, iteration)
 
+    # ORBIT-SEAM: base always fast-forwards the scheduler; skip it when a resume already restored
+    # optimizer/scheduler state (PEFT adapter resume, or the home checkpoint loader's full restore)
     if not peft_training_state_restored and not getattr(
         args, "_orbit_optimizer_scheduler_state_restored", False
     ):
