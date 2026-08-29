@@ -4,66 +4,40 @@ import logging
 import multiprocessing
 import os
 import time
-from pathlib import Path
 from urllib.parse import quote
 
 import requests
 import sglang_router
 from packaging.version import parse
 from sglang.srt.server_args import ServerArgs
-from sglang.srt.utils import MultiprocessingSerializer, kill_process_tree
+from sglang.srt.utils import kill_process_tree
 from urllib3.exceptions import NewConnectionError
 
+# ORBIT-SEAM: lora_utils' convert_target_modules_to_hf/is_lora_enabled replaced by
+# orbit.megatron.peft_utils' unified (LoRA+OFT) equivalents below
 from miles.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME
 from orbit.megatron.oft_utils import OFT_ADAPTER_NAME
 from orbit.megatron.peft_utils import convert_target_modules_to_hf, get_peft_method
-from orbit.sglang.native_ops import patch_sglang_native_ops
 from miles.ray.ray_actor import RayActor
 from miles.utils.env_report import collect_and_print_node_env_report
 from miles.utils.http_utils import get_host_info
 
+# ORBIT-SEAM: launch-env, MoE-parity and shm-refcount helpers moved to orbit/sglang/
+# (P1 lift-out, Phase 3 slice 3c); imported here both to call from the base functions
+# that stay in this file (launch_server_process, _init_normal, _compute_server_args)
+# and to re-export the names tests import directly from this module.
+from orbit.sglang.launch import (
+    _configure_peft_cache_kwargs,
+    _launch_server_with_orbit_compat,
+    _prepare_child_native_ops_env,
+    _prepare_child_peft_cache_env,  # noqa: F401  (re-exported: tests/test_sglang_native_ops.py)
+)
+from orbit.sglang.server_args import _configure_megatron_moe_parity_kwargs, _training_adapter_dtype_arg
+from orbit.sglang.shm_refcounts import _balance_broadcast_shm_refcounts  # noqa: F401  (re-exported: tests/test_peft_broadcast_shm_refcount.py)
+# ORBIT-SEAM: orbit-added adapter/teacher SGLangEngine methods moved to this home mixin (P2, Phase 3 slice 3c)
+from orbit.sglang.engine_ext import OrbitEngineExtensions
+
 logger = logging.getLogger(__name__)
-from orbit import sglang as _peft_sglang
-
-_COMPAT_SITE_DIR = Path(_peft_sglang.__file__).resolve().parent / "compat_site"
-
-
-def _balance_broadcast_shm_refcounts(tensors: dict, consumer_count: int) -> int:
-    """Pre-pay the shm refcount for a payload that ``consumer_count`` processes rebuild.
-
-    torch's ``file_system`` reduce/rebuild pair is a 1-producer -> 1-consumer
-    handshake: ``reduce_storage`` calls ``storage._shared_incref()`` exactly
-    once per serialization, and every ``rebuild_storage_filename`` ends in a
-    matching ``_shared_decref()`` (torch/multiprocessing/reductions.py). SGLang
-    hands ONE payload to EVERY TP scheduler and each deserializes it
-    (tp_worker.py:218), so a tp_size=N engine decrefs N times against that
-    single incref. The manager unlinks the segment N-1 releases early — while
-    this actor still holds ``tensors`` — and the rank that opens last dies with
-    ``unable to open shared memory object ... No such file or directory (2)``.
-    Ranks skew by roughly a batch, so it fires intermittently and always on the
-    slowest rank: three e4 gsm8k LoRA arms died this way at rollouts 28, 65 and
-    114 on 2026-08-04.
-
-    One extra incref per ADDITIONAL consumer restores the pairing. Deduped by
-    storage because ForkingPickler reduces a storage once however many tensors
-    view it — increfing per tensor would leak the segment instead.
-
-    Returns the number of increfs performed, for tests and diagnostics.
-    """
-    if consumer_count <= 1:
-        return 0
-    increfs = 0
-    seen: set[int] = set()
-    for tensor in tensors.values():
-        storage = tensor.untyped_storage()
-        key = storage.data_ptr()
-        if key in seen:
-            continue
-        seen.add(key)
-        for _ in range(consumer_count - 1):
-            storage._shared_incref()
-            increfs += 1
-    return increfs
 
 
 def get_base_gpu_id(args, rank):
@@ -97,65 +71,11 @@ def _to_local_gpu_id(physical_gpu_id: int) -> int:
     )
 
 
-def _prepend_pythonpath(path: Path):
-    current = os.environ.get("PYTHONPATH", "")
-    entries = [entry for entry in current.split(os.pathsep) if entry]
-    path_str = str(path)
-    if path_str not in entries:
-        os.environ["PYTHONPATH"] = os.pathsep.join([path_str, *entries])
-
-
-def _prepare_child_native_ops_env(force_native_ops: bool):
-    if not force_native_ops:
-        return
-
-    os.environ["ORBIT_SGLANG_FORCE_NATIVE_OPS"] = "1"
-    _prepend_pythonpath(_COMPAT_SITE_DIR)
-
-
-def _server_args_enable_peft(server_args: ServerArgs) -> bool:
-    return bool(getattr(server_args, "enable_lora", False) or getattr(server_args, "enable_oft", False))
-
-
-def _prepare_child_peft_cache_env(server_args: ServerArgs):
-    if not _server_args_enable_peft(server_args):
-        return
-
-    # PEFT rollout requests rely on SGLang's adapter/version extra_key when
-    # matching prefix cache entries. In the tested SGLang build, the Python
-    # radix cache honors it while the experimental C++ radix tree drops it.
-    previous = os.environ.get("SGLANG_EXPERIMENTAL_CPP_RADIX_TREE")
-    if previous not in (None, "", "0", "false", "False"):
-        logger.warning(
-            "Disabling SGLang experimental C++ radix tree for PEFT rollout; "
-            "the Python radix cache preserves adapter-specific prefix keys."
-        )
-    os.environ["SGLANG_EXPERIMENTAL_CPP_RADIX_TREE"] = "0"
-
-
-def _configure_peft_cache_kwargs(kwargs: dict, peft_method: str | None):
-    if peft_method not in {"lora", "oft"}:
-        return
-
-    if kwargs.get("disable_radix_cache") is not True:
-        logger.warning(
-            "Disabling SGLang radix cache for PEFT rollout; cached prefixes can "
-            "produce stale adapter activations and train-inference mismatch."
-        )
-    kwargs["disable_radix_cache"] = True
-
-
-def _launch_server_with_orbit_compat(server_args: ServerArgs, force_native_ops: bool):
-    _prepare_child_peft_cache_env(server_args)
-
-    if force_native_ops:
-        patch_sglang_native_ops()
-
-    from sglang.srt.entrypoints.http_server import launch_server
-
-    launch_server(server_args)
-
-
+# ORBIT-SEAM: launch_server_process gained a force_native_ops passthrough and now
+# spawns the orbit-compat entrypoint below (native-ops env prep + PEFT radix-cache
+# env prep, both homed in orbit/sglang/launch.py) instead of sglang's launch_server
+# directly; the host-bracket-strip that used to happen here moved into _init_normal
+# (ServerArgs is read-only after __post_init__ resolves it in sglang v0.5.18)
 def launch_server_process(server_args: ServerArgs, force_native_ops: bool = False) -> multiprocessing.Process:
 
     multiprocessing.set_start_method("spawn", force=True)
@@ -211,7 +131,8 @@ def _wait_server_healthy(base_url, api_key, is_process_alive):
             time.sleep(2)
 
 
-class SGLangEngine(RayActor):
+# ORBIT-SEAM: orbit adapter/teacher engine methods live in the home mixin (P2, Phase 3 slice 3c)
+class SGLangEngine(OrbitEngineExtensions, RayActor):
     def __init__(
         self,
         args,
@@ -227,6 +148,8 @@ class SGLangEngine(RayActor):
         self.base_gpu_id = base_gpu_id
         self.sglang_overrides = sglang_overrides or {}
         self.num_gpus_per_engine = num_gpus_per_engine
+        # ORBIT-SEAM: tracks whether this sglang build exposes /post_process_weights
+        # (older builds 404); lazily set the first time post_process_weights() runs
         self._supports_post_process_weights: bool | None = None
 
     def init(
@@ -281,6 +204,8 @@ class SGLangEngine(RayActor):
             num_gpus_per_engine=self.num_gpus_per_engine,
         )
 
+        # ORBIT-SEAM: exposes engine node count for update_adapter_from_rank_tensors's
+        # single-host guard (home mixin, orbit/sglang/engine_ext.py)
         self.nnodes = server_args_dict["nnodes"]
         self.node_rank = server_args_dict["node_rank"]
         self.server_host = server_args_dict["host"]  # with [] if ipv6
@@ -317,16 +242,18 @@ class SGLangEngine(RayActor):
 
     def _init_normal(self, server_args_dict):
         logger.info(f"Launch HttpServerEngineAdapter at: {self.server_host}:{self.server_port}")
-        # ServerArgs is read-only after __post_init__ resolves it (v0.5.18); the
+        # ORBIT-SEAM: ServerArgs is read-only after __post_init__ resolves it (v0.5.18); the
         # bracket-stripped host must travel in as a constructor argument, not be
         # assigned after (self.server_host above keeps the bracketed form -- it's
-        # used for URL construction elsewhere in this class).
+        # used for URL construction elsewhere in this class). launch_server_process
+        # also gained the force_native_ops passthrough (orbit/sglang/native_ops.py).
         server_args_dict = {**server_args_dict, "host": server_args_dict["host"].strip("[]")}
         self.process = launch_server_process(
             ServerArgs(**server_args_dict),
             force_native_ops=getattr(self.args, "sglang_force_native_ops", False),
         )
 
+        # ORBIT-SEAM: use_miles_router renamed use_orbit_router (orbit's naming split)
         if self.node_rank == 0 and self.router_ip and self.router_port:
             if parse(sglang_router.__version__) <= parse("0.2.1") or self.args.use_orbit_router:
                 assert (
@@ -392,6 +319,8 @@ class SGLangEngine(RayActor):
         response.raise_for_status()
         return True
 
+    # ORBIT-SEAM: adapter_config/adapter_name passthrough for PEFT tensor updates;
+    # populated by the home mixin's update_adapter_from_ray_tensor/update_adapter_from_rank_tensors
     def update_weights_from_tensor(
         self,
         serialized_named_tensors: list[str],
@@ -423,6 +352,7 @@ class SGLangEngine(RayActor):
             payload,
         )
 
+    # ORBIT-SEAM: comment wording only (TODO -> Follow-up), no behavior change
     def get_remote_instance_transfer_engine_info(self, rank: int):
         # Follow-up: will be changed to `remote_instance_transfer_engine_info` when the sglang side is ready.
         response = requests.get(
@@ -476,172 +406,8 @@ class SGLangEngine(RayActor):
             payload,
         )
 
-    def _adapter_payload_consumers(self) -> int:
-        """How many processes will rebuild one broadcast adapter payload.
-
-        One scheduler per TP rank of this engine, and no more: SGLang's
-        dynamic-LoRA path asserts ``dp_size == 1``
-        (tokenizer_communicator_mixin.py:1137), so tp_size is the whole
-        fan-out. Falls back to 1 — the no-op count — when neither value is set,
-        which keeps single-GPU smokes on torch's own accounting.
-        """
-        per_engine = self.num_gpus_per_engine or getattr(
-            self.args, "rollout_num_gpus_per_engine", None
-        )
-        return int(per_engine or 1)
-
-    def load_lora_adapter_from_ray_tensors(
-        self,
-        lora_name: str,
-        tensors: dict,
-        config_dict: dict,
-        load_format: str | None = None,
-        pinned: bool = False,
-        added_tokens_config: dict | None = None,
-    ):
-        """Load LoRA tensors received through Ray.
-
-        The SGLang HTTP endpoint deserializes tensors inside the scheduler
-        process with ``MultiprocessingSerializer``. Serializing in the trainer
-        actor can embed multiprocessing resource-sharer handles with a
-        different auth key, so distributed Ray transport serializes here,
-        inside the SGLangEngine actor that owns the server process.
-
-        Serialized under the ``file_system`` sharing strategy, never the
-        ``file_descriptor`` default. The endpoint takes ONE payload and every
-        TP-rank scheduler deserializes it, but a fd-strategy DupFd is
-        redeemable exactly once: on a TP=2 engine, TP0's deserialize consumes
-        the fd and TP1 dies on EOFError in recvfds (measured on the
-        2026-08-04 B200 probe, reproduced deterministically on CPU). A
-        file_system storage is a named shm segment any process can attach
-        any number of times, which is what a broadcast payload needs.
-
-        Attaching is not the whole story: the segment's *lifetime* still has to
-        be paid for, once per rank. See
-        ``_balance_broadcast_shm_refcounts``.
-        """
-        import torch.multiprocessing as torch_mp  # local: the module keeps torch off its import path
-
-        old_strategy = torch_mp.get_sharing_strategy()
-        torch_mp.set_sharing_strategy("file_system")
-        try:
-            serialized_tensors = MultiprocessingSerializer.serialize(tensors, output_str=True)
-            _balance_broadcast_shm_refcounts(tensors, self._adapter_payload_consumers())
-        finally:
-            torch_mp.set_sharing_strategy(old_strategy)
-        return self.load_lora_adapter_from_tensors(
-            lora_name=lora_name,
-            serialized_tensors=serialized_tensors,
-            config_dict=config_dict,
-            load_format=load_format,
-            pinned=pinned,
-            added_tokens_config=added_tokens_config,
-        )
-
-    def load_oft_adapter_from_tensors(
-        self,
-        adapter_name: str,
-        serialized_tensors: str,
-        config_dict: dict,
-        pinned: bool = False,
-    ):
-        """Load an OFT adapter from serialized tensor data.
-
-        Requires the sglang server to be launched with ``peft_method="oft"``;
-        orbit's SGLangEngine kwargs builder sets this automatically when OFT
-        is configured.
-        """
-        payload = {
-            "adapter_name": adapter_name,
-            "serialized_tensors": serialized_tensors,
-            "config_dict": config_dict,
-            "pinned": pinned,
-        }
-        return self._make_request("load_oft_adapter_from_tensors", payload)
-
-    def update_adapter_from_ray_tensor(
-        self,
-        *,
-        flat_tensor,
-        metadata: dict,
-        entries: list,
-        payload_tag: str,
-        load_format: str,
-        adapter_config: dict,
-        adapter_name: str,
-    ):
-        """Update PEFT tensors received through Ray via SGLang's streamed loader.
-
-        ``payload_tag`` is the per-method wire tag: sglang's
-        normalize_{oft,lora}_weight_payload asserts on "flattened_oft_payload" /
-        "flattened_lora_payload" respectively, so it must follow the method, not
-        be hardcoded -- LoRA reaches this path too now that it has a shaper.
-        """
-        inner = (
-            payload_tag,
-            MultiprocessingSerializer.serialize(flat_tensor),
-            metadata,
-            entries,
-        )
-        serialized = MultiprocessingSerializer.serialize(inner, output_str=True)
-        return self.update_weights_from_tensor(
-            serialized_named_tensors=[serialized],
-            load_format=load_format,
-            adapter_config=adapter_config,
-            adapter_name=adapter_name,
-        )
-
-    def update_adapter_from_rank_tensors(
-        self,
-        *,
-        rank_payloads: list[tuple],
-        payload_tag: str,
-        load_format: str,
-        adapter_config: dict,
-        adapter_name: str,
-    ):
-        """Serialize colocated PEFT TP shards inside the SGLang parent actor.
-
-        Condor and other restricted runtimes can deny ``pidfd_getfd``, making
-        CUDA IPC handles produced by trainer actors impossible for scheduler
-        children to rebuild. CPU copies arrive here through Ray, then named
-        shared-memory serialization gives each TP scheduler a parent-owned
-        payload without crossing the restricted CUDA IPC boundary.
-
-        ``payload_tag`` is the per-method wire tag SGLang asserts on --
-        "flattened_oft_payload" / "flattened_lora_payload".
-        """
-        if self.nnodes > 1:
-            raise RuntimeError(
-                "PEFT rank-tensor serialization currently supports only a single-host "
-                "SGLang engine."
-            )
-
-        import torch.multiprocessing as torch_mp
-
-        old_strategy = torch_mp.get_sharing_strategy()
-        torch_mp.set_sharing_strategy("file_system")
-        try:
-            serialized_rank_payloads = []
-            for flat_tensor, metadata, entries in rank_payloads:
-                inner = (
-                    payload_tag,
-                    MultiprocessingSerializer.serialize(flat_tensor),
-                    metadata,
-                    entries,
-                )
-                serialized_rank_payloads.append(
-                    MultiprocessingSerializer.serialize(inner, output_str=True)
-                )
-            return self.update_weights_from_tensor(
-                serialized_named_tensors=serialized_rank_payloads,
-                load_format=load_format,
-                adapter_config=adapter_config,
-                adapter_name=adapter_name,
-            )
-        finally:
-            torch_mp.set_sharing_strategy(old_strategy)
-
+    # ORBIT-SEAM: raise_if_local_process_exited + timeout= arg added so flush_cache fails
+    # fast (with the underlying process-exit cause) instead of retrying against a dead server
     def flush_cache(self):
         """Flush the cache of the server."""
         if self.node_rank != 0:
@@ -683,6 +449,7 @@ class SGLangEngine(RayActor):
         if self.node_rank == 0:
             worker_url = f"http://{self.server_host}:{self.server_port}"
             response = None
+            # ORBIT-SEAM: use_miles_router renamed use_orbit_router (orbit's naming split)
             if parse(sglang_router.__version__) <= parse("0.2.1") or self.args.use_orbit_router:
                 response = requests.post(
                     f"http://{self.router_ip}:{self.router_port}/remove_worker?url=http://{self.server_host}:{self.server_port}"
@@ -720,12 +487,16 @@ class SGLangEngine(RayActor):
                 return response.json()["weight_version"]
         response.raise_for_status()
 
+    # ORBIT-SEAM: removed base docstring: trivial one-liner mirrored below by the
+    # undocumented unload_oft_adapter counterpart; kept the pair symmetric
     def unload_lora_adapter(self, lora_name: str):
         return self._make_request(
             "unload_lora_adapter",
             {"lora_name": lora_name},
         )
 
+    # ORBIT-SEAM: new method -- OFT counterpart to unload_lora_adapter above; not one of
+    # the seven methods named for the P2 mixin move in the slice-3c spec, left here
     def unload_oft_adapter(self, adapter_name: str):
         return self._make_request(
             "unload_oft_adapter",
@@ -805,57 +576,6 @@ class SGLangEngine(RayActor):
             payload,
         )
 
-    def update_adapter_from_distributed(
-        self,
-        *,
-        names: list[str],
-        dtypes: list[str],
-        shapes: list[list[int]],
-        group_name: str,
-        weight_version: str,
-        load_format: str,           # "lora_adapter" | "oft_adapter"
-        adapter_config: dict,
-        adapter_name: str,
-        payload_metadata: dict | None = None,  # OFT FlattenedTensorBucket metadata
-        adapter_version: str | None = None,
-        double_buffer: bool = False,
-    ):
-        payload = {
-            "names": names,
-            "dtypes": [str(dtype).replace("torch.", "") for dtype in dtypes],
-            "shapes": shapes,
-            "group_name": group_name,
-            "weight_version": weight_version,
-            # v1 invariant: adapter_version == weight_version; callers that pass
-            # adapter_version=None opt into emitting this canonical pair from
-            # weight_version alone.
-            "adapter_version": adapter_version if adapter_version is not None else weight_version,
-            "load_format": load_format,
-            "adapter_config": adapter_config,
-            "adapter_name": adapter_name,
-            "payload_metadata": payload_metadata,
-            "double_buffer": double_buffer,
-        }
-        return self._make_request("update_adapter_from_distributed", payload)
-
-    def activate_adapter_version(
-        self,
-        *,
-        adapter_name: str,
-        adapter_version: str,
-        weight_version: str,
-        load_format: str,
-    ):
-        return self._make_request(
-            "activate_adapter_version",
-            {
-                "adapter_name": adapter_name,
-                "adapter_version": adapter_version,
-                "weight_version": weight_version,
-                "load_format": load_format,
-            },
-        )
-
     def pause_generation(self, mode: str = "retract"):
         response = requests.post(
             f"http://{self.server_host}:{self.server_port}/pause_generation",
@@ -880,6 +600,9 @@ class SGLangEngine(RayActor):
         Note: The model should be on GPUs rather than CPU for this functionality to work properly.
         If you encounter issues, ensure your model is loaded on GPU devices rather than CPU.
         """
+        # ORBIT-SEAM: 404 tolerance for sglang builds that predate this endpoint (see
+        # self._supports_post_process_weights above); a BF16/non-quantized/colocate
+        # setup makes the step a no-op, so silently skipping it is safe
         if self._supports_post_process_weights is False:
             return None
 
@@ -955,80 +678,9 @@ class SGLangEngine(RayActor):
         self.shutdown()
 
 
-def _target_modules_request_moe_lora(target_modules) -> bool:
-    if target_modules is None:
-        return False
-    if isinstance(target_modules, str):
-        values = [part.strip().lower() for part in target_modules.split(",")]
-    else:
-        values = [str(part).strip().lower() for part in target_modules]
-    return bool(
-        {value for value in values if value}
-        & {
-            "all",
-            "all-linear",
-            "all_linear",
-            "gate_proj",
-            "up_proj",
-            "down_proj",
-            "linear_fc1",
-            "linear_fc2",
-            "linear_fc1_gate",
-            "linear_fc1_up",
-        }
-    )
-
-
-def _training_adapter_dtype_arg(args) -> str:
-    if getattr(args, "fp16", False):
-        return "float16"
-    if getattr(args, "bf16", False):
-        return "bfloat16"
-    return "float32"
-
-
-def _args_indicate_moe_model(args) -> bool:
-    # num_experts is the authoritative MoE signal. moe_layer_freq is meaningful
-    # only when MoE is active, and Megatron's parser defaults it to 1 even for
-    # dense models, so it cannot be used as a fallback indicator.
-    num_experts = getattr(args, "num_experts", None)
-    if num_experts is None:
-        return False
-    try:
-        return int(num_experts) > 0
-    except (TypeError, ValueError):
-        return False
-
-
-def _configure_megatron_moe_parity_kwargs(kwargs: dict, args, sglang_overrides: dict | None) -> None:
-    if not _args_indicate_moe_model(args):
-        return
-
-    explicit_overrides = set(sglang_overrides or {})
-
-    if (
-        not getattr(args, "moe_apply_probs_on_input", False)
-        and "moe_megatron_weighted_swiglu" not in explicit_overrides
-    ):
-        if not kwargs.get("moe_megatron_weighted_swiglu", False):
-            logger.info(
-                "Megatron MoE rollout: enabling SGLang moe_megatron_weighted_swiglu "
-                "to match Megatron Core weighted_bias_swiglu_impl."
-            )
-        kwargs["moe_megatron_weighted_swiglu"] = True
-
-    if (
-        str(getattr(args, "moe_router_dtype", "")).lower() == "fp32"
-        and "moe_router_force_fp32" not in explicit_overrides
-    ):
-        if not kwargs.get("moe_router_force_fp32", False):
-            logger.info(
-                "Megatron MoE rollout: enabling SGLang moe_router_force_fp32 "
-                "because Megatron moe_router_dtype=fp32."
-            )
-        kwargs["moe_router_force_fp32"] = True
-
-
+# ORBIT-SEAM: _compute_server_args helpers (MoE-parity, target-module classification,
+# adapter dtype selection) moved to orbit/sglang/server_args.py (P1 lift-out, Phase 3
+# slice 3c); imported above and called directly below
 def _compute_server_args(
     args,
     rank,
@@ -1066,6 +718,7 @@ def _compute_server_args(
         # parallel
         "tp_size": _gpus_per_engine,
         "dp_size": args.sglang_dp_size,
+        # ORBIT-SEAM: attn_cp_size / moe_dp_size parallelism knobs added
         "attn_cp_size": args.sglang_attn_cp_size,
         "moe_dp_size": args.sglang_moe_dp_size,
         "pp_size": args.sglang_pp_size,
@@ -1097,6 +750,11 @@ def _compute_server_args(
     if engine_info_bootstrap_port is not None:
         kwargs["engine_info_bootstrap_port"] = engine_info_bootstrap_port
 
+    # ORBIT-SEAM: OPD same-base teacher engine-slot reservation (reserves a peft_paths
+    # entry / max_ofts_per_batch slot for a frozen teacher adapter colocated with the
+    # student); out of scope for this slice's P1 extraction (not one of the named
+    # _compute_server_args helpers) -- lazy import keeps this file miles-clean at
+    # module scope
     from orbit.opd.opd_teacher_spec import (
         OPD_TEACHER_ADAPTER_NAME,
         needs_engine_teacher_slot,
@@ -1117,6 +775,10 @@ def _compute_server_args(
     )
     opd_teacher_slot = not external_opd_teacher and needs_engine_teacher_slot(opd_teacher_spec)
 
+    # ORBIT-SEAM: base's single is_lora_enabled(args) check replaced by the unified
+    # get_peft_method(args) (lora | oft | none) dispatch used throughout this function;
+    # enable_adapter_cpu_backup (OFT-only) added alongside the pre-existing
+    # enable_weights_cpu_backup guard
     peft_method = get_peft_method(args)
     if "enable_weights_cpu_backup" not in kwargs:
         kwargs["enable_weights_cpu_backup"] = args.offload_rollout
@@ -1131,6 +793,10 @@ def _compute_server_args(
                 "--no-offload-rollout-adapter."
             )
 
+    # ORBIT-SEAM: base's plain `if is_lora_enabled(args): kwargs["enable_lora"] = True; ...`
+    # (upstream's multi-tenant LoRAManager) replaced end-to-end by this peft_method
+    # dispatch over the fork's single-active peft/lora and peft/oft paths (see the
+    # per-branch comments below for the rationale of each field)
     if peft_method == "lora":
         # Route LoRA through the fork's SINGLE-ACTIVE peft/lora (peft_method="lora"),
         # symmetric to the OFT branch below -- NOT upstream's multi-tenant
@@ -1192,6 +858,11 @@ def _compute_server_args(
         if opd_teacher_slot and opd_teacher_spec.source == "adapter":
             kwargs.setdefault("peft_paths", {})[OPD_TEACHER_ADAPTER_NAME] = opd_teacher_spec.path
 
+    # ORBIT-SEAM: server_arg_fields precomputed upfront (was: unused_keys = set(kwargs.keys())
+    # seeded before the loop, with unused_keys.discard(attr.name) removed per-attr inside the
+    # loop below); the PEFT branches above and the peft/MoE-parity calls below also add keys
+    # to kwargs, so a single set-difference against server_arg_fields after everything has
+    # settled is the only computation that accounts for every source correctly
     server_arg_fields = {field.name for field in dataclasses.fields(ServerArgs)}
     for attr in dataclasses.fields(ServerArgs):
         if worker_type == "decode" and attr.name == "enable_hierarchical_cache":
@@ -1210,6 +881,8 @@ def _compute_server_args(
         for key in unused_keys:
             kwargs.pop(key)
 
+    # ORBIT-SEAM: external_engine_need_check_fields relocated here (was computed right
+    # after engine_info_bootstrap_port, before any PEFT/MoE-parity kwargs existed).
     # Compute the external-engine sanity-check field set after every kwargs
     # mutation has settled (PEFT branches add peft_method / enable_lora /
     # lora_backend / etc.; the dataclasses-fields auto-pass-through pulls in
@@ -1221,6 +894,8 @@ def _compute_server_args(
     return kwargs, external_engine_need_check_fields
 
 
+# ORBIT-SEAM: list -> frozenset (immutable module-level constant; no behavior change,
+# `in` membership tests above work identically on either container)
 _EXTERNAL_ENGINE_SKIP_CHECK_FIELDS = frozenset({
     "model_path",
     "trust_remote_code",
