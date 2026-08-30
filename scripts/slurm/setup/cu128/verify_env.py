@@ -475,10 +475,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    source_root = args.source_root or default_workspace(args.miles_root)
+    source_root = args.source_root or default_workspace(args.orbit_root)
     try:
         pins = load_pins(args.pins)
-        checks = metadata_checks(pins, args.miles_root.resolve(), source_root.resolve())
+        checks = metadata_checks(pins, args.orbit_root.resolve(), source_root.resolve())
         if args.full_h200:
             checks.extend(check_h200_runtime(pins))
     except (OSError, VerificationError, subprocess.CalledProcessError, json.JSONDecodeError) as error:

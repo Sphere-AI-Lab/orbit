@@ -188,3 +188,40 @@ def test_print_summary_returns_failure_count(capsys) -> None:
     assert "[PASS] torch build: 2.11.0+cu128" in output
     assert "[FAIL] orbit import: missing" in output
     assert "1 passed, 1 failed" in output
+
+
+def test_every_args_attribute_read_in_main_is_a_registered_dest() -> None:
+    """`main()` is not otherwise exercised here, so a rename that touches the
+    `args.<dest>` reads but not the registered option string (or vice versa)
+    used to survive CI and raise AttributeError on every real invocation."""
+    import ast
+
+    tree = ast.parse(MODULE_PATH.read_text())
+
+    dests: set[str] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        if node.func.attr != "add_argument":
+            continue
+        explicit = next((k.value for k in node.keywords if k.arg == "dest"), None)
+        if isinstance(explicit, ast.Constant):
+            dests.add(explicit.value)
+            continue
+        for arg in node.args:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                dests.add(arg.value.lstrip("-").replace("-", "_"))
+
+    main_fn = next(
+        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"
+    )
+    reads = {
+        n.attr
+        for n in ast.walk(main_fn)
+        if isinstance(n, ast.Attribute)
+        and isinstance(n.value, ast.Name)
+        and n.value.id == "args"
+    }
+
+    assert reads, "no args.<dest> reads found; the scan is broken, not the script"
+    assert reads <= dests, f"main() reads unregistered args: {sorted(reads - dests)}"
