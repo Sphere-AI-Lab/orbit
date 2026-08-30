@@ -16,7 +16,7 @@ Classes:
                  deliberately regenerated and the new delta reviewed.
 
 Regenerating (needs the miles base objects once):
-  git fetch https://github.com/radixark/miles.git ef7481ae3bfbcc641d031e7e6113b646bb764382:refs/miles/base
+  git fetch https://github.com/radixark/miles.git dbbab1566ae438f7202fff653eae938e07b1d4b6:refs/miles/base
   python3 tools/miles_purity.py --write
 """
 
@@ -32,7 +32,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 MANIFEST = REPO / "tests" / "fast" / "miles_purity_manifest.json"
-MILES_BASE = "ef7481ae3bfbcc641d031e7e6113b646bb764382"
+MILES_BASE = "dbbab1566ae438f7202fff653eae938e07b1d4b6"
 
 
 def sha(text: str) -> str:

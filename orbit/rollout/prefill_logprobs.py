@@ -192,8 +192,9 @@ async def recompute_samples_rollout_logprobs_via_prefill(
     for sample in samples_to_score:
         headers = None
         uses_consistent_hashing = getattr(args, "sglang_router_policy", None) == "consistent_hashing"
-        if uses_consistent_hashing and sample.session_id:
-            headers = {"X-SMG-Routing-Key": sample.session_id}
+        # upstream renamed Sample.session_id -> routing_key (same X-SMG-Routing-Key header)
+        if uses_consistent_hashing and sample.routing_key:
+            headers = {"X-SMG-Routing-Key": sample.routing_key}
 
         await post(flush_url, {}, headers=headers)
         await recompute_rollout_logprobs_via_prefill(

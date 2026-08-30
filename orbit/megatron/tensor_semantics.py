@@ -197,8 +197,10 @@ def is_dsv4_grouped_moe_oft_param_name(name: str) -> bool:
 
 def uses_expert_tensor_parallel_group(name: str) -> bool:
     matchable = name.replace("._orig_module.", ".").replace(".to_wrap.", ".")
+    # Upstream excludes nested ".shared_experts.experts." (Inkling) from routed-expert
+    # handling; orbit's DSV4 shared-expert clauses below still match by their own names.
     return (
-        ".experts." in matchable
+        (".experts." in matchable and ".shared_experts." not in matchable)
         or any(
             fragment in matchable or matchable.endswith(fragment[:-1])
             for fragment in DSV4_SHARED_EXPERT_TP_PARAM_FRAGMENTS

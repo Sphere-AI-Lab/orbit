@@ -392,7 +392,7 @@ class MegatronTrainRayActor(OrbitTrainActorExtensions, TrainRayActor):
         self.model_state_manager = create_model_state_manager(
             self.args,
             source_getter=state_source_getter,
-            single_tag=None if args.enable_weights_backuper else "actor",
+            single_tag=None if getattr(args, "enable_weights_backuper", True) else "actor",  # ORBIT-SEAM: flag retired upstream; default True preserved
         )
         self._active_model_tag: str | None = "actor"
         # ORBIT-SEAM: base always takes the startup snapshot; skip it in the modes that never

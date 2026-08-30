@@ -1644,6 +1644,9 @@ def orbit_normalize_peft_args(args) -> None:
 
 
 def orbit_validate_args(args) -> None:
+    # Upstream code added after the flag rename (dashboard, examples) still reads
+    # args.use_miles_router; keep it as a read-only alias of orbit's renamed flag.
+    args.use_miles_router = args.use_orbit_router
     """Orbit's reward-side validator bundle, called from one seam in miles_validate_args."""
     _validate_opd_args(args)
     _validate_judge_args(args)
@@ -1836,18 +1839,8 @@ def add_orbit_arguments(parser):
         default=None,
         help="Override the contract selected by the model profile (e.g. qwen3_dense_true_on_policy_v1).",
     )
-    parser.add_argument(
-        "--recompute-logprobs-via-prefill",
-        action="store_true",
-        default=False,
-        help=(
-            "Recompute rollout logprobs via one clean SGLang prefill pass (flush_cache + "
-            "max_new_tokens=0 scoring) instead of trusting decode-time logprobs, removing "
-            "KV-cache/chunked-prefill/batch-composition variance. Usable standalone "
-            "(improves the rollout_log_probs consumed by TIS/ICE-POP/OPD); required by "
-            "true-on-policy contracts."
-        ),
-    )
+    # --recompute-logprobs-via-prefill was upstreamed (registered in miles/utils/arguments.py
+    # with identical semantics); orbit's duplicate registration is retired.
     parser.add_argument(
         "--eval-pass-k-values",
         type=int,
