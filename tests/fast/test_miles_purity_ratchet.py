@@ -1,8 +1,8 @@
 """Ratchet: orbit's entanglement with its miles fork base only shrinks.
 
 Every file orbit shares with radixark/miles at the fork base is recorded in
-miles_purity_manifest.json as either pristine (identical modulo the mechanical
-miles->orbit rename) or budgeted (carries orbit modifications, hash-pinned).
+miles_purity_manifest.json as either pristine (byte-identical to the base) or
+budgeted (carries orbit modifications, hash-pinned).
 Editing a pristine file, or editing a budgeted file without regenerating the
 manifest, fails here — so growing the fork delta is always a deliberate,
 reviewed act, never drift. See tools/miles_purity.py for regeneration.

@@ -1541,7 +1541,16 @@ def _assert_critic_supports_bridge(args) -> None:
     # Scoped to upstream's own critic topology (the separate full-model critic):
     # orbit's one-trunk adapter/head critics run WITH bridge mode and are
     # GPU-qualified that way (0.5B LoRA-PPO adapter-critic reference smoke).
-    if uses_separate_critic(args):
+    # `use_critic` is derived in `_apply_critic_args`, which runs after the
+    # `_apply_bridge_load_path` call site; mirror the derivation there so this
+    # pure argument check still fires before any checkpoint I/O.
+    separate_critic = (
+        uses_separate_critic(args)
+        if hasattr(args, "use_critic")
+        else args.advantage_estimator == "ppo"
+        and getattr(args, "critic_mode", "full") == "full"
+    )
+    if separate_critic:
         assert getattr(args, "megatron_to_hf_mode", None) != "bridge", (
             "Critic models are not supported with --megatron-to-hf-mode bridge"
         )
