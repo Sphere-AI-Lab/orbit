@@ -16,6 +16,9 @@ import orbit.transport.backends.ipc as ipc_mod
 import orbit.transport.backends.nccl as nccl_mod
 import orbit.transport.backends.ray_object as ray_mod
 import miles.backends.megatron_utils.update_weight.update_weight_from_tensor as uw_mod
+# update_weights / __init__ live on the OrbitUpdateWeightExtensions mixin, so the names they
+# resolve (time, get_gloo_group, begin/end_weight_update) are globals of the mixin module.
+import orbit.transport.update_weight_ext as ext_mod
 from orbit.transport.backends.ipc import IpcBackend
 from orbit.transport.backends.nccl import NcclBackend
 from orbit.transport.backends.ray_object import RayObjectBackend
@@ -130,12 +133,12 @@ def _patch_single_rank_dist(monkeypatch):
             object_gather_list[0] = obj
 
     monkeypatch.setattr(uw_mod.dist, "gather_object", fake_gather_object)
-    monkeypatch.setattr(uw_mod, "get_gloo_group", lambda: None)
+    monkeypatch.setattr(ext_mod, "get_gloo_group", lambda: None)
     monkeypatch.setattr(uw_mod.ray, "get", _fake_ray_get)
     # upstream replaced post_process_weights(restore_weights_before_load=/
     # post_process_quantization=) with an explicit begin/end weight-update session.
-    monkeypatch.setattr(uw_mod, "begin_weight_update", lambda *args, **kwargs: None)
-    monkeypatch.setattr(uw_mod, "end_weight_update", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ext_mod, "begin_weight_update", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ext_mod, "end_weight_update", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         uw_mod.MultiprocessingSerializer, "serialize", staticmethod(lambda obj, output_str=False: "blob")
     )
@@ -149,7 +152,7 @@ def _patch_perf_counter(monkeypatch, values):
             return remaining.pop(0)
         return remaining[0]
 
-    monkeypatch.setattr(uw_mod.time, "perf_counter", fake_perf_counter)
+    monkeypatch.setattr(ext_mod.time, "perf_counter", fake_perf_counter)
 
 
 # ---------------------------------------------------------------------------

@@ -56,7 +56,10 @@ class TestLoraWeightSeparation:
 # UpdateWeightFromTensor._lora_config initialisation
 # ---------------------------------------------------------------------------
 
-_UW_MODULE = "miles.backends.megatron_utils.update_weight.update_weight_from_tensor"
+# orbit: UpdateWeightFromTensor.__init__ lives on the OrbitUpdateWeightExtensions mixin, so the
+# names it reads (dist, HfWeightIteratorBase) are globals of the mixin module, not of the
+# vendored updater module. Patch them where the constructor looks them up.
+_UW_MODULE = "orbit.transport.update_weight_ext"
 
 
 class TestUpdateWeightFromTensorLoraConfig:

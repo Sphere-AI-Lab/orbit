@@ -649,14 +649,6 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
         """Return this engine's SchedulerActor handles (RDT mode, use_ray=True)."""
         return self._scheduler_actors
 
-    # ORBIT-SEAM: new method -- OFT counterpart to unload_lora_adapter above; not one of
-    # the seven methods named for the P2 mixin move in the slice-3c spec, left here
-    def unload_oft_adapter(self, adapter_name: str):
-        return self._make_request(
-            "unload_oft_adapter",
-            {"adapter_name": adapter_name},
-        )
-
     def release_memory_occupation(self, tags: list[str] = None):
         """Release memory occupation. Available tags: weights, kv_cache."""
         self.flush_cache()
@@ -775,74 +767,6 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
         response = requests.post(f"http://{self.server_host}:{self.server_port}/continue_generation", json={})
         response.raise_for_status()
         return response
-
-    def post_process_weights(
-        self,
-        restore_weights_before_load: bool = False,
-        post_process_quantization: bool = False,
-        post_load_weights: bool = False,
-    ):
-        """
-        Update model weights from tensor data. The HTTP server will only post meta data, and the real weights will be copied directly from GPUs.
-        Note: The model should be on GPUs rather than CPU for this functionality to work properly.
-        If you encounter issues, ensure your model is loaded on GPU devices rather than CPU.
-        """
-        # ORBIT-SEAM: 404 tolerance for sglang builds that predate this endpoint (see
-        # self._supports_post_process_weights above); a BF16/non-quantized/colocate
-        # setup makes the step a no-op, so silently skipping it is safe
-        if self._supports_post_process_weights is False:
-            return None
-
-        try:
-            result = self._make_request(
-                "post_process_weights",
-                {
-                    "restore_weights_before_load": restore_weights_before_load,
-                    "post_process_quantization": post_process_quantization,
-                    "post_load_weights": post_load_weights,
-                },
-            )
-            self._supports_post_process_weights = True
-            return result
-        except requests.HTTPError as exc:
-            if exc.response is not None and exc.response.status_code == 404:
-                # Older sglang versions (e.g. 0.5.9) do not expose this
-                # endpoint. For a BF16, non-quantized, colocate setup the
-                # post-process step is a no-op, so silently skip it.
-                self._supports_post_process_weights = False
-                return None
-            raise
-
-    def begin_weight_update(self, selector: str = "all"):
-        """Open a weight-update session on the engine (restores packed weights for loading)."""
-        # ORBIT-SEAM: 404 tolerance for sglang builds without the weight-update session
-        # (mirrors the post_process_weights probe above)
-        if self._supports_weight_update_session is False:
-            return None
-        try:
-            result = self._make_request("begin_weight_update", {"selector": selector})
-            self._supports_weight_update_session = True
-            return result
-        except requests.HTTPError as exc:
-            if exc.response is not None and exc.response.status_code == 404:
-                self._supports_weight_update_session = False
-                return None
-            raise
-
-    def end_weight_update(self):
-        """Close the weight-update session (post-load + quant post-process on the full model)."""
-        # ORBIT-SEAM: see begin_weight_update — sessionless builds skip the close too
-        if self._supports_weight_update_session is False:
-            return None
-        try:
-            result = self._make_request("end_weight_update", {})
-            self._supports_weight_update_session = True
-            return result
-        except requests.HTTPError as exc:
-            if exc.response is not None and exc.response.status_code == 404:
-                self._supports_weight_update_session = False
-                return None
-            raise
 
     def update_weight_version(self, weight_version: str):
         return self._make_request(

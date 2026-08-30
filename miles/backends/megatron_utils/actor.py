@@ -4,9 +4,6 @@ import os
 import random
 import shutil
 import socket
-
-# ORBIT-SEAM: SimpleNamespace stand-ins for the OPD teacher-logprob dump in train_actor below
-import types
 from argparse import Namespace
 from contextlib import ExitStack, nullcontext
 from typing import TYPE_CHECKING
@@ -25,7 +22,9 @@ from miles.utils import train_dump_utils
 from miles.utils.argparse_utils import inplace_modify_args
 
 # ORBIT-SEAM: orbit-added argument predicates (one-trunk vs separate critic, rollout-engine
-# presence, OPD top-k vocab validation) consumed by init/train_actor/update_weights below
+# presence, OPD top-k vocab validation). LOAD-BEARING BEYOND THIS MODULE: `uses_separate_critic`
+# and `uses_rollout_engines` are now named only by the home mixin's train_actor/update_weights,
+# which re-read them off THIS module at call time (see orbit/megatron/actor_ext.py).
 from miles.utils.arguments import (
     uses_one_trunk_critic,
     uses_rollout_engines,
@@ -49,8 +48,9 @@ from miles.utils.reloadable_process_group import destroy_process_groups, monkey_
 from miles.utils.replay_base import all_replay_managers, routing_replay_manager
 from miles.utils.test_utils.ft_test_actions import FTTestActionActorExecutor
 
-# ORBIT-SEAM: OPD self-distillation support used by train_actor/update_weights (the dump is
-# env-gated and no-ops unless ORBIT_OPD_TEACHER_LOGPROB_DUMP is set)
+# ORBIT-SEAM: OPD self-distillation support for train_actor/update_weights (the dump is env-gated
+# and no-ops unless ORBIT_OPD_TEACHER_LOGPROB_DUMP is set). LOAD-BEARING BEYOND THIS MODULE: both
+# methods now live on the home mixin, which re-reads these names off THIS module at call time.
 from orbit.opd.opd_dump import maybe_dump_teacher_logprobs
 from orbit.opd.opd_teacher_spec import should_promote_teacher
 
@@ -99,7 +99,9 @@ from .replay_utils import register_replay_list_moe
 from .update_weight.common import named_adapter_params, named_params_and_buffers
 
 # ORBIT-SEAM: the one-trunk (adapter) critic - build, save and the value-loss phase context - is an
-# orbit addition to this actor; the critic itself lives in orbit.critic
+# orbit addition to this actor; the critic itself lives in orbit.critic. LOAD-BEARING BEYOND THIS
+# MODULE: `value_loss_phase` is named only by the home mixin's train_actor, which re-reads it off
+# THIS module at call time.
 from orbit.critic.critic_adapter import (
     _expected_critic_resume_iteration,
     build_critic_instance,
@@ -108,12 +110,15 @@ from orbit.critic.critic_adapter import (
 )
 
 # ORBIT-SEAM: orbit's model-state manager generalises base's TensorBackuper (adapter-only state,
-# multiple tags); every `self.weights_backuper.<op>(...)` call below is the same op on
-# self.model_state_manager
+# multiple tags); every base `self.weights_backuper.<op>(...)` call is the same op on
+# self.model_state_manager. Base's remaining weights_backuper call sites lived in
+# _switch_model/train_actor/update_weights, which orbit now owns outright in the home mixin.
 from orbit.megatron.model_state_manager import create_model_state_manager
 
-# ORBIT-SEAM: orbit's explicit PEFT offload replaces base's torch_memory_saver pause/resume in
-# sleep/wake_up below (frozen base, adapter, grad buffers and optimizer move separately)
+# ORBIT-SEAM: orbit's explicit PEFT offload replaces base's torch_memory_saver pause/resume (frozen
+# base, adapter, grad buffers and optimizer move separately). LOAD-BEARING BEYOND THIS MODULE: the
+# sleep/wake_up that use these now live on the home mixin, which re-reads every name here off THIS
+# module at call time (see orbit/megatron/actor_ext.py) - none of them is dead.
 from orbit.megatron.peft_offload import (
     _should_offload_frozen_base,
     load_megatron_adapter_to_gpu,
@@ -136,14 +141,17 @@ from orbit.megatron.peft_utils import (
     load_adapter_tensors_for_teacher,
 )
 
-# ORBIT-SEAM: adapter-state mode decides whether the CPU snapshot holds adapters or full weights
+# ORBIT-SEAM: adapter-state mode decides whether the CPU snapshot holds adapters or full weights.
+# Also re-read off THIS module at call time by the home mixin's train_actor/update_weights.
 from orbit.megatron.state_mode import should_backup_actor_after_train, uses_adapter_state
 
 # ORBIT-SEAM: bridge-export weight updater for models without a megatron_to_hf name map; selected
 # by orbit.megatron.actor_helpers._select_update_weight_cls, which reads it back off this module
 from orbit.megatron.update_weight_bridge import UpdateWeightFromDistributedBridge
 
-# ORBIT-SEAM: the OPD teacher LM head is resident state sleep/wake_up must move (opd_jsd_loss)
+# ORBIT-SEAM: the OPD teacher LM head is resident state sleep/wake_up must move (opd_jsd_loss).
+# LOAD-BEARING BEYOND THIS MODULE: sleep/wake_up live on the home mixin now and re-read
+# offload_teacher_lm_head/onload_teacher_lm_head off THIS module at call time.
 from orbit.opd.teacher_lm_head import load_teacher_lm_head, offload_teacher_lm_head, onload_teacher_lm_head
 from .update_weight.update_weight_from_distributed.broadcast import UpdateWeightFromDistributed
 
@@ -157,8 +165,11 @@ except ImportError:
     # we leave it undefined and fail only if that code path is actually taken.
     UpdateWeightP2P = None
 from .update_weight.update_weight_from_tensor import UpdateWeightFromTensor
-# ORBIT-SEAM: orbit's added actor methods and module helpers live in the home layer (P2 mixin + P1
-# lift-out, Phase 3 slice 3g); re-exported here because callers import them off this module
+# ORBIT-SEAM: orbit's added AND overriding actor methods, plus the module helpers, live in the home
+# layer (P2 mixin + P1 lift-out, Phase 3 slice 3g; mixin-override slice added sleep, wake_up,
+# _switch_model, train_actor and update_weights); re-exported here because callers import them off
+# this module. Those five are DELETED from the class body below, not left as overridden copies: a
+# class's own __dict__ precedes every base in the MRO, so a retained body would shadow the mixin.
 from orbit.megatron.actor_ext import OrbitTrainActorExtensions
 from orbit.megatron.actor_helpers import (
     _get_weight_updater_kwargs,
@@ -191,7 +202,12 @@ def _setup_disk_offload_reclaim(disk_dir: str) -> None:
 
 
 # ORBIT-SEAM: the mixin carries orbit's added methods (ref/teacher log-probs, held-out eval NLL,
-# self-teacher restore/promotion, adapter-param view, train-state prefetch)
+# self-teacher restore/promotion, adapter-param view, train-state prefetch) AND orbit's replacements
+# for sleep, wake_up, _switch_model, train_actor and update_weights - orbit owned >= 50% of each, so
+# it carries the whole body. Those five are ABSENT from this class body on purpose: Python checks a
+# class's own __dict__ before any base, so keeping upstream's copy here (even "for reference") would
+# shadow the mixin and silently revert orbit's behaviour on the GPU training path. Deleting them
+# also makes an upstream rewrite conflict loudly at merge time instead of landing unnoticed.
 class MegatronTrainRayActor(OrbitTrainActorExtensions, TrainRayActor):
     @with_logs
     @with_defer(lambda: Timer().start("train_wait"))
@@ -532,102 +548,10 @@ class MegatronTrainRayActor(OrbitTrainActorExtensions, TrainRayActor):
 
         return start_rollout_id
 
-    @with_logs
-    @timer
-    def sleep(self) -> None:
-        assert self.args.offload_train
-        if self._asleep:
-            logger.info("sleep() called while already offloaded; skipping")
-            return
-
-        clear_memory(clear_host_memory=True)
-        print_memory("before offload model")
-        should_log_cpu_memory = is_first_replica_megatron_main_rank() and hasattr(self, "_last_rollout_id")
-
-        destroy_process_groups()
-
-        # ORBIT-SEAM: base pauses the whole allocator with torch_memory_saver.pause(); orbit
-        # offloads the train state piece by piece (grad buffers, optimizer, frozen base, and the
-        # OPD teacher LM head) so PEFT runs can keep the adapter resident on GPU
-        if self.args.offload_train_grad_buffers:
-            offload_megatron_grad_buffers(self.model)
-            print_memory("after offload grad_buffers")
-        if self.args.offload_train_optimizer:
-            offload_megatron_optimizer(self.optimizer)
-            print_memory("after offload optimizer")
-        if _should_offload_frozen_base(self.args):
-            offload_megatron_frozen_base_to_cpu(self.model)
-            print_memory("after offload frozen_base")
-
-        if self.args.loss_type == "opd_jsd_loss":
-            offload_teacher_lm_head(self.args.teacher_hf_checkpoint)
-            print_memory("after offload teacher_lm_head")
-
-        self._asleep = True
-        print_memory("after offload model")
-        # Read by compute_eval_nll: it must know whether the training state is
-        # resident before deciding to wake it, and must not leave it awake.
-        self._train_state_awake = False
-
-        if should_log_cpu_memory:
-            log_cpu_memory(self._last_rollout_id, self.args, "after_offload_train")
-
-    @with_logs
-    @timer
-    def wake_up(self) -> None:
-        assert self.args.offload_train
-        if not self._asleep:
-            logger.info("wake_up() called while already resident; ensuring process groups only")
-            reload_process_groups()
-            return
-        print_memory("before wake_up model")
-
-        # ORBIT-SEAM: mirror image of sleep() above - base resumes the allocator with
-        # torch_memory_saver.resume(); orbit either waits on the prefetch event
-        # prefetch_train_state recorded (home mixin) or reloads each piece synchronously
-        wake_up_event = getattr(self, "_wake_up_event", None)
-        if wake_up_event is not None:
-            torch.cuda.current_stream().wait_event(wake_up_event)
-            self._wake_up_event = None
-            print_memory("after wake_up train_state_prefetch")
-        elif _should_offload_frozen_base(self.args):
-            load_megatron_frozen_base_to_gpu(self.model)
-            print_memory("after wake_up frozen_base")
-            if self.args.offload_train_adapter:
-                load_megatron_adapter_to_gpu(self.model)
-                print_memory("after wake_up adapter")
-
-        if self.args.offload_train_optimizer:
-            load_megatron_optimizer(self.optimizer)
-            print_memory("after wake_up optimizer")
-        if self.args.offload_train_grad_buffers:
-            load_megatron_grad_buffers(self.model)
-            print_memory("after wake_up grad_buffers")
-        if self.args.loss_type == "opd_jsd_loss":
-            onload_teacher_lm_head(self.args.teacher_hf_checkpoint, torch.device("cuda", torch.cuda.current_device()))
-            print_memory("after wake_up teacher_lm_head")
-        clear_memory()
-        reload_process_groups()
-        self._asleep = False
-        print_memory("after wake_up model")
-        self._train_state_awake = True
-
     @property
     def _enable_weight_backup(self) -> bool:
         """Weight backup is only needed for CPU-side model switching or colocated tensor weight sync."""
         return self.with_ref or self.with_opd_teacher or self.args.keep_old_actor or self.args.colocate
-
-    def _switch_model(self, target_tag: str) -> None:
-        # ORBIT-SEAM: skip the restore when the tag is already resident; adapter-state restores are
-        # frequent enough (ref/teacher toggling per step) that the no-op case must be free
-        if target_tag == self._active_model_tag:
-            return
-        if not self._enable_weight_backup:
-            return
-        if target_tag not in self.model_state_manager.backup_tags:
-            raise ValueError(f"Cannot switch to unknown model tag: {target_tag}")
-        self.model_state_manager.restore(target_tag)
-        self._active_model_tag = target_tag
 
     def _set_replay_stage(self, stage: str) -> None:
         for m in all_replay_managers:
@@ -742,247 +666,6 @@ class MegatronTrainRayActor(OrbitTrainActorExtensions, TrainRayActor):
 
     def _use_rollout_replay(self, m) -> bool:
         return getattr(self.args, f"use_rollout_{m.name}_replay", False)
-
-    @with_logs
-    def train_actor(
-        self,
-        rollout_id: int,
-        rollout_data: RolloutBatch,
-        external_data=None,
-        *,
-        witness_info: WitnessInfo | None,
-        attempt: int,
-    ) -> TrainStepOutcome:
-        # ORBIT-SEAM: one-trunk-critic iterator/microbatch counts, built inside the advantages
-        # block below and consumed by the critic train phase at the end of this method
-        critic_data_iterator = None
-        critic_num_microbatches = None
-        # Create data iterator for log_probs and train.
-        data_iterator, num_microbatches = get_data_iterator(self.args, self.model, rollout_data)
-        num_optimizer_steps = len(num_microbatches)
-        skip_actor_forward_only = self.args.skip_actor_forward_only
-        if skip_actor_forward_only:
-            option = "--skip-actor-forward-only"
-            assert num_optimizer_steps == 1, f"{option} requires 1 optimizer step, got {num_optimizer_steps}"
-            assert rollout_data.get("log_probs") is None, f"{option} requires rollout data without actor log probs"
-
-        for m in all_replay_managers:
-            if self._use_rollout_replay(m):
-                fill_replay_data(
-                    args=self.args,
-                    models=self.model,
-                    data_iterator=data_iterator,
-                    num_microbatches=num_microbatches,
-                    rollout_data=rollout_data,
-                    data_key=m.data_key,
-                    replay_list=m.replays,
-                    register_replay_list_func=m.register_replay_list_func,
-                    if_sp_region=m.if_sp_region,
-                    indices_are_token_positions=m.replay_indices_are_token_positions,
-                )
-
-        with inverse_timer("train_wait"), timer("train"):
-            # ORBIT-SEAM: base does its ref forward inline inside the advantages block; orbit hoists
-            # it into compute_ref_log_probs (home mixin) so PEFT can serve the reference by
-            # disabling adapters, and so a direct loss can still request it
-            # Outside the advantages block so loss types that skip the PPO
-            # advantage/returns pipeline (opd_jsd_loss) can still opt into
-            # --use-kl-loss; compute_ref_log_probs returns None when neither
-            # kl_coef nor use_kl_loss asks for a ref forward.
-            ref_data = self.compute_ref_log_probs(data_iterator, num_microbatches)
-            if ref_data is not None:
-                rollout_data.update(ref_data)
-            if self.args.compute_advantages_and_returns:
-                # ORBIT-SEAM: on-policy-distillation teacher forward (home mixin) plus the env-gated
-                # correctness dump of what it produced; returns None when no in-process teacher runs
-                teacher_data = self.compute_teacher_log_probs(data_iterator, num_microbatches, ref_data=ref_data)
-                if teacher_data is not None:
-                    rollout_data.update(teacher_data)
-                    if self._is_main_rank:
-                        # M1 correctness leg (I-5): env-gated dump of the in-process
-                        # teacher_log_probs just computed. No Sample objects exist at
-                        # this point (megatron computes teacher_log_probs directly onto
-                        # the batch-level rollout_data/teacher_data dicts, never through
-                        # Sample), so synthesize lightweight per-sample stand-ins from
-                        # this rank's local shard: .tokens is the same full
-                        # prompt+response ids as Sample.tokens; sample_index numbers
-                        # this rank's local (seqlen-balanced) order, not the original
-                        # global rollout order -- process_rollout_data discards that
-                        # partition mapping before this point. The compare CLI's
-                        # required tokens-equality check still makes any accidental
-                        # cross-index comparison fail loudly rather than silently.
-                        # No-op unless ORBIT_OPD_TEACHER_LOGPROB_DUMP is set.
-                        maybe_dump_teacher_logprobs(
-                            rollout_id,
-                            [
-                                types.SimpleNamespace(tokens=tokens.tolist(), teacher_log_probs=teacher_lp.tolist())
-                                for tokens, teacher_lp in zip(
-                                    rollout_data["tokens"], teacher_data["teacher_log_probs"], strict=True
-                                )
-                            ],
-                        )
-                self._switch_model("old_actor" if self.args.keep_old_actor else "actor")
-                if not skip_actor_forward_only and (
-                    not self.args.use_rollout_logprobs or self.args.get_mismatch_metrics
-                ):
-                    for m in all_replay_managers:
-                        if m.enabled:
-                            if self._use_rollout_replay(m):
-                                m.stage = "replay_forward"
-                            else:
-                                m.stage = "record"
-                    rollout_data.update(
-                        self.compute_log_prob(
-                            data_iterator,
-                            num_microbatches,
-                            rollout_id=rollout_id,
-                            store_prefix="",
-                        )
-                    )
-                    for m in all_replay_managers:
-                        if self._use_rollout_replay(m):
-                            m.clear_all_forward()
-
-                # ORBIT-SEAM: base's single `use_critic` splits in two - the separate critic actor
-                # still syncs over the actor/critic groups (or takes upstream's shipped `values`),
-                # while the one-trunk critic runs its value forward right here on this actor's trunk
-                if uses_separate_critic(self.args):
-                    if external_data is not None and get_parallel_state().is_pp_last_stage:
-                        values_ref = external_data.get("values")
-                        assert values_ref is not None, (
-                            "actor and critic share the same parallel topology, so the critic rank "
-                            "paired with a pp-last-stage actor rank must have shipped 'values'"
-                        )
-                        rollout_data["values"] = [
-                            value.to(device=torch.cuda.current_device(), non_blocking=True)
-                            for value in ray.get(values_ref.inner)
-                        ]
-                    else:
-                        sync_actor_critic_data(
-                            self.args,
-                            rollout_data,
-                            self._actor_critic_groups,
-                        )
-                elif uses_one_trunk_critic(self.args):
-                    critic_data_iterator, critic_num_microbatches = get_data_iterator(
-                        self.args, self.critic_model, rollout_data
-                    )
-                    rollout_data.update(
-                        forward_only(
-                            get_values,
-                            self.args,
-                            self.critic_model,
-                            critic_data_iterator,
-                            critic_num_microbatches,
-                            rollout_id=rollout_id,
-                        )
-                    )
-                if self._active_model_tag != "actor":
-                    self._switch_model("actor")
-
-                # Calculate adv and returns. Need to performed before training (instead of on the fly),
-                # because we may need normalize the whole rollout.
-                compute_advantages_and_returns(self.args, rollout_data)
-                log_train_advantage_computation_event(rollout_data)
-
-            # ORBIT-SEAM: hoisted out of the advantages block (base restores inside it)
-            # A full-FT reference forward switches the resident parameters to
-            # the "ref" backup. Direct losses such as opd_jsd_loss skip the
-            # advantages block above, so restoration must not live inside it.
-            if self._active_model_tag != "actor":
-                self._switch_model("actor")
-
-            if self.rollout_data_postprocess is not None:
-                self.rollout_data_postprocess(self.args)
-
-            log_rollout_data(rollout_id, self.args, rollout_data)
-
-            # Train
-            num_rollouts = get_num_rollouts(self.args, rollout_data, num_optimizer_steps)
-            self._set_replay_stage("replay_backward")
-            # ORBIT-SEAM: base always runs the policy step; with a one-trunk critic the first
-            # --num-critic-only-steps rollouts train the value head alone, so the policy step (and
-            # with it the self-teacher EMA/lag update and its promotion) is gated
-            run_policy_phase = not uses_one_trunk_critic(self.args) or rollout_id >= self.args.num_critic_only_steps
-            with timer("actor_train"):
-                train_step_outcome = TrainStepOutcome.NORMAL
-                if run_policy_phase:
-                    train_step_outcome = train(
-                        rollout_id,
-                        self.model,
-                        self.optimizer,
-                        self.opt_param_scheduler,
-                        data_iterator,
-                        num_microbatches,
-                        num_rollouts,
-                        witness_info=witness_info,
-                        attempt=attempt,
-                        ft_test_action_executor=self._ft_test_action_executor,
-                    )
-                    if self._self_teacher is not None:
-                        # EMA/lag cadence is defined in actor optimizer steps;
-                        # critic-only warmup rollouts must not age the teacher.
-                        self._self_teacher.update(self._adapter_named_params())
-                        actor_step = rollout_id
-                        if uses_one_trunk_critic(self.args):
-                            actor_step -= self.args.num_critic_only_steps
-                        if should_promote_teacher(
-                            self._opd_teacher_spec.source, self.args.opd_promote_interval, actor_step
-                        ):
-                            self._promote_self_teacher()
-
-            # ORBIT-SEAM: second train phase for the one-trunk critic, under the value-loss context
-            if uses_one_trunk_critic(self.args) and critic_data_iterator is not None:
-                with timer("critic_train"), value_loss_phase(self.args):
-                    train(
-                        rollout_id,
-                        self.critic_model,
-                        self.critic_optimizer,
-                        self.critic_opt_param_scheduler,
-                        critic_data_iterator,
-                        critic_num_microbatches,
-                        num_rollouts,
-                        witness_info=witness_info,
-                        attempt=attempt,
-                        ft_test_action_executor=self._ft_test_action_executor,
-                    )
-
-            self.prof.step(rollout_id=rollout_id)
-
-        train_dump_utils.save_debug_train_data(self.args, rollout_id=rollout_id, rollout_data=rollout_data)
-
-        for m in all_replay_managers:
-            if m.enabled:
-                m.clear_all()
-
-        if train_step_outcome == TrainStepOutcome.NORMAL:
-            # ORBIT-SEAM: base backs up unconditionally; skip it in the modes nothing restores from
-            # update the CPU actor snapshot when a later restore/copy path needs it
-            if should_backup_actor_after_train(self.args):
-                self.model_state_manager.backup("actor")
-            else:
-                torch.cuda.synchronize()
-
-            # Update ref model if needed
-            if (
-                self.args.ref_update_interval is not None
-                and (rollout_id + 1) % self.args.ref_update_interval == 0
-                and "ref" in self.model_state_manager.backup_tags
-            ):
-                with timer("ref_model_update"):
-                    if is_first_replica_megatron_main_rank():
-                        logger.info(f"Updating ref model at rollout_id {rollout_id}")
-                    self.model_state_manager.backup("ref")
-
-        if train_step_outcome == TrainStepOutcome.NORMAL and is_multi_lora_enabled(self.args):
-            from miles.backends.megatron_utils.multi_lora_utils import commit_trained_batch
-
-            commit_trained_batch(rollout_data, rollout_id, self._multi_lora_pending_push)
-
-        log_perf_data(rollout_id, self.args, extra_metrics=self.weight_updater.pop_metrics())
-
-        self._heartbeat.bump()
-        return train_step_outcome
 
     @with_logs
     @timer
@@ -1117,130 +800,6 @@ class MegatronTrainRayActor(OrbitTrainActorExtensions, TrainRayActor):
         from miles.backends.megatron_utils.hf_export import save_hf_model
 
         save_hf_model(self.args, rollout_id, self.model, path=path, raise_on_error=True)
-
-    @with_logs
-    @timer
-    def update_weights(self, info: "EnginesAndLock") -> None:
-        self._heartbeat.bump()
-        # ORBIT-SEAM: engine-free runs (SFT/eval-only) have nothing to sync to
-        if self.args.debug_train_only or self.args.debug_rollout_only or not uses_rollout_engines(self.args):
-            return
-
-        rollout_engines = info.rollout_engines
-        rollout_engine_lock = info.rollout_engine_lock
-        has_new_engines = info.has_new_engines
-        engine_gpu_counts = info.engine_gpu_counts
-        engine_gpu_offsets = info.engine_gpu_offsets
-        del info
-
-        process_groups_are_temporary = self.args.offload_train and self._asleep
-        if process_groups_are_temporary:
-            reload_process_groups()
-
-        if has_new_engines or not self.weight_updater.is_rollout_engines_fresh():
-            self.weight_updater.connect_rollout_engines(
-                rollout_engines,
-                rollout_engine_lock,
-                engine_gpu_counts=engine_gpu_counts,
-                engine_gpu_offsets=engine_gpu_offsets,
-            )
-            dist.barrier(group=get_gloo_group())
-            if dist.get_rank() == 0:
-                ray.get(self.rollout_manager.clear_updatable_has_new_engines.remote())
-
-        if self.args.debug_skip_weight_update:
-            if dist.get_rank() == 0:
-                logger.warning("Skipping actor-to-rollout weight update because " "--debug-skip-weight-update is set.")
-            if self.args.rematerialize_param_from_master_weight:
-                torch_memory_saver.pause(tag="param_buffer")
-            if process_groups_are_temporary:
-                destroy_process_groups()
-            return
-
-        version_update_names: list[str] = []
-        if is_multi_lora_enabled(self.args):
-            from miles.backends.megatron_utils.multi_lora_utils import select_adapters_to_push
-
-            self.weight_updater.multi_lora_adapters, version_update_names = select_adapters_to_push(
-                self.loaded_adapters, self._multi_lora_pending_push, has_new_engines
-            )
-
-        # ORBIT-SEAM: removed base's torch_memory_saver.disable() wrapper around this whole block
-        # (and the LoRA-specific resume before it): orbit never pauses the allocator, so the
-        # adapter/base params the export reads are already backed by real GPU memory
-        print_memory("before update_weights")
-        self.weight_updater.update_weights()
-        print_memory("after update_weights")
-        if dist.get_rank() == 0:
-            ray.get(self.rollout_manager.set_weight_version.remote(self.weight_updater.weight_version))
-
-        if is_multi_lora_enabled(self.args):
-            from miles.backends.megatron_utils.multi_lora_utils import commit_weight_push
-
-            self._multi_lora_pending_push.clear()
-            commit_weight_push(version_update_names, self._is_first_replica_megatron_main_rank)
-
-        # ORBIT-SEAM: fill the engine's OPD teacher slot, then release the adapter to CPU if the run
-        # offloads it - both must happen after the sync and before anything else touches the params
-        # Startup fill of the engine's orbit_teacher slot for sglang self:*
-        # teachers (Task 6 reserves it EMPTY; the local scoring stage fires
-        # unconditionally during the FIRST generate, and scoring an empty slot
-        # 404s). Both drivers call actor update_weights once before the first
-        # generate — on fresh start AND resume — so promoting here guarantees
-        # the slot is filled before any scoring. Re-promote whenever new or
-        # restarted engines connect: their slot starts empty too. Must run
-        # before offload_train_adapter (the export reads live GPU params). A
-        # failure raises out of the launch — never start training with an
-        # empty teacher slot.
-        if (
-            self._self_teacher is not None
-            and should_promote_teacher(
-                self._opd_teacher_spec.source, getattr(self.args, "opd_promote_interval", None), 0
-            )
-            and (not self._teacher_slot_startup_promoted or num_new_engines > 0)
-        ):
-            self._promote_self_teacher()
-            self._teacher_slot_startup_promoted = True
-
-        if self.args.offload_train_adapter:
-            offload_megatron_adapter_to_cpu(self.model)
-            print_memory("after update_weights adapter_offload")
-
-        if self.args.ci_test and len(rollout_engines) > 0 and not is_lora_enabled(self.args):
-            engine = random.choice(rollout_engines)
-            engine_version = ray.get(engine.get_weight_version.remote())
-            if str(engine_version) != str(self.weight_updater.weight_version):
-                raise RuntimeError(
-                    f"Weight version mismatch! Engine: {engine_version}, Updater: {self.weight_updater.weight_version}"
-                )
-
-        if getattr(self.args, "keep_old_actor", False):
-            if self.args.update_weights_interval == 1:
-                logger.info("updating model queue: rollout_actor -> old_actor, actor -> rollout_actor")
-                # Queue-style update: rollout_actor params -> old_actor, actor params -> rollout_actor
-                # First copy rollout_actor to old_actor
-                self.model_state_manager.copy(src_tag="rollout_actor", dst_tag="old_actor")
-                # Then copy current actor to rollout_actor
-                # ORBIT-SEAM: in adapter-state mode the "actor" snapshot is already current (the
-                # adapter is the whole state), so the queue advances by copy instead of re-backup
-                if uses_adapter_state(self.args):
-                    self.model_state_manager.copy(src_tag="actor", dst_tag="rollout_actor")
-                else:
-                    self.model_state_manager.backup("rollout_actor")
-            else:
-                if uses_adapter_state(self.args):
-                    self.model_state_manager.copy(src_tag="actor", dst_tag="old_actor")
-                else:
-                    self.model_state_manager.backup("old_actor")
-
-        if self.args.rematerialize_param_from_master_weight:
-            torch_memory_saver.pause(tag="param_buffer")
-        # ORBIT-SEAM: base gates this on process_groups_are_temporary only; orbit also frees the
-        # export's scratch allocations so the offloaded state actually stays offloaded
-        if process_groups_are_temporary or self.args.offload_train:
-            destroy_process_groups()
-            clear_memory()
-            print_memory("after update_weights destroy_process_groups")
 
     @with_logs
     def load_other_checkpoint(self, model_tag: str, path: str) -> None:

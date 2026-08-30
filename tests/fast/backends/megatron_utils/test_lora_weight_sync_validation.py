@@ -28,6 +28,10 @@ from miles.backends.megatron_utils.update_weight.update_weight_from_tensor impor
 from miles.utils.lora import LORA_ADAPTER_NAME
 
 _UW_MODULE = "miles.backends.megatron_utils.update_weight.update_weight_from_tensor"
+# orbit: __init__ / update_weights live on the OrbitUpdateWeightExtensions mixin, so the names
+# they read (dist, ray, HfWeightIteratorBase, get_gloo_group, _barrier_with_logging) are globals
+# of the mixin module. _send_to_colocated_engine stays in the vendored module above.
+_EXT_MODULE = "orbit.transport.update_weight_ext"
 _MIXIN_MODULE = "miles.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin"
 _BROADCAST_MODULE = "miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast"
 
@@ -118,8 +122,8 @@ class TestCheckWeightSyncResults:
 class TestSendHfParamsEmptyLoraDetection:
     """When is_lora=True but HF chunk has no lora_A/lora_B names, raise immediately."""
 
-    @patch(f"{_UW_MODULE}.dist")
-    @patch(f"{_UW_MODULE}.HfWeightIteratorBase")
+    @patch(f"{_EXT_MODULE}.dist")
+    @patch(f"{_EXT_MODULE}.HfWeightIteratorBase")
     def test_raises_when_no_lora_weights_in_chunk(self, mock_iter_base, mock_dist):
         mock_dist.get_world_size.return_value = 1
         mock_dist.get_rank.return_value = 0
@@ -144,8 +148,8 @@ class TestSendHfParamsEmptyLoraDetection:
             updater._send_lora_params(SAMPLE_BASE_ONLY_WEIGHTS)
 
     @patch(f"{_UW_MODULE}._send_to_colocated_engine", return_value=([], []))
-    @patch(f"{_UW_MODULE}.dist")
-    @patch(f"{_UW_MODULE}.HfWeightIteratorBase")
+    @patch(f"{_EXT_MODULE}.dist")
+    @patch(f"{_EXT_MODULE}.HfWeightIteratorBase")
     def test_passes_when_lora_weights_present(self, mock_iter_base, mock_dist, mock_send):
         mock_dist.get_world_size.return_value = 1
         mock_dist.get_rank.return_value = 0
@@ -185,12 +189,12 @@ class TestUpdateWeightsZeroChunks:
     # brackets it — same group, same collective — and that helper imports torch.distributed
     # itself, so the module-level `dist` patch no longer reaches it. Patch the wrapper instead;
     # the behaviour under test (zero-chunk detection) is unrelated to the barriers.
-    @patch(f"{_UW_MODULE}._barrier_with_logging")
+    @patch(f"{_EXT_MODULE}._barrier_with_logging")
     @patch("miles.backends.megatron_utils.update_weight.common.ray")
-    @patch(f"{_UW_MODULE}.get_gloo_group", return_value=MagicMock())
-    @patch(f"{_UW_MODULE}.ray")
-    @patch(f"{_UW_MODULE}.dist")
-    @patch(f"{_UW_MODULE}.HfWeightIteratorBase")
+    @patch(f"{_EXT_MODULE}.get_gloo_group", return_value=MagicMock())
+    @patch(f"{_EXT_MODULE}.ray")
+    @patch(f"{_EXT_MODULE}.dist")
+    @patch(f"{_EXT_MODULE}.HfWeightIteratorBase")
     def test_raises_on_zero_lora_chunks(
         self, mock_iter_base, mock_dist, mock_ray, mock_gloo, mock_common_ray, mock_barrier
     ):
@@ -220,12 +224,12 @@ class TestUpdateWeightsZeroChunks:
             updater.update_weights()
 
     # orbit: see test_raises_on_zero_lora_chunks above.
-    @patch(f"{_UW_MODULE}._barrier_with_logging")
+    @patch(f"{_EXT_MODULE}._barrier_with_logging")
     @patch("miles.backends.megatron_utils.update_weight.common.ray")
-    @patch(f"{_UW_MODULE}.get_gloo_group", return_value=MagicMock())
-    @patch(f"{_UW_MODULE}.ray")
-    @patch(f"{_UW_MODULE}.dist")
-    @patch(f"{_UW_MODULE}.HfWeightIteratorBase")
+    @patch(f"{_EXT_MODULE}.get_gloo_group", return_value=MagicMock())
+    @patch(f"{_EXT_MODULE}.ray")
+    @patch(f"{_EXT_MODULE}.dist")
+    @patch(f"{_EXT_MODULE}.HfWeightIteratorBase")
     def test_no_raise_for_base_model_zero_chunks(
         self, mock_iter_base, mock_dist, mock_ray, mock_gloo, mock_common_ray, mock_barrier
     ):

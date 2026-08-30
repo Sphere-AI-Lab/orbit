@@ -50,7 +50,7 @@ def test_direct_loss_restores_full_ft_actor_after_reference_forward(monkeypatch)
     actor.prof = SimpleNamespace(step=lambda **kwargs: None)
     events = []
 
-    def _compute_ref(self, data_iterator, num_microbatches):
+    def _compute_ref(self, data_iterator, num_microbatches, rollout_id=0):
         self._active_model_tag = "ref"
         events.append("ref_forward")
         return {"ref_log_probs": []}
@@ -107,7 +107,7 @@ def test_critic_only_warmup_does_not_advance_self_teacher(monkeypatch) -> None:
     actor._heartbeat = SimpleNamespace(bump=lambda: None)
     actor._active_model_tag = "actor"
     actor._self_teacher = SimpleNamespace(update=lambda params: updates.append(params))
-    actor.compute_ref_log_probs = MethodType(lambda self, *args: None, actor)
+    actor.compute_ref_log_probs = MethodType(lambda self, *args, **kwargs: None, actor)
     actor.prof = SimpleNamespace(step=lambda **kwargs: None)
     monkeypatch.setattr(actor_utils, "train", lambda *args, **kwargs: pytest.fail("actor train must be skipped"))
 
@@ -154,7 +154,7 @@ def test_first_actor_step_after_critic_warmup_uses_actor_relative_promotion_cade
     promotions = []
     actor._self_teacher = SimpleNamespace(update=lambda params: updates.append(params))
     actor._opd_teacher_spec = SimpleNamespace(source="self_ema")
-    actor.compute_ref_log_probs = MethodType(lambda self, *args: None, actor)
+    actor.compute_ref_log_probs = MethodType(lambda self, *args, **kwargs: None, actor)
     actor._adapter_named_params = MethodType(lambda self: {"adapter": object()}, actor)
     actor._promote_self_teacher = MethodType(lambda self: promotions.append(True), actor)
     actor.prof = SimpleNamespace(step=lambda **kwargs: None)

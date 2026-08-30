@@ -1,0 +1,24 @@
+{
+ "shadowed": {
+  "miles.ray.train_actor::TrainRayActor.compute_eval_nll": {
+   "mixin": "orbit.megatron.actor_ext.OrbitTrainActorExtensions",
+   "sha": "eb0003bb81b2dc14ffb0d8acdbdc0dd9b5a6c889811c97785cec552fb49c9c9d",
+   "via": "miles/backends/megatron_utils/actor.py::MegatronTrainRayActor"
+  },
+  "miles.ray.train_actor::TrainRayActor.sleep": {
+   "mixin": "orbit.megatron.actor_ext.OrbitTrainActorExtensions",
+   "sha": "93793265c2c5107092a98cdb0ed7a63f68ce03267a45b1f7300542dc14bf5724",
+   "via": "miles/backends/megatron_utils/actor.py::MegatronTrainRayActor"
+  },
+  "miles.ray.train_actor::TrainRayActor.update_weights": {
+   "mixin": "orbit.megatron.actor_ext.OrbitTrainActorExtensions",
+   "sha": "6cc5d2e8f48794ddd81043f5dd3a794488a267cbd8572c7b42b71a6eeca1fbff",
+   "via": "miles/backends/megatron_utils/actor.py::MegatronTrainRayActor"
+  },
+  "miles.ray.train_actor::TrainRayActor.wake_up": {
+   "mixin": "orbit.megatron.actor_ext.OrbitTrainActorExtensions",
+   "sha": "89fe7262bdf8100f85c159f203db8dfa2e4199f19b1e006f63bb1c93e00b7caa",
+   "via": "miles/backends/megatron_utils/actor.py::MegatronTrainRayActor"
+  }
+ }
+}

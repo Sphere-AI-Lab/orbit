@@ -47,9 +47,15 @@ def _args(peft_method="lora", transport="ray", double_buffer=False):
 
 
 def _sync_spec(method="lora"):
+    # Read the slot name from production rather than rebuilding it as
+    # f"orbit_{method}": that guess was right for OFT but went stale for LoRA
+    # when the isolation campaign restored upstream's "miles_lora", which this
+    # helper never learned -- so the fixture asserted against itself.
+    from orbit.transport.slots import _STUDENT_NAMES
+
     return PeftSyncSpec(
         method=method,
-        adapter_name=f"orbit_{method}",
+        adapter_name=_STUDENT_NAMES[method],
         adapter_config={"peft_type": method.upper()},
         sync_transport=f"{method}_adapter",
     )

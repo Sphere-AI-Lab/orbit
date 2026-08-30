@@ -195,7 +195,7 @@ def _install_toy_compute_log_prob(actor, hidden, tokens):
     adapter toggling in compute_teacher_log_probs is exercised for real.
     """
 
-    def _compute_log_prob(self, data_iterator, num_microbatches, store_prefix=""):
+    def _compute_log_prob(self, data_iterator, num_microbatches, rollout_id=0, store_prefix=""):
         return {f"{store_prefix}log_probs": [_token_logprobs(self.model[0], hidden, tokens)]}
 
     actor.compute_log_prob = MethodType(_compute_log_prob, actor)
