@@ -113,7 +113,7 @@ def attach_peft_request_payload(args, payload: dict[str, Any]) -> dict[str, Any]
 
 
 def should_request_rollout_logprobs(args, evaluation: bool = False) -> bool:
-    if getattr(args, "use_orbit_router", False) and "RadixTreeMiddleware" in getattr(
+    if getattr(args, "use_miles_router", False) and "RadixTreeMiddleware" in getattr(
         args, "miles_router_middleware_paths", []
     ):
         return True
@@ -129,8 +129,7 @@ async def update_sample_from_response(
     if (len(sample.response) == 0) and not sample.tokens:
         sample.tokens = payload["input_ids"]
 
-    # ORBIT-SEAM: use_miles_router renamed use_orbit_router (orbit's own pass-through router)
-    if args.use_orbit_router and "RadixTreeMiddleware" in args.miles_router_middleware_paths:
+    if args.use_miles_router and "RadixTreeMiddleware" in args.miles_router_middleware_paths:
         from miles.router.middleware_hub.radix_tree_middleware import postprocess_sample_with_radix_tree
 
         # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)

@@ -1761,6 +1761,21 @@ def add_peft_arguments(parser):
 
 def add_orbit_arguments(parser):
     """Every orbit-added argument, plus orbit's overrides of miles defaults."""
+    # Orbit's spelling of the inherited router flag, registered as an ALIAS onto
+    # upstream's dest rather than by renaming upstream's own flag. Renaming it in
+    # the vendored tree cost 17 seam lines across 6 miles files -- every reader
+    # had to be edited too -- for a naming preference. As an alias it costs one
+    # registration here, both spellings work, and miles stays pristine.
+    parser.add_argument(
+        "--use-orbit-router",
+        dest="use_miles_router",
+        action="store_true",
+        default=False,
+        help=(
+            "Orbit's spelling of --use-miles-router: use MilesRouter for "
+            "text-based routing instead of SGLang token-based routing."
+        ),
+    )
     parser.add_argument(
         "--offload-train-grad-buffers",
         action=argparse.BooleanOptionalAction,

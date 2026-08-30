@@ -1113,8 +1113,7 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
 
         def add_router_arguments(parser):
             parser.add_argument(
-                # ORBIT-SEAM: orbit renames the inherited miles-router flag family; readers use args.use_orbit_router
-                "--use-orbit-router",
+                "--use-miles-router",
                 action="store_true",
                 default=False,
                 help="Whether to use MilesRouter for text-based routing instead of SGLang token-based routing",

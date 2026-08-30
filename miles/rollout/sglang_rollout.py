@@ -269,8 +269,7 @@ async def generate(
         meta_info=output.get("meta_info") if isinstance(output, dict) else None,
     )
 
-    # ORBIT-SEAM: use_miles_router flag renamed use_orbit_router (orbit's own pass-through router)
-    if args.use_orbit_router and "RadixTreeMiddleware" in args.miles_router_middleware_paths:
+    if args.use_miles_router and "RadixTreeMiddleware" in args.miles_router_middleware_paths:
         from miles.router.middleware_hub.radix_tree_middleware import postprocess_sample_with_radix_tree
 
         sample = await postprocess_sample_with_radix_tree(args, sample, output)
@@ -441,8 +440,7 @@ async def abort(args: Namespace, rollout_id: int) -> list[list[Sample]]:
     assert not state.aborted
     state.aborted = True
 
-    # ORBIT-SEAM: use_miles_router flag renamed use_orbit_router (orbit's own pass-through router)
-    if parse(sglang_router.__version__) <= parse("0.2.1") or args.use_orbit_router:
+    if parse(sglang_router.__version__) <= parse("0.2.1") or args.use_miles_router:
         response = await get(f"http://{args.sglang_router_ip}:{args.sglang_router_port}/list_workers")
         urls = response["urls"]
     else:

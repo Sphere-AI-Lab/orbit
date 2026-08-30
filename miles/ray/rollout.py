@@ -71,7 +71,7 @@ logger = logging.getLogger(__name__)
 
 # ORBIT-SEAM: OFT rollout needs Orbit's pass-through router (preserves oft_path); consumed by _start_router below
 def _requires_orbit_router_passthrough(args) -> bool:
-    return getattr(args, "peft_method", "none") == "oft" and not getattr(args, "use_orbit_router", False)
+    return getattr(args, "peft_method", "none") == "oft" and not getattr(args, "use_miles_router", False)
 
 
 # ---------------------------------------------------------------------------
@@ -1035,7 +1035,7 @@ def _start_router(args, *, has_pd_disaggregation: bool = False, force_new: bool 
         logger.warning(
             "Forcing Orbit router for OFT rollout because the installed sglang_router does not preserve oft_path."
         )
-        args.use_orbit_router = True
+        args.use_miles_router = True
 
     if not force_new and args.sglang_router_ip is not None:
         return args.sglang_router_ip, args.sglang_router_port
@@ -1048,8 +1048,7 @@ def _start_router(args, *, has_pd_disaggregation: bool = False, force_new: bool 
         if router_port is None:
             router_port = find_available_port(random.randint(3000, 4000))
 
-    # ORBIT-SEAM: use_miles_router flag renamed use_orbit_router (orbit's own pass-through router, see above)
-    if args.use_orbit_router:
+    if args.use_miles_router:
         import copy
 
         assert not has_pd_disaggregation, "miles router does not support PD disaggregation."

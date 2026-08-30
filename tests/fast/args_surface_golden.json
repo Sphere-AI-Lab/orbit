@@ -19965,6 +19965,30 @@
  {
   "choices": null,
   "default": "False",
+  "dest": "use_miles_router",
+  "help": "Whether to use MilesRouter for text-based routing instead of SGLang token-based routing",
+  "nargs": 0,
+  "option_strings": [
+   "--use-miles-router"
+  ],
+  "required": false,
+  "type": null
+ },
+ {
+  "choices": null,
+  "default": "False",
+  "dest": "use_miles_router",
+  "help": "Orbit's spelling of --use-miles-router: use MilesRouter for text-based routing instead of SGLang token-based routing.",
+  "nargs": 0,
+  "option_strings": [
+   "--use-orbit-router"
+  ],
+  "required": false,
+  "type": null
+ },
+ {
+  "choices": null,
+  "default": "False",
   "dest": "use_mp_args_from_checkpoint_args",
   "help": "Copy model parallelism command-line arguments from checkpoint",
   "nargs": 0,
@@ -20018,18 +20042,6 @@
   "nargs": 0,
   "option_strings": [
    "--use-opsm"
-  ],
-  "required": false,
-  "type": null
- },
- {
-  "choices": null,
-  "default": "False",
-  "dest": "use_orbit_router",
-  "help": "Whether to use MilesRouter for text-based routing instead of SGLang token-based routing",
-  "nargs": 0,
-  "option_strings": [
-   "--use-orbit-router"
   ],
   "required": false,
   "type": null
