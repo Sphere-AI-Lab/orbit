@@ -68,37 +68,9 @@
    "delta_lines": 20,
    "sha": "58a92a94ad4922960cc1144ea9ef4eb3e1a844e61a609537710da318e6c42c73"
   },
-  "miles/backends/megatron_utils/megatron_to_hf/glm4.py": {
-   "delta_lines": 6,
-   "sha": "44314e0bba508aca6a8526d4b24426167f9a7d806b235bed81da6cd5149fb37e"
-  },
-  "miles/backends/megatron_utils/megatron_to_hf/glm4moe.py": {
-   "delta_lines": 3,
-   "sha": "aabd6bdc329fca30d6c11b380efcfbe94616627e0d685cf2d53710004497ff8c"
-  },
-  "miles/backends/megatron_utils/megatron_to_hf/llama.py": {
-   "delta_lines": 3,
-   "sha": "2b35b7dee5353e0f069c345ba4059e26fd601e59212d1350b64320274f50820d"
-  },
   "miles/backends/megatron_utils/megatron_to_hf/processors/padding_remover.py": {
    "delta_lines": 22,
    "sha": "6b802e25a448e752cbbd128c6bb380a1a8d9778dea96d2f1082229a388045715"
-  },
-  "miles/backends/megatron_utils/megatron_to_hf/qwen2.py": {
-   "delta_lines": 5,
-   "sha": "0f6d795592fc460ff60c157dedf65fc4fcca86d092169e066d7985c1db0cc67a"
-  },
-  "miles/backends/megatron_utils/megatron_to_hf/qwen3_5.py": {
-   "delta_lines": 3,
-   "sha": "557a706a26fcc60653c5b44f24bd5de826c548a45854ad5e8af9af06f7db5372"
-  },
-  "miles/backends/megatron_utils/megatron_to_hf/qwen3_next.py": {
-   "delta_lines": 3,
-   "sha": "96f9fa5a2708b8acb364f73685ef8fb77e5bcb929ef81256295918be93a90f0b"
-  },
-  "miles/backends/megatron_utils/megatron_to_hf/qwen3moe.py": {
-   "delta_lines": 16,
-   "sha": "de628c7bb653a51dcb5a55dd04a8a5cb75861906bd7d055f48b11423ecb8b87d"
   },
   "miles/backends/megatron_utils/misc_utils.py": {
    "delta_lines": 5,
@@ -806,12 +778,19 @@
   "miles/backends/megatron_utils/kernels/int4_qat/fake_int4_quant_cuda.cu": "d2b291133d84cd824b0e2b0fbbb539b2d2e62b969f0a097a37a1551766c6bcb7",
   "miles/backends/megatron_utils/kernels/int4_qat/setup.py": "f8a9389797532d24701698e96222ca35d6a81236fe02a4a0dbcc04515614cde6",
   "miles/backends/megatron_utils/megatron_to_hf/deepseekv3.py": "dfab14f4b938525798fb4bd05195e43b8f267de34671808a5d0cfeb64019341f",
+  "miles/backends/megatron_utils/megatron_to_hf/glm4.py": "fdc2a52fa21e7f9b526b0cffeee97801cc3a28990a8ace7d33809c6044d4283e",
+  "miles/backends/megatron_utils/megatron_to_hf/glm4moe.py": "5e84f368481c5d713907d6a32de0424d3b58fe96b22d8de4ef8375626c762969",
+  "miles/backends/megatron_utils/megatron_to_hf/llama.py": "e9223b10d7bf62b9acb3314f909831b0b12502451595763668c541ae0cd28399",
   "miles/backends/megatron_utils/megatron_to_hf/mimo.py": "1704cc6e76262273a54ee41e1dbbe85d0af8cc06676d0291eb313ba2f0bc939f",
   "miles/backends/megatron_utils/megatron_to_hf/processors/__init__.py": "abd236e0b45f098cb84b37ab6ba9ac11b027648961f8d90e0c47b206ff796499",
   "miles/backends/megatron_utils/megatron_to_hf/processors/quantizer_compressed_tensors.py": "5f667343d552e02058507d6a408b6a9e1fe2c7c686ce14db2ce4ba1064410aa9",
   "miles/backends/megatron_utils/megatron_to_hf/processors/quantizer_fp8.py": "92530ef743d16da394f796b30150f4e0624642e6253f6bf38f85842be8443d6a",
   "miles/backends/megatron_utils/megatron_to_hf/processors/quantizer_mxfp8.py": "ca5d05e6b6f074abeb7e87586556ad2d32d9bcc78e489f6e60ad3b19db621cc0",
   "miles/backends/megatron_utils/megatron_to_hf/processors/quantizer_nvfp4.py": "1b00fde8208b077654f37307560dbc6ce6473d557363d9ab5aaf57f4591c4a43",
+  "miles/backends/megatron_utils/megatron_to_hf/qwen2.py": "fb18f23241200815a3ef21ea9eba8dd303877af7286a31bb814857342f9a2804",
+  "miles/backends/megatron_utils/megatron_to_hf/qwen3_5.py": "e83cd55ba2cf81936ab72a6b0a8ae3c2cbd02de6a232094aec5dc215939ee639",
+  "miles/backends/megatron_utils/megatron_to_hf/qwen3_next.py": "911d9ef0f5c11dd54bf59a1e66e861da24b8657a128e80d841d4731ef1e4d8c7",
+  "miles/backends/megatron_utils/megatron_to_hf/qwen3moe.py": "59aef122cc8e193e69e8bc46b2a22fbb73daa28b5f5b9da06bb53a471dbbc5b9",
   "miles/backends/megatron_utils/sglang.py": "ab1010b886238582ebe1879f3a29b4ae074363d6a1f06fd2921748d678e509cf",
   "miles/backends/megatron_utils/update_weight/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
