@@ -27,7 +27,7 @@ from miles.utils.ft_utils.control_server.server import start_control_server
 from miles.utils.ft_utils.mini_ft_controller import maybe_start_mini_ft_controller
 
 # ORBIT-SEAM: held-out NLL eval feature (gate G4) - metric builder for the eval-NLL blocks below
-from orbit.utils.eval_nll import build_eval_nll_metrics
+from miles.orbit.utils.eval_nll import build_eval_nll_metrics
 from miles.utils.logging_utils import configure_logger
 # ORBIT-SEAM: computes the tracking-log step number for eval-NLL and progress metrics below
 from miles.utils.metric_utils import compute_rollout_step
@@ -35,7 +35,7 @@ from miles.utils.misc import should_run_periodic_action
 from miles.utils.tracking_utils.tracking import finish_tracking, init_tracking
 
 # ORBIT-SEAM: ETA tracking + duration formatting for the progress bar / progress metrics below
-from orbit.utils.training_eta import TrainingETA, format_duration
+from miles.orbit.utils.training_eta import TrainingETA, format_duration
 
 logger = logging.getLogger(__name__)
 

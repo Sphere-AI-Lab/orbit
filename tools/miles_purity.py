@@ -3,8 +3,9 @@
 
 This repo vendors radixark/miles at MILES_BASE verbatim: the miles/ and
 miles_plugins/ packages keep upstream's names and, wherever possible, upstream's
-exact bytes. All orbit code lives in the top-level orbit/ home (plus the
-orbit-only trees: tools/, scripts/, examples/, docs/, tests/). The manifest
+exact bytes. All orbit code lives in the miles/orbit/ home subpackage -- a
+subtree upstream does not have, so it stays add-only in merges -- plus the
+orbit-only trees: tools/, scripts/, examples/, docs/, tests/. The manifest
 records, for every file shared with the base, which purity class it is in and a
 content hash. The companion test (tests/fast/test_miles_purity_ratchet.py) needs
 only the manifest and the working tree, so CI never touches the miles repository.
@@ -105,17 +106,20 @@ def build() -> dict:
 
 
 def home_violations(manifest: dict) -> list[str]:
-    """Every file under miles/ traces to the base. Orbit code never lands there
-    without going through the seam workflow; new orbit modules live in orbit/."""
+    """Every file under miles/ traces to the base, except the miles/orbit/ home
+    layer (orbit-authored by definition; upstream has no such path, verified
+    against the base, so a future upstream miles/orbit/ would collide loudly at
+    manifest regen). Orbit code never lands elsewhere under miles/ without
+    going through the seam workflow; new orbit modules live in miles/orbit/."""
     known = set(manifest["pristine"]) | set(manifest["budgeted"])
     out = []
     for path in git("ls-files", "miles/").splitlines():
-        if path in known:
+        if path in known or path.startswith("miles/orbit/"):
             continue
         out.append(
             f"{path}: file under miles/ that is not part of the vendored miles "
-            f"base; orbit code belongs in orbit/ (regenerate the manifest only "
-            f"if this really is upstreamed miles code)"
+            f"base; orbit code belongs in miles/orbit/ (regenerate the manifest "
+            f"only if this really is upstreamed miles code)"
         )
     return out
 
@@ -129,7 +133,7 @@ def check(manifest: dict) -> list[str]:
         elif sha(current) != expect:
             errors.append(
                 f"{path}: was pristine miles code and has been modified; keep "
-                f"miles files pristine, or move the change into the orbit/ "
+                f"miles files pristine, or move the change into the miles/orbit/ "
                 f"home layer and regenerate the manifest"
             )
     for path, entry in manifest["budgeted"].items():

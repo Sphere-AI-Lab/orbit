@@ -10,9 +10,9 @@ from miles.backends.training_utils.sampling_mask import build_local_sampling_mas
 from miles.utils.sampling_mask import RolloutSamplingMask
 
 # ORBIT-SEAM: orbit's OPD top-k student scoring (vocab-parallel or true-on-policy full-vocab
-# gather) lives in orbit.opd.losses; imported here for the `teacher_topk_ids` branch of
+# gather) lives in miles.orbit.opd.losses; imported here for the `teacher_topk_ids` branch of
 # get_log_probs_and_entropy below, which is orbit's only addition to base's loop.
-from orbit.opd.losses import opd_topk_sample_log_probs
+from miles.orbit.opd.losses import opd_topk_sample_log_probs
 
 
 def _iter_response_chunks(
@@ -292,7 +292,7 @@ def get_log_probs_and_entropy(
         zip(response_chunks, topk_ids_iter, strict=True)
     ):
         if sample_topk_ids is not None:
-            # ORBIT-SEAM: orbit's OPD top-k scoring for this sample lives in orbit.opd.losses
+            # ORBIT-SEAM: orbit's OPD top-k scoring for this sample lives in miles.orbit.opd.losses
             topk_log_prob, log_prob, entropy = opd_topk_sample_log_probs(
                 logits_chunk,
                 tokens_chunk,
@@ -347,7 +347,7 @@ def get_log_probs_and_entropy(
     }
     if with_entropy:
         res["entropy"] = entropy_list
-    # ORBIT-SEAM: extra result key consumed by orbit.opd.losses.opd_topk_loss_function
+    # ORBIT-SEAM: extra result key consumed by miles.orbit.opd.losses.opd_topk_loss_function
     if topk_log_probs_list is not None:
         res["student_topk_log_probs"] = topk_log_probs_list
 

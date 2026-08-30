@@ -7,7 +7,7 @@
 #   LoRA r256 attn:     PEFT_METHOD=lora  LORA_RANK=256 TARGET_MODULES=linear_qkv,linear_proj
 #   LoRA r256 mlp:      PEFT_METHOD=lora  LORA_RANK=256 TARGET_MODULES=linear_fc1,linear_fc2
 #   OFT matched-r256:   PEFT_METHOD=oft   OFT_BLOCK_SIZE=$(python -c 'from
-#                       orbit.utils.peft_param_match import matched_oft_block_size as m;
+#                       miles.orbit.utils.peft_param_match import matched_oft_block_size as m;
 #                       print(m(256, 4096, 4096))')
 #   E2 (batch study):   TRAIN_JSONL=.../openthoughts3_train.jsonl
 #                       GLOBAL_BATCH_SIZE=512 ROLLOUT_BATCH_SIZE=512
@@ -137,7 +137,7 @@ ROLLOUT_ARGS=(
 # The no-colon form distinguishes "unset" (use the pinned default) from "set to
 # empty" (the model has its own -- omit the flag); the colon form would collapse
 # both, which is the LABEL_KEY bug one flag over.
-CHAT_TEMPLATE_PATH=${CHAT_TEMPLATE_PATH-${ORBIT_ROOT}/orbit/utils/chat_template_utils/templates/llama3.1_pinned.jinja}
+CHAT_TEMPLATE_PATH=${CHAT_TEMPLATE_PATH-${ORBIT_ROOT}/miles/orbit/utils/chat_template_utils/templates/llama3.1_pinned.jinja}
 if [[ -n "${CHAT_TEMPLATE_PATH}" ]]; then
     ROLLOUT_ARGS+=( --chat-template-path "${CHAT_TEMPLATE_PATH}" )
 fi
@@ -286,13 +286,13 @@ case "${PEFT_METHOD}" in
         #
         # OFT_BLOCK_SIZE is required, not defaulted. The block size IS the
         # parameter budget for the matched comparison E5 exists to make, and it
-        # must come from orbit.utils.peft_param_match.matched_oft_block_size --
+        # must come from miles.orbit.utils.peft_param_match.matched_oft_block_size --
         # a silent 32 here would quietly compare unmatched models.
         PEFT_ARGS=(
             --peft-method oft
             --peft-variant standard
             --oft-type canonical_oft
-            --oft-block-size "${OFT_BLOCK_SIZE:?set OFT_BLOCK_SIZE from orbit.utils.peft_param_match.matched_oft_block_size; there is no safe default}"
+            --oft-block-size "${OFT_BLOCK_SIZE:?set OFT_BLOCK_SIZE from miles.orbit.utils.peft_param_match.matched_oft_block_size; there is no safe default}"
             --oft-eps "${OFT_EPS:-6e-5}"
             --target-modules "${TARGET_MODULES:-${TARGET_MODULES_DEFAULT}}"
         )

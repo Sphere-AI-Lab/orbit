@@ -28,7 +28,7 @@ import json
 import sys
 from types import SimpleNamespace
 
-import orbit.rewards.swe_agent.episode as episode_mod
+import miles.orbit.rewards.swe_agent.episode as episode_mod
 from miles.utils.types import Sample
 
 

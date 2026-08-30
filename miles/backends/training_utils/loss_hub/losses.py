@@ -13,7 +13,7 @@ from miles.backends.training_utils.loss_hub.corrections import vanilla_tis_funct
 from miles.backends.training_utils.loss_hub.logit_processors import get_log_probs_and_entropy, get_values
 from miles.backends.training_utils.loss_hub.math_utils import (
     # ORBIT-SEAM: orbit-added helpers on base's import list - the critic explained-variance stat
-    # keys and the two overflow-safe ratio helpers (homes: orbit/critic/value_stats.py and
+    # keys and the two overflow-safe ratio helpers (homes: miles/orbit/critic/value_stats.py and
     # math_utils itself; both re-exported by loss_hub.math_utils)
     VALUE_EV_STAT_KEYS,
     _safe_clamp_log_ratio,
@@ -29,10 +29,10 @@ from miles.utils.misc import load_function
 from miles.utils.types import RolloutBatch
 
 # ORBIT-SEAM: orbit's OPD losses (full-vocab JSD, direct top-k KL) and the masked
-# response-reduction helper added with them live in orbit.opd.losses; bound here so the
+# response-reduction helper added with them live in miles.orbit.opd.losses; bound here so the
 # loss_type arms in get_loss_function below and policy_loss_function's max diagnostic resolve
 # them. miles.backends.training_utils.loss re-exports all three for existing importers.
-from orbit.opd.losses import _response_masked_max, opd_jsd_loss_function, opd_topk_loss_function
+from miles.orbit.opd.losses import _response_masked_max, opd_jsd_loss_function, opd_topk_loss_function
 
 
 class LossFunction(Protocol):
@@ -373,7 +373,7 @@ def policy_loss_function(
     train_scored_log_probs = old_log_probs
     train_rollout_logprob_abs_diff = None
     # ORBIT-SEAM: base reports only the mean train-vs-rollout log-prob gap; orbit adds the
-    # worst-token gap through orbit.opd.losses._response_masked_max
+    # worst-token gap through miles.orbit.opd.losses._response_masked_max
     train_rollout_logprob_abs_diff_max = None
     train_rollout_kl = None
     if rollout_old_log_probs:
@@ -494,7 +494,7 @@ def value_loss_function(
 
     # ORBIT-SEAM: orbit-added critic explained-variance sufficient statistics. Left in place
     # rather than lifted: the block is five calls to this module's own sum_of_sample_mean
-    # reducer, and its natural home (orbit/critic/value_stats.py, which owns
+    # reducer, and its natural home (miles/orbit/critic/value_stats.py, which owns
     # VALUE_EV_STAT_KEYS and compute_value_explained_var) belongs to the math_utils slice.
     # Sufficient statistics for the critic explained-variance metric,
     # EV = 1 - Var(returns - values) / Var(returns) over trainable tokens.
@@ -601,7 +601,7 @@ def get_loss_function(args: Namespace) -> LossFunction:
         case "sft_loss":
             return sft_loss_function
         # ORBIT-SEAM: two orbit loss types added to base's match; both names are bound at the top
-        # of this module to the home implementations in orbit.opd.losses. Deliberately not routed
+        # of this module to the home implementations in miles.orbit.opd.losses. Deliberately not routed
         # through --custom-loss-function-path: `--loss-type opd_jsd_loss` / `opd_topk_loss` is the
         # CLI contract orbit's recipes and tests already use.
         case "opd_jsd_loss":

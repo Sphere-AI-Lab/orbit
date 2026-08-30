@@ -1,4 +1,5 @@
-"""Every static orbit.*/miles_plugins.* import must resolve to a real module.
+"""Every static miles.*/miles_plugins.*/orbit.* import must resolve to a real
+module (top-level orbit.* no longer exists, so any such import is stale and fails).
 
 Guards the isolation refactor's failure mode: a file moves, the old package still
 imports (so nothing crashes at import-scan time), but `from pkg import module`

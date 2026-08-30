@@ -90,7 +90,7 @@ def check_env() -> list[Check]:
     namespace package, so it presents as a missing attribute, not an ImportError.
     """
     checks = []
-    for name in ("torch", "transformers", "megatron.core", "orbit"):
+    for name in ("torch", "transformers", "megatron.core", "miles.orbit"):
         try:
             module = __import__(name, fromlist=["__file__"])
             path = getattr(module, "__file__", None)

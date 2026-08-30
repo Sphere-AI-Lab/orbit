@@ -26,7 +26,7 @@ import json
 import sys
 from types import SimpleNamespace
 
-from orbit.rewards.sandbox import swe_rm
+from miles.orbit.rewards.sandbox import swe_rm
 from miles.utils.types import Sample
 
 

@@ -15,7 +15,7 @@ from miles.utils.multi_lora import is_multi_lora_enabled
 from miles.utils.types import RolloutBatch
 
 # ORBIT-SEAM: orbit's ICE-POP hard gate for the OPD advantage, applied by
-# compute_advantages_and_returns below. Home: orbit/opd/advantages.py, re-exported by
+# compute_advantages_and_returns below. Home: miles/orbit/opd/advantages.py, re-exported by
 # loss_hub.math_utils.
 from miles.backends.training_utils.loss_hub.math_utils import apply_opd_icepop_gate
 
@@ -23,7 +23,7 @@ from miles.backends.training_utils.loss_hub.math_utils import apply_opd_icepop_g
 # loss_hub/{advantages,corrections,logit_processors,losses,opd,math_utils}.py and left loss.py
 # as the thin advantage/loss dispatcher; every name orbit's own code and tests used to import
 # from `miles.backends.training_utils.loss` is re-bound here so those import sites (the two
-# actors, megatron_utils.model, orbit.opd.losses' call-time imports and the OPD/true-on-policy
+# actors, megatron_utils.model, miles.orbit.opd.losses' call-time imports and the OPD/true-on-policy
 # tests) keep resolving exactly as they did before the decomposition. Each name has exactly one
 # implementation, in the loss_hub module or the orbit home named beside it.
 from miles.backends.training_utils.cp_utils import (  # noqa: F401
@@ -57,7 +57,7 @@ from miles.backends.training_utils.loss_hub.math_utils import (  # noqa: F401
     icepop_gate,
     opd_mopd_advantages,
 )
-from orbit.opd.losses import (  # noqa: F401
+from miles.orbit.opd.losses import (  # noqa: F401
     _TOPK_LOG_INF,
     _response_masked_max,
     _response_masked_min,

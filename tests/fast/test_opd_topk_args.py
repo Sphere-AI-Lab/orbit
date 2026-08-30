@@ -39,8 +39,8 @@ def _valid_args(**overrides) -> Namespace:
         use_opd=False,
         use_kl_loss=False,
         kl_coef=0.0,
-        custom_rm_path="orbit.opd.opd_sglang.reward_func",
-        custom_reward_post_process_path="orbit.opd.opd_sglang.post_process",
+        custom_rm_path="miles.orbit.opd.opd_sglang.reward_func",
+        custom_reward_post_process_path="miles.orbit.opd.opd_sglang.post_process",
     )
     defaults.update(overrides)
     return Namespace(**defaults)
@@ -142,7 +142,7 @@ def test_allows_opd_serve_teacher_as_teacher_presence():
 
 def test_rejects_managed_same_engine_teacher_path():
     # opd_teacher="base" with no external URL selects
-    # orbit.opd.opd_scoring.local_scoring_enabled's path, which does not
+    # miles.orbit.opd.opd_scoring.local_scoring_enabled's path, which does not
     # retain teacher_topk_ids/teacher_topk_logprobs (Task 1 gap).
     args = _valid_args(opd_teacher_url=None, opd_teacher_urls=None, opd_teacher="base")
     with pytest.raises(ValueError, match="external teacher"):

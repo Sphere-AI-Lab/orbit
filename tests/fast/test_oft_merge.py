@@ -1,15 +1,15 @@
 import pytest
 import torch
 
-import orbit.merge  # noqa: F401  (registers strategies)
-from orbit.merge.oft_merge import (
+import miles.orbit.merge  # noqa: F401  (registers strategies)
+from miles.orbit.merge.oft_merge import (
     infer_oft_block_size,
     magnitude_corrected_merge,
     oft_params_to_skew_matrix,
     orthomerge_original_merge,
     skew_matrix_to_oft_params,
 )
-from orbit.merge.strategy import get_strategy
+from miles.orbit.merge.strategy import get_strategy
 
 
 def _rand_vec(num_blocks=3, block_size=4, seed=0):

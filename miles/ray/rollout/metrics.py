@@ -17,7 +17,7 @@ from miles.utils.tracking_utils import tracking
 from miles.utils.types import AdapterRef, Sample
 # ORBIT-SEAM (re-anchored from miles/ray/rollout.py::_log_eval_rollout_data, which upstream dbbab156
 # split into this module): math-alignment eval scoring
-from orbit.rewards.math_alignment import compute_math_alignment_metrics, is_math_alignment_sample
+from miles.orbit.rewards.math_alignment import compute_math_alignment_metrics, is_math_alignment_sample
 
 logger = logging.getLogger(__name__)
 

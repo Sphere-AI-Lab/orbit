@@ -5,7 +5,7 @@ on every ledger row, and `probe.py` imports `sweep.py` for the matrix tables --
 so the parser living in `probe.py` would make that import a cycle.
 
 `train.py:261` already logs one `progress` line per rollout, built by
-`orbit/utils/training_eta.py`, for SFT and RL alike. Reading `last=` from it is
+`miles/orbit/utils/training_eta.py`, for SFT and RL alike. Reading `last=` from it is
 strictly better than subtracting wall clocks: it is the loop's own measurement,
 it excludes startup by construction, and it needs no timestamp parsing.
 """

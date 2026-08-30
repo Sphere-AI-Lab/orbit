@@ -113,7 +113,7 @@ class RayTrainGroup:
         )
 
     # ORBIT-SEAM: held-out NLL eval broadcast; result de-duplication (one DP-reduced value, rest None)
-    # delegates to orbit.utils.eval_nll.select_eval_nll_result
+    # delegates to miles.orbit.utils.eval_nll.select_eval_nll_result
     async def compute_eval_nll(self, rollout_id) -> dict:
         """Held-out NLL of the current actor weights, reduced across ranks.
 
@@ -125,7 +125,7 @@ class RayTrainGroup:
         replicas (which hold the same samples) and would mis-weight DP shards
         (which hold different token counts).
         """
-        from orbit.utils.eval_nll import select_eval_nll_result
+        from miles.orbit.utils.eval_nll import select_eval_nll_result
 
         return select_eval_nll_result(await self._broadcast("compute_eval_nll", rollout_id))
 

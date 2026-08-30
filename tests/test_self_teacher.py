@@ -3,9 +3,9 @@ import copy
 import pytest
 import torch
 
-from orbit.utils.adapter_swap import swap_adapter_tensors
-from orbit.utils.adapter_tensors import adapter_tensor_key_digest
-from orbit.opd.self_teacher import (
+from miles.orbit.utils.adapter_swap import swap_adapter_tensors
+from miles.orbit.utils.adapter_tensors import adapter_tensor_key_digest
+from miles.orbit.opd.self_teacher import (
     SELF_TEACHER_STATE_SCHEMA_VERSION,
     SelfTeacherBuffer,
 )
@@ -298,9 +298,9 @@ def test_update_shape_mismatch_is_rejected_before_mutation():
         torch.testing.assert_close(buf.tensors[key], before[key])
 
 
-# Sidecar tests: extracted module lives at orbit.opd.self_teacher_checkpoint
+# Sidecar tests: extracted module lives at miles.orbit.opd.self_teacher_checkpoint
 # (the ultra program keeps the pool-binding parts).
-from orbit.opd.self_teacher_checkpoint import (
+from miles.orbit.opd.self_teacher_checkpoint import (
     TeacherCheckpointError,
     has_self_teacher_sidecar,
     load_self_teacher_sidecar,

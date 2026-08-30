@@ -76,7 +76,7 @@ class TrainRayActor(RayActor):
         object_store.init_instance(args)
 
     # TODO mv the args into ctor
-    # ORBIT-SEAM: OPD teacher actors reuse the trainer lifecycle (orbit/opd)
+    # ORBIT-SEAM: OPD teacher actors reuse the trainer lifecycle (miles/orbit/opd)
     def init(self, args, role, with_ref=False, with_opd_teacher=False):
         self.args = args
         self.role = role
@@ -171,7 +171,7 @@ class TrainRayActor(RayActor):
         """Export current weights as an HF checkpoint to ``path`` (eval snapshots)."""
         raise NotImplementedError(f"{type(self).__name__} does not support HF export")
 
-    # ORBIT-SEAM: optional held-out NLL API, consumed by orbit/utils/eval_nll.py
+    # ORBIT-SEAM: optional held-out NLL API, consumed by miles/orbit/utils/eval_nll.py
     def compute_eval_nll(self, rollout_id):
         """Forward-only held-out NLL. Returns the reduced statistics on exactly
         one rank and None on all others, so the caller can dedupe TP/PP replicas

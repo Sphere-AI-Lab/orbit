@@ -5,11 +5,11 @@ import pytest
 import torch
 import torch.multiprocessing as torch_mp
 
-from orbit.sglang import engine_ext as engine_ext_module
-from orbit.transport.backends import ipc as ipc_backend
-from orbit.transport.backends.ipc import IpcBackend
-from orbit.transport.registry import PeftMethodSpec
-from orbit.megatron.peft_utils import PeftSyncSpec
+from miles.orbit.sglang import engine_ext as engine_ext_module
+from miles.orbit.transport.backends import ipc as ipc_backend
+from miles.orbit.transport.backends.ipc import IpcBackend
+from miles.orbit.transport.registry import PeftMethodSpec
+from miles.orbit.megatron.peft_utils import PeftSyncSpec
 from miles.backends.sglang_utils import sglang_engine as engine_module
 from miles.backends.sglang_utils.sglang_engine import SGLangEngine
 
@@ -151,7 +151,7 @@ def test_engine_serializes_each_oft_rank_tensor_under_file_system(monkeypatch):
             calls.append((value, output_str, torch_mp.get_sharing_strategy()))
             return f"serialized-{len(calls)}"
 
-    # update_adapter_from_rank_tensors lives in the orbit/sglang/engine_ext.py home
+    # update_adapter_from_rank_tensors lives in the miles/orbit/sglang/engine_ext.py home
     # mixin (Phase 3 slice 3c P2 move); patch MultiprocessingSerializer there.
     monkeypatch.setattr(engine_ext_module, "MultiprocessingSerializer", _Serializer)
     engine = SGLangEngine.__new__(SGLangEngine)
@@ -243,7 +243,7 @@ def test_engine_rejects_multi_node_oft_rank_tensor_serialization(monkeypatch):
         def serialize(_value, output_str=False):
             return "serialized"
 
-    # update_adapter_from_rank_tensors lives in the orbit/sglang/engine_ext.py home
+    # update_adapter_from_rank_tensors lives in the miles/orbit/sglang/engine_ext.py home
     # mixin (Phase 3 slice 3c P2 move); patch MultiprocessingSerializer there.
     monkeypatch.setattr(engine_ext_module, "MultiprocessingSerializer", _Serializer)
     monkeypatch.setattr(

@@ -42,7 +42,7 @@
   },
   "docs/examples/on-policy-distillation.md": {
    "delta_lines": 335,
-   "sha": "ffe5c30ed1a005695ba06e986cb2825c8a40db97c5f546431339a2f35a92e3fb"
+   "sha": "063325cc41d255f51dbf91cd5f487895ab4098f8e28a44149fe9d8494cd14889"
   },
   "docs/examples/on-policy-distillation/qwen3-5-35b-selfdistill.md": {
    "delta_lines": 2,
@@ -70,7 +70,7 @@
   },
   "examples/on_policy_distillation/README.md": {
    "delta_lines": 335,
-   "sha": "18b143b216df0e213cf5327df0fdbb50da49c173f90c2ebaffff68ff0d0411bf"
+   "sha": "3e423e4f4b0da64b948a1ded1ac86cf724b99fbb6d46814f5518c6ab50a8cef1"
   },
   "miles/backends/megatron_utils/__init__.py": {
    "delta_lines": 6,
@@ -78,7 +78,7 @@
   },
   "miles/backends/megatron_utils/actor.py": {
    "delta_lines": 688,
-   "sha": "34c0bb30b5b0acb76bc28679bd96c9277b0c2b3c74821ebc608f17c30015335b"
+   "sha": "985e605083786d02091fd36e7f64882015113b5170a4d868eb9668a0efeb5f8e"
   },
   "miles/backends/megatron_utils/arguments.py": {
    "delta_lines": 13,
@@ -86,15 +86,15 @@
   },
   "miles/backends/megatron_utils/bridge_lora_helpers.py": {
    "delta_lines": 218,
-   "sha": "a5a4467b9b5229a99ca4a63a3d4289ee4c15db496fc291861c9b823ed3a3f90b"
+   "sha": "ed5d7dda6567fcf1f3db3d54983a524ca651bdc2ea6c7970c76ef79c1fdb8b73"
   },
   "miles/backends/megatron_utils/checkpoint.py": {
    "delta_lines": 131,
-   "sha": "dcc122a69735d8d495d7b842dc396886ec60846dab3968efa97bfb63af03d5f4"
+   "sha": "f1acb6f3c0b65903faf99045259b0b36ad7c6f8bc095e17dbac479fe971d9217"
   },
   "miles/backends/megatron_utils/hf_export.py": {
    "delta_lines": 7,
-   "sha": "0edb18d734a05d159e75c8ef3be212b7f753bb95477c1872dd0fffaeb77a6793"
+   "sha": "9a3f37d243facf8f72e4e4ab87a424fda575c6536073ac02f5155d16e4aef850"
   },
   "miles/backends/megatron_utils/initialize.py": {
    "delta_lines": 19,
@@ -102,7 +102,7 @@
   },
   "miles/backends/megatron_utils/lora_utils.py": {
    "delta_lines": 392,
-   "sha": "715b370644078d6bc0101af12f0f554c9f266046b3cdc80cf94ded374237d824"
+   "sha": "ba3c7f9de94c902fd792eda2b86f787bc822764eaa44e28b8ffa90dc63d0df38"
   },
   "miles/backends/megatron_utils/megatron_to_hf/__init__.py": {
    "delta_lines": 15,
@@ -146,11 +146,11 @@
   },
   "miles/backends/megatron_utils/model.py": {
    "delta_lines": 458,
-   "sha": "99755bea908395a02ebf74a56d7adbfdc94e58dd4579f2a0086d2fdd7e4d9c63"
+   "sha": "7fe7244e49be6b53f5e1006e8506e115c70d842b2e97d6265bc5d88b420b2caa"
   },
   "miles/backends/megatron_utils/model_provider.py": {
    "delta_lines": 25,
-   "sha": "8e84c97b5b8ce6ec5f151eb309c17ceaeb131508f1f38a124589149f4e67cb27"
+   "sha": "c8cff96a180ca254f68a38f014877fcb06da8eb12f9e1592c16bb29e6ead1b80"
   },
   "miles/backends/megatron_utils/parallel.py": {
    "delta_lines": 5,
@@ -162,7 +162,7 @@
   },
   "miles/backends/megatron_utils/update_weight/common.py": {
    "delta_lines": 71,
-   "sha": "8401e4be4ebbbe7c086b0b25d296d0901a7f244b9aae0b63871005431bd2ae77"
+   "sha": "0d7d8a1532109c65d21bee137717d39e5e796c6d929215c38151667c47f6c841"
   },
   "miles/backends/megatron_utils/update_weight/hf_weight_iterator_base.py": {
    "delta_lines": 18,
@@ -170,7 +170,7 @@
   },
   "miles/backends/megatron_utils/update_weight/hf_weight_iterator_bridge.py": {
    "delta_lines": 82,
-   "sha": "4a09fa8872ec695d5fe5dbb02204923576da9b499e1cf756ee9c18dc2e536464"
+   "sha": "5df5354004021485dc5c7b09cd38fdd0063733f8320b37a199a260530c10e4bb"
   },
   "miles/backends/megatron_utils/update_weight/hf_weight_iterator_direct.py": {
    "delta_lines": 12,
@@ -178,23 +178,23 @@
   },
   "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/broadcast.py": {
    "delta_lines": 10,
-   "sha": "f00671d6fe3420a3a8131fd2fe930d171b091fd0270020b6f2c272e4e511897d"
+   "sha": "34e0a5d98a810ca2f471e4fef3d4538b5878b0ed72660e48eb8d74851e27d4e5"
   },
   "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/mixin.py": {
    "delta_lines": 55,
-   "sha": "20e5b3ffa43b41636fe0ada33054a0f218b983abe7aaa74632558a2be3e8bb25"
+   "sha": "1cd2bd87f395bfa9d5bf6a66812e5372a4cce45c3e7781104d8fdd816b7cdcc4"
   },
   "miles/backends/megatron_utils/update_weight/update_weight_from_tensor.py": {
    "delta_lines": 519,
-   "sha": "630c90cef88032c689b6e516b04295d27d74497d59e650a751a6b01b7b3cc245"
+   "sha": "e6553db5826ef77001a4c2159097008be0839678aeb18267cb10766bd741043e"
   },
   "miles/backends/sglang_utils/arguments.py": {
    "delta_lines": 133,
-   "sha": "16156e6e4e345e364c877429edc9a63ebe54bfc9fffbee1493ab32f8d537b30b"
+   "sha": "18b12f212db0a6abe1156fbec18c08f45a7f552ca2a7d99763176bbdc04d4269"
   },
   "miles/backends/sglang_utils/sglang_engine.py": {
    "delta_lines": 368,
-   "sha": "4eca45fac8ef4a865a7db200227e8ad30c68e900b3b788a897053a813cf6564d"
+   "sha": "8b1329897cc662eeb1dab01db62bd357fa95925a797baed31dae434b1e7fe4db"
   },
   "miles/backends/training_utils/ci_utils.py": {
    "delta_lines": 2,
@@ -214,39 +214,39 @@
   },
   "miles/backends/training_utils/loss.py": {
    "delta_lines": 104,
-   "sha": "612e73caab15cebc61eb830da008a7cbf87ace66b7277aea23d86abbe45268db"
+   "sha": "4f6648820848b03cb601ae3cf584937070c4c98424752fa61e98fb90de796268"
   },
   "miles/backends/training_utils/loss_hub/advantages.py": {
    "delta_lines": 56,
-   "sha": "5b833644e0906caf01586ef763ef8f100cc9cea187719ab88c7bb0c205e30441"
+   "sha": "bceada644cce3ef4cade4af851dec9a4274e6e7fd6cd8bc24f5b266514a85315"
   },
   "miles/backends/training_utils/loss_hub/corrections.py": {
    "delta_lines": 11,
-   "sha": "b9149b1718c411aadb4f93b945565069ec032d07b5bd7f50fc177bb990d7e4b5"
+   "sha": "67a556ba25ae5745e3d26628d969c3bb8cecac272112fce18e849ab146f175bc"
   },
   "miles/backends/training_utils/loss_hub/logit_processors.py": {
    "delta_lines": 123,
-   "sha": "8e2cda1c7c4de778534ce6617dc5a7045fc0cba319f4f0312e0c9b7abae8df19"
+   "sha": "4368455fed8c044183c65eed35620349d25589b8283a4961a651aa7d5945e03c"
   },
   "miles/backends/training_utils/loss_hub/losses.py": {
    "delta_lines": 101,
-   "sha": "0c8d6920f8cd7b171d7f65d1df425893d568459c64a06b40a2791414ac6b7fca"
+   "sha": "001131fffe761cc6da0573d50a4ae31590ea00603e2a7c0408f3b8f47c4d015c"
   },
   "miles/backends/training_utils/loss_hub/math_utils.py": {
    "delta_lines": 211,
-   "sha": "c18c39e6b1df0f63bc4d5e899cbdb46a756235c7e498fffa867814f00682a768"
+   "sha": "e1248c1b029d7f6b84db1d9aab02235f435c158e45a03e74a9c2b14b85f8c532"
   },
   "miles/backends/training_utils/loss_hub/opd.py": {
    "delta_lines": 99,
-   "sha": "3a63e96c975bfbc88e2d331ba8c4650d08db53d89a91444e1a0f8b1691e998d9"
+   "sha": "7d6fda5b26d1c5b53559c0689498e4851a726db1599e3ec5cf2bb394f531cb48"
   },
   "miles/ray/actor_group.py": {
    "delta_lines": 46,
-   "sha": "3193adbcea00b642e9e89e0c410b9fe42c1af02036fc172595ea8b02f80cd130"
+   "sha": "bf25d0bf7bd8726cc98a3e456c072513f0be823daf9524ba2884d6aa0d83a79b"
   },
   "miles/ray/placement_group.py": {
    "delta_lines": 140,
-   "sha": "f29d33e1e4f56f9ebd245ec2cb72ce5bae3300972106743d07a28ec3b27e6172"
+   "sha": "726b0541cc014bc88c89c41c39e8b5aef2a850536a021187b9f471a321b2c687"
   },
   "miles/ray/rollout/addr_allocator.py": {
    "delta_lines": 3,
@@ -258,15 +258,15 @@
   },
   "miles/ray/rollout/metrics.py": {
    "delta_lines": 47,
-   "sha": "def82a1e0a9d28537b9d114b042d58ae2a30d7ac9cbf821adad007f20a47cd26"
+   "sha": "f546c45bcef8ec868a0cacc38073c23879903b4f74cd3fdcf9f6cd1fbe13e27f"
   },
   "miles/ray/rollout/rollout_manager.py": {
    "delta_lines": 32,
-   "sha": "670e2503b41133961f35a0e152caa6558bad2f85265474c69fdd0174a6844ba5"
+   "sha": "52c7e9bd9eb365d73f1e1ec8308e3ba14002397e566d0a709d7567c9cecedfa9"
   },
   "miles/ray/rollout/rollout_server.py": {
    "delta_lines": 49,
-   "sha": "d6e7ad5f1b9cc3e8c2d6d187273fea9d6eadd1e5006b88e883f226c98b7124fd"
+   "sha": "4ade81da1b600a6fa67228bfe00cd033c74832ad8a66649f123e8c9bca070a79"
   },
   "miles/ray/rollout/router_manager.py": {
    "delta_lines": 20,
@@ -278,7 +278,7 @@
   },
   "miles/ray/rollout/train_data_conversion.py": {
    "delta_lines": 59,
-   "sha": "463d883282e83585eadaf5680f8f7641f02b4e3d0bae6f2c41c22314021b0579"
+   "sha": "acd678ed612cdfa2086d6612953ef31b2cc590aa997a2999843712c0a0e49ef9"
   },
   "miles/ray/train/actor_factory.py": {
    "delta_lines": 76,
@@ -286,7 +286,7 @@
   },
   "miles/ray/train_actor.py": {
    "delta_lines": 13,
-   "sha": "81ef6a87b166f02b54922c7238a236328fbd7112e9ccddccd7abd61ae2e9f606"
+   "sha": "9ecb7d072f8de18652dc7d2255a038d844df224f1d247b3153b8dc8617629c58"
   },
   "miles/ray/utils.py": {
    "delta_lines": 24,
@@ -318,11 +318,11 @@
   },
   "miles/rollout/generate_utils/generate_endpoint_utils.py": {
    "delta_lines": 111,
-   "sha": "a208006fd0e79b99d2a90696ffe43c4b15a1083548301fb5055bae649df67e4a"
+   "sha": "bc1261c14ee2eb0bb98fc46af45ecb1f18c5700aecc64d574edab8735efdc64a"
   },
   "miles/rollout/generate_utils/sample_utils.py": {
    "delta_lines": 72,
-   "sha": "b07fb684099342a69198443d763876d412d82a3d29b90021b9b7e2de848b5a10"
+   "sha": "a916ee76385390fa5a1cea6bc8a34a6fd3661492766fc6ff76939b6d9ac5b402"
   },
   "miles/rollout/generate_utils/tool_call_utils.py": {
    "delta_lines": 10,
@@ -334,7 +334,7 @@
   },
   "miles/rollout/inference_rollout/inference_rollout_eval.py": {
    "delta_lines": 117,
-   "sha": "42ec64f9d010796f50b2992129ea810ad9836c05d3786ceee38b15d1e93ea2c6"
+   "sha": "fa1046d138d2bc5d08cffc6d4f1517d110e5f8ff268ca192e48b7eecdfff57c3"
   },
   "miles/rollout/inference_rollout/inference_rollout_train.py": {
    "delta_lines": 3,
@@ -342,7 +342,7 @@
   },
   "miles/rollout/rm_hub/__init__.py": {
    "delta_lines": 18,
-   "sha": "0efdaabb389f4055ba5ef09582734e4b5ccde08d29dbb6fba2b78ea8d712231a"
+   "sha": "11ed76b5b9ee345c06a6863eea0ed3381f6a64eea5afdf1d4f0bb0e964096fba"
   },
   "miles/rollout/session/linear_trajectory.py": {
    "delta_lines": 2,
@@ -358,7 +358,7 @@
   },
   "miles/rollout/sglang_rollout.py": {
    "delta_lines": 278,
-   "sha": "958e7124dc4e6b07d0006d3d083369f0a13fed188653f969683e4c90f42a63d5"
+   "sha": "01c16bf67b30c31806930e4bc2c26a328b65e1fbfcdd22e8199e230200104ba0"
   },
   "miles/router/router.py": {
    "delta_lines": 87,
@@ -366,7 +366,7 @@
   },
   "miles/utils/arguments.py": {
    "delta_lines": 340,
-   "sha": "33ff229d9be17801c552ffd49fbb55f9e294b458174cde34ded1a873e2fc0879"
+   "sha": "abe7f5f90446f214f3278c27bfbfa9d07c407d6962eeb800c0efc69e79ba7e68"
   },
   "miles/utils/chat_template_utils/tito_tokenizer.py": {
    "delta_lines": 37,
@@ -422,7 +422,7 @@
   },
   "miles/utils/processing_utils.py": {
    "delta_lines": 10,
-   "sha": "831a715c3902447ab7603803ca3b2a9954304afd16d74d0eb33fffae76a0f2b4"
+   "sha": "0b758d090921d55436d29352f4f59ffac26b0bc8733281844db2940e7090ae95"
   },
   "miles/utils/profile_utils.py": {
    "delta_lines": 2,
@@ -446,11 +446,11 @@
   },
   "miles/utils/tracking_utils/wandb_utils.py": {
    "delta_lines": 19,
-   "sha": "c96f9ae2244f4393ad12693841152950227d99edfeee775529242971cbef34f6"
+   "sha": "10ef0cfa9eff3be3a0338dc95542f21b847c82d386812255faf27264d68caa1e"
   },
   "miles/utils/train_metric_utils.py": {
    "delta_lines": 8,
-   "sha": "2dd31d66d6770161d70fa31d2ca3cbdd1634f43f64306682f2c6e6b502dc961c"
+   "sha": "2f69f394b2deb18842d832741bf1e41def7e595ac41ff22c27de44a5f16eaf41"
   },
   "miles/utils/types.py": {
    "delta_lines": 191,
@@ -478,11 +478,11 @@
   },
   "miles_plugins/models/qwen3_5.py": {
    "delta_lines": 6,
-   "sha": "5d17cd1ad1dc4cd8540fcc9e70dcc87f8c1dfb5d2cffea4debbcff8eb8931902"
+   "sha": "aed2e6dd4f2a8a89f65567c2c5f26d42f88babbb40e7ad706ffd42c0e41c8353"
   },
   "pyproject.toml": {
-   "delta_lines": 288,
-   "sha": "9d116281030c04aa72896ebf92bc090d7408d809cd0fcc1e23432d50d2e2e4a6"
+   "delta_lines": 283,
+   "sha": "a536583a8d1b7352c1bbab0ee3d86986c05984a4f723f464531e2b2f86ab9f1e"
   },
   "requirements.txt": {
    "delta_lines": 40,
@@ -490,7 +490,7 @@
   },
   "setup.py": {
    "delta_lines": 9,
-   "sha": "63d38b60be4477bd721c9d044c110a56458225843fe70c25cbe440e2f3860f60"
+   "sha": "a4471bac504eb8e49d113716f1c417ecf1519847924fac3bfc37e20e69ffada2"
   },
   "tests/__init__.py": {
    "delta_lines": 1,
@@ -502,7 +502,7 @@
   },
   "tests/fast/backends/megatron_utils/test_lora_model_branches.py": {
    "delta_lines": 90,
-   "sha": "8f99aad5cb7f635445eddef0155162496a3fb8f3d82243ff7964e4c5ef9531f2"
+   "sha": "82805f54c4595e6b3a7a8408eb7cf839af85d3f0d359832f882cc8ed6b70d006"
   },
   "tests/fast/backends/megatron_utils/test_lora_utils.py": {
    "delta_lines": 23,
@@ -510,7 +510,7 @@
   },
   "tests/fast/backends/megatron_utils/test_lora_weight_sync_validation.py": {
    "delta_lines": 15,
-   "sha": "4da3386fb283b613ad6e8441c1187ff1f4c7d3c476ba4d5d1909e361c8641835"
+   "sha": "f2e663ae23efc2da64843ab11a144dd7cae644e9f5b876310529624b305b2108"
   },
   "tests/fast/backends/megatron_utils/test_model_initialize.py": {
    "delta_lines": 34,
@@ -518,7 +518,7 @@
   },
   "tests/fast/backends/megatron_utils/test_shared_ppo_lifecycle.py": {
    "delta_lines": 79,
-   "sha": "2198ddfc635e2b8b065ce205a060a7a5a57ee4d1e3298d217798ce9c00723e3a"
+   "sha": "ac6803837c3d2b86768824e1d1c431ef8a6d6d4d4c074b326752a2207704a382"
   },
   "tests/fast/backends/sglang_utils/test_compute_server_args.py": {
    "delta_lines": 21,
@@ -534,7 +534,7 @@
   },
   "tests/fast/fixtures/generation_fixtures.py": {
    "delta_lines": 45,
-   "sha": "4d6ae179b33ffb837595a6d0e71ecbab929141637da166a9a8609d3c6d102ebc"
+   "sha": "0bafa1c4e98c2873a7fbf361b9be01c2eef8220461bae9bc1f7233e04b664558"
   },
   "tests/fast/fixtures/rollout_fixtures.py": {
    "delta_lines": 14,
@@ -618,11 +618,11 @@
   },
   "train.py": {
    "delta_lines": 325,
-   "sha": "1f800e36ff24bb53e4506df526714c8d951dab59751119e7a8b847f906fd5094"
+   "sha": "4995465a52f22c4dcabf2076b8a5e39f57e746d271080144e0b0cc5bd31decae"
   },
   "train_async.py": {
    "delta_lines": 27,
-   "sha": "471df8cda14152f4f4f759b74b4c0419c5521bc1e66191a44409d4cbf4b838f3"
+   "sha": "0ca8e9a30e5128e9eada8a425e85e7d2ff54b0304ac008b59edfce0f227cc962"
   }
  },
  "dropped": [

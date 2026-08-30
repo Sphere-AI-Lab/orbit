@@ -10,7 +10,7 @@ import pytest
 import torch
 
 import miles.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin as mixin_mod
-from orbit.megatron.sync_metrics import (
+from miles.orbit.megatron.sync_metrics import (
     NUM_CHUNKS_KEY,
     PAUSE_TIMER_KEY,
     PAYLOAD_BYTES_KEY,

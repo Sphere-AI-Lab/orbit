@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-shot SWE patch RL smoke (rung 2a): the model emits a unified diff for
-# a real GitHub issue; orbit.rewards.sandbox.swe_rm applies it + the row's
+# a real GitHub issue; miles.orbit.rewards.sandbox.swe_rm applies it + the row's
 # test_patch inside the instance's Apptainer image and runs the SWE-bench
 # FAIL_TO_PASS/PASS_TO_PASS suites (binary reward). Data + SIF cache from
 # tools/prepare_swe_subset.py. Golden-patch oracle: tools/swe_rm_oracle.py.
@@ -70,7 +70,7 @@ ROLLOUT_ARGS=(
     --rollout-max-response-len "${ROLLOUT_MAX_RESPONSE_LEN}"
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --custom-rm-path orbit.rewards.sandbox.swe_rm.reward_func
+    --custom-rm-path miles.orbit.rewards.sandbox.swe_rm.reward_func
     --swe-rm-sif-cache "${SWE_SIF_CACHE:?set SWE_SIF_CACHE to the pre-pulled SIF dir}"
     --swe-rm-timeout-secs "${SWE_RM_TIMEOUT_SECS:-300}"
 )

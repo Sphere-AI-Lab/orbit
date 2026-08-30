@@ -2,7 +2,7 @@ import argparse
 
 import pytest
 
-from orbit.critic.critic_adapter import value_loss_phase
+from miles.orbit.critic.critic_adapter import value_loss_phase
 
 
 def test_value_loss_phase_toggles_and_restores():

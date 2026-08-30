@@ -21,7 +21,7 @@ import json
 import os
 import sys
 
-from orbit.rewards.sandbox.swe_rm import _sif_path
+from miles.orbit.rewards.sandbox.swe_rm import _sif_path
 
 _PROMPT_TEMPLATE = """You are an expert software engineer. Fix the following GitHub issue.
 

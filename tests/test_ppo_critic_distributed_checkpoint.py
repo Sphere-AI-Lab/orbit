@@ -8,7 +8,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-from orbit.critic.critic_adapter import (
+from miles.orbit.critic.critic_adapter import (
     load_critic_checkpoint,
     save_critic_checkpoint,
 )

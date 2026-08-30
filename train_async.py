@@ -16,7 +16,7 @@ from miles.utils.misc import should_run_periodic_action
 from miles.utils.tracking_utils.tracking import finish_tracking, init_tracking
 
 # ORBIT-SEAM: eval-NLL entrypoint guard (see rejection note below)
-from orbit.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint
+from miles.orbit.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint
 
 logger = logging.getLogger(__name__)
 

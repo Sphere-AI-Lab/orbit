@@ -8,23 +8,23 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 
-# ORBIT-SEAM: critic explained-variance plumbing (VALUE_EV_* stat keys + compute_value_explained_var) moved to orbit/critic/value_stats.py (P1 lift-out); re-exported here so log_utils.py, loss.py and the existing tests keep importing it from this module
-from orbit.critic.value_stats import (  # noqa: F401
+# ORBIT-SEAM: critic explained-variance plumbing (VALUE_EV_* stat keys + compute_value_explained_var) moved to miles/orbit/critic/value_stats.py (P1 lift-out); re-exported here so log_utils.py, loss.py and the existing tests keep importing it from this module
+from miles.orbit.critic.value_stats import (  # noqa: F401
     VALUE_EV_METRIC_KEY,
     VALUE_EV_STAT_KEYS,
     compute_value_explained_var,
 )
 
-# ORBIT-SEAM: OPD/MOPD advantage shaping and the shared ICE-POP gate moved to orbit/opd/advantages.py (P1 lift-out); re-exported here so loss.py and the OPD tests keep importing them from this module
-from orbit.opd.advantages import (  # noqa: F401
+# ORBIT-SEAM: OPD/MOPD advantage shaping and the shared ICE-POP gate moved to miles/orbit/opd/advantages.py (P1 lift-out); re-exported here so loss.py and the OPD tests keep importing them from this module
+from miles.orbit.opd.advantages import (  # noqa: F401
     apply_opd_icepop_gate,
     apply_opd_kl_to_advantages,
     icepop_gate,
     opd_mopd_advantages,
 )
 
-# ORBIT-SEAM: true-on-policy full-vocab gather (replicated-loss all-gather autograd) moved to orbit/true_on_policy/full_logits.py (P1 lift-out); imported for the true-on-policy branch below and re-exported for loss.py and the true-on-policy tests
-from orbit.true_on_policy.full_logits import (  # noqa: F401
+# ORBIT-SEAM: true-on-policy full-vocab gather (replicated-loss all-gather autograd) moved to miles/orbit/true_on_policy/full_logits.py (P1 lift-out); imported for the true-on-policy branch below and re-exported for loss.py and the true-on-policy tests
+from miles.orbit.true_on_policy.full_logits import (  # noqa: F401
     _gather_true_on_policy_full_logits,
     _prepare_true_on_policy_full_logits,
     _split_replicated_loss_gather_grad,
@@ -351,7 +351,7 @@ def _apply_sampling_mask(
 
 # ORBIT-SEAM: upstream re-declares _prepare_true_on_policy_full_logits, _gather_true_on_policy_full_logits,
 # _split_replicated_loss_gather_grad and _ReplicatedLossAllGatherLastDim here. Orbit lifted those
-# verbatim to orbit/true_on_policy/full_logits.py (P1 lift-out) and re-exports them at the top of
+# verbatim to miles/orbit/true_on_policy/full_logits.py (P1 lift-out) and re-exports them at the top of
 # this module, so the duplicate definitions are dropped -- keeping them would shadow the re-export
 # and silently make the orbit home module non-authoritative. Upstream's copies are identical apart
 # from a torch.narrow()-vs-slice in _split_replicated_loss_gather_grad and a dist.get_world_size()
@@ -996,7 +996,7 @@ def calculate_log_probs_and_entropy(
 
 
 # ORBIT-SEAM: base assumes an already-full [R, V] logits tensor; orbit accepts a TP vocab shard and adds
-# tp_group / entropy_no_grad / vocab_size. Left in place (not lifted to orbit/true_on_policy/full_logits.py) because
+# tp_group / entropy_no_grad / vocab_size. Left in place (not lifted to miles/orbit/true_on_policy/full_logits.py) because
 # it is a base function the base dispatcher above calls; only its full-vocab gather moved to the orbit home.
 def _calculate_log_probs_and_entropy_true_on_policy(
     logits: torch.Tensor,

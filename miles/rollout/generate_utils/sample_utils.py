@@ -38,7 +38,7 @@ def _introduces_replay_gap(a: Sample, b: Sample) -> bool:
 def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
     """Merge two samples generated from sibling inference engine calls."""
     # ORBIT-SEAM: pad sentinels for the direct-OPD top-k gap-fill in _merge_optional_topk_pair below
-    from orbit.opd.opd_sglang import _TOPK_PAD_LOGPROB, _TOPK_PAD_TOKEN_ID
+    from miles.orbit.opd.opd_sglang import _TOPK_PAD_LOGPROB, _TOPK_PAD_TOKEN_ID
 
     a, b = deepcopy(a), deepcopy(b)
 

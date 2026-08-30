@@ -12,7 +12,7 @@ from miles.utils.replay_base import IndexerReplayManager, RoutingReplayManager
 
 # orbit: orbit's actor routes the OPD teacher forward through a TeacherSpec (see
 # `_actor_reuse_worker`).
-from orbit.opd.opd_teacher_spec import TeacherSpec
+from miles.orbit.opd.opd_teacher_spec import TeacherSpec
 
 
 @pytest.fixture(scope="module")

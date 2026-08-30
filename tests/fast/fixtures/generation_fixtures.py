@@ -31,7 +31,7 @@ def megatron_shape_argv(model_name: str) -> list[str]:
 
     orbit: upstream builds these fixtures on ``--train-backend fsdp``, but orbit
     deletes the experimental FSDP backend and narrows ``--train-backend`` to
-    ``choices=["megatron"]`` (orbit/arguments.py; ORBIT-SEAM in
+    ``choices=["megatron"]`` (miles/orbit/arguments.py; ORBIT-SEAM in
     ``miles/utils/arguments.py::parse_args``). The megatron branch runs
     ``hf_validate_args``, which requires these flags to match the HF config, so
     derive them from the checkpoint rather than pinning one model's numbers.

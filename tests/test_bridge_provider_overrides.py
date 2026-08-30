@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from orbit.megatron.bridge_provider_overrides import apply_bridge_provider_overrides
+from miles.orbit.megatron.bridge_provider_overrides import apply_bridge_provider_overrides
 
 
 def test_bridge_provider_overrides_gradient_accumulation_fusion():

@@ -70,7 +70,7 @@ class TestSetupModelAndOptimizerLoraBranch:
     # role. `peft_method` therefore replaces `lora_rank` as this fixture's on/off switch, and
     # the critic case pins `critic_mode="full"` so it stays outside the widened branch.
     # The optimizer/scheduler build is likewise one orbit helper (`_build_optimizer_and_scheduler`
-    # in orbit/megatron/optim_build.py) rather than base's two inline megatron calls, so the two
+    # in miles/orbit/megatron/optim_build.py) rather than base's two inline megatron calls, so the two
     # optimizer patches collapse into one.
     def _make_args(self, peft_method="lora", role="actor", mode="bridge"):
         return Namespace(

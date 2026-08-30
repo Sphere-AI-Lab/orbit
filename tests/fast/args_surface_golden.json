@@ -12270,7 +12270,7 @@
   "choices": null,
   "default": "None",
   "dest": "judge_base_url",
-  "help": "Base URL of an OpenAI-compatible judge server (e.g. an sglang server: http://host:port) used by orbit.rewards.llm_judge.reward_func. Required when --custom-rm-path points at the LLM-judge hook.",
+  "help": "Base URL of an OpenAI-compatible judge server (e.g. an sglang server: http://host:port) used by miles.orbit.rewards.llm_judge.reward_func. Required when --custom-rm-path points at the LLM-judge hook.",
   "nargs": null,
   "option_strings": [
    "--judge-base-url"
@@ -27439,7 +27439,7 @@
   "choices": null,
   "default": "False",
   "dest": "true_on_policy",
-  "help": "Enable the deterministic true-on-policy ladder via a named contract (orbit/true_on_policy/). The current Phase 1-4 implementation aligns scoring and measures the remaining train/rollout kernel gap; it does not claim bit-exact parity until a contract enables the Phase-5 SGLang-in-Megatron backend. Expands at parse time into rollout and training determinism flags and validates model/topology/precision/adapter.",
+  "help": "Enable the deterministic true-on-policy ladder via a named contract (miles/orbit/true_on_policy/). The current Phase 1-4 implementation aligns scoring and measures the remaining train/rollout kernel gap; it does not claim bit-exact parity until a contract enables the Phase-5 SGLang-in-Megatron backend. Expands at parse time into rollout and training determinism flags and validates model/topology/precision/adapter.",
   "nargs": 0,
   "option_strings": [
    "--true-on-policy"

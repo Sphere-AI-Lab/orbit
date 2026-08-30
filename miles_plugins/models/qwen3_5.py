@@ -15,9 +15,9 @@ try:
 except ImportError:
     pass
 
-# ORBIT-SEAM: fp32 A_log marking hook (orbit/megatron/fp32_param_utils); upstream now ships an
+# ORBIT-SEAM: fp32 A_log marking hook (miles/orbit/megatron/fp32_param_utils); upstream now ships an
 # equivalent miles.backends.megatron_utils.fp32_param_utils (differs only in the marker attr name)
-from orbit.megatron.fp32_param_utils import mark_param_dtype
+from miles.orbit.megatron.fp32_param_utils import mark_param_dtype
 from miles.backends.training_utils.cp_utils import build_gdn_cp_context
 
 from .hf_attention import HuggingfaceAttention

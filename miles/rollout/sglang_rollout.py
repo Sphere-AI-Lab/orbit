@@ -19,10 +19,10 @@ from packaging.version import parse
 from tqdm import tqdm
 
 from miles.rollout.base_types import GenerateFnInput, RolloutFnEvalOutput, RolloutFnTrainOutput
-# ORBIT-SEAM: true-on-policy prefill re-scoring hook -- orbit/rollout/prefill_logprobs.py, NOT the
+# ORBIT-SEAM: true-on-policy prefill re-scoring hook -- miles/orbit/rollout/prefill_logprobs.py, NOT the
 # lora-only miles/rollout/generate_utils/prefill_logprobs.py upstream dbbab156 added: orbit's copy
 # attaches PEFT requests through attach_peft_request_payload so OFT rollouts are re-scored too
-from orbit.rollout.prefill_logprobs import recompute_samples_rollout_logprobs_via_prefill
+from miles.orbit.rollout.prefill_logprobs import recompute_samples_rollout_logprobs_via_prefill
 from miles.rollout.filter_hub.base_types import MetricGatherer, call_dynamic_filter
 # ORBIT-SEAM: generic PEFT request-payload attachment (LoRA+OFT) and evaluation-aware return_logprob
 # gating, replacing upstream's lora-only LORA_ADAPTER_NAME/lora_rollout_enabled payload wiring
@@ -48,9 +48,9 @@ from miles.utils.processing_utils import (
 )
 from miles.utils.types import Sample
 
-from orbit.opd.opd_scoring import local_scoring_enabled, opd_score_sample
-# ORBIT-SEAM: phase-stats subsystem (per-phase timing/throughput + server poller) moved to orbit/rollout/phase_stats.py (P1 lift-out)
-from orbit.rollout.phase_stats import (
+from miles.orbit.opd.opd_scoring import local_scoring_enabled, opd_score_sample
+# ORBIT-SEAM: phase-stats subsystem (per-phase timing/throughput + server poller) moved to miles/orbit/rollout/phase_stats.py (P1 lift-out)
+from miles.orbit.rollout.phase_stats import (
     _EVAL_PHASE,
     _PROGRESS_LOG_EVERY,
     _TRAIN_PHASE,
@@ -579,7 +579,7 @@ async def generate_rollout_async(
     all_data = []
     do_print = True
     pbar = tqdm(total=target_data_size * args.n_samples_per_prompt, desc="Rollout generation")
-    # ORBIT-SEAM: activate the train-phase timing counters (see orbit/rollout/phase_stats.py)
+    # ORBIT-SEAM: activate the train-phase timing counters (see miles/orbit/rollout/phase_stats.py)
     _set_active_phase(_TRAIN_PHASE)
     while len(data) < target_data_size:
         while state.remaining_batch_size < target_data_size:
@@ -617,7 +617,7 @@ async def generate_rollout_async(
                 pbar.update(args.n_samples_per_prompt)
 
     pbar.close()
-    # ORBIT-SEAM: log the train-phase summary and deactivate phase timing (see orbit/rollout/phase_stats.py)
+    # ORBIT-SEAM: log the train-phase summary and deactivate phase timing (see miles/orbit/rollout/phase_stats.py)
     _phase_log_summary(
         _TRAIN_PHASE,
         target_data_size * args.n_samples_per_prompt,
@@ -830,7 +830,7 @@ async def eval_rollout_single_dataset(
         eval_generate_max_concurrency,
     )
 
-    # ORBIT-SEAM: activate eval-phase timing and start the background scheduler-stats poller (see orbit/rollout/phase_stats.py)
+    # ORBIT-SEAM: activate eval-phase timing and start the background scheduler-stats poller (see miles/orbit/rollout/phase_stats.py)
     _set_active_phase(_EVAL_PHASE)
     poll_stop = asyncio.Event()
     poll_task = asyncio.create_task(
@@ -856,7 +856,7 @@ async def eval_rollout_single_dataset(
         else:
             data.append(sample)
         pbar.update(1)
-        # ORBIT-SEAM: periodic eval-phase progress log every _PROGRESS_LOG_EVERY completions (see orbit/rollout/phase_stats.py)
+        # ORBIT-SEAM: periodic eval-phase progress log every _PROGRESS_LOG_EVERY completions (see miles/orbit/rollout/phase_stats.py)
         if (
             _PROGRESS_LOG_EVERY > 0
             and _EVAL_PHASE.n_completed - last_log_n >= _PROGRESS_LOG_EVERY

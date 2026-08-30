@@ -10,8 +10,8 @@ import asyncio
 
 import pytest
 
-import orbit.rewards.lean_rm as lr
-from orbit.rewards.grader_errors import GraderInfrastructureError, InfrastructureErrorCode
+import miles.orbit.rewards.lean_rm as lr
+from miles.orbit.rewards.grader_errors import GraderInfrastructureError, InfrastructureErrorCode
 
 HEADER = "import Mathlib\nopen Nat\n"
 STATEMENT = "theorem two : 1 + 1 = 2 := by\n"

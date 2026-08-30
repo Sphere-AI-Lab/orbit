@@ -20,10 +20,10 @@ from megatron.training.arguments import core_transformer_config_from_args
 from miles.utils.audit_utils.witness.module import install_witness
 
 # ORBIT-SEAM: base's inline bridge-provider overrides and orbit's low-precision provider config live in the home layer
-from orbit.megatron.low_precision_bootstrap import configure_provider_for_low_precision, load_hf_config, resolve_bridge_load_path
-from orbit.megatron.bridge_provider_overrides import apply_bridge_provider_overrides
-# ORBIT-SEAM: critic value-head swap lifted to orbit/critic/value_head.py (P1); re-exported here for base's call sites and this module's importers
-from orbit.critic.value_head import replace_output_layer_with_value_head
+from miles.orbit.megatron.low_precision_bootstrap import configure_provider_for_low_precision, load_hf_config, resolve_bridge_load_path
+from miles.orbit.megatron.bridge_provider_overrides import apply_bridge_provider_overrides
+# ORBIT-SEAM: critic value-head swap lifted to miles/orbit/critic/value_head.py (P1); re-exported here for base's call sites and this module's importers
+from miles.orbit.critic.value_head import replace_output_layer_with_value_head
 from miles.utils.misc import load_function
 from miles.utils.replay_base import routing_replay_manager
 

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Static import integrity: every orbit.*/miles_plugins.* import in tracked .py files
-must resolve to a real module file, and `from X import name` must name a submodule
-or a top-level binding in X. Catches the classic file-move failure where the old
-package still resolves but the submodule is gone. Exits 1 on any dangler."""
+"""Static import integrity: every miles.*/miles_plugins.*/orbit.* import in tracked
+.py files must resolve to a real module file, and `from X import name` must name a
+submodule or a top-level binding in X. Catches the classic file-move failure where
+the old package still resolves but the submodule is gone. "orbit" stays in ROOTS
+even though the home moved to miles/orbit/: top-level orbit.* no longer exists, so
+any surviving orbit.* import is a stale reference and fails here. Exits 1 on any
+dangler."""
 import ast, subprocess, sys
 from pathlib import Path
 

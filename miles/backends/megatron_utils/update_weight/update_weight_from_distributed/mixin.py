@@ -19,7 +19,7 @@ from ...lora_utils import _is_adapter_param_name, build_lora_sync_config, is_lor
 from ...megatron_to_hf import convert_to_hf
 # ORBIT-SEAM: orbit's update-weights perf/timeline instrumentation (payload tracker, timeline
 # markers, cross-rank metric sums) wired into this distributed-broadcast update path below
-from orbit.megatron.sync_metrics import (
+from miles.orbit.megatron.sync_metrics import (
     emit_timeline_event,
     emit_update_weights_metrics,
     get_payload_tracker,

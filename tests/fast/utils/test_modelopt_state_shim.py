@@ -18,7 +18,7 @@ import sys
 
 import pytest
 
-from orbit.megatron.modelopt_state_shim import (
+from miles.orbit.megatron.modelopt_state_shim import (
     MODULE_NAME,
     has_modelopt_state,
     install_if_missing,

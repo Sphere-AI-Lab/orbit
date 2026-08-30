@@ -7,8 +7,8 @@ import json
 import pytest
 
 from miles.ray.placement_group import _opd_teacher_extra_gpus
-from orbit.opd.teacher_servers import _opd_teacher_pool, _opd_teacher_pool_model_configs
-from orbit.opd.opd_teacher_pool import TeacherPoolError, parse_teacher_pool
+from miles.orbit.opd.teacher_servers import _opd_teacher_pool, _opd_teacher_pool_model_configs
+from miles.orbit.opd.opd_teacher_pool import TeacherPoolError, parse_teacher_pool
 
 
 def _write_manifest(tmp_path, teachers):
@@ -77,7 +77,7 @@ def test_routing_specs_after_serving(tmp_path):
 
 
 def test_routing_specs_feed_the_existing_router(tmp_path):
-    from orbit.opd.opd_sglang import parse_teacher_urls
+    from miles.orbit.opd.opd_sglang import parse_teacher_urls
 
     pool = parse_teacher_pool(_two_teacher_manifest(tmp_path))
     url_map = parse_teacher_urls(pool.routing_specs({"opd_teacher_math": "http://10.0.0.1:3100/generate"}))
@@ -104,8 +104,8 @@ def _validate_args(tmp_path, **overrides):
         opd_ema_decay=0.999,
         opd_self_teacher_interval=1,
         opd_promote_interval=None,
-        custom_rm_path="orbit.opd.opd_sglang.reward_func",
-        custom_reward_post_process_path="orbit.opd.opd_sglang.post_process",
+        custom_rm_path="miles.orbit.opd.opd_sglang.reward_func",
+        custom_reward_post_process_path="miles.orbit.opd.opd_sglang.post_process",
         loss_type="policy_loss",
         teacher_score_mode="sampled_token",
         teacher_hf_checkpoint=None,

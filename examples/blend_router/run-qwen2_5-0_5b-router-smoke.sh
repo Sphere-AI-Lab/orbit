@@ -73,7 +73,7 @@ ROLLOUT_ARGS=(
     --rollout-max-response-len "${ROLLOUT_MAX_RESPONSE_LEN}"
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --custom-rm-path "${CUSTOM_RM_OVERRIDE:-orbit.rewards.reward_router.reward_func}"
+    --custom-rm-path "${CUSTOM_RM_OVERRIDE:-miles.orbit.rewards.reward_router.reward_func}"
     --group-rm
     --code-rm-timeout-secs "${CODE_RM_TIMEOUT_SECS:-6}"
     --code-rm-max-tests "${CODE_RM_MAX_TESTS:-8}"

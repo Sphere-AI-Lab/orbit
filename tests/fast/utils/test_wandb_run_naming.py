@@ -108,7 +108,7 @@ def test_the_flag_is_registered(flag):
     from pathlib import Path
 
     # The orbit-added arguments moved out of miles/utils/arguments.py and into
-    # orbit/arguments.py in the Phase-2 registration refactor
+    # miles/orbit/arguments.py in the Phase-2 registration refactor
     # (docs/superpowers/plans/2026-08-29-phase2-arguments-registration.md).
-    source = (Path(__file__).resolve().parents[3] / "orbit" / "arguments.py").read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parents[3] / "miles" / "orbit" / "arguments.py").read_text(encoding="utf-8")
     assert f'"{flag}"' in source

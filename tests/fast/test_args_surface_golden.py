@@ -7,7 +7,7 @@ megatron's own arguments plus every orbit-added argument from
 to a record. Pinning that surface here, before
 `docs/superpowers/plans/2026-08-29-phase2-arguments-registration.md` moves the
 orbit-added argument definitions out of `miles/utils/arguments.py` into
-`orbit/arguments.py`, gives that refactor a total-surface equivalence check:
+`miles/orbit/arguments.py`, gives that refactor a total-surface equivalence check:
 group/help ordering inside the Python source may shift freely, but a
 moved/renamed/retyped/re-defaulted argument must show up here.
 """

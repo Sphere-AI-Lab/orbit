@@ -20,7 +20,7 @@ import torch.nn.functional as F
 
 from tests.fast.dist_utils import find_free_port, init_gloo
 
-from orbit.opd import teacher_lm_head as teacher_lm_head_module
+from miles.orbit.opd import teacher_lm_head as teacher_lm_head_module
 from miles.backends.training_utils.cp_utils import get_sum_of_sample_mean
 from miles.backends.training_utils.loss import (
     _TOPK_LOG_INF,
@@ -602,7 +602,7 @@ def test_teacher_vocab_overhang_id_masked_like_pad_slot(kl_type):
     silently returns a fake `0 - log_normalizer` value instead. Pins the fix's
     behavior: a slot with an overhang id must produce exactly the same loss and
     diagnostics as the same slot manually replaced by a pad slot (id=0,
-    logprob=-1e4, matching orbit.opd.opd_sglang's own padding convention)."""
+    logprob=-1e4, matching miles.orbit.opd.opd_sglang's own padding convention)."""
     _single_state()
 
     response_lengths = [2]

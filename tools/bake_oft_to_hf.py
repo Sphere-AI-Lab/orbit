@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Bake a single orbit OFT adapter into a standalone dense HF model.
 
-Thin CLI over orbit.merge.bake_hf.bake_hf_model for one adapter directory
+Thin CLI over miles.orbit.merge.bake_hf.bake_hf_model for one adapter directory
 (`iter_*/adapter` or `merged_adapter`). The merge tool's `--save-hf` covers
 merged outputs; this covers individual adapters for evaluation or deployment
 paths that expect dense Hugging Face weights.
@@ -17,7 +17,7 @@ import argparse
 import json
 from pathlib import Path
 
-from orbit.merge.bake_hf import bake_hf_model
+from miles.orbit.merge.bake_hf import bake_hf_model
 
 
 def main(argv: list[str] | None = None) -> None:

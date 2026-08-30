@@ -12,18 +12,18 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-import orbit.transport.backends.ipc as ipc_mod
-import orbit.transport.backends.nccl as nccl_mod
-import orbit.transport.backends.ray_object as ray_mod
+import miles.orbit.transport.backends.ipc as ipc_mod
+import miles.orbit.transport.backends.nccl as nccl_mod
+import miles.orbit.transport.backends.ray_object as ray_mod
 import miles.backends.megatron_utils.update_weight.update_weight_from_tensor as uw_mod
-from orbit.transport.backends.ipc import IpcBackend
-from orbit.transport.backends.nccl import NcclBackend
-from orbit.transport.backends.ray_object import RayObjectBackend
-from orbit.transport.interface import PeftPayload
-from orbit.transport.registry import PeftMethodSpec
-from orbit.transport.runtime import PeftRuntimeMode
-from orbit.megatron.peft_utils import PeftSyncSpec
-from orbit.megatron.sync_metrics import (
+from miles.orbit.transport.backends.ipc import IpcBackend
+from miles.orbit.transport.backends.nccl import NcclBackend
+from miles.orbit.transport.backends.ray_object import RayObjectBackend
+from miles.orbit.transport.interface import PeftPayload
+from miles.orbit.transport.registry import PeftMethodSpec
+from miles.orbit.transport.runtime import PeftRuntimeMode
+from miles.orbit.megatron.peft_utils import PeftSyncSpec
+from miles.orbit.megatron.sync_metrics import (
     NUM_CHUNKS_KEY,
     PAUSE_TIMER_KEY,
     PAYLOAD_BYTES_KEY,

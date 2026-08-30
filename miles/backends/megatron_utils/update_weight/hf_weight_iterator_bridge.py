@@ -101,7 +101,7 @@ class HfWeightIteratorBridge(HfWeightIteratorBase):
     # is_lora_weight_name at the two filter sites above
     def _is_adapter_weight_name(self, hf_name: str) -> bool:
         if self.peft_method == "oft":
-            from orbit.megatron.oft_utils import is_oft_weight_name
+            from miles.orbit.megatron.oft_utils import is_oft_weight_name
 
             return is_oft_weight_name(hf_name)
         return is_lora_weight_name(hf_name)

@@ -246,7 +246,7 @@ def validate_args(args):
     apply_prefill_cuda_graph_policy(args)
 
     # Fallback net: --true-on-policy-mode can be set directly, bypassing the
-    # --true-on-policy parse-time expansion (orbit/true_on_policy/config.py),
+    # --true-on-policy parse-time expansion (miles/orbit/true_on_policy/config.py),
     # which is the primary path that forces this (miles parity).
     if args.true_on_policy_mode:
         args.sglang_enable_deterministic_inference = True

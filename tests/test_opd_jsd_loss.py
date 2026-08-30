@@ -17,7 +17,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-from orbit.opd import teacher_lm_head as teacher_lm_head_module
+from miles.orbit.opd import teacher_lm_head as teacher_lm_head_module
 from miles.backends.training_utils.cp_utils import slice_log_prob_with_cp
 from miles.backends.training_utils.data import _tensorize_cp_sliced_teacher_hidden_states
 from miles.backends.training_utils.loss import opd_jsd_loss_function

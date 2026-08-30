@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# ORBIT-SEAM: removed base's `import dataclasses`: optimizer construction moved to orbit/megatron/optim_build.py
+# ORBIT-SEAM: removed base's `import dataclasses`: optimizer construction moved to miles/orbit/megatron/optim_build.py
 import gc
 import logging
 import math
@@ -20,7 +20,7 @@ from megatron.core.enums import ModelType
 from megatron.core.models.gpt import GPTModel
 # ORBIT-SEAM: removed base's `from megatron.core.optimizer import OptimizerConfig, get_megatron_optimizer`
 # and upstream's `get_megatron_muon_optimizer`: all three are used only by the optimizer builder,
-# now in orbit/megatron/optim_build.py
+# now in miles/orbit/megatron/optim_build.py
 from megatron.core.optimizer.optimizer import MegatronOptimizer
 from megatron.core.optimizer_param_scheduler import OptimizerParamScheduler
 from megatron.core.pipeline_parallel import get_forward_backward_func
@@ -35,7 +35,7 @@ from miles.utils.audit_utils.witness.allocator import WitnessInfo
 from miles.utils.audit_utils.witness.module import witness_dump_and_clear_stale
 
 # ORBIT-SEAM: install orbit's megatron.post_training.checkpointing shim at import of the module that owns the only get_model() call site
-from orbit.megatron.modelopt_state_shim import install_if_missing as _install_modelopt_shim
+from miles.orbit.megatron.modelopt_state_shim import install_if_missing as _install_modelopt_shim
 
 # Megatron's `get_model()` imports `megatron.post_training.checkpointing` at
 # call time, and this environment ships megatron.{bridge,core,training} only --
@@ -71,14 +71,14 @@ from .initialize import is_first_replica_megatron_main_rank
 from .lora_utils import is_lora_enabled, is_lora_model  # noqa: F401  (kept for base call sites)
 
 # ORBIT-SEAM: model-declared parameter dtype overrides (e.g. Qwen3.5 A_log pinned to fp32) are applied before the optimizer maps params
-from orbit.megatron.fp32_param_utils import enforce_marked_param_dtypes
+from miles.orbit.megatron.fp32_param_utils import enforce_marked_param_dtypes
 
 # ORBIT-SEAM: low-precision PEFT picks the build order in initialize_model_and_optimizer (base has one order)
-from orbit.megatron.low_precision_bootstrap import should_preload_low_precision_model_before_optimizer
+from miles.orbit.megatron.low_precision_bootstrap import should_preload_low_precision_model_before_optimizer
 from .model_provider import get_model_provider_func
 from .parallel import get_packed_seq_params
 # ORBIT-SEAM: base's .lora_utils predicates and adapter writer are orbit's PEFT (LoRA + OFT) layer in the home
-from orbit.megatron.peft_utils import (
+from miles.orbit.megatron.peft_utils import (
     is_peft_enabled,
     is_peft_model,
     restore_peft_training_state_after_optimizer_build,
@@ -88,21 +88,21 @@ from orbit.megatron.peft_utils import (
 logger = logging.getLogger(__name__)
 
 # ORBIT-SEAM: base's .bridge_lora_helpers / .lora_utils re-exports are orbit's PEFT bridge helpers in the home layer; removed base's `from .lora_utils import save_lora_checkpoint` (save_peft_checkpoint above supersedes it)
-from orbit.megatron.bridge_peft_helpers import _ensure_model_list, _setup_peft_model_via_bridge  # noqa: F401
+from miles.orbit.megatron.bridge_peft_helpers import _ensure_model_list, _setup_peft_model_via_bridge  # noqa: F401
 
-# ORBIT-SEAM: critic value-head helpers lifted to orbit/critic/value_head.py (P1); re-exported here because base's builders below call them and the fast tests monkeypatch them on this module
-from orbit.critic.value_head import (
+# ORBIT-SEAM: critic value-head helpers lifted to miles/orbit/critic/value_head.py (P1); re-exported here because base's builders below call them and the fast tests monkeypatch them on this module
+from miles.orbit.critic.value_head import (
     _critic_output_layer_needs_reinit,
     _head_critic_provider,
     _reinitialize_critic_output_layer,
 )
 
-# ORBIT-SEAM: optimizer+scheduler construction (incl. orbit's pion dispatch) lifted to orbit/megatron/optim_build.py (P1); re-exported for the two builders below
-from orbit.megatron.optim_build import _build_optimizer_and_scheduler
+# ORBIT-SEAM: optimizer+scheduler construction (incl. orbit's pion dispatch) lifted to miles/orbit/megatron/optim_build.py (P1); re-exported for the two builders below
+from miles.orbit.megatron.optim_build import _build_optimizer_and_scheduler
 
 # ORBIT-SEAM: save-time common-state normalization and the memory-history snapshot writer lifted to the home layer (P1); the seams below only call them
-from orbit.megatron.checkpointing import _preprocess_common_state_dict_for_megatron_save
-from orbit.megatron.memory_snapshot import _dump_memory_history_snapshot
+from miles.orbit.megatron.checkpointing import _preprocess_common_state_dict_for_megatron_save
+from miles.orbit.megatron.memory_snapshot import _dump_memory_history_snapshot
 
 
 def _has_loadable_ckpt(load_dir: str | None) -> bool:
@@ -199,7 +199,7 @@ def setup_model_and_optimizer(
     model = _build_model(args, role)
 
     # ORBIT-SEAM(upstream): --debug-disable-optimizer short-circuit, kept here because orbit's
-    # optimizer builder lives in orbit/megatron/optim_build.py
+    # optimizer builder lives in miles/orbit/megatron/optim_build.py
     if args.debug_disable_optimizer:
         if is_first_replica_megatron_main_rank():
             logger.warning(

@@ -2,11 +2,11 @@ from argparse import Namespace
 
 import pytest
 
-from orbit.megatron.peft_utils import PeftSyncSpec
+from miles.orbit.megatron.peft_utils import PeftSyncSpec
 from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import (
     UpdateWeightFromTensor,
 )
-from orbit.opd.opd_teacher_spec import parse_teacher_spec, should_promote_teacher
+from miles.orbit.opd.opd_teacher_spec import parse_teacher_spec, should_promote_teacher
 
 
 def test_non_self_sources_never_promote():

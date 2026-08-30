@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Qwen2.5-0.5B-Instruct BF16 GRPO with group-wise pairwise GenRM rewards.
-# Smoke config for orbit.rewards.genrm_judge: --group-rm hands the whole
+# Smoke config for miles.orbit.rewards.genrm_judge: --group-rm hands the whole
 # n-samples-per-prompt group to the hook; the judge compares responses
 # pairwise under the row's rubric (metadata.principle) and rewards are
 # win-rates. Built for the Nemotron-RL-Ultra rlhf blend (rows have no labels).
@@ -75,7 +75,7 @@ ROLLOUT_ARGS=(
     --rollout-max-response-len "${ROLLOUT_MAX_RESPONSE_LEN}"
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --custom-rm-path orbit.rewards.genrm_judge.reward_func
+    --custom-rm-path miles.orbit.rewards.genrm_judge.reward_func
     --group-rm
     --judge-base-url "${JUDGE_BASE_URL}"
 )

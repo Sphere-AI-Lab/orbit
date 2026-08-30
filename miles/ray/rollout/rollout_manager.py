@@ -162,7 +162,7 @@ class RolloutManager:
         # training-data conversion). Re-expressed as a direct await: upstream dbbab156 made generate()
         # a coroutine, so the original miles.utils.async_utils.run() bridge is no longer needed.
         if getattr(self.args, "opd_defer_full_vocab_scoring", False):
-            from orbit.opd.opd_sglang import score_full_vocab_samples
+            from miles.orbit.opd.opd_sglang import score_full_vocab_samples
 
             await score_full_vocab_samples(self.args, data)
         save_debug_rollout_data(self.args, data, rollout_id=rollout_id, evaluation=False, metadata=metadata)

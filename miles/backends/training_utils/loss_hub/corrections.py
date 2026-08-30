@@ -5,7 +5,7 @@ import torch
 
 # ORBIT-SEAM: base inlines the ICE-POP band `torch.where` in `icepop_function` below; orbit
 # shares the identical expression with the OPD advantage gate through
-# `orbit.opd.advantages.icepop_gate` (re-exported by loss_hub.math_utils), so the training-side
+# `miles.orbit.opd.advantages.icepop_gate` (re-exported by loss_hub.math_utils), so the training-side
 # correction and `apply_opd_icepop_gate` can never drift apart.
 from miles.backends.training_utils.loss_hub.math_utils import icepop_gate
 

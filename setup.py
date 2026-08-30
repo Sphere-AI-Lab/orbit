@@ -38,11 +38,11 @@ class bdist_wheel(_bdist_wheel):
 
 # Setup configuration
 setup(
-    # ORBIT-SEAM: orbit packaging identity: py3.12 pin, orbit*/tools* packages (dist name comes from pyproject [project])
+    # ORBIT-SEAM: orbit packaging identity: py3.12 pin, tools* packages; miles* covers the miles/orbit home (dist name comes from pyproject [project])
     author="Orbit Team",
     name="miles",
     version="0.1.0",
-    packages=find_packages(include=["miles*", "miles_plugins*", "orbit*", "tools*"]),
+    packages=find_packages(include=["miles*", "miles_plugins*", "tools*"]),
     include_package_data=True,
     package_data={"miles.dashboard": ["static/*"]},
     install_requires=_fetch_requirements("requirements.txt"),

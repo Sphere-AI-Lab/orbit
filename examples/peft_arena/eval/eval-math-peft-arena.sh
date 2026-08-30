@@ -49,7 +49,7 @@ ITER_DIR="$(cd -- "${ITER_DIR}" && pwd)"
 if [ ! -f "${ITER_DIR}/adapter_model.safetensors" ]; then
     echo "[eval-math-peft-arena] ERROR: missing adapter_model.safetensors under ${ITER_DIR}" >&2
     echo "  This wrapper only supports adapters written under the post-fix Orbit save path." >&2
-    echo "  Rerun training with the current orbit/megatron/peft_utils.py." >&2
+    echo "  Rerun training with the current miles/orbit/megatron/peft_utils.py." >&2
     exit 1
 fi
 if [ ! -f "${ITER_DIR}/adapter_config.json" ]; then

@@ -21,7 +21,7 @@ def log_perf_data_raw(
     timer_instance = Timer()
     log_dict_raw = deepcopy(timer_instance.log_dict())
     timer_instance.reset()
-    # ORBIT-SEAM: flush perf scalars staged by orbit/megatron/sync_metrics.py
+    # ORBIT-SEAM: flush perf scalars staged by miles/orbit/megatron/sync_metrics.py
     # Non-time perf scalars staged by instrumentation (e.g. weight-sync payload
     # bytes from update_weight/sync_metrics.py). Snapshot-and-clear mirrors the
     # timer handling above so stale values never leak into the next flush.

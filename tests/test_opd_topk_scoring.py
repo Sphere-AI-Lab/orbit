@@ -13,7 +13,7 @@ from argparse import Namespace
 
 import pytest
 
-from orbit.opd.opd_sglang import _compute_topk_reverse_kl
+from miles.orbit.opd.opd_sglang import _compute_topk_reverse_kl
 from miles.utils.types import Sample
 
 
@@ -116,7 +116,7 @@ def test_topk_xor_uses_symmetric_difference_without_normalization():
 
 import torch  # noqa: E402
 
-from orbit.opd.opd_sglang import (  # noqa: E402
+from miles.orbit.opd.opd_sglang import (  # noqa: E402
     _mixture_log_probs,
     _mixture_logprob_maps,
     _post_teacher_group,
@@ -321,7 +321,7 @@ def test_topk_ensemble_rejects_non_student_strategy():
 
 
 async def test_post_teacher_group_singleton_returns_raw_response(monkeypatch):
-    from orbit.opd import opd_sglang
+    from miles.orbit.opd import opd_sglang
 
     async def fake_post(url, payload, timeout_secs=None, max_response_bytes=None):
         # Assert the response cap is forwarded (payload-sized limit for scoring)
@@ -334,7 +334,7 @@ async def test_post_teacher_group_singleton_returns_raw_response(monkeypatch):
 
 
 async def test_post_teacher_group_ensemble_returns_responses_and_weights(monkeypatch):
-    from orbit.opd import opd_sglang
+    from miles.orbit.opd import opd_sglang
 
     async def fake_post(url, payload, timeout_secs=None, max_response_bytes=None):
         # Assert the response cap is forwarded (payload-sized limit for scoring)
@@ -352,7 +352,7 @@ async def test_post_teacher_group_ensemble_returns_responses_and_weights(monkeyp
 # (NeMo-RL DistillationLossFn parity, adapted to rollout-side scoring)
 # ---------------------------------------------------------------------------
 
-from orbit.opd.opd_sglang import _tail_bucket_forward_kl  # noqa: E402
+from miles.orbit.opd.opd_sglang import _tail_bucket_forward_kl  # noqa: E402
 
 
 def _kl_args(kl_type, mixed_weight=0.5, strategy="only-student"):

@@ -36,7 +36,7 @@ from miles.utils.audit_utils.event_logger.logger import event_logger_context
 from miles.utils.audit_utils.witness.allocator import WitnessInfo
 
 # ORBIT-SEAM: (vp_stage, name) adapter keys for the OPD teacher/self-teacher state built in init
-from orbit.utils.adapter_tensors import AdapterTensorKey
+from miles.orbit.utils.adapter_tensors import AdapterTensorKey
 from miles.utils.context_utils import with_defer
 from miles.utils.distributed_utils import get_gloo_group
 from miles.utils.ft_utils.indep_dp import IndepDPInfo
@@ -51,11 +51,11 @@ from miles.utils.test_utils.ft_test_actions import FTTestActionActorExecutor
 
 # ORBIT-SEAM: OPD self-distillation support used by train_actor/update_weights (the dump is
 # env-gated and no-ops unless ORBIT_OPD_TEACHER_LOGPROB_DUMP is set)
-from orbit.opd.opd_dump import maybe_dump_teacher_logprobs
-from orbit.opd.opd_teacher_spec import should_promote_teacher
+from miles.orbit.opd.opd_dump import maybe_dump_teacher_logprobs
+from miles.orbit.opd.opd_teacher_spec import should_promote_teacher
 
 # ORBIT-SEAM: the EMA/lag self-teacher buffer init seeds below
-from orbit.opd.self_teacher import SelfTeacherBuffer
+from miles.orbit.opd.self_teacher import SelfTeacherBuffer
 from miles.utils.timer import Timer, inverse_timer, timer
 from miles.utils.tracking_utils.structured_log import with_logs
 from miles.utils.tracking_utils.tracking import init_tracking
@@ -99,8 +99,8 @@ from .replay_utils import register_replay_list_moe
 from .update_weight.common import named_adapter_params, named_params_and_buffers
 
 # ORBIT-SEAM: the one-trunk (adapter) critic - build, save and the value-loss phase context - is an
-# orbit addition to this actor; the critic itself lives in orbit.critic
-from orbit.critic.critic_adapter import (
+# orbit addition to this actor; the critic itself lives in miles.orbit.critic
+from miles.orbit.critic.critic_adapter import (
     _expected_critic_resume_iteration,
     build_critic_instance,
     save_critic_checkpoint,
@@ -110,11 +110,11 @@ from orbit.critic.critic_adapter import (
 # ORBIT-SEAM: orbit's model-state manager generalises base's TensorBackuper (adapter-only state,
 # multiple tags); every `self.weights_backuper.<op>(...)` call below is the same op on
 # self.model_state_manager
-from orbit.megatron.model_state_manager import create_model_state_manager
+from miles.orbit.megatron.model_state_manager import create_model_state_manager
 
 # ORBIT-SEAM: orbit's explicit PEFT offload replaces base's torch_memory_saver pause/resume in
 # sleep/wake_up below (frozen base, adapter, grad buffers and optimizer move separately)
-from orbit.megatron.peft_offload import (
+from miles.orbit.megatron.peft_offload import (
     _should_offload_frozen_base,
     load_megatron_adapter_to_gpu,
     load_megatron_frozen_base_to_gpu,
@@ -128,8 +128,8 @@ from orbit.megatron.peft_offload import (
 
 # ORBIT-SEAM: PEFT (LoRA + OFT) predicates for init. LOAD-BEARING BEYOND THIS MODULE: the home
 # mixin re-reads `create_peft_instance` and `is_adapter_param_name` off THIS module at call time
-# (see orbit/megatron/actor_ext.py), so neither is dead even where nothing below names it.
-from orbit.megatron.peft_utils import (
+# (see miles/orbit/megatron/actor_ext.py), so neither is dead even where nothing below names it.
+from miles.orbit.megatron.peft_utils import (
     create_peft_instance,
     is_adapter_param_name,
     is_peft_enabled,
@@ -137,14 +137,14 @@ from orbit.megatron.peft_utils import (
 )
 
 # ORBIT-SEAM: adapter-state mode decides whether the CPU snapshot holds adapters or full weights
-from orbit.megatron.state_mode import should_backup_actor_after_train, uses_adapter_state
+from miles.orbit.megatron.state_mode import should_backup_actor_after_train, uses_adapter_state
 
 # ORBIT-SEAM: bridge-export weight updater for models without a megatron_to_hf name map; selected
-# by orbit.megatron.actor_helpers._select_update_weight_cls, which reads it back off this module
-from orbit.megatron.update_weight_bridge import UpdateWeightFromDistributedBridge
+# by miles.orbit.megatron.actor_helpers._select_update_weight_cls, which reads it back off this module
+from miles.orbit.megatron.update_weight_bridge import UpdateWeightFromDistributedBridge
 
 # ORBIT-SEAM: the OPD teacher LM head is resident state sleep/wake_up must move (opd_jsd_loss)
-from orbit.opd.teacher_lm_head import load_teacher_lm_head, offload_teacher_lm_head, onload_teacher_lm_head
+from miles.orbit.opd.teacher_lm_head import load_teacher_lm_head, offload_teacher_lm_head, onload_teacher_lm_head
 from .update_weight.update_weight_from_distributed.broadcast import UpdateWeightFromDistributed
 
 # ORBIT-SEAM: base imports p2p unconditionally; guard it so importing this module still works on
@@ -159,8 +159,8 @@ except ImportError:
 from .update_weight.update_weight_from_tensor import UpdateWeightFromTensor
 # ORBIT-SEAM: orbit's added actor methods and module helpers live in the home layer (P2 mixin + P1
 # lift-out, Phase 3 slice 3g); re-exported here because callers import them off this module
-from orbit.megatron.actor_ext import OrbitTrainActorExtensions
-from orbit.megatron.actor_helpers import (
+from miles.orbit.megatron.actor_ext import OrbitTrainActorExtensions
+from miles.orbit.megatron.actor_helpers import (
     _get_weight_updater_kwargs,
     _select_update_weight_cls,
     _start_rollout_id_from_checkpoint,
@@ -271,7 +271,7 @@ class MegatronTrainRayActor(OrbitTrainActorExtensions, TrainRayActor):
         )
         dist.barrier(group=get_gloo_group())
 
-        # ORBIT-SEAM: orbit offloads the train state explicitly (orbit.megatron.peft_offload)
+        # ORBIT-SEAM: orbit offloads the train state explicitly (miles.orbit.megatron.peft_offload)
         # rather than through torch_memory_saver, so --train-memory-margin-bytes has nothing to
         # tune; upstream's disk-offload reclaim is kept.
         if args.offload_train:
@@ -292,7 +292,7 @@ class MegatronTrainRayActor(OrbitTrainActorExtensions, TrainRayActor):
                 m.enable_check_replay_result = m.enabled and self.args.ci_test
 
         # ORBIT-SEAM: MTP-in-RL patches must be applied before the model is built (home layer)
-        from orbit.megatron.mtp_rl_patches import apply_mtp_in_rl_patches
+        from miles.orbit.megatron.mtp_rl_patches import apply_mtp_in_rl_patches
 
         apply_mtp_in_rl_patches(self.args)
 
@@ -421,7 +421,7 @@ class MegatronTrainRayActor(OrbitTrainActorExtensions, TrainRayActor):
         self._self_teacher = None
         if with_opd_teacher:
             if self._opd_teacher_spec is None:
-                from orbit.opd.opd_teacher_spec import parse_teacher_spec
+                from miles.orbit.opd.opd_teacher_spec import parse_teacher_spec
 
                 self._opd_teacher_spec = parse_teacher_spec(
                     getattr(self.args, "opd_teacher", None), self.args.opd_teacher_load
