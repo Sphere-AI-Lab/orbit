@@ -323,7 +323,7 @@ def test_delayed_save_without_snapshot_rejects_later_live_cursor(tmp_path):
 
 
 def test_rollout_manager_marks_completed_state_before_next_generate(monkeypatch):
-    import miles.ray.rollout as rollout_module
+    import miles.ray.rollout.rollout_manager as rollout_module
 
     class _RecordingDataSource:
         def __init__(self):

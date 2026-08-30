@@ -17,13 +17,23 @@ from __future__ import annotations
 
 import copy
 import json
-from typing import Any
+from collections.abc import Collection
+from typing import Any, Literal
 
 from huggingface_hub import hf_hub_download
 from jinja2 import TemplateError
 from pydantic import TypeAdapter
 from sglang.srt.entrypoints.openai.protocol import Tool
 from transformers.utils.chat_template_utils import render_jinja_template
+
+from miles.utils.chat_template_utils import deepseek, inkling
+
+# Message matching moved to message_matcher_hub; direct aliases keep the
+# established import surface working without a second implementation.
+from miles.utils.chat_template_utils.message_matcher_hub import (  # noqa: F401
+    assert_messages_append_only_with_allowed_role,
+    strict_message_matches,
+)
 
 
 def load_hf_chat_template(model_id: str) -> str:
@@ -50,26 +60,28 @@ def load_hf_chat_template(model_id: str) -> str:
         return f.read()
 
 
-def _normalize_tool_arguments(messages: list[dict]) -> list[dict]:
-    """Deep-copy messages and normalize for template rendering.
-
-    Normalizations:
-    - Parse JSON-string tool_call arguments to dicts.  Matches SGLang's
-      ``_apply_jinja_template`` normalization in ``serving_chat.py``.
-    - Convert ``content: None`` to ``content: ""`` for assistant messages with
-      tool_calls.  The OpenAI API returns ``content: null`` for tool-call-only
-      responses; Jinja2 renders Python ``None`` as the literal string "None".
+def normalize_tool_arguments(messages: list[dict], format: Literal["dict", "json"]) -> list[dict]:
+    """Deep-copy *messages*, normalize assistant ``content: None`` -> "", and coerce
+    tool_call ``arguments`` to the form the downstream renderer needs (``format`` picks
+    the direction; never mutates the input):
+    - ``"dict"``: JSON string -> dict, for HF-Jinja templates (they index args as objects).
+    - ``"json"``: dict -> JSON string, for the DeepSeek DSML encoders (they ``json.loads`` them).
     """
     normalized = copy.deepcopy(messages)
     for msg in normalized:
         if msg.get("role") == "assistant":
-            if msg.get("content") is None and msg.get("tool_calls"):
+            if msg.get("content") is None:
                 msg["content"] = ""
-            if "tool_calls" in msg and isinstance(msg["tool_calls"], list):
+            if isinstance(msg.get("tool_calls"), list):
                 for item in msg["tool_calls"]:
                     func = item.get("function")
-                    if func and "arguments" in func and isinstance(func["arguments"], str):
-                        func["arguments"] = json.loads(func["arguments"])
+                    if not func:
+                        continue
+                    args = func.get("arguments")
+                    if format == "dict" and isinstance(args, str):
+                        func["arguments"] = json.loads(args)
+                    elif format == "json" and isinstance(args, dict):
+                        func["arguments"] = json.dumps(args, ensure_ascii=False)
     return normalized
 
 
@@ -86,6 +98,21 @@ def extract_tool_dicts(tools: list[dict] | None) -> list[dict] | None:
     wrapped = [t if isinstance(t, dict) and "function" in t else {"type": "function", "function": t} for t in tools]
     validated = TypeAdapter(list[Tool]).validate_python(wrapped)
     return [tool.model_dump() for tool in validated]
+
+
+def merge_chat_template_kwargs(
+    base: dict[str, Any],
+    overrides: dict[str, Any],
+    *,
+    alias_keys: Collection[str] = (),
+) -> dict[str, Any]:
+    """Merge one config layer, replacing base aliases as a group."""
+    merged = dict(base)
+    if any(key in overrides for key in alias_keys):
+        for key in alias_keys:
+            merged.pop(key, None)
+    merged.update(overrides)
+    return merged
 
 
 def apply_chat_template_from_str(
@@ -115,7 +142,7 @@ def apply_chat_template_from_str(
         )
         return rendered[0]
 
-    messages = _normalize_tool_arguments(messages)
+    messages = normalize_tool_arguments(messages, "dict")
     tool_defs = extract_tool_dicts(tools)
     try:
         return _render(tool_defs)
@@ -126,84 +153,6 @@ def apply_chat_template_from_str(
             except TemplateError as te:
                 raise ValueError(f"Chat template rendering failed (tool format fallback): {te}") from te
         raise ValueError(f"Chat template rendering failed: {e}") from e
-
-
-_TEMPLATE_RELEVANT_KEYS = ("role", "content", "reasoning_content", "tool_calls")
-
-
-def _normalize_value(value: Any) -> Any:
-    """Normalize falsy sentinels that produce identical Jinja2 output.
-
-    None, "" and [] are all falsy in Jinja2 and render the same way,
-    but client libraries may interchange them (e.g. content: null vs ""
-    for tool-call-only responses, or tool_calls: null vs []).
-
-    Only collapses falsy values — non-falsy content (including whitespace
-    like trailing newlines) is returned as-is.  Message boundary characters
-    must be preserved exactly so they tokenize identically across turns.
-    """
-    if value is None or value == "" or value == []:
-        return None
-    return value
-
-
-def message_matches(stored: dict[str, Any], new: dict[str, Any]) -> bool:
-    """Compare only the fields that affect chat-template tokenization.
-
-    External client libraries (e.g. litellm) may inject extra keys like
-    ``provider_specific_fields`` into messages.  These have no effect on
-    the Jinja2 chat template output, so we only compare the keys that
-    templates actually read: role, content, reasoning_content, tool_calls.
-    """
-    for key in _TEMPLATE_RELEVANT_KEYS:
-        if _normalize_value(stored.get(key)) != _normalize_value(new.get(key)):
-            return False
-    return True
-
-
-_DEFAULT_APPEND_ROLES: list[str] = ["tool"]
-
-
-def assert_messages_append_only_with_allowed_role(
-    stored_messages: list[dict[str, Any]],
-    new_messages: list[dict[str, Any]],
-    allowed_append_roles: list[str] = _DEFAULT_APPEND_ROLES,
-) -> None:
-    """Assert *new_messages* is an append-only extension of *stored_messages*.
-
-    The stored prefix must match exactly (compared by template-relevant keys),
-    and any appended messages must have a role in *allowed_append_roles*
-    (default: ``{'tool'}``).
-    """
-    if not stored_messages:
-        return
-
-    if len(new_messages) < len(stored_messages):
-        raise ValueError(
-            f"new messages ({len(new_messages)}) are fewer than stored messages ({len(stored_messages)})",
-            new_messages,
-            stored_messages,
-        )
-
-    for i, stored_msg in enumerate(stored_messages):
-        if not message_matches(stored_msg, new_messages[i]):
-            diffs = {
-                key: {"stored": repr(stored_msg.get(key))[:200], "new": repr(new_messages[i].get(key))[:200]}
-                for key in _TEMPLATE_RELEVANT_KEYS
-                if stored_msg.get(key) != new_messages[i].get(key)
-            }
-            raise ValueError(
-                f"message mismatch at index {i} "
-                f"(role: stored={stored_msg.get('role')}, new={new_messages[i].get('role')}). "
-                f"Diffs: {diffs}"
-            )
-
-    for j, msg in enumerate(new_messages[len(stored_messages) :]):
-        if msg.get("role") not in allowed_append_roles:
-            raise ValueError(
-                f"appended message at index {len(stored_messages) + j} "
-                f"has role={msg.get('role')!r}, allowed={allowed_append_roles}"
-            )
 
 
 def apply_chat_template(
@@ -221,7 +170,30 @@ def apply_chat_template(
     ensuring the result is ``str`` (tokenize=False) or ``list[int]``
     (tokenize=True), not a ``BatchEncoding`` or ``dict``.
     """
-    messages = _normalize_tool_arguments(messages)
+    if deepseek.model_type(tokenizer) is not None:
+        return deepseek.apply_chat_template(
+            normalize_tool_arguments(messages, "json"),
+            tokenizer,
+            tools=tools,
+            tokenize=tokenize,
+            add_generation_prompt=add_generation_prompt,
+            **kwargs,
+        )
+
+    if inkling.is_inkling(tokenizer):
+        # the fixed template needs parsed tool-call arguments and handles the
+        # thinking-effort line, tool_calls, and the end-sampling token itself
+        return tokenizer.apply_chat_template(
+            normalize_tool_arguments(messages, "dict"),
+            chat_template=inkling.fixed_chat_template(),
+            tokenize=tokenize,
+            tools=extract_tool_dicts(tools),
+            return_dict=False,
+            add_generation_prompt=add_generation_prompt,
+            **kwargs,
+        )
+
+    messages = normalize_tool_arguments(messages, "dict")
     tool_defs = extract_tool_dicts(tools)
     render_kwargs = dict(add_generation_prompt=add_generation_prompt, **kwargs)
 

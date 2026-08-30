@@ -8,6 +8,22 @@ import numpy
 import torch
 
 
+@dataclass(frozen=True)
+class AdapterRef:
+    """Which LoRA adapter a sample is bound to (training slot routing, inference lora_path); ``None`` = no adapter."""
+
+    name: str
+    slot: int
+
+
+@dataclass(frozen=True)
+class RewardSpec:
+    """Per-sample spec of how the response is scored; intentionally decoupled from adapter routing."""
+
+    rm_type: str | None = None
+    custom_rm_path: str | None = None
+
+
 # ORBIT-SEAM: new helper - resolves the policy version tag from meta_info, preferring
 # adapter_version (PEFT) over weight_version and asserting the v1 invariant that they agree when
 # both are present; used by Sample.update_from_meta_info below instead of base's plain weight_version read
@@ -32,6 +48,9 @@ class Sample:
 
     group_index: int | None = None
     index: int | None = None
+    # Rollout execution id; None falls back to ``index``. Compact / subagent
+    # siblings must share it so the rollout is counted once.
+    rollout_id: int | None = None
     # prompt
     prompt: str | list[dict[str, str]] = ""
     tokens: list[int] = field(default_factory=list)
@@ -57,7 +76,13 @@ class Sample:
     rollout_routed_experts: numpy.ndarray | None = (
         None  # Routed experts from rollout engine. shape: (num_tokens-1, num_layers, moe_router_topk), dtype=int32
     )
+    rollout_indexer_topk: numpy.ndarray | None = (
+        None  # Indexer topk from rollout engine. shape: (num_tokens-1, num_indexer_layers, index_topk), dtype=int32
+    )
     remove_sample: bool = False
+    # ORBIT-SEAM: upstream re-declares teacher_log_probs / opd_reverse_kl here; the orbit OPD field
+    # block above already declares them (plus teacher_hidden_states and the top-k transport), so the
+    # duplicate dataclass fields are dropped
 
     class Status(Enum):
         PENDING = "pending"
@@ -76,10 +101,13 @@ class Sample:
     # metadata used during training, e.g., what loss to use for this sample.
     train_metadata: dict | None = None
 
-    # Session ID for consistent hashing routing (used when router policy is consistent_hashing)
-    # ORBIT-SEAM: repo-wide comment-style pass (TODO -> Follow-up), no functional change
-    # Follow-up: Its definition needs to merge with the session server's session id in the new rollout function.
-    session_id: str | None = None
+    # MultiLoRA: which adapter this sample trains/infers with
+    adapter: AdapterRef | None = None
+    # Per-sample reward dispatch override (e.g., per-adapter RM in multi-LoRA)
+    reward_spec: RewardSpec | None = None
+
+    # Per-sample routing key for the router's consistent_hashing policy (sent as X-SMG-Routing-Key)
+    routing_key: str | None = None
 
     non_generation_time: float = 0.0  # time spent in non-generation steps
 
@@ -302,7 +330,18 @@ class Sample:
         if self.rollout_routed_experts is not None:
             actual = len(self.rollout_routed_experts)
             expect = len(self.tokens) - 1
-            assert actual == expect, f"rollout_routed_experts length ({actual}) != len(tokens) - 1 ({expect})"
+            mm = self.multimodal_train_inputs or {}
+            extra = sum(
+                int(c) - 1 for key in ("mm_vision_num_patches", "mm_audio_num_tokens") for c in list(mm.get(key) or [])
+            )
+            assert actual in (expect, expect + extra), (
+                f"rollout_routed_experts length ({actual}) != len(tokens) - 1 ({expect})"
+                f" or media-expanded ({expect + extra})"
+            )
+        if self.rollout_indexer_topk is not None:
+            actual = len(self.rollout_indexer_topk)
+            expect = len(self.tokens) - 1
+            assert actual == expect, f"rollout_indexer_topk length ({actual}) != len(tokens) - 1 ({expect})"
 
     def strip_last_output_tokens(self, n: int, tokenizer) -> None:
         """Remove the last *n* output tokens and all associated per-token info."""
@@ -334,12 +373,14 @@ class Sample:
         self.response = tokenizer.decode(self.tokens[-self.response_length :]) if self.response_length > 0 else ""
         if self.rollout_routed_experts is not None:
             self.rollout_routed_experts = self.rollout_routed_experts[:-n]
+        if self.rollout_indexer_topk is not None:
+            self.rollout_indexer_topk = self.rollout_indexer_topk[:-n]
 
     def reset_for_retry(self) -> None:
         """Reset generated outputs so the original prompt can be re-sampled.
 
         Keeps identity / prompt fields (group_index, index, prompt, label,
-        multimodal_inputs, metadata, generate_function_path, session_id) and
+        multimodal_inputs, metadata, generate_function_path, routing_key) and
         restores everything else to dataclass defaults.
         """
         self.tokens = []
@@ -363,6 +404,7 @@ class Sample:
             self.metadata.pop("opd_student_top_logprobs", None)
             self.metadata.pop("opd_teacher_response", None)
         self.rollout_routed_experts = None
+        self.rollout_indexer_topk = None
         self.status = Sample.Status.ABORTED
         self.non_generation_time = 0.0
         self.spec_info = Sample.SpecInfo()

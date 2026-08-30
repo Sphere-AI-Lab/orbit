@@ -4,7 +4,7 @@ import pytest
 import torch
 
 from miles.backends.training_utils import loss as training_loss
-from miles.utils.ppo_utils import _safe_clamp_log_ratio, compute_approx_kl
+from miles.backends.training_utils.loss_hub.math_utils import _safe_clamp_log_ratio, compute_approx_kl
 
 
 def _unbiased_kl(log_probs: torch.Tensor, old_log_probs: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:

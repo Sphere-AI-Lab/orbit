@@ -188,11 +188,11 @@ local/
 .idea
 *.iml
 
-glm/
 _examples_synced/
 .env
 .DS_Store
-.claude/
+
+.humanize/
 .worktrees/
 
 orbit_ckpts
@@ -206,4 +206,3 @@ logs/
 eval_results/
 eval_subsets/
 run_*.pid
-.worktrees/

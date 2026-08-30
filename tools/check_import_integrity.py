@@ -15,6 +15,8 @@ ROOTS = ("miles", "miles_plugins", "orbit")
 # Pre-existing danglers, tolerated but not expanded (file, dotted module, name).
 ALLOWLIST = {
     ("tools/convert_to_hf_legacy.py", "miles.backends.megatron_utils", "update_weight_utils"),
+    # upstream ships this script for use after docker/npu_patch is applied
+    ("scripts/run_qwen3_4b_npu.py", "miles.utils.external_utils.command_utils", "execute_train_npu"),
 }
 
 def module_file(dotted: str):

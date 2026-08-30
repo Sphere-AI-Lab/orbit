@@ -7,19 +7,21 @@ from megatron.core.models.gpt.gpt_layer_specs import get_gpt_decoder_block_spec
 from megatron.core.transformer.spec_utils import ModuleSpec
 from megatron.core.transformer.transformer_block import get_num_layers_to_build
 from megatron.core.transformer.transformer_layer import get_transformer_layer_offset
+from transformers import AutoConfig
 from transformers.activations import ACT2FN
 
 try:
     from fla.modules import FusedRMSNormGated, ShortConvolution
-    from fla.ops.gated_delta_rule import chunk_gated_delta_rule
 except ImportError:
     pass
 
-# ORBIT-SEAM: fp32 A_log marking hook (orbit/megatron/fp32_param_utils)
+# ORBIT-SEAM: fp32 A_log marking hook (orbit/megatron/fp32_param_utils); upstream now ships an
+# equivalent miles.backends.megatron_utils.fp32_param_utils (differs only in the marker attr name)
 from orbit.megatron.fp32_param_utils import mark_param_dtype
 from miles.backends.training_utils.cp_utils import build_gdn_cp_context
 
-from .hf_attention import HuggingfaceAttention, _load_hf_config
+from .hf_attention import HuggingfaceAttention
+from .qwen_gdn_backend import get_chunk_gated_delta_rule
 
 
 def _get_text_config(hf_config):
@@ -37,8 +39,10 @@ class Qwen3_5GatedDeltaNet(nn.Module):
     separate in_proj_qkv (for Q,K,V) and in_proj_z (for Z).
     """
 
-    def __init__(self, config, layer_idx: int):
+    def __init__(self, config, layer_idx: int, args=None):
         super().__init__()
+        self.gdn_backend = getattr(args, "linear_attention_backend", "fla")
+        self.chunk_gated_delta_rule = get_chunk_gated_delta_rule(self.gdn_backend)
         self.hidden_size = config.hidden_size
         self.num_v_heads = config.linear_num_value_heads
         self.num_k_heads = config.linear_num_key_heads
@@ -74,6 +78,7 @@ class Qwen3_5GatedDeltaNet(nn.Module):
 
         A = torch.empty(self.num_v_heads).uniform_(0, 16)
         # ORBIT-SEAM: hold A_log in fp32 and mark it so precision wrappers preserve the dtype
+        # (upstream converged on the same fp32 + mark_param_dtype treatment)
         # Qwen3.5 ships A_log in fp32; Qwen3.6 reverted the HF weight to bf16.
         # We still hold it in fp32 here for engineering simplicity (no special
         # path for 3.6) — this matches the SGLang implementation, which also
@@ -81,6 +86,9 @@ class Qwen3_5GatedDeltaNet(nn.Module):
         self.A_log = nn.Parameter(torch.log(A).to(torch.float32))
         mark_param_dtype(self.A_log, torch.float32)
 
+        # HF stores this norm in fp32, but unlike A_log its precision impact is
+        # negligible and sglang runs it in bf16 on the rollout side — follow
+        # config.dtype (bf16) to stay equivalent to rollout.
         self.norm = FusedRMSNormGated(
             self.head_v_dim,
             eps=self.layer_norm_epsilon,
@@ -133,7 +141,11 @@ class Qwen3_5GatedDeltaNet(nn.Module):
             key = key.repeat_interleave(self.num_v_heads // self.num_k_heads, dim=2)
 
         if cp_context is not None:
-            core_attn_out, _ = chunk_gated_delta_rule(
+            if self.gdn_backend != "fla":
+                raise NotImplementedError(
+                    f"GDN context parallelism requires the 'fla' backend, got {self.gdn_backend!r}."
+                )
+            core_attn_out, _ = self.chunk_gated_delta_rule(
                 query,
                 key,
                 value,
@@ -144,7 +156,13 @@ class Qwen3_5GatedDeltaNet(nn.Module):
                 cp_context=cp_context,
             )
         else:
-            core_attn_out, _ = chunk_gated_delta_rule(
+            if self.gdn_backend == "flashqla":
+                query = query.contiguous()
+                key = key.contiguous()
+                value = value.contiguous()
+                g = g.contiguous()
+                beta = beta.contiguous()
+            core_attn_out, _ = self.chunk_gated_delta_rule(
                 query,
                 key,
                 value,
@@ -176,6 +194,7 @@ class Attention(HuggingfaceAttention):
         layer_number: int,
         cp_comm_type: str = "p2p",
         pg_collection=None,
+        name: str | None = None,
     ):
         super().__init__(
             args,
@@ -183,12 +202,13 @@ class Attention(HuggingfaceAttention):
             layer_number,
             cp_comm_type,
             pg_collection,
+            name=name,
         )
         # Qwen3.5 is a VLM model with nested text_config
         self.hf_config = _get_text_config(self.hf_config)
         self.hf_config._attn_implementation = "flash_attention_2"
 
-        self.linear_attn = Qwen3_5GatedDeltaNet(self.hf_config, self.hf_layer_idx)
+        self.linear_attn = Qwen3_5GatedDeltaNet(self.hf_config, self.hf_layer_idx, args=args)
 
         # Use a simple RMSNorm
         try:
@@ -228,7 +248,7 @@ def get_qwen3_5_spec(args, config, vp_stage):
     num_layers_to_build = get_num_layers_to_build(config, vp_stage=vp_stage)
     offset = get_transformer_layer_offset(config, vp_stage=vp_stage)
 
-    hf_config = _load_hf_config(args.hf_checkpoint)
+    hf_config = AutoConfig.from_pretrained(args.hf_checkpoint, trust_remote_code=True)
     text_config = _get_text_config(hf_config)
 
     # Compute layer_types if the config class doesn't expose it

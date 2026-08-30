@@ -3,15 +3,20 @@ from argparse import Namespace
 from collections.abc import Callable
 from copy import deepcopy
 
-from miles.utils import tracking_utils
+from miles.utils.device_flops import local_peak_bf16_tflops
 from miles.utils.metric_utils import compute_rollout_step
 from miles.utils.timer import Timer
+from miles.utils.tracking_utils import tracking
 
 logger = logging.getLogger(__name__)
 
 
 def log_perf_data_raw(
-    rollout_id: int, args: Namespace, is_primary_rank: bool, compute_total_fwd_flops: Callable
+    rollout_id: int,
+    args: Namespace,
+    is_primary_rank: bool,
+    compute_total_fwd_flops: Callable,
+    extra_metrics: dict | None = None,
 ) -> None:
     timer_instance = Timer()
     log_dict_raw = deepcopy(timer_instance.log_dict())
@@ -29,6 +34,8 @@ def log_perf_data_raw(
     log_dict = {f"perf/{key}_time": val for key, val in log_dict_raw.items()}
     # ORBIT-SEAM: publish staged perf scalars
     log_dict |= {f"perf/{key}": val for key, val in scalar_dict_raw.items()}
+    if extra_metrics:
+        log_dict.update(extra_metrics)
 
     if ("perf/actor_train_time" in log_dict) and (compute_total_fwd_flops is not None):
         total_fwd_flops = compute_total_fwd_flops(seq_lens=timer_instance.seq_lens)
@@ -43,6 +50,11 @@ def log_perf_data_raw(
             log_dict["perf/actor_train_tflops"] = 3 * total_fwd_flops / log_dict["perf/actor_train_time"]
             log_dict["perf/actor_train_tok_per_s"] = sum(timer_instance.seq_lens) / log_dict["perf/actor_train_time"]
 
+            peak_tflops = getattr(args, "mfu_peak_tflops", None) or local_peak_bf16_tflops()
+            if peak_tflops:
+                log_dict["perf/mfu_peak_tflops"] = peak_tflops
+                log_dict["perf/actor_train_mfu"] = log_dict["perf/actor_train_tflops"] / peak_tflops
+
     if "perf/train_wait_time" in log_dict and "perf/train_time" in log_dict:
         total_time = log_dict["perf/train_wait_time"] + log_dict["perf/train_time"]
         if total_time > 0:
@@ -53,4 +65,4 @@ def log_perf_data_raw(
 
     step = compute_rollout_step(args, rollout_id)
     log_dict["rollout/step"] = step
-    tracking_utils.log(args, log_dict, step_key="rollout/step")
+    tracking.log(args, log_dict, step_key="rollout/step")

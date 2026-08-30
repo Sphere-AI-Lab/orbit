@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from miles.utils import wandb_utils
+from miles.utils.tracking_utils import wandb_utils
 
 
 def _args(*, wandb_run_id=None):

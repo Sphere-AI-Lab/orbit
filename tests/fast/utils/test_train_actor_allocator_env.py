@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from argparse import Namespace
 
-from miles.ray.actor_group import _build_train_actor_env
+from miles.ray.train.actor_factory import _build_train_actor_env
 
 _KEY = "PYTORCH_CUDA_ALLOC_CONF"
 

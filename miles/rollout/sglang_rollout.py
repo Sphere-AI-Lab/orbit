@@ -1,6 +1,5 @@
 import asyncio
 import copy
-import inspect
 # ORBIT-SEAM: json supports the ORBIT_DSV4_RESPONSE_DEBUG dump and the eval dataset-cache key
 import json
 import logging
@@ -19,25 +18,31 @@ import sglang_router
 from packaging.version import parse
 from tqdm import tqdm
 
-# ORBIT-SEAM: LORA_ADAPTER_NAME/is_lora_enabled import removed; LoRA request-payload attachment now goes through the generic attach_peft_request_payload below (LoRA+OFT)
-from miles.rollout.base_types import RolloutFnEvalOutput, RolloutFnTrainOutput
-# ORBIT-SEAM: true-on-policy prefill re-scoring hook
+from miles.rollout.base_types import GenerateFnInput, RolloutFnEvalOutput, RolloutFnTrainOutput
+# ORBIT-SEAM: true-on-policy prefill re-scoring hook -- orbit/rollout/prefill_logprobs.py, NOT the
+# lora-only miles/rollout/generate_utils/prefill_logprobs.py upstream dbbab156 added: orbit's copy
+# attaches PEFT requests through attach_peft_request_payload so OFT rollouts are re-scored too
 from orbit.rollout.prefill_logprobs import recompute_samples_rollout_logprobs_via_prefill
 from miles.rollout.filter_hub.base_types import MetricGatherer, call_dynamic_filter
-# ORBIT-SEAM: generic PEFT request-payload attachment (LoRA+OFT) and evaluation-aware return_logprob gating, replacing the deleted lora_utils import above
+# ORBIT-SEAM: generic PEFT request-payload attachment (LoRA+OFT) and evaluation-aware return_logprob
+# gating, replacing upstream's lora-only LORA_ADAPTER_NAME/lora_rollout_enabled payload wiring
 from miles.rollout.generate_utils.generate_endpoint_utils import (
     attach_peft_request_payload,
     should_request_rollout_logprobs,
 )
+from miles.rollout.inference_rollout.compatibility import load_generate_function
 from miles.utils import dumper_utils
 from miles.utils.async_utils import run
 from miles.utils.data import Dataset
 from miles.utils.eval_config import EvalDatasetConfig
-from miles.utils.http_utils import get, post
-from miles.utils.misc import SingletonMeta, load_function
+from miles.utils.http_utils import get, post, router_worker_base_urls
+from miles.utils.lifecycle import TrajectoryLifecycle
+from miles.utils.misc import SingletonMeta, call_agent_abort_hook, load_function
+from miles.utils.multi_lora import make_rid, slot_lora_name
 from miles.utils.processing_utils import (
-    build_processor_kwargs,
+    call_processor,
     encode_image_for_rollout_engine,
+    extract_multimodal_train_inputs,
     load_processor,
     load_tokenizer,
 )
@@ -55,6 +60,13 @@ from orbit.rollout.phase_stats import (
     _server_info_poller,
     _set_active_phase,
 )
+
+from .generate_utils.generate_endpoint_utils import (
+    compute_routing_headers,
+    get_indexer_topk_from_response,
+    policy_uses_routing_key,
+)
+from .generate_utils.sample_utils import reward_log_summary, sample_text_preview
 from .rm_hub import async_rm, batched_async_rm
 
 __all__ = ["generate_rollout", "get_model_url"]
@@ -169,13 +181,14 @@ async def generate(
 
     # ORBIT-SEAM: per-phase tokenize timing, fed into _phase_record_request below
     _t_tok0 = time.perf_counter()
-    if state.processor and sample.multimodal_inputs and any(v is not None for v in sample.multimodal_inputs.values()):
-        processor_kwargs = build_processor_kwargs(sample.multimodal_inputs)
-        processor_output = state.processor(text=sample.prompt, **processor_kwargs)
+    if state.processor and (
+        isinstance(sample.prompt, (list, tuple))
+        or (sample.multimodal_inputs and any(v is not None for v in sample.multimodal_inputs.values()))
+    ):
+        processor_output = call_processor(state.processor, sample.prompt, sample.multimodal_inputs)
         prompt_ids = processor_output["input_ids"][0]
-        sample.multimodal_train_inputs = {
-            k: v for k, v in processor_output.items() if k not in ["input_ids", "attention_mask"]
-        } or None
+        prompt_ids = prompt_ids.tolist() if hasattr(prompt_ids, "tolist") else list(prompt_ids)
+        sample.multimodal_train_inputs = extract_multimodal_train_inputs(processor_output)
     else:
         prompt_ids = state.tokenizer.encode(sample.prompt, add_special_tokens=False)
     # ORBIT-SEAM: per-phase tokenize timing (see above)
@@ -197,29 +210,61 @@ async def generate(
         # ORBIT-SEAM: gated by should_request_rollout_logprobs(evaluation) instead of always True
         "return_logprob": should_request_rollout_logprobs(args, evaluation),
     }
+    opd_top_k = getattr(args, "opd_log_prob_top_k", 0) or 0
+    opd_top_k_strategy = getattr(args, "opd_top_k_strategy", "only-student")
+    if getattr(args, "use_opd", False) and opd_top_k > 0 and opd_top_k_strategy != "only-teacher":
+        payload["top_logprobs_num"] = opd_top_k
 
     # ORBIT-SEAM: OPD capture -- top-k OPD (sglang teacher): collect the student's own top-k logprobs during
-    # generation; post_process cross-scores them against the teacher's top-k.
-    _opd_top_k = getattr(args, "opd_log_prob_top_k", 0) or 0
+    # generation; post_process cross-scores them against the teacher's top-k. Narrower than upstream's
+    # gate a few lines up (sglang teacher, non-eval) and additionally forces return_logprob, which
+    # sglang requires before it will emit output_top_logprobs at all.
     _opd_wants_student_top = (
         not evaluation
-        and _opd_top_k > 0
+        and opd_top_k > 0
         and getattr(args, "opd_type", None) == "sglang"
-        and getattr(args, "opd_top_k_strategy", "only-student") != "only-teacher"
+        and opd_top_k_strategy != "only-teacher"
     )
     if _opd_wants_student_top:
-        payload["top_logprobs_num"] = _opd_top_k
+        payload["top_logprobs_num"] = opd_top_k
         payload["return_logprob"] = True  # sglang returns output_top_logprobs only with logprobs on
 
-    # ORBIT-SEAM: is_lora_enabled/payload["lora_path"] generalized to attach_peft_request_payload (LoRA+OFT)
-    attach_peft_request_payload(args, payload)
+    if sample.adapter is not None:
+        from miles.ray.multi_lora.controller import AdaptersCache
+
+        if (adapter := await AdaptersCache().get(sample.adapter.name)) is None:
+            # Adapter deregistered: don't POST, or an orphan the abort round can't see
+            # would keep decoding under the slot's next tenant and pollute its group.
+            logger.warning(
+                f"Dropping generation for adapter '{sample.adapter.name}' (slot {sample.adapter.slot}): "
+                "adapter is no longer sampleable"
+            )
+            sample.status = Sample.Status.ABORTED
+            return sample
+        payload["lora_path"] = slot_lora_name(sample.adapter.slot)
+        payload["rid"] = make_rid(sample.adapter.name)
+        payload["extra_key"] = f"{sample.adapter.name}:v{adapter.version}"
+    else:
+        # ORBIT-SEAM: upstream's `elif lora_rollout_enabled(args): payload["lora_path"] =
+        # LORA_ADAPTER_NAME` generalized to attach_peft_request_payload, which covers LoRA and OFT
+        # and knows that orbit's single-active fork must NOT be sent a named lora_path.
+        attach_peft_request_payload(args, payload)
 
     if args.use_rollout_routing_replay:
         payload["return_routed_experts"] = True
+    if getattr(args, "use_rollout_indexer_replay", False):
+        payload["return_indexer_topk"] = True
 
     if sample.multimodal_inputs and sample.multimodal_inputs["images"]:
         image_data = sample.multimodal_inputs["images"]
         payload["image_data"] = [encode_image_for_rollout_engine(image) for image in image_data]
+
+    if sample.multimodal_inputs and sample.multimodal_inputs.get("audios"):
+        import base64 as _b64
+
+        payload["audio_data"] = [
+            f"data:audio;base64,{_b64.b64encode(a).decode('ascii')}" for a in sample.multimodal_inputs["audios"]
+        ]
 
     # Use existing tokens for multi-turn or tokenize the new prompt
     if len(sample.response) > 0:
@@ -229,15 +274,14 @@ async def generate(
         if not sample.tokens:  # Initialize sample.tokens for the first turn
             sample.tokens = prompt_ids
 
-    # Use session_id for consistent hashing routing if router uses consistent_hashing policy
-    headers = None
-    if args.sglang_router_policy == "consistent_hashing" and sample.session_id:
-        headers = {"X-SMG-Routing-Key": sample.session_id}
+    headers = compute_routing_headers(args, sample)
 
     # ORBIT-SEAM: per-phase HTTP-post timing (see _phase_record_request below); OPD capture of the student's top-k logprobs; optional raw-response debug dump
     _t_http0 = time.perf_counter()
     output = await post(url, payload, headers=headers)
-    # ORBIT-SEAM: OPD capture of the student's top-k logprobs, plus optional ORBIT_DSV4_RESPONSE_DEBUG raw-response dump and per-phase timing (below)
+    # ORBIT-SEAM: OPD capture of the student's top-k logprobs (upstream's equivalent block is gated on
+    # its own looser use_opd check; orbit keeps the _opd_wants_student_top gate used for the request),
+    # plus optional ORBIT_DSV4_RESPONSE_DEBUG raw-response dump and per-phase timing (below)
     if _opd_wants_student_top:
         _output_top_logprobs = output.get("meta_info", {}).get("output_top_logprobs")
         if _output_top_logprobs is not None:
@@ -269,53 +313,57 @@ async def generate(
         meta_info=output.get("meta_info") if isinstance(output, dict) else None,
     )
 
-    # ORBIT-SEAM: use_miles_router flag renamed use_orbit_router (orbit's own pass-through router)
-    if args.use_orbit_router and "RadixTreeMiddleware" in args.miles_router_middleware_paths:
-        from miles.router.middleware_hub.radix_tree_middleware import postprocess_sample_with_radix_tree
-
-        sample = await postprocess_sample_with_radix_tree(args, sample, output)
+    if "output_token_logprobs" in output["meta_info"]:
+        # ORBIT-SEAM: prefer server-provided output_ids over reconstructing tokens from output_token_logprobs (not always present, e.g. OFT/DSV4 paths)
+        output_token_logprobs = output["meta_info"]["output_token_logprobs"]
+        new_response_log_probs = [item[0] for item in output_token_logprobs]
     else:
-        if "output_token_logprobs" in output["meta_info"]:
-            # ORBIT-SEAM: prefer server-provided output_ids over reconstructing tokens from output_token_logprobs (not always present, e.g. OFT/DSV4 paths)
-            output_token_logprobs = output["meta_info"]["output_token_logprobs"]
-            new_response_log_probs = [item[0] for item in output_token_logprobs]
-        else:
-            output_token_logprobs = None
-            new_response_log_probs = None
+        output_token_logprobs = None
+        new_response_log_probs = None
 
-        if output.get("output_ids") is not None:
-            new_response_tokens = output["output_ids"]
-        elif output_token_logprobs is not None:
-            new_response_tokens = [item[1] for item in output_token_logprobs]
-        else:
-            # ORBIT-SEAM: no output_ids and no output_token_logprobs; empty response tokens instead of aborting
-            new_response_tokens = []
+    if output.get("output_ids") is not None:
+        new_response_tokens = output["output_ids"]
+    elif output_token_logprobs is not None:
+        new_response_tokens = [item[1] for item in output_token_logprobs]
+    else:
+        # ORBIT-SEAM: no output_ids and no output_token_logprobs; empty response tokens instead of aborting
+        new_response_tokens = []
 
-        # Update sample with tokens directly - avoiding re-tokenization
-        sample.tokens = sample.tokens + new_response_tokens
-        sample.response_length += len(new_response_tokens)
-        sample.response += output["text"]
+    # Update sample with tokens directly - avoiding re-tokenization
+    sample.tokens = sample.tokens + new_response_tokens
+    sample.response_length += len(new_response_tokens)
+    sample.response += output["text"]
 
-        # When partial rollout and masking off policy is enabled, update the loss mask
-        if sample.loss_mask is not None:
-            assert args.partial_rollout and args.mask_offpolicy_in_partial_rollout
-            sample.loss_mask += [1] * len(new_response_tokens)
+    # When partial rollout and masking off policy is enabled, update the loss mask
+    if sample.loss_mask is not None:
+        assert args.partial_rollout and args.mask_offpolicy_in_partial_rollout
+        sample.loss_mask += [1] * len(new_response_tokens)
 
-        # ORBIT-SEAM: guard against new_response_log_probs being None (output_ids-only response, no output_token_logprobs)
-        if new_response_log_probs is not None:
-            if sample.rollout_log_probs is None:
-                sample.rollout_log_probs = []
-            sample.rollout_log_probs += new_response_log_probs
+    # ORBIT-SEAM: guard against new_response_log_probs being None (output_ids-only response, no output_token_logprobs)
+    if new_response_log_probs is not None:
+        if sample.rollout_log_probs is None:
+            sample.rollout_log_probs = []
+        sample.rollout_log_probs += new_response_log_probs
 
     if "routed_experts" in output["meta_info"]:
-        sample.rollout_routed_experts = np.frombuffer(
+        _re = np.frombuffer(
             pybase64.b64decode(output["meta_info"]["routed_experts"].encode("ascii")),
             dtype=np.int32,
-        ).reshape(
-            len(sample.tokens) - 1,
-            args.num_layers,
-            args.moe_router_topk,
         )
+        _ntok = int(output["meta_info"]["prompt_tokens"]) + len(new_response_tokens) - 1
+        _topk = _re.size // max(1, _ntok * args.num_layers)
+        if _re.size == (_ntok + 1) * args.num_layers * max(1, _topk):
+            # stop-edge: sglang also forwarded the final token; its routing rows
+            # feed no training position - drop the tail position.
+            _re = _re[: _ntok * args.num_layers * _topk]
+        assert _re.size == _ntok * args.num_layers * _topk, (
+            f"routed_experts buffer {_re.size} != ntok({_ntok}) x layers({args.num_layers}) x topk({_topk}); "
+            f"prompt_tokens={output['meta_info'].get('prompt_tokens')} response={len(new_response_tokens)} "
+            f"unexpanded_tokens={len(sample.tokens)}"
+        )
+        sample.rollout_routed_experts = _re.reshape(_ntok, args.num_layers, _topk)
+    if "indexer_topk" in output["meta_info"]:
+        sample.rollout_indexer_topk = get_indexer_topk_from_response(args, output, sample)
 
     sample.update_from_meta_info(args, output["meta_info"])
 
@@ -341,23 +389,32 @@ async def generate_and_rm(
 
     state = GenerateState(args)
 
+    # dashboard lifecycle probe (design §18.3): the semaphore wait IS the
+    # queue; attempt_end fires once generation is over, before reward
+    sink = None if evaluation else TrajectoryLifecycle().sink
+    if sink is not None:
+        sink.attempt_start(sample)
+
     # generate
     async with state.semaphore:
         if state.aborted:
             sample.status = Sample.Status.ABORTED
+            if sink is not None:
+                sink.attempt_end(sample)
             return sample
+        if sink is not None:
+            sink.gen_start(sample)
 
         with state.dp_rank_context() as _:
             # Check sample.generate_function_path for per-sample custom_generate_function_path (e.g., from eval dataset config)
             custom_func_path = getattr(sample, "generate_function_path", None) or args.custom_generate_function_path
 
-            if custom_func_path is not None:
-                custom_generate_func = load_function(custom_func_path)
-                # if signature has evaluation, pass evaluation
-                if "evaluation" in inspect.signature(custom_generate_func).parameters:
-                    sample = await custom_generate_func(args, sample, sampling_params, evaluation=evaluation)
-                else:
-                    sample = await custom_generate_func(args, sample, sampling_params)
+            generate_fn = load_generate_function(custom_func_path) if custom_func_path else None
+            if generate_fn is not None:
+                output = await generate_fn(
+                    GenerateFnInput(state=state, sample=sample, sampling_params=sampling_params, evaluation=evaluation)
+                )
+                sample = output.samples
             else:
                 # ORBIT-SEAM: pass the evaluation flag through to generate() (see should_request_rollout_logprobs there)
                 sample = await generate(args, sample, sampling_params, evaluation=evaluation)
@@ -370,6 +427,9 @@ async def generate_and_rm(
         for scored_sample in sample if isinstance(sample, list) else [sample]:
             if scored_sample.status != Sample.Status.ABORTED:
                 await opd_score_sample(args, scored_sample)
+
+    if sink is not None:
+        sink.attempt_end(sample)
 
     # for the rm that need the whole group, we will not do the rm here
     if args.group_rm:
@@ -407,11 +467,11 @@ async def generate_and_rm_group(
     if state.aborted:
         return group
 
-    # Generate a unique session_id for each sample in the group (consistent hashing only)
-    if args.sglang_router_policy == "consistent_hashing":
+    # Generate a unique routing_key for each sample in the group (routing-key policies only)
+    if policy_uses_routing_key(args):
         for sample in group:
-            if sample.session_id is None:
-                sample.session_id = str(uuid.uuid4())
+            if sample.routing_key is None:
+                sample.routing_key = str(uuid.uuid4())
 
     tasks = []
     for idx, sample in enumerate(group):
@@ -448,6 +508,7 @@ async def abort(args: Namespace, rollout_id: int) -> list[list[Sample]]:
     else:
         response = await get(f"http://{args.sglang_router_ip}:{args.sglang_router_port}/workers")
         urls = [worker["url"] for worker in response["workers"]]
+    urls = router_worker_base_urls(urls)
 
     logger.info(f"Abort request for {urls}")
     abort_tasks = [post(f"{url}/abort_request", {"abort_all": True}) for url in urls]
@@ -455,6 +516,10 @@ async def abort(args: Namespace, rollout_id: int) -> list[list[Sample]]:
     for url, result in zip(urls, abort_results, strict=False):
         if isinstance(result, Exception):
             logger.warning(f"Failed to abort worker at {url}: {result}")
+
+    # Let the agent integration tear down its in-flight trials so they stop hitting
+    # SGLang, instead of running on until their own max_seq_len / timeout.
+    await call_agent_abort_hook(args)
 
     # make sure all the pending tasks are finished
     count = 0
@@ -530,7 +595,10 @@ async def generate_rollout_async(
             if do_print:
                 sample = group[0][0] if isinstance(group[0], list) else group[0]
                 logger.info(
-                    f"First rollout sample: {[str(sample.prompt) + sample.response]}, label: {str(sample.label)[:100]}, reward: {sample.reward}",
+                    "First rollout sample: text_preview=%s, label=%s, reward_summary=%s",
+                    sample_text_preview(sample),
+                    str(sample.label)[:100],
+                    reward_log_summary(sample.reward),
                 )
                 do_print = False
 
@@ -558,7 +626,10 @@ async def generate_rollout_async(
     _set_active_phase(None)
     sample = data[-1][0][0] if isinstance(data[-1][0], list) else data[-1][0]
     logger.info(
-        f"Finish rollout: {[str(sample.prompt) + sample.response]}, label: {str(sample.label)[:100]}, reward: {sample.reward}",
+        "Finish rollout: text_preview=%s, label=%s, reward_summary=%s",
+        sample_text_preview(sample),
+        str(sample.label)[:100],
+        reward_log_summary(sample.reward),
     )
 
     # there are still some unfinished requests, abort them
@@ -588,14 +659,21 @@ async def generate_rollout_async(
 
     # reset the global state to prevent effects on the next rollout or eval.
     state.reset()
-    if args.rollout_sample_filter_path is not None:
-        filter_func = load_function(args.rollout_sample_filter_path)
+    if (x := args.rollout_sample_filter_path) is not None:
+        filter_func = load_function(x)
         filter_func(args, data)
 
     # There can be circumstances where users want to process all samples including filtered ones.
-    if args.rollout_all_samples_process_path is not None:
-        process_func = load_function(args.rollout_all_samples_process_path)
+    if (x := args.rollout_all_samples_process_path) is not None:
+        process_func = load_function(x)
         process_func(args, all_samples, data_source)
+
+    await recompute_samples_rollout_logprobs_via_prefill(
+        args,
+        [sample for group in data for sample in group],
+        url=get_model_url(args, "default"),
+        sampling_params=state.sampling_params,
+    )
 
     return RolloutFnTrainOutput(samples=data, metrics=metric_gatherer.collect()), aborted_samples
 
@@ -731,6 +809,8 @@ async def eval_rollout_single_dataset(
             sample_index += 1
             sample.metadata = dataset_cfg.inject_metadata(getattr(sample, "metadata", None))
             sample.generate_function_path = getattr(dataset_cfg, "custom_generate_function_path", None)
+            if policy_uses_routing_key(args):
+                sample.routing_key = str(uuid.uuid4())
             sampling_params = base_sampling_params
             if getattr(args, "sglang_enable_deterministic_inference", False):
                 sampling_params = base_sampling_params.copy()
@@ -764,10 +844,11 @@ async def eval_rollout_single_dataset(
     for coro in asyncio.as_completed(tasks):
         sample = await coro
         if do_print:
+            logged_sample = sample[0] if isinstance(sample, list) else sample
             logger.info(
                 "eval_rollout_single_dataset example data: "
-                f"{[str(sample.prompt) + sample.response]} "
-                f"reward={sample.reward}"
+                f"{[str(logged_sample.prompt) + logged_sample.response]} "
+                f"reward={logged_sample.reward}"
             )
             do_print = False
         if isinstance(sample, list):

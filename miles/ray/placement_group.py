@@ -1,3 +1,4 @@
+import copy
 import logging
 import socket
 
@@ -5,16 +6,22 @@ import ray
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
-from miles.utils.async_utils import eager_create_task
 # ORBIT-SEAM: needs_opd_teacher/uses_rollout_engines/uses_separate_critic gate PG sizing for OPD teacher
 # actors, debug_rollout_only-style configs, and rollout-only critic setups (used throughout this file)
 from miles.utils.arguments import needs_opd_teacher, uses_rollout_engines, uses_separate_critic
-
+from miles.utils.environ import enable_experimental_ft_trainer
 from ..utils.ray_utils import compute_ray_pin_head_options
-from .actor_group import RayTrainGroup
-from .rollout import RolloutManager
+from .rollout.rollout_manager import RolloutManager
 
 logger = logging.getLogger(__name__)
+
+
+def _select_train_group_class():
+    if enable_experimental_ft_trainer():
+        from miles.ray.train.group import RayTrainGroup
+    else:
+        from miles.ray.actor_group import RayTrainGroup
+    return RayTrainGroup
 
 
 @ray.remote(num_gpus=1)
@@ -44,8 +51,11 @@ def sort_key(x):
     return (node_ip_parts, gpu_id)
 
 
-def _create_placement_group(num_gpus):
+def _create_placement_group(num_gpus, is_rdt: bool = False):
     """Create a placement group with the specified number of GPUs."""
+    if num_gpus == 0:
+        return None, [], []
+
     bundles = [{"GPU": 1, "CPU": 1} for _ in range(num_gpus)]
     pg = placement_group(bundles, strategy="PACK")
     num_bundles = len(bundles)
@@ -67,7 +77,16 @@ def _create_placement_group(num_gpus):
         ray.kill(actor)
 
     bundle_infos = [(i, gpu_ids[i][0], gpu_ids[i][1]) for i in range(num_bundles)]
-    sorted_bundle_infos = sorted(bundle_infos, key=sort_key)
+    if is_rdt:
+        # Give the trainer the node PACK filled, so rollout bundles land where GPUs
+        # are still free: RayEngine STRICT_PACKs its SchedulerActors onto the engine
+        # actor's node and deadlocks if nothing there is unreserved.
+        node_bundle_counts: dict = {}
+        for _, node_identifier, _ in bundle_infos:
+            node_bundle_counts[node_identifier] = node_bundle_counts.get(node_identifier, 0) + 1
+        sorted_bundle_infos = sorted(bundle_infos, key=lambda info: (-node_bundle_counts[info[1]], *sort_key(info)))
+    else:
+        sorted_bundle_infos = sorted(bundle_infos, key=sort_key)
     pg_reordered_bundle_indices = [info[0] for info in sorted_bundle_infos]
     # Map from logical index -> physical GPU ID
     pg_reordered_gpu_ids = [gpu_ids[info[0]][1] for info in sorted_bundle_infos]
@@ -97,70 +116,81 @@ def _opd_teacher_extra_gpus(args) -> int:
         total += args.opd_teacher_num_gpus
     pool_path = getattr(args, "opd_teacher_pool", None)
     if pool_path is not None:
-        from miles.ray.rollout import _opd_teacher_pool
+        # ORBIT-SEAM re-anchor: upstream dbbab156 turned miles/ray/rollout.py into a package, so the
+        # pool helper is imported from its orbit home rather than re-exported through that module.
+        from orbit.opd.teacher_servers import _opd_teacher_pool
 
         total += _opd_teacher_pool(args).served_num_gpus
     return total
 
 
+def _get_placement_group_layout(args) -> tuple[int, int, int]:
+    """Returns (num_gpus, rollout_offset, critic_offset).
+
+    ORBIT-SEAM: two orbit deltas on upstream's extracted layout helper --
+    (a) a `uses_separate_critic()` critic slice with its own bundles, because orbit's full-mode PPO
+        critic runs on dedicated GPUs while upstream dbbab156 colocates the critic on the actor PG
+        (`result["critic"] = result["actor"]`); adapter/head critic modes live inside the actor
+        workers and reserve nothing, which is exactly what `uses_separate_critic()` encodes;
+    (b) `uses_rollout_engines()` / `_opd_teacher_extra_gpus()` in the rollout-bearing branches.
+    """
+    actor_num_gpus = args.actor_num_nodes * args.actor_num_gpus_per_node
+    critic_num_gpus = args.critic_num_nodes * args.critic_num_gpus_per_node if uses_separate_critic(args) else 0
+    # The critic slice always sits directly after the actor bundles.
+    critic_offset = actor_num_gpus
+
+    if args.debug_train_only or not uses_rollout_engines(args):
+        return actor_num_gpus + critic_num_gpus, 0, critic_offset
+    if args.rollout_external:
+        if args.debug_rollout_only:
+            return 0, 0, critic_offset
+        return actor_num_gpus + critic_num_gpus, actor_num_gpus + critic_num_gpus, critic_offset
+    if args.debug_rollout_only:
+        return args.rollout_num_gpus + _opd_teacher_extra_gpus(args), 0, critic_offset
+    if args.colocate:
+        return max(actor_num_gpus, args.rollout_num_gpus) + critic_num_gpus, 0, critic_offset
+    return (
+        actor_num_gpus
+        + critic_num_gpus
+        + args.rollout_num_gpus
+        + args.eval_num_gpus
+        + _opd_teacher_extra_gpus(args),
+        actor_num_gpus + critic_num_gpus,
+        critic_offset,
+    )
+
+
 def create_placement_groups(args):
     """Create placement groups for actor and rollout engines."""
 
-    num_gpus = 0
-    # ORBIT-SEAM: also skip rollout-engine GPUs for configs that never use rollout engines
-    # (e.g. debug_rollout_only variants), not just debug_train_only
-    if args.debug_train_only or not uses_rollout_engines(args):
-        num_gpus = args.actor_num_nodes * args.actor_num_gpus_per_node
-        rollout_offset = 0
-        if args.use_critic:
-            num_gpus += args.critic_num_nodes * args.critic_num_gpus_per_node
-            critic_offset = args.actor_num_nodes * args.actor_num_gpus_per_node
-    elif args.debug_rollout_only:
-        # ORBIT-SEAM: budget the managed OPD teacher's own GPUs alongside rollout GPUs (non-colocate)
-        num_gpus = args.rollout_num_gpus + _opd_teacher_extra_gpus(args)
-        rollout_offset = 0
-    elif args.colocate:
-        num_gpus = args.actor_num_nodes * args.actor_num_gpus_per_node
-        rollout_offset = 0
-        if args.use_critic:
-            num_gpus += args.critic_num_nodes * args.critic_num_gpus_per_node
-            critic_offset = args.actor_num_nodes * args.actor_num_gpus_per_node
-    else:
-        # ORBIT-SEAM: same OPD teacher GPU budget as the debug_rollout_only branch above, for the
-        # actor+rollout (non-colocate) topology
-        num_gpus = (
-            args.actor_num_nodes * args.actor_num_gpus_per_node
-            + args.rollout_num_gpus
-            + _opd_teacher_extra_gpus(args)
-        )
-        rollout_offset = args.actor_num_nodes * args.actor_num_gpus_per_node
-        if args.use_critic:
-            num_gpus += args.critic_num_nodes * args.critic_num_gpus_per_node
-            critic_offset = args.actor_num_nodes * args.actor_num_gpus_per_node
-            rollout_offset += args.critic_num_nodes * args.critic_num_gpus_per_node
+    num_gpus, rollout_offset, critic_offset = _get_placement_group_layout(args)
 
     logger.info(f"Creating placement group with {num_gpus} GPUs...")
-    pg, actor_pg_reordered_bundle_indices, actor_pg_reordered_gpu_ids = _create_placement_group(num_gpus)
+    pg, actor_pg_reordered_bundle_indices, actor_pg_reordered_gpu_ids = _create_placement_group(
+        num_gpus, is_rdt=args.update_weight_transfer_mode == "rdt"
+    )
 
     rollout_pg_reordered_bundle_indices = actor_pg_reordered_bundle_indices[rollout_offset:]
     rollout_pg_reordered_gpu_ids = actor_pg_reordered_gpu_ids[rollout_offset:]
-    # ORBIT-SEAM: gate critic PG slicing on uses_separate_critic() (handles rollout-only critic
-    # configs), not raw args.use_critic
-    if uses_separate_critic(args):
-        critic_pg_reordered_bundle_indices = actor_pg_reordered_bundle_indices[critic_offset:]
-        critic_pg_reordered_gpu_ids = actor_pg_reordered_gpu_ids[critic_offset:]
-
-    return {
+    result = {
         "actor": (pg, actor_pg_reordered_bundle_indices, actor_pg_reordered_gpu_ids),
-        # ORBIT-SEAM: same uses_separate_critic() gate as above, applied to the returned dict entry
-        "critic": (pg, critic_pg_reordered_bundle_indices, critic_pg_reordered_gpu_ids) if uses_separate_critic(args) else None,
         "rollout": (pg, rollout_pg_reordered_bundle_indices, rollout_pg_reordered_gpu_ids),
     }
+    # ORBIT-SEAM: orbit's full-mode PPO critic owns its own bundle slice (upstream dbbab156 hands the
+    # critic the actor's own slice); adapter/head critic modes never reach here.
+    if uses_separate_critic(args):
+        result["critic"] = (
+            pg,
+            actor_pg_reordered_bundle_indices[critic_offset:],
+            actor_pg_reordered_gpu_ids[critic_offset:],
+        )
+    else:
+        result["critic"] = None
+    return result
 
 
 # ORBIT-SEAM: PEFT runs derive the reference policy by disabling adapters (no separate "ref" checkpoint
-# tag), so the with_ref decision below now routes through this helper instead of the raw KL-coef check;
-# allocate_train_group also gains with_opd_teacher to thread through to RayTrainGroup
+# tag), so the with_ref decision below routes through this helper instead of the raw KL-coef check
 def _actor_needs_reference_weights(args) -> bool:
     """Whether the actor should load a separate reference checkpoint.
 
@@ -171,17 +201,21 @@ def _actor_needs_reference_weights(args) -> bool:
 
 
 def allocate_train_group(
-    args, num_nodes, num_gpus_per_node, pg, role: str, with_ref: bool, with_opd_teacher: bool = False
+    args, num_nodes, num_gpus_per_node, pg, role: str, with_ref: bool, rollout_manager, with_opd_teacher: bool = False
 ):
-    return RayTrainGroup(
+    # RDT pins one NIXL/NCCL rank per physical GPU, so it cannot time-share a device
+    # with a colocated rollout the way the fractional reservation allows.
+    num_gpus_per_actor = 1 if args.update_weight_transfer_mode == "rdt" else 0.4
+    train_group_cls = _select_train_group_class()
+    return train_group_cls(
         args=args,
         num_nodes=num_nodes,
         num_gpus_per_node=num_gpus_per_node,
         pg=pg,
-        num_gpus_per_actor=0.4,
+        num_gpus_per_actor=num_gpus_per_actor,
         role=role,
         with_ref=with_ref,
-        # ORBIT-SEAM: propagate the OPD teacher-actor flag through to RayTrainGroup.__init__
+        rollout_manager=rollout_manager,
         with_opd_teacher=with_opd_teacher,
     )
 
@@ -204,34 +238,43 @@ async def create_training_models(args, pgs, rollout_manager):
         num_gpus_per_node=args.actor_num_gpus_per_node,
         pg=pgs["actor"],
         role="actor",
-        # ORBIT-SEAM: with_ref now derived from _actor_needs_reference_weights (PEFT-aware); spin up an
-        # OPD teacher actor only for the megatron-hosted teacher path (needs_opd_teacher + opd_type check)
+        # ORBIT-SEAM: with_ref derived from _actor_needs_reference_weights (PEFT-aware, upstream uses the
+        # raw KL-coef check); needs_opd_teacher() covers both OPD objective forms where upstream reads
+        # args.use_opd only
         with_ref=_actor_needs_reference_weights(args),
+        rollout_manager=rollout_manager,
         with_opd_teacher=needs_opd_teacher(args) and args.opd_type == "megatron",
     )
-    # ORBIT-SEAM: gate critic-group creation on uses_separate_critic() (handles rollout-only critic
-    # configs), not raw args.use_critic
+    actor_start_rollout_ids = await actor_model.init()
+
+    # ORBIT-SEAM: gate critic-group creation on uses_separate_critic() (adapter/head critic modes run
+    # inside the actor workers), not raw args.use_critic
     if uses_separate_critic(args):
+        critic_args = copy.deepcopy(args)
+        critic_args.kl_coef = 0
+        critic_args.use_opd = False
+        critic_args.disable_param_buffers_cpu_backup = False
         critic_model = allocate_train_group(
-            args=args,
+            args=critic_args,
             num_nodes=args.critic_num_nodes,
             num_gpus_per_node=args.critic_num_gpus_per_node,
             pg=pgs["critic"],
             role="critic",
             with_ref=False,
+            rollout_manager=None,
         )
-        critic_init_task = await eager_create_task(critic_model.init())
+        critic_start_rollout_ids = await critic_model.init()
     else:
         critic_model = None
 
     # ORBIT-SEAM: consistency-checked start_rollout_id resolution via _single_start_rollout_id (replaces
     # the bare set-length assert), extended to also cross-check actor vs critic resume points
-    actor_start_rollout_id = _single_start_rollout_id("actor", await actor_model.init())
+    actor_start_rollout_id = _single_start_rollout_id("actor", actor_start_rollout_ids)
     if args.start_rollout_id is None:
         args.start_rollout_id = actor_start_rollout_id
 
     if uses_separate_critic(args):
-        critic_start_rollout_id = _single_start_rollout_id("critic", await critic_init_task)
+        critic_start_rollout_id = _single_start_rollout_id("critic", critic_start_rollout_ids)
         if actor_start_rollout_id != critic_start_rollout_id:
             raise RuntimeError(
                 "actor and critic checkpoints must resume at the same rollout id; "
@@ -239,7 +282,7 @@ async def create_training_models(args, pgs, rollout_manager):
             )
         await actor_model.connect(critic_model)
 
-    await actor_model.set_rollout_manager(rollout_manager)
+    await actor_model.set_rollout_manager()
     if args.rollout_global_dataset:
         await rollout_manager.load.remote(args.start_rollout_id - 1)
 
@@ -262,7 +305,9 @@ def create_rollout_manager(args, pg):
     # (uses_rollout_engines), not just on the raw flag
     if uses_rollout_engines(args) and args.check_weight_update_equal:
         ray.get(rollout_manager.check_weights.remote(action="snapshot"))
-        ray.get(rollout_manager.check_weights.remote(action="reset_tensors"))
+        ray.get(
+            rollout_manager.check_weights.remote(action="reset_tensors", skip_list=args.check_weight_update_skip_list)
+        )
 
     if args.offload_rollout:
         # ORBIT-SEAM: explains why the existing no-tags offload call below is a no-op in async/disjoint

@@ -4,25 +4,42 @@ from collections.abc import Sequence
 
 import torch
 import torch.distributed as dist
-from megatron.core import mpu
 from tqdm import tqdm
 
+from miles.backends.training_utils.parallel import get_parallel_state
 from miles.utils.distributed_utils import get_gloo_group
 from miles.utils.types import ParamInfo
 
 from ..megatron_to_hf import convert_to_hf
 from ..sglang import monkey_patch_torch_reductions
-from .common import all_gather_params_async, named_params_and_buffers, uses_expert_tensor_parallel_group
+from .common import (
+    NamedUpdateUnit,
+    all_gather_params_async,
+    get_atomic_update_groups,
+    get_named_update_units,
+    named_params_and_buffers,
+    # ORBIT-SEAM: orbit's expert-TP predicate (DSV4 shared-expert / grouped-MoE-OFT names) replaces
+    # upstream's is_routed_expert_param at the two routing sites below
+    uses_expert_tensor_parallel_group,
+)
 from .hf_weight_iterator_base import HfWeightIteratorBase
 
 
 class HfWeightIteratorDirect(HfWeightIteratorBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.megatron_local_param_info_buckets = _get_megatron_local_param_info_buckets(self.args, self.model)
+        self.megatron_local_param_info_buckets = _get_megatron_local_param_info_buckets(
+            self.args, self.model, self.model_name
+        )
 
-    def get_hf_weight_chunks(self, megatron_local_weights):
+    def get_hf_weight_chunks(self, megatron_local_weights, weight_type="base"):
         rank = dist.get_rank()
+
+        if weight_type == "lora":
+            from miles_plugins.models.inkling.lora import export_inkling_lora_hf_named
+
+            yield export_inkling_lora_hf_named(self.model)
+            return
 
         for megatron_local_param_infos in tqdm(
             self.megatron_local_param_info_buckets, disable=rank != 0, desc="Update weights"
@@ -49,8 +66,8 @@ def _get_megatron_full_params(
     megatron_local_weights,
 ) -> Sequence[torch.Tensor]:
     monkey_patch_torch_reductions()
-    pp_size = mpu.get_pipeline_model_parallel_world_size()
-    ep_size = mpu.get_expert_model_parallel_world_size()
+    pp_size = get_parallel_state().pp.size
+    ep_size = get_parallel_state().ep.size
     rank = dist.get_rank()
     # init params:
     params = []
@@ -70,10 +87,10 @@ def _get_megatron_full_params(
     if pp_size > 1:
         handles = []
         for info, param in zip(megatron_local_param_infos, params, strict=False):
-            if info.src_rank in dist.get_process_group_ranks(mpu.get_pipeline_model_parallel_group()):
+            if info.src_rank in dist.get_process_group_ranks(get_parallel_state().pp.group):
                 handles.append(
                     torch.distributed.broadcast(
-                        param, src=info.src_rank, group=mpu.get_pipeline_model_parallel_group(), async_op=True
+                        param, src=info.src_rank, group=get_parallel_state().pp.group, async_op=True
                     )
                 )
         for handle in handles:
@@ -83,16 +100,17 @@ def _get_megatron_full_params(
     if ep_size > 1:
         handles = []
         for info, param in zip(megatron_local_param_infos, params, strict=False):
-            # ORBIT-SEAM: EP-aware param routing must ask the param, not substring-match '.experts.' (upstream candidate)
+            # ORBIT-SEAM: EP-aware param routing goes through orbit's predicate, not upstream's
+            # is_routed_expert_param
             if uses_expert_tensor_parallel_group(info.name):
                 src_rank = (
                     info.src_rank
-                    if info.src_rank in dist.get_process_group_ranks(mpu.get_expert_model_parallel_group())
+                    if info.src_rank in dist.get_process_group_ranks(get_parallel_state().ep.group)
                     else rank
                 )
                 handles.append(
                     torch.distributed.broadcast(
-                        param, src=src_rank, group=mpu.get_expert_model_parallel_group(), async_op=True
+                        param, src=src_rank, group=get_parallel_state().ep.group, async_op=True
                     )
                 )
         for handle in handles:
@@ -109,33 +127,47 @@ def _get_megatron_full_params(
     return gathered_params
 
 
-def _get_megatron_local_param_info_buckets(args: Namespace, model: Sequence[torch.nn.Module]) -> list[list[ParamInfo]]:
+def _get_megatron_local_param_info_buckets(
+    args: Namespace, model: Sequence[torch.nn.Module], model_name: str
+) -> list[list[ParamInfo]]:
     """
     Partition params into buckets ≤ update_weight_buffer_size (with TP replication).
+
+    Model-specific atomic update groups are kept in the same bucket because
+    some rollout loaders must see related tensors in the same load_weights call.
     """
     param_infos = _get_megatron_local_param_infos(args, model)
-    param_info_buckets = [[]]  # Start with one empty bucket
-    buffer_size = 0  # Track current bucket size in bytes
+    param_names = [info.name for info in param_infos]
+    atomic_update_groups = get_atomic_update_groups(args, model_name)
+    update_units = get_named_update_units(param_names, atomic_update_groups)
+    return _pack_update_units(args, param_infos, update_units)
 
-    for info in param_infos:
-        # Expert-tensor-sharded params use expert-TP size, others use regular-TP size.
-        # ORBIT-SEAM: EP-aware TP sizing (same fix)
-        if uses_expert_tensor_parallel_group(info.name):
-            tp_size = mpu.get_expert_tensor_parallel_world_size()
-        else:
-            tp_size = mpu.get_tensor_model_parallel_world_size()
 
-        # Full param size = shard size × TP replicas (all-gather will reconstruct full param)
-        param_size = info.size * tp_size
+def _get_param_full_size(info: ParamInfo) -> int:
+    # ORBIT-SEAM: EP-aware TP sizing goes through orbit's predicate, not upstream's
+    # is_routed_expert_param
+    if uses_expert_tensor_parallel_group(info.name):
+        tp_size = get_parallel_state().etp.size
+    else:
+        tp_size = get_parallel_state().tp.size
+    return info.size * tp_size
 
-        # If adding this param exceeds limit AND current bucket has params: start new bucket
-        if buffer_size + param_size > args.update_weight_buffer_size and len(param_info_buckets[-1]) > 0:
+
+def _pack_update_units(
+    args: Namespace, param_infos: list[ParamInfo], update_units: list[NamedUpdateUnit]
+) -> list[list[ParamInfo]]:
+    by_name = {info.name: info for info in param_infos}
+    param_info_buckets: list[list[ParamInfo]] = [[]]
+    buffer_size = 0
+
+    for unit in update_units:
+        params = [by_name[name] for name in unit.names]
+        unit_size = sum(_get_param_full_size(param) for param in params)
+        if buffer_size + unit_size > args.update_weight_buffer_size and param_info_buckets[-1]:
             param_info_buckets.append([])
             buffer_size = 0
-
-        # Add param to current bucket and update size
-        param_info_buckets[-1].append(info)
-        buffer_size += param_size
+        param_info_buckets[-1].extend(params)
+        buffer_size += unit_size
 
     return param_info_buckets
 
@@ -145,12 +177,16 @@ def _get_megatron_local_param_infos(args: Namespace, model: Sequence[torch.nn.Mo
     Build global param metadata: collect → exchange PP/EP → resolve duplicates (MTP virtual PP)
     by min src_rank → validate. Returns sorted ParamInfo identical across all ranks.
     """
-    pp_size = mpu.get_pipeline_model_parallel_world_size()
-    ep_size = mpu.get_expert_model_parallel_world_size()
+    pp_size = get_parallel_state().pp.size
+    ep_size = get_parallel_state().ep.size
+
+    from ..lora_utils import _is_adapter_param_name
 
     param_infos = {}
     rank = dist.get_rank()
     for name, param in named_params_and_buffers(args, model):
+        if _is_adapter_param_name(name):
+            continue
         param_infos[name] = ParamInfo(
             name=name,
             dtype=param.dtype,
@@ -168,7 +204,7 @@ def _get_megatron_local_param_infos(args: Namespace, model: Sequence[torch.nn.Mo
     if pp_size > 1:
         param_infos_list = [None] * pp_size
         dist.all_gather_object(
-            obj=(rank, param_infos), object_list=param_infos_list, group=mpu.get_pipeline_model_parallel_group()
+            obj=(rank, param_infos), object_list=param_infos_list, group=get_parallel_state().pp.group
         )
         for src_rank, infos in param_infos_list:
             if src_rank == rank:
@@ -185,7 +221,7 @@ def _get_megatron_local_param_infos(args: Namespace, model: Sequence[torch.nn.Mo
     if ep_size > 1:
         param_infos_list = [None] * ep_size
         dist.all_gather_object(
-            obj=(rank, param_infos), object_list=param_infos_list, group=mpu.get_expert_model_parallel_group()
+            obj=(rank, param_infos), object_list=param_infos_list, group=get_parallel_state().ep.group
         )
         for src_rank, infos in param_infos_list:
             for name, info in infos.items():

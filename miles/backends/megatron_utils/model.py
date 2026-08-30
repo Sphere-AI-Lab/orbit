@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 # ORBIT-SEAM: removed base's `import dataclasses`: optimizer construction moved to orbit/megatron/optim_build.py
 import gc
 import logging
@@ -6,6 +8,7 @@ import math
 import os
 from argparse import Namespace
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from functools import partial
 from pathlib import Path
 
@@ -15,13 +18,21 @@ from megatron.core.distributed import DistributedDataParallel as DDP
 from megatron.core.distributed import finalize_model_grads
 from megatron.core.enums import ModelType
 from megatron.core.models.gpt import GPTModel
-# ORBIT-SEAM: removed base's `from megatron.core.optimizer import OptimizerConfig, get_megatron_optimizer`: both are used only by the optimizer builder, now in orbit/megatron/optim_build.py
+# ORBIT-SEAM: removed base's `from megatron.core.optimizer import OptimizerConfig, get_megatron_optimizer`
+# and upstream's `get_megatron_muon_optimizer`: all three are used only by the optimizer builder,
+# now in orbit/megatron/optim_build.py
 from megatron.core.optimizer.optimizer import MegatronOptimizer
 from megatron.core.optimizer_param_scheduler import OptimizerParamScheduler
 from megatron.core.pipeline_parallel import get_forward_backward_func
 from megatron.core.utils import get_model_config
 from megatron.training.global_vars import get_args
 from megatron.training.training import get_model
+
+from miles.backends.megatron_utils.ft.indep_dp import allreduce_grads_and_losses_across_replicas
+from miles.backends.megatron_utils.ft.types import TrainStepOutcome
+from miles.backends.megatron_utils.local_weight_checksum import dump_local_weight_checksums
+from miles.utils.audit_utils.witness.allocator import WitnessInfo
+from miles.utils.audit_utils.witness.module import witness_dump_and_clear_stale
 
 # ORBIT-SEAM: install orbit's megatron.post_training.checkpointing shim at import of the module that owns the only get_model() call site
 from orbit.megatron.modelopt_state_shim import install_if_missing as _install_modelopt_shim
@@ -38,7 +49,11 @@ _MODELOPT_SHIM_INSTALLED = _install_modelopt_shim()
 from miles.utils.arguments import uses_adapter_critic, uses_head_critic, uses_one_trunk_critic
 from miles.utils.dumper_utils import DumperMegatronUtil, DumperPhase
 from miles.utils.memory_utils import clear_memory
+from miles.utils.multi_lora import is_multi_lora_enabled
+from miles.utils.test_utils.ft_test_actions import FTTestActionActorExecutor
+from miles.utils.tracking_utils.structured_log import log_structured
 
+from ...utils.misc import filter_keys
 from ..training_utils.ci_utils import check_grad_norm, check_kl
 from ..training_utils.data import DataIterator, get_batch
 from ..training_utils.log_utils import aggregate_forward_results, aggregate_train_losses, log_train_step
@@ -52,9 +67,12 @@ from .ci_utils import (
     compute_model_hashes_by_layer,
     save_model_hashes,
 )
+from .initialize import is_first_replica_megatron_main_rank
+from .lora_utils import is_lora_enabled, is_lora_model  # noqa: F401  (kept for base call sites)
+
 # ORBIT-SEAM: model-declared parameter dtype overrides (e.g. Qwen3.5 A_log pinned to fp32) are applied before the optimizer maps params
 from orbit.megatron.fp32_param_utils import enforce_marked_param_dtypes
-from .initialize import is_megatron_main_rank
+
 # ORBIT-SEAM: low-precision PEFT picks the build order in initialize_model_and_optimizer (base has one order)
 from orbit.megatron.low_precision_bootstrap import should_preload_low_precision_model_before_optimizer
 from .model_provider import get_model_provider_func
@@ -85,6 +103,11 @@ from orbit.megatron.optim_build import _build_optimizer_and_scheduler
 # ORBIT-SEAM: save-time common-state normalization and the memory-history snapshot writer lifted to the home layer (P1); the seams below only call them
 from orbit.megatron.checkpointing import _preprocess_common_state_dict_for_megatron_save
 from orbit.megatron.memory_snapshot import _dump_memory_history_snapshot
+
+
+def _has_loadable_ckpt(load_dir: str | None) -> bool:
+    """Whether ``--load`` holds anything; ``load_checkpoint`` dispatches dist vs HF itself."""
+    return bool(load_dir) and Path(load_dir).is_dir() and any(Path(load_dir).iterdir())
 
 
 def get_optimizer_param_scheduler(args: Namespace, optimizer: MegatronOptimizer) -> OptimizerParamScheduler:
@@ -140,10 +163,14 @@ def get_optimizer_param_scheduler(args: Namespace, optimizer: MegatronOptimizer)
 # ---------------------------------------------------------------------------
 
 
+def _is_muon_optimizer(optimizer: str | None) -> bool:
+    return optimizer is not None and "muon" in optimizer.lower()
+
+
 def setup_model_and_optimizer(
     args: Namespace,
     role: str = "actor",
-) -> tuple[list[DDP], MegatronOptimizer, OptimizerParamScheduler]:
+) -> tuple[list[DDP], MegatronOptimizer | None, OptimizerParamScheduler | None]:
     """Build model(s), wrap with DDP, and construct optimizer and scheduler.
 
     Args:
@@ -153,8 +180,10 @@ def setup_model_and_optimizer(
     Returns:
         tuple[list[DDP], MegatronOptimizer, OptimizerParamScheduler]:
             - List of model chunks wrapped by ``DDP``.
-            - The constructed ``MegatronOptimizer`` instance.
-            - The learning-rate/weight-decay scheduler tied to the optimizer.
+            - The constructed ``MegatronOptimizer`` instance, or ``None`` when
+              ``--debug-disable-optimizer`` is set.
+            - The learning-rate/weight-decay scheduler tied to the optimizer, or
+              ``None`` when ``--debug-disable-optimizer`` is set.
     """
     assert not args.moe_use_upcycling
     # ORBIT-SEAM: base asserts a checkpoint source unconditionally
@@ -168,20 +197,51 @@ def setup_model_and_optimizer(
     # ORBIT-SEAM: base inlines the PEFT-vs-plain build and the optimizer build here; both are named
     # steps now because initialize_model_and_optimizer's low-precision path runs them out of order
     model = _build_model(args, role)
+
+    # ORBIT-SEAM(upstream): --debug-disable-optimizer short-circuit, kept here because orbit's
+    # optimizer builder lives in orbit/megatron/optim_build.py
+    if args.debug_disable_optimizer:
+        if is_first_replica_megatron_main_rank():
+            logger.warning(
+                "Skipping Megatron optimizer and LR scheduler initialization "
+                "because --debug-disable-optimizer is set."
+            )
+        return model, None, None
+
     # Apply parameter-level dtype overrides declared in model definitions
     # (e.g. Qwen3.5 A_log pinned to fp32) before the optimizer maps params.
     enforce_marked_param_dtypes(model)
     optimizer, opt_param_scheduler = _build_optimizer_and_scheduler(args, model)
+
+    # ORBIT-SEAM(upstream): NVMe optimizer-state streaming hookup, kept here for the same reason
+    if args.stream_optimizer_state_to_disk:
+        from miles_plugins.optimizers.nvme_stream import setup_optimizer_state_streaming
+
+        setup_optimizer_state_streaming(args, optimizer)
+
     return model, optimizer, opt_param_scheduler
 
 
 # ORBIT-SEAM: base's inline `is_lora_enabled(args) and role == "actor"` bridge branch is orbit's PEFT
 # (LoRA + OFT) build, widened to the adapter-mode critic, plus the head-mode critic provider wrap
 def _build_model(args: Namespace, role: str = "actor") -> list[DDP]:
+    # Multi-LoRA (upstream) and orbit's PEFT (LoRA + OFT) both build via the bridge helper, which
+    # picks the adapter type internally.
     peft_bridge = is_peft_enabled(args) and args.megatron_to_hf_mode == "bridge"
-    if peft_bridge and (role == "actor" or (role == "critic" and uses_adapter_critic(args))):
+    if is_multi_lora_enabled(args) or (
+        peft_bridge and (role == "actor" or (role == "critic" and uses_adapter_critic(args)))
+    ):
         return _setup_peft_model_via_bridge(args, role=role)
     provider = get_model_provider_func(args, role)
+    # ORBIT-SEAM(upstream): inkling LoRA provider wrap
+    if (
+        is_lora_enabled(args)
+        and role == "actor"
+        and "inkling" in (getattr(args, "custom_model_provider_path", None) or "")
+    ):
+        from miles_plugins.models.inkling.lora import wrap_model_provider_with_inkling_lora
+
+        provider = wrap_model_provider_with_inkling_lora(provider, args)
     if role == "critic" and uses_head_critic(args):
         provider = _head_critic_provider(provider)
     return get_model(provider, ModelType.encoder_or_decoder)
@@ -232,6 +292,7 @@ def forward_only(
     model: Sequence[DDP],
     data_iterator: Sequence[DataIterator],
     num_microbatches: Sequence[int],
+    rollout_id: int,
     store_prefix: str = "",
 ) -> dict[str, list[torch.Tensor]]:
     """Run forward passes only and collect non-loss outputs (e.g., logprobs).
@@ -245,13 +306,16 @@ def forward_only(
         model: Sequence of DDP-wrapped model chunks.
         data_iterator: Iterable(s) yielding batches for inference.
         num_microbatches: Number of microbatches per rollout step.
+        rollout_id: Rollout identifier (selects the per-rollout dump subdirectory).
         store_prefix: Prefix to prepend to stored output keys.
 
     Returns:
         Aggregated outputs keyed by ``store_prefix + key``.
     """
 
-    dumper_phase_util = DumperMegatronUtil(args, model, DumperPhase.FWD_ONLY)
+    dumper_phase_util = DumperMegatronUtil(
+        args, model, DumperPhase.FWD_ONLY, rollout_id=rollout_id, store_prefix=store_prefix
+    )
 
     # reset data iterator
     for iterator in data_iterator:
@@ -287,6 +351,7 @@ def forward_only(
                 "total_lengths",
                 "response_lengths",
                 "max_seq_lens",
+                "witness_ids",
             ],
             args.data_pad_size_multiplier,
             args.qkv_format,
@@ -297,6 +362,12 @@ def forward_only(
         packed_seq_params = get_packed_seq_params(batch, args)
         total_lengths = batch["total_lengths"]
         response_lengths = batch["response_lengths"]
+
+        if "adapter_token_counts" in batch:
+            from megatron.bridge.peft.multi_lora_layers import set_tokens_per_adapter_slot
+
+            set_tokens_per_adapter_slot(model, batch["adapter_token_counts"])
+
         output_tensor = model(
             input_ids=tokens,
             position_ids=None,
@@ -304,6 +375,7 @@ def forward_only(
             labels=None,
             packed_seq_params=packed_seq_params,
             loss_mask=batch["full_loss_masks"],
+            **(filter_keys(batch, ["witness_ids"]) if args.enable_witness else {}),
             **(batch["multimodal_train_inputs"] if batch["multimodal_train_inputs"] is not None else {}),
         )
 
@@ -360,20 +432,35 @@ def forward_only(
     return rollout_data
 
 
+def _zero_grads(model: Sequence[DDP], optimizer: MegatronOptimizer | None, disable_optimizer: bool) -> None:
+    for model_chunk in model:
+        model_chunk.zero_grad_buffer()
+    if not disable_optimizer:
+        optimizer.zero_grad()
+
+
 def train_one_step(
     args: Namespace,
     rollout_id: int,
     step_id: int,
     data_iterator: Sequence[DataIterator],
     model: Sequence[DDP],
-    optimizer: MegatronOptimizer,
-    opt_param_scheduler: OptimizerParamScheduler,
+    optimizer: MegatronOptimizer | None,
+    opt_param_scheduler: OptimizerParamScheduler | None,
     num_microbatches: int,
-) -> tuple[dict[str, float], float]:
+    num_rollouts: int,
+    witness_info: WitnessInfo | None,
+    attempt: int,
+    ft_test_action_executor: FTTestActionActorExecutor | None = None,
+) -> tuple[dict[str, float], float, TrainStepOutcome]:
     """Execute a single pipeline-parallel training step.
 
     Runs forward/backward over ``num_microbatches``, applies optimizer step and
     one scheduler step when gradients are valid.
+
+    Multi-LoRA: gradients are retained across train calls (per-adapter
+    gradient accumulation); only the slots in the batch's ``step_slots`` step,
+    and only their gradients are zeroed.
 
     Args:
         args: Runtime arguments.
@@ -384,17 +471,25 @@ def train_one_step(
         optimizer: Optimizer instance.
         opt_param_scheduler: LR/WD scheduler.
         num_microbatches: Number of microbatches to process.
+        num_rollouts: This step's rollout count (loss normalizer + LR increment).
 
     Returns:
-        Reduced loss dictionary (last stage only) and gradient norm for logging.
+        Tuple of (reduced loss dict, gradient norm, step outcome).
     """
     args = get_args()
-    dumper_phase_util = DumperMegatronUtil(args, model, DumperPhase.FWD_BWD)
+    parallel_state = get_parallel_state()
+    dumper_phase_util = DumperMegatronUtil(args, model, DumperPhase.FWD_BWD, rollout_id=rollout_id)
+    disable_optimizer = args.debug_disable_optimizer or optimizer is None
+    multi_lora = is_multi_lora_enabled(args)
 
-    # Set grad to zero.
-    for model_chunk in model:
-        model_chunk.zero_grad_buffer()
-    optimizer.zero_grad()
+    if multi_lora:
+        from miles.backends.megatron_utils.multi_lora_optimizer import reset_grad_metadata_keep_grads
+
+        # Retain accumulated per-adapter gradients; reset only the per-iteration
+        # DDP bookkeeping. Slot grads are zeroed selectively at step time.
+        reset_grad_metadata_keep_grads(model)
+    else:
+        _zero_grads(model, optimizer, disable_optimizer)
 
     if args.custom_megatron_before_train_step_hook_path:
         from miles.utils.misc import load_function
@@ -440,11 +535,19 @@ def train_one_step(
                 "teacher_topk_ids",
                 "teacher_topk_logprobs",
                 "max_seq_lens",
+                "witness_ids",
+                "opd_reverse_kl",
+                "rollout_mask_sums",
             ],
             args.data_pad_size_multiplier,
             args.qkv_format,
             allgather_cp=args.allgather_cp,
         )
+
+        if "adapter_token_counts" in batch:
+            from megatron.bridge.peft.multi_lora_layers import set_tokens_per_adapter_slot
+
+            set_tokens_per_adapter_slot(model, batch["adapter_token_counts"])
 
         from miles.utils.replay_base import all_replay_managers
 
@@ -454,6 +557,7 @@ def train_one_step(
 
         if return_schedule_plan:
             assert not args.enable_mtp_training, "MTP training should not be enabled when using combined 1f1b"
+            assert not args.enable_witness, "Witness is not supported with combined 1f1b (build_schedule_plan)"
             output_tensor = model.build_schedule_plan(
                 input_ids=batch["tokens"],
                 position_ids=None,
@@ -470,20 +574,25 @@ def train_one_step(
                 "labels": None,
                 "packed_seq_params": get_packed_seq_params(batch, args),
                 "loss_mask": batch["full_loss_masks"],
+                **(filter_keys(batch, ["witness_ids"]) if args.enable_witness else {}),
             }
 
-            if args.enable_mtp_training:
-                forward_kwargs["mtp_kwargs"] = {"mtp_labels": batch["tokens"]}
-
-            if batch["multimodal_train_inputs"] is not None:
-                forward_kwargs.update(batch["multimodal_train_inputs"])
+            if (x := batch["multimodal_train_inputs"]) is not None:
+                forward_kwargs.update(x)
 
             output_tensor = model(**forward_kwargs)
 
         for m, old_stage in zip(all_replay_managers, old_stages, strict=True):
             m.stage = old_stage
 
-        return output_tensor, partial(loss_function, args, batch, num_microbatches, apply_megatron_loss_scaling=True)
+        return output_tensor, partial(
+            loss_function,
+            args,
+            batch,
+            num_microbatches,
+            apply_megatron_loss_scaling=True,
+            num_rollouts=num_rollouts,
+        )
 
     # Forward pass.
     forward_backward_func = get_forward_backward_func()
@@ -498,8 +607,26 @@ def train_one_step(
         forward_only=False,
     )
 
+    outcome = TrainStepOutcome.NORMAL
+    grad_norm = 0.0
     valid_step = True
-    if not getattr(args, "check_for_nan_in_loss_and_grad", True):
+    indep_dp_loss_reduced: dict[str, float] = {}
+
+    if parallel_state.indep_dp.size > 1:
+        assert step_id == 0, "indep-dp does not support multi step per train yet"
+
+        if ft_test_action_executor is not None:
+            ft_test_action_executor.maybe_crash(rollout_id=rollout_id, attempt=attempt)
+
+        metric_num_rollouts = None if args.calculate_per_token_loss else num_rollouts
+        ok, indep_dp_loss_reduced = allreduce_grads_and_losses_across_replicas(
+            args, model, parallel_state, losses_reduced=losses_reduced, num_rollouts=metric_num_rollouts
+        )
+        if not ok:
+            outcome = TrainStepOutcome.DISCARDED_SHOULD_RETRY
+            valid_step = False
+
+    if (not disable_optimizer) and (not multi_lora) and (not getattr(args, "check_for_nan_in_loss_and_grad", True)):
         found_inf_flag = optimizer.prepare_grads()
         if found_inf_flag:
             valid_step = False
@@ -518,25 +645,56 @@ def train_one_step(
 
         check_mtp_only_grad(model, step_id)
 
-    if valid_step:
-        # Update parameters.
-        update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
+    # Dump backward tensors while gradients are still attached. The optimizer
+    # step and subsequent zero_grad release them.
+    if outcome == TrainStepOutcome.NORMAL:
+        dumper_phase_util.finalize(model)
 
-        # Update learning rate.
-        assert update_successful
-        opt_param_scheduler.step(increment=args.global_batch_size)
+    if not disable_optimizer and valid_step:
+        if multi_lora:
+            from miles.backends.megatron_utils.multi_lora_utils import step_stepped_adapter_slots
 
-    # release grad
-    for model_chunk in model:
-        model_chunk.zero_grad_buffer()
-    optimizer.zero_grad()
+            grad_norm = step_stepped_adapter_slots(
+                args, model, optimizer, data_iterator[0].rollout_data, rollout_id, step_id
+            )
+        else:
+            # Update parameters.
+            update_successful, grad_norm, num_zeros_in_grad = optimizer.step()
 
-    dumper_phase_util.finalize(model)
+            # Update learning rate.
+            assert update_successful
+            opt_param_scheduler.step(increment=num_rollouts)
 
-    if mpu.is_pipeline_last_stage(ignore_virtual=True):
-        loss_reduced = aggregate_train_losses(losses_reduced)
-        return loss_reduced, grad_norm
-    return {}, grad_norm
+    # release grad (multi-LoRA retains accumulated grads; stepped slots were
+    # zeroed selectively inside step_adapter_slots)
+    if not multi_lora:
+        _zero_grads(model, optimizer, disable_optimizer)
+
+    log_structured(
+        logger.info,
+        op="train_step",
+        rollout=rollout_id,
+        step=step_id,
+        attempt=attempt,
+        outcome=outcome.name,
+        valid_step=valid_step,
+    )
+
+    if outcome == TrainStepOutcome.NORMAL:
+        dump_local_weight_checksums(args=args, model=model, optimizer=optimizer)
+        if args.enable_witness:
+            witness_dump_and_clear_stale(model=model, witness_info=witness_info, optimizer=optimizer)
+
+        if mpu.is_pipeline_last_stage(ignore_virtual=True):
+            metric_num_rollouts = None if args.calculate_per_token_loss else num_rollouts
+            loss_reduced = (
+                indep_dp_loss_reduced
+                if parallel_state.indep_dp.size > 1
+                else aggregate_train_losses(losses_reduced, metric_num_rollouts)
+            )
+            return loss_reduced, grad_norm, outcome
+
+    return {}, grad_norm, outcome
 
 
 def finalize_model_grads_with_empty_cache(*args, **kwargs):
@@ -546,17 +704,24 @@ def finalize_model_grads_with_empty_cache(*args, **kwargs):
     free, total = torch.cuda.mem_get_info(device)
     if free / total < 0.1:
         clear_memory()
+    from .lora_utils import reduce_marked_lora_grads
+
+    reduce_marked_lora_grads(args[0])
     return finalize_model_grads(*args, **kwargs)
 
 
 def train(
     rollout_id: int,
     model: Sequence[DDP],
-    optimizer: MegatronOptimizer,
-    opt_param_scheduler: OptimizerParamScheduler,
+    optimizer: MegatronOptimizer | None,
+    opt_param_scheduler: OptimizerParamScheduler | None,
     data_iterator: Sequence[DataIterator],
     num_microbatches: Sequence[int],
-) -> None:
+    num_rollouts: Sequence[int],
+    witness_info: WitnessInfo | None,
+    attempt: int,
+    ft_test_action_executor: FTTestActionActorExecutor | None = None,
+) -> TrainStepOutcome:
     """Run training over a rollout consisting of multiple steps.
 
     The model is switched to train mode, training hooks are configured, and
@@ -569,9 +734,16 @@ def train(
         opt_param_scheduler (OptimizerParamScheduler): LR/WD scheduler.
         data_iterator (Sequence[DataIterator]): Iterable(s) yielding training batches.
         num_microbatches (Sequence[int]): Microbatches per step in the rollout.
+        num_rollouts (Sequence[int]): Rollout count per step (total across DP).
     """
     parallel_state = get_parallel_state()
     args = get_args()
+    disable_optimizer = args.debug_disable_optimizer or optimizer is None
+
+    assert len(num_microbatches) == len(num_rollouts), (
+        f"num_microbatches and num_rollouts must have the same length, "
+        f"got {len(num_microbatches)} vs {len(num_rollouts)}"
+    )
 
     for iterator in data_iterator:
         iterator.reset()
@@ -582,7 +754,7 @@ def train(
 
     # Setup some training config params.
     config = get_model_config(model[0])
-    config.grad_scale_func = optimizer.scale_loss
+    config.grad_scale_func = None if disable_optimizer else optimizer.scale_loss
     config.timers = None
     if isinstance(model[0], DDP) and args.overlap_grad_reduce:
         assert config.no_sync_func is None, (
@@ -604,8 +776,8 @@ def train(
 
     pre_hook_enabled = False
 
-    if args.reset_optimizer_states:
-        if is_megatron_main_rank():
+    if args.reset_optimizer_states and not disable_optimizer:
+        if is_first_replica_megatron_main_rank():
             print("Reset optimizer states")
         for chained_optimizer in optimizer.chained_optimizers:
             for group in chained_optimizer.optimizer.param_groups:
@@ -636,6 +808,8 @@ def train(
         pre_hook_enabled = False
 
     num_steps_per_rollout = len(num_microbatches)
+    if parallel_state.indep_dp.size > 1:
+        assert num_steps_per_rollout == 1, "indep_dp is incompatible with num_steps_per_rollout>1 currently"
 
     # Run training iterations till done.
     for step_id in range(num_steps_per_rollout):
@@ -651,7 +825,7 @@ def train(
                 enabled="all", context="all", stacks="python", max_entries=2_000_000
             )
         try:
-            loss_dict, grad_norm = train_one_step(
+            loss_dict, grad_norm, train_step_outcome = train_one_step(
                 args,
                 rollout_id,
                 step_id,
@@ -660,6 +834,10 @@ def train(
                 optimizer,
                 opt_param_scheduler,
                 num_microbatches[step_id],
+                num_rollouts[step_id],
+                witness_info=witness_info,
+                attempt=attempt,
+                ft_test_action_executor=ft_test_action_executor,
             )
         except torch.OutOfMemoryError:
             if _mem_profile_this_step:
@@ -683,19 +861,20 @@ def train(
                 config.param_sync_func = param_sync_func
                 pre_hook_enabled = True
 
+        mtp_losses = None
         if args.enable_mtp_training:
             from megatron.core.transformer.multi_token_prediction import MTPLossLoggingHelper
 
-            mtp_loss_scale = 1 / num_microbatches[step_id]
+            mtp_loss_scale = 1.0 if args.calculate_per_token_loss else 1 / num_microbatches[step_id]
+            MTPLossLoggingHelper.reduce_loss_in_tracker()
             tracker = MTPLossLoggingHelper.tracker
+            # here we assume only one mtp layer
             if "values" in tracker:
-                values = tracker["values"]
-                if tracker.get("reduce_group") is not None:
-                    torch.distributed.all_reduce(values, group=tracker.get("reduce_group"))
-                if tracker.get("avg_group") is not None:
-                    torch.distributed.all_reduce(values, group=tracker["avg_group"], op=torch.distributed.ReduceOp.AVG)
-                # here we assume only one mtp layer
                 mtp_losses = (tracker["values"] * mtp_loss_scale).item()
+            elif "loss_values" in tracker:
+                mtp_losses = (tracker["loss_values"] * mtp_loss_scale).item()
+
+            if mtp_losses is not None:
                 MTPLossLoggingHelper.clean_loss_in_tracker()
 
                 # CI check: verify MTP loss is within expected bounds
@@ -705,17 +884,18 @@ def train(
                     check_mtp_loss(mtp_losses)
 
         # per train step log.
-        if is_megatron_main_rank():
+        if (train_step_outcome == TrainStepOutcome.NORMAL) and is_first_replica_megatron_main_rank():
             accumulated_step_id = rollout_id * num_steps_per_rollout + step_id
             role = getattr(model[0], "role", "actor")
             role_tag = "" if role == "actor" else f"{role}-"
 
             extra_metrics = {}
-            if args.enable_mtp_training:
+            if args.enable_mtp_training and mtp_losses is not None:
                 extra_metrics["mtp_loss"] = mtp_losses
 
-            for param_group_id, param_group in enumerate(optimizer.param_groups):
-                extra_metrics[f"lr-pg_{param_group_id}"] = opt_param_scheduler.get_lr(param_group)
+            if not disable_optimizer:
+                for param_group_id, param_group in enumerate(optimizer.param_groups):
+                    extra_metrics[f"lr-pg_{param_group_id}"] = opt_param_scheduler.get_lr(param_group)
 
             log_dict = log_train_step(
                 args=args,
@@ -741,12 +921,14 @@ def train(
                     rollout_id=rollout_id,
                     step_id=step_id,
                     role=role,
-                    rank=parallel_state.intra_dp.rank,
+                    rank=parallel_state.effective_dp.rank,
                 )
 
     # Close out pre-hooks if using distributed optimizer and overlapped param gather.
     if pre_hook_enabled:
         disable_forward_pre_hook(model)
+
+    return train_step_outcome
 
 
 # ORBIT-SEAM: self_teacher sidecar added to base's signature (orbit OPD self-distillation state is
@@ -754,8 +936,10 @@ def train(
 def save(
     iteration: int,
     model: Sequence[DDP],
-    optimizer: MegatronOptimizer,
-    opt_param_scheduler: OptimizerParamScheduler,
+    optimizer: MegatronOptimizer | None,
+    opt_param_scheduler: OptimizerParamScheduler | None,
+    checkpointing_context: dict | None = None,
+    non_persistent_ckpt: bool = False,
     *,
     self_teacher=None,
 ) -> None:
@@ -766,6 +950,9 @@ def save(
         model (Sequence[DDP]): Sequence of DDP-wrapped model chunks.
         optimizer (MegatronOptimizer): Optimizer instance.
         opt_param_scheduler (OptimizerParamScheduler): LR/WD scheduler.
+        checkpointing_context (dict | None): Context passed to Megatron's save_checkpoint
+            (e.g. ``{'local_checkpoint_manager': manager}`` for in-memory checkpoints).
+        non_persistent_ckpt (bool): If True, save a non-persistent (in-memory) checkpoint.
     """
     args = get_args()
     hashes = None
@@ -790,10 +977,11 @@ def save(
             optimizer,
             opt_param_scheduler,
             num_floating_point_operations_so_far=0,
-            checkpointing_context=None,
             train_data_iterator=None,
             # ORBIT-SEAM: base passes None; rank-consistency checks must not see rank/local_rank in args
             preprocess_common_state_dict_fn=_preprocess_common_state_dict_for_megatron_save,
+            checkpointing_context=checkpointing_context,
+            non_persistent_ckpt=non_persistent_ckpt,
         )
 
     if hashes is not None:
@@ -803,7 +991,10 @@ def save(
 
 
 # ORBIT-SEAM: same self_teacher sidecar as save() above; docstring/log wording follows orbit's PEFT
-# (LoRA + OFT) naming where base says LoRA
+# (LoRA + OFT) naming where base says LoRA.
+# PHASE-4 NOTE: upstream moved its own save_hf_model to megatron_utils/hf_export.py (with path= /
+# raise_on_error= / a .complete marker). That copy has no self_teacher sidecar, so orbit's version
+# stays here and the two need consolidating - see the phase-4 merge report flag.
 def save_hf_model(args, rollout_id: int, model: Sequence[DDP], *, self_teacher=None) -> None:
     """Save Megatron model in HuggingFace format.
 
@@ -872,26 +1063,21 @@ def save_hf_model(args, rollout_id: int, model: Sequence[DDP], *, self_teacher=N
 
 
 def initialize_model_and_optimizer(
-    args: Namespace, role: str = "actor"
-) -> tuple[list[DDP], MegatronOptimizer, OptimizerParamScheduler, int]:
+    args: Namespace,
+    role: str = "actor",
+    checkpointing_context=None,
+) -> tuple[list[DDP], MegatronOptimizer | None, OptimizerParamScheduler | None, int]:
     """Initialize model(s), optimizer, scheduler, and load from checkpoint.
 
     Args:
         args (Namespace): Runtime arguments.
         role (str): Logical role of the model (e.g., "actor", "critic").
+        checkpointing_context: pass-through checkpointing context
 
     Returns:
         tuple[list[DDP], MegatronOptimizer, OptimizerParamScheduler, int]:
             DDP-wrapped model chunks, optimizer, scheduler, and iteration index.
     """
-    if torch.version.hip:
-        import megatron.core.dist_checkpointing.strategies.filesystem_async as filesystem_async_module
-
-        from miles.utils.rocm_checkpoint_writer import ROCmFileSystemWriterAsync
-
-        filesystem_async_module.FileSystemWriterAsync = ROCmFileSystemWriterAsync
-        print("[ROCm] Applied FileSystemWriterAsync patch for HIP compatibility")
-
     # ORBIT-SEAM: base runs one build->load order; orbit splits it in two because low-precision PEFT
     # must load base weights before the optimizer exists (the else-branch is base's order)
     # Low-precision PEFT actors build the base model first, preload base
@@ -904,17 +1090,19 @@ def initialize_model_and_optimizer(
         model[0].role = role
         reinit_critic_output_layer = _critic_output_layer_needs_reinit(args, model, role)
         clear_memory()
-        if args.load is not None:
+        if args.load is not None and _has_loadable_ckpt(args.load):
             iteration, _ = load_checkpoint(
                 model,
                 None,
                 None,
-                checkpointing_context={},
+                checkpointing_context=checkpointing_context if checkpointing_context is not None else {},
                 skip_load_to_model_and_opt=False,
                 is_value_model=reinit_critic_output_layer,
                 load_training_state=role == "critic" and not reinit_critic_output_layer,
             )
         else:
+            if args.load is not None and is_first_replica_megatron_main_rank():
+                logger.warning("--load %r is empty; starting from model_provider-initialized weights", args.load)
             iteration = 0
         if reinit_critic_output_layer:
             _reinitialize_critic_output_layer(model)
@@ -937,18 +1125,49 @@ def initialize_model_and_optimizer(
         # builds) and reinitializes a value head the checkpoint cannot supply
         reinit_critic_output_layer = _critic_output_layer_needs_reinit(args, model, role)
         clear_memory()
-        if args.load is not None:
-            iteration, _ = load_checkpoint(
-                model,
-                optimizer,
-                opt_param_scheduler,
-                checkpointing_context={},
-                skip_load_to_model_and_opt=False,
-                is_value_model=reinit_critic_output_layer,
-                load_training_state=True,
-            )
+
+        # ORBIT-SEAM(upstream): multi-LoRA hides adapter params so the bridge's conversion-task
+        # walk does not see them while the base checkpoint loads
+        if is_multi_lora_enabled(args):
+            from megatron.bridge.peft.multi_lora_layers import hide_adapters
+
+            load_ctx = hide_adapters(model)
         else:
+            load_ctx = nullcontext()
+
+        if args.load is not None and _has_loadable_ckpt(args.load):
+            with load_ctx:
+                iteration, _ = load_checkpoint(
+                    model,
+                    optimizer,
+                    opt_param_scheduler,
+                    checkpointing_context=checkpointing_context if checkpointing_context is not None else {},
+                    skip_load_to_model_and_opt=False,
+                    is_value_model=reinit_critic_output_layer,
+                    load_training_state=True,
+                )
+        else:
+            if args.load is not None and is_first_replica_megatron_main_rank():
+                logger.warning("--load %r is empty; starting from model_provider-initialized weights", args.load)
             iteration = 0
+
+        # ORBIT-SEAM(upstream): non-bridge inkling LoRA adapter restore
+        if (
+            is_lora_enabled(args)
+            and role == "actor"
+            and args.megatron_to_hf_mode != "bridge"
+            and getattr(args, "lora_adapter_path", None)
+            and "inkling" in (getattr(args, "custom_model_provider_path", None) or "")
+        ):
+            if (Path(args.lora_adapter_path) / "adapter_model.safetensors").exists():
+                from miles_plugins.models.inkling.lora import load_inkling_lora_adapter
+
+                load_inkling_lora_adapter(model, args.lora_adapter_path)
+                if optimizer is not None:
+                    # refresh the fp32 masters, or the first step() restores the
+                    # pre-load init values over the adapter we just wrote
+                    optimizer.reload_model_params()
+
         if reinit_critic_output_layer:
             _reinitialize_critic_output_layer(model)
             if (args.fp16 or args.bf16) and optimizer is not None:
@@ -963,9 +1182,14 @@ def initialize_model_and_optimizer(
             check_model_hashes(args, model, iteration)
 
     # ORBIT-SEAM: base always fast-forwards the scheduler; skip it when a resume already restored
-    # optimizer/scheduler state (PEFT adapter resume, or the home checkpoint loader's full restore)
-    if not peft_training_state_restored and not getattr(
-        args, "_orbit_optimizer_scheduler_state_restored", False
+    # optimizer/scheduler state (PEFT adapter resume, or the home checkpoint loader's full restore).
+    # Upstream's guard (a Megatron load can restore scheduler state directly, which would then be
+    # double-counted) is kept alongside it.
+    if (
+        opt_param_scheduler is not None
+        and not (args.use_checkpoint_opt_param_scheduler and iteration > 0)
+        and not peft_training_state_restored
+        and not getattr(args, "_orbit_optimizer_scheduler_state_restored", False)
     ):
         opt_param_scheduler.step(increment=iteration * args.global_batch_size)
 

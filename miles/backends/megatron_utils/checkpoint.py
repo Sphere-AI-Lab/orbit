@@ -133,18 +133,25 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, checkpointing_con
     # ORBIT-SEAM: orbit load preamble - low-precision bridge-bootstrap validation plus the per-load
     # resume-orchestration flags the actor/model layer reads afterwards (home layer)
     orbit_checkpointing.prepare_load_checkpoint(args)
+
     load_path = args.load
 
-    assert Path(load_path).exists() and _is_dir_nonempty(
-        load_path
-    ), f"{args.load=} does not exist or is an empty directory. Did you specify the wrong folder?"
+    has_local_checkpoint_manager = "local_checkpoint_manager" in (checkpointing_context or {})
+    if has_local_checkpoint_manager:
+        logger.info("Skipping disk path validation: using in-memory checkpoint via local_checkpoint_manager")
+    else:
+        assert Path(load_path).exists() and _is_dir_nonempty(
+            load_path
+        ), f"{args.load=} does not exist or is an empty directory. Did you specify the wrong folder?"
 
     # ORBIT-SEAM: reject a partially written torch_dist directory before legacy detection claims it
-    orbit_checkpointing._raise_if_incomplete_direct_distributed_checkpoint(load_path)
+    # (skipped for the in-memory local_checkpoint_manager path, which has no on-disk load_path)
+    if not has_local_checkpoint_manager:
+        orbit_checkpointing._raise_if_incomplete_direct_distributed_checkpoint(load_path)
 
     # ORBIT-SEAM: torch_dist sources are an orbit-added branch ahead of base's legacy check; the
     # marker-aware training-resume vs model-only dispatch lives in the home layer
-    if is_distributed_checkpoint(load_path):
+    if not has_local_checkpoint_manager and is_distributed_checkpoint(load_path):
         result = orbit_checkpointing.load_distributed_checkpoint(
             args,
             ddp_model=ddp_model,
@@ -159,7 +166,7 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, checkpointing_con
     # ORBIT-SEAM: base calls megatron's loader directly here; orbit first preflights the legacy
     # checkpoint across ranks (home layer) so an ambiguous source degrades to a model-only bootstrap
     # instead of a half-restored resume, then runs that same loader
-    elif _is_megatron_checkpoint(load_path):
+    elif has_local_checkpoint_manager or _is_megatron_checkpoint(load_path):
         result = orbit_checkpointing.load_legacy_megatron_checkpoint(
             args,
             ddp_model=ddp_model,
@@ -232,13 +239,10 @@ def _load_checkpoint_hf(ddp_model, optimizer, args, load_path: str):
     assert args.megatron_to_hf_mode == "bridge", "Only bridge mode is supported for loading HF checkpoint"
     from megatron.bridge import AutoBridge
 
-    # ORBIT-SEAM: removed base's `import miles_plugins.megatron_bridge` here: orbit loads the
-    # megatron-bridge plugin patches once at backend import (megatron_utils/__init__.py seam)
-
     logger.info(f"Load checkpoint from HuggingFace model into Megatron (path={load_path})")
 
     with megatron_bridge_utils.patch_megatron_model(ddp_model):
-        bridge = AutoBridge.from_hf_pretrained(args.hf_checkpoint, trust_remote_code=True)
+        bridge = AutoBridge.from_hf_pretrained(load_path, trust_remote_code=True)
         bridge.load_hf_weights(ddp_model)
 
     # Copied from Megatron-core :: load_checkpoint (with simplifications)

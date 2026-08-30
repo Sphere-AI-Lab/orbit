@@ -8,13 +8,18 @@ from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.utils import get_model_config
 from megatron.training.global_vars import get_args
 
-from ..training_utils.parallel import GroupInfo, ParallelState, get_parallel_state
+from miles.utils.ft_utils.process_group_utils import GroupInfo
+
+from ..training_utils.parallel import ParallelState, get_parallel_state
 
 logger = logging.getLogger(__name__)
 
 
-def create_megatron_parallel_state() -> ParallelState:
+def create_megatron_parallel_state(
+    indep_dp: GroupInfo,
+) -> ParallelState:
     vpp_size, microbatch_group_size_per_vp_stage = _compute_vpp_fields()
+    args = get_args()
 
     def _create_intra_dp(with_context_parallel: bool):
         return GroupInfo(
@@ -32,11 +37,28 @@ def create_megatron_parallel_state() -> ParallelState:
             size=mpu.get_context_parallel_world_size(),
             group=mpu.get_context_parallel_group(),
         ),
+        cp_comm_type=getattr(args, "cp_comm_type", None),
         tp=GroupInfo(
             rank=mpu.get_tensor_model_parallel_rank(),
             size=mpu.get_tensor_model_parallel_world_size(),
             group=mpu.get_tensor_model_parallel_group(),
         ),
+        pp=GroupInfo(
+            rank=mpu.get_pipeline_model_parallel_rank(),
+            size=mpu.get_pipeline_model_parallel_world_size(),
+            group=mpu.get_pipeline_model_parallel_group(),
+        ),
+        ep=GroupInfo(
+            rank=mpu.get_expert_model_parallel_rank(),
+            size=mpu.get_expert_model_parallel_world_size(),
+            group=mpu.get_expert_model_parallel_group(),
+        ),
+        etp=GroupInfo(
+            rank=mpu.get_expert_tensor_parallel_rank(),
+            size=mpu.get_expert_tensor_parallel_world_size(),
+            group=mpu.get_expert_tensor_parallel_group(),
+        ),
+        indep_dp=indep_dp,
         is_pp_last_stage=mpu.is_pipeline_last_stage(),
         vpp_size=vpp_size,
         microbatch_group_size_per_vp_stage=microbatch_group_size_per_vp_stage,

@@ -3,6 +3,7 @@ import logging
 import asyncio
 # ORBIT-SEAM: contextlib/time back the _timed_phase/_timed_block instrumentation helpers below
 import contextlib
+import os
 import time
 
 from sglang.srt.constants import GPU_MEMORY_TYPE_CUDA_GRAPH, GPU_MEMORY_TYPE_KV_CACHE, GPU_MEMORY_TYPE_WEIGHTS
@@ -10,23 +11,31 @@ from sglang.srt.constants import GPU_MEMORY_TYPE_CUDA_GRAPH, GPU_MEMORY_TYPE_KV_
 # ORBIT-SEAM: tqdm backs the rollout progress bar added below
 from tqdm.auto import tqdm
 
-# ORBIT-SEAM: tracking_utils module import backs startup/progress metric logging below (init_tracking
-# import further down is base's, kept as-is)
-from miles.utils import tracking_utils
+# ORBIT-SEAM: tracking module import backs startup/progress metric logging below (init_tracking
+# import further down is base's, kept as-is); re-anchored onto upstream's tracking_utils package
+from miles.utils.tracking_utils import tracking
 from miles.ray.placement_group import create_placement_groups, create_rollout_manager, create_training_models
+from miles.utils import object_store
+
 # ORBIT-SEAM: uses_rollout_engines/uses_separate_critic replace base's raw args.use_critic checks and
 # gate the rollout-engine-optional (SFT-mode) code paths added throughout train() below
 from miles.utils.arguments import parse_args, uses_rollout_engines, uses_separate_critic
-from miles.utils.async_utils import eager_create_task
+from miles.utils.audit_utils.process_identity import MainProcessIdentity
+from miles.utils.data import remove_rollout_data_refs
+from miles.utils.debug_utils.periodic_py_spy import maybe_start_periodic_pyspy_dump
+from miles.utils.ft_utils.control_server.server import start_control_server
+from miles.utils.ft_utils.mini_ft_controller import maybe_start_mini_ft_controller
+
 # ORBIT-SEAM: held-out NLL eval feature (gate G4) - metric builder for the eval-NLL blocks below
 from orbit.utils.eval_nll import build_eval_nll_metrics
 from miles.utils.logging_utils import configure_logger
 # ORBIT-SEAM: computes the tracking-log step number for eval-NLL and progress metrics below
 from miles.utils.metric_utils import compute_rollout_step
 from miles.utils.misc import should_run_periodic_action
+from miles.utils.tracking_utils.tracking import finish_tracking, init_tracking
+
 # ORBIT-SEAM: ETA tracking + duration formatting for the progress bar / progress metrics below
 from orbit.utils.training_eta import TrainingETA, format_duration
-from miles.utils.tracking_utils import init_tracking
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +68,7 @@ def _log_eval_nll(args, rollout_id: int, stats: dict, *, before_train: bool = Fa
         stats["num_tokens"],
         stats["num_samples"],
     )
-    tracking_utils.log(args, metrics, step_key="rollout/step")
+    tracking.log(args, metrics, step_key="rollout/step")
 
 
 @contextlib.asynccontextmanager
@@ -95,7 +104,9 @@ def _timed_block(prefix: str, name: str, *, timing_raw: dict | None = None, star
 
 
 async def train(args):
-    configure_logger()
+    assert not args.fully_async, "--fully-async requires the async driver: run train_async.py"
+    configure_logger(args, source=MainProcessIdentity())
+    maybe_start_periodic_pyspy_dump()
     # ORBIT-SEAM: startup_timing accumulates the _timed_block/_timed_phase elapsed times below into
     # the startup_metrics log emitted further down; rollout_engines_enabled gates every rollout-engine
     # call in this function (SFT/no-rollout-engine mode support), replacing base's unconditional calls
@@ -105,6 +116,7 @@ async def train(args):
     # allocate the GPUs
     with _timed_block("startup", "placement groups", timing_raw=startup_timing):
         pgs = create_placement_groups(args)
+    object_store.init_instance(args, contribute_segment=False)
     with _timed_block("startup", "init tracking", timing_raw=startup_timing):
         init_tracking(args)
 
@@ -119,6 +131,16 @@ async def train(args):
     async with _timed_phase("startup", "create training models", timing_raw=startup_timing):
         actor_model, critic_model = await create_training_models(args, pgs, rollout_manager)
 
+    if args.control_server_port:
+        start_control_server(
+            actor_model=actor_model,
+            rollout_manager=rollout_manager,
+            port=args.control_server_port,
+            ft_components=args.ft_components,
+        )
+
+    maybe_start_mini_ft_controller(args)
+
     # ORBIT-SEAM: guard + timing wrap (see note above)
     if rollout_engines_enabled and args.offload_rollout:
         async with _timed_phase("startup", "onload rollout weights", timing_raw=startup_timing):
@@ -132,7 +154,12 @@ async def train(args):
 
     # ORBIT-SEAM: rollout_engines_enabled guard added (see note above)
     if rollout_engines_enabled and args.check_weight_update_equal:
-        await rollout_manager.check_weights.remote(action="compare")
+        await rollout_manager.check_weights.remote(
+            action="compare",
+            allow_quant_error=args.check_weight_update_allow_quant_error,
+            selector=args.check_weight_update_selector,
+            skip_list=args.check_weight_update_skip_list,
+        )
 
     if rollout_engines_enabled and args.offload_rollout:
         async with _timed_phase("startup", "onload rollout kv", timing_raw=startup_timing):
@@ -144,7 +171,7 @@ async def train(args):
         startup_metrics = {f"timing_s_startup/{k}": v for k, v in startup_timing.items()}
         startup_metrics["timing_s_startup/total"] = sum(startup_timing.values())
         startup_metrics["rollout/step"] = compute_rollout_step(args, args.start_rollout_id)
-        tracking_utils.log(args, startup_metrics, step_key="rollout/step")
+        tracking.log(args, startup_metrics, step_key="rollout/step")
 
     # special case for eval-only
     if args.num_rollout == 0 and args.eval_interval is not None:
@@ -161,31 +188,32 @@ async def train(args):
 
     async def offload_train():
         # ORBIT-SEAM: uses_separate_critic(args) replaces base's raw args.use_critic check here and
-        # in save() below
+        # in save() below. Upstream now offloads critic/actor inline in the train dispatch, so this
+        # returns early on the separate-critic path instead of doing the offload dance itself.
+        if uses_separate_critic(args):
+            return
         if args.offload_train:
-            if uses_separate_critic(args):
-                await critic_model.offload()
-                if rollout_id >= args.num_critic_only_steps:
-                    await actor_model.offload()
-            else:
-                await actor_model.offload()
+            await actor_model.offload()
         else:
             await actor_model.clear_memory()
 
-    async def save(rollout_id):
-        # ORBIT-SEAM: uses_separate_critic(args) replaces args.use_critic here too (see note above)
+    async def save(rollout_id, force_sync=False):
+        force_sync = force_sync or rollout_id == args.num_rollout - 1
+
+        async def save_training_model(model):
+            # ORBIT-SEAM: uses_separate_critic(args) replaces args.use_critic (see note above)
+            if uses_separate_critic(args) and args.offload_train:
+                await model.onload()
+            await model.save_model(rollout_id, force_sync=force_sync)
+            if uses_separate_critic(args) and args.offload_train:
+                await model.offload()
+
+        # ORBIT-SEAM: uses_separate_critic(args) replaces args.use_critic here too
         if (not uses_separate_critic(args)) or (rollout_id >= args.num_critic_only_steps):
-            await actor_model.save_model(
-                rollout_id,
-                force_sync=rollout_id == args.num_rollout - 1,
-            )
+            await save_training_model(actor_model)
         if uses_separate_critic(args):
-            await critic_model.save_model(
-                rollout_id,
-                force_sync=rollout_id == args.num_rollout - 1,
-            )
-        if args.rollout_global_dataset:
-            await rollout_manager.save.remote(rollout_id)
+            await save_training_model(critic_model)
+        await rollout_manager.save.remote(rollout_id)
 
     # train loop.
     # note that for async training, one can change the position of the sync operation(ray.get).
@@ -208,7 +236,11 @@ async def train(args):
         timing_raw: dict[str, float] = {}
         prefix = f"rollout {rollout_id}"
 
-        if args.eval_interval is not None and rollout_id == 0 and not args.skip_eval_before_train:
+        if (
+            args.eval_interval is not None
+            and rollout_id == args.start_rollout_id
+            and not args.skip_eval_before_train
+        ):
             async with _timed_phase(prefix, "eval-before-train", timing_raw=timing_raw):
                 await rollout_manager.eval.remote(rollout_id)
 
@@ -223,7 +255,8 @@ async def train(args):
             _log_eval_nll(args, rollout_id, nll_stats, before_train=True)
 
         async with _timed_phase(prefix, "generate", timing_raw=timing_raw):
-            rollout_data_ref = await rollout_manager.generate.remote(rollout_id)
+            # ORBIT-SEAM: timing wrap; upstream renamed rollout_data_ref -> rollout_data_pack
+            rollout_data_pack = await rollout_manager.generate.remote(rollout_id)
 
         # ORBIT-SEAM: rollout_engines_enabled guard + timing wrap; new prefetch_train_state block below
         if rollout_engines_enabled and args.offload_rollout:
@@ -244,14 +277,16 @@ async def train(args):
         # ORBIT-SEAM: uses_separate_critic(args) replaces args.use_critic; both branches' actor
         # train call wrapped in _timed_phase below (timing instrumentation)
         if uses_separate_critic(args):
-            critic_task = await eager_create_task(critic_model.train(rollout_id, rollout_data_ref))
+            values = await critic_model.train(rollout_id, rollout_data_pack)
+            if args.offload_train:
+                await critic_model.offload()
             if rollout_id >= args.num_critic_only_steps:
                 async with _timed_phase(prefix, "actor train", timing_raw=timing_raw):
-                    await actor_model.train(rollout_id, rollout_data_ref)
-            await critic_task
+                    await actor_model.train(rollout_id, rollout_data_pack, external_data=values)
         else:
             async with _timed_phase(prefix, "actor train", timing_raw=timing_raw):
-                await actor_model.train(rollout_id, rollout_data_ref)
+                await actor_model.train(rollout_id, rollout_data_pack)
+        remove_rollout_data_refs(args, rollout_data_pack)
 
         # ORBIT-SEAM: periodic held-out NLL block (new; num_rollout arg documented below); save wrap
         # further down adds _timed_phase instrumentation to base's plain save(rollout_id) call
@@ -273,10 +308,21 @@ async def train(args):
                 nll_stats = await actor_model.compute_eval_nll(rollout_id)
             _log_eval_nll(args, rollout_id, nll_stats)
 
-        # ORBIT-SEAM: timing wrap around base's plain save(rollout_id) call
-        if should_run_periodic_action(rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout):
+        # ORBIT-SEAM: upstream offloads the actor inline immediately after the critic-branch
+        # actor train; deferred to here so the held-out NLL forward above still sees the
+        # post-update weights on GPU (the whole point of the eval-NLL placement note above)
+        if uses_separate_critic(args) and args.offload_train and rollout_id >= args.num_critic_only_steps:
+            await actor_model.offload()
+
+        # ORBIT-SEAM: timing wrap around the save call
+        external_save = args.save_trigger_sentinel is not None and os.path.exists(args.save_trigger_sentinel)
+        if external_save or should_run_periodic_action(
+            rollout_id, args.save_interval, num_rollout_per_epoch, args.num_rollout
+        ):
             async with _timed_phase(prefix, "save", timing_raw=timing_raw):
-                await save(rollout_id)
+                await save(rollout_id, force_sync=external_save)
+            if external_save:
+                os.remove(args.save_trigger_sentinel)
 
         # ORBIT-SEAM: timing wraps + rollout_engines_enabled guards, same pattern as startup above
         async with _timed_phase(prefix, "offload/clear train", timing_raw=timing_raw):
@@ -286,7 +332,7 @@ async def train(args):
                 await rollout_manager.onload_weights.remote()
         if rollout_engines_enabled:
             async with _timed_phase(prefix, "actor update_weights", timing_raw=timing_raw):
-                await actor_model.update_weights()
+                await actor_model.update_weights(rollout_id=rollout_id)
         if rollout_engines_enabled and args.offload_rollout:
             async with _timed_phase(prefix, "onload rollout kv", timing_raw=timing_raw):
                 await rollout_manager.onload_kv.remote()
@@ -322,7 +368,18 @@ async def train(args):
         progress_metrics = eta_report.to_metrics(step=rollout_step)
         for phase_name, elapsed in timing_raw.items():
             progress_metrics[f"timing_s/{phase_name.replace(' ', '_')}"] = elapsed
-        tracking_utils.log(args, progress_metrics, step_key="rollout/step")
+        tracking.log(args, progress_metrics, step_key="rollout/step")
+
+        if (
+            args.debug_exit_after_rollout is not None
+            and (rollout_id - args.start_rollout_id + 1) >= args.debug_exit_after_rollout
+        ):
+            logger.info(
+                "debug_exit_after_rollout=%d reached at rollout_id=%d, exiting",
+                args.debug_exit_after_rollout,
+                rollout_id,
+            )
+            break
 
     # ORBIT-SEAM: closes the progress bar opened above; dispose wrapped in _timed_phase
     rollout_pbar.close()
@@ -332,4 +389,7 @@ async def train(args):
 
 if __name__ == "__main__":
     args = parse_args()
-    asyncio.run(train(args))
+    try:
+        asyncio.run(train(args))
+    finally:
+        finish_tracking()

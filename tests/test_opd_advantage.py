@@ -6,7 +6,7 @@ import miles.backends.training_utils.loss as training_loss
 
 _ORIGINAL_VANILLA_TIS = training_loss.vanilla_tis_function
 
-from miles.utils.ppo_utils import (
+from miles.backends.training_utils.loss_hub.math_utils import (
     apply_opd_icepop_gate,
     apply_opd_kl_to_advantages,
     icepop_gate,

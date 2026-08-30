@@ -184,6 +184,10 @@ class DataSource(abc.ABC):
         Load the state of the data source
         """
 
+    def get_buffer_length(self) -> int | None:
+        """Pending-sample backlog, or None for sources without a buffer."""
+        return None
+
 
 # ORBIT-SEAM: TODO wording normalized (repo-wide comment style pass, no functional change)
 # Follow-up may further refactor data-loading part later
@@ -212,7 +216,8 @@ class RolloutDataSource(DataSource):
             # Follow-up move (during the refactor)
             if (d := args.dump_details) is not None:
                 tokenizer.save_pretrained(Path(d) / "tokenizer")
-                if processor:
+                # Bespoke processors (e.g. Inkling's) are not ProcessorMixin and cannot serialise.
+                if hasattr(processor, "save_pretrained"):
                     processor.save_pretrained(Path(d) / "processor")
 
             self.dataset = Dataset(

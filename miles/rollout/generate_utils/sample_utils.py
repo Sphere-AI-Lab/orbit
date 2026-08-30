@@ -1,21 +1,38 @@
 from copy import deepcopy
 from dataclasses import fields
+from typing import Any
 
 # ORBIT-SEAM: numpy backs the OPD teacher hidden-states merge (_merge_optional_hidden_states below)
 import numpy as np
 
 from miles.utils.types import Sample
 
-# ORBIT-SEAM: metadata key popped/merged separately by _merge_metadata below (top-k OPD student logprobs
-# don't merge like plain equal-value metadata)
 _OPD_STUDENT_TOP_LOGPROBS_KEY = "opd_student_top_logprobs"
+
+
+_REPLAY_FIELDS = ("rollout_routed_experts", "rollout_indexer_topk")
 
 
 def merge_samples(samples: list[Sample], tokenizer) -> Sample:
     acc = samples[0]
     for sample in samples[1:]:
+        # Only a COMPLETED turn can be extended by a later turn; if an
+        # intermediate turn truncated, the trajectory ends there.
+        # TODO (shi.dong): figure out how in-turn truncation should be handled.
+        if acc.status != Sample.Status.COMPLETED:
+            break
+        # An aborted/truncated turn omits the routing-replay payloads
+        # (routed_experts / indexer_topk). Replay requires every training sample
+        # to carry these end-to-end, so stop at the last fully-captured turn
+        # instead of extending into a turn with a routing gap.
+        if _introduces_replay_gap(acc, sample):
+            break
         acc = _merge_sample_pair(acc, sample, tokenizer=tokenizer)
     return acc
+
+
+def _introduces_replay_gap(a: Sample, b: Sample) -> bool:
+    return any(getattr(a, field) is not None and getattr(b, field) is None for field in _REPLAY_FIELDS)
 
 
 def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
@@ -37,16 +54,14 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
         if sample.rollout_log_probs is None:
             sample.rollout_log_probs = [0.0] * sample.response_length
 
-    # ORBIT-SEAM: OPD sample-merge helpers -- extend the base per-field merge with OPD-only optional
-    # per-token fields (teacher_log_probs/opd_reverse_kl), full-vocab teacher hidden states, direct-OPD
-    # top-k id/logprob pairs (with pad rows over the injected observation gap), and the
-    # opd_student_top_logprobs metadata sub-key, all merged consistently with the None/zero-fill rules
-    # used by the base rollout_log_probs merge below
+    # ORBIT-SEAM: upstream dbbab156 adopted _merge_optional_per_token / _merge_opd_student_top_logprobs /
+    # _merge_metadata verbatim, so only the orbit-only helpers below stay a seam: full-vocab teacher
+    # hidden states and direct-OPD top-k id/logprob pairs (pad rows over the injected observation gap).
+    # Rationale kept from the orbit original: "keep None" matters because zero-filling for non-OPD runs
+    # would poison batches that mix merged and unmerged samples.
     def _merge_optional_per_token(field):
         # Optional OPD per-token lists (teacher_log_probs, opd_reverse_kl): merge like
-        # rollout_log_probs when present (zeros over the injected observation span),
-        # else keep None — zero-filling for non-OPD runs would poison batches that
-        # mix merged and unmerged samples.
+        # rollout_log_probs when present (zeros over the injected observation span), else keep None.
         av, bv = getattr(a, field), getattr(b, field)
         if av is None and bv is None:
             return None
@@ -132,9 +147,25 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
         )
         return av + [[] for _ in range(obs_len)] + bv
 
+    def _pop_lifecycle(metadata):
+        if not metadata or "lifecycle" not in metadata:
+            return metadata, []
+        value = metadata["lifecycle"]
+        rest = {k: v for k, v in metadata.items() if k != "lifecycle"}
+        return rest, value if isinstance(value, list) else [value]
+
+    def _pop_messages(metadata):
+        if not metadata or "messages" not in metadata:
+            return metadata, None
+        return {k: v for k, v in metadata.items() if k != "messages"}, metadata["messages"]
+
     def _merge_metadata():
         a_metadata, a_top_logprobs = _pop_opd_student_top_logprobs(a.metadata)
         b_metadata, b_top_logprobs = _pop_opd_student_top_logprobs(b.metadata)
+        a_metadata, a_lifecycle = _pop_lifecycle(a_metadata)
+        b_metadata, b_lifecycle = _pop_lifecycle(b_metadata)
+        a_metadata, a_messages = _pop_messages(a_metadata)
+        b_metadata, b_messages = _pop_messages(b_metadata)
         assert a_metadata == b_metadata, f"metadata mismatch: a.metadata={a.metadata}, b.metadata={b.metadata}"
 
         merged_metadata = deepcopy(a_metadata)
@@ -143,6 +174,14 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
             if merged_metadata is None:
                 merged_metadata = {}
             merged_metadata[_OPD_STUDENT_TOP_LOGPROBS_KEY] = merged_top_logprobs
+        if a_lifecycle or b_lifecycle:
+            if merged_metadata is None:
+                merged_metadata = {}
+            merged_metadata["lifecycle"] = a_lifecycle + b_lifecycle
+        if (messages := b_messages or a_messages) is not None:
+            if merged_metadata is None:
+                merged_metadata = {}
+            merged_metadata["messages"] = messages
         return merged_metadata
 
     _fill_defaults(a)
@@ -161,7 +200,11 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
         assert _startswith(short=a.tokens, long=b.tokens), "b.tokens must start with a.tokens"
         assert obs_len > 0, f"obs_len must be > 0, got {obs_len}"
         if a.rollout_routed_experts is not None:
+            assert b.rollout_routed_experts is not None, "cannot merge: a has rollout_routed_experts but b does not"
             assert a.rollout_routed_experts.shape[0] <= b.rollout_routed_experts.shape[0]
+        if a.rollout_indexer_topk is not None:
+            assert b.rollout_indexer_topk is not None, "cannot merge: a has rollout_indexer_topk but b does not"
+            assert a.rollout_indexer_topk.shape[0] <= b.rollout_indexer_topk.shape[0]
         assert a.status == Sample.Status.COMPLETED, f"a.status must be COMPLETED, got {a.status}"
         # ORBIT-SEAM: resolve direct-OPD top-k merge/consistency-checks before building the merged Sample
         merged_topk_ids, merged_topk_logprobs = _merge_optional_topk_pair()
@@ -170,6 +213,7 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
             Sample,
             group_index=_merge_equal_value("group_index"),
             index=_merge_equal_value("index"),
+            rollout_id=_merge_equal_value("rollout_id"),
             prompt=b.prompt,
             tokens=b.tokens,
             multimodal_inputs=_merge_equal_value("multimodal_inputs"),
@@ -181,27 +225,29 @@ def _merge_sample_pair(a: Sample, b: Sample, tokenizer) -> Sample:
             loss_mask=a.loss_mask + [0] * obs_len + b.loss_mask,
             weight_versions=a.weight_versions + b.weight_versions,
             rollout_log_probs=a.rollout_log_probs + [0.0] * obs_len + b.rollout_log_probs,
-            # ORBIT-SEAM: OPD-only merged fields, using the helpers defined above
             teacher_log_probs=_merge_optional_per_token("teacher_log_probs"),
-            teacher_hidden_states=_merge_optional_hidden_states(),
             opd_reverse_kl=_merge_optional_per_token("opd_reverse_kl"),
+            # ORBIT-SEAM: orbit-only merged OPD fields (full-vocab hidden states, direct-OPD top-k)
+            teacher_hidden_states=_merge_optional_hidden_states(),
             teacher_topk_ids=merged_topk_ids,
             teacher_topk_logprobs=merged_topk_logprobs,
             rollout_routed_experts=b.rollout_routed_experts,
+            rollout_indexer_topk=b.rollout_indexer_topk,
             remove_sample=_merge_equal_value("remove_sample"),
             status=b.status,
-            # ORBIT-SEAM: metadata merge routes through _merge_metadata (handles opd_student_top_logprobs)
-            # instead of the plain equal-value merge
             metadata=_merge_metadata(),
             generate_function_path=_merge_equal_value("generate_function_path"),
             train_metadata=_merge_equal_value("train_metadata"),
-            session_id=_merge_equal_value("session_id"),
+            adapter=_merge_equal_value("adapter"),
+            reward_spec=_merge_equal_value("reward_spec"),
+            routing_key=_merge_equal_value("routing_key"),
             non_generation_time=_merge_equal_value("non_generation_time"),
             spec_info=_merge_spec_info(a.spec_info, b.spec_info),
             prefix_cache_info=_merge_prefix_cache_info(a.prefix_cache_info, b.prefix_cache_info),
         )
     except AssertionError as e:
-        e.add_note(f"{a=} {b=}")
+        if hasattr(e, "add_note"):
+            e.add_note(f"{a=} {b=}")
         raise
 
 
@@ -244,3 +290,48 @@ def _startswith(*, short, long) -> bool:
     if isinstance(short, list) and isinstance(long, list):
         return (len(long) >= len(short)) and (long[: len(short)] == short)
     raise NotImplementedError
+
+
+def _len_or_value(value: Any) -> Any:
+    if isinstance(value, (dict, list, tuple, str)):
+        return {"type": type(value).__name__, "len": len(value)}
+    return value
+
+
+def sample_text_preview(sample: Sample, max_chars: int = 512) -> str:
+    text = (str(sample.prompt) + sample.response).replace("\n", "\\n")
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}...<truncated chars={len(text) - max_chars}>"
+
+
+def reward_log_summary(reward: Any) -> Any:
+    """Summarize a reward (which for OPD scoring can be a large nested dict of logprobs)
+    into shapes/lengths instead of dumping the whole thing into the log."""
+    if not isinstance(reward, dict):
+        return _len_or_value(reward)
+
+    summary: dict[str, Any] = {}
+    for key, value in reward.items():
+        if not isinstance(value, dict):
+            summary[key] = _len_or_value(value)
+            continue
+
+        entry: dict[str, Any] = {"keys": list(value.keys())}
+        meta_info = value.get("meta_info")
+        if isinstance(meta_info, dict):
+            entry["meta_info"] = {
+                meta_key: _len_or_value(meta_info[meta_key])
+                for meta_key in (
+                    "id",
+                    "finish_reason",
+                    "prompt_tokens",
+                    "weight_version",
+                    "input_token_logprobs",
+                    "input_token_ids_logprobs",
+                    "input_top_logprobs",
+                )
+                if meta_key in meta_info
+            }
+        summary[key] = entry
+    return summary

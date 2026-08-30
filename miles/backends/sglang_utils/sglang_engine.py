@@ -6,21 +6,29 @@ import os
 import time
 from urllib.parse import quote
 
+import ray
 import requests
 import sglang_router
 from packaging.version import parse
+from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 from sglang.srt.server_args import ServerArgs
 from sglang.srt.utils import kill_process_tree
 from urllib3.exceptions import NewConnectionError
 
 # ORBIT-SEAM: lora_utils' convert_target_modules_to_hf/is_lora_enabled replaced by
-# orbit.megatron.peft_utils' unified (LoRA+OFT) equivalents below
-from miles.backends.megatron_utils.lora_utils import LORA_ADAPTER_NAME
+# orbit.megatron.peft_utils' unified (LoRA+OFT) equivalents below; upstream's
+# lora_base_cpu_backup_enabled is re-anchored into the peft dispatch further down
+from miles.backends.megatron_utils.lora_utils import lora_base_cpu_backup_enabled
 from orbit.megatron.oft_utils import OFT_ADAPTER_NAME
 from orbit.megatron.peft_utils import convert_target_modules_to_hf, get_peft_method
 from miles.ray.ray_actor import RayActor
+from miles.ray.rollout.sglang_server_actor import SGLangServerActor
 from miles.utils.env_report import collect_and_print_node_env_report
 from miles.utils.http_utils import get_host_info
+# ORBIT-SEAM: upstream's lora_rollout_enabled / is_multi_lora_enabled drove the enable_lora
+# (multi-tenant LoRAManager) branches of _compute_server_args that orbit's peft_method dispatch
+# replaces, so they are not imported here
+from miles.utils.lora import LORA_ADAPTER_NAME
 
 # ORBIT-SEAM: launch-env, MoE-parity and shm-refcount helpers moved to orbit/sglang/
 # (P1 lift-out, Phase 3 slice 3c); imported here both to call from the base functions
@@ -47,14 +55,11 @@ def get_base_gpu_id(args, rank):
     else:
         num_actor_gpus = 0 if args.debug_rollout_only else args.actor_num_gpus_per_node * args.actor_num_nodes
         start_index = (num_actor_gpus + rank * num_gpus) % args.num_gpus_per_node
-        if args.use_critic:
-            num_critic_gpus = args.critic_num_gpus_per_node * args.critic_num_nodes
-            start_index = (num_actor_gpus + num_critic_gpus + rank * num_gpus) % args.num_gpus_per_node
     return start_index
 
 
 def _to_local_gpu_id(physical_gpu_id: int) -> int:
-    cvd = os.environ.get("CUDA_VISIBLE_DEVICES")
+    cvd = os.environ.get("CUDA_VISIBLE_DEVICES") or os.environ.get("HIP_VISIBLE_DEVICES")
     if not cvd:
         return physical_gpu_id  # no remapping
     # CUDA_VISIBLE_DEVICES can be like "4,5,6,7"
@@ -69,6 +74,18 @@ def _to_local_gpu_id(physical_gpu_id: int) -> int:
         f"GPU id {physical_gpu_id} is not valid under CUDA_VISIBLE_DEVICES={cvd}. "
         f"Expected one of {visible} (physical) or 0..{len(visible)-1} (local)."
     )
+
+
+def _get_gpu_uuids(gpu_ids: list[int]) -> list[str | None]:
+    """Best-effort NVML UUIDs so the dashboard can reconcile GPU index
+    spaces across processes; None entries when NVML is unavailable."""
+    try:
+        import pynvml
+
+        pynvml.nvmlInit()
+        return [str(pynvml.nvmlDeviceGetUUID(pynvml.nvmlDeviceGetHandleByIndex(i))) for i in gpu_ids]
+    except Exception:
+        return [None] * len(gpu_ids)
 
 
 # ORBIT-SEAM: launch_server_process gained a force_native_ops passthrough and now
@@ -93,6 +110,32 @@ def launch_server_process(server_args: ServerArgs, force_native_ops: bool = Fals
     )
 
     return p
+
+
+def _launch_sglang_server(server_args: ServerArgs, bundle_indices: list[int]):
+    """Host the Ray HTTP server in a same-job child actor. Returns (actor, scheduler_actors)."""
+    placement_group = ray.util.get_current_placement_group()
+    assert placement_group is not None
+    http_actor = (
+        ray.remote(SGLangServerActor)
+        .options(
+            num_cpus=0.2,
+            num_gpus=0,
+            scheduling_strategy=PlacementGroupSchedulingStrategy(
+                placement_group=placement_group,
+                placement_group_capture_child_tasks=True,
+                placement_group_bundle_index=bundle_indices[0],
+            ),
+        )
+        .remote()
+    )
+    scheduler_actors = ray.get(http_actor.start.remote(server_args, bundle_indices=bundle_indices))
+    _wait_server_healthy(
+        base_url=server_args.url(),
+        api_key=server_args.api_key,
+        is_process_alive=lambda: ray.get(http_actor.is_alive.remote()),
+    )
+    return http_actor, scheduler_actors
 
 
 def _wait_server_healthy(base_url, api_key, is_process_alive):
@@ -141,6 +184,7 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
         base_gpu_id: int | None = None,
         sglang_overrides: dict | None = None,
         num_gpus_per_engine: int | None = None,
+        pg_bundles: list[int] | None = None,
     ):
         self.args = args
         self.rank = rank
@@ -148,9 +192,36 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
         self.base_gpu_id = base_gpu_id
         self.sglang_overrides = sglang_overrides or {}
         self.num_gpus_per_engine = num_gpus_per_engine
+        self.pg_bundles = pg_bundles
+        self._scheduler_actors = []
+        self._sglang_server_actor = None
+        self.process = None
         # ORBIT-SEAM: tracks whether this sglang build exposes /post_process_weights
         # (older builds 404); lazily set the first time post_process_weights() runs
         self._supports_post_process_weights: bool | None = None
+        # ORBIT-SEAM: same probe for the newer /begin_weight_update//end_weight_update
+        # session endpoints (the pinned sglang build predates them; sessionless builds
+        # load weights directly, so skipping the session is safe)
+        self._supports_weight_update_session: bool | None = None
+
+    def get_topology_info(self) -> dict:
+        """Placement facts for the dashboard timeline. ``base_gpu_id`` is
+        node-physical, so these ids match the NVML order the GPU sampler uses."""
+        from miles.utils.misc import get_current_node_ip
+
+        if self.base_gpu_id is None:  # external engines: placement unknown
+            gpu_ids = []
+        else:
+            gpus_on_node = min(self.num_gpus_per_engine, self.args.num_gpus_per_node)
+            gpu_ids = list(range(self.base_gpu_id, self.base_gpu_id + gpus_on_node))
+        return dict(
+            url=f"http://{self.server_host}:{self.server_port}",
+            node_ip=get_current_node_ip(),
+            gpu_ids=gpu_ids,
+            gpu_uuids=_get_gpu_uuids(gpu_ids),
+            worker_type=self.worker_type,
+            node_rank=self.node_rank,
+        )
 
     def init(
         self,
@@ -188,7 +259,6 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
         host = _format_v6_uri(host)
         ip_part, port_part = dist_init_addr.rsplit(":", 1)
         dist_init_addr = f"{_format_v6_uri(ip_part)}:{port_part}"
-
         server_args_dict, external_engine_need_check_fields = _compute_server_args(
             self.args,
             self.rank,
@@ -241,17 +311,35 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
         _sanity_check_server_args(actual_server_args, expect_server_args)
 
     def _init_normal(self, server_args_dict):
-        logger.info(f"Launch HttpServerEngineAdapter at: {self.server_host}:{self.server_port}")
+        use_rdt = self.args.update_weight_transfer_mode == "rdt"
+        if use_rdt:
+            if self.node_rank != 0:
+                # For a multi-node engine, the node-0 server's RayEngine spawns
+                # the SchedulerActors of ALL ranks (placed cross-node via the
+                # placement group), so non-zero node ranks launch nothing.
+                return
+            server_args_dict["use_ray"] = True
+            server_args_dict["enable_rdt_weight_sync"] = True
+            assert self.pg_bundles
+        logger.info(
+            f"Launch HttpServerEngineAdapter at: {self.server_host}:{self.server_port}"
+            f"{' (use_ray=True for RDT)' if use_rdt else ''}"
+        )
         # ORBIT-SEAM: ServerArgs is read-only after __post_init__ resolves it (v0.5.18); the
         # bracket-stripped host must travel in as a constructor argument, not be
         # assigned after (self.server_host above keeps the bracketed form -- it's
         # used for URL construction elsewhere in this class). launch_server_process
         # also gained the force_native_ops passthrough (orbit/sglang/native_ops.py).
-        server_args_dict = {**server_args_dict, "host": server_args_dict["host"].strip("[]")}
-        self.process = launch_server_process(
-            ServerArgs(**server_args_dict),
-            force_native_ops=getattr(self.args, "sglang_force_native_ops", False),
-        )
+        server_args = ServerArgs(**{**server_args_dict, "host": server_args_dict["host"].strip("[]")})
+        if use_rdt:
+            self._sglang_server_actor, self._scheduler_actors = _launch_sglang_server(
+                server_args, bundle_indices=self.pg_bundles
+            )
+        else:
+            self.process = launch_server_process(
+                server_args,
+                force_native_ops=getattr(self.args, "sglang_force_native_ops", False),
+            )
 
         # ORBIT-SEAM: use_miles_router renamed use_orbit_router (orbit's naming split)
         if self.node_rank == 0 and self.router_ip and self.router_port:
@@ -293,7 +381,8 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
         try:
             response.raise_for_status()
         except requests.exceptions.HTTPError as e:
-            e.add_note(f"{response.text=}")
+            if hasattr(e, "add_note"):
+                e.add_note(f"{response.text=}")
             raise
         return response.json()
 
@@ -327,6 +416,7 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
         load_format: str | None = None,
         flush_cache: bool = False,
         weight_version: str | None = None,
+        selector: str = "all",
         adapter_config: dict | None = None,
         adapter_name: str | None = None,
     ):
@@ -340,6 +430,7 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
             "serialized_named_tensors": serialized_named_tensors,
             "load_format": load_format,
             "flush_cache": flush_cache,
+            "selector": selector,
         }
         if weight_version is not None:
             payload["weight_version"] = weight_version
@@ -383,26 +474,75 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
     def load_lora_adapter_from_tensors(
         self,
         lora_name: str,
-        serialized_tensors: str,
         config_dict: dict,
+        serialized_tensors: str | None = None,
+        serialized_named_tensors: list | None = None,
         load_format: str | None = None,
         pinned: bool = False,
         added_tokens_config: dict | None = None,
+        upsert: bool = False,
+        expected_checksums: dict | None = None,
     ):
-        """Load a LoRA adapter from serialized tensor data."""
+        """Load a LoRA adapter from either transport (exactly one of the two).
+
+        ``serialized_named_tensors[tp_rank]`` is bytes for that TP rank; ``serialized_tensors``
+        is the whole adapter. With ``upsert``, the already-loaded ``lora_name`` is overwritten
+        in place (no unload/register).
+        """
+        if (serialized_tensors is None) == (serialized_named_tensors is None):
+            raise ValueError("pass exactly one of serialized_tensors / serialized_named_tensors")
         payload = {
             "lora_name": lora_name,
-            "serialized_tensors": serialized_tensors,
             "config_dict": config_dict,
             "pinned": pinned,
         }
+        if serialized_tensors is not None:
+            payload["serialized_tensors"] = serialized_tensors
+        else:
+            payload["serialized_named_tensors"] = serialized_named_tensors
+        if upsert:
+            payload["upsert"] = True
         if load_format is not None:
             payload["load_format"] = load_format
         if added_tokens_config is not None:
             payload["added_tokens_config"] = added_tokens_config
+        if expected_checksums is not None:
+            payload["expected_checksums"] = expected_checksums
 
         return self._make_request(
             "load_lora_adapter_from_tensors",
+            payload,
+        )
+
+    def load_lora_adapter_from_distributed(
+        self,
+        lora_name: str,
+        config_dict: dict,
+        names: list,
+        dtypes: list,
+        shapes: list,
+        group_name: str,
+        pinned: bool = False,
+        added_tokens_config: dict | None = None,
+        upsert: bool = False,
+    ):
+        """Load a LoRA adapter: only metadata is sent; weights arrive via NCCL broadcast over ``group_name``.
+        With ``upsert``, the already-loaded ``lora_name`` is overwritten in place (no unload/register)."""
+        payload = {
+            "lora_name": lora_name,
+            "config_dict": config_dict,
+            "names": names,
+            "dtypes": [str(dtype).replace("torch.", "") for dtype in dtypes],
+            "shapes": shapes,
+            "group_name": group_name,
+            "pinned": pinned,
+            "upsert": upsert,
+        }
+        if added_tokens_config is not None:
+            payload["added_tokens_config"] = added_tokens_config
+
+        return self._make_request(
+            "load_lora_adapter_from_distributed",
             payload,
         )
 
@@ -426,23 +566,28 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
 
         raise_if_local_process_exited()
         # flush cache will not return status_code 200 when there are pending requests
+        last_message = None
         for _ in range(60):
             try:
                 response = requests.get(f"http://{self.server_host}:{self.server_port}/flush_cache", timeout=5.0)
                 if response.status_code == 200:
                     break
+                last_message = response.text
             except NewConnectionError as e:
                 raise e
             except Exception as e:
                 raise_if_local_process_exited(e)
                 logger.info(f"Error flushing cache: {e}")
-                time.sleep(1)
-                continue
+                last_message = str(e)
+            time.sleep(1)
         else:
-            raise TimeoutError("Timeout while flushing cache.")
+            raise TimeoutError(f"Timeout while flushing cache: {last_message}")
 
     def shutdown(self):
         if self.args.rollout_external:
+            return
+        if self._sglang_server_actor is None and self.process is None:
+            # Non-zero node ranks of an RDT multi-node engine launch no server.
             return
 
         logger.info(f"Shutdown engine {self.server_host}:{self.server_port}...")
@@ -474,6 +619,11 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
 
             if response is not None:
                 response.raise_for_status()
+        if self._sglang_server_actor is not None:
+            ray.kill(self._sglang_server_actor)
+            self._sglang_server_actor = None
+            self._scheduler_actors = []
+            return
         kill_process_tree(self.process.pid)
 
     def get_weight_version(self):
@@ -494,6 +644,10 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
             "unload_lora_adapter",
             {"lora_name": lora_name},
         )
+
+    def get_scheduler_actors(self) -> list:
+        """Return this engine's SchedulerActor handles (RDT mode, use_ray=True)."""
+        return self._scheduler_actors
 
     # ORBIT-SEAM: new method -- OFT counterpart to unload_lora_adapter above; not one of
     # the seven methods named for the P2 mixin move in the slice-3c spec, left here
@@ -520,18 +674,43 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
             {"tags": tags},
         )
 
-    def check_weights(self, action: str):
-        return self._make_request("weights_checker", {"action": action})
+    def check_weights(
+        self, action: str, allow_quant_error: bool = False, selector: str = "all", skip_list: list[str] | None = None
+    ):
+        payload = {"action": action, "allow_quant_error": allow_quant_error, "selector": selector}
+        if skip_list is not None:
+            # sglang's CheckWeightsReqInput names this field `skip_tensor_list`.
+            payload["skip_tensor_list"] = skip_list
+        return self._make_request("weights_checker", payload)
 
-    def update_weights_from_disk(self, model_path: str, load_format: str | None = None):
+    def pull_weights(self, target_version: int):
+        """Have the engine sync every host it spans to target_version: each host pulls the
+        published weights (a full checkpoint copied as-is, or deltas verified per-tensor and
+        applied onto the local checkpoint) into its local checkpoint dir. The engine reloads
+        it afterwards via update_weights_from_disk."""
+        return self._make_request(
+            "pull_weights",
+            {
+                "local_checkpoint_dir": self.args.update_weight_local_checkpoint_dir,
+                "source_dir": self.args.update_weight_disk_dir,
+                "target_version": target_version,
+            },
+        )
+
+    def update_weights_from_disk(
+        self, model_path: str, load_format: str | None = None, weight_version: str | None = None
+    ):
         """Reload weights from *model_path* without restarting the engine.
 
-        Used for non-updatable (frozen) models that overlap with megatron:
-        after offload, weights are restored from disk instead of CPU cache.
+        Used for non-updatable (frozen) models that overlap with megatron (after offload,
+        weights are restored from disk instead of CPU cache), and by disk-delta weight sync
+        to reload the patched host-local checkpoint.
         """
         payload = {"model_path": model_path}
         if load_format is not None:
             payload["load_format"] = load_format
+        if weight_version is not None:
+            payload["weight_version"] = weight_version
         return self._make_request("update_weights_from_disk", payload)
 
     def init_weights_update_group(self, master_address, master_port, rank_offset, world_size, group_name, backend):
@@ -560,7 +739,14 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
             pass
 
     def update_weights_from_distributed(
-        self, names, dtypes, shapes, group_name, flush_cache=False, weight_version: str | None = None
+        self,
+        names,
+        dtypes,
+        shapes,
+        group_name,
+        flush_cache=False,
+        weight_version: str | None = None,
+        selector: str = "all",
     ):
         payload = {
             "names": names,
@@ -568,6 +754,7 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
             "shapes": shapes,
             "group_name": group_name,
             "flush_cache": flush_cache,
+            "selector": selector,
         }
         if weight_version is not None:
             payload["weight_version"] = weight_version
@@ -626,10 +813,41 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
                 return None
             raise
 
+    def begin_weight_update(self, selector: str = "all"):
+        """Open a weight-update session on the engine (restores packed weights for loading)."""
+        # ORBIT-SEAM: 404 tolerance for sglang builds without the weight-update session
+        # (mirrors the post_process_weights probe above)
+        if self._supports_weight_update_session is False:
+            return None
+        try:
+            result = self._make_request("begin_weight_update", {"selector": selector})
+            self._supports_weight_update_session = True
+            return result
+        except requests.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 404:
+                self._supports_weight_update_session = False
+                return None
+            raise
+
+    def end_weight_update(self):
+        """Close the weight-update session (post-load + quant post-process on the full model)."""
+        # ORBIT-SEAM: see begin_weight_update — sessionless builds skip the close too
+        if self._supports_weight_update_session is False:
+            return None
+        try:
+            result = self._make_request("end_weight_update", {})
+            self._supports_weight_update_session = True
+            return result
+        except requests.HTTPError as exc:
+            if exc.response is not None and exc.response.status_code == 404:
+                self._supports_weight_update_session = False
+                return None
+            raise
+
     def update_weight_version(self, weight_version: str):
         return self._make_request(
             "update_weight_version",
-            {"new_version": weight_version},
+            {"new_version": weight_version, "abort_all_requests": False},
         )
 
     def start_profile(
@@ -727,14 +945,16 @@ def _compute_server_args(
         "skip_server_warmup": True,
         # always enable draft weights cpu backup so that we run training without mtp weights.
         "enable_draft_weights_cpu_backup": True,
+        # always serve /metrics so Prometheus scrapers can read engine stats.
+        "enable_metrics": True,
     }
 
-    if sglang_overrides:
-        kwargs.update(sglang_overrides)
+    if os.environ.get("MILES_SGLANG_DUMMY_LOAD") == "1":
+        kwargs["load_format"] = "dummy"
 
     if worker_type == "prefill":
         kwargs["disaggregation_mode"] = "prefill"
-        kwargs["load_balance_method"] = "round_robin"
+        kwargs.setdefault("load_balance_method", "round_robin")
         assert (
             disaggregation_bootstrap_port is not None
         ), "disaggregation_bootstrap_port must be set for prefill worker"
@@ -745,6 +965,8 @@ def _compute_server_args(
 
     if args.use_rollout_routing_replay:
         kwargs["enable_return_routed_experts"] = True
+    if args.use_rollout_indexer_replay:
+        kwargs["enable_return_indexer_topk"] = True
     if args.fp16:
         kwargs["dtype"] = "float16"
     if engine_info_bootstrap_port is not None:
@@ -858,6 +1080,24 @@ def _compute_server_args(
         if opd_teacher_slot and opd_teacher_spec.source == "adapter":
             kwargs.setdefault("peft_paths", {})[OPD_TEACHER_ADAPTER_NAME] = opd_teacher_spec.path
 
+    # ORBIT-SEAM: upstream's LoRA+colocate host-RAM base-weight mirror, re-anchored out of the
+    # `elif lora_rollout_enabled(args):` branch that orbit's peft_method dispatch above replaces
+    if peft_method == "lora" and lora_base_cpu_backup_enabled(args):
+        # Host-RAM mirror of the base weights so they survive
+        # torch_memory_saver.pause() across rollout/training swaps without
+        # needing to be re-shipped from the trainer. The trainer mirrors
+        # this by skipping the base weight sync entirely (see
+        # UpdateWeightFromTensor.update_weights).
+        kwargs["enable_weights_cpu_backup"] = True
+        logger.info(
+            "LoRA + colocate: enabling SGLang enable_weights_cpu_backup=True; "
+            "the trainer will skip per-step base weight sync."
+        )
+
+    # Last, so a per-group override wins over every args-derived default above.
+    if sglang_overrides:
+        kwargs.update(sglang_overrides)
+
     # ORBIT-SEAM: server_arg_fields precomputed upfront (was: unused_keys = set(kwargs.keys())
     # seeded before the loop, with unused_keys.discard(attr.name) removed per-attr inside the
     # loop below); the PEFT branches above and the peft/MoE-parity calls below also add keys
@@ -904,5 +1144,6 @@ _EXTERNAL_ENGINE_SKIP_CHECK_FIELDS = frozenset({
     "dist_init_addr",
     "skip_server_warmup",
     "enable_draft_weights_cpu_backup",
+    "enable_metrics",
     "mem_fraction_static",
 })

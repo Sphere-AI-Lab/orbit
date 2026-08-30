@@ -4,6 +4,18 @@ Each trajectory class defines a complete multi-turn conversation with tool calls
 Used by:
 - tests/fast/rollout/generate_hub/test_pretokenized_chat.py (chat template verification)
 - tests/fast/router/test_session_pretokenized_e2e.py (session proxy e2e)
+
+Class attributes consumed by chat_template_verify:
+
+- ``APPEND_ROLES: frozenset[str]`` — non-assistant roles that appear *after*
+  the first assistant message (``tool`` / ``user`` / ``system``).  These are
+  compared with the selected FixedTemplate's append capability.
+- ``IS_THINKING: bool`` — ``True`` iff at least one assistant message carries
+  ``reasoning_content``.  Drives ``--thinking`` filtering and whether the
+  ``enable_thinking`` chat-template kwarg is passed.
+
+Both are declared explicitly on each class so readers can see a trajectory's
+verify-layer classification without having to execute the module.
 """
 
 from __future__ import annotations
@@ -107,6 +119,8 @@ class SingleToolTrajectory:
 
     TOOLS = WEATHER_TOOLS
     PRETOKENIZE_POSITIONS = [3]
+    APPEND_ROLES = frozenset({"tool"})
+    IS_THINKING = False
     MESSAGES = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "What's the weather in Beijing?"},
@@ -136,7 +150,9 @@ class MultiTurnTrajectory:
     """sys, user, ass(tool), tool, ass(tool), tool — 2 turns"""
 
     TOOLS = WEATHER_TOOLS
-    PRETOKENIZE_POSITIONS = [4]
+    PRETOKENIZE_POSITIONS = [3, 5]
+    APPEND_ROLES = frozenset({"tool"})
+    IS_THINKING = False
     MESSAGES = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "What's the weather in Beijing and Shanghai?"},
@@ -186,6 +202,8 @@ class MultiToolSingleTurnTrajectory:
 
     TOOLS = ALL_TOOLS
     PRETOKENIZE_POSITIONS = [3]
+    APPEND_ROLES = frozenset({"tool"})
+    IS_THINKING = False
     MESSAGES = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "What's the weather in Beijing and what date is it?"},
@@ -229,6 +247,8 @@ class ParallelToolsTrajectory:
 
     TOOLS = WEATHER_TOOLS
     PRETOKENIZE_POSITIONS = [3]
+    APPEND_ROLES = frozenset({"tool"})
+    IS_THINKING = False
     MESSAGES = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "Compare weather in Beijing, Shanghai, and Guangzhou"},
@@ -284,7 +304,9 @@ class LongChainTrajectory:
     """sys, user, ass(tool), tool, ass(tool:date), tool, ass(tool), tool — 3 turns"""
 
     TOOLS = ALL_TOOLS
-    PRETOKENIZE_POSITIONS = [4, 6]
+    PRETOKENIZE_POSITIONS = [3, 5, 7]
+    APPEND_ROLES = frozenset({"tool"})
+    IS_THINKING = False
     MESSAGES = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "Do a multi-step task"},
@@ -356,7 +378,9 @@ class RetrySystemTrajectory:
     """
 
     TOOLS = WEATHER_TOOLS
-    PRETOKENIZE_POSITIONS = [3, 5]
+    PRETOKENIZE_POSITIONS = [3, 6]
+    APPEND_ROLES = frozenset({"tool", "system"})
+    IS_THINKING = False
     MESSAGES = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "What's the weather in Beijing and Shanghai?"},
@@ -405,14 +429,15 @@ class RetrySystemTrajectory:
 class MultiUserToolChainTrajectory:
     """sys, user1, ass(tool), tool, ass, user2, ass(tool), tool, ass(tool:date), tool
 
-    NOTE: LinearTrajectory can carry multiple user messages when
-    ``allowed_append_roles`` includes ``"user"``; this trajectory exercises
-    that path.  The distribution may still deviate from the chat template
+    NOTE: This trajectory exercises multiple user messages after a generated
+    assistant.  The distribution may still deviate from the chat template
     behavior, causing high tito_session_mismatch_rate.
     """
 
     TOOLS = ALL_TOOLS
-    PRETOKENIZE_POSITIONS = [8]
+    PRETOKENIZE_POSITIONS = [3, 5, 7, 9]
+    APPEND_ROLES = frozenset({"tool", "user"})
+    IS_THINKING = False
     MESSAGES = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "What's the weather in Beijing?"},
@@ -482,14 +507,24 @@ class MultiUserToolChainTrajectory:
 
 
 class SimpleNoToolTrajectory:
-    """sys, user, assistant (no tools) — 1 turn, no tool calls"""
+    """sys, user, asst, system_reminder, user2, asst2 — no tools, with system/user append boundaries.
+
+    Codifies the synthetic 'single_system' case the old CI used to manually
+    append: at N=3 prefix ends at the first asst, append starts with the
+    system_reminder, exercising the system-append boundary on a no-tool model.
+    """
 
     TOOLS = None
-    PRETOKENIZE_POSITIONS = [3]
+    PRETOKENIZE_POSITIONS = [3, 4, 5, 6]
+    APPEND_ROLES = frozenset({"user", "system"})
+    IS_THINKING = False
     MESSAGES = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "Hello!"},
         {"role": "assistant", "content": "Hi there! How can I help?"},
+        {"role": "system", "content": "Please answer in one short sentence."},
+        {"role": "user", "content": "What's 2+2?"},
+        {"role": "assistant", "content": "Four."},
     ]
 
 
@@ -498,6 +533,8 @@ class MultiTurnNoToolTrajectory:
 
     TOOLS = None
     PRETOKENIZE_POSITIONS = [3, 5]
+    APPEND_ROLES = frozenset({"user"})
+    IS_THINKING = False
     MESSAGES = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "What is the capital of France?"},
@@ -511,6 +548,8 @@ class MultiTurnNoToolThinkingTrajectory:
 
     TOOLS = None
     PRETOKENIZE_POSITIONS = [3, 5]
+    APPEND_ROLES = frozenset({"user"})
+    IS_THINKING = True
     MESSAGES = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "What is the capital of France?"},
@@ -529,10 +568,17 @@ class MultiTurnNoToolThinkingTrajectory:
 
 
 class SingleToolThinkingTrajectory:
-    """sys, user, assistant(reasoning_content + tool_calls), tool — 1 turn"""
+    """sys, user, ass(think+tool), tool, user2, ass(think+tool), tool, user3, ass — multi-role alternating with thinking.
+
+    Codifies the synthetic 'alternating_user_tool' case the old CI used to
+    manually append: prefix cuts at N=4/N=7 exercise the user-after-tool
+    boundary on a thinking model.
+    """
 
     TOOLS = WEATHER_TOOLS
-    PRETOKENIZE_POSITIONS = [3]
+    PRETOKENIZE_POSITIONS = [3, 4, 5, 6, 7, 8]
+    APPEND_ROLES = frozenset({"tool", "user"})
+    IS_THINKING = True
     MESSAGES = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "What's the weather in Beijing?"},
@@ -556,6 +602,33 @@ class SingleToolThinkingTrajectory:
             "content": '{"temperature": 25, "condition": "sunny"}',
             "tool_call_id": "call_1",
         },
+        {"role": "user", "content": "Now check Shanghai too."},
+        {
+            "role": "assistant",
+            "reasoning_content": "Now the user wants Shanghai's weather. Calling get_weather again.",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_2",
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "arguments": {"city": "Shanghai", "unit": "celsius"},
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "content": '{"temperature": 30, "condition": "cloudy"}',
+            "tool_call_id": "call_2",
+        },
+        {"role": "user", "content": "And tell me the date as well."},
+        {
+            "role": "assistant",
+            "reasoning_content": "The user is asking for the date. I'll answer based on what I know.",
+            "content": "Beijing is 25°C and sunny; Shanghai is 30°C and cloudy. I don't have access to the current date.",
+        },
     ]
 
 
@@ -563,7 +636,9 @@ class MultiTurnThinkingTrajectory:
     """sys, user, ass(thinking+tool), tool, ass(thinking+tool), tool — 2 turns"""
 
     TOOLS = WEATHER_TOOLS
-    PRETOKENIZE_POSITIONS = [4]
+    PRETOKENIZE_POSITIONS = [3, 5]
+    APPEND_ROLES = frozenset({"tool"})
+    IS_THINKING = True
     MESSAGES = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "What's the weather in Beijing and Shanghai?"},
@@ -614,7 +689,9 @@ class LongChainThinkingTrajectory:
     """sys, user, ass(thinking+tool), tool, ass(thinking+tool), tool, ass(thinking+tool), tool — 3 turns"""
 
     TOOLS = ALL_TOOLS
-    PRETOKENIZE_POSITIONS = [4, 6]
+    PRETOKENIZE_POSITIONS = [3, 5, 7]
+    APPEND_ROLES = frozenset({"tool"})
+    IS_THINKING = True
     MESSAGES = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "Do a multi-step task"},
@@ -691,6 +768,8 @@ class MultiUserTurnThinkingTrajectory:
 
     TOOLS = WEATHER_TOOLS
     PRETOKENIZE_POSITIONS = [7]
+    APPEND_ROLES = frozenset({"tool", "user"})
+    IS_THINKING = True
     MESSAGES = [
         {"role": "system", "content": "You are a helpful assistant."},
         # --- user turn 1 ---
@@ -754,7 +833,9 @@ class IntermediateSystemTrajectory:
     """sys, user, ass(tool), tool, system, ass(tool:date), tool, system, ass(tool), tool — 3 turns with system"""
 
     TOOLS = ALL_TOOLS
-    PRETOKENIZE_POSITIONS = [5, 8]
+    PRETOKENIZE_POSITIONS = [3, 6, 9]
+    APPEND_ROLES = frozenset({"tool", "system"})
+    IS_THINKING = False
     MESSAGES = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "Do a multi-step task"},
@@ -824,7 +905,9 @@ class IntermediateSystemThinkingTrajectory:
     """sys, user, ass(t+tool), tool, system, ass(t+tool:date), tool, system, ass(t+tool), tool — 3 turns with system+thinking"""
 
     TOOLS = ALL_TOOLS
-    PRETOKENIZE_POSITIONS = [5, 8]
+    PRETOKENIZE_POSITIONS = [3, 6, 9]
+    APPEND_ROLES = frozenset({"tool", "system"})
+    IS_THINKING = True
     MESSAGES = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": "Do a multi-step task"},
@@ -889,6 +972,71 @@ class IntermediateSystemThinkingTrajectory:
             "role": "tool",
             "content": '{"temperature": 35}',
             "tool_call_id": "call_3",
+        },
+    ]
+
+
+class MultiRoleSequenceTrajectory:
+    """sys, user, asst+tool, tool, user2, asst+tool, system_reminder, tool, asst-final.
+
+    Fills the {thinking=False, append_roles={tool, user, system}} matrix cell
+    that GLM47's tool+user+system append configuration otherwise has no
+    fixture for. Cuts exercise three boundaries: tool-append (N=3), user-after-tool
+    (N=4), system-after-asst (N=6). Cuts at N=5/N=7/N=8 are intentionally not
+    listed — they only exercise generation-prompt-only or repeat tool-append
+    which other trajectories already cover.
+    """
+
+    TOOLS = ALL_TOOLS
+    PRETOKENIZE_POSITIONS = [3, 4, 6]
+    APPEND_ROLES = frozenset({"tool", "user", "system"})
+    IS_THINKING = False
+    MESSAGES = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "What's the weather in Beijing today?"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_w1",
+                    "type": "function",
+                    "function": {
+                        "name": "get_weather",
+                        "arguments": {"city": "Beijing", "unit": "celsius"},
+                    },
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "content": '{"temperature": 22, "condition": "sunny"}',
+            "tool_call_id": "call_w1",
+        },
+        {"role": "user", "content": "Also tell me the date in Beijing."},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_d1",
+                    "type": "function",
+                    "function": {
+                        "name": "get_date",
+                        "arguments": {"timezone": "Asia/Shanghai"},
+                    },
+                }
+            ],
+        },
+        {"role": "system", "content": "Please answer in one short sentence."},
+        {
+            "role": "tool",
+            "content": '{"date": "2026-04-28"}',
+            "tool_call_id": "call_d1",
+        },
+        {
+            "role": "assistant",
+            "content": "Beijing is 22°C and sunny on 2026-04-28.",
         },
     ]
 

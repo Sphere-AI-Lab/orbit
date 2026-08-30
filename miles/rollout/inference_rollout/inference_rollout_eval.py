@@ -3,6 +3,7 @@ import copy
 # ORBIT-SEAM: json serializes apply_chat_template_kwargs into the dataset cache key below
 import json
 import logging
+import uuid
 # ORBIT-SEAM: suppress wraps the pending-logger task cancellation in the try/finally below
 from contextlib import suppress
 from typing import Any
@@ -16,6 +17,7 @@ from orbit.rollout.eval_logging import (
     _log_pending_eval_tasks,
     _update_eval_task_progress,
 )
+from miles.rollout.generate_utils.generate_endpoint_utils import policy_uses_routing_key
 from miles.rollout.inference_rollout.inference_rollout_common import (
     GenerateState,
     compute_sampling_params,
@@ -54,6 +56,20 @@ async def _generate_and_rm_for_eval_with_progress(
     if isinstance(completed_sample, Sample):
         _update_eval_task_progress(progress_by_index, "completed", completed_sample)
     return result
+
+
+async def run_eval_datasets(
+    state: GenerateState,
+    prompt_dataset_cache: dict[Any, Dataset],
+) -> dict[str, dict[str, Any]]:
+    args = state.args
+    assert not args.group_rm, "Group RM is not supported for eval rollout"
+
+    coros = []
+    for dataset_cfg in args.eval_datasets:
+        coros.append(eval_rollout_single_dataset(state, dataset_cfg, prompt_dataset_cache))
+    results_list = await asyncio.gather(*coros)
+    return {k: v for r in results_list for k, v in r.items()}
 
 
 async def eval_rollout_single_dataset(
@@ -115,6 +131,9 @@ async def eval_rollout_single_dataset(
             sample.index = sample_index
             sample_index += 1
             sample.metadata = dataset_cfg.inject_metadata(getattr(sample, "metadata", None))
+            sample.generate_function_path = dataset_cfg.custom_generate_function_path
+            if policy_uses_routing_key(args):
+                sample.routing_key = str(uuid.uuid4())
             sampling_params = base_sampling_params
             if getattr(args, "sglang_enable_deterministic_inference", False):
                 sampling_params = base_sampling_params.copy()

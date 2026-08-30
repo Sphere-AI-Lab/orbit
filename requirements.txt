@@ -1,25 +1,41 @@
+# ORBIT-SEAM: shared deps carry the orbit env's exact pins (mirrors pyproject.toml
+# [project.dependencies], which is what `uv sync` actually installs); upstream-only
+# deps keep upstream's own specifiers so the CI `pip install -r` path stays whole.
 accelerate==1.13.0
+backports.strenum; python_version < "3.11"
+blake3==1.0.9  # disk-delta weight sync (checksum)
 blobfile==3.0.0
 cachetools==7.1.1
 datasets==4.8.5
 fsspec==2026.2.0
 func_timeout==4.3.5
 httpx[http2]==0.28.1
+hypothesis>=5.40
+kubernetes_asyncio
 mcp[cli]==1.27.1
 memray  # needed for debugging (but is lightweight), we can put it to dev mode when using pyproject.toml
+nvidia-resiliency-ext~=0.6.0; platform_system == "Linux"
 omegaconf==2.3.0
+onnxscript  # import-time dependency of transformer_engine 2.17, which the docker image installs with --no-deps; without it any Megatron-backend run dies at `import megatron`
+openai  # imported by miles.rollout.generate_utils.tool_call_utils and the openenv adapter; previously only satisfied transitively via sglang
 pillow==12.2.0
+polars==1.42.1
+psycopg[binary]  # metric-history gate store (Neon Postgres driver)
 pybase64==1.4.3
 pylatexenc==2.10
 pytest-asyncio
 pyyaml==6.0.3
 qwen_vl_utils==0.0.14 # for VLM
 ray[default]==2.55.1
-ring_flash_attn
+ring_flash_attn; platform_system == "Linux"
+safetensors>=0.8.0  # samples-reply wire codec; malformed-payload exception contract validated on 0.8.0
 sglang-router==0.3.2
 starlette==0.52.1
 tensorboard==2.20.0
 timm==1.0.17
+torchft-nightly==2026.4.3; platform_system == "Linux" and platform_machine == "x86_64"
 tqdm==4.67.3
-transformers==4.57.1
+transformers==5.12.1  # Required by HF-native weight conversion; also avoids SGLang's qwen3_asr collision in 5.13.
 wandb==0.27.0
+xxhash==3.7.1  # disk-delta weight sync (checksum)
+zstandard==0.25.0  # disk-delta weight sync (codec)

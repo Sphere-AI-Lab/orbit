@@ -18,12 +18,12 @@ import pytest
 pytest.importorskip("ray")
 
 import miles.ray.placement_group as pg_mod
-from miles.ray.rollout import (
+from miles.ray.rollout.rollout_server import (
     RolloutServer,
-    ServerGroup,
     _compute_megatron_num_gpus,
     _compute_rollout_offset,
 )
+from miles.ray.rollout.server_group import ServerGroup
 
 
 def _topology_args(**overrides) -> SimpleNamespace:

@@ -4,8 +4,9 @@ Generic agentic generate function for agent-environment RL training.
 The agent logic is fully encapsulated in a user-provided async function
 (--custom-agent-function-path). This generate function only handles:
   1. TITO session tracing (OpenAIEndpointTracer)
-  2. Converting session records to training samples
-  3. Multi-turn merge
+  2. Collecting the worker-assembled training samples (the session server
+     converts records to samples, truncates and merges in the owning worker)
+  3. Driver-side metadata application (agent_metadata, session_metadata)
 
 Agent function contract:
   async def my_agent(
@@ -29,15 +30,11 @@ from collections.abc import Callable
 from copy import deepcopy
 from typing import Any
 
+import httpx
 from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
 
 from miles.rollout.base_types import GenerateFnInput, GenerateFnOutput
-from miles.rollout.generate_utils.openai_endpoint_utils import (
-    OpenAIEndpointTracer,
-    compute_samples_from_openai_records,
-    truncate_samples_by_total_tokens,
-)
-from miles.rollout.generate_utils.sample_utils import merge_samples
+from miles.rollout.generate_utils.openai_endpoint_utils import OpenAIEndpointTracer
 from miles.utils.misc import load_function
 from miles.utils.types import Sample
 
@@ -45,10 +42,11 @@ logger = logging.getLogger(__name__)
 
 
 async def generate(input: GenerateFnInput) -> GenerateFnOutput:
-    assert getattr(input.args, "session_server_ip", None) and getattr(input.args, "session_server_port", None), (
-        "agentic_tool_call.generate requires session_server_ip/session_server_port. "
+    assert getattr(input.args, "session_server_ip", None) and getattr(input.args, "session_server_ports", None), (
+        "agentic_tool_call.generate requires session_server_ip/session_server_ports. "
         "Pass --use-session-server to start the session server."
     )
+    use_v2 = getattr(input.args, "use_session_server", None) == "v2"
     tracer = await OpenAIEndpointTracer.create(input.args)
 
     custom_agent_function: Callable = load_function(input.args.custom_agent_function_path)
@@ -66,12 +64,11 @@ async def generate(input: GenerateFnInput) -> GenerateFnOutput:
 
     log_prefix = f"[session={tracer.session_id}]"
 
-    session_ip = getattr(input.args, "session_server_ip", None)
-    session_port = getattr(input.args, "session_server_port", None)
-    if session_ip and session_port:
-        metadata = {**metadata, "session_server_id": f"{session_ip}:{session_port}"}
+    # From the tracer, not args: with multiple instances the owning ip:port is per-session.
+    metadata = {**metadata, "session_server_id": tracer.session_server_id}
 
     agent_metadata = None
+    collect_failed = False
     t_start = time.monotonic()
     try:
         logger.debug(f"{log_prefix} Starting agent function call")
@@ -86,60 +83,77 @@ async def generate(input: GenerateFnInput) -> GenerateFnOutput:
         logger.warning(f"{log_prefix} Agent function failed: {e}", exc_info=True)
 
     finally:
-        logger.debug(f"{log_prefix} Calling collect_records...")
-        records, session_metadata = await tracer.collect_records()
-        logger.debug(f"{log_prefix} collect_records done: {len(records)} records")
+        # Collect even if the agent failed.
+        logger.debug(f"{log_prefix} Calling collect_samples...")
+        collect_kwargs = {"max_seq_len": max_seq_len}
+        if use_v2:
+            collect_kwargs["agent_metadata"] = agent_metadata
+        try:
+            result = await tracer.collect_samples(input.sample, **collect_kwargs)
+        # Costs this sample, not the run; a non-2xx still raises RuntimeError.
+        except (TimeoutError, httpx.TransportError) as e:
+            collect_failed = True
+            logger.warning(f"{log_prefix} Failed collecting samples: {e!r}", exc_info=True)
+        else:
+            logger.debug(
+                f"{log_prefix} collect_samples done: {len(result.samples)} samples, "
+                f"total_time={time.monotonic()-t_start:.1f}s"
+            )
 
-    if not records:
-        logger.warning("No model calls recorded for sample")
+    if collect_failed:
         sample = deepcopy(input.sample)
         sample.status = Sample.Status.ABORTED
-        return GenerateFnOutput(samples=sample)
+        return GenerateFnOutput(samples=[sample] if use_v2 else sample)
 
-    logger.debug(f"{log_prefix} Computing samples from {len(records)} records...")
-    samples = compute_samples_from_openai_records(
-        input.args,
-        input.sample,
-        records,
-        input.state.tokenizer,
-        accumulated_token_ids=session_metadata.get("accumulated_token_ids"),
-        max_trim_tokens=session_metadata.get("max_trim_tokens", 0),
-    )
-
-    logger.debug(
-        f"{log_prefix} compute_samples done: {len(samples)} samples, total_time={time.monotonic()-t_start:.1f}s"
-    )
-    for s in samples:
-        s.metadata.update(agent_metadata or {})
-
-    if max_seq_len is not None:
-        samples = truncate_samples_by_total_tokens(samples, max_seq_len, input.state.tokenizer)
-
-    if not samples:
-        logger.warning("All samples truncated (prompt already exceeds max_seq_len)")
+    if not result.samples:
+        if result.empty_reason == "all_truncated":
+            logger.warning("All samples truncated (prompt already exceeds max_seq_len)")
+        else:
+            logger.warning("No model calls recorded for sample")
         sample = deepcopy(input.sample)
         sample.status = Sample.Status.ABORTED
-        return GenerateFnOutput(samples=sample)
+        return GenerateFnOutput(samples=[sample] if use_v2 else sample)
 
-    if not input.args.generate_multi_samples:
-        samples = merge_samples(samples, input.state.tokenizer)
-        samples.metadata.update(session_metadata)
-    else:
-        samples[-1].metadata.update(session_metadata)
-    return GenerateFnOutput(samples=samples)
+    samples = result.samples
+    if use_v2 and len(samples) > 1:
+        # FIXME: handle sample index issues.
+        rollout_id = input.sample.rollout_id if input.sample.rollout_id is not None else input.sample.index
+        assert rollout_id is not None, "v2 agentic samples require input Sample.rollout_id or Sample.index"
+        for sample in samples:
+            sample.rollout_id = rollout_id
+    if not use_v2:
+        # v1: the agent's metadata is applied driver-side. Under v2 it traveled
+        # through collect_samples and came back applied by the server-side
+        # merge (per-sample metadata/reward on the wire) — no overlay here.
+        for s in samples:
+            s.metadata.update(agent_metadata or {})
+
+    # If the agent function reports wall-clock time spent outside policy generation
+    # (env/tool steps), surface it on Sample.non_generation_time so throughput
+    # accounting subtracts it.
+    ngt = ((agent_metadata or {}).get("agent_metrics") or {}).get("total_tool_time")
+    if ngt is not None:
+        for s in samples:
+            s.non_generation_time = ngt
+
+    if use_v2:
+        return GenerateFnOutput(samples=samples)
+
+    (sample,) = samples
+    sample.metadata.update(result.session_metadata)
+    return GenerateFnOutput(samples=sample)
 
 
 def _add_arguments(parser: argparse.ArgumentParser):
     parser.add_argument("--custom-agent-function-path", type=str)
-    parser.add_argument("--generate-multi-samples", action="store_true", default=False)
     parser.add_argument(
         "--max-seq-len",
         type=int,
         default=None,
         dest="max_seq_len",
         help="Max sequence length in tokens (prompt + completion, including env responses) "
-        "per session. Truncates samples on the Miles side and is forwarded to the "
-        "Harbor agent server (as max_seq_len) to abort the trial early.",
+        "per session. Truncation happens inside the session server during sample assembly; "
+        "also forwarded to the Harbor agent server (as max_seq_len) to abort the trial early.",
     )
 
 

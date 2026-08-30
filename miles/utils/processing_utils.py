@@ -1,14 +1,61 @@
 import base64
+import inspect
 import io
 import logging
 import os
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
 
+from huggingface_hub import hf_hub_download
+from tokenizers import Tokenizer as RawTokenizer
 from transformers import AutoProcessor, AutoTokenizer, PreTrainedTokenizerBase, ProcessorMixin
+
+from miles.utils.hf_config import register_hf_config_aliases
 
 # ORBIT-SEAM: DSV4 tokenizer wrapper hook
 from orbit.utils.chat_template_utils.deepseek_v4 import maybe_wrap_deepseek_v4_tokenizer
 
 logger = logging.getLogger(__name__)
+
+
+def _fix_v5_tokenizer_components(tokenizer: PreTrainedTokenizerBase, model_name_or_path: str) -> None:
+    # transformers v5's LlamaTokenizerFast rebuilds pre_tokenizer/decoder in
+    # __init__, discarding the originals from tokenizer.json.  DeepSeek-V3.2
+    # declares LlamaTokenizerFast but actually uses ByteLevel, so without this
+    # fix the loaded tokenizer decodes Metaspace ▁ instead of ByteLevel Ġ/Ċ
+    # and diverges from the sglang-served tokenizer.  Mirrors sglang's
+    # _fix_v5_tokenizer_components (hf_transformers_utils.py).
+    backend = getattr(tokenizer, "_tokenizer", None)
+    if backend is None:
+        return
+
+    try:
+        local_path = Path(model_name_or_path) / "tokenizer.json"
+        if local_path.is_file():
+            tok_file = str(local_path)
+        else:
+            tok_file = hf_hub_download(model_name_or_path, "tokenizer.json", local_files_only=True)
+        raw = RawTokenizer.from_file(tok_file)
+    except Exception as e:
+        logger.warning("Could not load tokenizer.json for %s: %s", model_name_or_path, e)
+        return
+
+    raw_pre = type(raw.pre_tokenizer).__name__ if raw.pre_tokenizer else None
+    loaded_pre = type(backend.pre_tokenizer).__name__ if backend.pre_tokenizer else None
+
+    if raw_pre and loaded_pre and raw_pre != loaded_pre:
+        logger.info(
+            "Fixing v5 tokenizer component mismatch for %s: pre_tokenizer %s -> %s, decoder %s -> %s",
+            model_name_or_path,
+            loaded_pre,
+            raw_pre,
+            type(backend.decoder).__name__ if backend.decoder else None,
+            type(raw.decoder).__name__ if raw.decoder else None,
+        )
+        backend.pre_tokenizer = raw.pre_tokenizer
+        backend.decoder = raw.decoder
+
 
 # Default image patch size for vision-language models
 # Note: Qwen3-VL uses 16, Qwen2.5-VL uses 14
@@ -16,8 +63,29 @@ logger = logging.getLogger(__name__)
 DEFAULT_PATCH_SIZE = 14
 
 
-def load_tokenizer(name_or_path: str, chat_template_path: str = None, **kwargs):
+_TOKENIZER_CACHE: dict[tuple, PreTrainedTokenizerBase] = {}
+
+
+def _make_cache_key(name_or_path: str, chat_template_path: str | None, kwargs: dict) -> tuple | None:
+    try:
+        kwargs_items = tuple(sorted(kwargs.items()))
+        hash(kwargs_items)
+    except TypeError:
+        return None
+    return (name_or_path, chat_template_path, kwargs_items)
+
+
+def load_tokenizer(name_or_path: str, chat_template_path: str | None = None, **kwargs) -> PreTrainedTokenizerBase:
+    # Cache keyed by (name, chat_template_path, kwargs) — the fast suite creates
+    # hundreds of SessionServer / MockSGLangServer fixtures and each previously
+    # triggered a fresh AutoTokenizer.from_pretrained, tripping HF Hub rate limits.
+    cache_key = _make_cache_key(name_or_path, chat_template_path, kwargs)
+    if cache_key is not None and cache_key in _TOKENIZER_CACHE:
+        return _TOKENIZER_CACHE[cache_key]
+
+    register_hf_config_aliases()
     tokenizer = AutoTokenizer.from_pretrained(name_or_path, **kwargs)
+    _fix_v5_tokenizer_components(tokenizer, name_or_path)
     if chat_template_path:
         assert os.path.isfile(chat_template_path), (
             f"chat_template_path not found: {chat_template_path}. "
@@ -26,8 +94,13 @@ def load_tokenizer(name_or_path: str, chat_template_path: str = None, **kwargs):
         with open(chat_template_path) as f:
             tokenizer.chat_template = f.read()
         logger.info("Loaded custom chat template from %s", chat_template_path)
-    # ORBIT-SEAM: wrap DSV4 tokenizers (no-op otherwise)
-    return maybe_wrap_deepseek_v4_tokenizer(tokenizer, name_or_path)
+    # ORBIT-SEAM: wrap DSV4 tokenizers (no-op otherwise); wrap before upstream's cache store so
+    # cache hits hand back the wrapped tokenizer too
+    tokenizer = maybe_wrap_deepseek_v4_tokenizer(tokenizer, name_or_path)
+
+    if cache_key is not None:
+        _TOKENIZER_CACHE[cache_key] = tokenizer
+    return tokenizer
 
 
 def build_processor_kwargs(multimodal_inputs: dict | None = None) -> dict:
@@ -48,7 +121,43 @@ def build_processor_kwargs(multimodal_inputs: dict | None = None) -> dict:
     return result
 
 
+def processor_requires_medias(processor) -> bool:
+    try:
+        params = inspect.signature(processor).parameters
+        return "medias" in params and "text" in params
+    except (TypeError, ValueError):
+        return hasattr(processor, "media_processor")
+
+
+def call_processor(processor, text, multimodal_inputs: dict | None = None):
+    multimodal_inputs = multimodal_inputs or {}
+
+    # for kimi-vl & kimi-2.5
+    if processor_requires_medias(processor):
+        medias = []
+        if images := multimodal_inputs.get("images"):
+            medias.extend({"type": "image", "image": image} for image in images)
+        if videos := multimodal_inputs.get("videos"):
+            medias.extend({"type": "video", "video": video} for video in videos)
+        return processor(text=text, medias=medias)
+
+    kwargs = build_processor_kwargs(multimodal_inputs)
+    return processor(text=text, **kwargs)
+
+
+def extract_multimodal_train_inputs(processor_output: Mapping[str, Any]) -> dict[str, Any] | None:
+    excluded_keys = {"input_ids", "attention_mask", "mm_token_type_ids"}
+    return {key: value for key, value in processor_output.items() if key not in excluded_keys} or None
+
+
 def load_processor(name_or_path: str, **kwargs):
+    from miles.utils.chat_template_utils.inkling import is_inkling_checkpoint
+
+    if is_inkling_checkpoint(name_or_path):
+        from miles_plugins.models.inkling.mm_processor import InklingTrainProcessor
+
+        return InklingTrainProcessor(name_or_path)
+
     try:
         proc = AutoProcessor.from_pretrained(name_or_path, **kwargs)
     except (OSError, ValueError) as e:
@@ -63,6 +172,9 @@ def load_processor(name_or_path: str, **kwargs):
 
 
 def process_vision_info(prompt, processor):
+    if hasattr(processor, "extract_media"):
+        return processor.extract_media(prompt)
+
     # Follow-up: temporary solution, will write image utils for orbit later
     from qwen_vl_utils import process_vision_info as qwen_process_vision_info
 

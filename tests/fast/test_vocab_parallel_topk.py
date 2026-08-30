@@ -11,7 +11,7 @@ from orbit.opd.vocab_parallel import (
     compute_vocab_parallel_topk_log_probs_and_entropy,
     vocab_parallel_topk_indices,
 )
-from miles.utils.ppo_utils import _gather_true_on_policy_full_logits
+from miles.backends.training_utils.loss_hub.math_utils import _gather_true_on_policy_full_logits
 
 
 def test_single_process_matches_log_softmax_gather_values_and_grad() -> None:

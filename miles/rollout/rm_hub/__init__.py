@@ -1,12 +1,13 @@
 import asyncio
+import hashlib
 import random
 
 import aiohttp
 
 from miles.utils.misc import load_function
+from miles.utils.multi_lora import is_multi_lora_enabled
 from miles.utils.types import Sample
 
-# ORBIT-SEAM: re-export the gemma math grader
 from .deepscaler import get_deepscaler_rule_based_reward, get_gemma_math_reward
 from .f1 import f1_score
 from .gpqa import compute_gpqa_reward
@@ -28,9 +29,22 @@ async def remote_rm(args, sample: Sample):
             return await resp.json()
 
 
+def _resolve_reward_config(args, sample: Sample) -> tuple[str | None, str]:
+    # Spec fields win when set; unset/empty fields fall back to sample metadata and process-wide args.
+    spec = sample.reward_spec
+    metadata = sample.metadata if isinstance(sample.metadata, dict) else {}
+    custom_rm_path = (spec.custom_rm_path if spec is not None else None) or getattr(args, "custom_rm_path", None)
+    rm_type = (
+        (spec.rm_type if spec is not None else None) or metadata.get("rm_type") or getattr(args, "rm_type", None) or ""
+    ).strip()
+    return custom_rm_path, rm_type
+
+
 async def async_rm(args, sample: Sample, **kwargs):
-    if args.custom_rm_path is not None:
-        rm_function = load_function(args.custom_rm_path)
+    custom_rm_path, rm_type = _resolve_reward_config(args, sample)
+
+    if custom_rm_path is not None:
+        rm_function = load_function(custom_rm_path)
         return await rm_function(args, sample, **kwargs)
 
     return await default_async_rm(args, sample)
@@ -44,10 +58,12 @@ async def default_async_rm(args, sample: Sample):
     (e.g. OPD teacher scoring) can still hand evaluation samples to the real
     task reward.
     """
-    metadata = sample.metadata if isinstance(sample.metadata, dict) else {}
-    rm_type = (metadata.get("rm_type") or args.rm_type or "").strip()
+    # ORBIT-SEAM: rm_type now comes from upstream's _resolve_reward_config (reward-spec aware),
+    # with its custom_rm_path half deliberately discarded -- that is what "bypass" means here.
+    _, rm_type = _resolve_reward_config(args, sample)
     response = sample.response
     label = sample.label
+    metadata = sample.metadata if isinstance(sample.metadata, dict) else {}
     if rm_type.startswith("boxed_"):
         response = extract_boxed_answer(response) or ""
         rm_type = rm_type[len("boxed_") :]
@@ -78,6 +94,10 @@ async def default_async_rm(args, sample: Sample):
         return compute_ifbench_reward(response, label, metadata=metadata)
     elif rm_type == "random":
         return random.randint(0, 1)
+    elif rm_type == "deterministic_random":
+        content = str(sample.tokens) + response
+        content_hash = hashlib.sha256(content.encode()).digest()
+        return int(content_hash[0]) % 2
     elif rm_type:
         raise NotImplementedError(f"Rule-based RM for {rm_type} is not implemented.")
     else:
@@ -99,8 +119,7 @@ async def batched_async_rm(
             sample.reward = reward
         return None
 
-    if args.custom_rm_path is not None:
-        # Ensure the custom reward function is implemented in batch mode
+    if args.custom_rm_path is not None and not is_multi_lora_enabled(args):
         rm_function = load_function(args.custom_rm_path)
         return await rm_function(args, samples, **kwargs)
     tasks = [async_rm(args, sample, **kwargs) for sample in samples]

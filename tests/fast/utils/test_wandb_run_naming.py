@@ -37,7 +37,7 @@ def _args(**overrides):
 
 def _init_kwargs(args) -> dict:
     """Run `init_wandb_primary` with wandb stubbed, and return its init kwargs."""
-    from miles.utils import wandb_utils
+    from miles.utils.tracking_utils import wandb_utils
 
     captured = {}
 

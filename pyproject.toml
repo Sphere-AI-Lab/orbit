@@ -313,6 +313,7 @@ ignore = [
     "E501", # Line too long # Follow-up handle it later
 ]
 
+
 [tool.pytest.ini_options]
 # durations=0 will display all tests execution time, sorted in ascending order starting from from the slowest one.
 # -vv will also display tests with duration = 0.00s
@@ -321,6 +322,7 @@ testpaths = ["./tests"]  # must be an explicit path to avoid importing another "
 # directories to ignore when discovering tests
 norecursedirs = [
     "external",
+    "snapshots",
     "examples",
     "docs",
     "scripts",

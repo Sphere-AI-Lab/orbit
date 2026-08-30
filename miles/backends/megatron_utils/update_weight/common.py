@@ -1,8 +1,9 @@
+import dataclasses
 import inspect
 import logging
 import re
 from argparse import Namespace
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 
 # ORBIT-SEAM: ray made an optional import so this module is importable in CPU-only test envs without it installed
 try:
@@ -17,19 +18,16 @@ import torch.distributed as dist
 
 # ORBIT-SEAM: megatron-core made an optional import (same CPU-only test-env rationale as ray above)
 try:
-    from megatron.core import mpu
     from megatron.core.transformer.transformer_layer import get_transformer_layer_offset
 except Exception:  # pragma: no cover - test environments may not ship megatron-core
-    class _MissingMegatronCore:
-        def __getattr__(self, name):
-            raise RuntimeError("megatron.core is required for global weight enumeration")
-
-    mpu = _MissingMegatronCore()
 
     def get_transformer_layer_offset(*args, **kwargs):
         raise RuntimeError("megatron.core is required for global weight enumeration")
 
+
 from miles.backends.megatron_utils.misc_utils import strip_param_name_prefix
+from miles.backends.training_utils.parallel import get_parallel_state
+
 # ORBIT-SEAM: expert-TP / DSV4-OFT name predicates and adapter-param enumeration moved to orbit/megatron (P1 lift-out); re-exported here so existing importers of this module keep working
 from orbit.megatron.adapter_params import is_named_adapter_tensor, named_adapter_params, named_adapter_params_and_buffers  # noqa: F401
 from orbit.megatron.tensor_semantics import (
@@ -37,9 +35,123 @@ from orbit.megatron.tensor_semantics import (
     should_skip_named_tensor_for_tracking,
     uses_expert_tensor_parallel_group,
 )
+
 from miles.utils.types import ParamInfo
 
 logger = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class AtomicUpdateGroup:
+    key: str
+    suffixes: tuple[str, ...]
+    optional: bool = False
+
+
+def get_atomic_update_groups(args, model_name) -> list[AtomicUpdateGroup]:
+    model_groups = _get_model_atomic_update_groups(args, model_name)
+    if model_groups:
+        return model_groups
+    return _get_q_lora_atomic_update_groups(args)
+
+
+def _get_q_lora_atomic_update_groups(args) -> list[AtomicUpdateGroup]:
+    if args.q_lora_rank is None:
+        return []
+
+    return [
+        AtomicUpdateGroup(
+            key="q_lora_a_proj",
+            suffixes=(
+                ".self_attention.linear_q_down_proj.weight",
+                ".self_attention.linear_kv_down_proj.weight",
+            ),
+        )
+    ]
+
+
+def _get_model_atomic_update_groups(args, model_name) -> list[AtomicUpdateGroup]:
+    model_name = model_name.lower()
+    if "inkling" in model_name:
+        from ..megatron_to_hf.inkling import get_inkling_atomic_update_groups
+
+        return get_inkling_atomic_update_groups(args)
+    if "deepseekv4" in model_name:
+        from ..megatron_to_hf.deepseekv4 import get_deepseek_v4_atomic_update_groups
+
+        return get_deepseek_v4_atomic_update_groups()
+    return []
+
+
+@dataclasses.dataclass(frozen=True)
+class NamedUpdateUnit:
+    """A set of params that must be transferred and packed together."""
+
+    names: tuple[str, ...]
+
+
+def get_named_update_units(param_names: Sequence[str], atomic_update_groups) -> list[NamedUpdateUnit]:
+    position = {}
+    for i, name in enumerate(param_names):
+        assert name not in position, f"Duplicate param name: {name}"
+        position[name] = i
+
+    grouped_names: set[str] = set()
+    group_keys: set[str] = set()
+    ordered_units: list[tuple[int, NamedUpdateUnit]] = []
+    pending_groups: dict[tuple[str, str], list[str | None]] = {}
+    matched_group_keys: set[str] = set()
+
+    for group in atomic_update_groups:
+        key = group.key
+        suffixes = group.suffixes
+        assert key not in group_keys, f"Duplicate atomic update group: {key}"
+        assert suffixes, f"Atomic update group {key} has no suffixes"
+        assert all(suffixes), f"Atomic update group {key} contains empty suffix"
+        assert len(set(suffixes)) == len(suffixes), f"Atomic update group {key} contains duplicate suffixes"
+        group_keys.add(key)
+
+    for name in param_names:
+        matches = [
+            (group, suffix_idx, suffix)
+            for group in atomic_update_groups
+            for suffix_idx, suffix in enumerate(group.suffixes)
+            if name.endswith(suffix)
+        ]
+        assert len(matches) <= 1, f"Param {name} matches multiple atomic update groups"
+        if not matches:
+            continue
+
+        group, suffix_idx, suffix = matches[0]
+        prefix = name[: -len(suffix)]
+        names = pending_groups.setdefault((prefix, group.key), [None] * len(group.suffixes))
+        names[suffix_idx] = name
+        grouped_names.add(name)
+        matched_group_keys.add(group.key)
+
+    for group in atomic_update_groups:
+        assert (
+            group.optional or group.key in matched_group_keys
+        ), f"Atomic update group {group.key} references no params matching suffixes {group.suffixes}"
+
+    for (prefix, key), names in pending_groups.items():
+        assert all(names), f"Atomic update group {prefix}:{key} is incomplete: {names}"
+        resolved_names = tuple(names)
+        ordered_units.append((min(position[name] for name in resolved_names), NamedUpdateUnit(names=resolved_names)))
+
+    for name in param_names:
+        if name not in grouped_names:
+            ordered_units.append((position[name], NamedUpdateUnit(names=(name,))))
+
+    return [unit for _position, unit in sorted(ordered_units, key=lambda item: item[0])]
+
+
+def get_named_value_update_units(
+    named_values: Sequence[tuple[str, object]], atomic_update_groups
+) -> list[list[tuple[str, object]]]:
+    update_units = get_named_update_units([name for name, _value in named_values], atomic_update_groups)
+    value_by_name = dict(named_values)
+    return [[(name, value_by_name[name]) for name in unit.names] for unit in update_units]
 
 
 def _gather_with_stride(
@@ -54,6 +166,29 @@ def _gather_with_stride(
     return torch.cat(interleaved, dim=partition_dim)
 
 
+def is_routed_expert_param(name: str) -> bool:
+    """Whether a Megatron param name belongs to the routed (expert-parallel) experts.
+
+    Routed experts live under ".experts.", but shared experts may nest an inner
+    ModuleList (e.g. Inkling's "mlp.shared_experts.experts.N.") whose params are
+    regular-TP sharded and EP-replicated, so they must not match.
+    """
+    return ".experts." in name and ".shared_experts." not in name
+
+
+def _is_unmarked_grouped_expert_weight(name: str, param: torch.nn.Parameter) -> bool:
+    """TEGroupedLinear never marks its per-expert weight0..weightN, so Megatron fills in
+    the defaults (tensor_model_parallel=False, partition_dim=-1) and the tensor claims to
+    be unsharded. It is expert-TP sharded whenever etp > 1, so the gather must still run.
+    """
+    return (
+        is_routed_expert_param(name)
+        and ("linear_fc1.weight" in name or "linear_fc2.weight" in name)
+        and not param.tensor_model_parallel
+        and get_parallel_state().etp.size > 1
+    )
+
+
 def _check_and_fix_partition(args: Namespace, name: str, partition_stride: int, partition_dim: int) -> tuple[int, int]:
     """Validate partition_stride values for known parameter patterns.
 
@@ -65,10 +200,12 @@ def _check_and_fix_partition(args: Namespace, name: str, partition_stride: int, 
     matchable = name.replace("._orig_module.", ".").replace(".to_wrap.", ".")
     if "linear_fc1.weight" in matchable and args.swiglu:
         partition_stride = 2
+        if partition_dim < 0:
+            partition_dim = 0
     # ORBIT-SEAM: same to_wrap/_orig_module stripping as above
     elif "linear_fc2.weight" in matchable:
         assert partition_stride == 1, f"Expected partition_stride=1 for {name}, got {partition_stride}"
-        if partition_dim == 0:
+        if partition_dim <= 0:
             partition_dim = 1
     else:
         assert partition_stride == 1, f"Expected partition_stride=1 for {name}, got {partition_stride}"
@@ -79,23 +216,31 @@ def all_gather_param(args: Namespace, name: str, param: torch.nn.Parameter) -> t
     # ORBIT-SEAM: docstring reworded for uses_expert_tensor_parallel_group (DSV4 shared-expert / grouped-MoE-OFT routing), not just ".experts."
     """
     All-gather TP-sharded param to full tensor. expert_bias→param, non-TP/duplicated→param.data.
-    Uses expert-TP for expert-tensor-sharded params, else regular-TP.
-    Handles strided partitioning via partition_stride.
+    Uses expert-TP for expert-tensor-sharded params (orbit's predicate: routed ".experts." plus
+    the DSV4 shared-expert / grouped-MoE-OFT names), else regular-TP. Upstream's narrower
+    is_routed_expert_param additionally excludes nested ".shared_experts.experts." — see the
+    phase-4 flag on orbit.megatron.tensor_semantics. Handles strided partitioning via
+    partition_stride.
     """
     if "expert_bias" in name:
         return param
 
     assert hasattr(param, "tensor_model_parallel"), f"{name} does not have tensor_model_parallel attribute"
-    if not param.tensor_model_parallel or getattr(param, "parallel_mode", None) == "duplicated":
+    if getattr(param, "parallel_mode", None) == "duplicated":
+        return param.data
+    if not param.tensor_model_parallel and not _is_unmarked_grouped_expert_weight(name, param):
         return param.data
 
-    # ORBIT-SEAM: route expert-TP grouping through uses_expert_tensor_parallel_group (DSV4 shared-expert / grouped-MoE-OFT param routing), not a bare ".experts." substring check
+    # ORBIT-SEAM: route expert-TP grouping through uses_expert_tensor_parallel_group (DSV4 shared-expert / grouped-MoE-OFT param routing), not upstream's bare is_routed_expert_param
     if uses_expert_tensor_parallel_group(name):
-        tp_size = mpu.get_expert_tensor_parallel_world_size()
-        tp_group = mpu.get_expert_tensor_parallel_group()
+        tp_size = get_parallel_state().etp.size
+        tp_group = get_parallel_state().etp.group
     else:
-        tp_size = mpu.get_tensor_model_parallel_world_size()
-        tp_group = mpu.get_tensor_model_parallel_group()
+        tp_size = get_parallel_state().tp.size
+        tp_group = get_parallel_state().tp.group
+
+    if tp_size <= 1:
+        return param.data
 
     param_partitions = [torch.empty_like(param.data) for _ in range(tp_size)]
     dist.all_gather(param_partitions, param.data, group=tp_group)
@@ -125,18 +270,25 @@ def all_gather_params_async(
         if "expert_bias" in info.name:
             gather_tasks.append((info, param, None, None, None, None))
             handles.append(None)
-        elif not param.tensor_model_parallel or getattr(param, "parallel_mode", None) == "duplicated":
+        elif getattr(param, "parallel_mode", None) == "duplicated" or (
+            not param.tensor_model_parallel and not _is_unmarked_grouped_expert_weight(info.name, param)
+        ):
             gather_tasks.append((info, param.data, None, None, None, None))
             handles.append(None)
         else:
             # Start async all_gather
             # ORBIT-SEAM: same expert-TP routing as all_gather_param
             if uses_expert_tensor_parallel_group(info.name):
-                tp_size = mpu.get_expert_tensor_parallel_world_size()
-                tp_group = mpu.get_expert_tensor_parallel_group()
+                tp_size = get_parallel_state().etp.size
+                tp_group = get_parallel_state().etp.group
             else:
-                tp_size = mpu.get_tensor_model_parallel_world_size()
-                tp_group = mpu.get_tensor_model_parallel_group()
+                tp_size = get_parallel_state().tp.size
+                tp_group = get_parallel_state().tp.group
+
+            if tp_size <= 1:
+                gather_tasks.append((info, param.data, None, None, None, None))
+                handles.append(None)
+                continue
 
             param_partitions = [torch.empty_like(param.data) for _ in range(tp_size)]
             handle = dist.all_gather(param_partitions, param.data, group=tp_group, async_op=True)
@@ -170,26 +322,10 @@ def named_params_and_buffers(
     args: Namespace,
     model: Sequence[torch.nn.Module],
     convert_to_global_name: bool = True,
-    translate_gpu_to_cpu: bool = False,
 ) -> Iterator[tuple[str, torch.Tensor]]:
     if convert_to_global_name:
-        ans = _named_params_and_buffers_global(args, model)
-    else:
-        ans = _named_params_and_buffers_vanilla(model)
-
-    if translate_gpu_to_cpu:
-        ans = ((name, _maybe_get_cpu_backup(tensor)) for name, tensor in ans)
-
-    return ans
-
-
-def _maybe_get_cpu_backup(x: torch.Tensor):
-    from torch_memory_saver import torch_memory_saver
-
-    if (cpu_tensor := torch_memory_saver.get_cpu_backup(x)) is not None:
-        return cpu_tensor
-
-    return x
+        return _named_params_and_buffers_global(args, model)
+    return _named_params_and_buffers_vanilla(model)
 
 
 def _named_params_and_buffers_vanilla(model: Sequence[torch.nn.Module]) -> Iterator[tuple[str, torch.Tensor]]:
@@ -199,6 +335,8 @@ def _named_params_and_buffers_vanilla(model: Sequence[torch.nn.Module]) -> Itera
             return f"vp_stages.{vp_stage}.{strip_param_name_prefix(name)}"
 
         for name, param in model_module.named_parameters():
+            if getattr(param, "_is_witness_param", False):
+                continue
             # ORBIT-SEAM: skip quantization-placeholder tensors (int4/nvfp4 triplets) from weight-sync tracking
             if should_skip_named_tensor_for_tracking(model_module, name, param):
                 continue
@@ -222,8 +360,8 @@ def _named_params_and_buffers_global(
     Yield (global_name, param/buffer) with consistent names across PP/EP. Adjusts indices for
     virtual PP + EP offsets. Handles decoder.layers, mtp.layers (Multi-Token Prediction), expert_bias.
     """
-    ep_size = mpu.get_expert_model_parallel_world_size()
-    ep_rank = mpu.get_expert_model_parallel_rank()
+    ep_size = get_parallel_state().ep.size
+    ep_rank = get_parallel_state().ep.rank
     if args.num_experts:
         expert_offset = ep_rank * args.num_experts // ep_size
 
@@ -236,6 +374,8 @@ def _named_params_and_buffers_global(
         else:
             layer_offset = get_transformer_layer_offset(model_module.config)
         for name, param in model_module.named_parameters():
+            if getattr(param, "_is_witness_param", False):
+                continue
             # ORBIT-SEAM: skip quantization-placeholder tensors (int4/nvfp4 triplets) from weight-sync tracking
             if should_skip_named_tensor_for_tracking(model_module, name, param):
                 continue
@@ -243,7 +383,7 @@ def _named_params_and_buffers_global(
             if not name.startswith("module.module."):
                 name = "module." + name
 
-            decoder_layers_pattern = r"module\.module\.decoder\.layers\.(\d+)\.(.+)"
+            decoder_layers_pattern = r"module\.module\.(?:language_model\.)?decoder\.layers\.(\d+)\.(.+)"
             match = re.match(decoder_layers_pattern, name)
             if not match:
                 # MTP (Multi-Token Prediction) layers for speculative decoding
@@ -255,15 +395,18 @@ def _named_params_and_buffers_global(
 
                 # MTP layer indices start from 0
                 layer_idx, rest = match.groups()
-                expert_pattern = r"transformer_layer.mlp.experts\.(.+)\.weight(\d+)"
+                expert_pattern = r"(transformer_layer|mtp_model_layer)\.mlp\.experts\.(.+)\.weight(\d+)"
                 match = re.match(expert_pattern, rest)
                 if not match:
                     yield name, param
                     continue
 
-                rest, expert_idx = match.groups()
+                inner, rest, expert_idx = match.groups()
                 expert_idx = int(expert_idx) + expert_offset
-                yield f"module.module.mtp.layers.{layer_idx}.transformer_layer.mlp.experts.{rest}.weight{expert_idx}", param
+                yield (
+                    f"module.module.mtp.layers.{layer_idx}.{inner}.mlp.experts.{rest}.weight{expert_idx}",
+                    param,
+                )
                 continue
 
             layer_idx, rest = match.groups()
@@ -292,7 +435,7 @@ def _named_params_and_buffers_global(
             if not name.startswith("module.module."):
                 name = "module." + name
 
-            decoder_layers_pattern = r"module\.module\.decoder\.layers\.(\d+)\.(.+)"
+            decoder_layers_pattern = r"module\.module\.(?:language_model\.)?decoder\.layers\.(\d+)\.(.+)"
             match = re.match(decoder_layers_pattern, name)
             if not match:
                 yield name, buffer
@@ -306,43 +449,55 @@ def collect_named_tensors_for_weight_transfer(
     args: Namespace,
     model: Sequence[torch.nn.Module],
     convert_to_global_name: bool = True,
-    translate_gpu_to_cpu: bool = False,
-    is_expert: bool = False,
+    is_expert: bool | None = False,
 ) -> Iterator[tuple[str, torch.Tensor]]:
 
-    for name, tensor in named_params_and_buffers(
-        args,
-        model,
-        convert_to_global_name,
-        translate_gpu_to_cpu,
-    ):
-        # ORBIT-SEAM: route expert-TP grouping through uses_expert_tensor_parallel_group, not a bare ".experts." substring check
-        if is_expert == uses_expert_tensor_parallel_group(name):
+    for name, tensor in named_params_and_buffers(args, model, convert_to_global_name):
+        # ORBIT-SEAM: route expert-TP grouping through uses_expert_tensor_parallel_group, not upstream's bare is_routed_expert_param
+        if is_expert is None or is_expert == uses_expert_tensor_parallel_group(name):
             yield name, tensor
 
 
-def post_process_weights(
-    rollout_engines: Sequence[ActorHandle],
-    restore_weights_before_load: bool = False,
-    post_process_quantization: bool = False,
-    post_load_weights: bool = False,
-):
+def begin_weight_update(rollout_engines: Sequence[ActorHandle], selector: str = "all"):
+    """Open a weight-update session on the selected rollout engines (restore packed weights)."""
+    ray.get([engine.begin_weight_update.remote(selector=selector) for engine in rollout_engines])
+
+
+def weight_update_selector(args) -> str:
+    """Exclude the draft only when the trainer provably has no MTP block to send it."""
+    if (
+        getattr(args, "sglang_speculative_algorithm", None)
+        and not getattr(args, "mtp_num_layers", None)
+        and getattr(args, "megatron_to_hf_mode", "raw") != "bridge"
+    ):
+        return "target"
+    return "all"
+
+
+def end_weight_update(rollout_engines: Sequence[ActorHandle]):
+    """Close the weight-update session (post-load + quant post-process on the full model)."""
+    ray.get([engine.end_weight_update.remote() for engine in rollout_engines])
+
+
+def _check_weight_sync_results(results: list, *, is_lora: bool) -> None:
+    """Validate return values from rollout engine weight-sync RPCs.
+
+    Raises RuntimeError if any engine reports failure, preventing silent
+    failures when SGLang versions are incompatible.
     """
-    Trigger post-process on all rollout engines,
-    including:
-        - int4/fp4 quantization
-        - post_load_weights (should be enabled when using p2p weights updating)
-    """
-    # ORBIT-SEAM: ray is optional-imported above; fail loudly if this path is hit without it
-    if ray is None:
-        raise RuntimeError("ray is required for post_process_weights")
-    ray.get(
-        [
-            engine.post_process_weights.remote(
-                restore_weights_before_load=restore_weights_before_load,
-                post_process_quantization=post_process_quantization,
-                post_load_weights=post_load_weights,
+    sync_type = "LoRA" if is_lora else "Base model"
+    for result in results:
+        if isinstance(result, Mapping):
+            success = result.get("success")
+            error_msg = result.get("error_message") or result.get("error") or "unknown error"
+        elif hasattr(result, "success"):
+            success = result.success
+            error_msg = getattr(result, "error_message", "unknown error")
+        else:
+            continue
+
+        if success is False:
+            raise RuntimeError(
+                f"{sync_type} weight sync failed on rollout engine: {error_msg}. "
+                f"Check SGLang version compatibility."
             )
-            for engine in rollout_engines
-        ]
-    )

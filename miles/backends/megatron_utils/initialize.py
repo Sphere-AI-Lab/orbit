@@ -3,13 +3,17 @@ import random
 
 import numpy as np
 import torch
+import torch.distributed as dist
 from megatron.core import mpu, tensor_parallel
 from megatron.core.config import set_experimental_flag
 from megatron.core.num_microbatches_calculator import init_num_microbatches_calculator
 from megatron.training.global_vars import _build_tokenizer, set_args
 
 from miles.backends.training_utils.parallel import get_parallel_state, set_parallel_state
+from miles.utils.ft_utils.indep_dp import IndepDPInfo
+from miles.utils.hf_config import register_hf_config_aliases
 
+from .ft.indep_dp import create_indep_dp_group
 from .parallel import create_megatron_parallel_state
 
 logger = logging.getLogger(__name__)
@@ -24,10 +28,10 @@ def _set_random_seed(
 ):
     """Set random seed for reproducability."""
     # Ensure that different pipeline MP stages get different seeds.
-    seed = seed_ + (100 * mpu.get_pipeline_model_parallel_rank())
+    seed = seed_ + (100 * get_parallel_state().pp.rank)
     # Ensure different data parallel ranks get different seeds
     if data_parallel_random_init:
-        seed = seed + (10 * get_parallel_state().intra_dp.rank)
+        seed = seed + (10 * get_parallel_state().effective_dp.rank)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -58,7 +62,14 @@ def _initialize_distributed(args, get_embedding_ranks=None, get_position_embeddi
     )
 
 
-def init(args):
+def init(
+    args,
+    indep_dp_store_addr: str | None = None,
+    indep_dp_info: IndepDPInfo | None = None,
+):
+    if indep_dp_info is None:
+        indep_dp_info = IndepDPInfo.create_trivial()
+
     set_args(args)
     if args.enable_experimental:
         logger.info("Enable megatron experimental")
@@ -67,7 +78,12 @@ def init(args):
     # Pytorch distributed.
     _initialize_distributed(args)
 
-    set_parallel_state(create_megatron_parallel_state())
+    indep_dp = create_indep_dp_group(
+        store_addr=indep_dp_store_addr,
+        indep_dp_info=indep_dp_info,
+        megatron_rank=dist.get_rank(),
+        megatron_world_size=dist.get_world_size(),
+    )
 
     # ORBIT-SEAM: numpy-2 guard removed; the pinned Sphere Megatron-LM is numpy-2 clean (shared cu13 env)
     # numpy 2.x is OK with this (Sphere-patched) Megatron-LM: NVIDIA/Megatron-LM#1563
@@ -75,6 +91,12 @@ def init(args):
     # here, and no other numpy-2.0-removed API is used. The old
     # `assert np.__version__.startswith("1.")` guard is removed so cu13-env
     # (numpy 2.x, shared with the sglang rollout / torch / flashinfer) can run.
+
+    set_parallel_state(create_megatron_parallel_state(indep_dp=indep_dp))
+
+    # sanity check
+    if getattr(args, "indep_dp", False):
+        assert args.data_parallel_size == 1
 
     # Random seeds for reproducibility.
     if args.rank == 0:
@@ -85,6 +107,7 @@ def init(args):
         args.te_rng_tracker,
         args.inference_rng_tracker,
     )
+    register_hf_config_aliases()
     _build_tokenizer(args)
     # We won't use this. initialize to pass some validation in megatron.
     init_num_microbatches_calculator(
@@ -114,6 +137,9 @@ def init(args):
             logger.info("> enabling batch-invariant kernels globally")
         enable_batch_invariant_mode()
 
+    if args.debug_deterministic_collective:
+        assert not args.overlap_grad_reduce, "deterministic collectives require synchronous grad sync"
+
     if args.tp_comm_overlap:
         from megatron.training.initialize import _initialize_tp_communicators
 
@@ -126,10 +152,10 @@ def init(args):
         custom_init(args)
 
 
-# Follow-up shall we use a simpler method to determine which rank to init wandb?
-def is_megatron_main_rank():
+# TODO shall we use a simpler method to determine which rank to init wandb?
+def is_first_replica_megatron_main_rank():
     return (
-        get_parallel_state().intra_dp_cp.rank == 0
-        and mpu.get_tensor_model_parallel_rank() == 0
-        and mpu.get_pipeline_model_parallel_rank() == mpu.get_pipeline_model_parallel_world_size() - 1
+        get_parallel_state().effective_dp_cp.rank == 0
+        and get_parallel_state().tp.rank == 0
+        and get_parallel_state().pp.rank == get_parallel_state().pp.size - 1
     )

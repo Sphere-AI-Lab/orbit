@@ -6,7 +6,7 @@ import argparse
 import pytest
 
 from miles.ray.placement_group import _opd_teacher_extra_gpus
-from miles.ray.rollout import OPD_TEACHER_MODEL_NAME, _opd_teacher_model_config
+from orbit.opd.teacher_servers import OPD_TEACHER_MODEL_NAME, _opd_teacher_model_config
 from miles.utils.arguments import _validate_opd_args
 
 

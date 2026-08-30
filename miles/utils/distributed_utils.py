@@ -6,6 +6,9 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
+
+# ORBIT-SEAM: upstream's `from packaging.version import parse` dropped with the torch-version
+# comparison it fed (see _new_process_group_options_kwargs below)
 from torch.distributed.distributed_c10d import (
     Backend,
     PrefixStore,
@@ -16,6 +19,7 @@ from torch.distributed.distributed_c10d import (
     rendezvous,
 )
 
+from miles.utils.ft_utils.process_group_utils import GeneralPGUtil
 
 GLOO_GROUP = None
 
@@ -76,9 +80,10 @@ def init_process_group(
 
     # NOTE: The pg_options parameter was renamed into backend_options in PyTorch 2.6.0
     # https://github.com/pytorch/pytorch/commit/a0c7029a75628cd5fa8df83c0de0ea98ee7fd844
-    # ORBIT-SEAM: removed base's version-string comparison (`"backend_options" if str(torch.__version__)
-    # >= "2.6" else "pg_options"`), which breaks on non-numeric-suffixed dev/nightly torch versions;
-    # replaced by _new_process_group_options_kwargs' direct signature inspection below
+    # ORBIT-SEAM: removed upstream's version-string comparison (base: `"backend_options" if
+    # str(torch.__version__) >= "2.6" else "pg_options"`; upstream now uses
+    # `parse(torch.__version__) >= parse("2.6")`), which breaks on non-PEP440 dev/nightly torch
+    # versions; replaced by _new_process_group_options_kwargs' direct signature inspection below
     pg, _ = _new_process_group_helper(
         world_size,
         rank,
@@ -150,7 +155,7 @@ def distributed_masked_whiten(
     stats_tensor = torch.stack((local_sum, local_sum_sq, local_mask_sum)).detach()
 
     # Aggregate via all_reduce within the selected group
-    dist.all_reduce(stats_tensor, group=process_group)
+    GeneralPGUtil.create(process_group).all_reduce(stats_tensor, process_group, op=dist.ReduceOp.SUM)
 
     # Calculate global stats from aggregated results
     global_sum, global_sum_sq, global_mask_sum = stats_tensor

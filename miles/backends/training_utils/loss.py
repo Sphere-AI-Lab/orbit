@@ -7,11 +7,14 @@ from torch.utils.checkpoint import checkpoint
 
 from miles.utils.distributed_utils import distributed_masked_whiten
 from miles.utils.misc import load_function
+
 # ORBIT-SEAM: orbit-added ppo_utils helpers - critic explained-variance stat keys, the
 # true-on-policy full-logits gather, the overflow-safe ratio helpers, the OPD advantage
 # shaping and the icepop gate. _gather_true_on_policy_full_logits is imported here purely
 # as a re-export: orbit.opd.losses reads it back off this module at call time.
-from miles.utils.ppo_utils import (  # noqa: F401
+# Re-anchored: upstream renamed miles/utils/ppo_utils.py to
+# miles/backends/training_utils/loss_hub/math_utils.py.
+from miles.backends.training_utils.loss_hub.math_utils import (  # noqa: F401
     VALUE_EV_STAT_KEYS,
     _gather_true_on_policy_full_logits,
     _safe_clamp_log_ratio,
@@ -30,15 +33,20 @@ from miles.utils.ppo_utils import (  # noqa: F401
     icepop_gate,
     opd_mopd_advantages,
 )
+from miles.utils.audit_utils.event_logger.logger import get_event_logger, is_event_logger_initialized
+from miles.utils.audit_utils.event_logger.models import TrainAdvantageComputationEvent
+from miles.utils.multi_lora import is_multi_lora_enabled
 from miles.utils.types import RolloutBatch
 
 from .cp_utils import (
     _allgather_cp_redistribute,
     all_gather_with_cp,
+    get_local_response_loss_masks,
     get_logits_and_tokens_offset_with_cp,
     get_sum_of_sample_mean,
 )
 from .parallel import get_parallel_state
+
 # ORBIT-SEAM: orbit's OPD losses (full-vocab JSD, direct top-k KL) and the masked
 # response-reduction helpers added with them live in orbit.opd.losses; bound here so the
 # loss_type arms below, policy_loss_function's max diagnostic and existing importers that
@@ -54,6 +62,16 @@ from orbit.opd.losses import (  # noqa: F401
     opd_topk_loss_function,
     opd_topk_sample_log_probs,
 )
+
+
+def _detach_rollout_tensor_list(rollout_data: RolloutBatch, key: str) -> list[torch.Tensor] | None:
+    tensors = rollout_data.get(key)
+    if tensors is None:
+        return None
+
+    detached_tensors = [tensor.detach() for tensor in tensors]
+    rollout_data[key] = detached_tensors
+    return detached_tensors
 
 
 def get_responses(
@@ -299,7 +317,10 @@ def get_log_probs_and_entropy(
                 tokens_chunk,
                 parallel_state.tp.group,
                 with_entropy=with_entropy,
-                entropy_no_grad=entropy_no_grad,
+                # ORBIT-SEAM: upstream renamed orbit's entropy_no_grad kwarg on
+                # calculate_log_probs_and_entropy to entropy_requires_grad (inverted sense);
+                # this call site is translated, orbit's own entropy_no_grad API is unchanged
+                entropy_requires_grad=not entropy_no_grad,
                 chunk_size=args.log_probs_chunk_size,
                 true_on_policy=args.true_on_policy_mode,
                 vocab_size=getattr(args, "vocab_size", None),
@@ -405,12 +426,14 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch, 
     This function extracts rewards, log-probs, values, and masks from
     `rollout_data`, computes KL divergences, then applies the chosen advantage
     estimator. Supported methods: "grpo", "gspo", "ppo", "reinforce_plus_plus",
-    and "reinforce_plus_plus_baseline". When `args.normalize_advantages` is
-    True, advantages are whitened across the data-parallel group using masked
-    statistics.
+    and "reinforce_plus_plus_baseline". On-policy distillation (OPD) is applied
+    orthogonally on top of any estimator via `args.use_opd`. When
+    `args.normalize_advantages` is True, advantages are whitened across the
+    data-parallel group using masked statistics.
 
     Early returns if both `log_probs` and `values` are None (intermediate
-    pipeline stages).
+    pipeline stages), unless the last stage is explicitly allowed to derive
+    zero-KL shapes without the standalone actor pass.
 
     Args:
         args: Configuration specifying estimator type, KL coefficient,
@@ -425,7 +448,9 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch, 
             advantage adjustments are skipped for role="critic".
     """
     parallel_state = get_parallel_state()
-    log_probs: list[torch.Tensor] = rollout_data.get("rollout_log_probs" if args.use_rollout_logprobs else "log_probs")
+    allow_missing_log_probs = args.skip_actor_forward_only and not args.use_rollout_logprobs
+    log_probs_key = "rollout_log_probs" if args.use_rollout_logprobs else "log_probs"
+    log_probs: list[torch.Tensor] = rollout_data.get(log_probs_key)
     ref_log_probs: list[torch.Tensor] = rollout_data.get("ref_log_probs")
     rewards: list[float] = rollout_data.get("rewards")
     values: None | list[torch.Tensor] = rollout_data.get("values")
@@ -436,9 +461,24 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch, 
 
     # return when not the last pp stage.
     if log_probs is None and values is None:
-        return
+        if not (allow_missing_log_probs and get_parallel_state().is_pp_last_stage):
+            return
 
-    if args.kl_coef == 0 or not log_probs:
+    # This is the authoritative persistence boundary: scores produced before
+    # the policy update are fixed training data and must not retain a graph.
+    _detach_rollout_tensor_list(rollout_data, "log_probs")
+    _detach_rollout_tensor_list(rollout_data, "rollout_log_probs")
+    _detach_rollout_tensor_list(rollout_data, "ref_log_probs")
+    _detach_rollout_tensor_list(rollout_data, "teacher_log_probs")
+    log_probs = rollout_data.get(log_probs_key)
+    ref_log_probs = rollout_data.get("ref_log_probs")
+
+    if log_probs is None and values is None:
+        local_masks = get_local_response_loss_masks(
+            total_lengths, response_lengths, loss_masks, args.qkv_format, max_seq_lens
+        )
+        kl = [torch.zeros_like(mask, dtype=torch.float32) for mask in local_masks]
+    elif args.kl_coef == 0 or not log_probs:
         # when kl_coef is 0, we won't compute ref_log_prob
         xs = log_probs if log_probs is not None else values
         kl = [torch.zeros_like(x, dtype=torch.float32, device=x.device) for x in xs]
@@ -509,7 +549,7 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch, 
     elif args.advantage_estimator == "on_policy_distillation":
         # ORBIT-SEAM: base computes the teacher-minus-student advantage inline; orbit's
         # version (device move, CP-aware response slicing, MOPD variants) lives in
-        # miles.utils.ppo_utils.opd_mopd_advantages
+        # miles.backends.training_utils.loss_hub.math_utils.opd_mopd_advantages
         advantages = opd_mopd_advantages(rollout_data, log_probs, rollout_data.get("response_lengths"))
         returns = advantages
 
@@ -518,7 +558,7 @@ def compute_advantages_and_returns(args: Namespace, rollout_data: RolloutBatch, 
 
     # ORBIT-SEAM: orbit-only post-estimator advantage shaping, actor-side only - blend the OPD
     # teacher KL into whichever advantage the estimator above produced, then optionally
-    # hard-gate off-policy tokens. Both transforms live in miles.utils.ppo_utils.
+    # hard-gate off-policy tokens. Both transforms live in miles.backends.training_utils.loss_hub.math_utils.
     if role == "actor" and getattr(args, "use_opd", False):
         apply_opd_kl_to_advantages(args.opd_kl_coef, rollout_data, advantages, log_probs)
 
@@ -632,7 +672,7 @@ def icepop_function(
     ice_ratio = torch.exp(old_log_probs - rollout_log_probs)
     ice_abs = (torch.exp(old_log_probs - rollout_log_probs) - 1).abs()
     # ORBIT-SEAM: base inlines the band torch.where; orbit shares the gate with the OPD
-    # advantage path via miles.utils.ppo_utils.icepop_gate (same expression)
+    # advantage path via miles.backends.training_utils.loss_hub.math_utils.icepop_gate (same expression)
     ice_weight = icepop_gate(ice_ratio, args.tis_clip_low, args.tis_clip)
     ice_clipfrac = (ice_weight != ice_ratio).float()
     metrics = {
@@ -1065,6 +1105,7 @@ def loss_function(
     num_microbatches: int,
     logits: torch.Tensor,
     apply_megatron_loss_scaling: bool = False,
+    num_rollouts: int | None = None,
 ) -> tuple[torch.Tensor, int | torch.Tensor, dict[str, list[str] | torch.Tensor]]:
     """Dispatch to the configured loss and rescale for Megatron integration.
 
@@ -1080,6 +1121,8 @@ def loss_function(
             keys required by the selected loss function.
         num_microbatches: Number of gradient accumulation steps.
         logits: Model outputs (policy or value head).
+        num_rollouts: This step's rollout count (total across DP), used as
+            the loss normalizer; None falls back to the legacy batch/args value.
 
     Returns:
         Tuple of `(scaled_loss, normalizer, logging_dict)` where:
@@ -1106,6 +1149,7 @@ def loss_function(
         args.calculate_per_token_loss,
         args.qkv_format,
         batch.get("max_seq_lens", None),
+        denominators=batch.get("rollout_mask_sums", None),
     )
 
     match args.loss_type:
@@ -1139,20 +1183,29 @@ def loss_function(
     else:
         loss, log = func(args, batch, logits, sum_of_sample_mean)
 
-    # With allgather-CP, some CP ranks may have no loss-contributing tokens (e.g., all
-    # padding). Without this, gradient doesn't flow through their attention path, so
-    # the CP gather's backward (reduce-scatter) is not called, deadlocking other CP
-    # ranks that call it. Adding this zero loss forces autograd to traverse the full
-    # graph on every rank without changing gradient values.
+    # Forces autograd to traverse the full graph on every rank to avoid hang.
     if parallel_state.cp.size > 1 and args.allgather_cp:
         loss = loss + 0 * logits.sum()
 
     # Here we need to divide by cp_size because to cancel the multiply in Megatron.
-    assert args.use_dynamic_global_batch_size == ("dynamic_global_batch_size" in batch)
-    global_batch_size = batch.get("dynamic_global_batch_size", args.global_batch_size)
+    if num_rollouts is not None:
+        global_batch_size = num_rollouts
+    else:
+        assert args.use_dynamic_global_batch_size == ("dynamic_global_batch_size" in batch)
+        global_batch_size = batch.get("dynamic_global_batch_size", args.global_batch_size)
+    # Multi-LoRA: samples enter the gradient buffers with weight 1; per-adapter
+    # normalization (1/adapter_global_batch_size, a constant known in advance)
+    # is applied to the accumulated slot gradient at optimizer-step time.
+    if is_multi_lora_enabled(args):
+        global_batch_size = 1
     if not args.calculate_per_token_loss:
         if apply_megatron_loss_scaling:
-            loss = loss * num_microbatches / global_batch_size * parallel_state.intra_dp_cp.size
+            loss_parallel_size = (
+                parallel_state.intra_dp.size
+                if args.true_on_policy_mode and parallel_state.is_ulysses_cp
+                else parallel_state.intra_dp_cp.size
+            )
+            loss = loss * num_microbatches / global_batch_size * loss_parallel_size
         else:
             loss = loss / global_batch_size * parallel_state.intra_dp.size
     else:
@@ -1173,11 +1226,27 @@ def loss_function(
         {
             "keys": list(log.keys()),
             "values": torch.tensor(
-                [
-                    num_samples if not args.calculate_per_token_loss else num_tokens,
-                ]
-                + list(log.values()),
+                [num_samples if not args.calculate_per_token_loss else num_tokens] + list(log.values()),
                 device=logits.device,
             ),
         },
+    )
+
+
+def log_train_advantage_computation_event(rollout_data: RolloutBatch) -> None:
+    if not is_event_logger_initialized():
+        return
+
+    advantages = rollout_data.get("advantages")
+    witness_ids = rollout_data.get("witness_ids")
+    if advantages is None or witness_ids is None:
+        return
+
+    get_event_logger().log(
+        TrainAdvantageComputationEvent,
+        dict(
+            advantages=[x.tolist() for x in advantages],
+            witness_ids=[x.tolist() for x in witness_ids],
+        ),
+        print_log=False,
     )

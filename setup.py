@@ -5,6 +5,18 @@ from setuptools import find_packages, setup
 from wheel.bdist_wheel import bdist_wheel as _bdist_wheel
 
 
+def _get_platform_tag():
+    if platform.system() != "Linux":
+        return platform.system().lower()
+
+    machine = platform.machine().lower()
+    if machine in ("x86_64", "amd64"):
+        return "manylinux1_x86_64"
+    if machine in ("aarch64", "arm64"):
+        return "manylinux2014_aarch64"
+    return f"linux_{machine}"
+
+
 def _fetch_requirements(path):
     with open(path) as fd:
         return [r.strip() for r in fd.readlines() if r.strip() and not r.startswith("#")]
@@ -19,11 +31,7 @@ class bdist_wheel(_bdist_wheel):
     def get_tag(self):
         python_version = f"cp{sys.version_info.major}{sys.version_info.minor}"
         abi_tag = f"{python_version}"
-
-        if platform.system() == "Linux":
-            platform_tag = "manylinux1_x86_64"
-        else:
-            platform_tag = platform.system().lower()
+        platform_tag = _get_platform_tag()
 
         return python_version, abi_tag, platform_tag
 
@@ -33,14 +41,25 @@ setup(
     # ORBIT-SEAM: orbit packaging identity: py3.12 pin, orbit*/tools* packages (dist name comes from pyproject [project])
     author="Orbit Team",
     name="miles",
-    version="0.2.1",
+    version="0.1.0",
     packages=find_packages(include=["miles*", "miles_plugins*", "orbit*", "tools*"]),
     include_package_data=True,
+    package_data={"miles.dashboard": ["static/*"]},
     install_requires=_fetch_requirements("requirements.txt"),
     extras_require={
         "fsdp": [
             "torch>=2.0",
-        ]
+        ],
+        "mlflow": [
+            "mlflow>=2.0",
+        ],
+        # standalone offline serving; the training image already has these via
+        # sglang, and polars is a base requirement (used by the collector)
+        "dashboard": [
+            "fastapi>=0.135",
+            "uvicorn>=0.41",
+            "prometheus_client>=0.24",
+        ],
     },
     python_requires=">=3.12,<3.13",
     classifiers=[

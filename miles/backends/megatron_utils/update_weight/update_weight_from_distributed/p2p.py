@@ -2,7 +2,6 @@ import logging
 from argparse import Namespace
 from collections.abc import Callable, Mapping, Sequence
 
-import ray
 import torch
 import torch.distributed as dist
 from ray.actor import ActorHandle
@@ -11,6 +10,9 @@ from sglang.srt.configs.device_config import DeviceConfig
 from sglang.srt.configs.load_config import LoadConfig
 from sglang.srt.configs.model_config import ModelConfig
 from sglang.srt.distributed.parallel_state import ParallelismContext, RankParallelismConfig
+from sglang.srt.layers.moe import initialize_moe_config
+from sglang.srt.layers.quantization.fp4_utils import initialize_fp4_gemm_config
+from sglang.srt.layers.quantization.fp8_utils import initialize_fp8_gemm_config
 from sglang.srt.model_loader import get_model
 from sglang.srt.model_loader.parameter_mapper import ParameterMapper
 from sglang.srt.server_args import ServerArgs
@@ -58,6 +60,10 @@ class UpdateWeightP2P(DistBucketedWeightUpdateMixin):
         self.quantization_config = quantization_config
         self.weight_version = 0
         self._model_update_groups = None
+        self.rollout_engines: Sequence[ActorHandle] | None = None
+        self._connection_stale: bool = False
+        assert not is_lora, "LoRA weight sync is not supported for p2p (RDMA) weight transfer."
+        self.is_lora = False
 
         self.transfer_plan = RemoteTransferPlan(args, model)
         self.global_rank = dist.get_rank(group=get_gloo_group())
@@ -113,19 +119,6 @@ class UpdateWeightP2P(DistBucketedWeightUpdateMixin):
             self._weight_memory_registry = register_cpu_memory(self._shared_params_dict, self._transfer_engine)
         self._model_registered = True
 
-    def _finalize_and_resume_engines(self):
-        # The `update_weight_version` here is necessary because the engine was not aware that the write has happened
-        # After p2p transfering, some models (like the ones with Deepseek-arch) of rollout side should invoke
-        # `post_load_weights` to re-generate the params which are not registered as `model.named_parameters()`
-        if dist.get_rank() == 0:
-            ray.get(
-                [
-                    engine.update_weight_version.remote(weight_version=str(self.weight_version))
-                    for engine in self.rollout_engines
-                ]
-            )
-        super()._finalize_and_resume_engines(post_load_weights=True)
-
     def _update_weight_implementation(
         self, converted_named_tensors: list[tuple[str, torch.Tensor]], pbar: tqdm | None = None
     ) -> None:
@@ -171,6 +164,13 @@ class UpdateWeightP2P(DistBucketedWeightUpdateMixin):
 
         converted_named_tensors.clear()
 
+    # TODO: avoid dup code during yueming's refactor (temp write this to avoid introducing potentially conflicting base class)
+    def is_rollout_engines_fresh(self) -> bool:
+        return self.rollout_engines is not None and not self._connection_stale
+
+    def mark_engine_connection_stale(self) -> None:
+        self._connection_stale = True
+
     def connect_rollout_engines(
         self,
         rollout_engines: Sequence[ActorHandle],
@@ -189,6 +189,7 @@ class UpdateWeightP2P(DistBucketedWeightUpdateMixin):
           weight format conversion before transfer.
         """
         self.rollout_engines = rollout_engines
+        self._connection_stale = False
         self.rollout_engine_lock = rollout_engine_lock
 
         if self._is_source:
@@ -221,7 +222,7 @@ class UpdateWeightP2P(DistBucketedWeightUpdateMixin):
                 )
                 server_args = self.session_id_to_server_args[session_id]
 
-                model_replica = self.create_cpu_replica(
+                model_replica = self._create_cpu_replica(
                     parallelism_config,
                     self.args.hf_checkpoint,
                     server_args,
@@ -244,39 +245,55 @@ class UpdateWeightP2P(DistBucketedWeightUpdateMixin):
 
                 self._transfer_engine_meta_list.append((model_replica, remote_infos))
 
-    def create_cpu_replica(
+    def _create_cpu_replica(
         self,
         parallelism_config: RankParallelismConfig,
         model_path: str,
         server_args: ServerArgs,
         first_engine_rank: bool = False,
     ) -> torch.nn.Module:
-        """Create model on GPU (required by sglang), then move to CPU pinned memory for the
-        first engine rank or point all parameters to shared pinned buffers for subsequent ranks."""
+        """Create a CPU model replica that loads the right shard and skips post_load_weights."""
         load_config = LoadConfig(
             load_format="dummy",
             model_loader_extra_config=None,
             rl_quant_profile=server_args.rl_quant_profile,
         )
-        server_args_module._global_server_args = server_args
-        with ParallelismContext(parallelism_config):
-            model = get_model(
-                model_config=ModelConfig(model_path),
-                load_config=load_config,
-                device_config=DeviceConfig(),
-            )
+        server_args_module.set_global_server_args_for_scheduler(server_args)
+        initialize_moe_config(server_args)
+        initialize_fp8_gemm_config(server_args)
+        initialize_fp4_gemm_config(server_args)
+
+        # Monkey-patch the loader-level post_load_weights to no-op BEFORE get_model,
+        # because get_model() calls post_load_weights() internally (loader.py:1310)
+        # which may invoke CUDA-only kernels (e.g., per_tensor_quant_fp8 for FP8 models).
+        # This is safe because the rollout engine runs post_load_weights on its own GPU
+        # after RDMA transfer, at end_weight_update.
+        from sglang.srt.model_loader import loader as model_loader_module
+
+        original_post_load_weights = model_loader_module.post_load_weights
+        model_loader_module.post_load_weights = lambda *args, **kwargs: None
+        try:
+            with ParallelismContext(parallelism_config):
+                model = get_model(
+                    model_config=ModelConfig(model_path),
+                    load_config=load_config,
+                    device_config=DeviceConfig(device="cpu"),
+                )
+        finally:
+            model_loader_module.post_load_weights = original_post_load_weights
+
+        # Also patch the instance method for subsequent load_weights() calls
+        # (deepseek_weight_loader.py:342 calls self.post_load_weights() at the end).
+        if hasattr(model, "post_load_weights"):
+            model.post_load_weights = lambda *args, **kwargs: None
 
         if first_engine_rank:
             for param in model.parameters():
-                cpu_data = param.data.to("cpu", non_blocking=True).pin_memory()
-                param.data = cpu_data
-            torch.cuda.synchronize()
+                param.data = param.data.pin_memory()
         else:
             for name, param in model.named_parameters():
                 assert name in self._shared_params_dict, f"[P2P-Shared] Parameter {name} not found in shared buffers"
                 param.data = self._shared_params_dict[name]
-
-        torch.cuda.empty_cache()
 
         return model
 

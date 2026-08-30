@@ -1,63 +1,18 @@
+# FROZEN: v1 RayTrainGroup is the non-FT default path. Only critical bugfixes
+# go here; new features land in miles/ray/train/group.py (v2). Dispatch between
+# v1 and v2 happens in miles/ray/placement_group.py based on the env var
+# MILES_EXPERIMENTAL_FT_TRAINER (default off -> v1).
+
 import asyncio
-import os
 
-import ray
 from ray.util.placement_group import PlacementGroup
-from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
-# ORBIT-SEAM: NOSET_VISIBLE_DEVICES_ENV_VARS_LIST replaced by build_noset_visible_devices_env_vars();
-# _uses_dsv4_deepep/_build_train_actor_env add DSV4 DeepEP NCCL symmetric-memory env vars and the PEFT
-# expandable_segments fragmentation workaround (colocated rollout hands the GPU back every step)
-from miles.ray.utils import build_noset_visible_devices_env_vars
-
-
-def _uses_dsv4_deepep(args) -> bool:
-    return getattr(args, "dsv4_moe_dispatcher", None) == "deepep"
-
-
-def _build_train_actor_env(args) -> dict[str, str]:
-    env_vars = {
-        "NCCL_CUMEM_ENABLE": os.environ.get("NCCL_CUMEM_ENABLE", "0"),
-        "NCCL_NVLS_ENABLE": os.environ.get("NCCL_NVLS_ENABLE", "0"),
-        "NVTE_FP8_BLOCK_SCALING_FP32_SCALES": "1",
-        **build_noset_visible_devices_env_vars(),
-        **args.train_env_vars,
-    }
-
-    if _uses_dsv4_deepep(args):
-        # DeepEP V2 ElasticBuffer requires NCCL communicators created with
-        # symmetric-memory support. Match SGLang's DSV4 DeepEP default.
-        env_vars["NCCL_CUMEM_ENABLE"] = "1"
-        env_vars["NCCL_NVLS_ENABLE"] = "1"
-
-    # PEFT hands the GPU back to a colocated engine every rollout, and its train
-    # step frees nearly everything: measured on 8xB200, rank 0 held
-    # `allocated 0.09 GB` against `reserved 65.71 GB`, of which 65.62 GB -- the
-    # entire gap -- was non-releasable split memory across just 17 segments. A
-    # few MB of straggler blocks pin ~3.9 GB apiece, `empty_cache()` may only
-    # return a wholly-free segment so it returns nothing, and the engine's
-    # `cuMemCreate` then fails at resume (`func=resume`, fatal at rollout 2 on
-    # an 80 GB H100). Expandable segments map physical pages on demand, so a
-    # live block pins pages instead of its whole segment.
-    #
-    # Full fine-tuning is left alone deliberately: its pool is tight -- reserved
-    # tracks allocated to within 0.07 GB on the same node -- because
-    # `_finalize_train_offload_args` forces the grad-buffer and optimizer
-    # offloads on for it, which return genuinely live state every step. It has
-    # no gap to close.
-    if getattr(args, "peft_method", "none") != "none":
-        env_vars.setdefault(
-            "PYTORCH_CUDA_ALLOC_CONF",
-            os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True"),
-        )
-
-    if source_patcher_config := args.dumper_source_patcher_config_train:
-        env_vars["DUMPER_SOURCE_PATCHER_CONFIG"] = source_patcher_config
-
-    if "PYTHONPATH" in os.environ and "PYTHONPATH" not in env_vars:
-        env_vars["PYTHONPATH"] = os.environ["PYTHONPATH"]
-
-    return env_vars
+# ORBIT-SEAM: _uses_dsv4_deepep / _build_train_actor_env moved out of this module -- upstream
+# dbbab156 extracted actor creation into miles/ray/train/actor_factory.py, so the orbit train-actor
+# env seam (build_noset_visible_devices_env_vars, DSV4 DeepEP NCCL symmetric memory, the PEFT
+# expandable_segments workaround, PYTHONPATH pass-through) is re-anchored there.
+from miles.ray.train.actor_factory import allocate_gpus_for_actor
+from miles.utils.ft_utils.indep_dp import IndepDPInfo
 
 
 class RayTrainGroup:
@@ -81,10 +36,10 @@ class RayTrainGroup:
         num_gpus_per_node,
         pg: tuple[PlacementGroup, list[int], list[int]],
         *,
+        rollout_manager: object | None,
         num_gpus_per_actor: float = 1,
         role: str,
         with_ref: bool,
-        # ORBIT-SEAM: OPD teacher-actor flag, threaded through to init() below
         with_opd_teacher: bool = False,
     ) -> None:
         self.args = args
@@ -92,62 +47,70 @@ class RayTrainGroup:
         self._num_gpus_per_node = num_gpus_per_node
         self.role = role
         self.with_ref = with_ref
-        # ORBIT-SEAM: store the OPD teacher-actor flag for init()
+        self._rollout_manager = rollout_manager
         self.with_opd_teacher = with_opd_teacher
 
         # Allocate the GPUs for actors w/o instantiating them
         self._actor_handles = self._allocate_gpus_for_actor(pg, num_gpus_per_actor)
 
     def _allocate_gpus_for_actor(self, pg, num_gpus_per_actor):
-        world_size = self._num_nodes * self._num_gpus_per_node
-
-        # Use placement group to lock resources for models of same type
-        assert pg is not None
-        pg, reordered_bundle_indices, _reordered_gpu_ids = pg
-
-        # ORBIT-SEAM: per-actor env now built by the shared _build_train_actor_env helper above
-        env_vars = _build_train_actor_env(self.args)
-
-        backend = self.args.train_backend
-        # ORBIT-SEAM: FSDP train backend dropped (orbit is Megatron-only); the fsdp_utils import branch
-        # is replaced by this assertion
-        assert backend == "megatron", f"Only the Megatron train backend is supported (got {backend})."
-        from miles.backends.megatron_utils.actor import MegatronTrainRayActor
-
-        actor_impl = MegatronTrainRayActor
-
-        TrainRayActor = ray.remote(num_gpus=1, runtime_env={"env_vars": env_vars})(actor_impl)
-
-        # Create worker actors
-        actor_handles = []
-        master_addr, master_port = None, None
-        for rank in range(world_size):
-            actor = TrainRayActor.options(
-                num_cpus=num_gpus_per_actor,
-                num_gpus=num_gpus_per_actor,
-                scheduling_strategy=PlacementGroupSchedulingStrategy(
-                    placement_group=pg,
-                    placement_group_bundle_index=reordered_bundle_indices[rank],
-                ),
-            ).remote(world_size, rank, master_addr, master_port)
-            if rank == 0:
-                master_addr, master_port = ray.get(actor.get_master_addr_and_port.remote())
-            actor_handles.append(actor)
-
-        return actor_handles
+        return allocate_gpus_for_actor(
+            args=self.args,
+            gpus_per_cell=self._num_nodes * self._num_gpus_per_node,
+            pg=pg,
+            num_gpus_per_actor=num_gpus_per_actor,
+            indep_dp_store_addr=None,
+            role=self.role,
+            cell_index=0,
+        )
 
     async def init(self):
         """
         Allocate GPU resourced and initialize model, optimizer, local ckpt, etc.
         """
-        # ORBIT-SEAM: pass with_opd_teacher through to each actor's init so OPD teacher actors init correctly
+        indep_dp_info = IndepDPInfo.create_trivial()
         return await self._broadcast(
-            "init", self.args, self.role, with_ref=self.with_ref, with_opd_teacher=self.with_opd_teacher
+            "init",
+            self.args,
+            self.role,
+            with_ref=self.with_ref,
+            with_opd_teacher=self.with_opd_teacher,
+            indep_dp_info=indep_dp_info,
         )
 
-    async def train(self, rollout_id, rollout_data_ref):
+    async def train(self, rollout_id, rollout_data_pack, external_data=None):
         """Do one rollout training"""
-        await self._broadcast("train", rollout_id, rollout_data_ref)
+        rollout_data_ref = rollout_data_pack["data_ref"]
+        if external_data is None:
+            return await self._broadcast(
+                "train",
+                rollout_id,
+                rollout_data_ref,
+                witness_info=None,
+                attempt=0,
+            )
+        if isinstance(external_data, list):
+            if len(external_data) != len(self._actor_handles):
+                raise ValueError("external_data must contain one payload per train worker")
+            refs = [
+                actor.train.remote(
+                    rollout_id,
+                    rollout_data_ref,
+                    witness_info=None,
+                    attempt=0,
+                    external_data=rank_data,
+                )
+                for actor, rank_data in zip(self._actor_handles, external_data, strict=False)
+            ]
+            return await asyncio.gather(*refs)
+        return await self._broadcast(
+            "train",
+            rollout_id,
+            rollout_data_ref,
+            witness_info=None,
+            attempt=0,
+            external_data=external_data,
+        )
 
     # ORBIT-SEAM: held-out NLL eval broadcast; result de-duplication (one DP-reduced value, rest None)
     # delegates to orbit.utils.eval_nll.select_eval_nll_result
@@ -170,9 +133,27 @@ class RayTrainGroup:
         """Save actor model"""
         await self._broadcast("save_model", rollout_id, force_sync=force_sync)
 
-    async def update_weights(self):
+    async def export_hf(self, rollout_id: int, path: str):
+        """Export current weights as an HF checkpoint (collective across all ranks)."""
+        await self._broadcast("export_hf", rollout_id, path)
+
+    async def update_weights(self, rollout_id: int | None = None):
         """Broadcast weights from rank 0 to all other ranks."""
-        await self._broadcast("update_weights")
+        if self.args.debug_train_only or self.args.debug_rollout_only:
+            return
+
+        if self.args.use_fault_tolerance and "rollout" in self.args.ft_components:
+            await self.rollout_manager.recover_updatable_engines.remote()
+
+        info = await self.rollout_manager.get_updatable_engines_and_lock.remote()
+        await self.rollout_manager.health_monitoring_pause.remote()
+
+        await self._broadcast("update_weights", info=info)
+
+    async def reconcile_adapters(self) -> None:
+        """Multi-LoRA: reconcile loaded adapters with the controller's active set
+        (load new, cleanup gone). Called by the trainer before generate."""
+        await self._broadcast("reconcile_adapters")
 
     async def onload(self):
         await self._broadcast("wake_up")
@@ -193,9 +174,10 @@ class RayTrainGroup:
     async def clear_memory(self):
         await self._broadcast("clear_memory")
 
+    # ORBIT-SEAM: actor<->critic wiring for orbit's PPO critic (upstream dropped connect() in
+    # dbbab156); fails fast on a worker-count mismatch instead of silently truncating the shorter
+    # side, and strict=True enforces the same invariant on the zip
     async def connect(self, critic_group):
-        # ORBIT-SEAM: fail fast on an actor/critic worker-count mismatch instead of silently truncating
-        # the shorter side; strict=True below enforces the same invariant on the zip
         if len(self._actor_handles) != len(critic_group._actor_handles):
             raise RuntimeError(
                 "actor and critic groups must have equal worker counts; "
@@ -207,8 +189,9 @@ class RayTrainGroup:
         ]
         await asyncio.gather(*refs)
 
-    async def set_rollout_manager(self, rollout_manager):
-        await self._broadcast("set_rollout_manager", rollout_manager)
+    async def set_rollout_manager(self):
+        self.rollout_manager = self._rollout_manager
+        await self._broadcast("set_rollout_manager", self._rollout_manager)
 
     async def _broadcast(self, method_name: str, *args, **kwargs) -> list:
         refs = [getattr(actor, method_name).remote(*args, **kwargs) for actor in self._actor_handles]

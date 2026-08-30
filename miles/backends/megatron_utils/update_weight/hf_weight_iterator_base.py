@@ -18,8 +18,10 @@ class HfWeightIteratorBase(ABC):
 
         return c(args, model, peft_method=peft_method, **kwargs)
 
-    # ORBIT-SEAM: peft_method plumbed to subclasses
-    def __init__(self, args, model, model_name, quantization_config, *, peft_method="none", is_lora=None):
+    # ORBIT-SEAM: peft_method plumbed to subclasses. Upstream dropped the base's is_lora ctor flag in
+    # favour of the per-call ``weight_type`` argument on get_hf_weight_chunks; orbit still needs the
+    # instance-level PEFT method so the bridge iterator can pick the OFT adapter-export path.
+    def __init__(self, args, model, model_name, quantization_config, *, peft_method="none", is_lora=None, **kwargs):
         if is_lora is not None and peft_method == "none":
             peft_method = "lora" if is_lora else "none"
 
@@ -31,7 +33,7 @@ class HfWeightIteratorBase(ABC):
         self.is_lora = peft_method == "lora"
 
     @abstractmethod
-    def get_hf_weight_chunks(self, megatron_local_weights):
+    def get_hf_weight_chunks(self, megatron_local_weights, weight_type="base"):
         """
         Mental model of the API:
         megatron_model.to_hf_magically().named_parameters()

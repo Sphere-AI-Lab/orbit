@@ -7,7 +7,7 @@ import json
 import pytest
 
 from miles.ray.placement_group import _opd_teacher_extra_gpus
-from miles.ray.rollout import _opd_teacher_pool, _opd_teacher_pool_model_configs
+from orbit.opd.teacher_servers import _opd_teacher_pool, _opd_teacher_pool_model_configs
 from orbit.opd.opd_teacher_pool import TeacherPoolError, parse_teacher_pool
 
 
