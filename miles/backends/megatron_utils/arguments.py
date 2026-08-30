@@ -9,19 +9,6 @@ __all__ = ["validate_args", "parse_args", "set_default_megatron_args"]
 logger = logging.getLogger(__name__)
 
 
-# ORBIT-SEAM: Muon/Pion optimizers own their own sharding and reject Megatron's distributed
-# optimizer. Upstream has since narrowed set_default_megatron_args' use_distributed_optimizer to
-# an Adam-only allow-list, which already subsumes the muon/pion case, so the predicates are no
-# longer wired into that line; they stay here as orbit's optimizer-family classifier (imported by
-# tests/test_pion_optimizer.py, and mirrored by model.py's dispatch).
-def _is_muon_optimizer(optimizer: str | None) -> bool:
-    return optimizer is not None and "muon" in optimizer.lower()
-
-
-def _is_pion_optimizer(optimizer: str | None) -> bool:
-    return optimizer is not None and "pion" in optimizer.lower()
-
-
 def set_default_megatron_args(args):
     if getattr(args, "true_on_policy_mode", False):
         raise NotImplementedError(

@@ -17,7 +17,7 @@ from miles.ray.rollout.addr_allocator import (
 from miles.ray.rollout.server_engine import ServerEngine
 # ORBIT-SEAM (re-anchored from miles/ray/rollout.py::ServerGroup, which upstream dbbab156 split into
 # this module): build_noset_visible_devices_env_vars() honours ORBIT_RESPECT_CUDA_VISIBLE_DEVICES
-from miles.ray.utils import build_noset_visible_devices_env_vars
+from orbit.utils.ray_env import build_noset_visible_devices_env_vars
 from miles.utils import dumper_utils
 
 logger = logging.getLogger(__name__)

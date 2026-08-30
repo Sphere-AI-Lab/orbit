@@ -62,3 +62,17 @@ def _build_optimizer_and_scheduler(
         )
     opt_param_scheduler = get_optimizer_param_scheduler(args, optimizer)
     return optimizer, opt_param_scheduler
+
+
+# Orbit's optimizer-family classifier. Lifted out of
+# ``miles/backends/megatron_utils/arguments.py`` (now byte-pristine again), where
+# these predicates were dead in production -- upstream's Adam-only allow-list
+# subsumed the muon/pion case, so nothing there called them. They live here
+# beside the pion/muon dispatch they describe; ``tests/test_pion_optimizer.py``
+# imports them, and ``model.py`` still carries its own mirrored copy.
+def _is_muon_optimizer(optimizer: str | None) -> bool:
+    return optimizer is not None and "muon" in optimizer.lower()
+
+
+def _is_pion_optimizer(optimizer: str | None) -> bool:
+    return optimizer is not None and "pion" in optimizer.lower()

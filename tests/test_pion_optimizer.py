@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from miles.backends.megatron_utils.arguments import _is_muon_optimizer, _is_pion_optimizer
+from orbit.megatron.optim_build import _is_muon_optimizer, _is_pion_optimizer
 
 
 def test_is_pion_predicate():
@@ -30,7 +30,7 @@ def test_pion_and_muon_predicates_disjoint():
 def test_zero_disabled_for_pion():
     from types import SimpleNamespace
 
-    from miles.backends.megatron_utils import arguments as A
+    from orbit.megatron import optim_build as A
 
     # exercise just the ZeRO-disable line the shim runs
     for opt, expect_dist in (("adam", True), ("muon", False), ("pion", False), ("pion_msign", False)):

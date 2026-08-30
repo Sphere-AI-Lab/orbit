@@ -7,7 +7,7 @@ from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 # ORBIT-SEAM: build_noset_visible_devices_env_vars() honours ORBIT_RESPECT_CUDA_VISIBLE_DEVICES
 # (parity/debug GPU pinning) instead of unconditionally unmasking every accelerator env var
-from miles.ray.utils import build_noset_visible_devices_env_vars
+from orbit.utils.ray_env import build_noset_visible_devices_env_vars
 from miles.utils.environ import default_fp8_block_scaling_fp32_scales
 from miles.utils.ft_utils.heartbeat_utils import HeartbeatStatus
 
