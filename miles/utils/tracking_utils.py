@@ -19,7 +19,7 @@ def init_tracking(args, primary: bool = True, **kwargs):
         init_prometheus(args, start_server=primary)
 
 
-# Follow-up further refactor, e.g. put TensorBoard init to the "init" part
+# TODO further refactor, e.g. put TensorBoard init to the "init" part
 def log(args, metrics, step_key: str):
     if args.use_wandb:
         wandb.log(metrics)

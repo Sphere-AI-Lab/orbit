@@ -6,7 +6,7 @@ from typing import Any
 
 _MISSING = object()
 
-# Follow-up: This is ugly, temporarily leave this. We should unify all the config name for dataset, default, and args. (advice from Tom.)
+# TODO: This is ugly, temporarily leave this. We should unify all the config name for dataset, default, and args. (advice from Tom.)
 DATASET_RUNTIME_SPECS: dict[str, dict[str, tuple[str, ...]]] = {
     "n_samples_per_eval_prompt": {
         "dataset_keys": ("n_samples_per_eval_prompt",),

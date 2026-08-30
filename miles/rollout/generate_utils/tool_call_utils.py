@@ -64,7 +64,7 @@ def update_sample_with_tool_responses(sample: Sample, tool_messages: list[dict[s
     sample.rollout_log_probs += [0.0] * len(next_obs_tokens_ids)
 
 
-# Follow-up: very naive implementation, need the to-be-implemented e2e test to validate.
+# TODO: very naive implementation, need the to-be-implemented e2e test to validate.
 def tokenize_tool_responses(
     tool_messages: list[dict[str, Any]],
     tokenizer,

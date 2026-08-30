@@ -253,7 +253,7 @@ class HuggingfaceAttention(MegatronModule, ABC):
                 mpu.get_context_parallel_group(),
             )
 
-            # Follow-up: preprocess this for each batch to prevent tolist in the training step
+            # TODO: preprocess this for each batch to prevent tolist in the training step
             whole_hidden_states_list = []
 
             local_cu_seqlens = cu_seqlens // cp_size

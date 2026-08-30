@@ -16,7 +16,7 @@ from miles.utils.chat_template_utils.tito_tokenizer import TITOTokenizer
 logger = logging.getLogger(__name__)
 
 
-# Follow-up: hardcoded to 1 for now; if multi-step rollback is actually needed,
+# TODO: hardcoded to 1 for now; if multi-step rollback is actually needed,
 #  raise this limit or make it configurable and remove the restriction.
 MAX_ASSISTANT_ROLLBACK_STEPS = 1
 

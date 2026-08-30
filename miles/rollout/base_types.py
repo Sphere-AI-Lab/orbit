@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class RolloutFnConstructorInput:
     args: Namespace
-    # Follow-up may refactor DataSource API
+    # TODO may refactor DataSource API
     data_source: DataSource
 
 
@@ -42,14 +42,14 @@ class RolloutFnEvalInput(RolloutFnBaseInput):
         return True
 
 
-# Follow-up make it frozen
+# TODO make it frozen
 @dataclass
 class RolloutFnTrainOutput:
     samples: list[list[Sample]]
     metrics: dict[str, Any] = None
 
 
-# Follow-up make it frozen
+# TODO make it frozen
 @dataclass
 class RolloutFnEvalOutput:
     data: dict[str, dict[str, Any]]
