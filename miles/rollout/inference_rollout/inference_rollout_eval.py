@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 # ORBIT-SEAM: per-task eval progress tracking + periodic "still pending" logging (surfaces stuck eval
 # generations instead of a silent hang until the whole batch completes)
-from miles.orbit.rollout.eval_logging import (
+from orbit.rollout.eval_logging import (
     _EvalTaskProgress,
     _log_pending_eval_tasks,
     _update_eval_task_progress,

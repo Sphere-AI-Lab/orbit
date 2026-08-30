@@ -16,7 +16,7 @@ from miles.utils.distributed_utils import init_process_group
 from miles.utils.lora import LORA_ADAPTER_NAME
 
 # ORBIT-SEAM: weight-sync payload accounting hook
-from miles.orbit.megatron.sync_metrics import get_payload_tracker
+from orbit.megatron.sync_metrics import get_payload_tracker
 
 from ..common import _check_weight_sync_results
 from .mixin import DistBucketedWeightUpdateMixin

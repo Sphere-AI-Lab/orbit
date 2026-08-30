@@ -79,7 +79,7 @@ async def default_async_rm(args, sample: Sample):
     elif rm_type == "dapo":
         return compute_score_dapo(response, label)
     elif rm_type == "math_alignment":
-        from miles.orbit.rewards.math_alignment import grade_math_alignment
+        from orbit.rewards.math_alignment import grade_math_alignment
 
         return 1 if grade_math_alignment(response, label, metadata) else 0
     elif rm_type == "math":

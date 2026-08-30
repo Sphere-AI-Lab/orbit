@@ -6,7 +6,7 @@ import argparse
 import pytest
 
 from miles.ray.placement_group import _opd_teacher_extra_gpus
-from miles.orbit.opd.teacher_servers import OPD_TEACHER_MODEL_NAME, _opd_teacher_model_config
+from orbit.opd.teacher_servers import OPD_TEACHER_MODEL_NAME, _opd_teacher_model_config
 from miles.utils.arguments import _validate_opd_args
 
 
@@ -82,8 +82,8 @@ def _validate_args(**overrides):
         opd_ema_decay=0.999,
         opd_self_teacher_interval=1,
         opd_promote_interval=None,
-        custom_rm_path="miles.orbit.opd.opd_sglang.reward_func",
-        custom_reward_post_process_path="miles.orbit.opd.opd_sglang.post_process",
+        custom_rm_path="orbit.opd.opd_sglang.reward_func",
+        custom_reward_post_process_path="orbit.opd.opd_sglang.post_process",
         loss_type="opd_jsd_loss",
         teacher_score_mode="full_vocab",
         teacher_hf_checkpoint="/fake/teacher",

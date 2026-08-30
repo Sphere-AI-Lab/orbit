@@ -143,7 +143,7 @@ class TestTheFrozenBasePathIsSkipped:
         loses nothing."""
         import torch
 
-        from miles.orbit.megatron.peft_offload import _iter_frozen_named_params
+        from orbit.megatron.peft_offload import _iter_frozen_named_params
 
         model = torch.nn.Sequential(torch.nn.Linear(4, 4), torch.nn.Linear(4, 4))
         assert list(_iter_frozen_named_params(model)) == []

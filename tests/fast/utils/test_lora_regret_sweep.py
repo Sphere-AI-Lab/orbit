@@ -129,7 +129,7 @@ class TestSftArms:
         assert len(oft) == 40
 
     def test_oft_block_sizes_come_from_the_solver(self):
-        from miles.orbit.utils.peft_param_match import matched_oft_block_size
+        from orbit.utils.peft_param_match import matched_oft_block_size
 
         oft = [a for a in sft_arms(H, FFN) if a.method == "oft"]
         blocks = {a.oft_block_size for a in oft}
@@ -295,7 +295,7 @@ class TestE3Matrix:
         assert mlp == {92, 128}
 
     def test_the_matched_ranks_really_are_matched(self):
-        from miles.orbit.utils.peft_param_match import lora_param_count
+        from orbit.utils.peft_param_match import lora_param_count
 
         attn = lora_param_count(256, 4096, 6144) + lora_param_count(256, 4096, 4096)
         mlp = lora_param_count(92, 4096, 2 * 14336) + lora_param_count(92, 14336, 4096)
@@ -357,7 +357,7 @@ class TestLogFormatPins:
         # sweep.py builds its regex from this constant instead of re-spelling
         # "eval/test_nll" -- confirm the constant is in fact the literal text
         # train.py's format string starts with.
-        from miles.orbit.utils.eval_nll import EVAL_NLL_METRIC_KEY
+        from orbit.utils.eval_nll import EVAL_NLL_METRIC_KEY
 
         assert _TRAIN_PY_LOG_TEMPLATE.startswith(EVAL_NLL_METRIC_KEY + " ")
 
@@ -990,9 +990,9 @@ class TestE5Matrix:
         # launcher takes. Importing it unaliased here shadows the string and every
         # `target_modules ==` comparison silently becomes string-vs-tuple, i.e.
         # always False.
-        from miles.orbit.utils.peft_param_match import ATTENTION_MODULES as ATTN_NAMES
-        from miles.orbit.utils.peft_param_match import MLP_MODULES as MLP_NAMES
-        from miles.orbit.utils.peft_param_match import megatron_module_shapes, oft_param_count_for_modules
+        from orbit.utils.peft_param_match import ATTENTION_MODULES as ATTN_NAMES
+        from orbit.utils.peft_param_match import MLP_MODULES as MLP_NAMES
+        from orbit.utils.peft_param_match import megatron_module_shapes, oft_param_count_for_modules
 
         arms = self._arms()
         shapes = megatron_module_shapes(LLAMA_H, LLAMA_FFN, 6144)

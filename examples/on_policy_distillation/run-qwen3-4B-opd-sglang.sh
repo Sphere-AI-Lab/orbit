@@ -15,8 +15,8 @@
 #
 # Teacher production is selected with `--opd-type sglang --opd-teacher-url`,
 # wired through orbit's custom-reward hooks:
-#   --custom-rm-path miles.orbit.opd.opd_sglang.reward_func                  (scores via the teacher server)
-#   --custom-reward-post-process-path miles.orbit.opd.opd_sglang.post_process (extracts teacher_log_probs)
+#   --custom-rm-path orbit.opd.opd_sglang.reward_func                  (scores via the teacher server)
+#   --custom-reward-post-process-path orbit.opd.opd_sglang.post_process (extracts teacher_log_probs)
 #
 # Note: pure MOPD (`--advantage-estimator on_policy_distillation`) and the
 # blend (`--use-opd`) are mutually exclusive -- do not pass `--use-opd` here.
@@ -26,7 +26,7 @@
 # so blend requires `--opd-type megatron` instead.
 #
 # CAVEAT -- eval/pass-rate is not meaningful in this mode: `reward_func`
-# (miles.orbit.opd.opd_sglang.reward_func) always returns `0.0` -- it is shared
+# (orbit.opd.opd_sglang.reward_func) always returns `0.0` -- it is shared
 # between train and eval, so any task-accuracy or pass-rate metric derived
 # from `sample.reward` (eval/<dataset>, pass@k, --log-passrate) reports 0
 # regardless of student quality. The actual training signal is
@@ -96,8 +96,8 @@ ROLLOUT_ARGS=(
     --label-key label
     --apply-chat-template
     --rollout-shuffle
-    --custom-rm-path miles.orbit.opd.opd_sglang.reward_func
-    --custom-reward-post-process-path miles.orbit.opd.opd_sglang.post_process
+    --custom-rm-path orbit.opd.opd_sglang.reward_func
+    --custom-reward-post-process-path orbit.opd.opd_sglang.post_process
     --num-rollout "${NUM_ROLLOUT}"
     --rollout-batch-size "${ROLLOUT_BATCH_SIZE}"
     --n-samples-per-prompt "${N_SAMPLES_PER_PROMPT}"

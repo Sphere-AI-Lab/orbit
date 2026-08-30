@@ -113,7 +113,7 @@ pytestmark = pytest.mark.skipif(
 def tokenizer():
     from transformers import AutoTokenizer
 
-    from miles.orbit.utils.llama3_chat_template import ensure_llama3_chat_template
+    from orbit.utils.llama3_chat_template import ensure_llama3_chat_template
 
     # Llama-3.1-8B *base* ships no chat_template, so apply_chat_template would raise
     # and MultiTurnLossMaskGenerator could not even be constructed. Must happen before

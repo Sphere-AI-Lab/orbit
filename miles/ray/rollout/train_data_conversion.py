@@ -246,7 +246,7 @@ def _reward_group_segments(args: Any, samples: list[Sample], prompt_group_sizes:
 
 
 # ORBIT-SEAM (converged): orbit's group_index-aware reward normalization
-# (miles/orbit/rewards/reward_normalization.normalize_grouped_rewards, with the legacy shape-inference
+# (orbit/rewards/reward_normalization.normalize_grouped_rewards, with the legacy shape-inference
 # fallback) is subsumed by upstream dbbab156's _reward_group_segments/_normalize_rewards_by_rollout,
 # which reads group_index first and falls back to the fixed-fanout layout exactly as orbit did. The
 # orbit helper is therefore no longer wired in here; verify numerical equivalence in the

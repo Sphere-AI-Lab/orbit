@@ -7,7 +7,7 @@ with -- megatron's own arguments plus every orbit-added argument from
 `miles.utils.arguments.parse_args()` builds it (via
 `megatron.training.arguments.parse_args(extra_args_provider=add_orbit_arguments)`),
 minus the final `parser.parse_args()` call against real argv. The refactor this
-gate exists to protect (arguments.py registration split, `miles/orbit/arguments.py`)
+gate exists to protect (arguments.py registration split, `orbit/arguments.py`)
 must reproduce this surface exactly; group/help-string reflow inside the
 Python source is fine, a moved/renamed/retyped/re-defaulted argument is not.
 

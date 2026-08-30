@@ -182,7 +182,7 @@ def save_hf_model(
                 logger.info(f"Saving LoRA adapter (HF PEFT format) to {adapter_path}")
             # ORBIT-SEAM: orbit's PEFT export carries the OPD self-teacher sidecar
             # (model.py's save_hf_model copy does the same; keep both in sync)
-            from miles.orbit.megatron.peft_utils import save_peft_checkpoint
+            from orbit.megatron.peft_utils import save_peft_checkpoint
 
             save_peft_checkpoint(model, args, str(adapter_path), self_teacher=self_teacher)
             if should_log:

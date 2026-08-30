@@ -14,8 +14,8 @@ import pybase64
 # ORBIT-SEAM: OFT adapter slot name / PEFT-method lookup, consumed by attach_peft_request_payload below
 # (miles.utils.lora's LORA_ADAPTER_NAME/lora_rollout_enabled are deliberately NOT imported -- see
 # attach_peft_request_payload below for why orbit never puts lora_path on a generate request)
-from miles.orbit.megatron.oft_utils import OFT_ADAPTER_NAME
-from miles.orbit.megatron.peft_utils import get_peft_method
+from orbit.megatron.oft_utils import OFT_ADAPTER_NAME
+from orbit.megatron.peft_utils import get_peft_method
 from miles.utils.processing_utils import encode_image_for_rollout_engine, extract_multimodal_train_inputs
 from miles.utils.types import Sample
 

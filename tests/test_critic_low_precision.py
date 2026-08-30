@@ -2,7 +2,7 @@ import argparse
 
 import pytest
 
-from miles.orbit.megatron.low_precision_bootstrap import validate_low_precision_bootstrap_args
+from orbit.megatron.low_precision_bootstrap import validate_low_precision_bootstrap_args
 
 
 def test_adapter_mode_rejects_low_precision_bridge_checkpoint_early():

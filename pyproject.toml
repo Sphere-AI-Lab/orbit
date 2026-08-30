@@ -267,6 +267,7 @@ include-package-data = true
 include = [
     "miles*",
     "miles_plugins*",
+    "orbit*",
     "tools*",
 ]
 
@@ -291,9 +292,9 @@ py_version = 310  # python 3.10 as a target version
 sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
 default_section = "THIRDPARTY"
 extend_skip = ["setup.py"]
-known_first_party = ["miles", "miles_plugins"]
+known_first_party = ["orbit", "miles_plugins"]
 known_third_party = ["megatron", "wandb", "ray", "transformers"]
-src_paths = ["miles", "miles_plugins"]
+src_paths = ["orbit", "miles_plugins"]
 
 
 [tool.black]

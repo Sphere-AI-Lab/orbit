@@ -1,7 +1,7 @@
 import logging
 import os
 # ORBIT-SEAM: removed base's `import re`: the legacy-checkpoint predicate below now delegates to
-# miles.orbit.megatron.low_precision_bootstrap, so this module no longer matches iter_ names itself
+# orbit.megatron.low_precision_bootstrap, so this module no longer matches iter_ names itself
 from pathlib import Path
 
 import torch.distributed as dist
@@ -18,10 +18,10 @@ from miles.utils import megatron_bridge_utils
 
 # ORBIT-SEAM: base's .lora_utils helpers are orbit's PEFT layer (LoRA + OFT), and the orbit-added
 # checkpoint subsystem (orbit.training_checkpoint marker format, rank-consensus legacy preflight,
-# torch_dist/legacy/HF load dispatch, PEFT adapter-state load) lives in miles.orbit.megatron.checkpointing
-from miles.orbit.megatron import checkpointing as orbit_checkpointing
-from miles.orbit.megatron.low_precision_bootstrap import is_distributed_checkpoint, is_legacy_megatron_checkpoint
-from miles.orbit.megatron.peft_utils import is_peft_enabled, is_peft_model, save_peft_checkpoint
+# torch_dist/legacy/HF load dispatch, PEFT adapter-state load) lives in orbit.megatron.checkpointing
+from orbit.megatron import checkpointing as orbit_checkpointing
+from orbit.megatron.low_precision_bootstrap import is_distributed_checkpoint, is_legacy_megatron_checkpoint
+from orbit.megatron.peft_utils import is_peft_enabled, is_peft_model, save_peft_checkpoint
 
 try:
     # Here we patch out the `validate_non_overlapping_shards_metadata` in both functions

@@ -1,4 +1,4 @@
-"""Unit tests for group-wise pairwise GenRM rewards (miles/orbit/rewards/genrm_judge.py).
+"""Unit tests for group-wise pairwise GenRM rewards (orbit/rewards/genrm_judge.py).
 
 The hook shape: ``--group-rm`` routes the whole n-samples-per-prompt group into
 ``batched_async_rm``, which calls ``reward_func(args, samples)`` -> list of
@@ -16,9 +16,9 @@ from types import SimpleNamespace
 import aiohttp
 import pytest
 
-import miles.orbit.rewards.genrm_judge as genrm
-from miles.orbit.rewards import scoring_client
-from miles.orbit.rewards.grader_errors import GraderInfrastructureError, InfrastructureErrorCode
+import orbit.rewards.genrm_judge as genrm
+from orbit.rewards import scoring_client
+from orbit.rewards.grader_errors import GraderInfrastructureError, InfrastructureErrorCode
 from miles.utils.types import Sample
 
 

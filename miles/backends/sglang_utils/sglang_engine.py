@@ -16,11 +16,11 @@ from sglang.srt.utils import kill_process_tree
 from urllib3.exceptions import NewConnectionError
 
 # ORBIT-SEAM: lora_utils' convert_target_modules_to_hf/is_lora_enabled replaced by
-# miles.orbit.megatron.peft_utils' unified (LoRA+OFT) equivalents below; upstream's
+# orbit.megatron.peft_utils' unified (LoRA+OFT) equivalents below; upstream's
 # lora_base_cpu_backup_enabled is re-anchored into the peft dispatch further down
 from miles.backends.megatron_utils.lora_utils import lora_base_cpu_backup_enabled
-from miles.orbit.megatron.oft_utils import OFT_ADAPTER_NAME
-from miles.orbit.megatron.peft_utils import convert_target_modules_to_hf, get_peft_method
+from orbit.megatron.oft_utils import OFT_ADAPTER_NAME
+from orbit.megatron.peft_utils import convert_target_modules_to_hf, get_peft_method
 from miles.ray.ray_actor import RayActor
 from miles.ray.rollout.sglang_server_actor import SGLangServerActor
 from miles.utils.env_report import collect_and_print_node_env_report
@@ -30,20 +30,20 @@ from miles.utils.http_utils import get_host_info
 # replaces, so they are not imported here
 from miles.utils.lora import LORA_ADAPTER_NAME
 
-# ORBIT-SEAM: launch-env, MoE-parity and shm-refcount helpers moved to miles/orbit/sglang/
+# ORBIT-SEAM: launch-env, MoE-parity and shm-refcount helpers moved to orbit/sglang/
 # (P1 lift-out, Phase 3 slice 3c); imported here both to call from the base functions
 # that stay in this file (launch_server_process, _init_normal, _compute_server_args)
 # and to re-export the names tests import directly from this module.
-from miles.orbit.sglang.launch import (
+from orbit.sglang.launch import (
     _configure_peft_cache_kwargs,
     _launch_server_with_orbit_compat,
     _prepare_child_native_ops_env,
     _prepare_child_peft_cache_env,  # noqa: F401  (re-exported: tests/test_sglang_native_ops.py)
 )
-from miles.orbit.sglang.server_args import _configure_megatron_moe_parity_kwargs, _training_adapter_dtype_arg
-from miles.orbit.sglang.shm_refcounts import _balance_broadcast_shm_refcounts  # noqa: F401  (re-exported: tests/test_peft_broadcast_shm_refcount.py)
+from orbit.sglang.server_args import _configure_megatron_moe_parity_kwargs, _training_adapter_dtype_arg
+from orbit.sglang.shm_refcounts import _balance_broadcast_shm_refcounts  # noqa: F401  (re-exported: tests/test_peft_broadcast_shm_refcount.py)
 # ORBIT-SEAM: orbit-added adapter/teacher SGLangEngine methods moved to this home mixin (P2, Phase 3 slice 3c)
-from miles.orbit.sglang.engine_ext import OrbitEngineExtensions
+from orbit.sglang.engine_ext import OrbitEngineExtensions
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ def _get_gpu_uuids(gpu_ids: list[int]) -> list[str | None]:
 
 # ORBIT-SEAM: launch_server_process gained a force_native_ops passthrough and now
 # spawns the orbit-compat entrypoint below (native-ops env prep + PEFT radix-cache
-# env prep, both homed in miles/orbit/sglang/launch.py) instead of sglang's launch_server
+# env prep, both homed in orbit/sglang/launch.py) instead of sglang's launch_server
 # directly; the host-bracket-strip that used to happen here moved into _init_normal
 # (ServerArgs is read-only after __post_init__ resolves it in sglang v0.5.18)
 def launch_server_process(server_args: ServerArgs, force_native_ops: bool = False) -> multiprocessing.Process:
@@ -275,7 +275,7 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
         )
 
         # ORBIT-SEAM: exposes engine node count for update_adapter_from_rank_tensors's
-        # single-host guard (home mixin, miles/orbit/sglang/engine_ext.py)
+        # single-host guard (home mixin, orbit/sglang/engine_ext.py)
         self.nnodes = server_args_dict["nnodes"]
         self.node_rank = server_args_dict["node_rank"]
         self.server_host = server_args_dict["host"]  # with [] if ipv6
@@ -329,7 +329,7 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
         # bracket-stripped host must travel in as a constructor argument, not be
         # assigned after (self.server_host above keeps the bracketed form -- it's
         # used for URL construction elsewhere in this class). launch_server_process
-        # also gained the force_native_ops passthrough (miles/orbit/sglang/native_ops.py).
+        # also gained the force_native_ops passthrough (orbit/sglang/native_ops.py).
         server_args = ServerArgs(**{**server_args_dict, "host": server_args_dict["host"].strip("[]")})
         if use_rdt:
             self._sglang_server_actor, self._scheduler_actors = _launch_sglang_server(
@@ -897,7 +897,7 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
 
 
 # ORBIT-SEAM: _compute_server_args helpers (MoE-parity, target-module classification,
-# adapter dtype selection) moved to miles/orbit/sglang/server_args.py (P1 lift-out, Phase 3
+# adapter dtype selection) moved to orbit/sglang/server_args.py (P1 lift-out, Phase 3
 # slice 3c); imported above and called directly below
 def _compute_server_args(
     args,
@@ -977,7 +977,7 @@ def _compute_server_args(
     # student); out of scope for this slice's P1 extraction (not one of the named
     # _compute_server_args helpers) -- lazy import keeps this file miles-clean at
     # module scope
-    from miles.orbit.opd.opd_teacher_spec import (
+    from orbit.opd.opd_teacher_spec import (
         OPD_TEACHER_ADAPTER_NAME,
         needs_engine_teacher_slot,
         parse_teacher_spec,

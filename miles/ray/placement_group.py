@@ -118,7 +118,7 @@ def _opd_teacher_extra_gpus(args) -> int:
     if pool_path is not None:
         # ORBIT-SEAM re-anchor: upstream dbbab156 turned miles/ray/rollout.py into a package, so the
         # pool helper is imported from its orbit home rather than re-exported through that module.
-        from miles.orbit.opd.teacher_servers import _opd_teacher_pool
+        from orbit.opd.teacher_servers import _opd_teacher_pool
 
         total += _opd_teacher_pool(args).served_num_gpus
     return total

@@ -28,9 +28,9 @@ except Exception:  # pragma: no cover - test environments may not ship megatron-
 from miles.backends.megatron_utils.misc_utils import strip_param_name_prefix
 from miles.backends.training_utils.parallel import get_parallel_state
 
-# ORBIT-SEAM: expert-TP / DSV4-OFT name predicates and adapter-param enumeration moved to miles/orbit/megatron (P1 lift-out); re-exported here so existing importers of this module keep working
-from miles.orbit.megatron.adapter_params import is_named_adapter_tensor, named_adapter_params, named_adapter_params_and_buffers  # noqa: F401
-from miles.orbit.megatron.tensor_semantics import (
+# ORBIT-SEAM: expert-TP / DSV4-OFT name predicates and adapter-param enumeration moved to orbit/megatron (P1 lift-out); re-exported here so existing importers of this module keep working
+from orbit.megatron.adapter_params import is_named_adapter_tensor, named_adapter_params, named_adapter_params_and_buffers  # noqa: F401
+from orbit.megatron.tensor_semantics import (
     is_dsv4_grouped_moe_oft_param_name,  # noqa: F401
     should_skip_named_tensor_for_tracking,
     uses_expert_tensor_parallel_group,
@@ -219,7 +219,7 @@ def all_gather_param(args: Namespace, name: str, param: torch.nn.Parameter) -> t
     Uses expert-TP for expert-tensor-sharded params (orbit's predicate: routed ".experts." plus
     the DSV4 shared-expert / grouped-MoE-OFT names), else regular-TP. Upstream's narrower
     is_routed_expert_param additionally excludes nested ".shared_experts.experts." — see the
-    phase-4 flag on miles.orbit.megatron.tensor_semantics. Handles strided partitioning via
+    phase-4 flag on orbit.megatron.tensor_semantics. Handles strided partitioning via
     partition_stride.
     """
     if "expert_bias" in name:

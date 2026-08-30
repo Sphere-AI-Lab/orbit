@@ -3,7 +3,7 @@ from argparse import Namespace
 import torch
 
 # ORBIT-SEAM: the OPD reverse-KL advantage blend has a single implementation, orbit's home
-# `miles.orbit.opd.advantages.apply_opd_kl_to_advantages` (re-exported by loss_hub.math_utils and
+# `orbit.opd.advantages.apply_opd_kl_to_advantages` (re-exported by loss_hub.math_utils and
 # imported from there by the orbit OPD tests). Upstream's own copy of the same algorithm used
 # to live in this module; it is gone. What remains here is the thin adapter that keeps
 # upstream's call signature (`args`-keyed, used by loss.py and tests/fast/backends/.../loss)

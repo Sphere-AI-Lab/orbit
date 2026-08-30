@@ -181,7 +181,7 @@ class TestUpdateWeightsZeroChunks:
 
     # orbit: base issues the sync barriers as bare `dist.barrier(group=get_gloo_group())` inside
     # this module, so patching the module's `dist` was enough to neutralise them. Orbit wraps each
-    # one in `_barrier_with_logging` (miles/orbit/megatron/sync_metrics.py) so the weight-sync trace
+    # one in `_barrier_with_logging` (orbit/megatron/sync_metrics.py) so the weight-sync trace
     # brackets it — same group, same collective — and that helper imports torch.distributed
     # itself, so the module-level `dist` patch no longer reaches it. Patch the wrapper instead;
     # the behaviour under test (zero-chunk detection) is unrelated to the barriers.

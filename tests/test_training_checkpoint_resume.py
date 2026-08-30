@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from miles.backends.megatron_utils import checkpoint as checkpoint_module
-from miles.orbit.megatron import checkpointing as orbit_checkpointing
+from orbit.megatron import checkpointing as orbit_checkpointing
 from miles.backends.megatron_utils import model as model_module
 
 

@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 import torch
 
-import miles.orbit.critic.critic_adapter as critic_adapter
-from miles.orbit.critic.critic_adapter import (
+import orbit.critic.critic_adapter as critic_adapter
+from orbit.critic.critic_adapter import (
     _check_resume_iteration,
     _expected_critic_resume_iteration,
     load_critic_checkpoint,

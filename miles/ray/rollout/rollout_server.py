@@ -12,8 +12,8 @@ from miles.ray.rollout.server_engine import ServerEngine
 from miles.ray.rollout.server_group import ServerGroup
 # ORBIT-SEAM (re-anchored from miles/ray/rollout.py::start_rollout_servers, which upstream dbbab156
 # split into this module): OPD teacher-pool / managed-teacher model-config builders live in
-# miles/orbit/opd/teacher_servers.py (P1 lift-out)
-from miles.orbit.opd.teacher_servers import (
+# orbit/opd/teacher_servers.py (P1 lift-out)
+from orbit.opd.teacher_servers import (
     OPD_TEACHER_MODEL_NAME,
     _opd_teacher_model_config,
     _opd_teacher_pool,

@@ -4,12 +4,12 @@ from dataclasses import dataclass
 import pytest
 import torch
 
-from miles.orbit.megatron.peft_utils import PeftSyncSpec
-from miles.orbit.transport import build_peft_transport
-from miles.orbit.transport.backends import ray_object as ray_backend
-from miles.orbit.transport.backends.ray_object import RayObjectBackend
-from miles.orbit.transport.registry import PEFT_METHODS, PeftMethodSpec
-from miles.orbit.transport.runtime import resolve_peft_runtime_mode
+from orbit.megatron.peft_utils import PeftSyncSpec
+from orbit.transport import build_peft_transport
+from orbit.transport.backends import ray_object as ray_backend
+from orbit.transport.backends.ray_object import RayObjectBackend
+from orbit.transport.registry import PEFT_METHODS, PeftMethodSpec
+from orbit.transport.runtime import resolve_peft_runtime_mode
 
 
 class _RemoteMethod:
@@ -61,7 +61,7 @@ def _fake_ray_get(value):
 
 def test_build_peft_transport_selects_ray_backend(monkeypatch):
     monkeypatch.setattr(
-        "miles.orbit.transport.build_peft_sync_spec",
+        "orbit.transport.build_peft_sync_spec",
         lambda _args: _sync_spec("lora"),
     )
 

@@ -8,7 +8,7 @@ pytest.importorskip("ray")
 
 import miles.backends.megatron_utils.actor as actor_mod
 import miles.backends.megatron_utils.checkpoint as checkpoint_mod
-import miles.orbit.megatron.checkpointing as orbit_checkpointing
+import orbit.megatron.checkpointing as orbit_checkpointing
 from miles.ray.actor_group import RayTrainGroup
 from miles.ray.placement_group import _single_start_rollout_id
 

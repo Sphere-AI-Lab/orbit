@@ -22,7 +22,7 @@ from miles.backends.megatron_utils.lora_utils import (
 )
 
 # ORBIT-SEAM: base's sync config is LoRA-only; orbit's PEFT layer (LoRA + OFT) supplies the sync spec
-from miles.orbit.megatron.peft_utils import (
+from orbit.megatron.peft_utils import (
     build_peft_sync_spec,
 )
 from miles.backends.training_utils.parallel import get_parallel_state
@@ -35,7 +35,7 @@ from .hf_weight_iterator_base import HfWeightIteratorBase
 
 # ORBIT-SEAM: weight-sync instrumentation (payload/pause metrics, timeline markers, the
 # ORBIT_LOG_WEIGHT_SYNC trace, sync-result labels) lives in the orbit home (P1, Phase 3 slice 3g)
-from miles.orbit.megatron.sync_metrics import (
+from orbit.megatron.sync_metrics import (
     _barrier_with_logging,
     _log_weight_sync_event,
     _sync_type_label,
@@ -46,7 +46,7 @@ from miles.orbit.megatron.sync_metrics import (
 )
 
 # ORBIT-SEAM: orbit's adapter/teacher send methods live in the home mixin (P2, Phase 3 slice 3g)
-from miles.orbit.transport.update_weight_ext import OrbitUpdateWeightExtensions
+from orbit.transport.update_weight_ext import OrbitUpdateWeightExtensions
 
 from .update_weight_from_distributed.broadcast import (
     connect_rollout_engines_from_distributed,
@@ -321,7 +321,7 @@ class UpdateWeightFromTensor(OrbitUpdateWeightExtensions):
 
         # ORBIT-SEAM: PEFT transport hookup - the adapter sync path base has no equivalent of
         # (colocated IPC vs NCCL selection, non-source ranks detach, reconnect on a mode change);
-        # construction and wire format live in miles.orbit.transport
+        # construction and wire format live in orbit.transport
         if self._peft_sync_spec is not None and self.use_distribute and colocate_engine_nums:
             raise RuntimeError(
                 "Hybrid colocated+distributed PEFT weight sync is not supported yet. "
@@ -336,7 +336,7 @@ class UpdateWeightFromTensor(OrbitUpdateWeightExtensions):
             return
 
         if self._peft_sync_spec is not None:
-            from miles.orbit.transport import build_peft_transport
+            from orbit.transport import build_peft_transport
             desired_mode = "nccl" if self.use_distribute else "ipc"
             if self._peft_transport is None or self._peft_transport_mode != desired_mode:
                 if self._peft_transport is not None:
@@ -480,7 +480,7 @@ class UpdateWeightFromTensor(OrbitUpdateWeightExtensions):
                 megatron_local_weights, weight_type="lora"
             )
             if self._peft_sync_spec.method == "lora":
-                from miles.orbit.transport._gather import (
+                from orbit.transport._gather import (
                     coalesce_lora_hf_weight_chunks,
                 )
 
@@ -491,7 +491,7 @@ class UpdateWeightFromTensor(OrbitUpdateWeightExtensions):
                         source_chunk_count,
                     )
             if self._peft_sync_spec.method == "oft":
-                from miles.orbit.transport._gather import (
+                from orbit.transport._gather import (
                     coalesce_oft_hf_weight_chunks,
                 )
 
@@ -885,7 +885,7 @@ def _send_to_colocated_engine(
 
 
 # ORBIT-SEAM: base derives the label inline from `is_lora`; with three PEFT methods orbit's adapter
-# path passes the label in (miles.orbit.megatron.sync_metrics._sync_type_label). Named apart from
+# path passes the label in (orbit.megatron.sync_metrics._sync_type_label). Named apart from
 # `.common._check_weight_sync_results`, which base's own call sites still use with is_lora=.
 def _check_peft_weight_sync_results(results: list, *, sync_type: str) -> None:
     """Validate return values from rollout engine weight-sync RPCs.

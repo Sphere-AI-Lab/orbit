@@ -66,7 +66,7 @@ ROLLOUT_ARGS=(
     --rollout-max-response-len 1024
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --rollout-function-path miles.orbit.rollout.fully_async_rollout.generate_rollout_fully_async
+    --rollout-function-path orbit.rollout.fully_async_rollout.generate_rollout_fully_async
 )
 
 OPTIMIZER_ARGS=(

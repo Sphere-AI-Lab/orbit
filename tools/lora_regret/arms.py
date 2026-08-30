@@ -40,7 +40,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from miles.orbit.utils.peft_param_match import (
+from orbit.utils.peft_param_match import (
     ATTENTION_MODULES,
     lora_param_count_for_modules,
     matched_mlp_rank,
@@ -50,7 +50,7 @@ from miles.orbit.utils.peft_param_match import (
     oft_lora_match_report,
     oft_param_count_for_modules,
 )
-from miles.orbit.utils.peft_param_match import MLP_MODULES as PEFT_MLP_MODULES
+from orbit.utils.peft_param_match import MLP_MODULES as PEFT_MLP_MODULES
 
 ALL_MODULES = "linear_qkv,linear_proj,linear_fc1,linear_fc2"
 ATTN_MODULES = "linear_qkv,linear_proj"
@@ -440,7 +440,7 @@ def sft_arms(hidden_size: int, ffn_size: int, seed: int = 0) -> list[Arm]:
     `OFT_BLOCK_SIZE` knob per arm; Megatron-Bridge's `OFTRotationModule`
     silently snaps it to a divisor of each layer's own `d_in`, so the MLP
     layers still end up with a valid, if not perfectly matched, block size).
-    See `miles.orbit.utils.peft_param_match`'s module docstring for the accounting.
+    See `orbit.utils.peft_param_match`'s module docstring for the accounting.
     """
     if hidden_size <= 0 or ffn_size <= 0:
         raise ValueError(f"hidden_size and ffn_size must be positive, got {hidden_size}, {ffn_size}")
@@ -1331,7 +1331,7 @@ def e5_arms(
 
     The pairing runs this direction -- fix the block size, solve for the rank --
     because a single global block size provably cannot match LoRA across mixed
-    shapes (see `miles.orbit.utils.peft_param_match`'s module docstring: the best
+    shapes (see `orbit.utils.peft_param_match`'s module docstring: the best
     all-modules ratio is 0.764). Rank is the finer lattice, so inverting gets
     within a few percent, and each arm carries the realized ratio it achieved.
 

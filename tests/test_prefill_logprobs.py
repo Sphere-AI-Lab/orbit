@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from miles.orbit.rollout import prefill_logprobs
+from orbit.rollout import prefill_logprobs
 from miles.utils.types import Sample
 
 

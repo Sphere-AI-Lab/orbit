@@ -1,6 +1,6 @@
 # Agentic SWE smoke (rung 2b): the model works real GitHub issues inside
 # their instance containers via run_shell tool calls over multiple turns
-# (miles.orbit.rewards.swe_agent.episode.generate); SWE-bench verification of the
+# (orbit.rewards.swe_agent.episode.generate); SWE-bench verification of the
 # final repo state grades each episode IN-EPISODE (no RM hook). Data rows:
 # user message = problem_statement; metadata.swe = verification contract.
 set -euo pipefail
@@ -69,7 +69,7 @@ ROLLOUT_ARGS=(
     --rollout-max-response-len "${ROLLOUT_MAX_RESPONSE_LEN}"
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --custom-generate-function-path "${CUSTOM_GENERATE_PATH:-miles.orbit.rewards.swe_agent.episode.generate}"
+    --custom-generate-function-path "${CUSTOM_GENERATE_PATH:-orbit.rewards.swe_agent.episode.generate}"
     --swe-rm-sif-cache "${SWE_SIF_CACHE:?set SWE_SIF_CACHE to the pre-pulled SIF dir}"
     --swe-rm-timeout-secs "${SWE_RM_TIMEOUT_SECS:-300}"
     --swe-agent-max-turns "${SWE_AGENT_MAX_TURNS:-10}"

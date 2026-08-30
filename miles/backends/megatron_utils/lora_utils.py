@@ -9,27 +9,27 @@ import torch
 import torch.distributed as dist
 
 # ORBIT-SEAM: base's `import os` / `from pathlib import Path` / `get_parallel_state` import dropped:
-# the adapter save/load bodies that used them now live in miles.orbit.megatron.peft_utils
+# the adapter save/load bodies that used them now live in orbit.megatron.peft_utils
 # ORBIT-SEAM: LORA_ADAPTER_NAME / lora_rollout_enabled re-exported from upstream's new
 # miles.utils.lora home (base defined LORA_ADAPTER_NAME here); is_lora_enabled is NOT re-exported -
 # orbit redefines it below on top of the peft_method source of truth
 from miles.utils.lora import LORA_ADAPTER_NAME, lora_rollout_enabled  # noqa: F401  (re-exported)
 
 # ORBIT-SEAM: PEFT-method detection, orbit's variant-aware target-module conversion, and adapter
-# checkpoint save/load delegate to miles.orbit.megatron.peft_utils. The orbit converters are aliased so
+# checkpoint save/load delegate to orbit.megatron.peft_utils. The orbit converters are aliased so
 # they do not shadow the base/upstream `lora_type=`-flavoured ones defined further down (which
 # multi_lora_utils and the sglang engine still import from this module).
-from miles.orbit.megatron.peft_utils import (
+from orbit.megatron.peft_utils import (
     PeftCheckpointPreflight,
     get_peft_method,
     load_peft_adapter_checkpoint,
     resolve_target_modules_hf,
     save_peft_adapter_checkpoint,
 )
-from miles.orbit.megatron.peft_utils import (
+from orbit.megatron.peft_utils import (
     convert_target_modules_to_megatron as _orbit_convert_target_modules_to_megatron,
 )
-from miles.orbit.megatron.peft_utils import (
+from orbit.megatron.peft_utils import (
     parse_exclude_modules as _orbit_parse_exclude_modules,
 )
 
@@ -214,7 +214,7 @@ def is_lora_weight_name(name: str) -> bool:
 
 
 # ORBIT-SEAM: orbit's MLA-aware variant selector, replacing the lora_type-only class-name switch for
-# the miles.orbit.megatron.peft_utils converters used by create_lora_instance below. The base/upstream
+# the orbit.megatron.peft_utils converters used by create_lora_instance below. The base/upstream
 # `lora_type=` helpers underneath are retained unchanged - multi_lora_utils and the sglang engine
 # still import them from this module.
 def _lora_variant(args: Namespace) -> str:
@@ -410,7 +410,7 @@ def create_lora_instance(args: Namespace):
     # so plain LoRA is the right wrapper there.
     lora_cls = CanonicalLoRA if variant == "canonical" else LoRA
 
-    # ORBIT-SEAM: converters come from miles.orbit.megatron.peft_utils and take variant= (from
+    # ORBIT-SEAM: converters come from orbit.megatron.peft_utils and take variant= (from
     # _lora_variant) instead of lora_type=lora_cls; aliased at import so the base/upstream
     # `lora_type=` helpers above stay available to their own importers
     target_modules = _orbit_convert_target_modules_to_megatron(args.target_modules, variant=variant)
@@ -446,7 +446,7 @@ def create_lora_instance(args: Namespace):
 
 # ORBIT-SEAM: relocated here from the end of the base file (base's checkpoint save/load section
 # header comment stood at this spot) so save_lora_checkpoint's build_config lambda below can see it;
-# target-module HF listing now delegates to miles.orbit.megatron.peft_utils.resolve_target_modules_hf
+# target-module HF listing now delegates to orbit.megatron.peft_utils.resolve_target_modules_hf
 # instead of computing target_modules_hf inline via the removed convert_target_modules_to_hf
 def build_lora_sync_config(args: Namespace) -> dict[str, Any]:
     """Build LoRA config dict for syncing weights to SGLang engines."""
@@ -477,12 +477,12 @@ def save_lora_checkpoint(
     opt_param_scheduler: Any | None = None,
     iteration: int | None = None,
     # ORBIT-SEAM: active_student_version param added - threaded through to
-    # miles.orbit.megatron.peft_utils.save_peft_adapter_checkpoint for OPD self-teacher version tagging
+    # orbit.megatron.peft_utils.save_peft_adapter_checkpoint for OPD self-teacher version tagging
     active_student_version: str | None = None,
 ) -> str:
     # ORBIT-SEAM: base's ~90-line LoRA save (Megatron-native per-rank .pt write + HF PEFT bridge
     # export + adapter_config.json + optimizer/scheduler training-state write) excised and replaced
-    # by a single delegation to miles.orbit.megatron.peft_utils.save_peft_adapter_checkpoint(method="lora"),
+    # by a single delegation to orbit.megatron.peft_utils.save_peft_adapter_checkpoint(method="lora"),
     # which implements the same two-format save plus PEFT method dispatch and the self-teacher sidecar
     return save_peft_adapter_checkpoint(
         model,
@@ -505,7 +505,7 @@ def load_lora_adapter(
     opt_param_scheduler: Any | None = None,
     # ORBIT-SEAM: 3 params added (expected_iteration, expected_active_student_version,
     # checkpoint_preflight) - support orbit's checkpoint-preflight validation and self-teacher-version
-    # consistency check, threaded through to miles.orbit.megatron.peft_utils.load_peft_adapter_checkpoint
+    # consistency check, threaded through to orbit.megatron.peft_utils.load_peft_adapter_checkpoint
     expected_iteration: int | None = None,
     expected_active_student_version: str | None = None,
     checkpoint_preflight: PeftCheckpointPreflight | None = None,
@@ -513,7 +513,7 @@ def load_lora_adapter(
     # ORBIT-SEAM: base's ~90-line LoRA load (native .pt tensor restore + HF-PEFT-not-supported
     # warning + optimizer/scheduler training-state restore) plus the standalone _load_training_state()
     # helper (removed entirely) excised and replaced by a delegation to
-    # miles.orbit.megatron.peft_utils.load_peft_adapter_checkpoint(label="LoRA"), which folds in
+    # orbit.megatron.peft_utils.load_peft_adapter_checkpoint(label="LoRA"), which folds in
     # checkpoint-preflight validation and self-teacher-version checks
     return load_peft_adapter_checkpoint(
         model,
@@ -530,4 +530,4 @@ def load_lora_adapter(
 # ORBIT-SEAM: base's build_lora_sync_config (inline target_modules_hf computation via
 # convert_target_modules_to_hf, then this same dict literal) stood at the end of the file here -
 # it was relocated above create_lora_instance and now delegates to
-# miles.orbit.megatron.peft_utils.resolve_target_modules_hf; see the ORBIT-SEAM stamp there
+# orbit.megatron.peft_utils.resolve_target_modules_hf; see the ORBIT-SEAM stamp there

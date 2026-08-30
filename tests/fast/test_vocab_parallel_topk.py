@@ -6,7 +6,7 @@ import torch.distributed as dist
 
 from tests.fast.dist_utils import init_gloo, run_multiprocess
 
-from miles.orbit.opd.vocab_parallel import (
+from orbit.opd.vocab_parallel import (
     compute_vocab_parallel_topk_log_probs,
     compute_vocab_parallel_topk_log_probs_and_entropy,
     vocab_parallel_topk_indices,

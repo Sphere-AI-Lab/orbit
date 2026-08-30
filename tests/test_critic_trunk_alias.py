@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from miles.orbit.critic.critic_adapter import (
+from orbit.critic.critic_adapter import (
     alias_trunk_storage,
     assert_trunk_aliased,
 )
@@ -119,7 +119,7 @@ class _PlainCriticChunk(torch.nn.Module):
 
 
 def test_prepare_head_critic_freezes_everything_but_value_head():
-    from miles.orbit.critic.critic_adapter import prepare_head_critic
+    from orbit.critic.critic_adapter import prepare_head_critic
 
     critic = [_PlainCriticChunk()]
     frozen = prepare_head_critic(critic)
@@ -129,7 +129,7 @@ def test_prepare_head_critic_freezes_everything_but_value_head():
 
 
 def test_head_critic_aliases_full_ft_actor_trunk():
-    from miles.orbit.critic.critic_adapter import prepare_head_critic
+    from orbit.critic.critic_adapter import prepare_head_critic
 
     critic, actor = [_PlainCriticChunk()], [_FullFTActorChunk()]
     prepare_head_critic(critic)
@@ -144,7 +144,7 @@ def test_head_critic_value_backward_leaves_actor_trunk_gradless():
     """The safety property of the detached-trunk design: a value-loss backward
     through the critic view produces NO gradient for the shared trunk storage,
     even though the actor's Parameter over that storage is trainable."""
-    from miles.orbit.critic.critic_adapter import prepare_head_critic
+    from orbit.critic.critic_adapter import prepare_head_critic
 
     critic, actor = [_PlainCriticChunk()], [_FullFTActorChunk()]
     prepare_head_critic(critic)

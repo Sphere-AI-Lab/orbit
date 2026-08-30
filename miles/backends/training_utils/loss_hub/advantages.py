@@ -7,7 +7,7 @@ from miles.backends.training_utils.loss_hub.math_utils import (
     get_advantages_and_returns_batch,
     get_grpo_returns,
     # ORBIT-SEAM: orbit's pure on-policy-distillation (MOPD) advantage, dispatched by the
-    # orbit-added "on_policy_distillation" estimator arm below; home is miles/orbit/opd/advantages.py
+    # orbit-added "on_policy_distillation" estimator arm below; home is orbit/opd/advantages.py
     opd_mopd_advantages,
     get_reinforce_plus_plus_baseline_advantages,
     get_reinforce_plus_plus_returns,
@@ -108,7 +108,7 @@ def compute_advantages(
 
     # ORBIT-SEAM: orbit-added estimator arm. Base computes the teacher-minus-student advantage
     # inline in policy space; orbit's version (device move, CP-aware response slicing, MOPD
-    # variants) lives in miles/orbit/opd/advantages.py and is re-exported by loss_hub.math_utils.
+    # variants) lives in orbit/opd/advantages.py and is re-exported by loss_hub.math_utils.
     elif args.advantage_estimator == "on_policy_distillation":
         if rollout_data is None:
             raise ValueError("advantage_estimator='on_policy_distillation' requires rollout_data.")

@@ -21,7 +21,7 @@ Already covered elsewhere (deliberately not repeated here):
     independence, base params untouched: tests/test_adapter_swap.py
 
 GPU/SGLang leg (runbook only — NOT implemented here):
-  The same comparison utility (miles.orbit.utils.logprob_compare) closes the loop
+  The same comparison utility (orbit.utils.logprob_compare) closes the loop
   against a live engine:
     1. launch trainer + SGLang engine with --opd-teacher <spec>;
     2. trainer side: compute_teacher_log_probs on a fixed sampled-token batch
@@ -46,9 +46,9 @@ import torch
 from megatron.bridge.peft.base import PEFT as BridgePEFT
 
 from miles.backends.megatron_utils import actor as actor_utils
-from miles.orbit.utils.adapter_swap import swap_adapter_tensors
-from miles.orbit.utils.logprob_compare import compare_logprobs
-from miles.orbit.opd.opd_teacher_spec import TeacherSpec
+from orbit.utils.adapter_swap import swap_adapter_tensors
+from orbit.utils.logprob_compare import compare_logprobs
+from orbit.opd.opd_teacher_spec import TeacherSpec
 
 VOCAB = 7
 DIM = 5

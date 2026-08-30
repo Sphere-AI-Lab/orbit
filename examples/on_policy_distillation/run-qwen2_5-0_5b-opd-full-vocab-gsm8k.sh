@@ -132,8 +132,8 @@ ROLLOUT_ARGS=(
     --rollout-max-response-len "${ROLLOUT_MAX_RESPONSE_LEN}"
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --custom-rm-path miles.orbit.opd.opd_sglang.reward_func
-    --custom-reward-post-process-path miles.orbit.opd.opd_sglang.post_process
+    --custom-rm-path orbit.opd.opd_sglang.reward_func
+    --custom-reward-post-process-path orbit.opd.opd_sglang.post_process
 )
 
 OPTIMIZER_ARGS=(

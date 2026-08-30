@@ -4,7 +4,7 @@ import logging
 import os
 from typing import Any
 
-# ORBIT-SEAM: base's `import yaml` dropped -- its only user, the --custom-config-path overlay, now lives in miles.orbit.arguments._apply_custom_config_args
+# ORBIT-SEAM: base's `import yaml` dropped -- its only user, the --custom-config-path overlay, now lives in orbit.arguments._apply_custom_config_args
 from sglang_router.launch_router import RouterArgs
 
 from miles.backends.sglang_utils.arguments import add_sglang_arguments, collect_eval_sglang_overrides
@@ -24,8 +24,8 @@ from miles.utils.misc import load_function
 from miles.utils.object_store import ObjectStoreBackend
 from miles.utils.tracking_utils.ci_history import RECORD_DIR_ENV
 
-# ORBIT-SEAM: orbit's argument home. miles/orbit/arguments.py owns every orbit-added argument, predicate and validator; this block re-exports them so every existing `from miles.utils.arguments import X` call site keeps working unchanged. Import direction across the seam is miles -> orbit only.
-from miles.orbit.arguments import (
+# ORBIT-SEAM: orbit's argument home. orbit/arguments.py owns every orbit-added argument, predicate and validator; this block re-exports them so every existing `from miles.utils.arguments import X` call site keeps working unchanged. Import direction across the seam is miles -> orbit only.
+from orbit.arguments import (
     SFT_ROLLOUT_FUNCTION_PATH,  # noqa: F401
     _PEFT_LORA_DEFAULTS,  # noqa: F401
     _apply_bridge_load_path,
@@ -1643,7 +1643,7 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
             return parser
 
         # ORBIT-SEAM: upstream re-adds its own nested add_on_policy_distillation_arguments here.
-        # Orbit registers the OPD argument group from miles/orbit/arguments.py (re-exported at the top
+        # Orbit registers the OPD argument group from orbit/arguments.py (re-exported at the top
         # of this module and registered via add_orbit_arguments below), so keeping upstream's copy
         # would make argparse fail on conflicting option strings (--use-opd, --opd-type, ...).
         # Upstream's group is dropped; its call site below is dropped too.
@@ -2590,7 +2590,7 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
         if not use_legacy_rollout_v1():
             parser = add_user_provided_function_arguments(parser)
 
-        # ORBIT-SEAM: orbit's own argument groups, plus its overrides of miles defaults/choices/help -- registered last so every option it overrides already exists (miles/orbit/arguments.py)
+        # ORBIT-SEAM: orbit's own argument groups, plus its overrides of miles defaults/choices/help -- registered last so every option it overrides already exists (orbit/arguments.py)
         parser = add_orbit_arguments(parser)
 
         reset_arg(
@@ -3390,7 +3390,7 @@ def _common_orbit_validate_args(args):
     if args.use_rollout_routing_replay:
         args.use_routing_replay = True
 
-    # ORBIT-SEAM: removed base validation: the --custom-config-path YAML overlay ran here, at the END of validation, so an overridden value could never feed the checks above it; orbit applies the same overlay first thing in miles_validate_args (miles.orbit.arguments._apply_custom_config_args, which also rejects a non-mapping root)
+    # ORBIT-SEAM: removed base validation: the --custom-config-path YAML overlay ran here, at the END of validation, so an overridden value could never feed the checks above it; orbit applies the same overlay first thing in miles_validate_args (orbit.arguments._apply_custom_config_args, which also rejects a non-mapping root)
 
     if args.use_rollout_indexer_replay:
         args.use_indexer_replay = True
@@ -3502,7 +3502,7 @@ def validate_skip_actor_forward_only(args) -> None:
 
 
 # ORBIT-SEAM: upstream re-adds its own validate_async_off_policy_correction here; orbit's version
-# (miles/orbit/arguments.py, re-exported at the top of this module) additionally validates
+# (orbit/arguments.py, re-exported at the top of this module) additionally validates
 # --update-weights-interval and gates on the advantage estimator, so upstream's copy is dropped
 # rather than shadowing the re-export.
 def _maybe_apply_dumper_overrides(args) -> None:

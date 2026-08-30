@@ -1,4 +1,4 @@
-"""Unit tests for the blend reward router (miles/orbit/rewards/reward_router.py).
+"""Unit tests for the blend reward router (orbit/rewards/reward_router.py).
 
 Routes each rollout group to a grader by ``metadata["agent"]`` (the NeMo Gym
 ``agent_ref.name`` carried through conversion). Groups are per-prompt, so the
@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import miles.orbit.rewards.reward_router as router
+import orbit.rewards.reward_router as router
 from miles.utils.types import Sample
 
 

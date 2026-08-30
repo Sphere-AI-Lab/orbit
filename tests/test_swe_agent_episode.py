@@ -1,4 +1,4 @@
-"""Unit tests for the agentic SWE episode loop (miles/orbit/rewards/swe_agent/).
+"""Unit tests for the agentic SWE episode loop (orbit/rewards/swe_agent/).
 
 The loop is exercised with a scripted fake engine + fake container session:
 what's under test is the pure episode logic — action parsing, token-stream
@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import miles.orbit.rewards.swe_agent.episode as gen_mod
+import orbit.rewards.swe_agent.episode as gen_mod
 from miles.utils.types import Sample
 
 

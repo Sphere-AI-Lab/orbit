@@ -1,8 +1,8 @@
 """Ratchet: orbit's entanglement with its miles fork base only shrinks.
 
 Every file orbit shares with radixark/miles at the fork base is recorded in
-miles_purity_manifest.json as either pristine (byte-identical to the base) or
-budgeted (carries orbit modifications, hash-pinned).
+miles_purity_manifest.json as either pristine (identical modulo the mechanical
+miles->orbit rename) or budgeted (carries orbit modifications, hash-pinned).
 Editing a pristine file, or editing a budgeted file without regenerating the
 manifest, fails here — so growing the fork delta is always a deliberate,
 reviewed act, never drift. See tools/miles_purity.py for regeneration.
@@ -41,9 +41,7 @@ def test_no_new_entanglement_with_miles_base():
 
 
 def test_no_orbit_code_outside_the_home_layer():
-    """New orbit files inside the vendored miles tree belong under miles/orbit/
-    (the home layer, exempted by home_violations); anything else under miles/
-    must trace to the vendored base."""
+    """New orbit files inside the vendored miles tree belong under orbit/."""
     manifest = json.loads(MANIFEST_PATH.read_text())
     violations = MILES_PURITY.home_violations(manifest)
     assert not violations, "\n  ".join(violations)

@@ -6,7 +6,7 @@ import inspect
 import aiohttp
 import pytest
 
-from miles.orbit.rewards import scoring_client
+from orbit.rewards import scoring_client
 
 
 def _run(coro):

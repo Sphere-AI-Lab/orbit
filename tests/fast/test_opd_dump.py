@@ -1,4 +1,4 @@
-"""Tests for miles.orbit.opd.opd_dump (M1 correctness leg, GPU side of I-5).
+"""Tests for orbit.opd.opd_dump (M1 correctness leg, GPU side of I-5).
 
 ``tokens`` here matches the real ``miles.utils.types.Sample.tokens`` field
 (full prompt+response token ids) -- the brief's ``response_token_ids`` name
@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-from miles.orbit.opd.opd_dump import (
+from orbit.opd.opd_dump import (
     ENV_LIMIT,
     ENV_PATH,
     dump_teacher_logprob_records,

@@ -1,6 +1,6 @@
 import argparse
 
-from miles.orbit.opd import opd_sglang
+from orbit.opd import opd_sglang
 from miles.utils.types import Sample
 
 

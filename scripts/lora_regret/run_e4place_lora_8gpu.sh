@@ -10,7 +10,7 @@
 #
 # **r92, not the post's r128.** Orbit fuses qkv and gate+up, so the post's pair
 # is not matched in this layout; r92 is the count solved for Orbit's shapes by
-# `miles.orbit.utils.peft_param_match.matched_mlp_rank`. An unmatched pair would
+# `orbit.utils.peft_param_match.matched_mlp_rank`. An unmatched pair would
 # compare placement and capacity at once, which is the confound this matrix
 # exists to avoid.
 #

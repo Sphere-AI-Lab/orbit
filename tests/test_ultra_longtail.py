@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 
-import miles.orbit.rewards.ultra_longtail as lt
-from miles.orbit.rewards.ultra_agents import grade_structured_output
+import orbit.rewards.ultra_longtail as lt
+from orbit.rewards.ultra_agents import grade_structured_output
 
 # ---------------------------------------------------------------------------
 # Boxed answers

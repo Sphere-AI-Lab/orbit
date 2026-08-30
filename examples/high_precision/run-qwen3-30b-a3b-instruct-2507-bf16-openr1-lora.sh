@@ -69,7 +69,7 @@ ROLLOUT_ARGS=(
     --rollout-max-response-len 1024
     --rollout-temperature 1.0
     --global-batch-size "${GLOBAL_BATCH_SIZE}"
-    --custom-rm-path miles.orbit.rewards.peft_arena_reward.peft_arena_reward
+    --custom-rm-path orbit.rewards.peft_arena_reward.peft_arena_reward
     --reward-key score
     --eval-reward-key score
 )

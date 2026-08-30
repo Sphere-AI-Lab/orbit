@@ -11,8 +11,8 @@ from argparse import Namespace
 import pytest
 import torch
 
-from miles.orbit.megatron import sync_metrics
-from miles.orbit.megatron.sync_metrics import (
+from orbit.megatron import sync_metrics
+from orbit.megatron.sync_metrics import (
     NUM_CHUNKS_KEY,
     PAUSE_TIMER_KEY,
     PAYLOAD_BYTES_KEY,

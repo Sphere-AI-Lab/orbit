@@ -14,7 +14,7 @@ from transformers import AutoProcessor, AutoTokenizer, PreTrainedTokenizerBase, 
 from miles.utils.hf_config import register_hf_config_aliases
 
 # ORBIT-SEAM: DSV4 tokenizer wrapper hook
-from miles.orbit.utils.chat_template_utils.deepseek_v4 import maybe_wrap_deepseek_v4_tokenizer
+from orbit.utils.chat_template_utils.deepseek_v4 import maybe_wrap_deepseek_v4_tokenizer
 
 logger = logging.getLogger(__name__)
 

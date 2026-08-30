@@ -16,7 +16,7 @@ import math
 import pytest
 import torch
 
-from miles.orbit.utils.eval_nll import (
+from orbit.utils.eval_nll import (
     NllStats,
     accumulate_nll,
     build_eval_nll_metrics,
@@ -716,7 +716,7 @@ def test_before_train_adds_its_own_key_without_dropping_the_primary():
 
 
 def test_metric_key_constants_match_the_emitted_strings():
-    from miles.orbit.utils.eval_nll import EVAL_NLL_BEFORE_TRAIN_METRIC_KEY, EVAL_NLL_METRIC_KEY
+    from orbit.utils.eval_nll import EVAL_NLL_BEFORE_TRAIN_METRIC_KEY, EVAL_NLL_METRIC_KEY
 
     metrics = build_eval_nll_metrics(_stats(), step=0, before_train=True)
     assert EVAL_NLL_METRIC_KEY == "eval/test_nll"
@@ -739,7 +739,7 @@ def test_step_key_is_present_for_tracking_utils():
 def test_unsupported_entrypoint_refuses_when_flag_is_set():
     from argparse import Namespace
 
-    from miles.orbit.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint
+    from orbit.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint
 
     with pytest.raises(ValueError, match="not supported by train_async.py"):
         reject_eval_nll_on_unsupported_entrypoint(
@@ -750,7 +750,7 @@ def test_unsupported_entrypoint_refuses_when_flag_is_set():
 def test_unsupported_entrypoint_names_the_supported_one():
     from argparse import Namespace
 
-    from miles.orbit.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint
+    from orbit.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint
 
     with pytest.raises(ValueError, match="train.py"):
         reject_eval_nll_on_unsupported_entrypoint(Namespace(eval_nll_data="/tmp/x.jsonl"), "other.py")
@@ -760,7 +760,7 @@ def test_unsupported_entrypoint_names_the_supported_one():
 def test_unsupported_entrypoint_is_a_noop_when_flag_is_unset(value):
     from argparse import Namespace
 
-    from miles.orbit.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint
+    from orbit.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint
 
     reject_eval_nll_on_unsupported_entrypoint(Namespace(eval_nll_data=value), "train_async.py")
     reject_eval_nll_on_unsupported_entrypoint(Namespace(), "train_async.py")
@@ -773,7 +773,7 @@ def test_train_async_calls_the_refusal():
 
     source = (Path(__file__).resolve().parents[3] / "train_async.py").read_text(encoding="utf-8")
     assert "reject_eval_nll_on_unsupported_entrypoint(args, \"train_async.py\")" in source
-    assert "from miles.orbit.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint" in source
+    assert "from orbit.utils.eval_nll import reject_eval_nll_on_unsupported_entrypoint" in source
 
 
 # --------------------------------------------------------------------------
@@ -800,7 +800,7 @@ def _compute_eval_nll_source() -> str:
     from pathlib import Path
 
     source = (
-        Path(__file__).resolve().parents[3] / "miles/orbit/megatron/actor_ext.py"
+        Path(__file__).resolve().parents[3] / "orbit/megatron/actor_ext.py"
     ).read_text(encoding="utf-8")
     start = source.index("    def compute_eval_nll(")
     end = source.index("\n    def ", start + 1)
