@@ -11,6 +11,14 @@ from transformers import AutoModelForCausalLM
 
 from miles.utils.processing_utils import load_tokenizer
 
+# ORBIT-SEAM: upstream bug fixed locally -- main() read args.local_data_path and
+# args.model_id, which no option registers (the parser declares --data-dir and
+# --input-dir), so this script raised AttributeError on every invocation. Fixed
+# here rather than left for upstream because it is a self-contained leaf tool:
+# the divergence cannot reach the training path and is 2 lines wide. The same
+# class of upstream bug in miles/utils/arguments.py (--offload-optimizer-states)
+# is deliberately NOT patched -- see tools/check_args_dest_consistency.py.
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -62,11 +70,11 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
 
     ds_hf = get_calibration_dataset(
-        tokenizer, args.num_calibration_samples, args.max_sequence_length, args.local_data_path
+        tokenizer, args.num_calibration_samples, args.max_sequence_length, args.data_dir
     )
 
     model = AutoModelForCausalLM.from_pretrained(
-        args.model_id,
+        args.input_dir,
         device_map="auto",
         torch_dtype=torch.bfloat16,
         trust_remote_code=args.trust_remote_code,

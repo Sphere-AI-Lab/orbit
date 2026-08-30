@@ -234,7 +234,7 @@
   },
   "miles/backends/training_utils/loss_hub/math_utils.py": {
    "delta_lines": 211,
-   "sha": "c18c39e6b1df0f63bc4d5e899cbdb46a756235c7e498fffa867814f00682a768"
+   "sha": "d569fdbbc19e37d419b403e5b650e49713dd5adb1ea517e372e15594098577b9"
   },
   "miles/backends/training_utils/loss_hub/opd.py": {
    "delta_lines": 99,
@@ -608,6 +608,10 @@
    "delta_lines": 14,
    "sha": "dcdc4370483d91f9dedf2bbe36bd01582e545ff96d73cd81836e14b9b40b0b9a"
   },
+  "tools/convert_hf_to_hf_int4.py": {
+   "delta_lines": 12,
+   "sha": "d8fc6df6a8e27dfe8698534b51c05988b50935c894d22690af75d1b52ce136e3"
+  },
   "tools/convert_hf_to_torch_dist.py": {
    "delta_lines": 192,
    "sha": "35b5615e3400a1e0b939c4cbbe9589adc57c4989081bc5a5407ff6cf39a99fb8"
@@ -734,9 +738,6 @@
   "examples/retool_v2/README.md",
   "examples/retool_v2/run_retool_multi_turn.py",
   "examples/retool_v2/tool_sandbox.py",
-  "examples/swe-agent-harbor-docker/download_and_process_data.py",
-  "examples/swe-agent-harbor-docker/generate.py",
-  "examples/swe-agent-harbor-docker/run.py",
   "miles/utils/debug_utils/__init__.py",
   "miles/utils/debug_utils/display_debug_rollout_data.py",
   "miles/utils/debug_utils/replay_reward_fn.py",
@@ -1070,7 +1071,10 @@
   "examples/ppo/README.md": "d1e3c1bb95c58c40460b12c412f1bc677241fcb553f5114bb5fec0ae9272a7e2",
   "examples/ppo/run_qwen3_4b_ppo.py": "6d61ac68e465fe7ceb0c25bec8f2e9a87ac09aed4f92d79a49de02f846a80736",
   "examples/swe-agent-harbor-docker/README.md": "f94b6a0c51cb64122b1bf05ba05fbe5ff2cfb109b3f6b8b6ec3a1a1f29b0f2c7",
+  "examples/swe-agent-harbor-docker/download_and_process_data.py": "f349f166b32caa2a71df4611069f2a8a67cba5160a67d0c0201271c2f5a1d594",
+  "examples/swe-agent-harbor-docker/generate.py": "5c4265890a4d5670973d348c60fa0ddaf2507e426bc0f6808b9dc754c690c8b2",
   "examples/swe-agent-harbor-docker/run-glm47-flash-agentic-async.py": "6a8b2812db045c5d4ca5dc309469d9353a98934441f482e129d49315d7644c24",
+  "examples/swe-agent-harbor-docker/run.py": "bd384241cff91d76ac0a3d3955d306c0aaa2f241db87b2af074b85b63f16c5f7",
   "examples/swe-agent-harbor-docker/run_glm52_lora_tb2_daytona.py": "d3c3bb6a6a76acec844e107bc5f3cdef11c15d92f32149347a5d3dc45d990086",
   "examples/swe-agent-harbor-docker/swe_agent_function.py": "687e2fa23477b40f2cb5c24dbf92c2959fd15948bd791d1fd35e7c3e82527312",
   "miles/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -2263,7 +2267,6 @@
   "tests/test_fused_experts_backward.py": "1697de6e48ccb396bf75e664baba5673b35c17e79feef528d46fedfd9655e37b",
   "tests/test_gspo.sh": "ac14486caa6f6dc2ca52f0956c4e368a7fb064ddb0ea36338dd18fac86f97dce",
   "tools/convert_fsdp_to_hf.py": "119558daf6a08f8830dd3ab718709a28bd15689b6a57f64ff08f5613bb5d0210",
-  "tools/convert_hf_to_hf_int4.py": "544919334c89bcbce51844c40ada94c70f0f94fe5d8698a63ecc7c5f21a455ab",
   "tools/convert_hf_to_mxfp8.py": "ada860e4569372acfac37d60c5d667ad843847ef1b9defe4b77a69ac24cfe167",
   "tools/convert_kimi_int4_to_bf16.py": "ebb44035010692281d790869fcdf45a1746787a40b98fc4d5e5756d7e1526d15",
   "tools/convert_mxfp4_to_fp8.py": "f450a224f74c1dbfe93c5ac1d9dc50fe67bfe852f99371ce55ff63c595ab2ec9",

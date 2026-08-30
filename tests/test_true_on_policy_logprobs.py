@@ -100,13 +100,13 @@ def test_true_on_policy_entropy_no_grad_detaches_only_entropy():
     tokens = torch.tensor([1, 0, 7])
 
     log_prob, entropy = _calculate_log_probs_and_entropy_true_on_policy(
-        logits, tokens, None, with_entropy=True, entropy_no_grad=True
+        logits, tokens, None, with_entropy=True, entropy_requires_grad=False
     )
     assert log_prob.requires_grad
     assert not entropy.requires_grad
 
     log_prob, entropy = _calculate_log_probs_and_entropy_true_on_policy(
-        logits, tokens, None, with_entropy=True, entropy_no_grad=False
+        logits, tokens, None, with_entropy=True, entropy_requires_grad=True
     )
     assert log_prob.requires_grad
     assert entropy.requires_grad

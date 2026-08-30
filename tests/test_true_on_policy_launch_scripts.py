@@ -22,7 +22,7 @@ from orbit.true_on_policy import build_true_on_policy_launch_plan, get_true_on_p
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-LAUNCHER = REPO_ROOT / "examples" / "true_on_policy" / "run-qwen3-4b-top.sh"
+LAUNCHER = REPO_ROOT / "examples" / "infra_features" / "true_on_policy" / "run-qwen3-4b-top.sh"
 
 
 def _dry_run(tmp_path: Path, *, top: str) -> list[str]:

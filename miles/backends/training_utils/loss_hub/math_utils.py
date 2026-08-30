@@ -996,7 +996,7 @@ def calculate_log_probs_and_entropy(
 
 
 # ORBIT-SEAM: base assumes an already-full [R, V] logits tensor; orbit accepts a TP vocab shard and adds
-# tp_group / entropy_no_grad / vocab_size. Left in place (not lifted to orbit/true_on_policy/full_logits.py) because
+# tp_group / entropy_requires_grad / vocab_size. Left in place (not lifted to orbit/true_on_policy/full_logits.py) because
 # it is a base function the base dispatcher above calls; only its full-vocab gather moved to the orbit home.
 def _calculate_log_probs_and_entropy_true_on_policy(
     logits: torch.Tensor,
