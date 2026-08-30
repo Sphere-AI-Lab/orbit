@@ -544,6 +544,12 @@ def _parallel_state(*, tp_rank=0, tp_size=1, cp_rank=0, cp_size=1, dp_rank=0, dp
         intra_dp_cp=GroupInfo(rank=dp_rank, size=dp_size, group=None),
         cp=GroupInfo(rank=cp_rank, size=cp_size, group=None),
         tp=GroupInfo(rank=tp_rank, size=tp_size, group=None),
+        # upstream's ParallelState gained required pp/ep/etp/indep_dp groups. eval_nll
+        # only reads is_pp_last_stage off the PP axis, so trivial groups suffice.
+        pp=GroupInfo(rank=0, size=1, group=None),
+        ep=GroupInfo(rank=0, size=1, group=None),
+        etp=GroupInfo(rank=0, size=1, group=None),
+        indep_dp=GroupInfo(rank=0, size=1, group=None),
         is_pp_last_stage=is_pp_last_stage,
     )
 

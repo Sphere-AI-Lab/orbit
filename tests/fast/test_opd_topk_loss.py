@@ -42,7 +42,20 @@ def _single_state() -> None:
     # tp_group to None here (gated on parallel_state.tp.size > 1), exercising the
     # process_group=None path the brief asks for.
     single = GroupInfo(rank=0, size=1, group=dist.group.WORLD)
-    set_parallel_state(ParallelState(intra_dp=single, intra_dp_cp=single, cp=single, tp=single))
+    # upstream's ParallelState gained required pp/ep/etp/indep_dp groups; trivial here.
+    trivial = GroupInfo(rank=0, size=1, group=None)
+    set_parallel_state(
+        ParallelState(
+            intra_dp=single,
+            intra_dp_cp=single,
+            cp=single,
+            tp=single,
+            pp=trivial,
+            ep=trivial,
+            etp=trivial,
+            indep_dp=trivial,
+        )
+    )
 
 
 def _row(teacher_logits: list[float], student_logits: list[float], k: int):

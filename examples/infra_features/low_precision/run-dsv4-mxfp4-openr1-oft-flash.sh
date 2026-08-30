@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-ORBIT_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+ORBIT_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
 
 source "${ORBIT_ROOT}/scripts/lib/common.sh"
 source "${ORBIT_ROOT}/scripts/lib/tool_env.sh"

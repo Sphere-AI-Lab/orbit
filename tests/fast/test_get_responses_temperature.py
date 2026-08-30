@@ -17,6 +17,11 @@ def _trivial_parallel_state() -> None:
             intra_dp_cp=trivial_group,
             cp=trivial_group,
             tp=trivial_group,
+            # upstream's ParallelState gained required pp/ep/etp/indep_dp groups; trivial here.
+            pp=trivial_group,
+            ep=trivial_group,
+            etp=trivial_group,
+            indep_dp=trivial_group,
         )
     )
 

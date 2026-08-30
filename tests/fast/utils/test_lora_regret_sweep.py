@@ -646,7 +646,9 @@ class TestEvalAccuracyFormatPins:
     nothing turns a whole sweep into uniform 'failed'."""
 
     def _rollout_py(self) -> str:
-        return (REPO_ROOT / "miles" / "ray" / "rollout.py").read_text(encoding="utf-8")
+        # upstream split miles/ray/rollout.py into the miles/ray/rollout/ package; the
+        # eval log line the sweep parser is pinned to now lives in its metrics module.
+        return (REPO_ROOT / "miles" / "ray" / "rollout" / "metrics.py").read_text(encoding="utf-8")
 
     def test_log_line_template_matches_rollout_py_source(self):
         assert 'logger.info(f"eval {rollout_id}: {log_dict}")' in self._rollout_py()

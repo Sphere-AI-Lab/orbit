@@ -61,7 +61,13 @@ def update_sample_with_tool_responses(sample: Sample, tool_messages: list[dict[s
     sample.response_length += len(next_obs_tokens_ids)
     sample.tokens += next_obs_tokens_ids
     sample.loss_mask += [0] * len(next_obs_tokens_ids)
-    sample.rollout_log_probs += [0.0] * len(next_obs_tokens_ids)
+    # ORBIT-SEAM: rollout_log_probs is legitimately None when orbit skipped return_logprob for this
+    # phase (eval without eval_return_rollout_logprobs -- see should_request_rollout_logprobs in
+    # generate_endpoint_utils.py). Upstream always requests logprobs, so it can append filler
+    # unconditionally; orbit must leave None alone rather than fabricate logprobs for a sample that
+    # is not tracking any. Mirrors the same None guard at the two update_sample_from_response sites.
+    if sample.rollout_log_probs is not None:
+        sample.rollout_log_probs += [0.0] * len(next_obs_tokens_ids)
 
 
 # Follow-up: very naive implementation, need the to-be-implemented e2e test to validate.

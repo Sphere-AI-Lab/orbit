@@ -8,9 +8,57 @@
    "delta_lines": 251,
    "sha": "82483855305b689779a28fbb7558ec4c1686f97539357a363025ec53b829e4b7"
   },
+  "docs/docs.json": {
+   "delta_lines": 16,
+   "sha": "effb3165502ca551385dc6953ac98b76a73676facb52da69cb46e7ad25e610fd"
+  },
+  "docs/examples/index.md": {
+   "delta_lines": 441,
+   "sha": "5466637312aaaa89f36950a27b42a4bfd097bf391fe45ab4a37a9191b9628ce0"
+  },
+  "docs/examples/infra-features.md": {
+   "delta_lines": 3,
+   "sha": "e3f7d14528e437a4b2f355a1ab00b49403b29799c4087c322db9ce7961cec4c9"
+  },
+  "docs/examples/infra-features/fully-async.md": {
+   "delta_lines": 2,
+   "sha": "9070254b5d0965a0ee203d0208f318a9ef6737b6df94d64f286ea7936178202a"
+  },
+  "docs/examples/infra-features/low-precision.md": {
+   "delta_lines": 135,
+   "sha": "d0ae21ae2329e09f4a647f3276f41dfa8e58d006bba73f34948702582baaaabe"
+  },
+  "docs/examples/infra-features/p2p-weight-transfer.md": {
+   "delta_lines": 2,
+   "sha": "48294a064f2737ce91b4d98270516d37432baa5cd1f862ac81c2b784cb642549"
+  },
+  "docs/examples/infra-features/random-async.md": {
+   "delta_lines": 2,
+   "sha": "3e0246e2a05b0408f7b52216ccc0a3c4b825148a74edb82c6de89b69b11a58bd"
+  },
+  "docs/examples/multi-lora.md": {
+   "delta_lines": 2,
+   "sha": "ec0effd1c1b271b72da6e593e1b7d5ada4ae2f90189a031948ea2970611d976a"
+  },
+  "docs/examples/on-policy-distillation.md": {
+   "delta_lines": 335,
+   "sha": "ffe5c30ed1a005695ba06e986cb2825c8a40db97c5f546431339a2f35a92e3fb"
+  },
+  "docs/examples/on-policy-distillation/qwen3-5-35b-selfdistill.md": {
+   "delta_lines": 2,
+   "sha": "eed822f1b122c04e79c30eaf522e212d868ea3e57f6fda80705f2ec0d97046e2"
+  },
+  "docs/examples/ppo.md": {
+   "delta_lines": 2,
+   "sha": "076661c32a5b9c4ab2f568571e1b80842b03fccbd589dd42a3e414dba6524aa4"
+  },
+  "docs/examples/swe-agent-harbor-docker.md": {
+   "delta_lines": 2,
+   "sha": "2aa7e34fc6e15c2d78fc65e591be17442b9b675d680c37cf13ce6adc47a28980"
+  },
   "examples/README.md": {
-   "delta_lines": 437,
-   "sha": "5c94fc9330a741511911607ac41565b1c827d18246344c9e33ae80a326e8b97f"
+   "delta_lines": 457,
+   "sha": "a724470c285801a1043c8af2ef9274177973044ac45cf208530f4c831875a501"
   },
   "examples/__init__.py": {
    "delta_lines": 1,
@@ -153,8 +201,8 @@
    "sha": "26b49fe5e18be0339babef96775bce42b4aa211f1227fb2b066e014eaab7f5b5"
   },
   "miles/backends/training_utils/cp_utils.py": {
-   "delta_lines": 105,
-   "sha": "a360a503db4599ecad7b70c46709d5be67c3589e597097ce2c6a1fbacfc35d3b"
+   "delta_lines": 21,
+   "sha": "002a2c2c42edc8a7d760d775980923e0f99b46e22f74eb925102c723fe307778"
   },
   "miles/backends/training_utils/data.py": {
    "delta_lines": 359,
@@ -165,12 +213,32 @@
    "sha": "75eba510859ce68114cccb75169f2bfa9f4c49185aed66026ad25a325da6cdef"
   },
   "miles/backends/training_utils/loss.py": {
-   "delta_lines": 1080,
-   "sha": "d521ace1f872a8d36bf9d4398de55395cf9d62d4bd32802ef766f9d3433eae05"
+   "delta_lines": 104,
+   "sha": "612e73caab15cebc61eb830da008a7cbf87ace66b7277aea23d86abbe45268db"
+  },
+  "miles/backends/training_utils/loss_hub/advantages.py": {
+   "delta_lines": 56,
+   "sha": "5b833644e0906caf01586ef763ef8f100cc9cea187719ab88c7bb0c205e30441"
+  },
+  "miles/backends/training_utils/loss_hub/corrections.py": {
+   "delta_lines": 11,
+   "sha": "b9149b1718c411aadb4f93b945565069ec032d07b5bd7f50fc177bb990d7e4b5"
+  },
+  "miles/backends/training_utils/loss_hub/logit_processors.py": {
+   "delta_lines": 123,
+   "sha": "8e2cda1c7c4de778534ce6617dc5a7045fc0cba319f4f0312e0c9b7abae8df19"
+  },
+  "miles/backends/training_utils/loss_hub/losses.py": {
+   "delta_lines": 101,
+   "sha": "0c8d6920f8cd7b171d7f65d1df425893d568459c64a06b40a2791414ac6b7fca"
   },
   "miles/backends/training_utils/loss_hub/math_utils.py": {
    "delta_lines": 211,
    "sha": "c18c39e6b1df0f63bc4d5e899cbdb46a756235c7e498fffa867814f00682a768"
+  },
+  "miles/backends/training_utils/loss_hub/opd.py": {
+   "delta_lines": 99,
+   "sha": "3a63e96c975bfbc88e2d331ba8c4650d08db53d89a91444e1a0f8b1691e998d9"
   },
   "miles/ray/actor_group.py": {
    "delta_lines": 46,
@@ -257,8 +325,8 @@
    "sha": "b07fb684099342a69198443d763876d412d82a3d29b90021b9b7e2de848b5a10"
   },
   "miles/rollout/generate_utils/tool_call_utils.py": {
-   "delta_lines": 2,
-   "sha": "5c94a91fdb720fa04facc8ec4936d3699de7623bf53b21f7eddb5d9cc1ba1bfa"
+   "delta_lines": 10,
+   "sha": "3ba71199f9784f3e6803deba0f34ce90cf2d0d1880caf7b3620cb259e4a69e8c"
   },
   "miles/rollout/inference_rollout/inference_rollout_common.py": {
    "delta_lines": 17,
@@ -297,8 +365,8 @@
    "sha": "316c6e23319fe6a61ed54d3b7583ee2d2315cb96003083b395ded31be69224ac"
   },
   "miles/utils/arguments.py": {
-   "delta_lines": 324,
-   "sha": "9db7e921ab7caa46f32f7e148790dd102e40dffe62f6a87b0889417d2ecc85cd"
+   "delta_lines": 340,
+   "sha": "33ff229d9be17801c552ffd49fbb55f9e294b458174cde34ded1a873e2fc0879"
   },
   "miles/utils/chat_template_utils/tito_tokenizer.py": {
    "delta_lines": 37,
@@ -313,8 +381,8 @@
    "sha": "bc176eef056735782010da67904bc3a7472eb857c7d335d691c75ed1a7f3dcc2"
   },
   "miles/utils/dumper_utils.py": {
-   "delta_lines": 14,
-   "sha": "c49efae06805e3b6b7f8b1598a235328acee3afa36ec26728dbe52010b93065a"
+   "delta_lines": 15,
+   "sha": "a5553f53eeb77d986f6b5392ee942a79eba0b6df0de5aefb8d1e8883265eccc6"
   },
   "miles/utils/env_report.py": {
    "delta_lines": 2,
@@ -428,9 +496,109 @@
    "delta_lines": 1,
    "sha": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
+  "tests/fast/backends/megatron_utils/test_lora_checkpoint_helpers.py": {
+   "delta_lines": 10,
+   "sha": "9d836fc60cef0547d2d48548dbd056065b87d78cd4545d76d7f313c40cecf7ed"
+  },
+  "tests/fast/backends/megatron_utils/test_lora_model_branches.py": {
+   "delta_lines": 90,
+   "sha": "8f99aad5cb7f635445eddef0155162496a3fb8f3d82243ff7964e4c5ef9531f2"
+  },
+  "tests/fast/backends/megatron_utils/test_lora_utils.py": {
+   "delta_lines": 23,
+   "sha": "9c4a188cc94d985893fb5d0f47f6431dc56cb2b8adedeee9bcc71d7d2ce6c285"
+  },
+  "tests/fast/backends/megatron_utils/test_lora_weight_sync_validation.py": {
+   "delta_lines": 15,
+   "sha": "4da3386fb283b613ad6e8441c1187ff1f4c7d3c476ba4d5d1909e361c8641835"
+  },
+  "tests/fast/backends/megatron_utils/test_model_initialize.py": {
+   "delta_lines": 34,
+   "sha": "9610f41fb2bbd299c1f4959c7810798568b609e3ecde284a9ebaa58c0bd46d8a"
+  },
+  "tests/fast/backends/megatron_utils/test_shared_ppo_lifecycle.py": {
+   "delta_lines": 79,
+   "sha": "2198ddfc635e2b8b065ce205a060a7a5a57ee4d1e3298d217798ce9c00723e3a"
+  },
+  "tests/fast/backends/sglang_utils/test_compute_server_args.py": {
+   "delta_lines": 21,
+   "sha": "086b9a5f047a0a26dfc232340f686ac87b9bb9ee0a5c190b84b7698946a0cf4f"
+  },
+  "tests/fast/backends/training_utils/loss/test_loss_snapshot.py": {
+   "delta_lines": 30,
+   "sha": "616e60fa5f5be9b448eabcd448a8bb60924f1fe9a99541f7012348f69565381b"
+  },
+  "tests/fast/backends/training_utils/test_opd_cp_data.py": {
+   "delta_lines": 9,
+   "sha": "b70ce46b4542478fc0cfb10c040a18445cfb385e2b2524b039f7592126685119"
+  },
+  "tests/fast/fixtures/generation_fixtures.py": {
+   "delta_lines": 45,
+   "sha": "4d6ae179b33ffb837595a6d0e71ecbab929141637da166a9a8609d3c6d102ebc"
+  },
+  "tests/fast/fixtures/rollout_fixtures.py": {
+   "delta_lines": 14,
+   "sha": "3932c4f39e5d0b64e5f9506d60ab5cae25fa3d37596404c0e1f8918f7a1c9b3f"
+  },
+  "tests/fast/launch_scripts/test_sh_harness.py": {
+   "delta_lines": 13,
+   "sha": "c0a8bee6fdfcea1547f0723be06eee6c374767ded9796a06e510b4c7779733be"
+  },
+  "tests/fast/ray/rollout/conftest.py": {
+   "delta_lines": 4,
+   "sha": "fc8e41a26e7fb01db2cdd010d596fe841b320ac9b107c55f1b044a06cd5ebd4a"
+  },
+  "tests/fast/ray/rollout/test_router_manager.py": {
+   "delta_lines": 3,
+   "sha": "63d819367e87b4d224da636a4c6f645b8b131bbb561267444f9da7fb317547e6"
+  },
+  "tests/fast/ray/test_placement_group_shared_ppo.py": {
+   "delta_lines": 22,
+   "sha": "5ff91998a4db068d965406644320a23fc82713c47a4f134e2bb3a15c2b4d38e3"
+  },
+  "tests/fast/rollout/inference_rollout/conftest.py": {
+   "delta_lines": 15,
+   "sha": "615ba94c2bd27c1ec0875bcf4b061d223a0d4f895e15ed5cf7926706b81be558"
+  },
+  "tests/fast/rollout/inference_rollout/integration/test_basic.py": {
+   "delta_lines": 24,
+   "sha": "88cffc548f37f21fbe5b1d48e1d2569780195b529f743a8632a583a7bff39e7d"
+  },
+  "tests/fast/rollout/inference_rollout/integration/utils.py": {
+   "delta_lines": 16,
+   "sha": "258559054b90b9eb7abe84da34aec02d3a81d74dc7d2c60add721f99c1c88a96"
+  },
+  "tests/fast/test_megatron_cli_flags.py": {
+   "delta_lines": 37,
+   "sha": "5c0ac7949a166ee36efa77c42ff0c5c1f51f31e1f318ad118c12a3d0ee0d0e53"
+  },
+  "tests/fast/test_ray_launcher_unbuffering.py": {
+   "delta_lines": 6,
+   "sha": "0bedfd1b6b34b5bad1949a5b1336379beb00c8b730c5c2b63a181c4ea1e31d80"
+  },
+  "tests/fast/utils/test_arguments.py": {
+   "delta_lines": 66,
+   "sha": "09ee47611a421ec7e49d25a8cd2fc8eb89cfcc351de2fcb25290a8ccaf43bc36"
+  },
+  "tests/fast/utils/test_command_utils.py": {
+   "delta_lines": 22,
+   "sha": "b72e4f8f861c3f524753876850cf2b292ea20361d4ea7e10c1565412d154541a"
+  },
   "tests/fast/utils/test_lora_arguments.py": {
    "delta_lines": 181,
    "sha": "4db14589daf3a5dc02bed1851a1f4b7cf9587c1e166fa0aa56f9bbecbe74e336"
+  },
+  "tests/fast/utils/test_mini_ft_controller.py": {
+   "delta_lines": 3,
+   "sha": "083992125fc1edcb47441dcc0eab06eb2e06e12f9ef66b499175281de4841b0f"
+  },
+  "tests/fast/utils/test_replay_base.py": {
+   "delta_lines": 10,
+   "sha": "4c2328686391f9485408baa10d412c318d51f29a37d18df6dec85eb31c965bd1"
+  },
+  "tests/fast/utils/test_utils/test_mock_sglang_server.py": {
+   "delta_lines": 6,
+   "sha": "07b5377906370cf04dfc09ac6915a4b199cd0376e2abb5d5f90a053fc8a05f97"
   },
   "tools/__init__.py": {
    "delta_lines": 1,
@@ -469,6 +637,11 @@
   "docs/assets/images/arch.png",
   "docs/assets/images/brand/miles_logo.png",
   "docs/assets/images/brand/miles_square.png",
+  "docs/examples/geo3k-vlm.md",
+  "docs/examples/geo3k-vlm/multi-turn.md",
+  "docs/examples/infra-features/train-infer-mismatch-helper.md",
+  "docs/examples/infra-features/true-on-policy.md",
+  "docs/examples/retool-v2.md",
   "examples/experimental/DrGRPO/README.md",
   "examples/experimental/DrGRPO/custom_reducer.py",
   "examples/experimental/README.md",
@@ -568,81 +741,6 @@
   "miles/utils/debug_utils/display_debug_rollout_data.py",
   "miles/utils/debug_utils/replay_reward_fn.py",
   "miles/utils/debug_utils/send_to_sglang.py",
-  "scripts/models/deepseek-v3-20layer.py",
-  "scripts/models/deepseek-v3-5layer.py",
-  "scripts/models/deepseek-v3.py",
-  "scripts/models/deepseek-v32-5layer.py",
-  "scripts/models/deepseek-v32.py",
-  "scripts/models/deepseek-v4-flash-4layer.py",
-  "scripts/models/deepseek-v4-flash.py",
-  "scripts/models/deepseek-v4-pro.py",
-  "scripts/models/gemma-4-26b-a4b-it.py",
-  "scripts/models/gemma-4-31b-it.py",
-  "scripts/models/glm4-32B.py",
-  "scripts/models/glm4.5-106B-A12B.py",
-  "scripts/models/glm4.5-355B-A32B.py",
-  "scripts/models/glm4.7-flash.py",
-  "scripts/models/glm5-744B-A40B.py",
-  "scripts/models/glm5-744B-A40B_20layer.py",
-  "scripts/models/glm5-744B-A40B_4layer.py",
-  "scripts/models/glm5.1-744B-A40B_6layer.py",
-  "scripts/models/glm5.1-744B-A40B_6layer_lora.py",
-  "scripts/models/glm5.1-744B-A40B_lora.py",
-  "scripts/models/glm5.2-744B-A40B.py",
-  "scripts/models/glm5.2-744B-A40B_5layer.py",
-  "scripts/models/glm5.2-744B-A40B_5layer_lora.py",
-  "scripts/models/glm5.2-744B-A40B_lora.py",
-  "scripts/models/gpt-oss-20b.py",
-  "scripts/models/inkling-small.py",
-  "scripts/models/inkling.py",
-  "scripts/models/joyai-llm-flash.py",
-  "scripts/models/kimi-k2-thinking.py",
-  "scripts/models/kimi-k2.py",
-  "scripts/models/kimi-k25.py",
-  "scripts/models/kimi-k25_2layer.py",
-  "scripts/models/llama3.1-8B-Instruct.py",
-  "scripts/models/llama3.2-3B-Instruct-amd.py",
-  "scripts/models/llama3.2-3B-Instruct.py",
-  "scripts/models/mimo-7B-rl.py",
-  "scripts/models/nemotron-3-nano-30b-a3b.py",
-  "scripts/models/nemotron-3-nano-4b.py",
-  "scripts/models/nemotron-3-super-120b-a12b.py",
-  "scripts/models/nemotron-3-ultra-550b-a55b-4layer.py",
-  "scripts/models/nemotron-3-ultra-550b-a55b.py",
-  "scripts/models/qwen2.5-0.5B.py",
-  "scripts/models/qwen2.5-1.5B.py",
-  "scripts/models/qwen2.5-32B.py",
-  "scripts/models/qwen2.5-3B.py",
-  "scripts/models/qwen2.5-7B.py",
-  "scripts/models/qwen3-0.6B.py",
-  "scripts/models/qwen3-1.7B.py",
-  "scripts/models/qwen3-14B.py",
-  "scripts/models/qwen3-235B-A22B.py",
-  "scripts/models/qwen3-30B-A3B-5layer.py",
-  "scripts/models/qwen3-30B-A3B.py",
-  "scripts/models/qwen3-32B.py",
-  "scripts/models/qwen3-4B-Instruct-2507.py",
-  "scripts/models/qwen3-4B.py",
-  "scripts/models/qwen3-8B.py",
-  "scripts/models/qwen3-next-80B-A3B.py",
-  "scripts/models/qwen3.5-27B.py",
-  "scripts/models/qwen3.5-35B-A3B.py",
-  "scripts/models/qwen3.5-35B-A3B_lora.py",
-  "scripts/models/qwen3.5-4B.py",
-  "scripts/models/qwen3.5-9B.py",
-  "scripts/models/qwen3.6-27B.py",
-  "scripts/models/qwen3.6-35B-A3B.py",
-  "scripts/models/qwen3.6-35B-A3B_lora.py",
-  "scripts/models/qwen3.8-27B.py",
-  "scripts/run_deepseek.py",
-  "scripts/run_glm45_355b_a32b.py",
-  "scripts/run_glm47_flash.py",
-  "scripts/run_glm5_744b_a40b.py",
-  "scripts/run_mcore_fsdp.py",
-  "scripts/run_qwen3_30b_a3b.py",
-  "scripts/run_qwen3_4b.py",
-  "scripts/run_qwen3_5_35b_a3b_mtp.py",
-  "scripts/tools/verify_chat_template.py",
   "tools/convert_hf_to_int4.py",
   "tools/convert_hf_to_int4_direct.py",
   "tools/convert_hf_to_nvfp4.py",
@@ -814,23 +912,6 @@
   "docs/diffusion/user-guide/launch-script.md": "d375b3db71e1691314858d5b892aaa7a50276c724706c773ce6a57533989043f",
   "docs/diffusion/user-guide/recipe-verification.md": "67aa75f7f5d540ec24ee18b89366e7ccc15906122e6698ee5c5f46f3d88def4f",
   "docs/diffusion/user-guide/rewards.md": "eb006452158e2f26ceddb10220cd1afed73bba9888ccb698c00b3a487762c590",
-  "docs/docs.json": "a9b2d2085146e8f1a71db56ac3f7e4530325319e78aa3d604b07acd2e860807b",
-  "docs/examples/geo3k-vlm.md": "95f89e8bbec46bdbfa8c7797acd167f076ce19414b674a1f1d4e8c907aa76320",
-  "docs/examples/geo3k-vlm/multi-turn.md": "73e92b71a040e78a321aa93c787c747c384f410159b7c16ef0cc515cdab98d0a",
-  "docs/examples/index.md": "1c290f53bfb437d8e7a6c4b7157ecdf96cf8dd944232ceba77d195659c16128b",
-  "docs/examples/infra-features.md": "815e1e007fb48dbc14c9d3e1e222ec126887e14b51f72ed41bff2fb5a58e7bfa",
-  "docs/examples/infra-features/fully-async.md": "2f5b78cc2df1e82ea1e10c4499e6a0591551a6bd8fb198a97aa579d4c558d683",
-  "docs/examples/infra-features/low-precision.md": "6a878e166f8fc33a229394982780db153c20014fc45dcc3dccff9deb8e92e648",
-  "docs/examples/infra-features/p2p-weight-transfer.md": "00601d364cab8644f24de5940688090e48c5ade2da67eaba4d83d1859443d62f",
-  "docs/examples/infra-features/random-async.md": "5940f36e5bde86e31a8d157735bf322d4e3c82dece132a147f55eca9fc97c786",
-  "docs/examples/infra-features/train-infer-mismatch-helper.md": "e2559583c171f7422b092c2076b3f2ec8ccfe326053220112bbfc41b2e4a5bb9",
-  "docs/examples/infra-features/true-on-policy.md": "7b0f9fb1516b33bcf35c7a6cbcdebfdd31f6462bf3b871da4513a152bd89ba58",
-  "docs/examples/multi-lora.md": "0b3329e08a77b54281ca4a34f467d245593455d34ad96dfc2e2e3eb22131e8e0",
-  "docs/examples/on-policy-distillation.md": "54408f9addf8a5bebf1fdcd67c889330a50d3636c2324c106133abe3b8b030a3",
-  "docs/examples/on-policy-distillation/qwen3-5-35b-selfdistill.md": "26c85e882ceedfcbdb93f016cff3e7674fb088c95faaea69ee41b6c78e29d91f",
-  "docs/examples/ppo.md": "120e2241488de4963bd867255fbe3469d3ad9cf7328ab392a77fe645ded40b94",
-  "docs/examples/retool-v2.md": "06952d180370f0947f5f4919d82bc3b02e2394849b0d52a71f2d7da7d602cc34",
-  "docs/examples/swe-agent-harbor-docker.md": "815ef81413103218e165654444b43e7b6067c7a153662f46413d37ef290a73c9",
   "docs/getting-started/index.md": "b31a8c46c9dc42381dff8397513719aeb4bfa95d5c6a1c6be6115a07b7bbc31b",
   "docs/getting-started/installation.md": "733b3bba9cb0d755943ff1493b6a61b49d78f59fb6389239aaa7fb44fa538261",
   "docs/getting-started/quick-start.md": "e0af6e3bf10985142c4ef5bcc571e28cdc720a7060eef70cd1752f0d64c1930c",
@@ -1065,11 +1146,6 @@
   "miles/backends/training_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/backends/training_utils/debug_dump.py": "810d250182fa337c6929e9779609529a9fb43945dfa35863ee059e2f4fc1c58c",
   "miles/backends/training_utils/loss_hub/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "miles/backends/training_utils/loss_hub/advantages.py": "3fc20719fba7448e78933c571e30aa8f54f96e7d425c4a1e6c1c0aadccacca3f",
-  "miles/backends/training_utils/loss_hub/corrections.py": "971ccb0bf00b43b0582839c5b8dc05e91162c878ab7ec0ca878e3b1e668f5318",
-  "miles/backends/training_utils/loss_hub/logit_processors.py": "3260a847e703b5ae8c363e5676249e73c7a4046c52c75839899c794f575313df",
-  "miles/backends/training_utils/loss_hub/losses.py": "9ee2f34ea64208fbbcf9ffd6d6a40c1710564525069e32d8636ebc2db23511b1",
-  "miles/backends/training_utils/loss_hub/opd.py": "8517e85153310c7d3d1309900158fb67fe60e540a18ddb85fea2dd2e080aa5e0",
   "miles/backends/training_utils/mm_data.py": "b78029cee54efa92225180ca28a1fbacc44f4061fba2050b3add50fdfd642d37",
   "miles/backends/training_utils/parallel.py": "519ec0b0608a985c25e6e1e3211f097db3e33a408e7694f56fe6dbeaafdba14d",
   "miles/backends/training_utils/replay_data.py": "bbb576d55e4081a9b7430a4664bc105b69d24aaaccb788229c51b4145e7a3131",
@@ -1361,33 +1437,108 @@
   "scripts/amd/run_inkling.py": "5f51d5e9d48583fe662e7f8e577d92ebc0c45735bea83813b3ae0e4d9a54aa29",
   "scripts/amd/run_qwen3_30b_a3b.py": "fbcd83398792bf43b7c2654932c262442ec4fe7598831df2ba96834bbf717145",
   "scripts/amd/run_qwen3_4b.py": "6ec4f66eed5df5015f767e0569a31968d8c0e976747b1da5bc23d7b799594bf6",
+  "scripts/models/deepseek-v3-20layer.py": "b81ccc9de4129c6658c32178c0a5f8b588fa70d9003308cd52da712959de7490",
+  "scripts/models/deepseek-v3-5layer.py": "b6ede365571fcbf8462f0949fa6a015957305e04fc4aa53e9a69b6044d007780",
+  "scripts/models/deepseek-v3.py": "a86081f66fa542d75a314d4e3a688b9d2272eb31da497595cf9bdaef3913bc49",
+  "scripts/models/deepseek-v32-5layer.py": "ad72e77604ed98bcf4ea942ecace3fb9378d4d7ce27eff6e83e37d93830a05fa",
+  "scripts/models/deepseek-v32.py": "bf302552d66b0384ae4511f9e2b548377631f5fe1e23c63e6e64afc5223a78dc",
+  "scripts/models/deepseek-v4-flash-4layer.py": "46f88d4acfc517f4e080960bada89803c745e8e508e11f8d346c55418c29cb1d",
+  "scripts/models/deepseek-v4-flash.py": "00fa949a32ff88c998739833486acb4f22206be89d36bba278f462c453ffb719",
+  "scripts/models/deepseek-v4-pro.py": "a16d554307ddacc9a27c3badd3e19089eeb07759873cf9fcf240ad2de1ed655e",
+  "scripts/models/gemma-4-26b-a4b-it.py": "faf004f8e7cd9b682a9e7385b98d645b491f39a547c2802d916fbee498f6c148",
+  "scripts/models/gemma-4-31b-it.py": "b528e7b894a5b8f0da5c414a57f7b457e66b5f764d25e41c628fed3ecbafb9cd",
+  "scripts/models/glm4-32B.py": "df382139bb2a708c2f5888d1724a405b1aab436dbf3b71a718fd236ef8b7e302",
+  "scripts/models/glm4.5-106B-A12B.py": "108fc94e61eec4fa1b72710d42cf10b7f0063597fce20580c00614019e8ed9f4",
+  "scripts/models/glm4.5-355B-A32B.py": "a1130a0072292b505c06ba669b0a02cd7c827bd08d5909a58e3629a61c1a4cba",
+  "scripts/models/glm4.7-flash.py": "aa6cba8ed25b0553c0825913b653c63854ada237e542766ff21b1bf3d5791644",
+  "scripts/models/glm5-744B-A40B.py": "fa70fc2afdb8871bfbad8e590b1920def03724fef7716e36116a45e9fc8798a2",
+  "scripts/models/glm5-744B-A40B_20layer.py": "6cfbb9d912d5fcb01a14f5e71ac07a745c9d4fbc25ef7d5eab1084dd5fa1a43a",
+  "scripts/models/glm5-744B-A40B_4layer.py": "17e5611839e658eaeb233439636c369508d62d79926e298ba78f160ee639fa6b",
+  "scripts/models/glm5.1-744B-A40B_6layer.py": "f457d9612be56597761c16e725aae966865fcb46f7c9b37a4ff765e4c116176f",
+  "scripts/models/glm5.1-744B-A40B_6layer_lora.py": "755d6dddf7119fb3ca923f12cf066935bd19d5d8cbe5000371781c036ca953d9",
+  "scripts/models/glm5.1-744B-A40B_lora.py": "fa70fc2afdb8871bfbad8e590b1920def03724fef7716e36116a45e9fc8798a2",
+  "scripts/models/glm5.2-744B-A40B.py": "8727568d7e2bd3269e941bd59f1a7b03c7f2302b4fe89dd4afa60d31b46d2912",
+  "scripts/models/glm5.2-744B-A40B_5layer.py": "61431a299dce4e618b4d402fcc8c31d4f8ac6bf8bd23545af7a9bfaaded49d51",
+  "scripts/models/glm5.2-744B-A40B_5layer_lora.py": "ab1743b6553318bcb074f32381b023afff5d9513925c8e5cdd5aa11cb0be89e3",
+  "scripts/models/glm5.2-744B-A40B_lora.py": "8727568d7e2bd3269e941bd59f1a7b03c7f2302b4fe89dd4afa60d31b46d2912",
+  "scripts/models/gpt-oss-20b.py": "da00103a2944a2f7d8004bd2f07dc733e9c51db4da5ab0ffb582b475b292adb5",
+  "scripts/models/inkling-small.py": "06e70cadd07180f04f179505891a00d689542e3c6be23bed796c82ae6e9e5779",
+  "scripts/models/inkling.py": "9ac0725c5444e0b755519b8855f4068deede84dc8f299909c488c1453ff96bdd",
+  "scripts/models/joyai-llm-flash.py": "0c13eaac5e829b3eab75e586ecfdb9db1934616c5f7fdcdc005ee7a1ea055187",
+  "scripts/models/kimi-k2-thinking.py": "115b9942b1e93639f25d99cf55e1d96856282b6fa46f06097ac70477e7721f7b",
+  "scripts/models/kimi-k2.py": "3b18ce661b54d29e50f2bb77782c215e3759b5e27f75b2f1bcf64f6a79878954",
+  "scripts/models/kimi-k25.py": "5322ebf2de11961794a3d0c174bb9d976228487718ad7cb171e8fc4222b730bc",
+  "scripts/models/kimi-k25_2layer.py": "94d93faa9db26a163498a58cce3d44b96c669de2435aa5defdb64e62afcc7945",
+  "scripts/models/llama3.1-8B-Instruct.py": "a475b009145abca6b89852dbab7896dbffeaa8c265bd3098247122ac4d850d18",
+  "scripts/models/llama3.2-3B-Instruct-amd.py": "cffe4379db1a6e4be8e7ac96d0260688da4b509e452b579d3400e3a7bbf4c1bd",
+  "scripts/models/llama3.2-3B-Instruct.py": "cffe4379db1a6e4be8e7ac96d0260688da4b509e452b579d3400e3a7bbf4c1bd",
+  "scripts/models/mimo-7B-rl.py": "b8bdc0e8bb836138fe6e5e02e5f89343e0c0ed8a2b4ffab41e7e42ac55dcec35",
+  "scripts/models/nemotron-3-nano-30b-a3b.py": "d278a4fff2b0deb0ef909bb6454a602c103fbeb3d3e61d8cfcfc74a9a1764dee",
+  "scripts/models/nemotron-3-nano-4b.py": "447e461bb3f8890d93695685025e7101dd42b683399a51cf3896eda5f6c83524",
+  "scripts/models/nemotron-3-super-120b-a12b.py": "39bb715d52b1e81a50b205d2a01bce32072d19a3c22586f8dddd7b6471db8dd3",
+  "scripts/models/nemotron-3-ultra-550b-a55b-4layer.py": "c2474001bd9f3b8809d98484c14b0f21c8c112e993c2dddc6f4a831f02ef67c7",
+  "scripts/models/nemotron-3-ultra-550b-a55b.py": "03bff4b71bf85f83936f27e103aa27e06020aa919388017879c26fd6a0d6de25",
+  "scripts/models/qwen2.5-0.5B.py": "f8468396eb4c11700c91eaaac2710a86e854d6bdd3486a0b45975521604843c4",
+  "scripts/models/qwen2.5-1.5B.py": "63d59e7689dc8cd36c9144da4389d9dbe2fbb9a3e6eee67667b89ae2838fba9a",
+  "scripts/models/qwen2.5-32B.py": "e33cb47f273a9199d0e2343dfd8bdd269ee5aeced70884bd740fa0c9d2a12c9e",
+  "scripts/models/qwen2.5-3B.py": "9c6ec53418e15c4b0fd20e59d1db6b7f5a25cf9b9ecb5670526d3731ccf16627",
+  "scripts/models/qwen2.5-7B.py": "43eea7bb6ef14cc7d714cf65d1ce9f4182a77dbd959c6d2d7472b9700a5217e8",
+  "scripts/models/qwen3-0.6B.py": "bc5bf67b02381bf4f7fd7b00e83524841b98cfe09b4e8834b5d3e0271e13de3c",
+  "scripts/models/qwen3-1.7B.py": "df9553a4ed65c1ce484c9ee71b6fbf704a93bc70215fb18279b7c222f91c18c9",
+  "scripts/models/qwen3-14B.py": "82c513a595bb4ef83aa6d519a4fb3ff4e45a38eaafb405617a5c41490e6e9ed1",
+  "scripts/models/qwen3-235B-A22B.py": "837265250902788e06c8ee80b26ad1a41a40020e04b61dcb4581912e8e68716e",
+  "scripts/models/qwen3-30B-A3B-5layer.py": "76b97bf0c8bcfa248119e2b4221f6bf922d9f0b1a958947853e6e1b9aeca8bf2",
+  "scripts/models/qwen3-30B-A3B.py": "70cedfb4e90edfca65970cc53ef372aa24f6800e71c2eb6384fd9ca7d9585ec1",
+  "scripts/models/qwen3-32B.py": "5f20ee88c53e307f9a6a36152e32ff19d6fd485675b7dcc593ef6bc11e0f663f",
+  "scripts/models/qwen3-4B-Instruct-2507.py": "41ce2798d62df9aa3b9b07a099619c713bb74396ec746d66c1ef974d0c7c9c43",
+  "scripts/models/qwen3-4B.py": "03cd4385bdda8a80aba19393464a7c9db051b1309e610c801bbaa78e44b2b819",
+  "scripts/models/qwen3-8B.py": "bb0583d71943666a4ecb15b682a1a6fb1010f7edda58225ffd9dcdd78255efa0",
+  "scripts/models/qwen3-next-80B-A3B.py": "4e6dc1aab5c1dd2e199fb10cb89c57ea14a077fadbfd9868ce84dc4396b8fbad",
+  "scripts/models/qwen3.5-27B.py": "4c4989126de5b589df7a4dec30d625a5eae170e49c974e5928c585a8fee1fba1",
+  "scripts/models/qwen3.5-35B-A3B.py": "f1197662ecb272e89dd84a2900d4fdefcd4fda96b22c014e29847edb139c9a06",
+  "scripts/models/qwen3.5-35B-A3B_lora.py": "f1197662ecb272e89dd84a2900d4fdefcd4fda96b22c014e29847edb139c9a06",
+  "scripts/models/qwen3.5-4B.py": "7d164c7eb0d0e207d30cf8a22d593c38789f1a05bb0247672de0432a21f4ec4a",
+  "scripts/models/qwen3.5-9B.py": "1d8e4350e7d9ae3bbed484c0c792b8e5644d3db39eed4ef3926644be50981def",
+  "scripts/models/qwen3.6-27B.py": "137e736496111187c9fab9584ccda85bdda8e715d26be286e9d7a831ed7160c6",
+  "scripts/models/qwen3.6-35B-A3B.py": "45a9ebcc2948b9e1c94fa5fae7815dd3a59052c9e3d7687130b0581759d79e81",
+  "scripts/models/qwen3.6-35B-A3B_lora.py": "45a9ebcc2948b9e1c94fa5fae7815dd3a59052c9e3d7687130b0581759d79e81",
+  "scripts/models/qwen3.8-27B.py": "dbd2bdb6cd67fb7a127e50f42ab8ccb49d32f976f0da5feaca745b041b51734c",
+  "scripts/run_deepseek.py": "3ccd50c84820424f957154373741c9744a5035aba7018c07e6d7a9ed17b04433",
   "scripts/run_deepseek_v32.py": "a5e2137f5f0185e6c13f4d97b19c4ed9ed41d23da4748681d49fa148a01c4a3d",
   "scripts/run_deepseek_v4.py": "7ec3bba220266182bbfddef831e6336b81da23f987ceb2d411cc67635c8e286c",
   "scripts/run_gemma_4_26b_a4b.py": "68b58d119a3d2313603b49b231ca7d24c2210ad92be67c152228f6429af66b66",
   "scripts/run_gemma_4_31b.py": "f6f5213a1e23b77859b94524fdf43cfb767461e0cdf0999bc5d757d757965a75",
+  "scripts/run_glm45_355b_a32b.py": "f06dc0966c168d581b6340fb00172281e927d02a0ec9f1ed1469e8f03d278e11",
   "scripts/run_glm45_355b_a32b_8node.py": "2cbdb774a834674ad432818da34af6eed45814e2eea57cba0a42f189a5535aaf",
+  "scripts/run_glm47_flash.py": "8f1543823cd3a18e12c624f0b953389a64a2fd76463658c5f7fe128358ae3b69",
   "scripts/run_glm5_1_744b_a40b_lora.py": "7dc29618693527d3f8a18083191b1da866a769c69239aa50b6aa5f668ec9c696",
   "scripts/run_glm5_2_744b_a40b.py": "9904d7e8e8d67b38615a6ee82928d8585372889ca5d42e50379862f9347a3960",
   "scripts/run_glm5_2_744b_a40b_lora.py": "f570d8ee799db81e57573c49f4ccda54de054ddef641d75713effb7c72bc9957",
+  "scripts/run_glm5_744b_a40b.py": "5a4d010a9578fccdd6a67904a436f4fb4eb076e63449e4bb943c1c006d0f5e1a",
   "scripts/run_gpt_oss_20b.py": "744becf4829f1da097d4b0d47125dd7967acb78b7a74887f164ec533c8c1c1c4",
   "scripts/run_inkling.py": "1590e4363a684e21b2379662898e5306655fcfb67a95c951a9e77ac0c71cd5f6",
   "scripts/run_joy_ai_llm_flash.py": "02faf1b2d6e4f7d159998b1f711f9c62998f0772de990f0ef262be9fa71e371a",
   "scripts/run_kimi_k2.py": "dec5e8ca24da2181858381b5c66886383751bec672e62b10580f2afb258f90a9",
   "scripts/run_kimi_k25.py": "1fd3ea73107dce7218f795c37bc1a1eac305a6007111e53775bac60e45cfe4f3",
+  "scripts/run_mcore_fsdp.py": "3a47a1912d84f70b9a7bffc01187697210a8813e3009e779c39b78c061f95026",
   "scripts/run_nemotron_3_nano.py": "77f042e2969f02b37ac211910144a1aac01aa21a472043ed2fcb256536c04346",
   "scripts/run_nemotron_3_nano_4b_fsdp.py": "f99817bc80bd1bfd0b12747179817e6616df5a214e02be9ffda11054865d5ab0",
   "scripts/run_nemotron_3_super_120b_a12b.py": "06480ed2d6302a1aac9562e7ca733dd633894e09fc09ffcf356f3fd777710ada",
   "scripts/run_nemotron_3_ultra_550b_a55b.py": "460377abdd6b2cecde8f2665a89bea598375122dec428632376f8da5f9a998aa",
   "scripts/run_qwen3_0_6b_fsdp.py": "93419932664c22f455ef167a5578a1684869899cbb3e2f9cb08eb4a626da2e2f",
   "scripts/run_qwen3_235b_a22b.py": "5509873173fb83589d2f68a4221457ba7d077ef46fcfce3cffc3d39e7930ad90",
+  "scripts/run_qwen3_30b_a3b.py": "892a5ac16f695c50dc196961ebe2a74d096a641f3699ea953c9dedf827add4e7",
   "scripts/run_qwen3_30b_a3b_fsdp.py": "b06bbce970418aff8c05f8a2c72dfc4452ec8e227711c996a893f332b24f3bfb",
+  "scripts/run_qwen3_4b.py": "8b3361be729ddfdfc862d44db217781ab76551a05e807b7e5578252cb2ae2e5e",
   "scripts/run_qwen3_4b_npu.py": "53e3eae9dd9803a4472a41cacd71fefd0eb24fae140a6f0f89d8f5f5087dcae2",
   "scripts/run_qwen3_5_35b_a3b_lora.py": "0b6ab12d995d5353db243d8b6f7cab682847b8c121821591aa4357fbf21cfc51",
+  "scripts/run_qwen3_5_35b_a3b_mtp.py": "1fefaa4a48e9251ef115dde3c7ac7548cad2af86869a9a246c6f8a5035d3ace7",
   "scripts/run_qwen3_6_35b_a3b_mtp.py": "4c7046465bcecac6d29720c1dd785ece53f7a9e09a8b056a3f075655177833c6",
   "scripts/run_qwen3_dense.py": "a6abc927137cdb4f99e4b7e6f7e8fd877078e8953b58128169699308ef689419",
   "scripts/run_qwen3_next_80b_a3b.py": "a6155e38341c00541b807a53e533e9a3a70b1ed45f850f797de703bdf3569fb3",
   "scripts/run_qwen3_sft.py": "b32d5a211dad3ca95309c78ace1bc880088694381a0f2b96c0f1de0b74d79a04",
   "scripts/tools/sync_example_docs.py": "e86e8b3f2e57b10a41c078adf9023e53f2f2e62d3b23e87443432d08016df140",
+  "scripts/tools/verify_chat_template.py": "5732646372cfbbe4b30d7483170daf24620dcba89441fd05fc6486ac0cd5c333",
   "scripts/tools/verify_session_tito_tokenizer.py": "7777ab5ea7d518a65e9945efe96d7fb5f2ac0fd5fe5555cee56bab4e6b0630ec",
   "tests/ci/README.md": "6c1eea7ad29aa1d79c4be452bc9a2978ccb28601e45bd55aae4a13dcda7586c0",
   "tests/ci/ci_policy.py": "47c68d79069c9385e62ebe5a8e64971f9211d2c727742dea533b58d9b59d224d",
@@ -1572,13 +1723,8 @@
   "tests/fast/backends/megatron_utils/test_in_memory_checkpoint.py": "aeb8d223bec96d5dec20b9f3ffc8dff822ac95b5283e95327d86b70e5056b39a",
   "tests/fast/backends/megatron_utils/test_initialize.py": "4f8fc78785b853a3fe6b81403d276471c2e72ed98b4d9450ead143549da9e829",
   "tests/fast/backends/megatron_utils/test_local_weight_checksum.py": "f1b782811d96700fdcbed835187293a7c0dd4b80772fd48fe7f82cd5e510c12d",
-  "tests/fast/backends/megatron_utils/test_lora_checkpoint_helpers.py": "c3e96882115ff80c6423e9aedccc2585c53d9f81df71f8989ce78017a03ee6a0",
   "tests/fast/backends/megatron_utils/test_lora_hf_weight_iterator.py": "c7b37de9ece2f3c9d9aaa100f99c68276ef84fe7a6749e76ce7a708738183d2b",
-  "tests/fast/backends/megatron_utils/test_lora_model_branches.py": "d19751f907dcf1cca8037d9722c0931432a72ccbf3220e2c1733b433f9dc1f3e",
   "tests/fast/backends/megatron_utils/test_lora_update_weight.py": "bebbba38093925fb5be2525abcfd1df6a897ac9ecd053dd0685ba97ba247baf4",
-  "tests/fast/backends/megatron_utils/test_lora_utils.py": "72fa5d749a08d60a083bca6de2f0defde0a63cfec525705d72b0b89295012df0",
-  "tests/fast/backends/megatron_utils/test_lora_weight_sync_validation.py": "6af5dd99347499a076166ce9a6a4f042c892f1a6ddd8604bc017fa14b1e6c3d9",
-  "tests/fast/backends/megatron_utils/test_model_initialize.py": "382d6a909b83fb604604898edc46728d3d4720d30ec2f12fbbc06f4bf69e524c",
   "tests/fast/backends/megatron_utils/test_model_provider_true_on_policy.py": "7df86b278da3e51b144b3a8544517565d372554046d81310d93416bd81baee01",
   "tests/fast/backends/megatron_utils/test_multi_lora_checkpoint_naming.py": "1a783fa138940488e301a143e481e7a8200cf4a1506dad656a9ec1d0b52616d3",
   "tests/fast/backends/megatron_utils/test_multi_lora_scheduler.py": "de13f80346abc2a3f94bf3dceee03e64390e1366a3dddc38ff0a8555088365b5",
@@ -1586,11 +1732,9 @@
   "tests/fast/backends/megatron_utils/test_qwen2_true_on_policy_conversion.py": "561e0c20ac8d31db76bbd55587b831d1416db8c89ff2fc07b8e5f5a254f620f0",
   "tests/fast/backends/megatron_utils/test_qwen3_5_mtp_bridge_mapping.py": "c16bfcccb945e9957bd271ec0604c0dcdc61e3d1a1d2c6bad6e52f35e9158ee9",
   "tests/fast/backends/megatron_utils/test_rematerialize_utils.py": "9d250a5ab89d48ec7363c731e7767d799dc5f06a73ae9643d16ece6d55058ecf",
-  "tests/fast/backends/megatron_utils/test_shared_ppo_lifecycle.py": "591b2006dd8f2896958adf116269ae2f09270b07fadac114f03786e6a107cfca",
   "tests/fast/backends/megatron_utils/test_slice_lora_to_rank.py": "e8270e778760ca1f6c5af44f0108fcbcc7ea2671e204e662ac90c592c2d0ef21",
   "tests/fast/backends/megatron_utils/test_update_weight_from_distributed_lock.py": "ebfe6c7867ebe3764de1775e1cdf7dfbd8ab3cb649d62f4aa5f860c70883e22e",
   "tests/fast/backends/sglang_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "tests/fast/backends/sglang_utils/test_compute_server_args.py": "f13eb5d1b6925c377183bb23f1ad58648ca28f78e23f9b65b5c5d5a3e4af81c4",
   "tests/fast/backends/sglang_utils/test_router_dp_aware.py": "6bf99d755596eace27ced5617b79b04ab5a36989484e2dbe7df1144fefef1f50",
   "tests/fast/backends/sglang_utils/test_sglang_engine.py": "7f08ee700e75b233f6cba7d406677652f89e388f85ea8cf55903583da8ed28e7",
   "tests/fast/backends/test_fsdp_arguments.py": "d6df8d120c7fe179d2f1c4a7f80062efdb11ae52d4b161e3eaa701fe106fa112",
@@ -1609,13 +1753,11 @@
   "tests/fast/backends/training_utils/loss/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "tests/fast/backends/training_utils/loss/conftest.py": "16623ce12d9426f5c44738099c4d2823a4044b8d6fdfa5cca2f4deab96107ac3",
   "tests/fast/backends/training_utils/loss/loss_test_utils.py": "4c861562023b822bd68696a504f8df6eddac6591eb559e13369d4621192868ea",
-  "tests/fast/backends/training_utils/loss/test_loss_snapshot.py": "c42edc41f16a031cdc49da0854af07f9987628ecfe2339cdb12ceaef88f204eb",
   "tests/fast/backends/training_utils/loss/test_opd.py": "83db1b0b1e4ffe1266d80c92563ffaf11f5ed4641a34e05ab7a2a1a0cb04e8cd",
   "tests/fast/backends/training_utils/loss/test_training_logprob_reuse.py": "02fa7af3777b2e9a315432e6fe97b5bef6086396295cbe745cc7b5caf488a726",
   "tests/fast/backends/training_utils/test_cp_log_prob_assembly.py": "c92f84e029204f39da6e502dfeb1a6d96d7c3c10aea8cc6b57d4d0afa77cae1d",
   "tests/fast/backends/training_utils/test_get_batch_multi_lora_cp.py": "e932edbff095dfe40682c396d528cdc16fc986bcb216d1c42ac1d276d1ef232b",
   "tests/fast/backends/training_utils/test_log_utils_metric_reduction.py": "af38f3df743388a2d508a639c2d1c69f0dea75142b8b8d7b43194248354db7af",
-  "tests/fast/backends/training_utils/test_opd_cp_data.py": "2efba2a5545f9c8073af3884f135d03ac3e12afacf210f35cf601aa9f342e85d",
   "tests/fast/backends/training_utils/test_parallel.py": "76f786cae85dd9842546f964b0486fb94634f69161f98839fce429d9df207607",
   "tests/fast/backends/training_utils/test_ppo_cp_advantages.py": "889ee957c4c28ab21d1e83c21aebe11c8bf8a8042dd95536e364e088dfb40533",
   "tests/fast/backends/training_utils/test_ppo_gae_masks.py": "e0685b702af38fd8ed0d5b63a1573a159efdb6e4e2c4e5114304dfaad383c9b2",
@@ -1691,22 +1833,18 @@
   "tests/fast/examples/swe_agent_harbor_docker/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "tests/fast/examples/swe_agent_harbor_docker/test_agent_metrics.py": "25974de1abcdeefab7d6a7121bd6e95996c46f86f0c861ecc4bdcae7e16428a5",
   "tests/fast/fixtures/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
-  "tests/fast/fixtures/generation_fixtures.py": "9dc95dbbb118addbda361ae886e3ade3f2b595bb3203113643a7c20fab3b6417",
   "tests/fast/fixtures/replay_fixtures.py": "1f91041808e04e76d4c8451627179579a332222285eac1d58aa1e7fbe6a6df59",
-  "tests/fast/fixtures/rollout_fixtures.py": "966ab784b22b70a5696283ca6cada2416f55efb3c46ac62ed8c3d6df644894a3",
   "tests/fast/launch_scripts/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "tests/fast/launch_scripts/model_args_harness.py": "71f997747b8bcf60b295dc87fb147e59bc0134db686aa67f9a087a52724d3321",
   "tests/fast/launch_scripts/py_harness.py": "9f0ea4d63f639ab723a9e096d6f23a54939476aaf52f61a9d3176da3ce414b85",
   "tests/fast/launch_scripts/sh_harness.py": "17b73d032c6aa2e7e54f4db4721377002affbedf1be686183ac338ed6193122b",
   "tests/fast/launch_scripts/test_run_deepseek_v4.py": "77abb0923b3c9015b513ee080bab00177af319acdeb8e9f9bc6d8840df6f03ce",
-  "tests/fast/launch_scripts/test_sh_harness.py": "03c80f2bc33442d4c57cb2e667bf88dd9ca6d7de4ef14a8955c73af47138a093",
   "tests/fast/launch_scripts/test_shell_script_hygiene.py": "24d676ab6435920f0aaed68272cf4f90fd93b0884f7916b14197e0b0c231bddd",
   "tests/fast/ray/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "tests/fast/ray/multi_lora/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "tests/fast/ray/multi_lora/test_controller_backend.py": "c4d7809862f4f2a7713a7bf3340cbfdc7bcd9b26582c525b30e86a5debeb4e0a",
   "tests/fast/ray/multi_lora/test_controller_http.py": "bae039ffa029f950dd5d4808b2a510d9b987e68df16eda48d6c486420fa74f42",
   "tests/fast/ray/rollout/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "tests/fast/ray/rollout/conftest.py": "594f73f319770114f3f0ac243587f4ff2033e51bb93cf7840975a26558063570",
   "tests/fast/ray/rollout/real_ray/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "tests/fast/ray/rollout/real_ray/conftest.py": "2de263f5eeec5299518b6f097eb37a9c58ba8966ae2521b97453a6e34b024201",
   "tests/fast/ray/rollout/real_ray/test_fault_tolerance.py": "8d1866d725882d21be015540d176630e8d7636e6805bb3dd94e0915d876f3574",
@@ -1723,12 +1861,10 @@
   "tests/fast/ray/rollout/test_multi_lora_train_data.py": "caed3b37eefa468b6fd4f90af5a5a5e4272a95b22d679cda799d4d3fc139eef1",
   "tests/fast/ray/rollout/test_rollout_data_conversion.py": "2f8f9b4faa0464f80f5af2d73b3f22fba303ff19d3f90016c58fb771ba8c59f2",
   "tests/fast/ray/rollout/test_rollout_server.py": "938b5e7b148e0fb94990782ffca142fd25c47f42e5b8c203ffd09c2cc57d92d7",
-  "tests/fast/ray/rollout/test_router_manager.py": "c5598d03b5d015938a92ef768a4419ece5e88e76c4982cddf9214a7c4605b4db",
   "tests/fast/ray/rollout/test_server_cell.py": "a485853fe85875b11a6178579c989229f99654fff90e68493067477b015bc2cd",
   "tests/fast/ray/rollout/test_train_data_conversion.py": "304af35fe05ada9bc508e590d02db98bbfe1d24ad7751d3e66535d8f47bc7c54",
   "tests/fast/ray/test_actor_factory.py": "0bcc006c62c324ee073ac3a2381d65dc2eb434155dea2ecd914b16de3b35f9a7",
   "tests/fast/ray/test_actor_group_shared_ppo.py": "bfc134e241be2090e04ee4fc7de5ec46958f06cc34a77d42753fa4e86c010963",
-  "tests/fast/ray/test_placement_group_shared_ppo.py": "5318b2484b2ce11f255f85d30cbc5600ee187841e9ca8f91bf6e2a6eb873539d",
   "tests/fast/ray/train/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "tests/fast/ray/train/conftest.py": "1499d9cf2a75db0cb1e78c535b9f64b8eed43bc131f89b61d4eba71ecbb7953e",
   "tests/fast/ray/train/dummy_actor.py": "3e11053f3516dc79545ec5ae911a1b2babb0fb71d48eccc86e8d1e3086bbc1f8",
@@ -1748,10 +1884,8 @@
   "tests/fast/rollout/generate_utils/test_prefill_logprobs.py": "a1494936cd17e479201ffcfb3a701d11e8dedaeb24d3c1ed6908da202a8432a8",
   "tests/fast/rollout/generate_utils/test_sample_utils.py": "4a7c7ea3013d4227b3bb1c89473df24fe42cc192bd814de57ea5d21835e3de17",
   "tests/fast/rollout/inference_rollout/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "tests/fast/rollout/inference_rollout/conftest.py": "562b0ecf3b0e71ad2a58ba0820a9de0fe829eaf32dd8ead0e9a1ee581d4c5bf9",
   "tests/fast/rollout/inference_rollout/integration/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "tests/fast/rollout/inference_rollout/integration/test_agent_metadata.py": "169a631d1fc3f19aea0bad407c5b9ba1f71c618970d6914b1bbd4edae71c6802",
-  "tests/fast/rollout/inference_rollout/integration/test_basic.py": "c1be5e863e9747cee1058adc35d5b1fe615aebbea2e1d2febee82e8b296542b0",
   "tests/fast/rollout/inference_rollout/integration/test_deterministic.py": "6cd2f5539b17b5e34e46b933b3a967a1cfc194016d1ab6ccc3cad936827b637d",
   "tests/fast/rollout/inference_rollout/integration/test_dynamic_filter.py": "3bc4204424872b9aa2d30a214519845af9f1d12625823031f16518dfff1351a0",
   "tests/fast/rollout/inference_rollout/integration/test_group_rm.py": "170a643adc539507e371a021fdb543bf8c10732b8321157b753293a5faa2ebde",
@@ -1759,7 +1893,6 @@
   "tests/fast/rollout/inference_rollout/integration/test_multi_turn.py": "dc55613573a8b48ef8bfc5c2a63e598b3622417e6ceffe412300c551848ddd9a",
   "tests/fast/rollout/inference_rollout/integration/test_over_sampling.py": "72c03684240539ff59f7e502cfea83791a7bfd87200107c3aaa74d6c32ad3978",
   "tests/fast/rollout/inference_rollout/integration/test_sample_filter.py": "31a9a7f420c0b2d398022728ca677f37015030475f6b647e55cf8c737652073d",
-  "tests/fast/rollout/inference_rollout/integration/utils.py": "a216267842456ce35f491c280eda5259ec559b8b4c8806be78d62ed4f3bf7041",
   "tests/fast/rollout/inference_rollout/test_compatibility.py": "aa48fcfd9406e57c373a3d73f42c11c3ddf54946359300d0eccdcef2f60b2ce2",
   "tests/fast/rollout/inference_rollout/test_lifecycle_attempt.py": "6bbaddcc54c156091e08b9a95d145bb801798758e60a944de727e5926694b868",
   "tests/fast/rollout/inference_rollout/test_sample_completion_backfill.py": "8e5ad12ef37a92f22d0564dcb816ed608ce389492c64a7c9db9c185d63c9513b",
@@ -1796,10 +1929,8 @@
   "tests/fast/router/test_tree_assembly_invariants.py": "51fe0d2087394e0883e6c5784995b5c63abf3d91262c945248c532e8d4fd8329",
   "tests/fast/router/test_tree_trajectory.py": "25b25255ac16b0c9c2d36c0d39f693d7b44a7c760b8cd045f6d78df9521ef319",
   "tests/fast/test_docker_image_inputs.py": "93c10a14b7fce6f30d6b534ce2b0ebeea86d661bdbc0958bb6d4db34896ae16e",
-  "tests/fast/test_megatron_cli_flags.py": "46a2b889980cf1cf8e0b951826f7603ea27ca046be902dcc6b58b8ea88d2c402",
   "tests/fast/test_qwen3_vl_cp_mrope.py": "b2a45fb1f1dd9fa112bd7cd102868c6acc90100613baaff9ef67d8bcfb291f8f",
   "tests/fast/test_qwen_gdn_backend.py": "8a54e4ac50dc1ebde0c95afb5f38b4a88ceb1f2fe9cd867dc272ee81a5215c00",
-  "tests/fast/test_ray_launcher_unbuffering.py": "50643b862818aced5b300604e008d4b9f03dcb757e25e0e94654efe3e2b01f61",
   "tests/fast/test_timer_event_sinks.py": "418c0b8177a07f478554ed014e34713faa1144e7c0a66ff6225f8d89098b042f",
   "tests/fast/true_on_policy/__init__.py": "95477a332bf5473d062d1e41a83ea93c42333a969b5d7480220645b9a0fc55e4",
   "tests/fast/true_on_policy/test_config.py": "be6049750064e77cd511c82913425e20c72848be659a050354fbce1c5ea32034",
@@ -1853,11 +1984,9 @@
   "tests/fast/utils/event_logger/test_models.py": "41ee67a65e72bdf45dae5e232c3ab02b3d4b96dd780bfd8db85ecb5a46fa369f",
   "tests/fast/utils/external_utils/test_model_args_utils.py": "28a48732e2f36253e1a2fa056017f641f5cdda0768e05bd8e0129fadbd1938a3",
   "tests/fast/utils/test_argparse_utils.py": "b205690bc4f21606dd4389d9a3b711a65190976f44829e21ec3adf781ec310af",
-  "tests/fast/utils/test_arguments.py": "1738484f662afe5a5cc55f6edc6649a8ded1e0da1f94e21040f1a2149180a533",
   "tests/fast/utils/test_async_utils.py": "e81722963a9a923c0b29ea68b7ea4dd72e235236265b147638b5994fdaddce25",
   "tests/fast/utils/test_checksum_utils.py": "555f4beed17c91108d026bfa9980fc30044018b5f369334eafbc9960746f725f",
   "tests/fast/utils/test_clock.py": "4fe747283dc136c2314fd41b1a3b2efc0dc14a239560206c8ee5382a64eaf38d",
-  "tests/fast/utils/test_command_utils.py": "5fb2de89a72061784787cb199ae1e3df29dd34c784f9409f204b62e68d3c91db",
   "tests/fast/utils/test_device_flops.py": "206428089126fdb863deba41b310eeabe3a445bc239114e993a5e127c823d40b",
   "tests/fast/utils/test_dp_schedule.py": "b498f501b52c7b690cb35b113f532e3d505ab893aaa0fdb9726922df96a9f521",
   "tests/fast/utils/test_dumper_utils.py": "6ffde5781fc6b1ea60abdb3a26644751c6c35a3309434b14f436457f4fd6a481",
@@ -1871,14 +2000,12 @@
   "tests/fast/utils/test_http_utils.py": "372a2ef272f17863ac657cd54b269203f41b0ac6129df5f3d2421ae4edee870a",
   "tests/fast/utils/test_logging_utils.py": "250c11cbdf6326b52e81229842713601a899c6c36754469e3e58558467a958ca",
   "tests/fast/utils/test_mask_utils.py": "6d792c03a16240c29259f524b012d7c57c7cfc5c60d3c95dea47b5fb2777f6ad",
-  "tests/fast/utils/test_mini_ft_controller.py": "eb847fad72b7cebeee35eaebe1f45749b91bbd31cd82e3acc62fcee641f3f73b",
   "tests/fast/utils/test_misc.py": "44928239a5d9cd207581d93ade803b03fb7e5b0a4a47652fdace7a520cf5bfb8",
   "tests/fast/utils/test_object_store.py": "466f966c602e5df15da450c6adc0e2cd97e53ef42fd71b3de50c7244f70def89",
   "tests/fast/utils/test_parallel_utils.py": "6ea9893688e820de1ea4d6bd7d9b1651650aaab07ffd6687ab1c622997fa74c2",
   "tests/fast/utils/test_process_group_utils.py": "17079cf817a8313d05cf86b647c3c629f5c1648d6a79d65167c82e91a784c0a6",
   "tests/fast/utils/test_process_identity.py": "63290475cdd9de047c369bfff6f11e4f541ccdd1c19ccaeb35a3130409ad7292",
   "tests/fast/utils/test_processing_utils.py": "fe5bfb685b23a1b4be8dd99e15ea2240c282c1ea8101c9b6b0194580489903f0",
-  "tests/fast/utils/test_replay_base.py": "6a2da91ca1ab0d1069beb395a605ce4be99eea13f70f47cd6fa783ebbf2fedc6",
   "tests/fast/utils/test_retry_utils.py": "54913e63e7f0d7c2fcae71c7d077d2751bf52d56662f1600dbdf4a754102288a",
   "tests/fast/utils/test_sampling_mask.py": "c497e12d0def5891efccf97bfc9a50cbb361e54d7559f033247e42c32eb505f5",
   "tests/fast/utils/test_sglang_config.py": "27fbec412dadcb98268d56108c657492199b44a9dae71b0bb8eb0254d786f3d0",
@@ -1896,7 +2023,6 @@
   "tests/fast/utils/test_utils/comparisons/test_metrics.py": "bb9833a5046310f0eb8a87575d4a3e5fe8c9cd16a7726090dcf2d16eb3f47a46",
   "tests/fast/utils/test_utils/test_ft_test_actions.py": "c32ac22f4bbaecc1c2d77c456784362e52b2829e080a12f99c0fb56655b0ad02",
   "tests/fast/utils/test_utils/test_mock_sglang_engine.py": "665759a58fd1671358e7f15a5b01baccb993456f78765be07cea0312b68d49dc",
-  "tests/fast/utils/test_utils/test_mock_sglang_server.py": "5feb301f9f2c3a5e02a02724c5271127057da2e15fa5d4a85fd65e6a0309ece4",
   "tests/fast/utils/test_utils/test_mock_tools.py": "8da242b509e595e9a77ba581c75665e058c1866b838498df401bc5534ed31012",
   "tests/fast/utils/test_utils/test_reconfigure_assertions.py": "f4b9e382fd6879f74124a320ca096443e12768b2a69f5a72808f7ed4faddcbca",
   "tests/fast/utils/test_utils/test_session_verify_agent.py": "e129140680e9d3d41a57b91614c363141093194b8eb06269fbd1ac1b5f544a20",

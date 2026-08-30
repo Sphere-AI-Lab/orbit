@@ -10,6 +10,10 @@ import torch
 
 from miles.utils.replay_base import IndexerReplayManager, RoutingReplayManager
 
+# orbit: orbit's actor routes the OPD teacher forward through a TeacherSpec (see
+# `_actor_reuse_worker`).
+from orbit.opd.opd_teacher_spec import TeacherSpec
+
 
 @pytest.fixture(scope="module")
 def actor_module():
@@ -152,7 +156,9 @@ def test_save_model_does_not_manage_lifecycle(actor_module, monkeypatch):
 
     worker.save_model(6)
 
-    save.assert_called_once_with(6, worker.model, worker.optimizer, worker.opt_param_scheduler)
+    # orbit: the save chain carries the self-teacher so its checkpoint sidecar is written
+    # beside the adapter; this worker never ran the OPD teacher init, so it is None.
+    save.assert_called_once_with(6, worker.model, worker.optimizer, worker.opt_param_scheduler, self_teacher=None)
     worker.wake_up.assert_not_called()
     worker.sleep.assert_not_called()
     reload_groups.assert_not_called()
@@ -192,51 +198,80 @@ def test_update_weights_only_uses_temporary_process_groups_when_asleep(actor_mod
     assert destroy_groups.call_count == int(asleep)
 
 
+# orbit: base's sleep()/wake_up() pause and resume the whole allocator through
+# `torch_memory_saver`, so these tests counted `saver.pause` / `saver.resume` calls. Orbit's
+# sleep()/wake_up() deliberately offload and reload the train state piece by piece (grad
+# buffers, optimizer, frozen base, OPD teacher LM head) so PEFT runs can keep the adapter
+# resident on GPU — `torch_memory_saver` is never called, which would make the original
+# assertions vacuous. The tests below keep their intent (each transition performs its work
+# exactly once, and is idempotent) by counting orbit's piecewise offload/reload calls instead.
+_ORBIT_OFFLOAD_CALLS = ("offload_megatron_grad_buffers", "offload_megatron_optimizer")
+_ORBIT_ONLOAD_CALLS = ("load_megatron_optimizer", "load_megatron_grad_buffers")
+
+
 def _lifecycle_worker(actor_module, monkeypatch, asleep):
     worker = object.__new__(actor_module.MegatronTrainRayActor)
-    worker.args = Namespace(offload_train=True, rematerialize_param_from_master_weight=False)
+    worker.args = Namespace(
+        offload_train=True,
+        rematerialize_param_from_master_weight=False,
+        # orbit: the piecewise-offload switches sleep()/wake_up() read.
+        offload_train_grad_buffers=True,
+        offload_train_optimizer=True,
+        offload_train_adapter=False,
+        peft_method="none",
+        loss_type="policy_loss",
+    )
+    worker.model = [object()]
+    worker.optimizer = object()
     worker._asleep = asleep
-    saver = Mock()
+    # orbit: `state_moves` stands in for base's `saver`; `.pause`/`.resume` are the aggregate
+    # offload/reload counters so the assertions below read the same as base's.
+    state_moves = Mock()
     reload_groups = Mock()
-    monkeypatch.setattr(actor_module, "torch_memory_saver", saver)
+    for name in _ORBIT_OFFLOAD_CALLS:
+        monkeypatch.setattr(actor_module, name, lambda _arg: state_moves.pause())
+    for name in _ORBIT_ONLOAD_CALLS:
+        monkeypatch.setattr(actor_module, name, lambda _arg: state_moves.resume())
     monkeypatch.setattr(actor_module, "clear_memory", Mock())
     monkeypatch.setattr(actor_module, "print_memory", Mock())
     monkeypatch.setattr(actor_module, "destroy_process_groups", Mock())
     monkeypatch.setattr(actor_module, "reload_process_groups", reload_groups)
     monkeypatch.setattr(actor_module, "is_first_replica_megatron_main_rank", lambda: False)
     monkeypatch.setattr(actor_module, "is_lora_enabled", lambda _args: False)
-    return worker, saver, reload_groups
+    return worker, state_moves, reload_groups
 
 
 def test_sleep_is_idempotent(actor_module, monkeypatch):
-    worker, saver, _ = _lifecycle_worker(actor_module, monkeypatch, asleep=False)
+    worker, state_moves, _ = _lifecycle_worker(actor_module, monkeypatch, asleep=False)
 
     worker.sleep()
     worker.sleep()
 
-    assert saver.pause.call_count == 1
+    # orbit: one call per offloaded piece, and only for the first sleep().
+    assert state_moves.pause.call_count == len(_ORBIT_OFFLOAD_CALLS)
     assert worker._asleep is True
 
 
 def test_wake_up_when_resident_skips_resume_but_restores_groups(actor_module, monkeypatch):
     # A retried attempt can die between wake and sleep: memory stays resident but the
     # process groups may already be gone, so wake_up must restore groups without resuming.
-    worker, saver, reload_groups = _lifecycle_worker(actor_module, monkeypatch, asleep=False)
+    worker, state_moves, reload_groups = _lifecycle_worker(actor_module, monkeypatch, asleep=False)
 
     worker.wake_up()
 
-    saver.resume.assert_not_called()
+    state_moves.resume.assert_not_called()
     reload_groups.assert_called_once_with()
     assert worker._asleep is False
 
 
 def test_wake_up_resumes_offloaded_model_once(actor_module, monkeypatch):
-    worker, saver, _ = _lifecycle_worker(actor_module, monkeypatch, asleep=True)
+    worker, state_moves, _ = _lifecycle_worker(actor_module, monkeypatch, asleep=True)
 
     worker.wake_up()
     worker.wake_up()
 
-    assert saver.resume.call_count == 1
+    # orbit: one call per reloaded piece, and only for the first wake_up().
+    assert state_moves.resume.call_count == len(_ORBIT_ONLOAD_CALLS)
     assert worker._asleep is False
 
 
@@ -247,6 +282,14 @@ def _actor_train_args(**overrides):
         keep_old_actor=False,
         get_mismatch_metrics=False,
         skip_actor_forward_only=False,
+        # orbit: base gates the reference forward purely on `"ref" in backup_tags`. Orbit
+        # routes it through `compute_ref_log_probs`, which first short-circuits when no KL
+        # term is configured at all, and can also serve the reference by disabling the PEFT
+        # adapter instead of restoring a backed-up "ref" model. Keep the KL gate open and PEFT
+        # off so these tests still exercise base's backup-tag path.
+        kl_coef=0.1,
+        use_kl_loss=False,
+        peft_method="none",
     )
     return Namespace(**(defaults | overrides))
 
@@ -257,7 +300,19 @@ def _actor_reuse_worker(actor_module, **args_overrides):
     worker.model = [object()]
     worker.optimizer = object()
     worker.opt_param_scheduler = object()
-    worker.weights_backuper = Mock(backup_tags=set())
+    # orbit: base backs model state up through a `weights_backuper` TensorBackuper built
+    # inline; orbit builds a `model_state_manager` via create_model_state_manager. One mock
+    # bound under both names so the backup_tags assertions below read unchanged.
+    worker.model_state_manager = Mock(backup_tags=set())
+    worker.weights_backuper = worker.model_state_manager
+    # orbit: base gates the teacher forward purely on `"teacher" in backup_tags`. Orbit routes
+    # it through `compute_teacher_log_probs`, whose plan comes from the teacher spec; the
+    # legacy "load:" source is the one that keeps base's backup-tag behaviour.
+    worker._opd_teacher_spec = TeacherSpec("load", "<test-teacher-ckpt>")
+    # orbit: an EMA/lag self-teacher buffer (None unless --opd-teacher self:*) and the
+    # cached main-rank flag orbit's train_actor consults; neither exists in base.
+    worker._self_teacher = None
+    worker._is_main_rank = False
     worker._active_model_tag = "actor"
     worker._switch_model = Mock()
     worker._set_replay_stage = Mock()

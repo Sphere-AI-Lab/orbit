@@ -12,7 +12,19 @@ from miles.rollout.inference_rollout.compatibility import call_rollout_function,
 from miles.utils.types import Sample
 
 
-def expected_sample(*, group_index: int | None) -> Sample:
+# Logprobs the mock server decodes for the canonical "What is 1+7?" response.
+ROLLOUT_LOG_PROBS = [-0.0, -0.0078125, -0.015625, -0.0234375, -0.03125]
+
+# orbit: sentinel so a call site can spell out that it expects orbit's eval contract
+# (no rollout logprobs) rather than silently passing None.
+NO_ROLLOUT_LOG_PROBS = None
+
+
+def expected_sample(
+    *,
+    group_index: int | None,
+    rollout_log_probs: list[float] | None = ROLLOUT_LOG_PROBS,
+) -> Sample:
     return Sample(
         group_index=group_index,
         index=0,
@@ -26,7 +38,7 @@ def expected_sample(*, group_index: int | None) -> Sample:
         reward=1,
         loss_mask=None,
         weight_versions=[],
-        rollout_log_probs=[-0.0, -0.0078125, -0.015625, -0.0234375, -0.03125],
+        rollout_log_probs=rollout_log_probs,
         rollout_routed_experts=None,
         remove_sample=False,
         status=Sample.Status.COMPLETED,

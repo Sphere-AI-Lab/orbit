@@ -5,8 +5,44 @@ import pytest
 from tests.fast.launch_scripts.model_args_harness import expand_model_args
 
 
+def _skip_unless_megatron_registers(*option_strings: str) -> None:
+    """Skip when the vendored Megatron-LM does not register these CLI flags.
+
+    orbit: these flags belong to Megatron's own parser, not to miles/orbit, and orbit
+    pins a Megatron-LM commit that predates them (`--post-self-attn-layernorm`,
+    `--post-mlp-layernorm`, and the YaRN trio `--original-max-position-embeddings`
+    / `--beta-fast` / `--beta-slow`). On a Megatron that has them these tests run
+    exactly as upstream wrote them; on orbit's pin argparse would SystemExit(2)
+    before reaching the assertion under test, which says nothing about miles/orbit.
+    Pair this skip with a Megatron pin bump, not with weakened assertions.
+    """
+    from megatron.training.arguments import parse_args as megatron_parse_args
+
+    registered: set[str] = set()
+
+    def _collect(parser):
+        for action in parser._actions:
+            registered.update(action.option_strings)
+        # Raise to stop megatron's parse_args before it consumes sys.argv.
+        raise _StopParsing
+
+    try:
+        megatron_parse_args(extra_args_provider=_collect)
+    except _StopParsing:
+        pass
+
+    missing = [option for option in option_strings if option not in registered]
+    if missing:
+        pytest.skip(f"vendored Megatron-LM does not register {', '.join(missing)}")
+
+
+class _StopParsing(Exception):
+    pass
+
+
 def test_post_layernorm_flags_propagate_to_megatron(monkeypatch):
     pytest.importorskip("megatron.training.arguments")
+    _skip_unless_megatron_registers("--post-self-attn-layernorm", "--post-mlp-layernorm")
 
     import torch
     from megatron.training.arguments import core_transformer_config_from_args
@@ -64,6 +100,7 @@ def test_post_layernorm_flags_propagate_to_megatron(monkeypatch):
 )
 def test_kimi_yarn_flags_propagate_to_megatron(monkeypatch, model_type, beta_fast):
     pytest.importorskip("megatron.training.arguments")
+    _skip_unless_megatron_registers("--original-max-position-embeddings", "--beta-fast", "--beta-slow")
 
     import torch
     from megatron.core.transformer.transformer_config import MLATransformerConfig

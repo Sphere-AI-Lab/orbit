@@ -4,6 +4,10 @@ import pytest
 import torch
 
 from miles.backends.training_utils import loss as training_loss
+# upstream moved policy_loss_function out of training_utils/loss.py into
+# training_utils/loss_hub/losses.py (loss.py re-exports it). Collaborators have to
+# be patched on the defining module or the real ones run.
+from miles.backends.training_utils.loss_hub import losses as losses_mod
 from miles.backends.training_utils.loss_hub.math_utils import _safe_clamp_log_ratio, compute_approx_kl
 
 
@@ -53,6 +57,34 @@ def test_unbiased_kl_gradient_includes_score_term() -> None:
     torch.testing.assert_close(x.grad, expected)
 
 
+@pytest.fixture
+def _trivial_parallel_state() -> None:
+    """A real single-rank ParallelState in the module global.
+
+    Stubbing ``losses_mod.get_parallel_state`` is no longer enough: upstream's
+    policy_loss_function reaches cp_utils.get_local_response_loss_masks, which resolves
+    ``get_parallel_state`` in its own module. Before the restructure this test passed
+    only when an earlier test in the same process had left the global set; pin it so
+    the test is order-independent. group=None short-circuits GroupInfo's post-init
+    verification, so no torch.distributed init is needed.
+    """
+    from miles.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
+
+    trivial = GroupInfo(rank=0, size=1, group=None)
+    set_parallel_state(
+        ParallelState(
+            intra_dp=trivial,
+            intra_dp_cp=trivial,
+            cp=trivial,
+            tp=trivial,
+            pp=trivial,
+            ep=trivial,
+            etp=trivial,
+            indep_dp=trivial,
+        )
+    )
+
+
 @pytest.mark.parametrize(
     ("use_rollout_logprobs", "use_tis", "expected_denominator"),
     [
@@ -61,6 +93,7 @@ def test_unbiased_kl_gradient_includes_score_term() -> None:
         (False, True, "rollout"),
     ],
 )
+@pytest.mark.usefixtures("_trivial_parallel_state")
 def test_policy_loss_uses_sampling_policy_for_unbiased_kl(
     monkeypatch: pytest.MonkeyPatch,
     use_rollout_logprobs: bool,
@@ -93,6 +126,9 @@ def test_policy_loss_uses_sampling_policy_for_unbiased_kl(
         use_unbiased_kl=True,
         kl_loss_type="k3",
         kl_loss_coef=1.0,
+        # upstream's policy_loss_function reads these two before the KL block.
+        skip_actor_forward_only=False,
+        observe_training_entropy=False,
     )
     batch = {
         "advantages": [torch.zeros(3)],
@@ -105,9 +141,9 @@ def test_policy_loss_uses_sampling_policy_for_unbiased_kl(
         "unconcat_tokens": [torch.arange(3)],
     }
 
-    monkeypatch.setattr(training_loss, "get_parallel_state", lambda: object())
+    monkeypatch.setattr(losses_mod, "get_parallel_state", lambda: object())
     monkeypatch.setattr(
-        training_loss,
+        losses_mod,
         "get_log_probs_and_entropy",
         lambda *args, **kwargs: {
             "log_probs": [current],
@@ -115,10 +151,12 @@ def test_policy_loss_uses_sampling_policy_for_unbiased_kl(
         },
     )
     monkeypatch.setattr(
-        training_loss,
+        losses_mod,
         "compute_policy_loss",
         lambda ppo_kl, *args, **kwargs: (torch.zeros_like(ppo_kl), torch.zeros_like(ppo_kl)),
     )
+
+    real_compute_approx_kl = losses_mod.compute_approx_kl
 
     def capture_kl(
         log_probs: torch.Tensor,
@@ -126,13 +164,17 @@ def test_policy_loss_uses_sampling_policy_for_unbiased_kl(
         kl_loss_type: str,
         importance_ratio: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        assert importance_ratio is not None
+        if importance_ratio is None:
+            # upstream's train-vs-rollout mismatch diagnostic calls compute_approx_kl
+            # too (kl_loss_type="low_var_kl", no importance ratio). That is not the call
+            # under test; let the real implementation serve it.
+            return real_compute_approx_kl(log_probs, log_probs_base, kl_loss_type=kl_loss_type)
         captured["importance_ratio"] = importance_ratio
         return importance_ratio * (log_probs - log_probs_base).square()
 
-    monkeypatch.setattr(training_loss, "compute_approx_kl", capture_kl)
+    monkeypatch.setattr(losses_mod, "compute_approx_kl", capture_kl)
     monkeypatch.setattr(
-        training_loss,
+        losses_mod,
         "vanilla_tis_function",
         lambda **kwargs: (kwargs["pg_loss"], kwargs["loss_masks"], {}),
     )
@@ -140,8 +182,8 @@ def test_policy_loss_uses_sampling_policy_for_unbiased_kl(
     def reducer(values: torch.Tensor) -> torch.Tensor:
         return values.sum()
 
-    monkeypatch.setattr(training_loss, "get_sum_of_sample_mean", lambda *args, **kwargs: reducer)
-    monkeypatch.setattr(training_loss, "_response_masked_max", lambda values, **kwargs: values.max())
+    monkeypatch.setattr(losses_mod, "get_sum_of_sample_mean", lambda *args, **kwargs: reducer)
+    monkeypatch.setattr(losses_mod, "_response_masked_max", lambda values, **kwargs: values.max())
 
     loss, _ = training_loss.policy_loss_function(
         args,

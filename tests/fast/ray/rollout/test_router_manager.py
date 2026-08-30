@@ -23,7 +23,8 @@ class TestStartRouter:
         assert (ip, port) == ("10.1.2.3", 4567)
 
     def test_pd_disagg_with_miles_router_asserts(self):
-        args = make_args(use_miles_router=True, sglang_router_ip=None, sglang_router_port=None)
+        # orbit: the flag is --use-orbit-router; make_args seeds both names.
+        args = make_args(use_orbit_router=True, sglang_router_ip=None, sglang_router_port=None)
         with patch("miles.ray.rollout.router_manager.get_host_info", return_value=("h", "127.0.0.1")), patch(
             "miles.ray.rollout.router_manager.find_available_port", return_value=20000
         ):

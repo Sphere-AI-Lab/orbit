@@ -91,7 +91,8 @@ class _FakeIterator:
     def __init__(self, chunks):
         self.chunks = chunks
 
-    def get_hf_weight_chunks(self, weights):
+    # upstream added the weight_type kwarg ("base" / adapter) to the real signature.
+    def get_hf_weight_chunks(self, weights, weight_type="base"):
         yield from self.chunks
 
 
@@ -101,6 +102,8 @@ def _make_updater(engine, chunks, *, peft_method="none", peft_sync_spec=None, pe
     updater._peft_args = updater.args
     updater.weight_version = 0
     updater.peft_method = peft_method
+    # upstream's update_weights now reads self.is_lora (set alongside peft_method in __init__).
+    updater.is_lora = peft_method == "lora"
     updater._peft_sync_spec = peft_sync_spec
     updater._peft_transport = peft_transport
     updater.quantization_config = None
@@ -129,7 +132,10 @@ def _patch_single_rank_dist(monkeypatch):
     monkeypatch.setattr(uw_mod.dist, "gather_object", fake_gather_object)
     monkeypatch.setattr(uw_mod, "get_gloo_group", lambda: None)
     monkeypatch.setattr(uw_mod.ray, "get", _fake_ray_get)
-    monkeypatch.setattr(uw_mod, "post_process_weights", lambda **kwargs: None)
+    # upstream replaced post_process_weights(restore_weights_before_load=/
+    # post_process_quantization=) with an explicit begin/end weight-update session.
+    monkeypatch.setattr(uw_mod, "begin_weight_update", lambda *args, **kwargs: None)
+    monkeypatch.setattr(uw_mod, "end_weight_update", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         uw_mod.MultiprocessingSerializer, "serialize", staticmethod(lambda obj, output_str=False: "blob")
     )

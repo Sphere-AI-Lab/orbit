@@ -6,6 +6,9 @@ from miles.backends.training_utils.cp_utils import get_logits_and_tokens_offset_
 from miles.backends.training_utils.loss_hub.math_utils import (
     get_advantages_and_returns_batch,
     get_grpo_returns,
+    # ORBIT-SEAM: orbit's pure on-policy-distillation (MOPD) advantage, dispatched by the
+    # orbit-added "on_policy_distillation" estimator arm below; home is orbit/opd/advantages.py
+    opd_mopd_advantages,
     get_reinforce_plus_plus_baseline_advantages,
     get_reinforce_plus_plus_returns,
 )
@@ -23,6 +26,10 @@ def compute_advantages(
     response_lengths: list[int],
     values: list[torch.Tensor] | None = None,
     max_seq_lens: list[int] | None = None,
+    # ORBIT-SEAM: rollout batch handed through purely for the orbit-added
+    # "on_policy_distillation" arm, whose teacher scores live on the batch rather than in
+    # `rewards`; defaulted so every base caller is unaffected
+    rollout_data: dict | None = None,
 ) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
     """Dispatch to the configured advantage estimator.
 
@@ -99,6 +106,15 @@ def compute_advantages(
         )
         returns = advantages
 
+    # ORBIT-SEAM: orbit-added estimator arm. Base computes the teacher-minus-student advantage
+    # inline in policy space; orbit's version (device move, CP-aware response slicing, MOPD
+    # variants) lives in orbit/opd/advantages.py and is re-exported by loss_hub.math_utils.
+    elif args.advantage_estimator == "on_policy_distillation":
+        if rollout_data is None:
+            raise ValueError("advantage_estimator='on_policy_distillation' requires rollout_data.")
+        advantages = opd_mopd_advantages(rollout_data, log_probs, response_lengths)
+        returns = advantages
+
     else:
         raise NotImplementedError(f"advantage_estimator {args.advantage_estimator} is not supported. ")
 
@@ -164,19 +180,31 @@ def normalize_advantages(
 
         all_masks = torch.cat(mask_chunks)
 
-    if all_masks.numel() > 0:
-        assert (
-            all_advs.size() == all_masks.size()
-        ), f"Shape mismatch before whitening: advantages {all_advs.size()}, masks {all_masks.size()}"
-        dp_group = parallel_state.effective_dp.group
+    # ORBIT-SEAM: base skips whitening entirely when this rank's mask is empty and whitens over
+    # parallel_state.effective_dp.group; orbit always enters the collective and, in the
+    # single-group (intra-DP) mode, whitens over the combined intra-DP+CP group instead - a
+    # genuine behavioural change to base, rationale inline below.
+    assert (
+        all_advs.size() == all_masks.size()
+    ), f"Shape mismatch before whitening: advantages {all_advs.size()}, masks {all_masks.size()}"
 
-        whitened_advs_flat = distributed_masked_whiten(
-            all_advs,
-            all_masks,
-            process_group=dp_group,
-            shift_mean=True,
-        )
-        chunk_lengths = [chunk.size(0) for chunk in advantages]
-        advantages = list(torch.split(whitened_advs_flat, chunk_lengths))
+    # CP ranks own disjoint response-token slices, so whitening over the
+    # DP-only group would normalize each CP shard independently.  Use the
+    # combined DP+CP group and have empty local shards enter the collective
+    # as well; otherwise an uneven response layout can strand its peers.
+    # `effective_dp_cp` is a single group (== intra_dp_cp) in intra-DP mode; the
+    # independent-DP mode pairs an inner and an outer group, which the single-group
+    # whitening collective cannot span, so that mode keeps base's effective_dp choice.
+    dp_cp_groups = parallel_state.effective_dp_cp.groups_inner_to_outer
+    dp_group = dp_cp_groups[0] if len(dp_cp_groups) == 1 else parallel_state.effective_dp.group
+
+    whitened_advs_flat = distributed_masked_whiten(
+        all_advs,
+        all_masks,
+        process_group=dp_group,
+        shift_mean=True,
+    )
+    chunk_lengths = [chunk.size(0) for chunk in advantages]
+    advantages = list(torch.split(whitened_advs_flat, chunk_lengths))
 
     return advantages

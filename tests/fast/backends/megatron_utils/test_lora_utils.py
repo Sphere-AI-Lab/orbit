@@ -195,20 +195,29 @@ class TestConvertTargetModulesToHf:
 
 
 class TestIsLoraEnabled:
-    def test_enabled_by_rank(self):
-        args = Namespace(lora_rank=32, lora_adapter_path=None)
+    # orbit: base infers "LoRA is on" from `lora_rank` / `lora_adapter_path`. Orbit's PEFT
+    # overhaul makes `args.peft_method` ("lora" | "oft" | "none") the single source of truth,
+    # because LoRA and OFT share those same rank/path fields — inferring from them would make
+    # an OFT run look like a LoRA run. The tests below assert orbit's contract: peft_method
+    # decides, and the rank/path fields no longer enable LoRA on their own.
+    def test_enabled_by_peft_method(self):
+        args = Namespace(peft_method="lora", lora_rank=32, lora_adapter_path=None)
         assert is_lora_enabled(args) is True
 
-    def test_enabled_by_adapter_path(self):
-        args = Namespace(lora_rank=0, lora_adapter_path="/some/path")
+    def test_enabled_by_peft_method_with_adapter_path(self):
+        args = Namespace(peft_method="lora", lora_rank=0, lora_adapter_path="/some/path")
         assert is_lora_enabled(args) is True
 
-    def test_enabled_by_both(self):
+    def test_rank_and_adapter_path_alone_do_not_enable(self):
         args = Namespace(lora_rank=16, lora_adapter_path="/some/path")
-        assert is_lora_enabled(args) is True
+        assert is_lora_enabled(args) is False
+
+    def test_oft_is_not_lora(self):
+        args = Namespace(peft_method="oft", lora_rank=16, lora_adapter_path="/some/path")
+        assert is_lora_enabled(args) is False
 
     def test_disabled(self):
-        args = Namespace(lora_rank=0, lora_adapter_path=None)
+        args = Namespace(peft_method="none", lora_rank=0, lora_adapter_path=None)
         assert is_lora_enabled(args) is False
 
     def test_disabled_missing_attrs(self):

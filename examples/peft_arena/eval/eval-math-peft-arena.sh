@@ -27,7 +27,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-ORBIT_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
+ORBIT_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." && pwd)"
 
 # SGLang's deep_gemm import requires CUDA_HOME; the standard launcher sources
 # tool_env.sh to set it (and PATH/LD_LIBRARY_PATH). Reuse the same setup so

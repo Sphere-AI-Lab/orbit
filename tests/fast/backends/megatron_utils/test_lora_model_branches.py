@@ -61,12 +61,26 @@ _MODEL_MODULE = "miles.backends.megatron_utils.model"
 
 
 class TestSetupModelAndOptimizerLoraBranch:
-    """Verify that LoRA-enabled actor + bridge mode routes to _setup_lora_model_via_bridge."""
+    """Verify that PEFT-enabled actor + bridge mode routes to _setup_peft_model_via_bridge."""
 
-    def _make_args(self, lora_rank=32, role="actor", mode="bridge"):
+    # orbit: base's bridge branch is `is_lora_enabled(args) and role == "actor"`, where LoRA is
+    # inferred from lora_rank. Orbit widened it to its whole PEFT layer (LoRA *and* OFT):
+    # `is_peft_enabled(args)` reads `args.peft_method`, and the adapter-mode critic is admitted
+    # alongside the actor. The helper is renamed `_setup_peft_model_via_bridge` and takes the
+    # role. `peft_method` therefore replaces `lora_rank` as this fixture's on/off switch, and
+    # the critic case pins `critic_mode="full"` so it stays outside the widened branch.
+    # The optimizer/scheduler build is likewise one orbit helper (`_build_optimizer_and_scheduler`
+    # in orbit/megatron/optim_build.py) rather than base's two inline megatron calls, so the two
+    # optimizer patches collapse into one.
+    def _make_args(self, peft_method="lora", role="actor", mode="bridge"):
         return Namespace(
-            lora_rank=lora_rank,
+            peft_method=peft_method,
+            lora_rank=32,
             lora_adapter_path=None,
+            multi_lora=False,
+            use_critic=(role == "critic"),
+            critic_mode="full",
+            custom_model_provider_path=None,
             megatron_to_hf_mode=mode,
             moe_use_upcycling=False,
             debug_disable_optimizer=False,
@@ -95,69 +109,61 @@ class TestSetupModelAndOptimizerLoraBranch:
             use_gloo_process_groups=False,
         )
 
-    @patch(f"{_MODEL_MODULE}.get_optimizer_param_scheduler")
-    @patch(f"{_MODEL_MODULE}.get_megatron_optimizer")
-    @patch(f"{_MODEL_MODULE}._setup_lora_model_via_bridge")
-    def test_lora_actor_bridge_routes_to_lora_setup(self, mock_lora_setup, mock_opt, mock_sched):
+    @patch(f"{_MODEL_MODULE}._build_optimizer_and_scheduler")
+    @patch(f"{_MODEL_MODULE}._setup_peft_model_via_bridge")
+    def test_lora_actor_bridge_routes_to_lora_setup(self, mock_lora_setup, mock_build_opt):
         from miles.backends.megatron_utils.model import setup_model_and_optimizer
 
         mock_lora_setup.return_value = [MagicMock()]
-        mock_opt.return_value = MagicMock(param_groups=[])
-        mock_sched.return_value = MagicMock()
+        mock_build_opt.return_value = (MagicMock(param_groups=[]), MagicMock())
 
-        args = self._make_args(lora_rank=32, role="actor", mode="bridge")
+        args = self._make_args(peft_method="lora", role="actor", mode="bridge")
         model, _, _ = setup_model_and_optimizer(args, role="actor")
 
-        mock_lora_setup.assert_called_once_with(args)
+        mock_lora_setup.assert_called_once_with(args, role="actor")
 
-    @patch(f"{_MODEL_MODULE}.get_optimizer_param_scheduler")
-    @patch(f"{_MODEL_MODULE}.get_megatron_optimizer")
+    @patch(f"{_MODEL_MODULE}._build_optimizer_and_scheduler")
     @patch(f"{_MODEL_MODULE}.get_model")
     @patch(f"{_MODEL_MODULE}.get_model_provider_func")
-    @patch(f"{_MODEL_MODULE}._setup_lora_model_via_bridge")
-    def test_lora_critic_skips_lora_setup(self, mock_lora_setup, mock_provider, mock_get_model, mock_opt, mock_sched):
+    @patch(f"{_MODEL_MODULE}._setup_peft_model_via_bridge")
+    def test_lora_critic_skips_lora_setup(self, mock_lora_setup, mock_provider, mock_get_model, mock_build_opt):
         from miles.backends.megatron_utils.model import setup_model_and_optimizer
 
         mock_get_model.return_value = [MagicMock()]
-        mock_opt.return_value = MagicMock(param_groups=[])
-        mock_sched.return_value = MagicMock()
+        mock_build_opt.return_value = (MagicMock(param_groups=[]), MagicMock())
 
-        args = self._make_args(lora_rank=32, role="critic", mode="bridge")
+        args = self._make_args(peft_method="lora", role="critic", mode="bridge")
         setup_model_and_optimizer(args, role="critic")
 
         mock_lora_setup.assert_not_called()
         mock_get_model.assert_called_once()
 
-    @patch(f"{_MODEL_MODULE}.get_optimizer_param_scheduler")
-    @patch(f"{_MODEL_MODULE}.get_megatron_optimizer")
+    @patch(f"{_MODEL_MODULE}._build_optimizer_and_scheduler")
     @patch(f"{_MODEL_MODULE}.get_model")
     @patch(f"{_MODEL_MODULE}.get_model_provider_func")
-    @patch(f"{_MODEL_MODULE}._setup_lora_model_via_bridge")
-    def test_non_lora_skips_lora_setup(self, mock_lora_setup, mock_provider, mock_get_model, mock_opt, mock_sched):
+    @patch(f"{_MODEL_MODULE}._setup_peft_model_via_bridge")
+    def test_non_lora_skips_lora_setup(self, mock_lora_setup, mock_provider, mock_get_model, mock_build_opt):
         from miles.backends.megatron_utils.model import setup_model_and_optimizer
 
         mock_get_model.return_value = [MagicMock()]
-        mock_opt.return_value = MagicMock(param_groups=[])
-        mock_sched.return_value = MagicMock()
+        mock_build_opt.return_value = (MagicMock(param_groups=[]), MagicMock())
 
-        args = self._make_args(lora_rank=0, role="actor", mode="bridge")
+        args = self._make_args(peft_method="none", role="actor", mode="bridge")
         setup_model_and_optimizer(args, role="actor")
 
         mock_lora_setup.assert_not_called()
         mock_get_model.assert_called_once()
 
-    @patch(f"{_MODEL_MODULE}.get_optimizer_param_scheduler")
-    @patch(f"{_MODEL_MODULE}.get_megatron_optimizer")
+    @patch(f"{_MODEL_MODULE}._build_optimizer_and_scheduler")
     @patch(f"{_MODEL_MODULE}.get_model")
-    @patch(f"{_MODEL_MODULE}._setup_lora_model_via_bridge")
-    def test_lora_raw_mode_skips_bridge(self, mock_lora_setup, mock_get_model, mock_opt, mock_sched):
+    @patch(f"{_MODEL_MODULE}._setup_peft_model_via_bridge")
+    def test_lora_raw_mode_skips_bridge(self, mock_lora_setup, mock_get_model, mock_build_opt):
         from miles.backends.megatron_utils.model import setup_model_and_optimizer
 
         mock_get_model.return_value = [MagicMock()]
-        mock_opt.return_value = MagicMock(param_groups=[])
-        mock_sched.return_value = MagicMock()
+        mock_build_opt.return_value = (MagicMock(param_groups=[]), MagicMock())
 
-        args = self._make_args(lora_rank=32, role="actor", mode="raw")
+        args = self._make_args(peft_method="lora", role="actor", mode="raw")
         setup_model_and_optimizer(args, role="actor")
 
         mock_lora_setup.assert_not_called()
@@ -175,8 +181,10 @@ class TestSaveLoRaBranch:
     @patch(f"{_MODEL_MODULE}.disable_forward_pre_hook")
     @patch(f"{_MODEL_MODULE}.should_disable_forward_pre_hook", return_value=False)
     @patch(f"{_MODEL_MODULE}.get_args")
-    @patch(f"{_MODEL_MODULE}.save_checkpoint_with_lora")
-    @patch(f"{_MODEL_MODULE}.is_lora_model", return_value=True)
+    # orbit: base's LoRA-only save predicate/writer are orbit's PEFT (LoRA + OFT) pair,
+    # `is_peft_model` / `save_checkpoint_with_peft`. Branch logic under test is unchanged.
+    @patch(f"{_MODEL_MODULE}.save_checkpoint_with_peft")
+    @patch(f"{_MODEL_MODULE}.is_peft_model", return_value=True)
     def test_lora_model_calls_lora_save(
         self, mock_is_lora, mock_save_lora, mock_get_args, mock_should, mock_disable, mock_enable, mock_save_hashes
     ):
@@ -193,7 +201,7 @@ class TestSaveLoRaBranch:
     @patch(f"{_MODEL_MODULE}.should_disable_forward_pre_hook", return_value=False)
     @patch(f"{_MODEL_MODULE}.get_args")
     @patch(f"{_MODEL_MODULE}.save_checkpoint")
-    @patch(f"{_MODEL_MODULE}.is_lora_model", return_value=False)
+    @patch(f"{_MODEL_MODULE}.is_peft_model", return_value=False)
     def test_non_lora_model_calls_regular_save(
         self, mock_is_lora, mock_save_ckpt, mock_get_args, mock_should, mock_disable, mock_enable, mock_save_hashes
     ):

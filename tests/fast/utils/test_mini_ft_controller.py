@@ -660,6 +660,9 @@ class TestArgumentValidation:
         from miles.utils.arguments import miles_validate_args
 
         args = argparse.Namespace(
+            # orbit: _common_orbit_validate_args opens with validate_rollout_temperature,
+            # which reads this before reaching the mini-ft check under test.
+            rollout_temperature=1.0,
             mini_ft_controller_enable=True,
             control_server_port=0,
             use_fault_tolerance=False,

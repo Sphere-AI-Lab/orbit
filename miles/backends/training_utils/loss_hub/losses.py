@@ -12,6 +12,12 @@ from miles.backends.training_utils.cp_utils import (
 from miles.backends.training_utils.loss_hub.corrections import vanilla_tis_function
 from miles.backends.training_utils.loss_hub.logit_processors import get_log_probs_and_entropy, get_values
 from miles.backends.training_utils.loss_hub.math_utils import (
+    # ORBIT-SEAM: orbit-added helpers on base's import list - the critic explained-variance stat
+    # keys and the two overflow-safe ratio helpers (homes: orbit/critic/value_stats.py and
+    # math_utils itself; both re-exported by loss_hub.math_utils)
+    VALUE_EV_STAT_KEYS,
+    _safe_clamp_log_ratio,
+    _safe_exp_neg_ppo_kl,
     compute_approx_kl,
     compute_ess_ratio_contribution,
     compute_gspo_kl,
@@ -21,6 +27,12 @@ from miles.backends.training_utils.loss_hub.math_utils import (
 from miles.backends.training_utils.parallel import get_parallel_state
 from miles.utils.misc import load_function
 from miles.utils.types import RolloutBatch
+
+# ORBIT-SEAM: orbit's OPD losses (full-vocab JSD, direct top-k KL) and the masked
+# response-reduction helper added with them live in orbit.opd.losses; bound here so the
+# loss_type arms in get_loss_function below and policy_loss_function's max diagnostic resolve
+# them. miles.backends.training_utils.loss re-exports all three for existing importers.
+from orbit.opd.losses import _response_masked_max, opd_jsd_loss_function, opd_topk_loss_function
 
 
 class LossFunction(Protocol):
@@ -182,7 +194,15 @@ def policy_loss_function(
     else:
         old_log_probs = torch.cat(old_log_probs, dim=0)
         log_probs = torch.cat(log_probs, dim=0)
-        ppo_kl = old_log_probs - log_probs
+        # ORBIT-SEAM: base always uses `old_log_probs - log_probs`; --force-on-policy-ratio is
+        # orbit's pure-MOPD switch (rationale inline below)
+        if getattr(args, "force_on_policy_ratio", False):
+            # Ratio pinned to exactly 1.0 with the gradient preserved: the surrogate
+            # degenerates to REINFORCE, the exact objective of pure sampled-token MOPD.
+            # Independent behaviour correction may still be applied with TIS.
+            ppo_kl = log_probs.detach() - log_probs
+        else:
+            ppo_kl = old_log_probs - log_probs
 
     local_loss_mask_list = get_local_response_loss_masks(
         total_lengths,
@@ -245,7 +265,9 @@ def policy_loss_function(
             assert rollout_old_log_probs is not None, "rollout_log_probs must be provided for built-in TIS"
             tis_func = vanilla_tis_function
 
-        ois = (-ppo_kl).exp()
+        # ORBIT-SEAM: base computes `(-ppo_kl).exp()`; orbit routes it through the shared
+        # overflow-safe clamp (identical in range, no inf/NaN under async drift)
+        ois = _safe_exp_neg_ppo_kl(ppo_kl)
         tis_kwargs = {
             "args": args,
             "pg_loss": pg_loss,
@@ -316,7 +338,18 @@ def policy_loss_function(
         ref_log_probs = torch.cat(reference_log_probs, dim=0)
         importance_ratio = None
         if args.use_unbiased_kl:
-            importance_ratio = torch.exp(log_probs - old_log_probs)
+            # ORBIT-SEAM: base uses `torch.exp(log_probs - old_log_probs)`; orbit clamps the
+            # exponent and switches the denominator to the rollout behavior policy under TIS.
+            # Route the exponent through the same safe clamp as every other
+            # ratio path: async/off-policy drift can push the log-ratio past exp
+            # overflow. TIS bridges the trainer snapshot to the rollout behavior
+            # policy for the PG term; the sampled KL needs that behavior policy as
+            # its denominator directly to remain unbiased.
+            behavior_log_probs = old_log_probs
+            if args.use_tis:
+                assert rollout_old_log_probs is not None, "rollout_log_probs must be provided for TIS"
+                behavior_log_probs = torch.cat(rollout_old_log_probs, dim=0)
+            importance_ratio = _safe_clamp_log_ratio(log_probs - behavior_log_probs).exp()
         kl = compute_approx_kl(
             log_probs,
             ref_log_probs,
@@ -339,6 +372,9 @@ def policy_loss_function(
 
     train_scored_log_probs = old_log_probs
     train_rollout_logprob_abs_diff = None
+    # ORBIT-SEAM: base reports only the mean train-vs-rollout log-prob gap; orbit adds the
+    # worst-token gap through orbit.opd.losses._response_masked_max
+    train_rollout_logprob_abs_diff_max = None
     train_rollout_kl = None
     if rollout_old_log_probs:
         rollout_log_probs = torch.cat(rollout_old_log_probs, dim=0)
@@ -349,6 +385,14 @@ def policy_loss_function(
             abs_diff.new_zeros(()),
         )
         train_rollout_logprob_abs_diff = sum_of_sample_mean(abs_diff)
+        train_rollout_logprob_abs_diff_max = _response_masked_max(
+            abs_diff,
+            total_lengths=total_lengths,
+            response_lengths=response_lengths,
+            loss_masks=batch["loss_masks"],
+            qkv_format=getattr(args, "qkv_format", "thd"),
+            max_seq_lens=max_seq_lens,
+        )
 
         # KL(rollout || train) at sampled tokens via Schulman k3 with per-token clamp [-10, 10]
         rollout_train_kl = compute_approx_kl(rollout_log_probs, train_scored_log_probs, kl_loss_type="low_var_kl")
@@ -370,6 +414,8 @@ def policy_loss_function(
 
     if train_rollout_logprob_abs_diff is not None:
         reported_loss["train_rollout_logprob_abs_diff"] = train_rollout_logprob_abs_diff.clone().detach()
+        # ORBIT-SEAM: companion metric for the max diagnostic computed above
+        reported_loss["train_rollout_logprob_abs_diff_max"] = train_rollout_logprob_abs_diff_max.clone().detach()
     if train_rollout_kl is not None:
         reported_loss["train_rollout_kl"] = train_rollout_kl.clone().detach()
 
@@ -446,9 +492,50 @@ def value_loss_function(
     if values.numel() == 0:
         loss += 0 * values.sum()
 
+    # ORBIT-SEAM: orbit-added critic explained-variance sufficient statistics. Left in place
+    # rather than lifted: the block is five calls to this module's own sum_of_sample_mean
+    # reducer, and its natural home (orbit/critic/value_stats.py, which owns
+    # VALUE_EV_STAT_KEYS and compute_value_explained_var) belongs to the math_utils slice.
+    # Sufficient statistics for the critic explained-variance metric,
+    # EV = 1 - Var(returns - values) / Var(returns) over trainable tokens.
+    # Averaging per-micro-batch EV would be biased when micro-batches differ in
+    # token count or mean, so emit masked token-level sums instead: the metric
+    # pipeline (aggregate_train_losses) SUM-reduces every non-extrema metric
+    # across micro-batches and DP/CP ranks and divides by one count shared by
+    # all keys, which cancels in the ratios taken by compute_value_explained_var
+    # at aggregation time. The token-sum reducer below is the CP-aware masked
+    # sum (`calculate_per_token_loss=True` selects sum-of-token semantics)
+    # regardless of the reduction mode used for the loss itself.
+    sum_of_token = get_sum_of_sample_mean(
+        batch["total_lengths"],
+        batch["response_lengths"],
+        batch["loss_masks"],
+        calculate_per_token_loss=True,
+        qkv_format=args.qkv_format,
+        max_seq_lens=batch.get("max_seq_lens", None),
+    )
+    detached_returns = returns.detach().float()
+    detached_err = detached_returns - values.detach().float()
+
+    ev_stats = dict(
+        zip(
+            VALUE_EV_STAT_KEYS,
+            (
+                sum_of_token(torch.ones_like(detached_returns)),
+                sum_of_token(detached_returns),
+                sum_of_token(detached_returns**2),
+                sum_of_token(detached_err),
+                sum_of_token(detached_err**2),
+            ),
+            strict=True,
+        )
+    )
+
     reported_loss = {
         "value_loss": loss.clone().detach(),
         "value_clipfrac": values_clipfrac.clone().detach(),
+        # ORBIT-SEAM: the explained-variance statistics computed above ride the metric dict
+        **ev_stats,
     }
 
     return loss, reported_loss
@@ -513,6 +600,14 @@ def get_loss_function(args: Namespace) -> LossFunction:
             return value_loss_function
         case "sft_loss":
             return sft_loss_function
+        # ORBIT-SEAM: two orbit loss types added to base's match; both names are bound at the top
+        # of this module to the home implementations in orbit.opd.losses. Deliberately not routed
+        # through --custom-loss-function-path: `--loss-type opd_jsd_loss` / `opd_topk_loss` is the
+        # CLI contract orbit's recipes and tests already use.
+        case "opd_jsd_loss":
+            return opd_jsd_loss_function
+        case "opd_topk_loss":
+            return opd_topk_loss_function
         case "custom_loss":
             return load_function(args.custom_loss_function_path)
         case _:

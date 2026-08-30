@@ -24,10 +24,16 @@ def _trivial_parallel_state(monkeypatch) -> None:
             intra_dp_cp=trivial_group,
             cp=trivial_group,
             tp=trivial_group,
+            # upstream's ParallelState gained required pp/ep/etp/indep_dp groups; trivial here.
+            pp=trivial_group,
+            ep=trivial_group,
+            etp=trivial_group,
+            indep_dp=trivial_group,
         )
     )
     # Single process: the DP/CP all-reduce inside aggregate_train_losses is a no-op.
-    monkeypatch.setattr(log_utils.dist, "all_reduce", lambda tensor, op, group: None)
+    # upstream routes it through MultiPGUtil.all_reduce(tensor, groups, op).
+    monkeypatch.setattr(log_utils.MultiPGUtil, "all_reduce", lambda tensor, groups, op: None)
 
 
 def _value_args(*, calculate_per_token_loss: bool, global_batch_size: int) -> Namespace:

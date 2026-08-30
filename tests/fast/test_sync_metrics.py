@@ -144,7 +144,7 @@ def test_emit_update_weights_metrics_no_pause_key_when_none():
 def test_log_perf_data_raw_emits_perf_scalars(monkeypatch):
     logged = {}
     monkeypatch.setattr(
-        train_metric_utils.tracking_utils, "log", lambda args, metrics, step_key: logged.update(metrics)
+        train_metric_utils.tracking, "log", lambda args, metrics, step_key: logged.update(metrics)
     )
     monkeypatch.setattr(train_metric_utils, "compute_rollout_step", lambda args, rollout_id: 7)
 
@@ -169,7 +169,7 @@ def test_log_perf_data_raw_emits_perf_scalars(monkeypatch):
 
 def test_log_perf_data_raw_clears_scalars_on_non_primary_rank(monkeypatch):
     monkeypatch.setattr(
-        train_metric_utils.tracking_utils, "log", lambda *a, **k: pytest.fail("must not log")
+        train_metric_utils.tracking, "log", lambda *a, **k: pytest.fail("must not log")
     )
     record_perf_scalar("update_weights_payload_bytes", 99)
     train_metric_utils.log_perf_data_raw(
@@ -187,7 +187,7 @@ def test_log_perf_data_raw_without_scalars_still_works(monkeypatch):
         del timer.perf_scalars
     logged = {}
     monkeypatch.setattr(
-        train_metric_utils.tracking_utils, "log", lambda args, metrics, step_key: logged.update(metrics)
+        train_metric_utils.tracking, "log", lambda args, metrics, step_key: logged.update(metrics)
     )
     monkeypatch.setattr(train_metric_utils, "compute_rollout_step", lambda args, rollout_id: 0)
     timer.add("update_weights", 2.0)

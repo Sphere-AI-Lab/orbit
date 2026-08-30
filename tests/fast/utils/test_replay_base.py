@@ -43,11 +43,17 @@ def test_get_topk_fn_fills_all_invalid_rows_with_arange():
 
 
 def test_get_topk_fn_preserves_partial_padding():
-    # a row with some valid picks keeps its -1 padding (only all-(-1) rows are filled)
+    # orbit: upstream leaves the -1s in a partially padded row (it repairs only all-(-1)
+    # rows). orbit's _sanitize_replay_top_indices repairs *every* -1 slot with a
+    # conflict-free expert id, because Megatron's sparse dispatch map would index on the
+    # -1. What is preserved here is the row's real pick (2) and the absence of duplicates.
     scores = torch.arange(5, dtype=torch.float32).unsqueeze(0)
     replayed_top_indices = torch.tensor([[2, -1, -1]], dtype=torch.int32)
     manager = _make_replay_manager(replayed_top_indices)
 
     topk_fn = manager.get_topk_fn(_topk, return_probs=False)
 
-    torch.testing.assert_close(topk_fn(scores, 3), replayed_top_indices)
+    repaired = topk_fn(scores, 3)
+    assert repaired[0, 0].item() == 2
+    assert (repaired >= 0).all()
+    assert len(set(repaired[0].tolist())) == 3

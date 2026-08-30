@@ -1,6 +1,6 @@
 ---
 title: "Qwen3.5-35B-A3B Self-Distillation on a Single Node (RLVR teacher → OPD)"
-description: "Two-phase self-distillation of Qwen3.5-35B-A3B on one 8xH200 node, with an in-process Megatron teacher."
+description: "Qwen3.5-35B self-distillation campaign."
 # Generated from examples/on_policy_distillation/qwen3_5_35b_selfdistill/README.md by scripts/tools/sync_example_docs.py. Edit that README, not this file.
 ---
 A reproducible two-phase on-policy-distillation (OPD) example for the

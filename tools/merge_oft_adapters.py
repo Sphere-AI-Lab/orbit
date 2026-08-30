@@ -17,7 +17,7 @@ import torch
 from safetensors.torch import load_file, save_file
 
 from orbit.merge import get_strategy  # light: pulls only torch
-from miles.utils.logging_utils import configure_logger
+from miles.utils.logging_utils import configure_logger_raw
 
 _COMPAT_KEYS = ("oft_type", "oft_block_size", "target_modules", "base_model_name_or_path")
 
@@ -79,7 +79,7 @@ def write_merged_adapter(merged: dict[str, torch.Tensor], src_config_dir: str, o
 
 
 def main(argv: list[str] | None = None) -> int:
-    configure_logger()
+    configure_logger_raw()
     p = argparse.ArgumentParser(description="Merge N orbit OFT adapters (OrthoMerge).")
     p.add_argument("--adapters", nargs="+", required=True, help="paths to OFT adapter dirs (>=2)")
     p.add_argument("--output", required=True, help="output dir; writes <output>/merged_adapter/")

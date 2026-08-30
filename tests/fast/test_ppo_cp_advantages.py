@@ -22,6 +22,11 @@ def _parallel_state(
         intra_dp_cp=GroupInfo(rank=rank, size=world_size, group=cp_group),
         cp=GroupInfo(rank=rank, size=world_size, group=cp_group),
         tp=trivial_group,
+        # upstream's ParallelState gained required pp/ep/etp/indep_dp groups; trivial here.
+        pp=GroupInfo(rank=0, size=1, group=None),
+        ep=GroupInfo(rank=0, size=1, group=None),
+        etp=GroupInfo(rank=0, size=1, group=None),
+        indep_dp=GroupInfo(rank=0, size=1, group=None),
     )
 
 
@@ -29,6 +34,8 @@ def _ppo_args(gamma: float = 0.0, lambd: float = 0.0, qkv_format: str = "thd") -
     return Namespace(
         advantage_estimator="ppo",
         use_rollout_logprobs=False,
+        # upstream's compute_advantages_and_returns now reads skip_actor_forward_only.
+        skip_actor_forward_only=False,
         kl_coef=0.1,
         kl_loss_type="k1",
         gamma=gamma,

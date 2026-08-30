@@ -24,7 +24,11 @@ def ray_launchers() -> list[Path]:
 
 def test_the_repo_has_ray_launchers_to_check() -> None:
     """A discovery bug that finds nothing would make every other check in this file vacuous."""
-    assert len(ray_launchers()) > 30
+    # orbit: upstream's >30 is calibrated on its example tree. Orbit's launchers mostly go
+    # through miles/utils/external_utils/command_utils.execute_train rather than spelling
+    # `ray job submit` inline, so the tree carries ~16. The guard's job is only to catch a
+    # discovery bug that finds nothing; keep it well below the real count.
+    assert len(ray_launchers()) > 10
 
 
 @pytest.mark.parametrize("launcher", ray_launchers(), ids=lambda path: str(path.relative_to(REPO_ROOT)))

@@ -22,7 +22,18 @@ def _single_process_state() -> None:
     # actually happen.
     single = GroupInfo(rank=0, size=1, group=None)
     set_parallel_state(
-        ParallelState(intra_dp=single, intra_dp_cp=single, cp=single, tp=single, is_pp_last_stage=True)
+        # upstream's ParallelState gained required pp/ep/etp/indep_dp groups; trivial here.
+        ParallelState(
+            intra_dp=single,
+            intra_dp_cp=single,
+            cp=single,
+            tp=single,
+            pp=single,
+            ep=single,
+            etp=single,
+            indep_dp=single,
+            is_pp_last_stage=True,
+        )
     )
 
 

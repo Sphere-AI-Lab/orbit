@@ -22,12 +22,17 @@ def test_direct_loss_restores_full_ft_actor_after_reference_forward(monkeypatch)
     monkeypatch.setattr(actor_utils, "uses_one_trunk_critic", lambda args: False)
     monkeypatch.setattr(actor_utils, "uses_separate_critic", lambda args: False)
     monkeypatch.setattr(actor_utils, "should_backup_actor_after_train", lambda args: False)
-    monkeypatch.setattr(actor_utils, "log_perf_data", lambda *args: None)
+    # upstream passes extra_metrics= to log_perf_data.
+    monkeypatch.setattr(actor_utils, "log_perf_data", lambda *args, **kwargs: None)
     monkeypatch.setattr(actor_utils.train_dump_utils, "save_debug_train_data", lambda *args, **kwargs: None)
 
     actor = object.__new__(actor_utils.MegatronTrainRayActor)
     actor.args = Namespace(
         compute_advantages_and_returns=False,
+        # upstream's train_actor reads skip_actor_forward_only up front and sizes the
+        # per-step rollout counts with get_num_rollouts(args, ...).
+        skip_actor_forward_only=False,
+        global_batch_size=1,
         num_critic_only_steps=0,
         ref_update_interval=None,
     )
@@ -35,6 +40,11 @@ def test_direct_loss_restores_full_ft_actor_after_reference_forward(monkeypatch)
     actor.optimizer = object()
     actor.opt_param_scheduler = object()
     actor.rollout_data_postprocess = None
+    # upstream's train_actor threads an FT test-action executor into train() and pops
+    # weight-sync metrics off the weight_updater before bumping the FT heartbeat.
+    actor._ft_test_action_executor = None
+    actor.weight_updater = SimpleNamespace(pop_metrics=lambda: {})
+    actor._heartbeat = SimpleNamespace(bump=lambda: None)
     actor._active_model_tag = "actor"
     actor._self_teacher = None
     actor.prof = SimpleNamespace(step=lambda **kwargs: None)
@@ -57,7 +67,7 @@ def test_direct_loss_restores_full_ft_actor_after_reference_forward(monkeypatch)
     actor._switch_model = MethodType(_switch, actor)
     monkeypatch.setattr(actor_utils, "train", _train)
 
-    actor.train_actor(rollout_id=0, rollout_data={})
+    actor.train_actor(rollout_id=0, rollout_data={}, witness_info=None, attempt=0)
 
     assert events == ["ref_forward", "switch:actor", "train"]
 
@@ -71,13 +81,18 @@ def test_critic_only_warmup_does_not_advance_self_teacher(monkeypatch) -> None:
     monkeypatch.setattr(actor_utils, "uses_one_trunk_critic", lambda args: True)
     monkeypatch.setattr(actor_utils, "uses_separate_critic", lambda args: False)
     monkeypatch.setattr(actor_utils, "should_backup_actor_after_train", lambda args: False)
-    monkeypatch.setattr(actor_utils, "log_perf_data", lambda *args: None)
+    # upstream passes extra_metrics= to log_perf_data.
+    monkeypatch.setattr(actor_utils, "log_perf_data", lambda *args, **kwargs: None)
     monkeypatch.setattr(actor_utils.train_dump_utils, "save_debug_train_data", lambda *args, **kwargs: None)
 
     updates = []
     actor = object.__new__(actor_utils.MegatronTrainRayActor)
     actor.args = Namespace(
         compute_advantages_and_returns=False,
+        # upstream's train_actor reads skip_actor_forward_only up front and sizes the
+        # per-step rollout counts with get_num_rollouts(args, ...).
+        skip_actor_forward_only=False,
+        global_batch_size=1,
         num_critic_only_steps=1,
         ref_update_interval=None,
     )
@@ -85,13 +100,18 @@ def test_critic_only_warmup_does_not_advance_self_teacher(monkeypatch) -> None:
     actor.optimizer = object()
     actor.opt_param_scheduler = object()
     actor.rollout_data_postprocess = None
+    # upstream's train_actor threads an FT test-action executor into train() and pops
+    # weight-sync metrics off the weight_updater before bumping the FT heartbeat.
+    actor._ft_test_action_executor = None
+    actor.weight_updater = SimpleNamespace(pop_metrics=lambda: {})
+    actor._heartbeat = SimpleNamespace(bump=lambda: None)
     actor._active_model_tag = "actor"
     actor._self_teacher = SimpleNamespace(update=lambda params: updates.append(params))
     actor.compute_ref_log_probs = MethodType(lambda self, *args: None, actor)
     actor.prof = SimpleNamespace(step=lambda **kwargs: None)
     monkeypatch.setattr(actor_utils, "train", lambda *args, **kwargs: pytest.fail("actor train must be skipped"))
 
-    actor.train_actor(rollout_id=0, rollout_data={})
+    actor.train_actor(rollout_id=0, rollout_data={}, witness_info=None, attempt=0)
 
     assert updates == []
 
@@ -105,12 +125,17 @@ def test_first_actor_step_after_critic_warmup_uses_actor_relative_promotion_cade
     monkeypatch.setattr(actor_utils, "uses_one_trunk_critic", lambda args: True)
     monkeypatch.setattr(actor_utils, "uses_separate_critic", lambda args: False)
     monkeypatch.setattr(actor_utils, "should_backup_actor_after_train", lambda args: False)
-    monkeypatch.setattr(actor_utils, "log_perf_data", lambda *args: None)
+    # upstream passes extra_metrics= to log_perf_data.
+    monkeypatch.setattr(actor_utils, "log_perf_data", lambda *args, **kwargs: None)
     monkeypatch.setattr(actor_utils.train_dump_utils, "save_debug_train_data", lambda *args, **kwargs: None)
 
     actor = object.__new__(actor_utils.MegatronTrainRayActor)
     actor.args = Namespace(
         compute_advantages_and_returns=False,
+        # upstream's train_actor reads skip_actor_forward_only up front and sizes the
+        # per-step rollout counts with get_num_rollouts(args, ...).
+        skip_actor_forward_only=False,
+        global_batch_size=1,
         num_critic_only_steps=2,
         ref_update_interval=None,
         opd_promote_interval=100,
@@ -119,6 +144,11 @@ def test_first_actor_step_after_critic_warmup_uses_actor_relative_promotion_cade
     actor.optimizer = object()
     actor.opt_param_scheduler = object()
     actor.rollout_data_postprocess = None
+    # upstream's train_actor threads an FT test-action executor into train() and pops
+    # weight-sync metrics off the weight_updater before bumping the FT heartbeat.
+    actor._ft_test_action_executor = None
+    actor.weight_updater = SimpleNamespace(pop_metrics=lambda: {})
+    actor._heartbeat = SimpleNamespace(bump=lambda: None)
     actor._active_model_tag = "actor"
     updates = []
     promotions = []
@@ -130,7 +160,7 @@ def test_first_actor_step_after_critic_warmup_uses_actor_relative_promotion_cade
     actor.prof = SimpleNamespace(step=lambda **kwargs: None)
     monkeypatch.setattr(actor_utils, "train", lambda *args, **kwargs: None)
 
-    actor.train_actor(rollout_id=2, rollout_data={})
+    actor.train_actor(rollout_id=2, rollout_data={}, witness_info=None, attempt=0)
 
     assert len(updates) == 1
     assert promotions == [True]

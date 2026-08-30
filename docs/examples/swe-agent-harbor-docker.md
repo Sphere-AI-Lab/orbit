@@ -1,6 +1,6 @@
 ---
 title: "SWE-Agent training with Harbor on Docker sandboxes"
-description: "Trains coding and terminal agents with Harbor-managed local Docker sandboxes and verifier rewards."
+description: "SWE-agent Harbor docker harness."
 # Generated from examples/swe-agent-harbor-docker/README.md by scripts/tools/sync_example_docs.py. Edit that README, not this file.
 ---
 This example trains GLM-4.7-Flash on agentic coding and terminal tasks. Miles

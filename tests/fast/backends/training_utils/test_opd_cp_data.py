@@ -54,7 +54,14 @@ def _load_rollout_data(
         "total_lengths": [11],
         "response_lengths": [7],
         "rollout_log_probs": [_ROLLOUT_LOG_PROBS.tolist()],
-        opd_key: [_OPD_VALUES.clone()],
+        # orbit: seeded as a raw list, not a tensor. Base tensorizes+CP-slices these fields
+        # unconditionally; orbit's `_tensorize_cp_sliced_log_probs` no-ops on already-tensor
+        # values, because orbit's megatron OPD teacher populates `teacher_log_probs` as
+        # response-aligned tensors *after* this point and re-slicing them would corrupt them.
+        # The wire format from the sglang OPD teacher this test covers is a raw
+        # `list[list[float]]`, so seeding one exercises the same CP slicing the base test meant
+        # to assert without weakening orbit's guard.
+        opd_key: [_OPD_VALUES.tolist()],
     }
 
     monkeypatch.setattr(data_utils, "process_rollout_data", lambda *args, **kwargs: (rollout_data, object()))

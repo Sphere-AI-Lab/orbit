@@ -3,6 +3,12 @@ from typing import Any
 
 import torch
 
+# ORBIT-SEAM: base inlines the ICE-POP band `torch.where` in `icepop_function` below; orbit
+# shares the identical expression with the OPD advantage gate through
+# `orbit.opd.advantages.icepop_gate` (re-exported by loss_hub.math_utils), so the training-side
+# correction and `apply_opd_icepop_gate` can never drift apart.
+from miles.backends.training_utils.loss_hub.math_utils import icepop_gate
+
 
 def vanilla_tis_function(
     args: Namespace,
@@ -49,9 +55,8 @@ def icepop_function(
     old_log_probs = torch.cat(train_log_probs, dim=0)
     ice_ratio = torch.exp(old_log_probs - rollout_log_probs)
     ice_abs = (torch.exp(old_log_probs - rollout_log_probs) - 1).abs()
-    ice_weight = torch.where(
-        (ice_ratio >= args.tis_clip_low) & (ice_ratio <= args.tis_clip), ice_ratio, torch.zeros_like(ice_ratio)
-    )
+    # ORBIT-SEAM: same band expression as base, routed through the shared gate (see import above)
+    ice_weight = icepop_gate(ice_ratio, args.tis_clip_low, args.tis_clip)
     ice_clipfrac = (ice_weight != ice_ratio).float()
     metrics = {
         "tis": ice_ratio.clone().detach(),

@@ -166,6 +166,10 @@ class TestGenerateEndpoint:
         assert response.status_code == 200
         assert response.json() == {
             "text": "\\boxed{8}",
+            # orbit: the mock returns output_ids at the top level, because orbit's
+            # generate_endpoint_utils prefers it over deriving tokens from
+            # output_token_logprobs when logprobs were not requested.
+            "output_ids": [59, 79075, 90, 23, 92],
             "meta_info": {
                 "finish_reason": {"type": "stop"},
                 "prompt_tokens": len(input_ids),
@@ -205,6 +209,8 @@ class TestGenerateEndpoint:
 
             assert response.json() == {
                 "text": "ok",
+                # orbit: top-level output_ids, see test_basic above.
+                "output_ids": [562],
                 "meta_info": {
                     "finish_reason": {"type": "stop"},
                     "prompt_tokens": 3,

@@ -205,14 +205,18 @@ def test_sglang_parallel_sizes_keep_server_args_destinations():
             "5",
         ]
     )
-    args.rollout_num_gpus_per_engine = 8
+    # orbit: validate_sglang_args also checks that the attention (dp x attn_cp) and MoE
+    # (ep x moe_dp) groups divide the engine's GPU count, which upstream does not. The
+    # sizes above are sentinels chosen to be pairwise distinct, so pick an engine size
+    # they actually tile (2*5 and 4*1 both divide 20) instead of weakening the check.
+    args.rollout_num_gpus_per_engine = 20
     args.true_on_policy_mode = False
     args.sglang_enable_dp_attention = True
     args.use_session_server = False
 
     validate_sglang_args(args)
 
-    assert args.sglang_tp_size == 8
+    assert args.sglang_tp_size == 20
     assert args.sglang_dp_size == 2
     assert args.sglang_pp_size == 3
     assert args.sglang_ep_size == 4
@@ -305,11 +309,6 @@ class TestRdtValidation:
         ("extra", "message"),
         [
             pytest.param(
-                ["--train-backend", "fsdp", "--advantage-estimator", "grpo"],
-                "only supported with --train-backend megatron",
-                id="fsdp",
-            ),
-            pytest.param(
                 ["--train-backend", "megatron", "--advantage-estimator", "ppo"],
                 "not compatible with Shared Actor/Critic PPO",
                 id="ppo",
@@ -321,6 +320,19 @@ class TestRdtValidation:
 
         with pytest.raises(AssertionError, match=message):
             self._validate(extra)
+
+    def test_fsdp_backend_is_rejected_before_the_rdt_check(self):
+        # orbit: upstream parametrized `--train-backend fsdp` here to reach RDT's
+        # "only supported with --train-backend megatron" assert. orbit dropped fsdp from
+        # --train-backend's choices entirely, so argparse rejects the value first and the
+        # assert is unreachable. Pin the surface that still exists rather than the assert.
+        parser = argparse.ArgumentParser()
+        get_miles_extra_args_provider()(parser)
+        with pytest.raises(SystemExit):
+            parser.parse_args(
+                ["--update-weight-transfer-mode", "rdt", "--train-backend", "fsdp", "--num-rollout", "1"]
+                + REQUIRED_ARGS
+            )
 
 
 class TestCriticSaveDerivation:
@@ -583,6 +595,14 @@ def test_critic_rejects_reward_level_kl(tmp_path):
         [
             "--advantage-estimator",
             "ppo",
+            # orbit: upstream has one critic -- the shared actor/critic one -- and applies
+            # this rule to it unconditionally. orbit spells that topology
+            # --critic-mode head/adapter (one trunk); its separate full-model critic is a
+            # topology upstream does not have and keeps a narrower rule (reward-level KL is
+            # rejected only under --num-critic-only-steps, see
+            # tests/test_critic_mode_args.py). Name the shared topology to reach the guard.
+            "--critic-mode",
+            "head",
             "--kl-coef",
             "0.05",
             "--ref-load",
@@ -605,6 +625,13 @@ class TestMultiLoRAValidation:
         get_miles_extra_args_provider()(parser)
         return parser.parse_args(
             [
+                # orbit: LoRA flags are gated behind orbit's PEFT superset
+                # (--peft-method lora/oft/none), which in turn only runs under the HF
+                # bridge. Upstream's bare --lora-rank implied both; name them.
+                "--peft-method",
+                "lora",
+                "--megatron-to-hf-mode",
+                "bridge",
                 "--multi-lora-n-adapters",
                 "2",
                 "--lora-rank",
@@ -793,7 +820,10 @@ def test_sglang_parallel_sizes_use_short_namespace_fields(parallel_args, expecte
     assert not hasattr(args, "sglang_pipeline_parallel_size")
     assert not hasattr(args, "sglang_expert_parallel_size")
 
-    args.rollout_num_gpus_per_engine = 8
+    # orbit: see test_sglang_parallel_sizes_keep_server_args_destinations -- orbit's
+    # validate_sglang_args adds attention/MoE divisibility checks, so the engine size
+    # has to tile dp x attn_cp (3) and ep x moe_dp (5); 60 does, 8 does not.
+    args.rollout_num_gpus_per_engine = 60
     args.true_on_policy_mode = False
     args.recompute_logprobs_via_prefill = False
     args.sglang_router_policy = None
@@ -801,7 +831,7 @@ def test_sglang_parallel_sizes_use_short_namespace_fields(parallel_args, expecte
 
     validate_sglang_args(args)
 
-    assert args.sglang_tp_size == 8
+    assert args.sglang_tp_size == 60
     assert (args.sglang_dp_size, args.sglang_pp_size, args.sglang_ep_size) == expected[1:]
 
 
@@ -815,8 +845,15 @@ def test_sglang_parallel_size_aliases_keep_last_value():
 
 
 def _make_async_ppo_args(**overrides) -> SimpleNamespace:
+    # orbit: orbit's validate_async_off_policy_correction is a superset of upstream's --
+    # it gates on --advantage-estimator (PPO implies a critic in both adapter and
+    # separate modes) rather than a precomputed use_critic, and additionally requires a
+    # positive --update-weights-interval, with --keep-old-actor only counting as a
+    # behavior-policy correction at interval 1. Supply both so the namespace matches.
     defaults = dict(
         use_critic=True,
+        advantage_estimator="ppo",
+        update_weights_interval=1,
         use_rollout_logprobs=False,
         use_tis=False,
         keep_old_actor=False,
@@ -835,7 +872,10 @@ class TestValidateAsyncOffPolicyCorrection:
         validate_async_off_policy_correction(_make_async_ppo_args(**{flag: True}))
 
     def test_non_ppo_estimators_are_unaffected(self):
-        validate_async_off_policy_correction(_make_async_ppo_args(use_critic=False))
+        # orbit: the gate reads --advantage-estimator, not use_critic (see above).
+        validate_async_off_policy_correction(
+            _make_async_ppo_args(use_critic=False, advantage_estimator="grpo")
+        )
 
 
 class TestValidateRematerializeParamFromMasterWeight:
@@ -908,8 +948,10 @@ class TestValidateRematerializeParamFromMasterWeight:
         "overrides",
         [
             {"train_backend": "fsdp"},
-            {"lora_rank": 8},
-            {"lora_adapter_path": "/path/to/adapter"},
+            # orbit: is_lora_enabled() reads orbit's --peft-method, so a bare lora_rank /
+            # lora_adapter_path is not "LoRA enabled" any more. Name the method too.
+            {"peft_method": "lora", "lora_rank": 8},
+            {"peft_method": "lora", "lora_adapter_path": "/path/to/adapter"},
             {"debug_disable_optimizer": True},
             {"indep_dp": True},
             {"colocate": False},

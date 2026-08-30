@@ -337,13 +337,14 @@ def _barrier_after_dump_dir_cleanup() -> None:
 
 def _get_phase_override_configs(args: Namespace, phase: DumperPhase) -> dict[str, Any]:
     raw = getattr(args, f"dumper_{phase.value}")
-    # ORBIT-SEAM: skip kv parsing when the dumper is disabled (older sglang lacks _kv_pairs_to_dict)
-    # Older sglang versions (e.g. 0.5.9) do not expose
-    # DumperConfig._kv_pairs_to_dict. If the dumper is disabled, we never
-    # need to parse the raw kv pairs; short-circuit to avoid the missing
-    # classmethod.
-    if not args.dumper_enable:
-        return {"enable": False}
+    # ORBIT-SEAM: guard the kv parsing on the classmethod actually existing. Older sglang
+    # versions (e.g. 0.5.9) do not expose DumperConfig._kv_pairs_to_dict; without it there
+    # is nothing to parse, so the phase falls back to the global --dumper-enable.
+    # (This used to short-circuit on `not args.dumper_enable`, which also dropped base's
+    # rule that a per-phase `enable=true` override turns a phase on with the global flag
+    # off -- see test_sglang_env_includes_startup_dumper_settings.)
+    if not hasattr(DumperConfig, "_kv_pairs_to_dict"):
+        return {"enable": args.dumper_enable}
     return {"enable": args.dumper_enable, **DumperConfig._kv_pairs_to_dict(raw)}
 
 

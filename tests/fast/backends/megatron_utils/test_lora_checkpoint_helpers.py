@@ -69,9 +69,13 @@ class TestIsMegatronCheckpoint:
 
 
 class TestSaveCheckpointWithLoRA:
+    # orbit: base's LoRA-only save is orbit's PEFT save (LoRA *and* OFT adapters), so the two
+    # collaborators this branch routes through are renamed: `is_lora_model` -> `is_peft_model`
+    # and `save_lora_checkpoint` -> `save_peft_checkpoint`. The branch logic under test is
+    # unchanged, so the patch targets move but the assertions do not.
     @patch("miles.backends.megatron_utils.checkpoint.get_args")
-    @patch("miles.backends.megatron_utils.checkpoint.save_lora_checkpoint")
-    @patch("miles.backends.megatron_utils.checkpoint.is_lora_model", return_value=True)
+    @patch("miles.backends.megatron_utils.checkpoint.save_peft_checkpoint")
+    @patch("miles.backends.megatron_utils.checkpoint.is_peft_model", return_value=True)
     def test_lora_model_saves_adapter(self, mock_is_lora, mock_save_lora, mock_get_args, tmp_path):
         mock_get_args.return_value = Namespace(save=str(tmp_path))
         model = [MagicMock()]
@@ -84,7 +88,7 @@ class TestSaveCheckpointWithLoRA:
 
     @patch("miles.backends.megatron_utils.checkpoint.get_args")
     @patch("miles.backends.megatron_utils.checkpoint.save_checkpoint")
-    @patch("miles.backends.megatron_utils.checkpoint.is_lora_model", return_value=False)
+    @patch("miles.backends.megatron_utils.checkpoint.is_peft_model", return_value=False)
     def test_non_lora_model_saves_regular(self, mock_is_lora, mock_save_ckpt, mock_get_args, tmp_path):
         mock_get_args.return_value = Namespace(save=str(tmp_path))
         model = [MagicMock()]

@@ -1,6 +1,6 @@
 ---
 title: "Random fully-async example"
-description: "Dataset-free stress test of the async rollout ↔ trainer loop."
+description: "Randomized async off-policy stress recipes."
 # Generated from examples/infra_features/random_async/README.md by scripts/tools/sync_example_docs.py. Edit that README, not this file.
 ---
 Minimal sibling of `examples/infra_features/fully_async/`. Exercises the entire async

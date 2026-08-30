@@ -9,6 +9,7 @@ import torch
 from miles.backends.megatron_utils import actor as actor_utils
 from miles.backends.megatron_utils import checkpoint as checkpoint_utils
 from miles.backends.megatron_utils import lora_utils
+from miles.backends.megatron_utils import hf_export as hf_export_utils
 from miles.backends.megatron_utils import model as model_utils
 from orbit.megatron import peft_utils
 from orbit.opd.self_teacher import SelfTeacherBuffer
@@ -213,7 +214,11 @@ def test_actor_save_forwards_teacher_and_separate_critic_stays_teacher_free(monk
 
     monkeypatch.setattr(actor_utils, "save", save)
     monkeypatch.setattr(actor_utils, "uses_one_trunk_critic", lambda args: False)
+    # upstream's save_model now imports save_hf_model from megatron_utils.hf_export
+    # (orbit's self_teacher-sidecar copy in megatron_utils.model is still the one the
+    # direct-call tests above exercise; consolidating the two is a separate flag).
     monkeypatch.setattr(model_utils, "save_hf_model", save_hf_model)
+    monkeypatch.setattr(hf_export_utils, "save_hf_model", save_hf_model)
 
     def actor_for(role: str, *, with_teacher: bool):
         actor = object.__new__(actor_utils.MegatronTrainRayActor)
@@ -223,8 +228,12 @@ def test_actor_save_forwards_teacher_and_separate_critic_stays_teacher_free(monk
             debug_rollout_only=False,
             offload_train=False,
             save_hf="checkpoint-{rollout_id}",
+            # upstream added a post-save hook at the tail of save_model.
+            custom_megatron_post_save_hook_path=None,
         )
         actor.role = role
+        # upstream's save_model opens with a fault-tolerance heartbeat bump.
+        actor._heartbeat = SimpleNamespace(bump=lambda: None)
         actor.model = [object()]
         actor.optimizer = object()
         actor.opt_param_scheduler = object()

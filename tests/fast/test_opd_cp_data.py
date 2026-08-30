@@ -24,11 +24,20 @@ def _parallel_state(*, cp_size: int, cp_rank: int = 0) -> ParallelState:
         intra_dp_cp=GroupInfo(rank=cp_rank, size=cp_size, group=None),
         cp=GroupInfo(rank=cp_rank, size=cp_size, group=None),
         tp=trivial_group,
+        # upstream's ParallelState gained required pp/ep/etp/indep_dp groups; trivial here.
+        pp=trivial_group,
+        ep=trivial_group,
+        etp=trivial_group,
+        indep_dp=trivial_group,
     )
 
 
 def _args(qkv_format: str, *, dsv4: bool = False) -> Namespace:
     return Namespace(
+        # upstream's get_rollout_data now consults args.enable_witness and,
+        # on the bshd path, args.compress_ratios.
+        enable_witness=False,
+        compress_ratios=[],
         qkv_format=qkv_format,
         data_pad_size_multiplier=16,
         allgather_cp=False,
@@ -63,12 +72,15 @@ def _load_rollout_data(
         opd_key: [_OPD_VALUES.tolist()],
     }
 
-    monkeypatch.setattr(data_utils, "process_rollout_data", lambda *args, **kwargs: rollout_data)
+    # upstream's process_rollout_data/get_rollout_data now return
+    # (rollout_data, object_store_get_result); only the first element is under test.
+    monkeypatch.setattr(data_utils, "process_rollout_data", lambda *args, **kwargs: (rollout_data, object()))
     monkeypatch.setattr(data_utils, "get_parallel_state", lambda: parallel_state)
     monkeypatch.setattr(cp_utils, "get_parallel_state", lambda: parallel_state)
     monkeypatch.setattr(torch.cuda, "current_device", lambda: torch.device("cpu"))
 
-    return data_utils.get_rollout_data(_args(qkv_format, dsv4=dsv4), object())
+    loaded_rollout_data, _store_get_result = data_utils.get_rollout_data(_args(qkv_format, dsv4=dsv4), object())
+    return loaded_rollout_data
 
 
 @pytest.mark.parametrize("opd_key", ["teacher_log_probs", "opd_reverse_kl"])
@@ -184,7 +196,8 @@ def test_dsv4_padded_thd_teacher_hidden_states_align_with_actual_jsd_logits(
         "rollout_log_probs": [_ROLLOUT_LOG_PROBS.tolist()],
         "teacher_hidden_states": [hidden],
     }
-    monkeypatch.setattr(data_utils, "process_rollout_data", lambda *args, **kwargs: rollout_data)
+    # upstream's process_rollout_data returns (rollout_data, object_store_get_result).
+    monkeypatch.setattr(data_utils, "process_rollout_data", lambda *args, **kwargs: (rollout_data, object()))
     monkeypatch.setattr(data_utils, "get_parallel_state", lambda: parallel_state)
     monkeypatch.setattr(cp_utils, "get_parallel_state", lambda: parallel_state)
     monkeypatch.setattr(torch.cuda, "current_device", lambda: torch.device("cpu"))
@@ -201,7 +214,7 @@ def test_dsv4_padded_thd_teacher_hidden_states_align_with_actual_jsd_logits(
     args.log_probs_chunk_size = -1
     args.vocab_size = 3
 
-    batch = data_utils.get_rollout_data(args, object())
+    batch, _store_get_result = data_utils.get_rollout_data(args, object())
     batch["unconcat_tokens"] = [torch.as_tensor(batch["tokens"][0])]
 
     # Rows 3..9 predict the seven response tokens.  Their real-vocabulary

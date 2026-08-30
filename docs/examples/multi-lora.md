@@ -1,6 +1,6 @@
 ---
 title: "Multi-LoRA Training Example (fully-async)"
-description: "Fully-async multi-adapter LoRA training with a slot-keyed adapter page table."
+description: "Multi-tenant LoRA training and rollout."
 # Generated from examples/multi_lora/README.md by scripts/tools/sync_example_docs.py. Edit that README, not this file.
 ---
 Train multiple LoRA adapters concurrently against a shared base model, using a

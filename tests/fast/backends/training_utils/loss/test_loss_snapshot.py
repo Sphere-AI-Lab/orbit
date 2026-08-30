@@ -22,6 +22,7 @@ from miles.backends.training_utils.loss import compute_advantages_and_returns, l
 from miles.backends.training_utils.loss_hub.corrections import icepop_function, vanilla_tis_function
 from miles.backends.training_utils.loss_hub.logit_processors import get_log_probs_and_entropy, get_values
 from miles.backends.training_utils.loss_hub.losses import policy_loss_function, sft_loss_function, value_loss_function
+from miles.backends.training_utils.loss_hub.math_utils import VALUE_EV_STAT_KEYS
 
 from .loss_test_utils import (
     args_from_dict,
@@ -40,6 +41,33 @@ from .loss_test_utils import (
 SNAPSHOT_DIR = Path(__file__).parent / "loss_snapshots"
 VOCAB_SIZE = 128
 SEED = 42
+
+# orbit: the snapshots are captured from upstream miles, whose policy/value losses emit a
+# strictly smaller metric set than orbit's. Orbit adds two diagnostics that upstream has no
+# counterpart for, so the recorded metric dicts can never match key-for-key:
+#   * "train_rollout_logprob_abs_diff_max" - the worst-token train-vs-rollout log-prob gap
+#     (upstream only records the mean).
+#   * VALUE_EV_STAT_KEYS - the critic explained-variance sufficient statistics.
+# Both are additive: they change no value the snapshot does carry. Rather than weaken the
+# comparison (which is exact, including tensor values and grads, for every shared key), drop
+# just these keys from the freshly computed side before comparing. Their own semantics are
+# covered by tests/fast/test_value_explained_var.py and
+# tests/fast/test_unbiased_kl_numerics.py. Snapshot capture (--snapshot) is untouched.
+ORBIT_ONLY_METRIC_KEYS = frozenset({"train_rollout_logprob_abs_diff_max", *VALUE_EV_STAT_KEYS})
+
+
+def _drop_orbit_only_metrics(outputs: dict) -> dict:
+    """Strip orbit-only metric keys from `run_all` output so upstream snapshots compare."""
+    loss_fn = outputs["loss_fn"]
+    loss_fn["metrics"] = {k: v for k, v in loss_fn["metrics"].items() if k not in ORBIT_ONLY_METRIC_KEYS}
+
+    dispatcher = outputs["loss_function_dispatcher"]
+    keys = dispatcher["log_dict_keys"]
+    # log_dict_values is [count, <one value per key>], so key i maps to value i + 1.
+    keep = [0] + [i + 1 for i, k in enumerate(keys) if k not in ORBIT_ONLY_METRIC_KEYS]
+    dispatcher["log_dict_keys"] = [k for k in keys if k not in ORBIT_ONLY_METRIC_KEYS]
+    dispatcher["log_dict_values"] = dispatcher["log_dict_values"][keep]
+    return outputs
 
 # ---------------------------------------------------------------------------
 # Test configurations: (name, args_overrides, batch_size, prompt_lens, response_lens)
@@ -252,4 +280,6 @@ class TestLossSnapshot:
             saved_inputs, saved_outputs = load_snapshot(path)
             saved_args = args_from_dict(saved_inputs["args_dict"])
             outputs = run_all(saved_args, parallel_state, saved_inputs)
+            # orbit: see ORBIT_ONLY_METRIC_KEYS above.
+            outputs = _drop_orbit_only_metrics(outputs)
             assert_outputs_equal(outputs, saved_outputs)

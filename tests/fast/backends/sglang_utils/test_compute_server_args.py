@@ -17,6 +17,10 @@ def make_args(**overrides) -> SimpleNamespace:
         sglang_dp_size=1,
         sglang_pp_size=1,
         sglang_ep_size=1,
+        # orbit: two parallelism knobs orbit adds to the engine's server args
+        # (attn_cp_size / moe_dp_size); both default to 1 in argument finalisation.
+        sglang_attn_cp_size=1,
+        sglang_moe_dp_size=1,
         sglang_mem_fraction_static=0.7,
         use_rollout_routing_replay=False,
         use_rollout_indexer_replay=False,
@@ -54,11 +58,15 @@ class TestSglangOverridePrecedence:
         assert server_args["dtype"] == "bfloat16"
 
     def test_override_wins_over_lora_defaults(self):
-        args = make_args(lora_rank=8)
+        # orbit: base routes rollout LoRA through sglang's multi-tenant LoRAManager
+        # (`enable_lora`, gated on lora_rank); orbit replaces that end-to-end with a
+        # `peft_method` dispatch onto the fork's single-active peft/lora path, whose
+        # args-derived rank knob is `peft_max_lora_rank`. Same assertion, orbit's field.
+        args = make_args(peft_method="lora", lora_rank=8)
 
-        server_args = compute(args, sglang_overrides={"enable_lora": False})
+        server_args = compute(args, sglang_overrides={"peft_max_lora_rank": 64})
 
-        assert server_args["enable_lora"] is False
+        assert server_args["peft_max_lora_rank"] == 64
 
     @pytest.mark.parametrize("value", [0.5, 0.95])
     def test_override_wins_over_base_sglang_args(self, value):
@@ -69,10 +77,13 @@ class TestSglangOverridePrecedence:
         assert server_args["mem_fraction_static"] == value
 
     def test_no_overrides_keeps_args_derived_values(self):
-        args = make_args(fp16=True, lora_rank=8)
+        args = make_args(fp16=True, peft_method="lora", lora_rank=8)
 
         server_args = compute(args)
 
         assert server_args["dtype"] == "float16"
-        assert server_args["enable_lora"] is True
+        # orbit: see test_override_wins_over_lora_defaults — `peft_method` is orbit's
+        # single-active replacement for base's `enable_lora`.
+        assert server_args["peft_method"] == "lora"
+        assert server_args["peft_max_lora_rank"] == 8
         assert server_args["mem_fraction_static"] == 0.7

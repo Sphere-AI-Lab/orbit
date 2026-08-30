@@ -234,7 +234,7 @@ def test_argparse_accepts_llama3_and_rejects_junk(monkeypatch):
     import miles.utils.arguments as arguments
     from miles.utils.arguments import get_orbit_extra_args_provider
 
-    monkeypatch.setattr(arguments, "enable_experimental_rollout_refactor", lambda: False)
+    monkeypatch.setattr(arguments, "use_legacy_rollout_v1", lambda: True)
     parser = argparse.ArgumentParser()
     get_orbit_extra_args_provider()(parser)
 

@@ -371,3 +371,23 @@ and standalone tool/parity script):
 | `CUDA_HOME` | Override the auto-detected CUDA root. |
 | `MEGATRON_BRIDGE_ROOT` | If set, prepended to `PYTHONPATH` before `ORBIT_ROOT`. |
 | `DEFAULT_OUTPUT_ROOT` | Base directory for `default_output_path` (used by conversion scripts). |
+
+## Example directory
+
+- **[adapter_first](adapter_first/)**: Adapter-first RL recipes (OFT/LoRA phase-0 suites and OPD cost studies).
+- **[high_precision](high_precision/)**: BF16 full-finetune and PEFT RL recipes, including the one-trunk adapter-critic PPO smokes.
+- **[infra_features](infra_features/)**: Infrastructure feature demos (async modes, low precision, weight transfer).
+- **[infra_features/fully_async](infra_features/fully_async/)**: Fully asynchronous rollout/training overlap recipes.
+- **[infra_features/low_precision](infra_features/low_precision/)**: RL on quantized checkpoints (INT4/NVFP4/FP8/MXFP4) with OFT.
+- **[infra_features/p2p_weight_transfer](infra_features/p2p_weight_transfer/)**: Peer-to-peer weight-update transfer mode.
+- **[infra_features/random_async](infra_features/random_async/)**: Randomized async off-policy stress recipes.
+- **[multi_lora](multi_lora/)**: Multi-tenant LoRA training and rollout.
+- **[on_policy_distillation](on_policy_distillation/)**: On-policy distillation (MOPD) recipes: external/managed teachers, teacher pools, self-teacher.
+- **[on_policy_distillation/qwen3_5_35b_selfdistill](on_policy_distillation/qwen3_5_35b_selfdistill/)**: Qwen3.5-35B self-distillation campaign.
+- **[peft_arena/backend](peft_arena/backend/)**: PEFT-Arena evaluation backend and graders.
+- **[peft_arena/eval](peft_arena/eval/)**: PEFT-Arena math evaluation launchers.
+- **[ppo](ppo/)**: PPO recipes on the vendored upstream flow.
+- **[search_r1](search_r1/)**: Search-R1 tool-use RL recipes.
+- **[sft](sft/)**: Supervised fine-tuning launchers.
+- **[swe-agent-harbor-docker](swe-agent-harbor-docker/)**: SWE-agent Harbor docker harness.
+- **[tau_bench](tau_bench/)**: Tau-bench agentic RL recipes.

@@ -179,12 +179,21 @@ class TestSendHfParamsEmptyLoraDetection:
 class TestUpdateWeightsZeroChunks:
     """When the weight iterator yields nothing for LoRA, raise instead of silently succeeding."""
 
+    # orbit: base issues the sync barriers as bare `dist.barrier(group=get_gloo_group())` inside
+    # this module, so patching the module's `dist` was enough to neutralise them. Orbit wraps each
+    # one in `_barrier_with_logging` (orbit/megatron/sync_metrics.py) so the weight-sync trace
+    # brackets it — same group, same collective — and that helper imports torch.distributed
+    # itself, so the module-level `dist` patch no longer reaches it. Patch the wrapper instead;
+    # the behaviour under test (zero-chunk detection) is unrelated to the barriers.
+    @patch(f"{_UW_MODULE}._barrier_with_logging")
     @patch("miles.backends.megatron_utils.update_weight.common.ray")
     @patch(f"{_UW_MODULE}.get_gloo_group", return_value=MagicMock())
     @patch(f"{_UW_MODULE}.ray")
     @patch(f"{_UW_MODULE}.dist")
     @patch(f"{_UW_MODULE}.HfWeightIteratorBase")
-    def test_raises_on_zero_lora_chunks(self, mock_iter_base, mock_dist, mock_ray, mock_gloo, mock_common_ray):
+    def test_raises_on_zero_lora_chunks(
+        self, mock_iter_base, mock_dist, mock_ray, mock_gloo, mock_common_ray, mock_barrier
+    ):
         from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
 
         mock_dist.get_world_size.return_value = 1
@@ -210,13 +219,15 @@ class TestUpdateWeightsZeroChunks:
         with pytest.raises(RuntimeError, match="zero chunks"):
             updater.update_weights()
 
+    # orbit: see test_raises_on_zero_lora_chunks above.
+    @patch(f"{_UW_MODULE}._barrier_with_logging")
     @patch("miles.backends.megatron_utils.update_weight.common.ray")
     @patch(f"{_UW_MODULE}.get_gloo_group", return_value=MagicMock())
     @patch(f"{_UW_MODULE}.ray")
     @patch(f"{_UW_MODULE}.dist")
     @patch(f"{_UW_MODULE}.HfWeightIteratorBase")
     def test_no_raise_for_base_model_zero_chunks(
-        self, mock_iter_base, mock_dist, mock_ray, mock_gloo, mock_common_ray
+        self, mock_iter_base, mock_dist, mock_ray, mock_gloo, mock_common_ray, mock_barrier
     ):
         """Base model weight sync with zero chunks is valid (e.g. empty model state)."""
         mock_dist.get_world_size.return_value = 1

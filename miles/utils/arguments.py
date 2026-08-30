@@ -2989,7 +2989,7 @@ def _common_orbit_validate_args(args):
 
     # TODO: During loading, we need to set the start_rollout_id here.
     if args.megatron_to_hf_mode == "bridge":
-        # ORBIT-SEAM: bridge load-path resolution moved to orbit's low-precision bootstrap (resolves/validates NVFP4 + INT4 quantized checkpoints); it also drops base's unconditional `args.start_rollout_id = 0`
+        # ORBIT-SEAM: bridge load-path resolution moved to orbit's low-precision bootstrap (resolves/validates NVFP4 + INT4 quantized checkpoints). It carries base's fresh-run fallback (missing dir / missing tracker -> ref_load or hf_checkpoint, start_rollout_id = 0), narrowed by one case: a --load that already is a Megatron checkpoint dir is kept without a tracker, because converted INT4/NVFP4 dist checkpoints never write one
         _apply_bridge_load_path(args)
     else:
         if (
@@ -3241,14 +3241,12 @@ def _common_orbit_validate_args(args):
             )
             args.rollout_num_gpus = args.actor_num_gpus_per_node * args.actor_num_nodes
 
-    if args.use_critic and not args.debug_rollout_only:
-        if args.offload_train is None:
-            args.offload_train = True
-        elif not args.offload_train:
-            logger.warning(
-                "--no-offload-train with shared Actor/Critic PPO is reserved for offload debugging: "
-                "both models stay resident on the shared train GPUs, so make sure they fit."
-            )
+    # ORBIT-SEAM: base defaults `offload_train = True` for every critic run (its critic
+    # is always the shared one-GPU-set actor/critic). Orbit's critic is a full-model
+    # trainer on its own workers and `_validate_ppo_args` rejects --offload-train with
+    # --advantage-estimator ppo outright, so keeping base's default would make every
+    # orbit PPO run fail its own validation. Offload stays whatever the operator asked
+    # for; the rejection below is the single source of truth.
 
     # ORBIT-SEAM: base's offload_train/offload_rollout finalization replaced by orbit's PEFT-aware version (--offload-train-{grad-buffers,optimizer,adapter,async,frozen-base-mode}), followed by the PPO/critic-mode checks. Also removed base validation: the `disable_grad_buffers_cpu_backup`/`disable_param_buffers_cpu_backup` defaulting -- neither flag exists anywhere in orbit's tree.
     _finalize_train_offload_args(args)

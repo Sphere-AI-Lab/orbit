@@ -84,6 +84,10 @@ def make_args(**overrides: Any) -> Namespace:
         prefill_num_servers=None,
         # routers / session server
         use_miles_router=False,
+        # orbit: --use-miles-router is registered as --use-orbit-router (orbit_validate_args
+        # keeps use_miles_router as a read-only alias for upstream code that still reads it).
+        # miles/ray/rollout/router_manager.py reads the orbit name.
+        use_orbit_router=False,
         use_session_server=False,
         session_server_ip=None,
         session_server_port=None,

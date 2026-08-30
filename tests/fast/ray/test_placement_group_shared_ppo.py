@@ -21,11 +21,15 @@ def _layout_args(**overrides):
     return Namespace(**values)
 
 
+# orbit: _get_placement_group_layout returns (num_gpus, rollout_offset, critic_offset),
+# not upstream's (num_gpus, rollout_offset) -- orbit's full-mode PPO critic gets its own
+# bundles right after the actor's, where upstream colocates the critic on the actor PG.
+# These args carry no critic, so critic_offset is just the actor bundle count.
 @pytest.mark.parametrize(
     ("colocate", "expected"),
     [
-        (False, (6, 2)),
-        (True, (4, 0)),
+        (False, (6, 2, 2)),
+        (True, (4, 0, 2)),
     ],
 )
 def test_shared_ppo_counts_actor_bundles_once(colocate, expected):
@@ -33,11 +37,11 @@ def test_shared_ppo_counts_actor_bundles_once(colocate, expected):
 
 
 def test_debug_train_only_counts_actor_bundles_once():
-    assert _get_placement_group_layout(_layout_args(debug_train_only=True)) == (2, 0)
+    assert _get_placement_group_layout(_layout_args(debug_train_only=True)) == (2, 0, 2)
 
 
 def test_external_rollout_only_reserves_no_local_bundles():
-    assert _get_placement_group_layout(_layout_args(debug_rollout_only=True, rollout_external=True)) == (0, 0)
+    assert _get_placement_group_layout(_layout_args(debug_rollout_only=True, rollout_external=True)) == (0, 0, 2)
 
 
 async def test_critic_role_disables_reward_kl_and_preserves_actor_args(monkeypatch):
@@ -55,6 +59,11 @@ async def test_critic_role_disables_reward_kl_and_preserves_actor_args(monkeypat
         async def set_rollout_manager(self):
             return None
 
+        # orbit: the separate-critic branch wires the actor to the critic group.
+        async def connect(self, other):
+            self.connected_to = other
+            return None
+
     def _allocate_train_group(*, args, role, with_ref, **_kwargs):
         group = _Group(args, role, with_ref)
         groups.append(group)
@@ -67,6 +76,11 @@ async def test_critic_role_disables_reward_kl_and_preserves_actor_args(monkeypat
         critic_num_nodes=1,
         critic_num_gpus_per_node=2,
         use_critic=True,
+        # orbit: create_training_models reads advantage_estimator (needs_opd_teacher covers
+        # pure MOPD as well as --use-opd) and critic_mode (uses_separate_critic gates the
+        # critic group, since adapter/head critics live inside the actor workers).
+        advantage_estimator="ppo",
+        critic_mode="full",
         kl_coef=0.1,
         use_kl_loss=False,
         use_opd=True,

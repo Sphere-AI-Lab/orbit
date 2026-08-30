@@ -375,17 +375,23 @@ class TestExecuteTrain:
 
         assert submitted[len(submitted) - len(declared) :] == declared
 
+    # orbit: upstream's two FSDP-shaped expectations (no model-args expansion, no
+    # CUDA_DEVICE_MAX_CONNECTIONS pin) are unreachable here -- orbit is Megatron-only and
+    # execute_train rejects `--train-backend fsdp` up front. Pin the rejection instead; if
+    # FSDP ever returns, these are the two behaviours to restore.
     def test_omits_the_model_args_for_fsdp(self, commands):
-        """FSDP has no megatron model config to expand."""
-        command_utils.execute_train(train_args="--train-backend fsdp", num_gpus_per_node=8, megatron_model_type=None)
-
-        assert "--num-layers" not in commands[-1]
+        """FSDP has no megatron model config to expand -- orbit rejects it outright."""
+        with pytest.raises(AssertionError, match="FSDP train backend is no longer supported"):
+            command_utils.execute_train(
+                train_args="--train-backend fsdp", num_gpus_per_node=8, megatron_model_type=None
+            )
 
     def test_drops_cuda_device_max_connections_for_fsdp(self, commands):
-        """Pinning it to 1 breaks computation/communication overlap on FSDP."""
-        command_utils.execute_train(train_args="--train-backend fsdp", num_gpus_per_node=8, megatron_model_type=None)
-
-        assert "CUDA_DEVICE_MAX_CONNECTIONS" not in _runtime_env(commands[-1])
+        """Pinning it to 1 breaks overlap on FSDP -- orbit never gets that far."""
+        with pytest.raises(AssertionError, match="FSDP train backend is no longer supported"):
+            command_utils.execute_train(
+                train_args="--train-backend fsdp", num_gpus_per_node=8, megatron_model_type=None
+            )
 
     def test_pins_cuda_device_max_connections_for_megatron(self, commands):
         """Megatron requires the serialized copy engine ordering."""

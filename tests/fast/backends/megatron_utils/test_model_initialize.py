@@ -137,16 +137,46 @@ def _mock_megatron_environment():
         sys.modules.update(original_modules)
 
 
+# orbit: base's initialize_model_and_optimizer is one build-then-load sequence that always calls
+# load_checkpoint. Orbit adds three decisions ahead of it: a low-precision-PEFT branch that builds
+# the model before the optimizer, a `--load` that may be absent or empty (one-trunk critic builds),
+# and a value head the checkpoint cannot supply. None of them is what these two tests are about
+# (whether the LR scheduler is fast-forwarded after a resume), so they are pinned to base's
+# behaviour: base order, a loadable checkpoint, no critic-head reinit.
 def _patch_initialize_side_effects(stack: ExitStack) -> None:
     stack.enter_context(patch("miles.backends.megatron_utils.model.clear_memory"))
     stack.enter_context(patch("miles.backends.megatron_utils.model.check_peak_gpu_memory_after_load"))
     stack.enter_context(patch("miles.backends.megatron_utils.model.check_model_hashes"))
+    stack.enter_context(
+        patch(
+            "miles.backends.megatron_utils.model.should_preload_low_precision_model_before_optimizer",
+            return_value=False,
+        )
+    )
+    stack.enter_context(patch("miles.backends.megatron_utils.model._has_loadable_ckpt", return_value=True))
+    stack.enter_context(
+        patch("miles.backends.megatron_utils.model._critic_output_layer_needs_reinit", return_value=False)
+    )
+
+
+# orbit: the args the base branch of orbit's initialize_model_and_optimizer reads on the way to the
+# scheduler decision, beyond base's own two.
+_ORBIT_INITIALIZE_ARGS = dict(
+    load="/some/checkpoint",
+    peft_method="none",
+    multi_lora=False,
+    megatron_to_hf_mode="bridge",
+    lora_adapter_path=None,
+    custom_model_provider_path=None,
+    fp16=False,
+    bf16=False,
+)
 
 
 def test_initialize_does_not_step_scheduler_restored_from_checkpoint():
     from miles.backends.megatron_utils.model import initialize_model_and_optimizer
 
-    args = Namespace(use_checkpoint_opt_param_scheduler=True, global_batch_size=8)
+    args = Namespace(use_checkpoint_opt_param_scheduler=True, global_batch_size=8, **_ORBIT_INITIALIZE_ARGS)
     model = [_FakeModelChunk()]
     optimizer = object()
     opt_param_scheduler = MagicMock()
@@ -169,7 +199,7 @@ def test_initialize_does_not_step_scheduler_restored_from_checkpoint():
 def test_initialize_steps_scheduler_when_checkpoint_did_not_restore_it():
     from miles.backends.megatron_utils.model import initialize_model_and_optimizer
 
-    args = Namespace(use_checkpoint_opt_param_scheduler=False, global_batch_size=8)
+    args = Namespace(use_checkpoint_opt_param_scheduler=False, global_batch_size=8, **_ORBIT_INITIALIZE_ARGS)
     model = [_FakeModelChunk()]
     optimizer = object()
     opt_param_scheduler = MagicMock()

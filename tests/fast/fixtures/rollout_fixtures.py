@@ -14,6 +14,8 @@ from unittest.mock import patch
 import pytest
 import requests
 
+from tests.fast.fixtures.generation_fixtures import megatron_shape_argv
+
 from miles.rollout.data_source import DataSource, RolloutDataSourceWithBuffer
 from miles.rollout.session.server import SessionServer
 from miles.router.router import MilesRouter
@@ -41,8 +43,11 @@ class RolloutEnv:
 def _build_args(*, data_path: str, router_port: int, extra_argv: list[str] | None = None) -> Namespace:
     argv = [
         "pytest",
+        # orbit: upstream uses the FSDP backend here; orbit deletes it and narrows
+        # --train-backend to choices=["megatron"], so the megatron shape flags that
+        # hf_validate_args checks must be supplied too (see megatron_shape_argv).
         "--train-backend",
-        "fsdp",
+        "megatron",
         "--ci-test",
         "--rollout-batch-size",
         "1",
@@ -67,14 +72,17 @@ def _build_args(*, data_path: str, router_port: int, extra_argv: list[str] | Non
         "--eval-prompt-data",
         "toy",
         data_path,
-        "--use-miles-router",
+        # orbit: renamed --use-miles-router -> --use-orbit-router (orbit's own
+        # pass-through router; ORBIT-SEAM in miles/ray/rollout/router_manager.py).
+        # args.use_miles_router survives as a read-only alias, but the CLI flag is gone.
+        "--use-orbit-router",
         "--sglang-router-ip",
         "127.0.0.1",
         "--sglang-router-port",
         str(router_port),
         "--rollout-max-response-len",
         "16",
-    ] + (extra_argv or [])
+    ] + megatron_shape_argv("Qwen/Qwen3-0.6B") + (extra_argv or [])
     with patch("sys.argv", argv):
         args = parse_args()
     init_http_client(args)

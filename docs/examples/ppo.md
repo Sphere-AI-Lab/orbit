@@ -1,6 +1,6 @@
 ---
 title: "PPO Example"
-description: "Actor-critic PPO with GAE advantages, where the critic shares the actor's train GPUs."
+description: "PPO recipes on the vendored upstream flow."
 # Generated from examples/ppo/README.md by scripts/tools/sync_example_docs.py. Edit that README, not this file.
 ---
 This example trains Qwen3-4B with **PPO** — the actor-critic algorithm, with a learned value

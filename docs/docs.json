@@ -242,14 +242,18 @@
      {
       "group": "Recipes",
       "pages": [
-       "examples/geo3k-vlm",
-       "examples/geo3k-vlm/multi-turn",
+       "examples/adapter-first",
+       "examples/high-precision",
        "examples/multi-lora",
        "examples/on-policy-distillation",
        "examples/on-policy-distillation/qwen3-5-35b-selfdistill",
+       "examples/peft-arena/backend",
+       "examples/peft-arena/eval",
        "examples/ppo",
-       "examples/retool-v2",
-       "examples/swe-agent-harbor-docker"
+       "examples/search-r1",
+       "examples/sft",
+       "examples/swe-agent-harbor-docker",
+       "examples/tau-bench"
       ]
      },
      {
@@ -259,9 +263,7 @@
        "examples/infra-features/fully-async",
        "examples/infra-features/low-precision",
        "examples/infra-features/p2p-weight-transfer",
-       "examples/infra-features/random-async",
-       "examples/infra-features/train-infer-mismatch-helper",
-       "examples/infra-features/true-on-policy"
+       "examples/infra-features/random-async"
       ]
      }
     ]

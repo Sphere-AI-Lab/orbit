@@ -1,6 +1,6 @@
 ---
 title: "P2P Weight Transfer Examples"
-description: "Point-to-point weight transfer between training and rollout engines."
+description: "Peer-to-peer weight-update transfer mode."
 # Generated from examples/infra_features/p2p_weight_transfer/README.md by scripts/tools/sync_example_docs.py. Edit that README, not this file.
 ---
 Example scripts for running P2P (RDMA) and broadcast (NCCL) weight transfer between

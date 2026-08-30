@@ -17,6 +17,8 @@ import pytest
 
 pytest.importorskip("ray")
 
+from sglang.srt.constants import GPU_MEMORY_TYPE_CUDA_GRAPH, GPU_MEMORY_TYPE_KV_CACHE, GPU_MEMORY_TYPE_WEIGHTS
+
 import miles.ray.placement_group as pg_mod
 from miles.ray.rollout.rollout_server import (
     RolloutServer,
@@ -77,7 +79,8 @@ def _server_group(needs_offload: bool, engines: list) -> ServerGroup:
         pg=None,
         all_engines=engines,
         num_gpus_per_engine=1,
-        num_new_engines=0,
+        # upstream replaced the num_new_engines count with a has_new_engines flag.
+        has_new_engines=False,
         needs_offload=needs_offload,
         model_path="/ckpt/base",
     )
@@ -98,10 +101,17 @@ def test_server_group_offload_onload_noop_without_needs_offload():
 
 
 def _recording_engine(calls: list):
+    # upstream's ServerGroup reaches the RPCs through engine.actor_handle and skips
+    # engines whose state is not allocated; release_memory_occupation now takes tags too.
     return SimpleNamespace(
-        release_memory_occupation=SimpleNamespace(remote=lambda: calls.append("release") or "release-handle"),
-        resume_memory_occupation=SimpleNamespace(
-            remote=lambda tags=None: calls.append(("resume", tuple(tags or ()))) or "resume-handle"
+        is_allocated=True,
+        actor_handle=SimpleNamespace(
+            release_memory_occupation=SimpleNamespace(
+                remote=lambda tags=None: calls.append("release") or "release-handle"
+            ),
+            resume_memory_occupation=SimpleNamespace(
+                remote=lambda tags=None: calls.append(("resume", tuple(tags or ()))) or "resume-handle"
+            ),
         ),
     )
 
@@ -116,14 +126,19 @@ def test_server_group_issues_rpcs_only_when_needs_offload():
     assert calls == ["release", ("resume", ("weights",))]
 
 
-def test_rollout_server_offload_onload_paths_all_noop_for_async_groups():
+async def test_rollout_server_offload_onload_paths_all_noop_for_async_groups():
     """RolloutServer aggregates gated groups; with every group at
-    needs_offload=False all four memory paths return [] without ray."""
+    needs_offload=False all four memory paths return [] without ray.
+
+    upstream made offload/onload coroutines (they gather the per-engine handles) and
+    moved the onload_weights/onload_kv wrappers up to RolloutManager, where they are
+    thin `onload(tags=...)` calls -- so the tagged paths are pinned here as onload(tags).
+    """
     server = RolloutServer(server_groups=[_server_group(False, [object()]), _server_group(False, [object()])])
-    assert server.offload() == []
-    assert server.onload() == []
-    assert server.onload_weights() == []
-    assert server.onload_kv() == []
+    assert await server.offload() == []
+    assert await server.onload() == []
+    assert await server.onload(tags=[GPU_MEMORY_TYPE_WEIGHTS]) == []
+    assert await server.onload(tags=[GPU_MEMORY_TYPE_KV_CACHE, GPU_MEMORY_TYPE_CUDA_GRAPH]) == []
 
 
 class _RecordingManagerHandle:

@@ -34,12 +34,33 @@ def _single_process_state() -> None:
     # group needed): gather_log_data is monkeypatched below, so no distributed calls
     # actually happen.
     single = GroupInfo(rank=0, size=1, group=None)
-    set_parallel_state(ParallelState(intra_dp=single, intra_dp_cp=single, cp=single, tp=single, is_pp_last_stage=True))
+    # upstream's ParallelState gained required pp/ep/etp/indep_dp groups; trivial here.
+    set_parallel_state(
+        ParallelState(
+            intra_dp=single,
+            intra_dp_cp=single,
+            cp=single,
+            tp=single,
+            pp=single,
+            ep=single,
+            etp=single,
+            indep_dp=single,
+            is_pp_last_stage=True,
+        )
+    )
 
 
-def _identity_gather_log_data(metric_name, args, rollout_id, log_dict):
+def _identity_gather_log_data(metric_name, args, rollout_id, log_dict, reduction_by_key=None):
     # Simulates a single-DP-rank reduction: mean-over-1-rank is the identity.
-    return {f"{metric_name}/{key}": value for key, value in log_dict.items()}
+    # upstream lets callers pass `(sum, count)` pairs, reduced as Sum/Count (see
+    # reduce_gathered_log_dict), so the stub has to collapse those the same way.
+    def _reduce(value):
+        if isinstance(value, tuple) and len(value) == 2:
+            total, count = value
+            return total / count if count else 0.0
+        return value
+
+    return {f"{metric_name}/{key}": _reduce(value) for key, value in log_dict.items()}
 
 
 def _args(**overrides):
@@ -176,7 +197,18 @@ def test_direct_true_on_policy_mode_without_phase5_attribute_does_not_crash(monk
 def test_exact_gate_uses_dsv4_padded_thd_cp_local_response_mask(cp_rank, response_indices):
     single = GroupInfo(rank=0, size=1, group=None)
     cp = GroupInfo(rank=cp_rank, size=2, group=None)
-    set_parallel_state(ParallelState(intra_dp=single, intra_dp_cp=single, cp=cp, tp=single))
+    set_parallel_state(
+        ParallelState(
+            intra_dp=single,
+            intra_dp_cp=single,
+            cp=cp,
+            tp=single,
+            pp=single,
+            ep=single,
+            etp=single,
+            indep_dp=single,
+        )
+    )
 
     global_values = torch.tensor([-0.1, -0.2, -0.3, -0.4, -0.5, -0.6, -0.7])
     local_values = global_values[torch.tensor(response_indices)]
@@ -218,7 +250,17 @@ def _worker_rank_local_parity_failure(rank: int, world_size: int, port: int) -> 
         )
         single = GroupInfo(rank=0, size=1, group=None)
         set_parallel_state(
-            ParallelState(intra_dp=world, intra_dp_cp=world, cp=single, tp=single, is_pp_last_stage=True)
+            ParallelState(
+                intra_dp=world,
+                intra_dp_cp=world,
+                cp=single,
+                tp=single,
+                pp=single,
+                ep=single,
+                etp=single,
+                indep_dp=single,
+                is_pp_last_stage=True,
+            )
         )
         # Only rank 1 has a mismatch. Both ranks must leave the synchronized
         # check with the same failure instead of rank 0 entering gather_log_data

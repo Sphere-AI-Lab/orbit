@@ -1,6 +1,6 @@
 ---
 title: "Fully Asynchronous Rollout Example"
-description: "Demonstrates fully asynchronous rollout generation for higher efficiency."
+description: "Fully asynchronous rollout/training overlap recipes."
 # Generated from examples/infra_features/fully_async/README.md by scripts/tools/sync_example_docs.py. Edit that README, not this file.
 ---
 This example shows a simple way to make rollout generation **fully asynchronous**: a single global worker is created once and then keeps running in the background, continuously pulling prompts and launching generation tasks. Training only needs to fetch already finished results. This removes the per‑step wait that happens in the normal synchronous style.

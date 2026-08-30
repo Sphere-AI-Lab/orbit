@@ -48,7 +48,10 @@ def _init_kwargs(args) -> dict:
         fake_wandb.init.side_effect = _fake_init
         fake_wandb.util.generate_id.return_value = "abc123"
         fake_wandb.Settings.side_effect = lambda **kw: kw
-        with patch.object(wandb_utils, "_init_wandb_common"), \
+        # upstream now imports generate_id directly (from wandb.sdk.lib.runid), so
+        # stubbing the wandb module attribute alone no longer pins the suffix.
+        with patch.object(wandb_utils, "generate_id", return_value="abc123"), \
+             patch.object(wandb_utils, "_init_wandb_common"), \
              patch.object(wandb_utils, "_compute_config_for_logging", return_value={}), \
              patch.object(wandb_utils, "_is_offline_mode", return_value=True):
             wandb_utils.init_wandb_primary(args)

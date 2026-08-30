@@ -26,6 +26,44 @@ MODEL_NAME = "Qwen/Qwen3-0.6B"
 RESPONSE_TEXT = "\\boxed{8}"
 
 
+def megatron_shape_argv(model_name: str) -> list[str]:
+    """Megatron model-shape flags that agree with ``model_name``'s HF config.
+
+    orbit: upstream builds these fixtures on ``--train-backend fsdp``, but orbit
+    deletes the experimental FSDP backend and narrows ``--train-backend`` to
+    ``choices=["megatron"]`` (orbit/arguments.py; ORBIT-SEAM in
+    ``miles/utils/arguments.py::parse_args``). The megatron branch runs
+    ``hf_validate_args``, which requires these flags to match the HF config, so
+    derive them from the checkpoint rather than pinning one model's numbers.
+    """
+    from miles.utils.hf_config import load_hf_config
+
+    cfg = load_hf_config(model_name)
+    cfg = getattr(cfg, "text_config", cfg)
+
+    rope_theta = getattr(cfg, "rope_theta", None)
+    rope_parameters = getattr(cfg, "rope_parameters", None)
+    if isinstance(rope_parameters, dict) and "rope_theta" in rope_parameters:
+        rope_theta = rope_parameters["rope_theta"]
+
+    argv: list[str] = []
+    for flag, value in (
+        ("--num-layers", getattr(cfg, "num_hidden_layers", None)),
+        ("--hidden-size", getattr(cfg, "hidden_size", None)),
+        ("--num-attention-heads", getattr(cfg, "num_attention_heads", None)),
+        ("--ffn-hidden-size", getattr(cfg, "intermediate_size", None)),
+        ("--moe-ffn-hidden-size", getattr(cfg, "moe_intermediate_size", None)),
+        ("--norm-epsilon", getattr(cfg, "rms_norm_eps", None)),
+        # --rotary-base is type=int; HF may store rope_theta as a float
+        ("--rotary-base", None if rope_theta is None else int(rope_theta)),
+    ):
+        if value is not None:
+            argv.extend([flag, str(value)])
+    if getattr(cfg, "tie_word_embeddings", True) is False:
+        argv.append("--untie-embeddings-and-output-weights")
+    return argv
+
+
 DEFAULT_SAMPLING_PARAMS = {"max_new_tokens": 64, "temperature": 0.7}
 
 VARIANT_TO_GENERATE_FN_PATH = {
@@ -156,8 +194,11 @@ def make_args(
 ) -> Namespace:
     argv = [
         "pytest",
+        # orbit: upstream uses the FSDP backend here; orbit deletes it and narrows
+        # --train-backend to choices=["megatron"], so the megatron shape flags that
+        # hf_validate_args checks must be supplied too (see megatron_shape_argv).
         "--train-backend",
-        "fsdp",
+        "megatron",
         "--ci-test",
         "--rollout-batch-size",
         "1",
@@ -179,7 +220,7 @@ def make_args(
         str(router_port),
         "--rollout-max-response-len",
         "16",
-    ]
+    ] + megatron_shape_argv(model_name)
     if chat_template_path:
         argv.extend(["--chat-template-path", chat_template_path])
     if use_rollout_routing_replay:

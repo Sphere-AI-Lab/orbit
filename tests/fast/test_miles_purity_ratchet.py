@@ -59,7 +59,6 @@ COSMETIC_ONLY = {
     "miles/rollout/base_types.py",
     "miles/rollout/generate_hub/__init__.py",
     "miles/rollout/generate_hub/benchmarkers.py",
-    "miles/rollout/generate_utils/tool_call_utils.py",
     "miles/rollout/session/linear_trajectory.py",
     "miles/utils/env_report.py",
     "miles/utils/eval_config.py",
@@ -84,6 +83,10 @@ def test_every_functional_seam_is_stamped():
     unstamped = []
     for path, entry in manifest["budgeted"].items():
         if path in COSMETIC_ONLY:
+            continue
+        # Adapted upstream TEST files document divergences with `# orbit:` comments;
+        # ORBIT-SEAM stamps are the contract for vendored SOURCE only.
+        if path.startswith("tests/"):
             continue
         p = REPO_ROOT / path
         if p.suffix not in (".py", ".yml", ".yaml", ".j2", ".sh"):

@@ -9,6 +9,11 @@ from miles.backends.training_utils.parallel import get_parallel_state
 from miles.backends.training_utils.sampling_mask import build_local_sampling_mask
 from miles.utils.sampling_mask import RolloutSamplingMask
 
+# ORBIT-SEAM: orbit's OPD top-k student scoring (vocab-parallel or true-on-policy full-vocab
+# gather) lives in orbit.opd.losses; imported here for the `teacher_topk_ids` branch of
+# get_log_probs_and_entropy below, which is orbit's only addition to base's loop.
+from orbit.opd.losses import opd_topk_sample_log_probs
+
 
 def _iter_response_chunks(
     logits: torch.Tensor,
@@ -118,7 +123,9 @@ def _iter_response_chunks(
                 )
             assert logits_chunk.size(0) == tokens_chunk.size(0), f"{logits_chunk.size(0)} vs {tokens_chunk.size(0)}"
         else:
-            # TODO: this is super ugly... do better abstraction.
+            # ORBIT-SEAM: repo-wide comment-style pass (base's "TODO: this is super ugly..."
+            # replaced by a description), no functional change
+            # Map response logits and labels into the two local context-parallel chunks.
             chunk_size, chunks_offset, logits_offset, tokens_offset = get_logits_and_tokens_offset_with_cp(
                 total_length, response_length, qkv_format, max_seq_len
             )
@@ -193,6 +200,11 @@ def get_log_probs_and_entropy(
     non_loss_data: bool = True,
     max_seq_lens: list[int] | None = None,
     rollout_sampling_mask: Sequence[RolloutSamplingMask] | None = None,
+    # ORBIT-SEAM: two orbit-added keyword-only options on the base signature (and their
+    # docstring entries below) - teacher_topk_ids/with_log_probs turn on the OPD top-k branch
+    # in the loop below
+    teacher_topk_ids: list[torch.Tensor] | None = None,
+    with_log_probs: bool = True,
 ) -> dict[str, list[torch.Tensor]]:
     """Compute per-token log-probabilities (and optionally entropy) on responses.
 
@@ -213,13 +225,35 @@ def get_log_probs_and_entropy(
         non_loss_data: Unused; kept for API compatibility.
         rollout_sampling_mask: One ``RolloutSamplingMask`` per sample,
             covering every response token.
+        teacher_topk_ids: For on_policy_distillation's "topk" mode, a list of
+            `[R, K]` token-id tensors (one per sample, from TeacherManager) to
+            additionally gather student log-probs for at each response
+            position. When None (the default), no extra gather is done.
+        with_log_probs: Compute sampled-token log-probs. The direct top-k OPD
+            loss disables this because it only consumes the supplied-id scores.
 
     Returns:
         Dict with key "log_probs" mapping to a list of `[R]` tensors per
         sample. If `with_entropy` is True, also includes "entropy" key with
-        a list of `[R]` tensors.
+        a list of `[R]` tensors. If `teacher_topk_ids` is given, also
+        includes "student_topk_log_probs" mapping to a list of `[R, K]`
+        tensors.
     """
     assert non_loss_data
+    # ORBIT-SEAM: the OPD top-k branch below cannot ride the CP redistribution helper, nor the
+    # sampling-mask path, so reject the unsupported combinations before any work is done
+    if teacher_topk_ids is not None:
+        if args.allgather_cp:
+            raise NotImplementedError(
+                "on_policy_distillation opd_loss_type='topk' does not support --allgather-cp: "
+                "the CP redistribution helper only handles 1D per-token tensors, not the "
+                "[R, K] student_topk_log_probs tensor."
+            )
+        if rollout_sampling_mask is not None:
+            raise NotImplementedError(
+                "on_policy_distillation opd_loss_type='topk' does not support a rollout sampling "
+                "mask: the top-k scorer gathers supplied ids, not a masked vocabulary slice."
+            )
     if rollout_sampling_mask is not None:
         for sample_index, (sampling_mask, response_length) in enumerate(
             zip(rollout_sampling_mask, response_lengths, strict=True)
@@ -230,8 +264,21 @@ def get_log_probs_and_entropy(
                     f"{response_length} for sample {sample_index}"
                 )
     parallel_state = get_parallel_state()
+    # ORBIT-SEAM: TP group for the OPD top-k branch, hoisted out of the loop so the home
+    # helper is handed the same object on every sample. Resolved only on that branch: base
+    # callers must not have to supply `tp.size`.
+    # dev's opd_jsd pattern: only pay for the TP collective path when TP is actually
+    # on, rather than czy's unconditional parallel_state.tp.group.
+    topk_tp_group = None
+    if teacher_topk_ids is not None:
+        topk_tp_group = parallel_state.tp.group if parallel_state.tp.size > 1 else None
     log_probs_list = []
     entropy_list = []
+    # ORBIT-SEAM: base iterates the response chunks directly; orbit zips them (strict) against
+    # the per-sample teacher top-k ids so the OPD branch can score supplied ids alongside the
+    # sampled token, and collects those scores under "student_topk_log_probs" below
+    topk_log_probs_list = [] if teacher_topk_ids is not None else None
+    topk_ids_iter = teacher_topk_ids if teacher_topk_ids is not None else [None] * len(unconcat_tokens)
     response_chunks = _iter_response_chunks(
         logits,
         args=args,
@@ -241,28 +288,57 @@ def get_log_probs_and_entropy(
         max_seq_lens=max_seq_lens,
         include_response_indices=rollout_sampling_mask is not None,
     )
-    for sample_index, (logits_chunk, tokens_chunk, response_indices) in enumerate(response_chunks):
-        sampling_mask = None
-        if rollout_sampling_mask is not None:
-            sampling_mask = build_local_sampling_mask(
+    for sample_index, ((logits_chunk, tokens_chunk, response_indices), sample_topk_ids) in enumerate(
+        zip(response_chunks, topk_ids_iter, strict=True)
+    ):
+        if sample_topk_ids is not None:
+            # ORBIT-SEAM: orbit's OPD top-k scoring for this sample lives in orbit.opd.losses
+            topk_log_prob, log_prob, entropy = opd_topk_sample_log_probs(
                 logits_chunk,
-                rollout_sampling_mask[sample_index],
-                response_indices,
-                tp_rank=parallel_state.tp.rank,
+                tokens_chunk,
+                sample_topk_ids,
+                args=args,
+                parallel_state=parallel_state,
+                tp_group=topk_tp_group,
+                with_entropy=with_entropy,
+                # orbit's home helper keeps the original entropy_no_grad sense; upstream
+                # renamed this module's public kwarg to entropy_requires_grad (inverted)
+                entropy_no_grad=not entropy_requires_grad,
+                with_log_probs=with_log_probs,
             )
-        log_prob, entropy = calculate_log_probs_and_entropy(
-            logits_chunk,
-            tokens_chunk,
-            parallel_state.tp.group,
-            with_entropy=with_entropy,
-            entropy_requires_grad=entropy_requires_grad,
-            chunk_size=args.log_probs_chunk_size,
-            true_on_policy=args.true_on_policy_mode,
-            vocab_size=getattr(args, "vocab_size", None),
-            sampling_mask=sampling_mask,
-        )
+            topk_log_probs_list.append(topk_log_prob)
+        else:
+            # ORBIT-SEAM: base's path, plus the guard for the OPD-only with_log_probs=False
+            # combination
+            if not with_log_probs:
+                raise ValueError("with_log_probs=False requires teacher_topk_ids.")
+            sampling_mask = None
+            if rollout_sampling_mask is not None:
+                sampling_mask = build_local_sampling_mask(
+                    logits_chunk,
+                    rollout_sampling_mask[sample_index],
+                    response_indices,
+                    tp_rank=parallel_state.tp.rank,
+                )
+            log_prob, entropy = calculate_log_probs_and_entropy(
+                logits_chunk,
+                tokens_chunk,
+                parallel_state.tp.group,
+                with_entropy=with_entropy,
+                entropy_requires_grad=entropy_requires_grad,
+                chunk_size=args.log_probs_chunk_size,
+                true_on_policy=args.true_on_policy_mode,
+                vocab_size=getattr(args, "vocab_size", None),
+                sampling_mask=sampling_mask,
+            )
 
-        log_probs_list.append(log_prob.squeeze(-1))
+        # ORBIT-SEAM: base always appends log_prob.squeeze(-1); orbit skips the append when the
+        # OPD top-k loss asked for scores only, and reshapes instead of squeezing.
+        # Standard Megatron CE returns [R, 1], whereas the true-on-policy full-vocab path
+        # returns [R]. Preserve the public per-token [R] shape even for one-token responses
+        # in both cases.
+        if with_log_probs:
+            log_probs_list.append(log_prob.reshape(-1))
         if with_entropy:
             entropy_list.append(entropy)
 
@@ -271,6 +347,9 @@ def get_log_probs_and_entropy(
     }
     if with_entropy:
         res["entropy"] = entropy_list
+    # ORBIT-SEAM: extra result key consumed by orbit.opd.losses.opd_topk_loss_function
+    if topk_log_probs_list is not None:
+        res["student_topk_log_probs"] = topk_log_probs_list
 
     # we need to turn the all gather kv into zigzag ring attn kv
     if args.allgather_cp:

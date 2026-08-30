@@ -64,10 +64,12 @@ class _RecordingParser:
 
 @pytest.fixture
 def registered_parser(monkeypatch):
-    # The experimental-rollout branch in get_orbit_extra_args_provider would
-    # otherwise import orbit.experimental_rollout, which transitively pulls in
-    # CUDA-dependent modules. Force the legacy surface for these tests.
-    monkeypatch.setattr(arguments, "enable_experimental_rollout_refactor", lambda: False)
+    # The user-provided-function branch in get_orbit_extra_args_provider would
+    # otherwise load_function() the rollout path, which transitively pulls in
+    # CUDA-dependent modules. Force the legacy surface for these tests. (Upstream
+    # renamed the gate: enable_experimental_rollout_refactor() -> not
+    # use_legacy_rollout_v1(), so the polarity flips with it.)
+    monkeypatch.setattr(arguments, "use_legacy_rollout_v1", lambda: True)
     parser = _RecordingParser()
     get_orbit_extra_args_provider()(parser)
     return parser
@@ -98,7 +100,7 @@ def test_eval_nll_flags_are_registered(registered_parser):
 def test_lora_a_init_method_real_parser_rejects_uniform(monkeypatch):
     """Regression guard: 'uniform' was the wrong vocabulary (see lora_utils.py's real
     Bridge path, ParallelLinearAdapter._get_init_fn) and must not silently parse."""
-    monkeypatch.setattr(arguments, "enable_experimental_rollout_refactor", lambda: False)
+    monkeypatch.setattr(arguments, "use_legacy_rollout_v1", lambda: True)
     parser = argparse.ArgumentParser()
     get_orbit_extra_args_provider()(parser)
     with pytest.raises(SystemExit):

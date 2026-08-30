@@ -277,6 +277,21 @@ def add_on_policy_distillation_arguments(parser):
         ),
     )
     parser.add_argument(
+        # Home-ported from upstream's OPD group (the only flag it registers that orbit
+        # lacked). miles/rollout/on_policy_distillation.py already reads
+        # args.opd_topk_per_position; without the flag it was permanently False.
+        "--opd-topk-per-position",
+        action="store_true",
+        default=False,
+        help=(
+            "Send per-position token ids to the teacher/student scoring server "
+            "(token_ids_logprob_positions) instead of the global top-k union, so the "
+            "response is O(response_len * k) instead of O(response_len * |union|). "
+            "Requires a patched sglang server that supports token_ids_logprob_positions; "
+            "leave off for an unpatched server."
+        ),
+    )
+    parser.add_argument(
         "--opd-topk-tail-bucket",
         action="store_true",
         default=False,
@@ -1275,6 +1290,34 @@ _MEGATRON_FULL_MODEL_OFFLOAD_ERROR = (
 )
 
 
+def _mla_all_linear_targets(args) -> list[str]:
+    """MLA projections that ``--target-modules all-linear`` should cover, per HF config.
+
+    Home-ported from upstream, which now gates these on the HF config instead of
+    listing them unconditionally: SGLang sizes its LoRA buffers per module name, so
+    naming MLA projections on a dense model crashes the engine. The DSA indexer stays
+    excluded.
+
+    orbit adds one guard upstream does not need: ``--hf-checkpoint`` may be absent
+    (validators are called with hand-built Namespaces, and orbit's explicit
+    ``--peft-variant mla`` already names these modules), in which case there is
+    nothing to gate on and the dense list stands.
+    """
+    hf_checkpoint = getattr(args, "hf_checkpoint", None)
+    if not hf_checkpoint:
+        return []
+
+    from miles.utils.hf_config import load_hf_config
+
+    hf_config = load_hf_config(hf_checkpoint)
+    if not getattr(hf_config, "kv_lora_rank", None):
+        return []
+    modules = ["kv_a_proj_with_mqa", "kv_b_proj"]
+    if getattr(hf_config, "q_lora_rank", None):
+        modules += ["q_a_proj", "q_b_proj"]
+    return modules
+
+
 def _normalize_peft_args(args):
     peft_method = getattr(args, "peft_method", "none")
     assert peft_method in _PEFT_METHODS, "--peft-method must be one of none, oft, lora."
@@ -1310,6 +1353,7 @@ def _normalize_peft_args(args):
                 ]
             else:
                 modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+                modules += _mla_all_linear_targets(args)
             if target_modules == "all":
                 # "all" extends "all-linear" with the input embedding and the
                 # language-modeling head. MLA / DSV4 are out of scope until those
@@ -1487,12 +1531,51 @@ def _finalize_train_offload_args(args) -> None:
     # record of what the old failure said, since operators will find it in logs.
 
 
+def _assert_critic_supports_bridge(args) -> None:
+    """Home-ported from upstream: no critic under ``--megatron-to-hf-mode bridge``.
+
+    Kept as its own helper because orbit has to raise it from two places: the critic
+    defaulting below, and ``_apply_bridge_load_path``, which runs earlier and would
+    otherwise fail on checkpoint I/O before this pure argument check is reached.
+    """
+    assert getattr(args, "megatron_to_hf_mode", None) != "bridge", (
+        "Critic models are not supported with --megatron-to-hf-mode bridge"
+    )
+
+
 def _apply_critic_args(args) -> None:
     args.use_critic = args.advantage_estimator == "ppo"
+    if args.use_critic:
+        # Home-ported from upstream's critic block (miles_validate_args). These two
+        # hold for every orbit critic topology -- separate workers as well as the
+        # one-trunk --critic-mode adapter/head variants.
+        _assert_critic_supports_bridge(args)
+        from miles.utils.environ import enable_experimental_ft_trainer
+
+        assert not enable_experimental_ft_trainer(), (
+            "Shared Actor/Critic PPO is not supported with MILES_EXPERIMENTAL_FT_TRAINER=1: the v2 "
+            "fault-tolerant train group cannot route critic values or lifecycle options yet. "
+            "Unset MILES_EXPERIMENTAL_FT_TRAINER or use a non-PPO advantage estimator."
+        )
     if args.critic_mode in ("adapter", "head"):
         mode = args.critic_mode
         if args.advantage_estimator != "ppo":
             raise ValueError(f"--critic-mode {mode} requires --advantage-estimator ppo.")
+        # Upstream's third critic guard, scoped to the topology its own message describes:
+        # upstream has exactly one critic, the *shared* actor/critic one, which orbit
+        # spells --critic-mode adapter/head (one trunk; the value phase trains before
+        # the actor step and never sees ref log probs). Orbit's separate full-model
+        # critic is a topology upstream does not have, and it already carries its own
+        # narrower rule in _validate_ppo_args: reward-level KL is rejected only under
+        # --num-critic-only-steps, the case where the value targets would actually miss
+        # the penalty. Applying upstream's blanket rule there would remove a working
+        # orbit configuration (see tests/test_critic_mode_args.py).
+        assert getattr(args, "kl_coef", 0) == 0, (
+            "Shared Actor/Critic PPO does not support reward-level KL (--kl-coef): the critic "
+            "trains before the actor and never sees ref log probs, so its value targets would "
+            "silently exclude the KL penalty applied to the actor's rewards. Use --use-kl-loss "
+            "for KL regularization instead."
+        )
         if mode == "adapter" and args.peft_method == "none":
             raise ValueError("--critic-mode adapter requires an enabled --peft-method: the critic is an adapter.")
         if args.train_backend != "megatron":
@@ -1518,6 +1601,7 @@ def _apply_critic_args(args) -> None:
         args.critic_num_nodes = 0
         if args.critic_lr is None:
             args.critic_lr = args.lr
+        _derive_critic_save(args)
         return
     if getattr(args, "critic_num_gpus_per_node", None) is None:
         args.critic_num_gpus_per_node = args.actor_num_gpus_per_node
@@ -1527,6 +1611,17 @@ def _apply_critic_args(args) -> None:
         args.critic_load = args.load
     if getattr(args, "critic_lr", None) is None:
         args.critic_lr = args.lr
+    _derive_critic_save(args)
+
+
+def _derive_critic_save(args) -> None:
+    """Home-ported from upstream: default ``--critic-save`` to a sibling of ``--save``.
+
+    A sibling dir, not ``args.save`` itself: sharing a dir would clobber the actor's
+    iteration tracker.
+    """
+    if getattr(args, "critic_save", None) is None and getattr(args, "save", None) is not None:
+        args.critic_save = args.save.rstrip("/") + "_critic"
 
 
 def _validate_ppo_args(args) -> None:
@@ -1601,15 +1696,42 @@ def _validate_peft_ref_args(args) -> None:
 
 
 def _apply_bridge_load_path(args) -> None:
+    # Pure argument check, before any checkpoint I/O: a bridge+critic run is
+    # unsupported, and must fail on the flags rather than on a config.json read.
+    if getattr(args, "advantage_estimator", None) == "ppo":
+        _assert_critic_supports_bridge(args)
+
     from orbit.megatron.low_precision_bootstrap import (
+        is_megatron_checkpoint_path,
         load_hf_config,
         resolve_bridge_load_path,
         validate_low_precision_bootstrap_args,
     )
 
     hf_config = load_hf_config(args) if args.hf_checkpoint is not None else None
-    if args.load is None:
+
+    # Home-ported from upstream's bridge branch: a `--load` directory that does not
+    # exist yet, or that carries no `latest_checkpointed_iteration.txt`, is a fresh
+    # run rather than a resume, so fall back to the reference weights (ref_load, else
+    # hf_checkpoint) instead of asserting inside load_checkpoint. Upstream also resets
+    # `start_rollout_id` on that path; orbit keeps that.
+    #
+    # orbit narrows it by exactly one case: a `--load` that *is* a Megatron checkpoint
+    # directory (legacy or distributed) is kept even without a tracker file, because
+    # orbit's low-precision bootstrap points --load at a converted INT4/NVFP4 dist
+    # checkpoint that never writes one. Falling back there would silently downgrade a
+    # quantized run to the bf16 reference.
+    load_is_fresh = args.load is None or not (
+        os.path.exists(args.load)
+        and (
+            os.path.exists(os.path.join(args.load, "latest_checkpointed_iteration.txt"))
+            or is_megatron_checkpoint_path(args.load)
+        )
+    )
+    if load_is_fresh:
+        args.load = None  # so resolve_bridge_load_path picks the bootstrap source
         args.load = resolve_bridge_load_path(args, hf_config=hf_config)
+        args.start_rollout_id = 0
     if hf_config is not None:
         validate_low_precision_bootstrap_args(args, hf_config=hf_config)
 

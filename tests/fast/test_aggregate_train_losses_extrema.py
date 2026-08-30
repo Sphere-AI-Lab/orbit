@@ -11,17 +11,32 @@ from miles.backends.training_utils.loss_hub.math_utils import VALUE_EV_METRIC_KE
 
 def _single_process_state() -> None:
     single = GroupInfo(rank=0, size=1, group=None)
-    set_parallel_state(ParallelState(intra_dp=single, intra_dp_cp=single, cp=single, tp=single, is_pp_last_stage=True))
+    # upstream's ParallelState gained required pp/ep/etp/indep_dp groups; trivial here.
+    set_parallel_state(
+        ParallelState(
+            intra_dp=single,
+            intra_dp_cp=single,
+            cp=single,
+            tp=single,
+            pp=single,
+            ep=single,
+            etp=single,
+            indep_dp=single,
+            is_pp_last_stage=True,
+        )
+    )
 
 
 def test_aggregate_train_losses_preserves_min_and_max_across_microbatches(monkeypatch) -> None:
     _single_process_state()
     reduce_ops = []
 
-    def _record_all_reduce(tensor, op, group):
+    # upstream routes the reduction through MultiPGUtil.all_reduce(tensor, groups, op)
+    # instead of a bare dist.all_reduce, so the stub follows it.
+    def _record_all_reduce(tensor, groups_inner_to_outer, op):
         reduce_ops.append(op)
 
-    monkeypatch.setattr(log_utils.dist, "all_reduce", _record_all_reduce)
+    monkeypatch.setattr(log_utils.MultiPGUtil, "all_reduce", _record_all_reduce)
     keys = ["loss", "gap_max", "opd_topk/teacher_mass_min"]
     losses = [
         {"keys": keys, "values": torch.tensor([2.0, 6.0, 0.8, 0.4])},
@@ -40,7 +55,7 @@ def test_aggregate_train_losses_preserves_min_and_max_across_microbatches(monkey
 
 def test_aggregate_train_losses_finalizes_value_explained_var(monkeypatch) -> None:
     _single_process_state()
-    monkeypatch.setattr(log_utils.dist, "all_reduce", lambda tensor, op, group: None)
+    monkeypatch.setattr(log_utils.MultiPGUtil, "all_reduce", lambda tensor, groups, op: None)
 
     # Token-level ground truth across two micro-batches of unequal token count:
     # returns r and errors d = r - v over the unmasked tokens.
@@ -85,7 +100,17 @@ def _worker_remote_extrema(rank: int, world_size: int, port: int) -> None:
         # Treat WORLD as CP as well: mean metrics receive the CP multiplier,
         # while extrema must remain raw global extrema.
         set_parallel_state(
-            ParallelState(intra_dp=world, intra_dp_cp=world, cp=world, tp=single, is_pp_last_stage=True)
+            ParallelState(
+                intra_dp=world,
+                intra_dp_cp=world,
+                cp=world,
+                tp=single,
+                pp=single,
+                ep=single,
+                etp=single,
+                indep_dp=single,
+                is_pp_last_stage=True,
+            )
         )
         keys = ["loss", "gap_max", "opd_topk/teacher_mass_min"]
         local_values = torch.tensor([2.0, 6.0, 0.8, 0.4]) if rank == 0 else torch.tensor([3.0, 9.0, 0.9, 0.25])

@@ -51,6 +51,9 @@ class _FakeEngine:
         self.pause_generation = _RemoteMethod(call_log, "pause_generation")
         self.flush_cache = _RemoteMethod(call_log, "flush_cache")
         self.continue_generation = _RemoteMethod(call_log, "continue_generation")
+        # upstream's _finalize_and_resume_engines unifies the weight version on the
+        # engines before ending the session, for both full-param and LoRA updates.
+        self.update_weight_version = _RemoteMethod(call_log, "update_weight_version")
 
 
 def _make_updater(engine, chunks, call_log):
@@ -79,7 +82,9 @@ def _patch_single_rank(monkeypatch, perf_values):
     monkeypatch.setattr(mixin_mod.dist, "barrier", lambda group=None: None)
     monkeypatch.setattr(mixin_mod, "get_gloo_group", lambda: None)
     monkeypatch.setattr(mixin_mod.ray, "get", lambda refs: refs)
-    monkeypatch.setattr(mixin_mod, "post_process_weights", lambda **kwargs: None)
+    # upstream replaced post_process_weights with an explicit begin/end weight-update session.
+    monkeypatch.setattr(mixin_mod, "begin_weight_update", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mixin_mod, "end_weight_update", lambda *args, **kwargs: None)
     monkeypatch.setattr(mixin_mod, "sum_metrics_across_ranks", lambda values, group=None: list(values))
     remaining = list(perf_values)
 
