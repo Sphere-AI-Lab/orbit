@@ -874,6 +874,7 @@ class MegatronTrainRayActor(OrbitTrainActorExtensions, TrainRayActor):
                             self.critic_model,
                             critic_data_iterator,
                             critic_num_microbatches,
+                            rollout_id=rollout_id,
                         )
                     )
                 if self._active_model_tag != "actor":
