@@ -1799,6 +1799,21 @@ def _apply_nested_rope_theta(hf_config) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _extend_arg_choices(parser, name, *extra):
+    """Add choices to an already-registered argument, keeping upstream's.
+
+    A narrowing override (``_override_arg(..., choices=[...])``) would replace
+    the list and silently drop any value upstream adds later; this only ever
+    grows it, and still fails hard if the option is gone.
+    """
+    for action in parser._actions:
+        if name in action.option_strings:
+            existing = list(action.choices or [])
+            action.choices = existing + [c for c in extra if c not in existing]
+            return parser
+    raise ValueError(f"{name} is not registered on this parser; orbit cannot extend it.")
+
+
 def _override_arg(parser, name, **kwargs):
     """Rewrite an already-registered argument's ``default``/``choices``/``help``.
 
@@ -2142,6 +2157,19 @@ def add_orbit_arguments(parser):
     # Orbit's overrides of miles-registered arguments. These run last, so every
     # option below is already on the parser.
     _override_arg(parser, "--train-backend", choices=["megatron"])
+    # Pure MOPD is spelled `--advantage-estimator on_policy_distillation`, and every
+    # orbit validator and the OPD loss path key on that exact string. miles @
+    # dbbab1566 dropped it from the choices list ("OPD is now orthogonal to the
+    # advantage estimator. Use --opd-kl-coef > 0"), which left every MOPD recipe in
+    # examples/on_policy_distillation/ dying in argparse before it could start.
+    # Re-offered from here rather than edited back into the vendored list, so the
+    # spelling orbit's recipes and validators use keeps working while miles' own
+    # choices stay upstream's.
+    #
+    # Follow-up: whether orbit should instead adopt upstream's orthogonal
+    # --opd-kl-coef mechanism is a design question, not a port question -- the two
+    # are not the same semantics (pure MOPD disables advantages entirely).
+    _extend_arg_choices(parser, "--advantage-estimator", "on_policy_distillation")
     _override_arg(
         parser,
         "--true-on-policy-mode",

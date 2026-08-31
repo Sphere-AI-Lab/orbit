@@ -183,6 +183,7 @@
   "choices": [
    "grpo",
    "gspo",
+   "on_policy_distillation",
    "ppo",
    "reinforce_plus_plus",
    "reinforce_plus_plus_baseline"

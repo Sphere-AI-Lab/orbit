@@ -27,3 +27,31 @@ SPEC.loader.exec_module(CHECKER)
 def test_every_namespace_read_names_a_registered_dest():
     errors = CHECKER.collect_errors()
     assert not errors, "argparse dest inconsistencies:\n  " + "\n  ".join(errors)
+
+
+def test_pure_mopd_is_still_a_valid_advantage_estimator():
+    """miles @ dbbab1566 dropped ``on_policy_distillation`` from the choices.
+
+    Every orbit validator and the OPD loss path key on that exact string, and
+    examples/on_policy_distillation/ spells pure MOPD with it, so losing the
+    choice makes those recipes die in argparse before they start. orbit re-offers
+    it (orbit/arguments.py::_extend_arg_choices) rather than editing miles' list.
+    """
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[2]
+    spec = importlib.util.spec_from_file_location(
+        "orbit_dump_args_surface", repo / "tools" / "dump_args_surface.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    parser = module.build_parser()
+    action = next(a for a in parser._actions if "--advantage-estimator" in a.option_strings)
+    assert "on_policy_distillation" in action.choices
+    # ...and orbit only ADDED: upstream's own choices must all survive.
+    for upstream_choice in ("grpo", "gspo", "reinforce_plus_plus", "reinforce_plus_plus_baseline", "ppo"):
+        assert upstream_choice in action.choices
