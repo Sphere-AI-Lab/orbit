@@ -81,8 +81,8 @@
    "sha": "e04af0c8b9b2f307f082a81990f54f109874c9370367195691678b2a418ef17f"
   },
   "miles/backends/megatron_utils/model_provider.py": {
-   "delta_lines": 55,
-   "sha": "5e8497658154a28fa2b5716d1c0b60f11439dd21c75bb8c05bb5ff1db68a04a2"
+   "delta_lines": 65,
+   "sha": "0ec2bfbdc8e9afb5e82b7a77fd975f5b5a5ff85fc86a11e214136d9efc47b1bb"
   },
   "miles/backends/megatron_utils/parallel.py": {
    "delta_lines": 5,
@@ -303,6 +303,10 @@
   "miles_plugins/megatron_bridge/__init__.py": {
    "delta_lines": 7,
    "sha": "2b8104d51467ebb366df0327a8eeab397b5d00de3edd78d138449b6b34ecfb39"
+  },
+  "miles_plugins/models/glm4.py": {
+   "delta_lines": 8,
+   "sha": "9ec1de4d0a5150f469c2877cc2b9449b5e7e21496ef86a2d43f88e430468f84e"
   },
   "miles_plugins/models/qwen3_5.py": {
    "delta_lines": 10,
@@ -882,7 +886,6 @@
   "miles_plugins/mbridge/qwen3_next.py": "86110c106bb61c468765eccb57e81645bc30cc653c29dc0cce609f284354e67e",
   "miles_plugins/models/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles_plugins/models/cp_utils.py": "1e6eb160c1952247f895478dd9f2676038cd2205d7ba1568513e776346ec2eca",
-  "miles_plugins/models/glm4.py": "3c4d2bab8e433f70f2687ef29117b9b7267a69f6b6f369f308965213bb782ff3",
   "miles_plugins/models/glm5/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles_plugins/models/glm5/glm5.py": "feefe18e65b83f6df5bcdccbdf0c08178a2293864ff805996845a770fbebda30",
   "miles_plugins/models/glm5/ops/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",

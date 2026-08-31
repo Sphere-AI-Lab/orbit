@@ -67,16 +67,6 @@ ALLOWLIST = {
     # them skips when absent (see tests/fast/test_megatron_cli_flags.py).
     ("miles_plugins/models/glm4.py", "post_self_attn_layernorm"),
     ("miles_plugins/models/glm4.py", "post_mlp_layernorm"),
-    # UPSTREAM BUG on upstream's DEFAULT path, inherited verbatim: nothing in
-    # orbit, miles or the pinned Megatron-LM registers --moe-use-legacy-grouped-gemm,
-    # so `--megatron-to-hf-mode raw` -- which is the DEFAULT -- dies in
-    # MegatronTrainRayActor.init() with AttributeError. Confirmed by a raw-mode
-    # GPU smoke on 2026-08-31 and present identically at orbit-main. It has
-    # bit-rotted because every recipe in the repo passes `bridge`. Left unfixed
-    # deliberately: it is upstream's code on upstream's default path, so the fix
-    # belongs upstream, not as a local divergence in a merge-hot file.
-    ("miles/backends/megatron_utils/model_provider.py", "moe_use_legacy_grouped_gemm"),
-    ("miles_plugins/models/glm4.py", "moe_use_legacy_grouped_gemm"),
 }
 
 # Calls whose result is a parsed argparse namespace. `SimpleNamespace` is

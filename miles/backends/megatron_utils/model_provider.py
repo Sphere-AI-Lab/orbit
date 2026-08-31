@@ -60,6 +60,12 @@ class LinearForLastLayer(torch.nn.Linear):
         return logits, None
 
 
+# ORBIT-SEAM: upstream reads an argparse dest nothing registers -- no orbit, miles or
+# pinned-Megatron option defines --moe-use-legacy-grouped-gemm -- so this raised
+# AttributeError at actor init on the `--megatron-to-hf-mode raw` path, which is the
+# DEFAULT mode (it bit-rotted because every recipe passes `bridge`). getattr restores
+# Megatron's own default for the parameter (gpt_layer_specs.py: Optional[bool] = False),
+# so this is a no-op for anyone not setting it. Belongs upstream; kept minimal here.
 def get_model_provider_func(
     args: argparse.Namespace,
     role: Literal["actor", "critic"] = "actor",
@@ -177,7 +183,7 @@ def get_model_provider_func(
                         moe_grouped_gemm=args.moe_grouped_gemm,
                         qk_layernorm=args.qk_layernorm,
                         multi_latent_attention=args.multi_latent_attention,
-                        moe_use_legacy_grouped_gemm=args.moe_use_legacy_grouped_gemm,
+                        moe_use_legacy_grouped_gemm=getattr(args, "moe_use_legacy_grouped_gemm", False),
                     )
                 else:
                     transformer_layer_spec = get_gpt_layer_local_spec(
@@ -185,7 +191,7 @@ def get_model_provider_func(
                         moe_grouped_gemm=args.moe_grouped_gemm,
                         qk_layernorm=args.qk_layernorm,
                         multi_latent_attention=args.multi_latent_attention,
-                        moe_use_legacy_grouped_gemm=args.moe_use_legacy_grouped_gemm,
+                        moe_use_legacy_grouped_gemm=getattr(args, "moe_use_legacy_grouped_gemm", False),
                     )
 
         build_model_context = nullcontext
