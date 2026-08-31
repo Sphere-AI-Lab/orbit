@@ -13,6 +13,15 @@ import torch.distributed.checkpoint as dist_cp
 from transformers import AutoConfig
 from typing_extensions import override
 
+# ORBIT-SEAM: arm orbit's converter patches. orbit/megatron/hf_export_patches.py
+# supplies the parameter names upstream's converters do not map (bare
+# input_layernorm / pre_mlp_layernorm, and grouped-expert FC1 OFT adapters), and
+# they install via a hook that `import orbit` arms. Without this line the tool
+# runs upstream's converters unpatched and those tensors raise "Unknown parameter
+# name" -- silently losing mappings orbit-main had inline. One line here rather
+# than a site-wide .pth, which would import orbit into every interpreter.
+import orbit  # noqa: F401  -- imported for the patch-arming side effect
+
 from miles.backends.megatron_utils.megatron_to_hf import convert_to_hf, remove_padding
 
 

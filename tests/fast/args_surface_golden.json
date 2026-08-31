@@ -6521,12 +6521,36 @@
  },
  {
   "choices": null,
+  "default": "3",
+  "dest": "miles_router_health_check_failure_threshold",
+  "help": "Orbit's spelling of --miles-router-health-check-failure-threshold.",
+  "nargs": null,
+  "option_strings": [
+   "--orbit-router-health-check-failure-threshold"
+  ],
+  "required": false,
+  "type": "int"
+ },
+ {
+  "choices": null,
   "default": "None",
   "dest": "miles_router_max_connections",
   "help": "Max connections for MilesRouter HTTP client.",
   "nargs": null,
   "option_strings": [
    "--miles-router-max-connections"
+  ],
+  "required": false,
+  "type": "int"
+ },
+ {
+  "choices": null,
+  "default": "None",
+  "dest": "miles_router_max_connections",
+  "help": "Orbit's spelling of --miles-router-max-connections.",
+  "nargs": null,
+  "option_strings": [
+   "--orbit-router-max-connections"
   ],
   "required": false,
   "type": "int"
@@ -6545,12 +6569,36 @@
  },
  {
   "choices": null,
+  "default": "''",
+  "dest": "miles_router_middleware_paths",
+  "help": "Orbit's spelling of --miles-router-middleware-paths.",
+  "nargs": "+",
+  "option_strings": [
+   "--orbit-router-middleware-paths"
+  ],
+  "required": false,
+  "type": "str"
+ },
+ {
+  "choices": null,
   "default": "None",
   "dest": "miles_router_timeout",
   "help": "Timeout for MilesRouter HTTP requests in seconds.",
   "nargs": null,
   "option_strings": [
    "--miles-router-timeout"
+  ],
+  "required": false,
+  "type": "float"
+ },
+ {
+  "choices": null,
+  "default": "None",
+  "dest": "miles_router_timeout",
+  "help": "Orbit's spelling of --miles-router-timeout.",
+  "nargs": null,
+  "option_strings": [
+   "--orbit-router-timeout"
   ],
   "required": false,
   "type": "float"

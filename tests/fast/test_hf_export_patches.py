@@ -90,3 +90,62 @@ def test_patched_modules_are_leaves_so_import_time_apply_cannot_cycle():
             if mod and mod.split(".")[0] == "orbit":
                 offenders.append(f"{patch.module} imports {mod}")
     assert not offenders, "patched module is not a leaf:\n  " + "\n  ".join(offenders)
+
+
+def test_every_entrypoint_that_reaches_a_patched_module_arms_the_patches():
+    """The failure this catches actually happened.
+
+    Patches install through a hook that ``import orbit`` arms, so a standalone
+    script that imports a patched module WITHOUT importing orbit silently runs
+    upstream's unpatched function -- no error, just orbit's mappings missing.
+    Both checkpoint->HF converter CLIs did exactly that, and no test noticed
+    because every test imports orbit itself.
+
+    Rule: a file with a ``__main__`` block that imports a patched module (or the
+    package that pulls it in) must also import orbit.
+    """
+    import ast
+    import subprocess
+    from pathlib import Path
+
+    from orbit.patch import registry
+
+    repo = Path(__file__).resolve().parents[2]
+    # A module counts as "reaching" a patch target if it imports the target or
+    # the package whose __init__ imports it.
+    reaching = set()
+    for patch in registry():
+        reaching.add(patch.module)
+        reaching.add(patch.module.rsplit(".", 1)[0])
+
+    tracked = subprocess.run(
+        ["git", "-C", str(repo), "ls-files", "*.py"], capture_output=True, text=True
+    ).stdout.split()
+
+    offenders = []
+    for rel in tracked:
+        if rel.startswith(("miles/", "miles_plugins/", "orbit/", "tests/")):
+            continue  # library code and tests run inside processes that import orbit
+        path = repo / rel
+        try:
+            tree = ast.parse(path.read_text(errors="surrogateescape"))
+        except (OSError, SyntaxError):
+            continue
+        src = path.read_text(errors="surrogateescape")
+        if '__name__ == "__main__"' not in src and "__name__ == '__main__'" not in src:
+            continue
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imported.add(node.module)
+            elif isinstance(node, ast.Import):
+                imported.update(a.name for a in node.names)
+        if not (imported & reaching):
+            continue
+        if not any(m == "orbit" or m.startswith("orbit.") for m in imported):
+            offenders.append(rel)
+
+    assert not offenders, (
+        "entrypoint reaches a patched module without arming the patches "
+        "(add `import orbit`):\n  " + "\n  ".join(offenders)
+    )

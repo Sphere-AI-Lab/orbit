@@ -340,6 +340,10 @@
    "delta_lines": 213,
    "sha": "35b5615e3400a1e0b939c4cbbe9589adc57c4989081bc5a5407ff6cf39a99fb8"
   },
+  "tools/convert_torch_dist_to_hf.py": {
+   "delta_lines": 9,
+   "sha": "a044a933b3efb29698c1258fa4e80665461edc52903f4267ed0949c3fc440015"
+  },
   "tools/fp8_cast_bf16.py": {
    "delta_lines": 14,
    "sha": "d86629faa09824d2a0cf8731e00ddc7688b67bf39d437d53857131c28ffb01dd"
@@ -892,7 +896,6 @@
   "tools/convert_hf_to_hf_int4.py": "e51165a25e942c5ae28da87511f700adab0a7c4a9f755afc6299adbef1f0e935",
   "tools/convert_hf_to_mxfp8.py": "2e4088218a2ad940cd69863cb2ced09192a204b878e556f4aff9f24ac1fd292f",
   "tools/convert_k2_thinking_int4_to_bf16.py": "97125ca9629a4b6fccf076ad7cffb6cb59c3f1a2d0d841523d170ad6c50e5f8d",
-  "tools/convert_torch_dist_to_hf.py": "a8ac94a5b99ae6b521388a9a504a3a19f7e94e682506cf584868e2b10986bfc6",
   "tools/cpu_memory_profiler.py": "ad7a9dc7eed50647ef60803db7b514c173dee5173b0f4e93bfcd276b4d472988",
   "tools/visualize/cpu_memory_profiler_visualize.py": "d98346c6c0038f10776f5dea7aaee20ecc2c9a51334e28f223a4f11e4f54b350"
  }

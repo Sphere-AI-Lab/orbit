@@ -104,6 +104,11 @@ from typing_extensions import override
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Arm orbit's converter patches before the converters are imported: they supply
+# the parameter names upstream does not map, and install via a hook that
+# `import orbit` arms. Ray workers import this module fresh, so each one arms too.
+import orbit  # noqa: F401  -- imported for the patch-arming side effect
+
 from miles.backends.megatron_utils import megatron_to_hf as m2hf
 
 DEFAULT_DIRECT_MOE_GROUP_SIZE = 2 * 1024**3

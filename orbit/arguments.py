@@ -1776,6 +1776,41 @@ def add_orbit_arguments(parser):
             "text-based routing instead of SGLang token-based routing."
         ),
     )
+    # The rest of the router group, aliased for the same reason. orbit-main
+    # spelled all five `--orbit-router-*`; the isolation campaign restored
+    # upstream's spelling in the vendored tree, which silently dropped the orbit
+    # ones from the CLI. Recipes kept outside this repo still pass them, so they
+    # are re-offered here as aliases onto upstream's dests -- types and defaults
+    # mirror the vendored registration exactly.
+    parser.add_argument(
+        "--orbit-router-middleware-paths",
+        dest="miles_router_middleware_paths",
+        type=str,
+        nargs="+",
+        default="",
+        help="Orbit's spelling of --miles-router-middleware-paths.",
+    )
+    parser.add_argument(
+        "--orbit-router-timeout",
+        dest="miles_router_timeout",
+        type=float,
+        default=None,
+        help="Orbit's spelling of --miles-router-timeout.",
+    )
+    parser.add_argument(
+        "--orbit-router-max-connections",
+        dest="miles_router_max_connections",
+        type=int,
+        default=None,
+        help="Orbit's spelling of --miles-router-max-connections.",
+    )
+    parser.add_argument(
+        "--orbit-router-health-check-failure-threshold",
+        dest="miles_router_health_check_failure_threshold",
+        type=int,
+        default=3,
+        help="Orbit's spelling of --miles-router-health-check-failure-threshold.",
+    )
     parser.add_argument(
         "--offload-train-grad-buffers",
         action=argparse.BooleanOptionalAction,
