@@ -33,6 +33,11 @@ class UpstreamDrift(RuntimeError):
     """An upstream function orbit patches is not the one the patch was written against."""
 
 
+# Top-level packages that may hold a stale `from x import fn` binding of a
+# patched function. See _repoint_reexports for why the sweep stops here.
+_REPO_ROOTS = frozenset({"miles", "miles_plugins", "orbit", "tools", "tests"})
+
+
 def normalize(source: str) -> str:
     """Body text a hash is taken over: from `def`/`async def` onward, no blank
     lines, no trailing whitespace, no leading indentation drift."""
@@ -129,15 +134,28 @@ def _repoint_reexports(patch: "Patch", original_fn) -> None:
     unpickling its worker class, before the actor body runs `import orbit` --
     would call upstream's unpatched function despite the patch being installed.
 
+    Nor is it only PACKAGES that go stale. Any already-imported module that did
+    `from .cp_utils import slice_with_cp` holds the same dead binding, and
+    `miles/backends/training_utils/data.py` is exactly that: it imports cp_utils
+    with no orbit import anywhere above it, so in a process that reaches data.py
+    first, patching the cp_utils attribute leaves data.py calling upstream --
+    silently, which is the one failure mode this layer exists to remove. So the
+    sweep is over every already-imported module in this repo's own packages, not
+    just the target's parents (which it subsumes).
+
+    Third-party modules are deliberately excluded: a lazy-import module proxy
+    can run arbitrary work inside `getattr`, and nothing outside this repo
+    re-exports a miles function anyway.
+
     Only an attribute that is still identical to the object just replaced is
     re-pointed, so an unrelated same-named attribute is never clobbered.
     """
-    parts = patch.module.split(".")
-    for depth in range(len(parts) - 1, 0, -1):
-        pkg = sys.modules.get(".".join(parts[:depth]))
-        if pkg is not None and getattr(pkg, patch.attr, None) is original_fn:
-            setattr(pkg, f"_orbit_unpatched_{patch.attr}", original_fn)
-            setattr(pkg, patch.attr, patch.replacement)
+    for name, module in list(sys.modules.items()):
+        if module is None or name.split(".")[0] not in _REPO_ROOTS:
+            continue
+        if getattr(module, patch.attr, None) is original_fn:
+            setattr(module, f"_orbit_unpatched_{patch.attr}", original_fn)
+            setattr(module, patch.attr, patch.replacement)
 
 
 class _ApplyOnImport:

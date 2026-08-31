@@ -36,10 +36,6 @@
    "delta_lines": 369,
    "sha": "18b143b216df0e213cf5327df0fdbb50da49c173f90c2ebaffff68ff0d0411bf"
   },
-  "miles/backends/megatron_utils/__init__.py": {
-   "delta_lines": 6,
-   "sha": "9e1384621d8fa17fcdbc899d1416e21e42ff2225d35655603d952a0e00034855"
-  },
   "miles/backends/megatron_utils/actor.py": {
    "delta_lines": 604,
    "sha": "90d5fe794a8fd6b094ab5149f138c9d4111c08f17dfb7b077b183b7265cd22c7"
@@ -84,10 +80,6 @@
    "delta_lines": 64,
    "sha": "f5a5145ca3ccb6896e7b4553cf66dc8e6daa73c39c818f676549172eb35b041d"
   },
-  "miles/backends/megatron_utils/parallel.py": {
-   "delta_lines": 5,
-   "sha": "1c2c694bcc7f0222bbc9de1dd64fe41dbe6e28527b1207bf076a132d7fab69e5"
-  },
   "miles/backends/megatron_utils/replay_utils.py": {
    "delta_lines": 81,
    "sha": "ce7ade3fd592fe5e2866bf9e96c4e1a254c22a3f170d7c8923605e874800c173"
@@ -108,10 +100,6 @@
    "delta_lines": 10,
    "sha": "31afdcf0131a361b92e274714c8da86ffb0c036f05654a9eb52aea35af5153d4"
   },
-  "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/broadcast.py": {
-   "delta_lines": 8,
-   "sha": "77adeadbca7b2a538c55e47274550bbd5baa27d384189afd748bd953e8ae136e"
-  },
   "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/mixin.py": {
    "delta_lines": 44,
    "sha": "31f96696164bef449cfccf7506fe3be034076ff8227dcbfae4aecdabea51374f"
@@ -127,10 +115,6 @@
   "miles/backends/sglang_utils/sglang_engine.py": {
    "delta_lines": 279,
    "sha": "12010158a89b579bee5d1d2613466828885401113828de160a43298e3d91efae"
-  },
-  "miles/backends/training_utils/cp_utils.py": {
-   "delta_lines": 21,
-   "sha": "9e688cd0d20e102bee114f12f6663bfa2ccc05ada16c6608a4ee40d8a8497401"
   },
   "miles/backends/training_utils/data.py": {
    "delta_lines": 312,
@@ -252,14 +236,6 @@
    "delta_lines": 36,
    "sha": "d6184a92ec0d5823322c0cbfc61acc6ed3e4e86beaaf6568fe9083312a0cacfa"
   },
-  "miles/utils/metric_utils.py": {
-   "delta_lines": 12,
-   "sha": "4653926a4a50fc1a854e81b197e89252dc8b0656e9bda78301364d29845d31b8"
-  },
-  "miles/utils/misc.py": {
-   "delta_lines": 10,
-   "sha": "1d8f9dd98f8138360a3ff253acea0c3759ce9c2ac72c6161bfdebeaca2d7ab12"
-  },
   "miles/utils/ppo_utils.py": {
    "delta_lines": 319,
    "sha": "0feaa54beadc0d7526756ea52bc7209ab7415259282b3707b8a3eaf76baf751f"
@@ -267,10 +243,6 @@
   "miles/utils/processing_utils.py": {
    "delta_lines": 10,
    "sha": "d09018b701448929f52d01bb89feb37745a302975dc45b4684d3431cdadb66ce"
-  },
-  "miles/utils/reloadable_process_group.py": {
-   "delta_lines": 37,
-   "sha": "c99b4057e1a331126e6a2790ecaed055657f01b4e70739f7255382974d866a02"
   },
   "miles/utils/replay_base.py": {
    "delta_lines": 62,
@@ -299,10 +271,6 @@
   "miles_plugins/mbridge/qwen3_5.py": {
    "delta_lines": 72,
    "sha": "675989ed3d206b19f8f05522ad767058e3b38047725b34b83474385284e85fa8"
-  },
-  "miles_plugins/megatron_bridge/__init__.py": {
-   "delta_lines": 7,
-   "sha": "2b8104d51467ebb366df0327a8eeab397b5d00de3edd78d138449b6b34ecfb39"
   },
   "miles_plugins/models/glm4.py": {
    "delta_lines": 8,
@@ -782,6 +750,7 @@
   "LICENSE": "bf917707c1e0ffdfe653d63aebc188a48f738f3faad9acc188c346d3618694af",
   "miles/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/backends/__init__.py": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+  "miles/backends/megatron_utils/__init__.py": "f71498541a3e05bc11962748ecc70d5f21f054804548eb23e6d0d1faf5e77a50",
   "miles/backends/megatron_utils/ci_utils.py": "03a1209522d11d8f4edc844cd5386bb08b2c8fd73a1772eaa173b8c22ab21677",
   "miles/backends/megatron_utils/kernels/int4_qat/fake_int4_quant_cuda.cu": "d2b291133d84cd824b0e2b0fbbb539b2d2e62b969f0a097a37a1551766c6bcb7",
   "miles/backends/megatron_utils/kernels/int4_qat/setup.py": "f8a9389797532d24701698e96222ca35d6a81236fe02a4a0dbcc04515614cde6",
@@ -799,15 +768,18 @@
   "miles/backends/megatron_utils/megatron_to_hf/qwen3_5.py": "e83cd55ba2cf81936ab72a6b0a8ae3c2cbd02de6a232094aec5dc215939ee639",
   "miles/backends/megatron_utils/megatron_to_hf/qwen3_next.py": "911d9ef0f5c11dd54bf59a1e66e861da24b8657a128e80d841d4731ef1e4d8c7",
   "miles/backends/megatron_utils/megatron_to_hf/qwen3moe.py": "59aef122cc8e193e69e8bc46b2a22fbb73daa28b5f5b9da06bb53a471dbbc5b9",
+  "miles/backends/megatron_utils/parallel.py": "c03c41d52fc9fa7cb87c673f7759d5af441a0d865a34cb554b21fd7c11275d8e",
   "miles/backends/megatron_utils/sglang.py": "ab1010b886238582ebe1879f3a29b4ae074363d6a1f06fd2921748d678e509cf",
   "miles/backends/megatron_utils/update_weight/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/broadcast.py": "72aff20fc0d4f2320ae2dd188ab5fef423bb5e2c2bc492fea7bc96b259ff4e1e",
   "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/p2p.py": "d70f27df4d709ecffa399d82d1c7de26555af4c026778609d06fe255f852dd37",
   "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/p2p_transfer_utils.py": "628b2989a457daae99671c7c49564ab20c920cbd84b8c48f389f2435ccb04908",
   "miles/backends/sglang_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/backends/sglang_utils/sglang_config.py": "13877f58ea1c9225992f7ab2484a848ce4689a7faed293dcc806eba8fff40e11",
   "miles/backends/training_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/backends/training_utils/ci_utils.py": "d8ce012fdb8fdb3093c5013917cc7221a904952f65d497afddcef36fca50f253",
+  "miles/backends/training_utils/cp_utils.py": "875916b79952f9f58fceadb768c509b4440c5cb802ed302b8e52dcb851e37231",
   "miles/backends/training_utils/parallel.py": "5b7c666b8bdb602331efb9a53d6670908e6c844c9d723d6681b26648831fe4e5",
   "miles/ray/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/ray/ray_actor.py": "f01d53cf01d248878261db7929790b96bc63d25705b33546b5ca26ab96c7662f",
@@ -861,9 +833,12 @@
   "miles/utils/logging_utils.py": "cfc53a302e8feac7afde17ed8e8fcf27f3cc64a92f918c2eb8ee906eafa776ed",
   "miles/utils/megatron_bridge_utils.py": "de8abf036db3bc73f99d76b4a3314c9fb708870e3ad7ce62ebd2e99a37516296",
   "miles/utils/metric_checker.py": "13d407e4df672592e9e959cf673efa9cb5bfa738eb2ad3545246469edf32bb6d",
+  "miles/utils/metric_utils.py": "cf917c030c2a0d49838d34479702b5e43e22ccf9f3be6fc26de367d0ba828d77",
+  "miles/utils/misc.py": "e7d33db74be887ed4332e96e8e7a0c4f4a5829b2541a86794eea4bbcdce48a15",
   "miles/utils/profile_utils.py": "f620b223dfcb3e6893c33c8f2ec4491d9628388b01e07d21dcb18919ca14fae4",
   "miles/utils/prometheus_utils.py": "3a165daf154f0dfcd686bb6da19af8526c88cc89bd3038b47b6e8d2d4accc63f",
   "miles/utils/ray_utils.py": "3bdf5470e5a56318b50c44e6d320b226dacdf532e48fe5c23d3230b4852b542d",
+  "miles/utils/reloadable_process_group.py": "2dfc82fa67789049ca05e9f95f022e7d965217503b4550e997c5db975cd99b48",
   "miles/utils/rocm_checkpoint_writer.py": "6f29a85785a5b40e09e3b28b34e4dfb8007730039ba059863d7bbacef557e6a4",
   "miles/utils/seqlen_balancing.py": "2054f39c167898c104824666b514647c31008ed6be4cb90c07b3869f75550984",
   "miles/utils/tensorboard_utils.py": "6f919b68fd2378f9489398e2655040761cc93bfd09b53dcc5f4b3f8619c9b683",
@@ -884,6 +859,7 @@
   "miles_plugins/mbridge/glm4moe_lite.py": "09b18332d210ab4b0ab0acdf14df24a971a9847c49ce5ce4ff188d012e13ac6b",
   "miles_plugins/mbridge/mimo.py": "b43cf010814262721ed561ccf28f3786a464eb03d959bf0ca7aede24f9f28df5",
   "miles_plugins/mbridge/qwen3_next.py": "86110c106bb61c468765eccb57e81645bc30cc653c29dc0cce609f284354e67e",
+  "miles_plugins/megatron_bridge/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles_plugins/models/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles_plugins/models/cp_utils.py": "1e6eb160c1952247f895478dd9f2676038cd2205d7ba1568513e776346ec2eca",
   "miles_plugins/models/glm5/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",

@@ -23,4 +23,15 @@ from orbit.patch import install_hook as _install_hook
 # miles module, so this stays cheap.
 from orbit.megatron import hf_export_patches as _hf_export_patches  # noqa: F401
 
+# Same deal for the seams that replace a module-level `import` line a vendored
+# file used to carry (orbit/patch/on_import.py): these modules only register, and
+# do their own importing lazily inside the callback.
+from orbit.megatron import bridge_plugins as _bridge_plugins  # noqa: F401
+from orbit.utils import miles_utils_patches as _miles_utils_patches  # noqa: F401
+
+# The rest of the delegating patches, grouped by the vendored package they cover.
+from orbit.megatron import megatron_utils_patches as _megatron_utils_patches  # noqa: F401
+from orbit.megatron import training_utils_patches as _training_utils_patches  # noqa: F401
+from orbit.utils import metric_utils_patches as _metric_utils_patches  # noqa: F401
+
 _install_hook()

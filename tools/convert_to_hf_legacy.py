@@ -5,6 +5,12 @@ import torch.distributed as dist
 from megatron.core import mpu
 from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
+# ORBIT-SEAM: arm orbit's patches over the megatron backend this tool drives --
+# the HF converters' extra parameter names, and get_packed_seq_params' DSV4
+# fields. They install via a hook that `import orbit` arms, so without this line
+# the tool runs upstream's unpatched functions and silently loses them.
+import orbit  # noqa: F401  -- imported for the patch-arming side effect
+
 import miles.backends.megatron_utils as megatron_utils
 from miles.backends.megatron_utils import update_weight_utils
 from miles.utils.arguments import parse_args
