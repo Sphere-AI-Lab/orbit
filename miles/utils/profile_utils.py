@@ -60,7 +60,7 @@ def _profile_simple_loop(iterator, args, name):
 def _create_torch_profiler(args, name):
     return torch.profiler.profile(
         schedule=torch.profiler.schedule(
-            # Follow-up the train_actor and train_log_probs ones may need to have different args to control step
+            # TODO the train_actor and train_log_probs ones may need to have different args to control step
             wait=max(args.profile_step_start - 1, 0),
             warmup=1 if args.profile_step_start > 0 else 0,
             active=args.profile_step_end - args.profile_step_start,

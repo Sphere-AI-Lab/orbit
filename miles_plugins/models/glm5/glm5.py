@@ -538,7 +538,7 @@ class DSAMLASelfAttention(DSAMultiLatentAttention):
         rotary_seq_len = self.rotary_pos_emb.get_rotary_seq_len(
             inference_context, None, hidden_states, self.config, packed_seq_params
         )
-        # Follow-up: support apply_rope_fusion
+        # TODO: support apply_rope_fusion
         rotary_pos_emb, mscale = self.rotary_pos_emb(rotary_seq_len, packed_seq=packed_seq_params is not None)
 
         cu_seqlens_q = packed_seq_params.cu_seqlens_q
@@ -601,7 +601,7 @@ class DSAMLASelfAttention(DSAMultiLatentAttention):
                 t = torch.cat((x1, x2), dim=-1)
             else:
                 t = q
-            # Follow-up remove copy here
+            # TODO remove copy here
             # fuse rope not support this way rope (diff with cp)
             if gathered:
                 return fused_apply_rotary_pos_emb_thd(t, cu_seqlens, rotary_pos_emb.squeeze(0))

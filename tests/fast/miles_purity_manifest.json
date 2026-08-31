@@ -104,41 +104,9 @@
    "delta_lines": 15,
    "sha": "3d32d7cb163974ca83ab8d71665ee035f55ac6facda0bcf37de0d02bd0cfea17"
   },
-  "miles/backends/megatron_utils/megatron_to_hf/glm4.py": {
-   "delta_lines": 6,
-   "sha": "44314e0bba508aca6a8526d4b24426167f9a7d806b235bed81da6cd5149fb37e"
-  },
-  "miles/backends/megatron_utils/megatron_to_hf/glm4moe.py": {
-   "delta_lines": 3,
-   "sha": "150ceb1b49998391b78dec71f84e2bd07b3eda3400aeaf23484a9f87a4d2ec1b"
-  },
-  "miles/backends/megatron_utils/megatron_to_hf/llama.py": {
-   "delta_lines": 3,
-   "sha": "2b35b7dee5353e0f069c345ba4059e26fd601e59212d1350b64320274f50820d"
-  },
   "miles/backends/megatron_utils/megatron_to_hf/processors/padding_remover.py": {
    "delta_lines": 22,
    "sha": "6b802e25a448e752cbbd128c6bb380a1a8d9778dea96d2f1082229a388045715"
-  },
-  "miles/backends/megatron_utils/megatron_to_hf/processors/quantizer_fp8.py": {
-   "delta_lines": 2,
-   "sha": "66616c3441ae88c827c161894204f5e2519a31618ffc88f881d50f48ec3e7a24"
-  },
-  "miles/backends/megatron_utils/megatron_to_hf/processors/quantizer_mxfp8.py": {
-   "delta_lines": 2,
-   "sha": "bb5968e9baf572bb81696cc96bd3958fb303b55731b69f35a7fe1e3c93a1cec7"
-  },
-  "miles/backends/megatron_utils/megatron_to_hf/qwen3_5.py": {
-   "delta_lines": 3,
-   "sha": "d06f1b1791b68982b8905f66ebc256c3d1e6832db756be717402ec170e7e1f33"
-  },
-  "miles/backends/megatron_utils/megatron_to_hf/qwen3_next.py": {
-   "delta_lines": 3,
-   "sha": "8f6bc967f9f838ecfbb579263910b64eb22b1112acfa901906280cae093fd2ff"
-  },
-  "miles/backends/megatron_utils/megatron_to_hf/qwen3moe.py": {
-   "delta_lines": 16,
-   "sha": "de628c7bb653a51dcb5a55dd04a8a5cb75861906bd7d055f48b11423ecb8b87d"
   },
   "miles/backends/megatron_utils/model.py": {
    "delta_lines": 458,
@@ -147,10 +115,6 @@
   "miles/backends/megatron_utils/model_provider.py": {
    "delta_lines": 25,
    "sha": "8e84c97b5b8ce6ec5f151eb309c17ceaeb131508f1f38a124589149f4e67cb27"
-  },
-  "miles/backends/megatron_utils/parallel.py": {
-   "delta_lines": 5,
-   "sha": "6b601ea21460bd1caac2281742173fb507fd3a9ded510e749f0f14f6f33c4b08"
   },
   "miles/backends/megatron_utils/update_weight/common.py": {
    "delta_lines": 71,
@@ -168,10 +132,6 @@
    "delta_lines": 12,
    "sha": "ad3fd2288eef9d8ac795d76ace07164cf160bf44ef2c366215eb53aa5ebdfec7"
   },
-  "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/broadcast.py": {
-   "delta_lines": 10,
-   "sha": "f00671d6fe3420a3a8131fd2fe930d171b091fd0270020b6f2c272e4e511897d"
-  },
   "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/mixin.py": {
    "delta_lines": 55,
    "sha": "20e5b3ffa43b41636fe0ada33054a0f218b983abe7aaa74632558a2be3e8bb25"
@@ -187,10 +147,6 @@
   "miles/backends/sglang_utils/sglang_engine.py": {
    "delta_lines": 304,
    "sha": "c9a3688480aeab1a68f54752f3e1cad5e7802ff40cfdb677759e4eb2add84096"
-  },
-  "miles/backends/training_utils/ci_utils.py": {
-   "delta_lines": 2,
-   "sha": "26b49fe5e18be0339babef96775bce42b4aa211f1227fb2b066e014eaab7f5b5"
   },
   "miles/backends/training_utils/cp_utils.py": {
    "delta_lines": 21,
@@ -280,21 +236,9 @@
    "delta_lines": 13,
    "sha": "81ef6a87b166f02b54922c7238a236328fbd7112e9ccddccd7abd61ae2e9f606"
   },
-  "miles/rollout/base_types.py": {
-   "delta_lines": 6,
-   "sha": "4a5628054bc4410ef089d43deeeabfad70c7b8c0b1516333aea86e7296eda76a"
-  },
   "miles/rollout/data_source.py": {
    "delta_lines": 264,
    "sha": "b672f2ee56042235da9b2f3db1b240da895959e4e7873785c694eeb1140f8d04"
-  },
-  "miles/rollout/generate_hub/__init__.py": {
-   "delta_lines": 2,
-   "sha": "6dd9e89c464305609e611749ddf9670fb78a308cae12639570c84a46ca3a7355"
-  },
-  "miles/rollout/generate_hub/benchmarkers.py": {
-   "delta_lines": 2,
-   "sha": "516cc2945f0b9a32324b83e6d25c35634e73cbfb161eff8393a23c8ea6bfd3ab"
   },
   "miles/rollout/generate_hub/multi_turn.py": {
    "delta_lines": 9,
@@ -332,10 +276,6 @@
    "delta_lines": 18,
    "sha": "0efdaabb389f4055ba5ef09582734e4b5ccde08d29dbb6fba2b78ea8d712231a"
   },
-  "miles/rollout/session/linear_trajectory.py": {
-   "delta_lines": 2,
-   "sha": "ec3ea98efc85205a10fcc0b549c8d8a0cccfec31a005d287ded74eac95373bb4"
-  },
   "miles/rollout/session/samples/merge.py": {
    "delta_lines": 18,
    "sha": "8c54b6645b5f5a8df2befabd0194b38d74ab550a633b1f04ed2321319f1805d8"
@@ -372,14 +312,6 @@
    "delta_lines": 15,
    "sha": "a5553f53eeb77d986f6b5392ee942a79eba0b6df0de5aefb8d1e8883265eccc6"
   },
-  "miles/utils/env_report.py": {
-   "delta_lines": 2,
-   "sha": "df75ee18ee327825acdefaff09c578737eff551a9d4cf3361598aa7fbe6fff31"
-  },
-  "miles/utils/eval_config.py": {
-   "delta_lines": 2,
-   "sha": "5befdf23d7b3910f61dd54394550a836193d0b348c3ddfea16487a769fec30b3"
-  },
   "miles/utils/external_utils/command_utils.py": {
    "delta_lines": 40,
    "sha": "6ce91686ce183a5d27d43dbd175d7f17b47c4d1e72b77ba3df5969b1b5b235a1"
@@ -387,10 +319,6 @@
   "miles/utils/http_utils.py": {
    "delta_lines": 104,
    "sha": "116e0cb42cfefb0f30f6dbd43a64fbfb861ea4cb4feb10bb183325893d786e33"
-  },
-  "miles/utils/iter_utils.py": {
-   "delta_lines": 2,
-   "sha": "e7fbb40cd7e23e370af3c398f130f50af543db95343f5d4e32606be35da63c47"
   },
   "miles/utils/mask_utils.py": {
    "delta_lines": 223,
@@ -400,25 +328,9 @@
    "delta_lines": 36,
    "sha": "d6184a92ec0d5823322c0cbfc61acc6ed3e4e86beaaf6568fe9083312a0cacfa"
   },
-  "miles/utils/metric_utils.py": {
-   "delta_lines": 12,
-   "sha": "4653926a4a50fc1a854e81b197e89252dc8b0656e9bda78301364d29845d31b8"
-  },
-  "miles/utils/misc.py": {
-   "delta_lines": 10,
-   "sha": "d1e02aa3b2d31289c465b83c098f6809e6f3611a8b5c56f36352c1bfea22ef4c"
-  },
   "miles/utils/processing_utils.py": {
    "delta_lines": 10,
    "sha": "831a715c3902447ab7603803ca3b2a9954304afd16d74d0eb33fffae76a0f2b4"
-  },
-  "miles/utils/profile_utils.py": {
-   "delta_lines": 2,
-   "sha": "efaf3e1398dadc27e78abaf37662e8405f081ce7fbb5118c3a154d4d1b7bad85"
-  },
-  "miles/utils/reloadable_process_group.py": {
-   "delta_lines": 4,
-   "sha": "0e7de86152f4af67e2067384b91d72a1dd357816896fc8c517e872ba50a388bb"
   },
   "miles/utils/replay_base.py": {
    "delta_lines": 66,
@@ -444,10 +356,6 @@
    "delta_lines": 191,
    "sha": "8e176e8004ad300a4ea8d66f6f88e7cbcc9de4042ac2520bc10f1787806bd601"
   },
-  "miles_plugins/__init__.py": {
-   "delta_lines": 1,
-   "sha": "6f88dd6f47d77e8eb8ec3ddd92506f48a9909bed5a72a0773d816724eb1985b6"
-  },
   "miles_plugins/mbridge/qwen3_5.py": {
    "delta_lines": 11,
    "sha": "572b754c222bb9fd50c87cdda7e51588b08d735da8c12a0bd9c6de5cad825e05"
@@ -455,14 +363,6 @@
   "miles_plugins/megatron_bridge/__init__.py": {
    "delta_lines": 7,
    "sha": "7a1e0e3a1d7a5351205f2cfbb9c997354e5c2be43274b7b25605a57c48787e82"
-  },
-  "miles_plugins/models/glm5/glm5.py": {
-   "delta_lines": 4,
-   "sha": "62b9700bad01fbb860cab63fce3b41b8760975425abd57c46d0f050c0f0f5b61"
-  },
-  "miles_plugins/models/hf_attention.py": {
-   "delta_lines": 2,
-   "sha": "119adf09e7adc9fe89ab5f198dbc1c0f01fddd00ccdfabda72d15c3d743c65d4"
   },
   "miles_plugins/models/qwen3_5.py": {
    "delta_lines": 6,
@@ -607,6 +507,10 @@
   "tools/convert_hf_to_torch_dist.py": {
    "delta_lines": 192,
    "sha": "35b5615e3400a1e0b939c4cbbe9589adc57c4989081bc5a5407ff6cf39a99fb8"
+  },
+  "tools/convert_torch_dist_to_hf_ray.py": {
+   "delta_lines": 16,
+   "sha": "57534a70e54b54dc0e0689b4fafdf7799663f6cca054e90b984ae286c1118b90"
   },
   "tools/fp8_cast_bf16.py": {
    "delta_lines": 14,
@@ -1119,22 +1023,32 @@
   "miles/backends/megatron_utils/local_weight_checksum.py": "3441772f08409cd9385d9a866cf24a2a45e5bbc1f20512d93f4ea879cd066900",
   "miles/backends/megatron_utils/megatron_to_hf/deepseekv3.py": "c1ea9c27f2cb537ec1fc43408cdfdd70862e38b2ffa1ae82ee12661f16783eac",
   "miles/backends/megatron_utils/megatron_to_hf/deepseekv4.py": "e057d088eb0a5d94c33ef19392b8b2c227fd1504a66c811b3fdfe321dba0fb97",
+  "miles/backends/megatron_utils/megatron_to_hf/glm4.py": "fdc2a52fa21e7f9b526b0cffeee97801cc3a28990a8ace7d33809c6044d4283e",
+  "miles/backends/megatron_utils/megatron_to_hf/glm4moe.py": "b6cf1014891b72c599c4c1fd779736b2356607f7d8083f0f958105341e1ad0e1",
   "miles/backends/megatron_utils/megatron_to_hf/inkling.py": "b7b454ee7954139052e5cf8220209a3bfe474b544fea904d2323d4900739416a",
   "miles/backends/megatron_utils/megatron_to_hf/kimi_vl.py": "ec4f39f391ab4a2edefbd85789b5319511d6edd5ad3ae622f4ba134014c8dd28",
+  "miles/backends/megatron_utils/megatron_to_hf/llama.py": "e9223b10d7bf62b9acb3314f909831b0b12502451595763668c541ae0cd28399",
   "miles/backends/megatron_utils/megatron_to_hf/mimo.py": "97f923736c95bfa00f87a905affc228b57428c62b0534c998c709d9ff6b92254",
   "miles/backends/megatron_utils/megatron_to_hf/processors/__init__.py": "65d2515cc094a4eabd0d2b991959056f19aa401b3e175dd79f1a37640dac1fe4",
   "miles/backends/megatron_utils/megatron_to_hf/processors/quantizer_compressed_tensors.py": "8e5988739e8b1a60aaa19b5e858e50c47de2690210178836c193751e043d23df",
+  "miles/backends/megatron_utils/megatron_to_hf/processors/quantizer_fp8.py": "22d6ecccea13bee06911567881b6e72ef16eb2db89c87d57287ee05b817e6f52",
+  "miles/backends/megatron_utils/megatron_to_hf/processors/quantizer_mxfp8.py": "e6fa1b2fd31a3d6d2da966c8f70054b3dd6c83e6ee2fcbd5d17bcb05f686b5d6",
   "miles/backends/megatron_utils/megatron_to_hf/processors/quantizer_nvfp4.py": "45cf128d6e518fb537cc7b2359ce113b83add70085192ac8ec140fb82b862770",
   "miles/backends/megatron_utils/megatron_to_hf/qwen2.py": "312660a94ba4d4d390acd62f0cda2756428ca07ce72fdc65af1e2d53a4bf1904",
+  "miles/backends/megatron_utils/megatron_to_hf/qwen3_5.py": "0fc2b8800b606a5386c065de562ed4dbb294f52caf93ecad6bc5094b36ebb2c1",
+  "miles/backends/megatron_utils/megatron_to_hf/qwen3_next.py": "fb0c184194d17b04f1dad2bf3faae0d7d1a2edcda0e8145da44feb3676fc9db9",
+  "miles/backends/megatron_utils/megatron_to_hf/qwen3moe.py": "59aef122cc8e193e69e8bc46b2a22fbb73daa28b5f5b9da06bb53a471dbbc5b9",
   "miles/backends/megatron_utils/misc_utils.py": "10566d9583fd9e593213e42b22c232264b9da70adfb9af2f7a91f08aaa695d64",
   "miles/backends/megatron_utils/multi_lora_optimizer.py": "595bfa38b818900bb2363980411ece1492138f246e122dfaa2ee68a769bdbc6f",
   "miles/backends/megatron_utils/multi_lora_scheduler.py": "79d4ebdfdc8d44f451febb24023eb291e7b14a6cd62554543801920caaf88cd3",
   "miles/backends/megatron_utils/multi_lora_utils.py": "de0153a47d420f99d30925a22bfee525aa827f94777d0c0505e6420ca22ff095",
+  "miles/backends/megatron_utils/parallel.py": "37182acf0d6fb1030a30632d6e6b079b8ba40abd7e1cbd0d65265aef81302a29",
   "miles/backends/megatron_utils/rematerialize_utils.py": "6c4185adfa3ed1a5482d937c6bb4e66f740eecb90f823c4aa37672f711c6c48e",
   "miles/backends/megatron_utils/replay_utils.py": "83044a3d7f9133e942e0668bb77c7b3f9fe8397356e82c7f2a14bd0de188d9d8",
   "miles/backends/megatron_utils/sglang.py": "3b531dc0f3edd6197b9fc29d71a6f1c8f95f3bdc0e2821da9919febbd0fa531a",
   "miles/backends/megatron_utils/update_weight/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/broadcast.py": "eff2186c7872b64c142a31c5a86893454e1fcecacc1f463c8131ed20c0394b65",
   "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/delta.py": "f12105c34894fcc660b84aa5e1fd28c1e3167d6e0741e463f931cbc360068113",
   "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/p2p.py": "0763d01982146732e8b628c267881201e3cf236b0ffb5e4456785f3f74a65346",
   "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/p2p_transfer_utils.py": "e9c86bcc8b18384f0fd3f3bb4292dc5b67130956f3586b8d00030f497073a2ba",
@@ -1142,6 +1056,7 @@
   "miles/backends/sglang_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/backends/sglang_utils/sglang_config.py": "13877f58ea1c9225992f7ab2484a848ce4689a7faed293dcc806eba8fff40e11",
   "miles/backends/training_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/backends/training_utils/ci_utils.py": "af54a1a5d895cf10dbcd1e2a28dabd3cb6721a7afc7b8ba752f981a0520eac33",
   "miles/backends/training_utils/debug_dump.py": "810d250182fa337c6929e9779609529a9fb43945dfa35863ee059e2f4fc1c58c",
   "miles/backends/training_utils/loss_hub/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/backends/training_utils/mm_data.py": "b78029cee54efa92225180ca28a1fbacc44f4061fba2050b3add50fdfd642d37",
@@ -1197,13 +1112,16 @@
   "miles/ray/train/group.py": "0369e2fc428faf33c2cd6f35e6562983e59ea71f40aacdc44ae43c69c72bb57d",
   "miles/ray/utils.py": "b66211d098278acc6313b7f4d203980f006e6297173c4b3318fa871a2e912212",
   "miles/rollout/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/rollout/base_types.py": "3f3bd4c5bb9b7adb5aafc1b806153f41c642fa232d4baa9bfe17d91b74a1cce8",
   "miles/rollout/checkpoint_eval.py": "13cee940a6a7bf8716c01ec418eaf3092edb41f898ec57139b37bdac72cd2bba",
   "miles/rollout/filter_hub/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/rollout/filter_hub/base_types.py": "7eedd8d000dcd9cdb930f05ce23e19d08269b5bb672a4a521d70d537f548c654",
   "miles/rollout/filter_hub/dynamic_sampling_filters.py": "36f975d8f35520e6c0dc7c6e1eac2f7e87b5222142a5a8388f5ffb4f6c0c4085",
   "miles/rollout/fully_async_data_buffer.py": "f7dfaa4215ced6f40e3ed7a6a8e3aaabbb4d62b4f241052133bd9a41f8c96a29",
   "miles/rollout/fully_async_rollout.py": "76375a601c31af5a549fa34a70aa1d5d7356dd7996dfb0f06b64db22df39add3",
+  "miles/rollout/generate_hub/__init__.py": "aefce0294b1b424db4c21ada501a312586fa1e424793fe24bc051ca7c53fc759",
   "miles/rollout/generate_hub/agentic_tool_call.py": "0d7dc4cb4ed82dc0d8bae5361ecd6a52a6ec0045aa31340b301681c31acdbd35",
+  "miles/rollout/generate_hub/benchmarkers.py": "8b466270e8c4aa5941602ea042e35880079678e73dfaa2305a921c5af3a7c625",
   "miles/rollout/generate_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/rollout/generate_utils/openai_endpoint_utils.py": "9b314fd05af265dde766b116ebcbb53e94d1f31109ea7348a717346dce43b54d",
   "miles/rollout/generate_utils/prefill_logprobs.py": "d8370d4b8abdfca3fe705f5f2354ea2710929ca41d974269ccadba4fb192f5c4",
@@ -1222,6 +1140,7 @@
   "miles/rollout/session/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/rollout/session/core.py": "bbda648f0d95c1079e6fd71f1645c182707cf0399a9307a64cd2217d756f66bf",
   "miles/rollout/session/errors.py": "e00fc9d99274200a537081ad41bfeaf0f5f58d69026bd3afc67f3657560cec64",
+  "miles/rollout/session/linear_trajectory.py": "44cf1f9765eaf04e740b80f1b53abf00ef6bf29598230459d213d3f665f142c7",
   "miles/rollout/session/samples/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/rollout/session/samples/codec.py": "56e660284c0624413fd7271775a840e8912ac2ed9fd3188111323ec47bc72d18",
   "miles/rollout/session/sessions.py": "d5d733b423983e23bffd92be4123b04cb70443545c10e96d5563633cd492b1f3",
@@ -1308,7 +1227,9 @@
   "miles/utils/device_flops.py": "e331bad2fff30dc19fb32f5b10f34cd2887c9a4122e30219ce14d1a727872a3e",
   "miles/utils/disk_delta.py": "630aced68428a6225600907904519fbe416532b81046a9570d031402d817f966",
   "miles/utils/dp_schedule.py": "8d51102fa832f38c0000f0f504265d07adad78a7b9b1ddcd578a33ce50ccd81c",
+  "miles/utils/env_report.py": "500ef6938856f6a206916c97af67910549cb021501a96a3700e2018f2f2a2393",
   "miles/utils/environ.py": "7662c29381f5811e3ad616190186e21e60b5812eaca87d84b8cfeacdc17ed144",
+  "miles/utils/eval_config.py": "98c7053fa3081415a2de03b38767555ea2177a50acf9355646538e96de496529",
   "miles/utils/external_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/utils/external_utils/exec_command.py": "e67f21e684ae954250b9333e9e44a1f579ae54053bc9ff86771fa1b432e5fc7c",
   "miles/utils/external_utils/model_args_utils.py": "9bc0bc742dac9c51300f2137bf35c6ceb224f85563735fb1b2ef3900831b9082",
@@ -1328,18 +1249,23 @@
   "miles/utils/ft_utils/process_group_utils.py": "78ce6e24a9334394e8fb9fe170628d6bbff50f556605cc15a111f87d06302729",
   "miles/utils/health_monitor.py": "9e01ab5294d2159dd9b8b64600ecfd018eccf78115adcdbf46ebf4e9eabc54aa",
   "miles/utils/hf_config.py": "603617e36cf713e41356c0c2c20247443d87ecff7cd963480e1b4636a5a3f643",
+  "miles/utils/iter_utils.py": "642b8a8121bb06c8980ac708feb6d64253a0a23db5be0cc10778901a26e20b1e",
   "miles/utils/lifecycle.py": "eaa4fee0de28cb864615ae53c0ee7585dfe17b60a1aec79e5d3a55b991f80458",
   "miles/utils/logging_utils.py": "dc8b11cf1ec4eb78e1850bb4adb8da5d03a078db719064a5d481716c6e5d88ea",
   "miles/utils/lora.py": "eee663241f2ccd3915252e8adf84b01a12f2949eb54f733ea05318fd31633fc0",
   "miles/utils/megatron_args_utils.py": "8a5e2ad602f3a22f80d300efce0c7e960e1d8820b0c7d5e5a5d4be8d55e1d9a9",
   "miles/utils/megatron_bridge_utils.py": "7f711efd040d06ed76fb8962540393b96ee344a44a10bb07d5218d5da33a1afb",
   "miles/utils/metric_checker.py": "13d407e4df672592e9e959cf673efa9cb5bfa738eb2ad3545246469edf32bb6d",
+  "miles/utils/metric_utils.py": "cf917c030c2a0d49838d34479702b5e43e22ccf9f3be6fc26de367d0ba828d77",
+  "miles/utils/misc.py": "746dac7c19177aa8500e8fd62c9f946e233decae24396bdbfe0eb6591f5bb0aa",
   "miles/utils/multi_lora.py": "483ec47075346119228c0e64019cedec3e558084a4009a89c96661138b3c0cd6",
   "miles/utils/mxfp8.py": "47b13f3dc1d5e144090c45ce253a50de443f47b9a972cc97580a21975a07b8fd",
   "miles/utils/nvfp4.py": "c1c3f2d52862ef7adf4220721df75ade9eba8fda3f254789fcacfee15f985b77",
   "miles/utils/object_store.py": "7a8242c1a343010944c35f38f6bccc144683c5a59a3ba866213d615e41c78f52",
+  "miles/utils/profile_utils.py": "f620b223dfcb3e6893c33c8f2ec4491d9628388b01e07d21dcb18919ca14fae4",
   "miles/utils/pydantic_utils.py": "24d439d68f5ea30c32cb8ace77b95f18c20825e937c50337b6e5eb0656f0ef19",
   "miles/utils/ray_utils.py": "3bdf5470e5a56318b50c44e6d320b226dacdf532e48fe5c23d3230b4852b542d",
+  "miles/utils/reloadable_process_group.py": "a667b9a60e9a8d1f72605d4b23a8e083a3a378709eded806c08e8002de809bc2",
   "miles/utils/retry_utils.py": "75e9763d6a1537e102124d06186ea6d35507c2b0d2abfe5338526767fd9afb3f",
   "miles/utils/sampling_mask.py": "d31b3712e08075ce934c0ce42dd6ea262365dbb977da229a2ee147f647632799",
   "miles/utils/seqlen_balancing.py": "7d5fb3bc9550f3e487406045386c16aae9aa1cb32763e4430116c402228fdf0a",
@@ -1374,6 +1300,7 @@
   "miles/utils/tracking_utils/tracking.py": "b2a32e4090322bf6561da4e1c6f9d5debfd4359b761be9b12a8d7bb796450fb1",
   "miles/utils/train_dump_utils.py": "38acc9e19104f651c7d54fca83285b64a8cee4213cc9c9df6ab3891d4470d7ed",
   "miles/utils/typer_utils.py": "ade806547442a9cd309fb07909e07d6cedf38b39b83e20bb47744f7161ac717a",
+  "miles_plugins/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles_plugins/mbridge/__init__.py": "de35b8057014570891c66e3c5141e6268ef8ca8d139d8282abd3ea12faaf2e34",
   "miles_plugins/mbridge/deepseek_v32.py": "c25025da9861905b4fe9ba3370cbb3e282c9eb462144b05c79ba019994e03c71",
   "miles_plugins/mbridge/deepseekv4.py": "dd7679ce5d7a0dfcac23ee6fd746bb0bfb3e6ed3f2f1bcbb11e720225b2f9bf6",
@@ -1409,6 +1336,7 @@
   "miles_plugins/models/dsa_topk.py": "32e7ced8f4c89a0be4693bb58f52f8c38e2d68de11b0fd447200ce63e4bd0280",
   "miles_plugins/models/glm4.py": "74e15a1294ca563096eaa380d14a7c2ce0b28bd21ff76ff5893de350c84a08cc",
   "miles_plugins/models/glm5/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles_plugins/models/glm5/glm5.py": "098f0dc97e169f4a6151bd91c109a1cb7e296d85d406bfa772815923aea85fa5",
   "miles_plugins/models/glm5/ops/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles_plugins/models/glm5/ops/indexer.py": "5ec1f011b8f446468a2aa1dd7d3afd4e431eed5646d8c71ec693469aded902fa",
   "miles_plugins/models/glm5/ops/sparse_mla.py": "d79d169c899250c7efdf82a4c3b638e3aa751069e528189f6682e234c67fc1f4",
@@ -1416,6 +1344,7 @@
   "miles_plugins/models/glm5/ops/tilelang_indexer_fwd.py": "39e78f7b5e0e79cb213cca1951aecf7bb826ac6dca5020172aea986d8e81223e",
   "miles_plugins/models/glm5/ops/tilelang_sparse_mla_bwd.py": "7c9880ad9ef4729bc76c4d2c8c917659c405aef8b24ed9d43e1346fc1b86fae7",
   "miles_plugins/models/glm5/ops/tilelang_sparse_mla_fwd.py": "76b94462b451e162045f278939af53788f0be0978e46a277a99b59f64e3799d0",
+  "miles_plugins/models/hf_attention.py": "46bb46c95cbcf87e0f2105a04bb75693d842f9cfeb2240d4792f737baebde902",
   "miles_plugins/models/inkling/__init__.py": "b0afaf944408f8a2f65f97ca0e472667e9082338f0259823f03861f3219f16f0",
   "miles_plugins/models/inkling/audio_processing.py": "f4b818584b3446fc018df2d8b09e48082b5d339e3c79bd6aa7a5fb90f6fee2ee",
   "miles_plugins/models/inkling/image_processing.py": "5b02fe262afc7662b11902ac982476a71665261a231d88edd0cadd242f86e381",
@@ -2265,7 +2194,6 @@
   "tools/convert_kimi_int4_to_bf16.py": "ebb44035010692281d790869fcdf45a1746787a40b98fc4d5e5756d7e1526d15",
   "tools/convert_mxfp4_to_fp8.py": "f450a224f74c1dbfe93c5ac1d9dc50fe67bfe852f99371ce55ff63c595ab2ec9",
   "tools/convert_torch_dist_to_hf.py": "332bf9eedb5c72f83de69ac8e993d43c4ab4c2c30d4d2e60f6ba466ac5ea6390",
-  "tools/convert_torch_dist_to_hf_ray.py": "81d992ecd6af61c788174a70a707c2a2e56b1aa93639eaa988b5d996a22cbc80",
   "tools/cpu_memory_profiler.py": "ad7a9dc7eed50647ef60803db7b514c173dee5173b0f4e93bfcd276b4d472988",
   "tools/param_name_remap.py": "042412e447e9a49d4c20e2d93f9aa59654124b47ca2fd473b58955953ef920b3",
   "tools/visualize/cpu_memory_profiler_visualize.py": "d98346c6c0038f10776f5dea7aaee20ecc2c9a51334e28f223a4f11e4f54b350",

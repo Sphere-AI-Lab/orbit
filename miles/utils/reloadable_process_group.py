@@ -261,10 +261,6 @@ class ReloadableProcessGroup(torch.distributed.ProcessGroup):
         self.group.bound_device_id = dev
 
 
-# ORBIT-SEAM: auto-forward every torch ProcessGroup collective ReloadableProcessGroup doesn't
-# explicitly override (instead of a hand-maintained forward list), so newly added/renamed torch
-# collectives (e.g. torch 2.13's *_single family) don't silently fall through to the C++ base and
-# fail with "No backend type associated with device type cuda"
 def _forward_remaining_collectives():
     """Forward every ProcessGroup collective this class does not define itself.
 

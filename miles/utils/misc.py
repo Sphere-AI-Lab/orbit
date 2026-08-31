@@ -8,7 +8,7 @@ from typing import Any
 
 import ray
 
-from miles.utils.http_utils import _try_lock_port_range, is_port_available
+from miles.utils.http_utils import is_port_available
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class FunctionRegistry:
 function_registry = FunctionRegistry()
 
 
-# Follow-up may rename to `load_object` since it can be used to load things like tool_specs
+# TODO may rename to `load_object` since it can be used to load things like tool_specs
 def load_function(path, *, sync_required=False):
     """
     Load a function from registry or module.
@@ -122,11 +122,7 @@ def get_current_node_ip():
 def get_free_port(start_port=10000, consecutive=1):
     # find the port where port, port + 1, port + 2, ... port + consecutive - 1 are all available
     port = start_port
-    # ORBIT-SEAM: cross-process port locking; concurrent launches on one host raced is_port_available
-    while not (
-        all(is_port_available(port + i) for i in range(consecutive))
-        and _try_lock_port_range(port, consecutive)
-    ):
+    while not all(is_port_available(port + i) for i in range(consecutive)):
         port += 1
     return port
 

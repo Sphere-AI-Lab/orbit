@@ -17,6 +17,8 @@ the CI gate that verifies every pin statically, without importing torch.
 from orbit.patch.runtime import (
     UpstreamDrift,
     apply_all,
+    install_hook,
+    original,
     patch_function,
     registry,
     source_sha,
@@ -25,6 +27,8 @@ from orbit.patch.runtime import (
 __all__ = [
     "UpstreamDrift",
     "apply_all",
+    "install_hook",
+    "original",
     "patch_function",
     "registry",
     "source_sha",

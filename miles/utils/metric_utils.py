@@ -8,13 +8,10 @@ def dict_add_prefix(d: dict[str, Any], prefix: str) -> dict[str, Any]:
     return {f"{prefix}{k}": v for k, v in d.items()}
 
 
-# ORBIT-SEAM: explicit k_values + scale for PEFT-Arena eval reporting
 def compute_pass_rate(
     flat_rewards: list[float],
     group_size: int,
     num_groups: int | None = None,
-    k_values: list[int] | None = None,
-    scale: float = 1.0,
 ):
     if group_size == 1:
         return {}
@@ -22,12 +19,7 @@ def compute_pass_rate(
     if num_groups is None:
         num_groups = len(flat_rewards) // group_size
 
-    if k_values is None:
-        pass_rate_name_list = [2**i for i in range(int(math.log2(group_size)) + 1)]
-    else:
-        pass_rate_name_list = sorted({int(k) for k in k_values if 1 <= int(k) <= group_size})
-        if not pass_rate_name_list:
-            return {}
+    pass_rate_name_list = [2**i for i in range(int(math.log2(group_size)) + 1)]
 
     assert len(flat_rewards) == num_groups * group_size, f"{len(flat_rewards)=} {num_groups=} {group_size=}"
     rewards_of_group = np.array(flat_rewards).reshape(num_groups, group_size)
@@ -39,7 +31,7 @@ def compute_pass_rate(
 
         pass_k_estimates = _estimate_pass_at_k(num_samples, num_correct, k)
 
-        pass_k = np.mean(pass_k_estimates) * scale
+        pass_k = np.mean(pass_k_estimates)
         log_dict[f"pass@{k}"] = pass_k
 
     return log_dict

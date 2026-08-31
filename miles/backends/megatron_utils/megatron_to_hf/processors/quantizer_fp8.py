@@ -46,7 +46,7 @@ def quantize_params_fp8(args, megatron_name, converted_named_params, quantizatio
             quantize_named_params = []
             for converted_name, param in converted_named_params:
                 # skip bf16 weight_scale and input_scale
-                # Follow-up: find a clearer way.
+                # TODO: find a clearer way.
                 if converted_name.endswith("_scale"):
                     continue
                 quantize_named_params.extend(_quantize_param(args, converted_name, param, weight_block_size))

@@ -12,9 +12,14 @@ import ast, subprocess, sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-tracked = subprocess.run(
-    ["git", "-C", str(REPO), "ls-files", "*.py"], capture_output=True, text=True
-).stdout.splitlines()
+# `--others` matters as much as `--cached`: a brand-new module is untracked until
+# it is staged, and a file this guard cannot see is a file whose callees it
+# resolves to the wrong definition -- or not at all. Same reasoning, same flags,
+# as tools/check_patch_pins.py.
+tracked = sorted(set(subprocess.run(
+    ["git", "-C", str(REPO), "ls-files", "--cached", "--others", "--exclude-standard", "*.py"],
+    capture_output=True, text=True,
+).stdout.splitlines()))
 
 # Decorators that provably preserve the wrapped callable's call signature. A callee
 # carrying any other decorator is skipped: the decorator may rewrite the signature.
@@ -309,6 +314,53 @@ def _index_file(f: str) -> ast.Module | None:
     return tree
 
 
+# ---------------------------------------------------------------------------
+# orbit's patch layer: what actually runs at a patched target
+# ---------------------------------------------------------------------------
+
+PATCHED: dict = {}  # (target module, attr) -> signature of orbit's replacement
+
+
+def _build_patch_overrides(trees: dict) -> None:
+    """Index every `@patch_function("module", "attr", ...)` in orbit/.
+
+    orbit/patch/runtime.py swaps a vendored function for one declared in orbit/,
+    so at a patched target the signature a call site must satisfy is the
+    REPLACEMENT's, not the vendored `def`'s. That matters in both directions: a
+    replacement that widens the signature (orbit's `compute_pass_rate` takes
+    `k_values`/`scale`, which upstream's parameters have no room for) makes its
+    call sites correct, and one that narrows makes them wrong even though the
+    vendored text would accept them. Reading the vendored `def` alone gets both
+    backwards. tools/check_patch_pins.py is what keeps the declaration itself
+    honest, and it rejects any target it cannot read as a plain string literal,
+    so a declaration this loop skips is already a hard failure over there.
+    """
+    for f, tree in trees.items():
+        if not f.startswith("orbit/"):
+            continue
+        for node in tree.body:
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for dec in node.decorator_list:
+                if not isinstance(dec, ast.Call):
+                    continue
+                dname = dec.func.attr if isinstance(dec.func, ast.Attribute) else getattr(dec.func, "id", None)
+                if dname != "patch_function":
+                    continue
+                pos = [a.value for a in dec.args if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+                kw = {
+                    k.arg: k.value.value
+                    for k in dec.keywords
+                    if k.arg and isinstance(k.value, ast.Constant) and isinstance(k.value.value, str)
+                }
+                module = kw.get("module") or (pos[0] if len(pos) > 0 else None)
+                attr = kw.get("attr") or (pos[1] if len(pos) > 1 else None)
+                if not module or not attr:
+                    continue
+                node._src_file = f
+                PATCHED[(module, attr)] = _signature(node)
+
+
 def _resolve_module(dotted: str) -> ModIndex | None:
     if dotted.split(".")[0] not in PACKAGE_ROOTS:
         return None
@@ -523,6 +575,9 @@ def _resolve_call(mod: ModIndex, call: ast.Call, ci):
     if tgt is None:
         return None
     sig = tgt.funcs.get(oname)
+    # A declared orbit patch replaces the vendored def at import time, so the
+    # replacement is the signature this call has to satisfy.
+    sig = PATCHED.get((tgt.dotted, oname), sig)
     if not isinstance(sig, dict):
         return None
     if oname in tgt.mod_attr_stores or oname in mod.mod_attr_stores:
@@ -581,12 +636,14 @@ def collect_errors() -> list[str]:
     MODULES.clear()
     _UNRESOLVED.clear()
     _DESCENDANTS.clear()
+    PATCHED.clear()
     STATS.update(checked=0, skipped=0, files=0)
     trees: dict[str, ast.Module] = {}
     for f in tracked:
         tree = _index_file(f)
         if tree is not None:
             trees[f] = tree
+    _build_patch_overrides(trees)
     for f, tree in trees.items():
         _build_aliases(MODULES[_dotted(f)], tree)
     _build_descendants()

@@ -22,13 +22,20 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import importlib.util
 import inspect
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 
 class UpstreamDrift(RuntimeError):
     """An upstream function orbit patches is not the one the patch was written against."""
+
+
+# Top-level packages that may hold a stale `from x import fn` binding of a
+# patched function. See _repoint_reexports for why the sweep stops here.
+_REPO_ROOTS = frozenset({"miles", "miles_plugins", "orbit", "tools", "tests"})
 
 
 def normalize(source: str) -> str:
@@ -70,6 +77,25 @@ def registry() -> list[Patch]:
     return list(_REGISTRY)
 
 
+def original(module: str, attr: str) -> Callable:
+    """The pristine upstream function a patch replaced.
+
+    A replacement that DELEGATES -- handling only its own cases and letting
+    upstream's body do the rest -- is strongly preferred over one that copies
+    upstream's logic: it stays small, and upstream's future fixes keep flowing
+    through instead of being shadowed by a stale copy.
+    """
+    mod = importlib.import_module(module)
+    saved = getattr(mod, f"_orbit_unpatched_{attr}", None)
+    if saved is None:
+        raise UpstreamDrift(
+            f"{module}.{attr}: no saved original -- orbit.patch.apply_all() has "
+            f"not run in this process, so the replacement is executing without "
+            f"the function it delegates to"
+        )
+    return saved
+
+
 def patch_function(module: str, attr: str, *, upstream_sha: str, reason: str):
     """Declare that the decorated function replaces ``module.attr``.
 
@@ -92,7 +118,113 @@ def patch_function(module: str, attr: str, *, upstream_sha: str, reason: str):
     return decorate
 
 
-def apply_all(*, reapply: bool = False) -> int:
+def _repoint_reexports(patch: "Patch", original_fn) -> None:
+    """Re-point already-imported re-exports of a patched function.
+
+    Patching `module.attr` is not enough when a package did
+    `from .submodule import attr` at import time: that bound the ORIGINAL object
+    into the package namespace, and callers dispatching through the package keep
+    getting it. The import hook normally avoids this by patching before anything
+    imports the target -- but a target already in sys.modules when the hook is
+    armed has re-exports that are already stale.
+
+    That is not theoretical. `miles.backends.megatron_utils.megatron_to_hf`
+    re-exports every converter and `_convert_to_hf_core` dispatches through the
+    PACKAGE binding, so a Ray actor -- which imports the converter package while
+    unpickling its worker class, before the actor body runs `import orbit` --
+    would call upstream's unpatched function despite the patch being installed.
+
+    Nor is it only PACKAGES that go stale. Any already-imported module that did
+    `from .cp_utils import slice_with_cp` holds the same dead binding, and
+    `miles/backends/training_utils/data.py` is exactly that: it imports cp_utils
+    with no orbit import anywhere above it, so in a process that reaches data.py
+    first, patching the cp_utils attribute leaves data.py calling upstream --
+    silently, which is the one failure mode this layer exists to remove. So the
+    sweep is over every already-imported module in this repo's own packages, not
+    just the target's parents (which it subsumes).
+
+    Third-party modules are deliberately excluded: a lazy-import module proxy
+    can run arbitrary work inside `getattr`, and nothing outside this repo
+    re-exports a miles function anyway.
+
+    Only an attribute that is still identical to the object just replaced is
+    re-pointed, so an unrelated same-named attribute is never clobbered.
+    """
+    for name, module in list(sys.modules.items()):
+        if module is None or name.split(".")[0] not in _REPO_ROOTS:
+            continue
+        if getattr(module, patch.attr, None) is original_fn:
+            setattr(module, f"_orbit_unpatched_{patch.attr}", original_fn)
+            setattr(module, patch.attr, patch.replacement)
+
+
+class _ApplyOnImport:
+    """Apply each patch when its target module is first imported -- never sooner.
+
+    Applying eagerly (importing every target at ``import orbit`` time) is the
+    obvious design and it is wrong: it makes ``import orbit`` drag in torch and
+    the whole vendored backend, which breaks lightweight tooling that only
+    wanted a constant and slows every test that touches orbit. Measured: the
+    fast suite went 5m20s -> 14m07s, and a helper spawning
+    ``python -c "from tools.lora_regret.arms import ..."`` started failing.
+
+    So instead this finder sits on ``sys.meta_path`` and does nothing until
+    something actually imports a patched module; it then lets the normal
+    machinery load it and applies the patch immediately afterwards. ``import
+    orbit`` stays as cheap as it was.
+    """
+
+    def __init__(self) -> None:
+        self._loading: set[str] = set()
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in self._loading:
+            return None  # re-entrancy: our own find_spec below
+        if not any(p.module == fullname for p in _REGISTRY):
+            return None
+        self._loading.add(fullname)
+        try:
+            spec = importlib.util.find_spec(fullname)
+        finally:
+            self._loading.discard(fullname)
+        if spec is None or spec.loader is None:
+            return None
+        spec.loader = _PatchingLoader(spec.loader, fullname)
+        return spec
+
+
+class _PatchingLoader:
+    def __init__(self, inner, fullname: str) -> None:
+        self._inner = inner
+        self._fullname = fullname
+
+    def create_module(self, spec):
+        return self._inner.create_module(spec)
+
+    def exec_module(self, module):
+        self._inner.exec_module(module)
+        apply_all(only=self._fullname)
+
+    def __getattr__(self, item):
+        return getattr(self._inner, item)
+
+
+_HOOK: _ApplyOnImport | None = None
+
+
+def install_hook() -> None:
+    """Arm deferred patching. Idempotent; safe to call from ``orbit/__init__``."""
+    global _HOOK
+    if _HOOK is None:
+        _HOOK = _ApplyOnImport()
+        sys.meta_path.insert(0, _HOOK)
+    # Anything already imported missed the hook, so patch it now.
+    for patch in _REGISTRY:
+        if patch.module in sys.modules:
+            apply_all(only=patch.module)
+
+
+def apply_all(*, reapply: bool = False, only: str | None = None) -> int:
     """Verify every pin, then install every replacement. Returns the count.
 
     Idempotent: applying twice is a no-op unless ``reapply`` is set, so an
@@ -101,6 +233,8 @@ def apply_all(*, reapply: bool = False) -> int:
     """
     applied = 0
     for patch in _REGISTRY:
+        if only is not None and patch.module != only:
+            continue
         if patch.target in _APPLIED and not reapply:
             continue
         module = importlib.import_module(patch.module)
@@ -128,6 +262,7 @@ def apply_all(*, reapply: bool = False) -> int:
             )
         setattr(module, f"_orbit_unpatched_{patch.attr}", current)
         setattr(module, patch.attr, patch.replacement)
+        _repoint_reexports(patch, current)
         _APPLIED.add(patch.target)
         applied += 1
     return applied

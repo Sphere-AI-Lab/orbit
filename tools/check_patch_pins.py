@@ -34,10 +34,22 @@ DECORATOR = "patch_function"
 
 
 def tracked_orbit_py() -> list[str]:
+    """Tracked AND untracked-but-not-ignored orbit sources.
+
+    `--others` matters: a brand-new patch module is untracked until it is
+    staged, and a gate that cannot see new patches is exactly the vacuously
+    green one this exists to prevent.
+    """
     out = subprocess.run(
-        ["git", "-C", str(REPO), "ls-files", "orbit/*.py"], capture_output=True, text=True
+        [
+            "git", "-C", str(REPO), "ls-files",
+            "--cached", "--others", "--exclude-standard",
+            "orbit/*.py",
+        ],
+        capture_output=True,
+        text=True,
     ).stdout.splitlines()
-    return out
+    return sorted(set(out))
 
 
 def _kwargs_of(call: ast.Call) -> dict[str, str]:
@@ -72,6 +84,21 @@ def declarations() -> list[dict]:
                     continue
                 kw = _kwargs_of(dec)
                 if not {"module", "attr", "upstream_sha"} <= set(kw):
+                    # Never skip quietly: a declaration this gate cannot read is
+                    # a patch it cannot verify, which is the vacuously-green
+                    # failure this whole file exists to prevent. Keep module and
+                    # attr as plain string literals -- an f-string is not a
+                    # static constant and lands here.
+                    found.append(
+                        {
+                            "file": rel,
+                            "lineno": dec.lineno,
+                            "replacement": node.name,
+                            "unreadable": sorted(
+                                {"module", "attr", "upstream_sha"} - set(kw)
+                            ),
+                        }
+                    )
                     continue
                 found.append(
                     {
@@ -108,6 +135,15 @@ def upstream_sha(module: str, attr: str) -> str | None:
 def collect_errors() -> list[str]:
     errors = []
     for d in declarations():
+        if "unreadable" in d:
+            errors.append(
+                f"{d['file']}:{d['lineno']}: patch_function declaration for "
+                f"{d['replacement']} is not statically readable "
+                f"({', '.join(d['unreadable'])} is not a plain string literal), "
+                f"so this patch cannot be pin-checked. Use literals, not "
+                f"f-strings or names."
+            )
+            continue
         actual = upstream_sha(d["module"], d["attr"])
         target = f"{d['module']}.{d['attr']}"
         where = f"{d['file']}:{d['lineno']}"
@@ -133,19 +169,28 @@ def rewrite_pins() -> int:
     changed = 0
     by_file: dict[str, list[dict]] = {}
     for d in declarations():
+        if "unreadable" in d:
+            continue
         by_file.setdefault(d["file"], []).append(d)
     for rel, decls in by_file.items():
         path = REPO / rel
-        text = path.read_text(errors="surrogateescape")
-        for d in decls:
+        lines = path.read_text(errors="surrogateescape").splitlines(keepends=True)
+        # Rewrite by LINE, not by text search: several declarations in one file
+        # legitimately share a pin value (every unfilled placeholder is the same
+        # empty string), so a search-and-replace cannot tell them apart. Walk
+        # bottom-up so earlier edits never shift a later declaration's lineno.
+        for d in sorted(decls, key=lambda x: -x["lineno"]):
             actual = upstream_sha(d["module"], d["attr"])
             if actual is None or actual == d["upstream_sha"]:
                 continue
-            if d["upstream_sha"] not in text:
-                continue
-            text = text.replace(d["upstream_sha"], actual)
-            changed += 1
-        path.write_text(text)
+            old = f'upstream_sha="{d["upstream_sha"]}"'
+            new = f'upstream_sha="{actual}"'
+            for i in range(d["lineno"] - 1, min(d["lineno"] + 12, len(lines))):
+                if old in lines[i]:
+                    lines[i] = lines[i].replace(old, new, 1)
+                    changed += 1
+                    break
+        path.write_text("".join(lines))
     return changed
 
 

@@ -11,6 +11,15 @@ import torch
 import torch.distributed.checkpoint as dist_cp
 from typing_extensions import override
 
+# ORBIT-SEAM: arm orbit's converter patches. orbit/megatron/hf_export_patches.py
+# supplies the parameter names upstream's converters do not map (bare
+# input_layernorm / pre_mlp_layernorm on the models miles has not absorbed them
+# for, and grouped-expert FC1 OFT adapters), and they install via a hook that
+# `import orbit` arms. Today this process is armed anyway, by accident: a
+# vendored file deep in its import closure still carries an `import orbit` seam.
+# Relying on that is exactly the silent-loss failure this line prevents.
+import orbit  # noqa: F401  -- imported for the patch-arming side effect
+
 from miles.backends.megatron_utils.megatron_to_hf import convert_to_hf, remove_padding
 from miles.utils.hf_config import load_hf_config
 
