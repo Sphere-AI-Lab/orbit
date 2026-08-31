@@ -20,6 +20,10 @@ from typing import Any
 from miles.utils.chat_template_utils import deepseek, template
 from miles.utils.chat_template_utils.message_matcher_hub import assert_messages_append_only_with_allowed_role
 from miles.utils.chat_template_utils.token_seq_comparator import TokenSeqComparator
+from orbit.utils.chat_template_utils.tito_ext import (
+    OrbitQwen3TITOTokenizerExtensions,
+    OrbitTITOTokenizerExtensions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +82,8 @@ def _build_dummy_assistant(stored_assistant: dict[str, Any]) -> dict[str, Any]:
 # TODO: split different model's TITO tokenizer into different files
 
 
-class TITOTokenizer:
+# ORBIT-SEAM: expected_ids_for_finish_reason lives in the mixin (orbit/utils/chat_template_utils/tito_ext.py)
+class TITOTokenizer(OrbitTITOTokenizerExtensions):
     """Incremental tokenization and prefix merging for appended messages."""
 
     max_trim_tokens: int = 0
@@ -136,24 +141,6 @@ class TITOTokenizer:
             special_token_ids=self.special_token_ids,
             trim_trailing_ids=self.trailing_token_ids or None,
         )
-
-    # ORBIT-SEAM: new base-class hook (identity default) so a length-truncated generation's canonical
-    # expected-ids can drop closing control tokens the model couldn't have emitted; Qwen3TITOTokenizer
-    # below overrides it for the im_end/newline suffix
-    def expected_ids_for_finish_reason(
-        self,
-        expected_ids: list[int],
-        finish_reason: str | None,
-    ) -> list[int]:
-        """Adjust canonical IDs for a model-specific incomplete finish.
-
-        A chat template renders a completed assistant message, including its
-        closing control tokens.  A length-truncated generation does not emit
-        those tokens.  Most tokenizer families need no adjustment; subclasses
-        may remove only the canonical suffix that the model could not have
-        produced for the supplied finish reason.
-        """
-        return list(expected_ids)
 
     def apply_chat_template(
         self,
@@ -255,7 +242,9 @@ class TITOTokenizer:
 # ---------------------------------------------------------------------------
 
 
-class Qwen3TITOTokenizer(TITOTokenizer):
+# ORBIT-SEAM: the Qwen3 override of expected_ids_for_finish_reason lives in the mixin; it must come
+# FIRST in the bases so it outranks TITOTokenizer's inherited identity default
+class Qwen3TITOTokenizer(OrbitQwen3TITOTokenizerExtensions, TITOTokenizer):
     """Qwen3 variant: handles missing newline at the boundary.
 
     The Qwen3 chat template emits ``<|im_end|>\\n`` after every message, but
@@ -290,25 +279,6 @@ class Qwen3TITOTokenizer(TITOTokenizer):
         self._newline_id: int = nl_ids[0]
         self._im_end_id: int = tokenizer.convert_tokens_to_ids("<|im_end|>")
         self.trailing_token_ids = frozenset({self._newline_id})
-
-    # ORBIT-SEAM: on a length-truncated finish, strip a trailing newline then a trailing <|im_end|>
-    # from the canonical expected ids (the model can't emit its closing token when generation was cut
-    # off by max_new_tokens)
-    def expected_ids_for_finish_reason(
-        self,
-        expected_ids: list[int],
-        finish_reason: str | None,
-    ) -> list[int]:
-        ids = list(expected_ids)
-        if finish_reason != "length":
-            return ids
-
-        boundary = len(ids)
-        if boundary and ids[boundary - 1] == self._newline_id:
-            boundary -= 1
-        if boundary and ids[boundary - 1] == self._im_end_id:
-            return ids[: boundary - 1]
-        return ids
 
     def merge_tokens(
         self,

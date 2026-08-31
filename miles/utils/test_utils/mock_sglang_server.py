@@ -15,6 +15,7 @@ from sglang.srt.function_call.function_call_parser import FunctionCallParser
 from miles.utils.http_utils import find_available_port
 from miles.utils.processing_utils import load_tokenizer
 from miles.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
+from orbit.sglang.mock_server_ext import OrbitMockSGLangServerExtensions
 
 
 @dataclass(frozen=True)
@@ -40,7 +41,8 @@ class ProcessResult:
 ProcessFn = Callable[[str], ProcessResult]
 
 
-class MockSGLangServer:
+# ORBIT-SEAM: _setup_routes and its adapter-version state live in the mixin
+class MockSGLangServer(OrbitMockSGLangServerExtensions):
     def __init__(
         self,
         model_name: str,
@@ -61,13 +63,6 @@ class MockSGLangServer:
 
         self.request_log: list[dict] = []
         self._concurrency = Counter()
-
-        # ORBIT-SEAM: mock adapter/weight-version state for the PEFT double-buffer update endpoints
-        # registered below (update_adapter_from_distributed / update_weight_version /
-        # activate_adapter_version), mirroring the real SGLang engine's staged-then-activated adapter model
-        self.weight_version = "0"
-        self.adapter_version = "0"
-        self.staged_adapter_versions = {}
 
         self._setup_routes()
 
@@ -91,108 +86,6 @@ class MockSGLangServer:
     def url(self) -> str:
         return f"http://{self.host}:{self.port}"
 
-    def _setup_routes(self):
-        @self.app.post("/generate")
-        async def generate(request: Request):
-            return await self._handle_generate_like_request(request, self._compute_generate_response)
-
-        @self.app.post("/v1/chat/completions")
-        async def chat_completions(request: Request):
-            return await self._handle_generate_like_request(request, self._compute_chat_completions_response)
-
-        @self.app.get("/health")
-        async def health():
-            return JSONResponse(content={"status": "ok"})
-
-        @self.app.post("/abort_request")
-        async def abort_request(_request: Request):
-            return JSONResponse(content={"status": "ok"})
-
-        # ORBIT-SEAM: mock endpoints for orbit's PEFT weight/adapter-version protocol -- model_info
-        # exposes the current versions; update_adapter_from_distributed stages (double_buffer=True) or
-        # immediately activates an adapter version; update_weight_version bumps both versions together
-        # (full-FT path); activate_adapter_version promotes a staged version, rejecting an unstaged one
-        @self.app.get("/model_info")
-        async def model_info():
-            return {
-                "model_info": {
-                    "weight_version": self.weight_version,
-                    "adapter_version": self.adapter_version,
-                }
-            }
-
-        @self.app.post("/update_adapter_from_distributed")
-        async def update_adapter_from_distributed(request: Request):
-            payload = await request.json()
-            self.request_log.append(
-                {"endpoint": "update_adapter_from_distributed", "payload": payload}
-            )
-            adapter_version = str(payload.get("adapter_version", payload.get("weight_version", "0")))
-            weight_version = str(payload.get("weight_version", adapter_version))
-            if adapter_version != weight_version:
-                return JSONResponse(
-                    {
-                        "success": False,
-                        "message": "adapter_version and weight_version disagree",
-                        "adapter_version": adapter_version,
-                        "weight_version": weight_version,
-                    },
-                    status_code=400,
-                )
-            if payload.get("double_buffer", False):
-                self.staged_adapter_versions[payload.get("adapter_name", "adapter")] = adapter_version
-                active_version = self.adapter_version
-            else:
-                self.adapter_version = adapter_version
-                self.weight_version = weight_version
-                active_version = adapter_version
-            return {
-                "success": True,
-                "message": "ok",
-                "adapter_version": adapter_version,
-                "weight_version": weight_version,
-                "staged_adapter_version": adapter_version,
-                "active_adapter_version": active_version,
-            }
-
-        @self.app.post("/update_weight_version")
-        async def update_weight_version(request: Request):
-            payload = await request.json()
-            self.request_log.append({"endpoint": "update_weight_version", "payload": payload})
-            version = str(payload.get("weight_version", payload.get("new_version", "0")))
-            self.weight_version = version
-            self.adapter_version = version
-            return {"success": True, "weight_version": version, "adapter_version": version}
-
-        @self.app.post("/activate_adapter_version")
-        async def activate_adapter_version(request: Request):
-            payload = await request.json()
-            self.request_log.append({"endpoint": "activate_adapter_version", "payload": payload})
-            adapter_name = payload.get("adapter_name", "adapter")
-            adapter_version = str(payload.get("adapter_version", payload.get("weight_version", "0")))
-            weight_version = str(payload.get("weight_version", adapter_version))
-            staged_version = self.staged_adapter_versions.get(adapter_name)
-            if staged_version != adapter_version:
-                return JSONResponse(
-                    {
-                        "success": False,
-                        "message": f"No staged adapter version for {adapter_name}={adapter_version}",
-                        "adapter_version": adapter_version,
-                        "weight_version": weight_version,
-                        "active_adapter_version": self.adapter_version,
-                    },
-                    status_code=400,
-                )
-            self.adapter_version = adapter_version
-            self.weight_version = weight_version
-            del self.staged_adapter_versions[adapter_name]
-            return {
-                "success": True,
-                "message": "ok",
-                "adapter_version": adapter_version,
-                "weight_version": weight_version,
-                "active_adapter_version": adapter_version,
-            }
 
     async def _handle_generate_like_request(self, request: Request, compute_fn: Callable[[dict], dict]):
         payload = await request.json()

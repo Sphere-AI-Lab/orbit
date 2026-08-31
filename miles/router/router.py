@@ -1,9 +1,7 @@
 import argparse
 import asyncio
 import json
-# ORBIT-SEAM: os backs the ORBIT_DEBUG_PEFT_REQUEST diagnostic in do_proxy below
 import logging
-import os
 
 import httpx
 import setproctitle
@@ -13,6 +11,7 @@ from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
 from miles.utils.logging_utils import configure_logger_raw
+from orbit.rollout.router_ext import OrbitRouterExtensions
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,8 @@ def run_router(args):
     uvicorn.run(miles_router.app, host=args.sglang_router_ip, port=args.sglang_router_port, log_level="info")
 
 
-class MilesRouter:
+# ORBIT-SEAM: orbit's added worker endpoints and its do_proxy override live in the home layer
+class MilesRouter(OrbitRouterExtensions):
     def __init__(self, args, verbose=False):
         """Initialize the miles-router with SGLang router address"""
         self.args = args
@@ -48,8 +48,6 @@ class MilesRouter:
         self.worker_failure_counts: dict[str, int] = {}
         # Quarantined workers excluded from routing pool
         self.dead_workers: set[str] = set()
-        # ORBIT-SEAM: rate-limit counter for the ORBIT_DEBUG_PEFT_REQUEST diagnostic in do_proxy below
-        self._debug_peft_request_count = 0
 
         max_connections = getattr(args, "miles_router_max_connections", None)
         if max_connections is None:
@@ -70,10 +68,10 @@ class MilesRouter:
         """Setup all the HTTP routes except catch-all proxy"""
         # sglang-router api
         self.app.post("/add_worker")(self.add_worker)
-        # ORBIT-SEAM: expose remove_worker (see below) as a route, matching add_worker
+        # ORBIT-SEAM: expose remove_worker (orbit/rollout/router_ext.py) as a route, matching add_worker
         self.app.post("/remove_worker")(self.remove_worker)
         self.app.get("/list_workers")(self.list_workers)
-        # ORBIT-SEAM: sglang-router-compatible /workers GET (see workers() below) and POST alias to
+        # ORBIT-SEAM: sglang-router-compatible /workers GET (orbit/rollout/router_ext.py) and POST alias to
         # add_worker, for tooling that expects the sglang-router worker-management API shape
         self.app.get("/workers")(self.workers)
         self.app.post("/workers")(self.add_worker)
@@ -152,68 +150,6 @@ class MilesRouter:
         result = await self.do_proxy(request, path)
         return self.build_proxy_response(result)
 
-    async def do_proxy(
-        self,
-        request: Request,
-        path: str,
-        body: bytes | None = None,
-        headers: dict | None = None,
-    ) -> dict:
-        """Core proxy logic. Returns dict with request_body, response_body, status_code, headers."""
-        worker_url = self._use_url()
-        url = f"{worker_url}/{path}"
-
-        if body is None:
-            body = await request.body()
-        if headers is None:
-            headers = dict(request.headers)
-        if body is not None:
-            headers = {k: v for k, v in headers.items() if k.lower() not in ("content-length", "transfer-encoding")}
-
-        # ORBIT-SEAM: opt-in rate-limited diagnostic logging of PEFT adapter selection on generate
-        # requests passing through the router (LoRA lora_path vs OFT oft_path presence)
-        if os.environ.get("ORBIT_DEBUG_PEFT_REQUEST") and path == "generate":
-            limit = int(os.environ.get("ORBIT_DEBUG_PEFT_REQUEST_LIMIT", "16"))
-            if self._debug_peft_request_count < limit:
-                body_text = body.decode("utf-8", errors="replace") if body else ""
-                logger.info(
-                    "[miles-router] generate payload has_lora_path=%s has_oft_path=%s body_bytes=%d content_type=%s",
-                    '"lora_path"' in body_text,
-                    '"oft_path"' in body_text,
-                    len(body or b""),
-                    headers.get("content-type") or headers.get("Content-Type"),
-                )
-                self._debug_peft_request_count += 1
-
-        try:
-            response = await self.client.request(request.method, url, content=body, headers=headers)
-            content = await response.aread()
-            return {
-                "request_body": body,
-                "response_body": content,
-                "status_code": response.status_code,
-                "headers": dict(response.headers),
-            }
-        # ORBIT-SEAM: return a synthesized 502 instead of letting an upstream connection error escape
-        # do_proxy uncaught (the finally below still runs to release the active-request slot)
-        except httpx.HTTPError as exc:
-            logger.warning(
-                "[miles-router] Upstream request failed path=%s worker_url=%s error=%s",
-                path,
-                worker_url,
-                repr(exc),
-            )
-            return {
-                "request_body": body,
-                "response_body": json.dumps(
-                    {"error": f"upstream request failed: {type(exc).__name__}"}
-                ).encode(),
-                "status_code": 502,
-                "headers": {"content-type": "application/json"},
-            }
-        finally:
-            self._finish_url(worker_url)
-
     def build_proxy_response(self, result: dict) -> Response:
         """Build HTTP response from proxy result."""
         content = result["response_body"]
@@ -261,39 +197,9 @@ class MilesRouter:
 
         return {"status": "success", "worker_urls": self.worker_request_counts}
 
-    # ORBIT-SEAM: new endpoint (registered above) to remove a worker mid-run, clearing its request/
-    # failure counts and dead-worker quarantine so a decommissioned engine stops being routed to
-    async def remove_worker(self, request: Request):
-        """Remove a worker from the router."""
-        worker_url = request.query_params.get("url") or request.query_params.get("worker_url")
-        if not worker_url:
-            body = await request.body()
-            payload = json.loads(body) if body else {}
-            worker_url = payload.get("url") or payload.get("worker_url")
-
-        if not worker_url:
-            return JSONResponse(
-                status_code=400, content={"error": "worker_url is required (use query ?url=... or JSON body)"}
-            )
-
-        self.worker_request_counts.pop(worker_url, None)
-        self.worker_failure_counts.pop(worker_url, None)
-        self.dead_workers.discard(worker_url)
-        return {"status": "success", "worker_urls": self.worker_request_counts}
-
     async def list_workers(self, request: Request):
         """List all registered workers"""
         return {"urls": list(self.worker_request_counts.keys())}
-
-    # ORBIT-SEAM: sglang-router-compatible worker listing (registered as GET /workers above), for
-    # tooling that expects that response shape instead of list_workers' plain URL list
-    async def workers(self, request: Request):
-        """SGLang-router compatible worker listing."""
-        workers = [
-            {"id": str(i), "url": url, "worker_type": "regular"}
-            for i, url in enumerate(self.worker_request_counts)
-        ]
-        return {"workers": workers, "urls": [worker["url"] for worker in workers]}
 
     def _use_url(self):
         """Select worker URL with minimal active requests."""
