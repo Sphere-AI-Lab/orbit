@@ -38,6 +38,14 @@ def tracked_py() -> list[str]:
 # positives (the rule is doing exactly what it's supposed to on every one of
 # these), but pre-existing findings the guard surfaces without fixing.
 ALLOWLIST: dict[tuple[str, int], str] = {
+    ("tests/fast/test_import_integrity.py", 36): (
+        "deliberately transient: that guard's untracked-file regression test writes "
+        "the probe, runs the checker and deletes it in a finally block"
+    ),
+    ("tests/fast/test_args_dest_consistency.py", 37): (
+        "deliberately transient: same shape, for the args-dest guard's own "
+        "untracked-file regression test"
+    ),
     ("tests/fast/test_path_anchors.py", 39): (
         "deliberately transient, same shape as the arming probe above: this guard's "
         "own untracked-file regression test writes the probe, runs the checker and "

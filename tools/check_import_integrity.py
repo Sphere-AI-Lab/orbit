@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static import integrity: every orbit.*/miles_plugins.* import in tracked .py files
+"""Static import integrity: every orbit.*/miles_plugins.* import in repo .py files
 must resolve to a real module file, and `from X import name` must name a submodule
 or a top-level binding in X. Catches the classic file-move failure where the old
 package still resolves but the submodule is gone. Exits 1 on any dangler."""
@@ -7,9 +7,24 @@ import ast, subprocess, sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-tracked = subprocess.run(
-    ["git", "-C", str(REPO), "ls-files", "*.py"], capture_output=True, text=True
-).stdout.splitlines()
+def tracked_py() -> list[str]:
+    """Tracked AND untracked-but-not-ignored files matching ``patterns``.
+
+    Reading the index alone makes the guard pass VACUOUSLY on a file that has not
+    been committed yet -- exactly when a new defect is most likely to be present.
+    Computed per call rather than cached at import, so an in-process caller that
+    creates a file after import still sees it.
+    """
+    out = subprocess.run(
+        [
+            "git", "-C", str(REPO), "ls-files",
+            "--cached", "--others", "--exclude-standard",
+            "*.py",
+        ],
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    return sorted(set(out))
 ROOTS = ("miles", "miles_plugins", "orbit")
 
 # Pre-existing danglers, tolerated but not expanded (file, dotted module, name).
@@ -80,7 +95,7 @@ def top_bindings(pyfile: Path):
 
 def collect_errors() -> list[str]:
     errors = []
-    for f in tracked:
+    for f in tracked_py():
         errors.extend(_check_file(f))
     return errors
 
@@ -135,5 +150,5 @@ if __name__ == "__main__":
     all_errors = collect_errors()
     for e in all_errors:
         print(e)
-    print(f"[verify-imports] {'FAIL' if all_errors else 'ok'}: {len(tracked)} files")
+    print(f"[verify-imports] {'FAIL' if all_errors else 'ok'}: {len(tracked_py())} files")
     sys.exit(1 if all_errors else 0)

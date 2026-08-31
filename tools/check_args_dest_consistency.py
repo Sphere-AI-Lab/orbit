@@ -28,7 +28,7 @@ Reads that cannot raise are never flagged: `getattr(args, "x", default)` and
 `hasattr` guards, and any namespace written through a dynamic key
 (`setattr(args, key, v)`, `vars(args)[k] = v`, `Namespace(**payload)`).
 
-SCOPE: tracked non-test .py files. `tests/` is excluded on purpose. Not for
+SCOPE: repo non-test .py files, tracked or not. `tests/` is excluded on purpose. Not for
 noise -- including it costs only two hits -- but because folding test files into
 the repo-wide valid set adds 64 names harvested from fabricated namespaces,
 among them `debug`, `default`, `name`, `flag` and `labels`: exactly the generic
@@ -44,12 +44,28 @@ GOLDEN = REPO / "tests" / "fast" / "args_surface_golden.json"
 
 
 def _ls_files(*patterns: str) -> list[str]:
-    return subprocess.run(
-        ["git", "-C", str(REPO), "ls-files", *patterns], capture_output=True, text=True
+    """Tracked AND untracked-but-not-ignored files matching ``patterns``.
+
+    Reading the index alone makes the guard pass VACUOUSLY on a file that has not
+    been committed yet -- exactly when a new defect is most likely to be present.
+    Computed per call rather than cached at import, so an in-process caller that
+    creates a file after import still sees it.
+    """
+    out = subprocess.run(
+        [
+            "git", "-C", str(REPO), "ls-files",
+            "--cached", "--others", "--exclude-standard",
+            *patterns,
+        ],
+        capture_output=True,
+        text=True,
     ).stdout.splitlines()
+    return sorted(set(out))
 
 
-tracked = [f for f in _ls_files("*.py") if not f.startswith("tests/")]
+def tracked_py() -> list[str]:
+    """Repo .py files this guard covers. ``tests/`` is excluded on purpose."""
+    return [f for f in _ls_files("*.py") if not f.startswith("tests/")]
 
 # Reads the guard is right to flag but that it must not fail on today, as
 # (file, attribute). Every entry is a standing debt, not an exemption class.
@@ -550,7 +566,7 @@ def scan(rel: str, tree: ast.Module) -> dict:
 def collect_errors() -> list[str]:
     golden = {r["dest"] for r in json.loads(GOLDEN.read_text(encoding="utf-8"))}
     infos, errors = [], []
-    for f in tracked:
+    for f in tracked_py():
         p = REPO / f
         if not p.is_file():
             continue
@@ -588,5 +604,5 @@ if __name__ == "__main__":
     all_errors = collect_errors()
     for e in all_errors:
         print(e)
-    print(f"[verify-args-dest] {'FAIL' if all_errors else 'ok'}: {len(tracked)} files")
+    print(f"[verify-args-dest] {'FAIL' if all_errors else 'ok'}: {len(tracked_py())} files")
     sys.exit(1 if all_errors else 0)
