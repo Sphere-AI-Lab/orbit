@@ -11,14 +11,38 @@ import ast, subprocess, sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-tracked = subprocess.run(
-    ["git", "-C", str(REPO), "ls-files", "*.py"], capture_output=True, text=True
-).stdout.splitlines()
+def tracked_py() -> list[str]:
+    """Tracked AND untracked-but-not-ignored .py files.
+
+    Reading the index alone makes this guard pass VACUOUSLY on a file that has
+    not been committed yet, which is exactly when a new anchor is most likely to
+    be wrong -- tests/fast/test_arming.py landed carrying a finding this guard
+    could not see until the commit that added it.
+
+    Computed per call rather than once at import: as a module-level constant it
+    also went stale for any in-process caller that created a file after import,
+    which silently defeated the very test written to prove this blind spot closed.
+    """
+    out = subprocess.run(
+        [
+            "git", "-C", str(REPO), "ls-files",
+            "--cached", "--others", "--exclude-standard",
+            "*.py",
+        ],
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    return sorted(set(out))
 
 # (file, lineno) -> reason. Real, reviewed exceptions only -- not guard false
 # positives (the rule is doing exactly what it's supposed to on every one of
 # these), but pre-existing findings the guard surfaces without fixing.
 ALLOWLIST: dict[tuple[str, int], str] = {
+    ("tests/fast/test_path_anchors.py", 39): (
+        "deliberately transient, same shape as the arming probe: this guard's own "
+        "untracked-file regression test writes the probe, runs the checker and "
+        "deletes it in a finally block, so it must NOT exist in the working tree"
+    ),
     ("tests/fast/test_arming.py", 76): (
         "deliberately transient: the arming guard's falsification test writes this "
         "probe, runs the checker against it and deletes it in a finally block, so it "
@@ -288,7 +312,7 @@ def _check_file(f: str, source: str) -> list[str]:
 
 def collect_errors() -> list[str]:
     errors = []
-    for f in tracked:
+    for f in tracked_py():
         p = REPO / f
         if not p.is_file():
             continue
@@ -304,5 +328,5 @@ if __name__ == "__main__":
     all_errors = collect_errors()
     for e in all_errors:
         print(e)
-    print(f"[check-path-anchors] {'FAIL' if all_errors else 'ok'}: {len(tracked)} files")
+    print(f"[check-path-anchors] {'FAIL' if all_errors else 'ok'}: {len(tracked_py())} files")
     sys.exit(1 if all_errors else 0)
