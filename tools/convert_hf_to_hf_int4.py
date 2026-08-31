@@ -9,6 +9,14 @@ from llmcompressor import oneshot
 from llmcompressor.modifiers.quantization.gptq import GPTQModifier
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+# ORBIT-SEAM: upstream bug fixed locally -- main() read args.model_id and
+# args.local_data_path, which no option registers (the parser below declares
+# --input-dir and --data-dir), so this script raised AttributeError on every
+# invocation. Fixed here rather than left for upstream because it is a
+# self-contained leaf tool: the divergence cannot reach the training path and is
+# 3 lines wide. The same class of upstream bug in library code on a merge-hot
+# path is deliberately NOT patched -- see tools/check_args_dest_consistency.py.
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -55,16 +63,16 @@ def get_calibration_dataset(tokenizer, num_samples, seq_len, local_data_path):
 def main():
     args = parse_args()
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_id, trust_remote_code=args.trust_remote_code)
+    tokenizer = AutoTokenizer.from_pretrained(args.input_dir, trust_remote_code=args.trust_remote_code)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     ds_hf = get_calibration_dataset(
-        tokenizer, args.num_calibration_samples, args.max_sequence_length, args.local_data_path
+        tokenizer, args.num_calibration_samples, args.max_sequence_length, args.data_dir
     )
 
     model = AutoModelForCausalLM.from_pretrained(
-        args.model_id,
+        args.input_dir,
         device_map="auto",
         torch_dtype=torch.bfloat16,
         trust_remote_code=args.trust_remote_code,

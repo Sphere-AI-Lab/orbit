@@ -173,11 +173,18 @@ def grade_structured_output(response: str, schema_str: str, schema_type: str | N
 def _default_open_instruct_repo() -> str:
     # Walk up from this file: open-instruct is a sibling of the repo root in
     # the workspace (a fixed parents[N] silently broke when this module moved).
-    for root in Path(__file__).resolve().parents:
+    here = Path(__file__).resolve()
+    for root in here.parents:
         candidate = root / "open-instruct"
         if candidate.is_dir():
             return str(candidate)
-    return str(Path(__file__).resolve().parents[3] / "open-instruct")
+    # Not checked out anywhere above us. Name where it is expected to live --
+    # beside the repo root -- locating that root by marker rather than by a
+    # fixed parents[N], which is what silently broke when this module moved.
+    for root in here.parents:
+        if (root / "pyproject.toml").is_file():
+            return str(root.parent / "open-instruct")
+    return str(here.parent / "open-instruct")
 
 
 _OPEN_INSTRUCT_REPO = Path(
