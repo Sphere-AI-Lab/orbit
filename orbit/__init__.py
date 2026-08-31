@@ -38,5 +38,6 @@ from orbit.utils import processing_utils_patches as _processing_utils_patches  #
 from orbit.utils import replay_ext as _replay_ext  # noqa: F401
 from orbit.rewards import rm_hub_patches as _rm_hub_patches  # noqa: F401
 from orbit.rollout import inference_rollout_patches as _inference_rollout_patches  # noqa: F401
+from orbit.rollout import tool_call_patches as _tool_call_patches  # noqa: F401
 
 _install_hook()

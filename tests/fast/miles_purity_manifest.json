@@ -252,10 +252,6 @@
    "delta_lines": 72,
    "sha": "b07fb684099342a69198443d763876d412d82a3d29b90021b9b7e2de848b5a10"
   },
-  "miles/rollout/generate_utils/tool_call_utils.py": {
-   "delta_lines": 10,
-   "sha": "3ba71199f9784f3e6803deba0f34ce90cf2d0d1880caf7b3620cb259e4a69e8c"
-  },
   "miles/rollout/inference_rollout/inference_rollout_eval.py": {
    "delta_lines": 117,
    "sha": "42ec64f9d010796f50b2992129ea810ad9836c05d3786ceee38b15d1e93ea2c6"
@@ -1110,6 +1106,7 @@
   "miles/rollout/generate_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/rollout/generate_utils/openai_endpoint_utils.py": "9b314fd05af265dde766b116ebcbb53e94d1f31109ea7348a717346dce43b54d",
   "miles/rollout/generate_utils/prefill_logprobs.py": "d8370d4b8abdfca3fe705f5f2354ea2710929ca41d974269ccadba4fb192f5c4",
+  "miles/rollout/generate_utils/tool_call_utils.py": "2f686b3862732b931eb18b98bc35ed1a514da474975160413479662dae888a2c",
   "miles/rollout/inference_rollout/__init__.py": "49d49c5fe0d19ae701f62bc444c661a63d62b9495cca9459d1bf2d037cdc0da6",
   "miles/rollout/inference_rollout/compatibility.py": "d55d682bf15673cd90aefee59ad174b82d77497c880fd2537b577c2faf3feca0",
   "miles/rollout/inference_rollout/inference_rollout_common.py": "96e3cba12ae033527e823ed3dd8cb43c31d244775756ecf0bab4ad81eb4f06a4",
