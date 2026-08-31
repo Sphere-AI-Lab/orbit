@@ -65,6 +65,32 @@ def _barrier_with_logging(stage: str, *, group, rank: int, world_size: int, **fi
     _log_weight_sync_event(f"{stage}_exit", rank=rank, world_size=world_size, **fields)
 
 
+def _raise_distributed_peft_failure(local_error: Exception | None) -> None:
+    """Make a source-only adapter failure visible to every trainer rank."""
+    rank = dist.get_rank()
+    failure_record = None
+    if local_error is not None:
+        failure_record = {
+            "source_rank": rank,
+            "error": f"{type(local_error).__name__}: {local_error}",
+        }
+
+    gloo_group = get_gloo_group()
+    failure_records = [None] * dist.get_world_size(gloo_group)
+    dist.all_gather_object(failure_records, failure_record, group=gloo_group)
+    failure_record = next((record for record in failure_records if record is not None), None)
+    if failure_record is None:
+        return
+
+    message = (
+        "PEFT adapter dispatch failed on source rank "
+        f"{failure_record['source_rank']}: {failure_record['error']}"
+    )
+    if local_error is not None and failure_record["source_rank"] == rank:
+        raise RuntimeError(message) from local_error
+    raise RuntimeError(message)
+
+
 class UpdateWeightFromTensor:
     """
     Update rollout engines from tensor dict:
@@ -380,20 +406,47 @@ class UpdateWeightFromTensor:
         sync_chunk_count = 0
         for hf_named_tensors in weight_chunks:
             completed_results = None
-            if self._peft_sync_spec is not None:
+            if self._peft_sync_spec is not None and self.use_distribute:
+                chunk_error = None
+                try:
+                    refs, long_lived_tensors, completed_results = self._send_adapter_params(hf_named_tensors)
+                    results = completed_results if completed_results is not None else ray.get(refs)
+                    _log_weight_sync_event(
+                        "chunk_results_received",
+                        rank=rank,
+                        world_size=world_size,
+                        weight_version=self.weight_version,
+                        chunk_idx=sync_chunk_count,
+                        results_count=len(results),
+                    )
+                    _check_weight_sync_results(results, sync_type=_sync_type_label(self.peft_method))
+                except Exception as exc:  # noqa: BLE001 -- synchronized below
+                    chunk_error = exc
+                _raise_distributed_peft_failure(chunk_error)
+            elif self._peft_sync_spec is not None:
                 refs, long_lived_tensors, completed_results = self._send_adapter_params(hf_named_tensors)
+                results = completed_results if completed_results is not None else ray.get(refs)
+                _log_weight_sync_event(
+                    "chunk_results_received",
+                    rank=rank,
+                    world_size=world_size,
+                    weight_version=self.weight_version,
+                    chunk_idx=sync_chunk_count,
+                    results_count=len(results),
+                )
+                _check_weight_sync_results(results, sync_type=_sync_type_label(self.peft_method))
             else:
                 refs, long_lived_tensors = self._send_base_params(hf_named_tensors)
-            results = completed_results if completed_results is not None else ray.get(refs)
-            _log_weight_sync_event(
-                "chunk_results_received",
-                rank=rank,
-                world_size=world_size,
-                weight_version=self.weight_version,
-                chunk_idx=sync_chunk_count,
-                results_count=len(results),
-            )
-            _check_weight_sync_results(results, sync_type=_sync_type_label(self.peft_method))
+                results = ray.get(refs)
+                _log_weight_sync_event(
+                    "chunk_results_received",
+                    rank=rank,
+                    world_size=world_size,
+                    weight_version=self.weight_version,
+                    chunk_idx=sync_chunk_count,
+                    results_count=len(results),
+                )
+                _check_weight_sync_results(results, sync_type=_sync_type_label(self.peft_method))
             del long_lived_tensors
             sync_chunk_count += 1
 

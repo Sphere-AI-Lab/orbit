@@ -1272,6 +1272,23 @@ def reset_arg(parser, name, **kwargs):
         parser.add_argument(name, **kwargs)
 
 
+def _read_oft_adapter_block_size(adapter_dir: str) -> int:
+    config_path = os.path.join(adapter_dir, "adapter_config.json")
+    with open(config_path) as f:
+        config = json.load(f)
+
+    actual_type = config.get("peft_type")
+    if actual_type is not None and actual_type.upper() != "OFT":
+        raise ValueError(f"PEFT checkpoint at {adapter_dir} has peft_type={actual_type}, expected OFT.")
+
+    block_size = config.get("oft_block_size")
+    if isinstance(block_size, bool) or not isinstance(block_size, int) or block_size <= 0:
+        raise ValueError(
+            f"OFT checkpoint at {adapter_dir} must define a positive integer oft_block_size; got {block_size!r}."
+        )
+    return block_size
+
+
 def _normalize_peft_args(args):
     peft_method = getattr(args, "peft_method", "none")
     assert peft_method in _PEFT_METHODS, "--peft-method must be one of none, oft, lora."
@@ -1352,6 +1369,15 @@ def _normalize_peft_args(args):
                 raise AssertionError("--peft-adapter-path and --oft-adapter-path must match when both are set.")
             args.oft_adapter_path = peft_adapter_path
             oft_adapter_path = peft_adapter_path
+        if oft_adapter_path is not None:
+            adapter_block_size = _read_oft_adapter_block_size(oft_adapter_path)
+            if getattr(args, "oft_block_size", 0) > 0 and args.oft_block_size != adapter_block_size:
+                raise ValueError(
+                    f"--oft-block-size={args.oft_block_size} conflicts with oft_block_size={adapter_block_size} "
+                    f"in {oft_adapter_path}/adapter_config.json"
+                )
+            if getattr(args, "oft_block_size", 0) <= 0:
+                args.oft_block_size = adapter_block_size
         if getattr(args, "oft_block_size", 0) <= 0 and oft_adapter_path is None:
             raise AssertionError(
                 "--peft-method oft requires --oft-block-size > 0 or --oft-adapter-path/--peft-adapter-path."
