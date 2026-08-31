@@ -21,12 +21,16 @@ from __future__ import annotations
 # Gemma-4 closes its thinking block with this instead of `</think>`.
 GEMMA_THINKING_END = "<channel|>"
 
-# The marker upstream's grader splits the response on. `split(...)[-1]` on a
-# string that starts with it and contains no other returns the rest verbatim,
-# which is how the already-selected solution reaches upstream's grading half
-# unchanged. The one input that would not survive the round trip is a solution
-# containing `</think>` itself -- the Gemma-4 format cannot produce one, since
-# that is the whole reason it has its own reward.
+# The marker upstream's grader splits the response on. Prefixing the selected
+# solution with it makes upstream's `split(...)[-1]` a no-op, which is how the
+# solution reaches upstream's grading half unchanged.
+#
+# It is only a no-op if the solution carries no `</think>` of its own: upstream
+# splits on the LAST one, and `extract_answer` reads the LAST `\boxed`, so a
+# solution like `\boxed{42} </think> no answer here` would grade the empty tail
+# and score 0 where orbit-main scored 1. In the Gemma-4 format `</think>` is not
+# a marker at all -- it is ordinary response text -- so it is stripped before the
+# round trip rather than left to act as one.
 _DEEPSCALER_THINKING_END = "</think>"
 
 
@@ -36,4 +40,8 @@ def get_gemma_math_reward(response, label):
     # Gemma-4 closes thinking with <channel|>; grade text after the last one.
     if GEMMA_THINKING_END in response:
         response = response.split(GEMMA_THINKING_END)[-1]
+    # Neutralise any `</think>` in the selection so the prefix below is the only
+    # one upstream can split on. `</think>` is brace-free, so removing it cannot
+    # disturb the `\boxed{...}` brace matching that grading depends on.
+    response = response.replace(_DEEPSCALER_THINKING_END, "")
     return get_deepscaler_rule_based_reward(_DEEPSCALER_THINKING_END + response, label)

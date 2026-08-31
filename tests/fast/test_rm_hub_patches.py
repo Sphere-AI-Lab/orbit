@@ -287,3 +287,61 @@ def test_both_vendored_callers_bind_the_name_at_import_time():
         ):
             binders.append(rel)
     assert binders, "no module-level `from ... import async_rm` left -- retire this test"
+
+
+def _orbit_main_gemma_reward(response, label):
+    """orbit-main's body, verbatim, as the differential reference.
+
+    On orbit-main this called a ``_grade_boxed_solution`` tail that orbit had
+    split out of the vendored grader; the split is gone (the file is pristine),
+    so the tail is inlined here -- it is upstream's own grading code, only
+    reachable on its own from this test.
+    """
+    from miles.rollout.rm_hub.math_utils import extract_answer, grade_answer_mathd, grade_answer_sympy
+
+    if "<channel|>" in response:
+        response = response.split("<channel|>")[-1]
+    model_answer = extract_answer(response)
+    if model_answer is None or label == "":
+        return 0
+    truth = str(label)
+    if "\\boxed" in truth:
+        truth = extract_answer(truth)
+        if truth is None:
+            return 0
+    return 1 if (grade_answer_mathd(model_answer, truth) or grade_answer_sympy(model_answer, truth)) else 0
+
+
+def test_the_gemma_lift_matches_orbit_main_when_the_solution_contains_a_think_tag():
+    """The round trip through upstream's front end must not act on a ``</think>``
+    that is ordinary response text.
+
+    Upstream selects on the LAST ``</think>`` and grades the LAST ``\\boxed``, so
+    without neutralising the marker a solution whose boxed answer precedes one
+    would grade the empty tail and score 0 where orbit-main scored 1.
+    """
+    for response in (
+        "<channel|> \\boxed{42} </think> tail with no answer",
+        "\\boxed{42} </think> tail with no answer",
+        "<channel|> </think> \\boxed{42}",
+        "a </think> b </think> \\boxed{42} </think> c",
+    ):
+        assert get_gemma_math_reward(response, "42") == _orbit_main_gemma_reward(response, "42"), response
+
+
+def test_the_gemma_lift_matches_orbit_main_across_a_grid():
+    bodies = ("\\boxed{42}", "\\boxed{7}", "The answer is \\boxed{42}", "no boxed answer", "")
+    decorations = ("", " </think> tail", " </think> \\boxed{7}", " ###Response x", "\\boxed{7} ")
+    labels = ("42", "7", "", "\\boxed{42}", 42)
+    cases = 0
+    for body in bodies:
+        for deco in decorations:
+            for prefix in ("", "thinking <channel|> ", "\\boxed{1} <channel|> "):
+                response = prefix + body + deco
+                for label in labels:
+                    assert get_gemma_math_reward(response, label) == _orbit_main_gemma_reward(response, label), (
+                        response,
+                        label,
+                    )
+                    cases += 1
+    assert cases == 375

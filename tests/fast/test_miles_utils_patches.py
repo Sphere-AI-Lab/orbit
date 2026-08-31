@@ -8,6 +8,10 @@ Both changes used to live inside vendored files:
 They now live in orbit/utils/miles_utils_patches.py. A seam that silently stops
 firing looks exactly like a seam that fires, so each property below is asserted
 against observable behaviour rather than against the presence of the code.
+
+The rule that no unarmed process may reach these seams used to be enforced
+here too, by a weaker approximation of it; it now lives in
+tests/fast/test_arming.py, which covers both registries at once.
 """
 
 import os
@@ -124,56 +128,6 @@ def test_every_import_seam_target_still_exists():
         "miles.utils.reloadable_process_group",
         "miles.backends.megatron_utils",
     }
-
-
-def test_every_entrypoint_that_reaches_an_import_seam_arms_it():
-    """Import seams fail the same silent way the function patches do.
-
-    ``import orbit`` is what arms them, so a standalone script that imports a
-    seam's module without importing orbit just does not get the seam -- no
-    error, only the missing behaviour much later.
-    tests/fast/test_hf_export_patches.py enforces this for ``patch_function``
-    targets; the on_import registry is a second, separate registry and needs the
-    same check or the rule is enforced for half the seams.
-    """
-    import ast
-
-    reaching = set()
-    for module, _ in registry():
-        reaching.add(module)
-        reaching.add(module.rsplit(".", 1)[0])
-
-    tracked = subprocess.run(
-        ["git", "-C", str(REPO), "ls-files", "*.py"], capture_output=True, text=True
-    ).stdout.split()
-
-    offenders = []
-    for rel in tracked:
-        if rel.startswith(("miles/", "miles_plugins/", "orbit/", "tests/")):
-            continue  # library code and tests run inside processes that import orbit
-        src = (REPO / rel).read_text(errors="surrogateescape")
-        if '__name__ == "__main__"' not in src and "__name__ == '__main__'" not in src:
-            continue
-        try:
-            tree = ast.parse(src)
-        except SyntaxError:
-            continue
-        imported = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                imported.add(node.module)
-                imported.update(f"{node.module}.{a.name}" for a in node.names)
-            elif isinstance(node, ast.Import):
-                imported.update(a.name for a in node.names)
-        if not (imported & reaching):
-            continue
-        if not any(m == "orbit" or m.startswith("orbit.") for m in imported):
-            offenders.append(rel)
-
-    assert not offenders, (
-        "entrypoint reaches an orbit import seam without arming it "
-        "(add `import orbit`):\n  " + "\n  ".join(offenders)
-    )
 
 
 # --------------------------------------------------------------------------

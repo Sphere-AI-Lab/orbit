@@ -110,6 +110,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # this module when it is __main__ (the documented invocation), so ConversionWorker
 # arms again in its own __init__. Do not delete either one.
 import orbit  # noqa: F401  -- imported for the patch-arming side effect
+from orbit.ray_setup import WORKER_SETUP_HOOK
 
 from miles.backends.megatron_utils import megatron_to_hf as m2hf
 
@@ -1138,10 +1139,14 @@ def initialize_ray() -> None:
     os.environ.setdefault("RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES", "1")
     if ray.is_initialized():
         return
+    # Arm orbit's patches in every worker this job starts, not just the driver:
+    # ConversionWorker ships by value, so the actor cannot rely on its defining
+    # module being imported worker-side. See orbit/ray_setup.py.
+    runtime_env = {"worker_process_setup_hook": WORKER_SETUP_HOOK}
     try:
-        ray.init(address="auto", ignore_reinit_error=True)
+        ray.init(address="auto", ignore_reinit_error=True, runtime_env=runtime_env)
     except ConnectionError:
-        ray.init(ignore_reinit_error=True)
+        ray.init(ignore_reinit_error=True, runtime_env=runtime_env)
 
 
 def live_ray_node_ids() -> list[str]:

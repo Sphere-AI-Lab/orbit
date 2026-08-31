@@ -15,7 +15,8 @@ class HfWeightIteratorBridge(HfWeightIteratorBase):
         from megatron.bridge import AutoBridge
 
         # ORBIT-SEAM: removed base's `import miles_plugins.megatron_bridge` here: orbit loads the
-        # megatron-bridge plugin patches once at backend import (megatron_utils/__init__.py seam)
+        # megatron-bridge plugin patches once at backend import (orbit/megatron/bridge_plugins.py,
+        # an on_import seam on miles.backends.megatron_utils)
         self._bridge = AutoBridge.from_hf_pretrained(self.args.hf_checkpoint, trust_remote_code=True)
 
     def get_hf_weight_chunks(self, megatron_local_weights):

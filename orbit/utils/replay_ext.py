@@ -34,7 +34,7 @@ tools/check_patch_pins.py, which only reads ``@patch_function`` declarations.
 so an upstream rewrite of ``get_topk_fn`` aborts loudly instead of silently
 running orbit's stale copy of a body that has moved on; the same hash is
 re-derived statically from the vendored source in
-tests/fast/test_replay_ext.py, which is what puts the check in the CPU gate.
+tests/fast/test_replay_seams.py, which is what puts the check in the CPU gate.
 
 Nothing here imports torch or miles at module scope -- ``import orbit`` executes
 this module and must stay cheap (see orbit/patch/runtime.py).
@@ -52,7 +52,7 @@ from orbit.patch.runtime import normalize
 _REPLAY_BASE = "miles.utils.replay_base"
 
 # Hash of upstream ``BaseReplayManager.get_topk_fn``, the body orbit replaces.
-# Re-derive it with tests/fast/test_replay_ext.py, which prints the current
+# Re-derive it with tests/fast/test_replay_seams.py, which prints the current
 # value when it disagrees.
 GET_TOPK_FN_UPSTREAM_SHA = "ef4b8f4a303e7d349d7d479a83048efa48d631ccc8887e9c8778312f01cabb0b"
 

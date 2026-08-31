@@ -109,6 +109,13 @@ from pathlib import Path
 import ray
 import ray._private.services as services
 
+# Arms orbit's patches in every Ray worker this job starts. Four vendored modules
+# define @ray.remote callables and cannot import orbit themselves (they are
+# byte-pristine); without the hook below their workers silently run upstream's
+# unpatched functions. Ray carries it to workers in an env var that per-actor
+# env_vars merge rather than replace. See orbit/ray_setup.py.
+from orbit.ray_setup import WORKER_SETUP_HOOK
+
 train_path = sys.argv[1]
 sys.argv = [train_path, *sys.argv[2:]]
 
@@ -157,7 +164,10 @@ _log_to_driver = os.environ.get("ORBIT_RAY_LOG_TO_DRIVER", "0").lower() in ("1",
 _ray_init_kwargs = {
     "address": os.environ["ORBIT_RAY_ADDRESS"],
     "log_to_driver": _log_to_driver,
-    "runtime_env": {"env_vars": _runtime_env_vars} if _runtime_env_vars else None,
+    "runtime_env": {
+        "worker_process_setup_hook": WORKER_SETUP_HOOK,
+        **({"env_vars": _runtime_env_vars} if _runtime_env_vars else {}),
+    },
 }
 _driver_debug = os.environ.get("ORBIT_DRIVER_DEBUG", "0").lower() in ("1", "true", "yes", "y", "on")
 

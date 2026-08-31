@@ -85,8 +85,8 @@
    "sha": "dad5fcf6c00224b38140627c5489070186c96f0b281710720fe5ba86daeaf5b1"
   },
   "miles/backends/megatron_utils/update_weight/hf_weight_iterator_bridge.py": {
-   "delta_lines": 89,
-   "sha": "7fea51005ff7578b5adfe74193c21a4c4b0af7d6256f8866eb3b02d1cc4a31d1"
+   "delta_lines": 90,
+   "sha": "3f1a7af7377bc8099b632fc0a59993383a86e298e6618a3a66c28dd49f91c6e1"
   },
   "miles/backends/megatron_utils/update_weight/hf_weight_iterator_direct.py": {
    "delta_lines": 10,
