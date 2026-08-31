@@ -696,16 +696,38 @@ class SGLangEngine(RayActor):
         normalize_{oft,lora}_weight_payload asserts on "flattened_oft_payload" /
         "flattened_lora_payload" respectively, so it must follow the method, not
         be hardcoded -- LoRA reaches this path too now that it has a shaper.
+
+        SGLang selects ``serialized_named_tensors[tp_rank]``, so every TP
+        scheduler needs its own serialized entry.  Serialize each entry under
+        ``file_system`` sharing: each serialization supplies the one shared-
+        memory ownership credit redeemed by its matching scheduler.  Unlike a
+        broadcast payload, these entries have one consumer each and therefore
+        require no refcount pre-payment.
+
+        POSIX shared-memory names are local to the engine host, so this
+        transport supports only a single-host SGLang engine.
         """
-        inner = (
-            payload_tag,
-            MultiprocessingSerializer.serialize(flat_tensor),
-            metadata,
-            entries,
-        )
-        serialized = MultiprocessingSerializer.serialize(inner, output_str=True)
+        if self.nnodes > 1:
+            raise RuntimeError("Ray PEFT tensor serialization currently supports only a single-host SGLang engine.")
+
+        import torch.multiprocessing as torch_mp
+
+        old_strategy = torch_mp.get_sharing_strategy()
+        torch_mp.set_sharing_strategy("file_system")
+        try:
+            serialized_rank_payloads = []
+            for _ in range(self._adapter_payload_consumers()):
+                inner = (
+                    payload_tag,
+                    MultiprocessingSerializer.serialize(flat_tensor),
+                    metadata,
+                    entries,
+                )
+                serialized_rank_payloads.append(MultiprocessingSerializer.serialize(inner, output_str=True))
+        finally:
+            torch_mp.set_sharing_strategy(old_strategy)
         return self.update_weights_from_tensor(
-            serialized_named_tensors=[serialized],
+            serialized_named_tensors=serialized_rank_payloads,
             load_format=load_format,
             adapter_config=adapter_config,
             adapter_name=adapter_name,
@@ -935,6 +957,54 @@ class SGLangEngine(RayActor):
         return self._make_request(
             "update_weights_from_distributed",
             payload,
+        )
+
+    def update_adapter_from_distributed(
+        self,
+        *,
+        names: list[str],
+        dtypes: list[str],
+        shapes: list[list[int]],
+        group_name: str,
+        weight_version: str,
+        load_format: str,
+        adapter_config: dict,
+        adapter_name: str,
+        payload_metadata: dict | None = None,
+        adapter_version: str | None = None,
+        double_buffer: bool = False,
+    ):
+        payload = {
+            "names": names,
+            "dtypes": [str(dtype).replace("torch.", "") for dtype in dtypes],
+            "shapes": shapes,
+            "group_name": group_name,
+            "weight_version": weight_version,
+            "adapter_version": adapter_version if adapter_version is not None else weight_version,
+            "load_format": load_format,
+            "adapter_config": adapter_config,
+            "adapter_name": adapter_name,
+            "payload_metadata": payload_metadata,
+            "double_buffer": double_buffer,
+        }
+        return self._make_request("update_adapter_from_distributed", payload)
+
+    def activate_adapter_version(
+        self,
+        *,
+        adapter_name: str,
+        adapter_version: str,
+        weight_version: str,
+        load_format: str,
+    ):
+        return self._make_request(
+            "activate_adapter_version",
+            {
+                "adapter_name": adapter_name,
+                "adapter_version": adapter_version,
+                "weight_version": weight_version,
+                "load_format": load_format,
+            },
         )
 
     def pause_generation(self, mode: str = "retract"):

@@ -130,6 +130,7 @@ def _distributed_load_worker(
         peft_utils.get_parallel_state = lambda: SimpleNamespace(
             tp=SimpleNamespace(rank=rank),
             pp=SimpleNamespace(rank=0),
+            ep=SimpleNamespace(rank=0, size=1),
         )
         for case in ("mixed_native", "mixed_sidecar", "corrupt_sidecar", "embedded_param_state"):
             adapter_dir = adapter_dirs[case]

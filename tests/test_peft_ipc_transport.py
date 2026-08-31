@@ -33,6 +33,7 @@ class _FailingRemoteMethod:
 
 class _FakeEngine:
     def __init__(self):
+        self.update_weights_from_tensor = _RemoteMethod({"loaded": True})
         self.update_adapter_from_rank_tensors = _RemoteMethod({"loaded": True})
         self.update_weight_version = _RemoteMethod({"versioned": True})
 
@@ -183,6 +184,61 @@ def test_engine_serializes_each_oft_rank_tensor_under_file_system(monkeypatch):
     assert torch_mp.get_sharing_strategy() == old_strategy
 
 
+def test_engine_serializes_ray_adapter_for_every_tp_rank_under_file_system(monkeypatch):
+    """Each SGLang TP worker selects its own Ray payload by rank.
+
+    A one-element ``serialized_named_tensors`` list works only for TP=1:
+    TP1 indexes past it.  Each payload must be serialized independently so
+    its file-system shared-memory ownership credit has exactly one consumer.
+    """
+    calls = []
+
+    class _Serializer:
+        @staticmethod
+        def serialize(value, output_str=False):
+            calls.append((value, output_str, torch_mp.get_sharing_strategy()))
+            return f"serialized-{len(calls)}"
+
+    monkeypatch.setattr(engine_module, "MultiprocessingSerializer", _Serializer)
+    monkeypatch.setattr(
+        engine_module,
+        "_balance_broadcast_shm_refcounts",
+        lambda *_args: pytest.fail("independently serialized TP payloads must not pre-pay broadcast references"),
+    )
+    engine = SGLangEngine.__new__(SGLangEngine)
+    engine.nnodes = 1
+    engine.args = Namespace(rollout_num_gpus_per_engine=2)
+    engine.num_gpus_per_engine = 2
+    captured = {}
+
+    def update_weights_from_tensor(**kwargs):
+        captured.update(kwargs)
+        return {"success": True}
+
+    engine.update_weights_from_tensor = update_weights_from_tensor
+    old_strategy = torch_mp.get_sharing_strategy()
+
+    result = engine.update_adapter_from_ray_tensor(
+        flat_tensor=torch.arange(4),
+        metadata={"rank": 0},
+        entries=[("m0", 0)],
+        payload_tag="flattened_oft_payload",
+        load_format="oft_adapter",
+        adapter_config={"peft_type": "OFT"},
+        adapter_name="miles_oft",
+    )
+
+    assert result == {"success": True}
+    assert captured == {
+        "serialized_named_tensors": ["serialized-2", "serialized-4"],
+        "load_format": "oft_adapter",
+        "adapter_config": {"peft_type": "OFT"},
+        "adapter_name": "miles_oft",
+    }
+    assert [call[2] for call in calls] == ["file_system"] * 4
+    assert torch_mp.get_sharing_strategy() == old_strategy
+
+
 def test_engine_init_persists_launched_nnodes_from_server_args(monkeypatch):
     initialized = []
 
@@ -208,6 +264,7 @@ def test_engine_init_persists_launched_nnodes_from_server_args(monkeypatch):
             sglang_pp_size=1,
             sglang_ep_size=1,
             use_rollout_routing_replay=False,
+            use_rollout_indexer_replay=False,
             fp16=False,
             peft_method="none",
         ),
@@ -251,6 +308,36 @@ def test_engine_rejects_multi_node_oft_rank_tensor_serialization(monkeypatch):
     with pytest.raises(RuntimeError, match="single-host"):
         engine.update_adapter_from_rank_tensors(
             rank_payloads=[(torch.arange(4), {"rank": 0}, [("m0", 0)])],
+            payload_tag="flattened_oft_payload",
+            load_format="oft_adapter",
+            adapter_config={"peft_type": "OFT"},
+            adapter_name="miles_oft",
+        )
+
+
+def test_engine_rejects_multi_node_ray_tensor_serialization(monkeypatch):
+    class _Serializer:
+        @staticmethod
+        def serialize(_value, output_str=False):
+            pytest.fail("multi-node rejection must precede serialization")
+
+    monkeypatch.setattr(engine_module, "MultiprocessingSerializer", _Serializer)
+    monkeypatch.setattr(
+        torch_mp,
+        "set_sharing_strategy",
+        lambda _strategy: pytest.fail("multi-node rejection must precede sharing-strategy changes"),
+    )
+    engine = SGLangEngine.__new__(SGLangEngine)
+    engine.nnodes = 2
+    engine.args = Namespace(num_gpus_per_node=4, rollout_num_gpus_per_engine=8)
+    engine.num_gpus_per_engine = 8
+    engine.update_weights_from_tensor = lambda **_kwargs: pytest.fail("multi-node rejection must precede RPC dispatch")
+
+    with pytest.raises(RuntimeError, match="single-host"):
+        engine.update_adapter_from_ray_tensor(
+            flat_tensor=torch.arange(4),
+            metadata={"rank": 0},
+            entries=[("m0", 0)],
             payload_tag="flattened_oft_payload",
             load_format="oft_adapter",
             adapter_config={"peft_type": "OFT"},
@@ -365,6 +452,89 @@ def test_ipc_oft_propagates_source_load_failure_across_engine_groups(monkeypatch
         peer_backend.send_adapter(tensors, weight_version=3)
 
     assert all_gather_groups == [global_group, global_group]
+
+
+def test_cuda_ipc_propagates_source_load_failure_to_peer_rank(monkeypatch):
+    rank = {"value": 0}
+    source_record = {"value": None}
+    first_local_group = object()
+    second_local_group = object()
+    global_group = object()
+
+    def gather_object(obj, object_gather_list, **_kwargs):
+        if object_gather_list is not None:
+            object_gather_list[:] = [obj, obj]
+
+    def get_world_size(group):
+        return 4 if group is global_group else 2
+
+    def all_gather_object(objects, obj, **_kwargs):
+        if rank["value"] == 0:
+            source_record["value"] = obj
+        objects[:] = [source_record["value"], None, None, None]
+
+    class _Serializer:
+        @staticmethod
+        def serialize(_value, output_str=False):
+            return "serialized" if output_str else b"serialized"
+
+    monkeypatch.setenv("MILES_PEFT_ADAPTER_TRANSPORT", "cuda_ipc")
+    monkeypatch.setattr(ipc_backend, "MultiprocessingSerializer", _Serializer)
+    monkeypatch.setattr(ipc_backend.dist, "get_rank", lambda: rank["value"])
+    monkeypatch.setattr(ipc_backend.dist, "get_world_size", get_world_size)
+    monkeypatch.setattr(ipc_backend.dist, "gather_object", gather_object)
+    monkeypatch.setattr(ipc_backend.dist, "all_gather_object", all_gather_object)
+    monkeypatch.setattr(ipc_backend.dist, "barrier", lambda **_kwargs: None)
+    monkeypatch.setattr(ipc_backend.ray, "get", lambda value: value)
+    monkeypatch.setattr(ipc_backend, "get_gloo_group", lambda: global_group, raising=False)
+
+    failed_engine = _FakeEngine()
+    failed_engine.update_weights_from_tensor = _FailingRemoteMethod(RuntimeError("scheduler load failed"))
+    source_backend = IpcBackend(
+        args=Namespace(
+            peft_method="oft",
+            peft_distributed_transport="nccl",
+            adapter_double_buffer=False,
+            peft_adapter_path=None,
+        ),
+        method_spec=_method_spec(),
+        sync_spec=PeftSyncSpec(
+            method="oft",
+            adapter_name="miles_oft",
+            adapter_config={"peft_type": "OFT"},
+            sync_transport="oft_adapter",
+        ),
+        ipc_gather_group=first_local_group,
+        ipc_gather_src=0,
+    )
+    source_backend.connect([failed_engine], object())
+
+    peer_backend = IpcBackend(
+        args=Namespace(
+            peft_method="oft",
+            peft_distributed_transport="nccl",
+            adapter_double_buffer=False,
+            peft_adapter_path=None,
+        ),
+        method_spec=_method_spec(),
+        sync_spec=PeftSyncSpec(
+            method="oft",
+            adapter_name="miles_oft",
+            adapter_config={"peft_type": "OFT"},
+            sync_transport="oft_adapter",
+        ),
+        ipc_gather_group=second_local_group,
+        ipc_gather_src=2,
+    )
+    peer_backend.connect([_FakeEngine()], object())
+
+    tensors = [("model.layers.0.self_attn.q_proj.oft_R", torch.ones(2, 2))]
+    with pytest.raises(RuntimeError, match="scheduler load failed"):
+        source_backend.send_adapter(tensors, weight_version=3)
+
+    rank["value"] = 3
+    with pytest.raises(RuntimeError, match="scheduler load failed"):
+        peer_backend.send_adapter(tensors, weight_version=3)
 
 
 def test_ipc_oft_propagates_failed_engine_result_to_peer_rank(monkeypatch):

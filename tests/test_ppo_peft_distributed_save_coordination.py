@@ -82,11 +82,12 @@ def _distributed_adapter_save_worker(
         peft_utils.get_parallel_state = lambda: SimpleNamespace(
             # Both CP replicas are rank zero when CP is excluded from DP.
             intra_dp=SimpleNamespace(rank=0, size=1),
-            # The combined group has one writer for their shared TP/PP shard.
+            # These CP replicas share one realized TP/PP/EP coordinate.
             intra_dp_cp=SimpleNamespace(rank=rank, size=world_size),
             cp=SimpleNamespace(rank=rank, size=world_size),
             tp=SimpleNamespace(rank=0),
             pp=SimpleNamespace(rank=0),
+            ep=SimpleNamespace(rank=0, size=1),
         )
         peft_utils.native_adapter_state = lambda _model: {(0, "lora_A"): torch.ones(1)}
         megatron_bridge_utils.patch_megatron_model = lambda _model: nullcontext()

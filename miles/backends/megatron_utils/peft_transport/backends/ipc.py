@@ -91,7 +91,7 @@ class IpcBackend(PeftWeightTransport):
             payload = self.method_spec.payload_shaper(weight_tensors)
             if _cpu_gather_transport_enabled():
                 return self._send_shaped_via_cpu_gather(payload, rank, world_size, is_src, weight_version)
-            return self._send_shaped_via_cuda_ipc(payload, world_size, is_src, weight_version)
+            return self._send_shaped_via_cuda_ipc(payload, rank, world_size, is_src, weight_version)
 
         # LoRA path: unload existing adapter before loading new weights so SGLang
         # doesn't layer new tensors on top of stale state.
@@ -143,7 +143,9 @@ class IpcBackend(PeftWeightTransport):
             return send_result
         return PeftSendResult(refs=[])
 
-    def _send_shaped_via_cuda_ipc(self, payload, world_size: int, is_src: bool, weight_version: int) -> PeftSendResult:
+    def _send_shaped_via_cuda_ipc(
+        self, payload, rank: int, world_size: int, is_src: bool, weight_version: int
+    ) -> PeftSendResult:
         """Ship the flat tensor as a CUDA IPC handle (default transport)."""
         # The wire format inherited from verl: outer pickle wraps inner
         # IPC-handle-bearing serialization of the flat tensor. See
@@ -168,30 +170,25 @@ class IpcBackend(PeftWeightTransport):
             group=self.ipc_gather_group,
         )
         send_result: PeftSendResult | None = None
-        load_error: Exception | None = None
+        source_error: Exception | None = None
         if is_src:
-            engine = self._engines[0]
-            load_ref = engine.update_weights_from_tensor.remote(
-                serialized_named_tensors=gathered,
-                load_format=self.method_spec.sglang_load_format,
-                adapter_config=self.sync_spec.adapter_config,
-                adapter_name=self.sync_spec.adapter_name,
-            )
             try:
+                engine = self._engines[0]
+                load_ref = engine.update_weights_from_tensor.remote(
+                    serialized_named_tensors=gathered,
+                    load_format=self.method_spec.sglang_load_format,
+                    adapter_config=self.sync_spec.adapter_config,
+                    adapter_name=self.sync_spec.adapter_name,
+                )
                 send_result = self._record_weight_version_after_load(engine, load_ref, weight_version)
-            except Exception as exc:
-                load_error = exc
+            except Exception as exc:  # noqa: BLE001 -- synchronized below
+                source_error = exc
 
         # Every rank serialized a CUDA IPC handle to its local flat tensor.
         # Keep those local tensors alive until the source rank has finished
         # the SGLang load/version RPCs; otherwise peer ranks can return and
         # free the storage before SGLang deserializes their handles.
-        dist.barrier(group=self.ipc_gather_group)
-        if load_error is not None:
-            raise load_error
-        if send_result is not None:
-            return send_result
-        return PeftSendResult(refs=[])
+        return self._synchronize_source_result(rank, is_src, send_result, source_error)
 
     def _send_shaped_via_cpu_gather(
         self, payload, rank: int, world_size: int, is_src: bool, weight_version: int
@@ -216,8 +213,8 @@ class IpcBackend(PeftWeightTransport):
             dst=self.ipc_gather_src,
             group=self.ipc_gather_group,
         )
-        source_record = None
         source_error: Exception | None = None
+        send_result: PeftSendResult | None = None
         if is_src:
             try:
                 engine = self._engines[0]
@@ -229,18 +226,28 @@ class IpcBackend(PeftWeightTransport):
                     adapter_name=self.sync_spec.adapter_name,
                 )
                 send_result = self._record_weight_version_after_load(engine, load_ref, weight_version)
-                source_record = {
-                    "source_rank": rank,
-                    "results": send_result.results,
-                    "error": None,
-                }
             except Exception as exc:  # noqa: BLE001 -- synchronized below
                 source_error = exc
-                source_record = {
-                    "source_rank": rank,
-                    "results": None,
-                    "error": f"{type(exc).__name__}: {exc}",
-                }
+
+        return self._synchronize_source_result(rank, is_src, send_result, source_error)
+
+    def _synchronize_source_result(
+        self,
+        rank: int,
+        is_src: bool,
+        send_result: PeftSendResult | None,
+        source_error: Exception | None,
+    ) -> PeftSendResult:
+        """Share each local engine source's result or failure with every trainer rank."""
+        source_record = None
+        if is_src:
+            if source_error is None:
+                assert send_result is not None
+            source_record = {
+                "source_rank": rank,
+                "results": send_result.results if send_result is not None else None,
+                "error": (None if source_error is None else f"{type(source_error).__name__}: {source_error}"),
+            }
 
         # Local gather groups can represent separate colocated engines, so
         # only the global Gloo group can make source RPC failures and
