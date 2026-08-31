@@ -25,3 +25,21 @@ SPEC.loader.exec_module(CHECKER)
 def test_all_orbit_imports_resolve():
     errors = CHECKER.collect_errors()
     assert not errors, "dangling orbit imports:\n  " + "\n  ".join(errors)
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="repo sources use PEP 695 syntax")
+def test_the_checker_sees_untracked_files():
+    """Reading the git index alone makes this guard pass VACUOUSLY on a file that
+    has not been committed yet -- exactly when a dangling import is most likely
+    to be there, since the file is new. The file list is therefore read per call,
+    tracked and untracked alike."""
+    probe = REPO_ROOT / "orbit" / "_import_integrity_untracked_probe.py"
+    probe.write_text("from orbit.definitely_not_a_real_module import nothing\n")
+    try:
+        errors = CHECKER.collect_errors()
+    finally:
+        probe.unlink()
+    assert any("_import_integrity_untracked_probe" in e for e in errors), (
+        "the checker did not flag a dangling import in an untracked file; it is "
+        "reading the index only again"
+    )
