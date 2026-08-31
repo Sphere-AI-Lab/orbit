@@ -29,8 +29,8 @@ dependencies = ["transformers==5.12.1"]
 
 [tool.uv.sources]
 sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "a6fe249b3d56dde4bf275f98cc3d9f95813b0f44", subdirectory = "python" }
-megatron-core = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git", rev = "83879096b7ca4854adfa5f50993bbb728952aaaf" }
-megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "988d642688b46ccf68796b0eb9c22aacc59593bc" }
+megatron-core = { git = "https://github.com/radixark/Megatron-LM.git", rev = "235952df607b3820716e5e67728a5ab470ca33ae" }
+megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "bb9372161e016b87dd87f7bb06d19794c31178f7" }
 transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", rev = "71bbefbf153418f943640df0f7373625dc93fa46" }
 deep-ep = { git = "https://github.com/deepseek-ai/DeepEP.git", rev = "d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb" }
 
@@ -39,12 +39,12 @@ source = "https://github.com/Sphere-AI-Lab/sglang.git"
 tested-ref = "a6fe249b3d56dde4bf275f98cc3d9f95813b0f44"
 
 [tool.orbit.release.backend-pins.megatron-core]
-source = "https://github.com/Sphere-AI-Lab/Megatron-LM.git"
-tested-ref = "83879096b7ca4854adfa5f50993bbb728952aaaf"
+source = "https://github.com/radixark/Megatron-LM.git"
+tested-ref = "235952df607b3820716e5e67728a5ab470ca33ae"
 
 [tool.orbit.release.backend-pins.megatron-bridge]
 source = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git"
-tested-ref = "988d642688b46ccf68796b0eb9c22aacc59593bc"
+tested-ref = "bb9372161e016b87dd87f7bb06d19794c31178f7"
 """.strip()
     )
     (sglang / "python" / "pyproject.toml").write_text(
@@ -60,8 +60,8 @@ dependencies = ["torch==2.11.0", "flashinfer-python==0.6.14"]
     assert pins["CUDA_PROFILE"] == "cu128"
     assert pins["TORCH_VERSION"] == "2.11.0"
     assert pins["SGLANG_COMMIT"] == "a6fe249b3d56dde4bf275f98cc3d9f95813b0f44"
-    assert pins["MEGATRON_COMMIT"] == "83879096b7ca4854adfa5f50993bbb728952aaaf"
-    assert pins["MEGATRON_BRIDGE_COMMIT"] == "988d642688b46ccf68796b0eb9c22aacc59593bc"
+    assert pins["MEGATRON_COMMIT"] == "235952df607b3820716e5e67728a5ab470ca33ae"
+    assert pins["MEGATRON_BRIDGE_COMMIT"] == "bb9372161e016b87dd87f7bb06d19794c31178f7"
     assert pins["NCCL_VERSION"] == "2.30.4"
     assert pins["DEEP_EP_SOURCE_URL"] == "https://github.com/deepseek-ai/DeepEP.git"
     assert pins["DEEP_EP_COMMIT"] == "d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb"
@@ -85,8 +85,8 @@ dependencies = ["transformers==5.12.1"]
 
 [tool.uv.sources]
 sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", subdirectory = "python" }
-megatron-core = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git", rev = "83879096b7ca4854adfa5f50993bbb728952aaaf" }
-megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "988d642688b46ccf68796b0eb9c22aacc59593bc" }
+megatron-core = { git = "https://github.com/radixark/Megatron-LM.git", rev = "235952df607b3820716e5e67728a5ab470ca33ae" }
+megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "bb9372161e016b87dd87f7bb06d19794c31178f7" }
 transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", rev = "71bbefbf153418f943640df0f7373625dc93fa46" }
 deep-ep = { git = "https://github.com/deepseek-ai/DeepEP.git", rev = "d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb" }
 
@@ -95,12 +95,12 @@ source = "https://github.com/Sphere-AI-Lab/sglang.git"
 tested-ref = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 [tool.orbit.release.backend-pins.megatron-core]
-source = "https://github.com/Sphere-AI-Lab/Megatron-LM.git"
-tested-ref = "83879096b7ca4854adfa5f50993bbb728952aaaf"
+source = "https://github.com/radixark/Megatron-LM.git"
+tested-ref = "235952df607b3820716e5e67728a5ab470ca33ae"
 
 [tool.orbit.release.backend-pins.megatron-bridge]
 source = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git"
-tested-ref = "988d642688b46ccf68796b0eb9c22aacc59593bc"
+tested-ref = "bb9372161e016b87dd87f7bb06d19794c31178f7"
 """.strip()
     )
     (sglang / "python" / "pyproject.toml").write_text(

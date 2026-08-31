@@ -165,8 +165,8 @@ flash-linear-attention = ["setuptools", "torch", "wheel"]
 
 [tool.uv.sources]
 deep-ep = { git = "https://github.com/deepseek-ai/DeepEP.git", rev = "d4f41e4e93602a15e95f55f6ee8df8f1aaa0e4bb" }
-megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "988d642688b46ccf68796b0eb9c22aacc59593bc" }
-megatron-core = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git", rev = "83879096b7ca4854adfa5f50993bbb728952aaaf" }
+megatron-bridge = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git", rev = "bb9372161e016b87dd87f7bb06d19794c31178f7" }
+megatron-core = { git = "https://github.com/radixark/Megatron-LM.git", rev = "235952df607b3820716e5e67728a5ab470ca33ae" }
 nvidia-resiliency-ext = { git = "https://github.com/NVIDIA/nvidia-resiliency-ext.git", rev = "63154570cea17f8805a7fd15cc3b8cc2919ba575" }
 # orbit-main-oft-tiny = sglang's orbit-main (v0.5.16 + the modularized OFT/LoRA
 # single-active peft framework) with the tiny-block OFT work ported on top. The
@@ -255,12 +255,12 @@ include = [
 ]
 
 [tool.orbit.release.backend-pins.megatron-core]
-source = "https://github.com/Sphere-AI-Lab/Megatron-LM.git"
-tested-ref = "83879096b7ca4854adfa5f50993bbb728952aaaf"
+source = "https://github.com/radixark/Megatron-LM.git"
+tested-ref = "235952df607b3820716e5e67728a5ab470ca33ae"
 
 [tool.orbit.release.backend-pins.megatron-bridge]
 source = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git"
-tested-ref = "988d642688b46ccf68796b0eb9c22aacc59593bc"
+tested-ref = "bb9372161e016b87dd87f7bb06d19794c31178f7"
 
 [tool.orbit.release.backend-pins.sglang]
 source = "https://github.com/Sphere-AI-Lab/sglang.git"

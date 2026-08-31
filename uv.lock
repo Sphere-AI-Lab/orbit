@@ -10,7 +10,7 @@ resolution-markers = [
 overrides = [
     { name = "cuda-python", specifier = "==13.2.0" },
     { name = "flashinfer-python", specifier = "==0.6.15.post1" },
-    { name = "megatron-core", git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git?rev=83879096b7ca4854adfa5f50993bbb728952aaaf" },
+    { name = "megatron-core", git = "https://github.com/radixark/Megatron-LM.git?rev=235952df607b3820716e5e67728a5ab470ca33ae" },
     { name = "numpy", specifier = "==2.3.5" },
     { name = "nvidia-cublas", specifier = "==13.4.1.1" },
     { name = "nvidia-cuda-cupti", specifier = "==13.2.75" },
@@ -644,7 +644,7 @@ cufft = [
     { name = "nvidia-cufft" },
 ]
 cufile = [
-    { name = "nvidia-cufile", marker = "sys_platform == 'linux'" },
+    { name = "nvidia-cufile" },
 ]
 cupti = [
     { name = "nvidia-cuda-cupti" },
@@ -730,7 +730,7 @@ name = "decord2"
 version = "3.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy", marker = "platform_machine != 's390x'" },
+    { name = "numpy" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/51/c3/fbc81c2cc18b2b7ca8a3a26ca2e8dfa243a2c7f5c4431f4b3839a8f12f0a/decord2-3.3.0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:3a67fb644041a031bc3f21b2e1adcf92b9742d980bd90f3bc45396c2a0ddcbfa", size = 25036754, upload-time = "2026-04-06T18:09:46.005Z" },
@@ -2202,11 +2202,10 @@ wheels = [
 
 [[package]]
 name = "megatron-bridge"
-version = "0.5.0+988d6426"
-source = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git?rev=988d642688b46ccf68796b0eb9c22aacc59593bc#988d642688b46ccf68796b0eb9c22aacc59593bc" }
+version = "0.5.0+bb937216"
+source = { git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git?rev=bb9372161e016b87dd87f7bb06d19794c31178f7#bb9372161e016b87dd87f7bb06d19794c31178f7" }
 dependencies = [
     { name = "accelerate" },
-    { name = "causal-conv1d" },
     { name = "comet-ml" },
     { name = "datasets" },
     { name = "diffusers" },
@@ -2215,8 +2214,8 @@ dependencies = [
     { name = "hydra-core" },
     { name = "imageio" },
     { name = "imageio-ffmpeg" },
-    { name = "mamba-ssm" },
     { name = "megatron-core" },
+    { name = "mistral-common" },
     { name = "mlflow" },
     { name = "nvidia-resiliency-ext" },
     { name = "omegaconf" },
@@ -2231,7 +2230,6 @@ dependencies = [
     { name = "timm" },
     { name = "torch" },
     { name = "tqdm" },
-    { name = "transformer-engine" },
     { name = "transformers" },
     { name = "typing-extensions" },
     { name = "wandb" },
@@ -2239,8 +2237,8 @@ dependencies = [
 
 [[package]]
 name = "megatron-core"
-version = "0.18.0rc0"
-source = { git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git?rev=83879096b7ca4854adfa5f50993bbb728952aaaf#83879096b7ca4854adfa5f50993bbb728952aaaf" }
+version = "0.19.0+235952df6"
+source = { git = "https://github.com/radixark/Megatron-LM.git?rev=235952df607b3820716e5e67728a5ab470ca33ae#235952df607b3820716e5e67728a5ab470ca33ae" }
 dependencies = [
     { name = "numpy" },
     { name = "packaging" },
@@ -3297,8 +3295,8 @@ requires-dist = [
     { name = "math-verify", marker = "extra == 'allinone'", specifier = "==0.9.0" },
     { name = "matplotlib", marker = "extra == 'plots'", specifier = ">=3.8" },
     { name = "mcp", extras = ["cli"], specifier = "==1.27.1" },
-    { name = "megatron-bridge", git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git?rev=988d642688b46ccf68796b0eb9c22aacc59593bc" },
-    { name = "megatron-core", git = "https://github.com/Sphere-AI-Lab/Megatron-LM.git?rev=83879096b7ca4854adfa5f50993bbb728952aaaf" },
+    { name = "megatron-bridge", git = "https://github.com/Sphere-AI-Lab/Megatron-Bridge.git?rev=bb9372161e016b87dd87f7bb06d19794c31178f7" },
+    { name = "megatron-core", git = "https://github.com/radixark/Megatron-LM.git?rev=235952df607b3820716e5e67728a5ab470ca33ae" },
     { name = "memray" },
     { name = "ninja", marker = "extra == 'allinone'" },
     { name = "nvidia-modelopt", marker = "extra == 'allinone'", specifier = "==0.44.0" },

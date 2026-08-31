@@ -229,8 +229,8 @@ Orbit installs the backend forks from immutable public Git refs recorded in
 reachable:
 
 ```bash
-git ls-remote https://github.com/Sphere-AI-Lab/Megatron-Bridge.git 988d642688b46ccf68796b0eb9c22aacc59593bc
-git ls-remote https://github.com/Sphere-AI-Lab/Megatron-LM.git 83879096b7ca4854adfa5f50993bbb728952aaaf
+git ls-remote https://github.com/Sphere-AI-Lab/Megatron-Bridge.git bb9372161e016b87dd87f7bb06d19794c31178f7
+git ls-remote https://github.com/radixark/Megatron-LM.git 235952df607b3820716e5e67728a5ab470ca33ae
 git ls-remote https://github.com/Sphere-AI-Lab/sglang.git a6fe249b3d56dde4bf275f98cc3d9f95813b0f44
 ```
 
