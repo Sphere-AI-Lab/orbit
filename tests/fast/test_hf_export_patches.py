@@ -138,6 +138,11 @@ def test_every_entrypoint_that_reaches_a_patched_module_arms_the_patches():
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module:
                 imported.add(node.module)
+                # `from miles.backends.megatron_utils import megatron_to_hf` has
+                # node.module == the PARENT of what it actually binds. Without
+                # this the guard never even considered the Ray converter CLI --
+                # it was structurally blind to the exact file it was written for.
+                imported.update(f"{node.module}.{a.name}" for a in node.names)
             elif isinstance(node, ast.Import):
                 imported.update(a.name for a in node.names)
         if not (imported & reaching):
@@ -148,4 +153,44 @@ def test_every_entrypoint_that_reaches_a_patched_module_arms_the_patches():
     assert not offenders, (
         "entrypoint reaches a patched module without arming the patches "
         "(add `import orbit`):\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_patch_survives_the_converter_package_being_imported_before_orbit():
+    """Import ORDER must not decide whether the patch takes effect.
+
+    Patching `qwen2.convert_qwen2_to_hf` is not enough: the package
+    `megatron_to_hf/__init__.py` does `from .qwen2 import convert_qwen2_to_hf`
+    at import time, and `_convert_to_hf_core` dispatches through THAT binding.
+    If the package was already imported when the hook is armed, the re-export is
+    stale and callers get upstream's unpatched function while the patch looks
+    installed.
+
+    Not hypothetical: a Ray actor imports the converter package while unpickling
+    its worker class, before the actor body runs `import orbit`. Run in a
+    subprocess so the import order is real rather than simulated.
+    """
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[2]
+    probe = (
+        "import miles.backends.megatron_utils.megatron_to_hf as pkg\n"   # BEFORE orbit
+        "import orbit\n"
+        "print(pkg.convert_qwen2_to_hf.__module__)\n"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        # Inherit the environment: torch/sglang need the CUDA and loader paths the
+        # activated env sets. Only the two knobs this probe cares about are forced.
+        env={**os.environ, "PYTHONPATH": str(repo), "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    assert out.returncode == 0, out.stderr[-2000:]
+    assert out.stdout.strip().endswith("orbit.megatron.hf_export_patches"), (
+        f"package-level re-export was not re-pointed: {out.stdout.strip()!r}"
     )

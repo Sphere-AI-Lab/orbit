@@ -106,7 +106,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Arm orbit's converter patches before the converters are imported: they supply
 # the parameter names upstream does not map, and install via a hook that
-# `import orbit` arms. Ray workers import this module fresh, so each one arms too.
+# `import orbit` arms. This arms the DRIVER ONLY -- Ray actors do NOT re-import
+# this module when it is __main__ (the documented invocation), so ConversionWorker
+# arms again in its own __init__. Do not delete either one.
 import orbit  # noqa: F401  -- imported for the patch-arming side effect
 
 from miles.backends.megatron_utils import megatron_to_hf as m2hf
@@ -1073,6 +1075,17 @@ class ConversionWorker:
         max_file_bytes: int,
         metadata_ref: Any,
     ) -> None:
+        # Arm orbit's converter patches INSIDE the actor. The module-level
+        # `import orbit` above only arms the DRIVER: this class is defined in
+        # __main__ when the tool is run the documented way
+        # (`python tools/convert_torch_dist_to_hf_ray.py ...`), so ray.cloudpickle
+        # exports it by VALUE while its `m2hf` global is repickled by REFERENCE --
+        # the worker re-imports miles' converters and never touches orbit. Every
+        # m2hf.* call happens here, in convert(), so without this the actors run
+        # upstream's unpatched converters and raise "Unknown parameter name" on
+        # the layouts orbit adds mappings for. Verified at the cloudpickle layer.
+        import orbit  # noqa: F401  -- patch-arming side effect, per-actor
+
         self.actor_id = actor_id
         self.ray_node_id = ray.get_runtime_context().get_node_id()
         self.cuda_device_id = initialize_worker_cuda_device(actor_id, quantization_config)

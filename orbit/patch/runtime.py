@@ -113,6 +113,33 @@ def patch_function(module: str, attr: str, *, upstream_sha: str, reason: str):
     return decorate
 
 
+def _repoint_reexports(patch: "Patch", original_fn) -> None:
+    """Re-point already-imported re-exports of a patched function.
+
+    Patching `module.attr` is not enough when a package did
+    `from .submodule import attr` at import time: that bound the ORIGINAL object
+    into the package namespace, and callers dispatching through the package keep
+    getting it. The import hook normally avoids this by patching before anything
+    imports the target -- but a target already in sys.modules when the hook is
+    armed has re-exports that are already stale.
+
+    That is not theoretical. `miles.backends.megatron_utils.megatron_to_hf`
+    re-exports every converter and `_convert_to_hf_core` dispatches through the
+    PACKAGE binding, so a Ray actor -- which imports the converter package while
+    unpickling its worker class, before the actor body runs `import orbit` --
+    would call upstream's unpatched function despite the patch being installed.
+
+    Only an attribute that is still identical to the object just replaced is
+    re-pointed, so an unrelated same-named attribute is never clobbered.
+    """
+    parts = patch.module.split(".")
+    for depth in range(len(parts) - 1, 0, -1):
+        pkg = sys.modules.get(".".join(parts[:depth]))
+        if pkg is not None and getattr(pkg, patch.attr, None) is original_fn:
+            setattr(pkg, f"_orbit_unpatched_{patch.attr}", original_fn)
+            setattr(pkg, patch.attr, patch.replacement)
+
+
 class _ApplyOnImport:
     """Apply each patch when its target module is first imported -- never sooner.
 
@@ -217,6 +244,7 @@ def apply_all(*, reapply: bool = False, only: str | None = None) -> int:
             )
         setattr(module, f"_orbit_unpatched_{patch.attr}", current)
         setattr(module, patch.attr, patch.replacement)
+        _repoint_reexports(patch, current)
         _APPLIED.add(patch.target)
         applied += 1
     return applied
