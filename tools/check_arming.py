@@ -164,7 +164,10 @@ def patch_targets() -> set[tuple[str, str | None]]:
     from orbit.patch.on_import import registry as seam_registry
 
     targets = {(p.module, p.attr) for p in registry()}
-    targets |= {(name, None) for name, _ in seam_registry()}
+    for name, callback in seam_registry():
+        relevant = getattr(callback, "orbit_relevant_names", ())
+        # A seam with no declared relevance falls back to module reachability.
+        targets |= {(name, n) for n in relevant} or {(name, None)}
     return targets
 
 

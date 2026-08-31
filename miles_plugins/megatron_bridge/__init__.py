@@ -75,10 +75,3 @@ try:
     from . import nemotron_h  # noqa: F401
 except Exception as _e:  # pragma: no cover - defensive
     logger.warning("miles nemotron_h plugin failed to load: %s", _e)
-
-
-# ORBIT-SEAM: single import boundary for megatron.bridge; orbit code imports AutoBridge from here
-from megatron.bridge import AutoBridge  # noqa: E402
-
-
-__all__ = ["AutoBridge"]

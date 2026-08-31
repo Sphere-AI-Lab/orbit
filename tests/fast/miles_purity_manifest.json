@@ -72,10 +72,6 @@
    "delta_lines": 335,
    "sha": "18b143b216df0e213cf5327df0fdbb50da49c173f90c2ebaffff68ff0d0411bf"
   },
-  "miles/backends/megatron_utils/__init__.py": {
-   "delta_lines": 6,
-   "sha": "80303e14ba585dbdea4ecde0f428a2aaed81d1c8407ac2c2215893b5a71d7670"
-  },
   "miles/backends/megatron_utils/actor.py": {
    "delta_lines": 669,
    "sha": "8b0147e301d3d882b5e25afcb4219569db5fec4adbeb8e57b637a63fcf355f2e"
@@ -101,8 +97,8 @@
    "sha": "715b370644078d6bc0101af12f0f554c9f266046b3cdc80cf94ded374237d824"
   },
   "miles/backends/megatron_utils/megatron_to_hf/__init__.py": {
-   "delta_lines": 15,
-   "sha": "3d32d7cb163974ca83ab8d71665ee035f55ac6facda0bcf37de0d02bd0cfea17"
+   "delta_lines": 14,
+   "sha": "6fa6ff23af73d5bbc5a4a3856ae1f50d3db8fd1045aa65f249c193c69f65c6f6"
   },
   "miles/backends/megatron_utils/megatron_to_hf/processors/padding_remover.py": {
    "delta_lines": 22,
@@ -260,10 +256,6 @@
    "delta_lines": 10,
    "sha": "3ba71199f9784f3e6803deba0f34ce90cf2d0d1880caf7b3620cb259e4a69e8c"
   },
-  "miles/rollout/inference_rollout/inference_rollout_common.py": {
-   "delta_lines": 17,
-   "sha": "97883a294afcd46333df3d307501641e8a5f5b8ffb0129e4a8d593cf1ee507db"
-  },
   "miles/rollout/inference_rollout/inference_rollout_eval.py": {
    "delta_lines": 117,
    "sha": "42ec64f9d010796f50b2992129ea810ad9836c05d3786ceee38b15d1e93ea2c6"
@@ -359,10 +351,6 @@
   "miles_plugins/mbridge/qwen3_5.py": {
    "delta_lines": 11,
    "sha": "572b754c222bb9fd50c87cdda7e51588b08d735da8c12a0bd9c6de5cad825e05"
-  },
-  "miles_plugins/megatron_bridge/__init__.py": {
-   "delta_lines": 7,
-   "sha": "7a1e0e3a1d7a5351205f2cfbb9c997354e5c2be43274b7b25605a57c48787e82"
   },
   "miles_plugins/models/qwen3_5.py": {
    "delta_lines": 6,
@@ -507,6 +495,10 @@
   "tools/convert_hf_to_torch_dist.py": {
    "delta_lines": 192,
    "sha": "35b5615e3400a1e0b939c4cbbe9589adc57c4989081bc5a5407ff6cf39a99fb8"
+  },
+  "tools/convert_torch_dist_to_hf.py": {
+   "delta_lines": 9,
+   "sha": "1c36dce676fc3cacdff9392276c70291eb0690bdbbae109d617c2549b792149f"
   },
   "tools/convert_torch_dist_to_hf_ray.py": {
    "delta_lines": 16,
@@ -1010,6 +1002,7 @@
   "miles/backends/fsdp_utils/sglang_attn_bridge/hf_sglang_triton_patch.py": "ac07ddadddfa19270a784beab3ed3a533b6b311f16900f122fe5ed1392492cfa",
   "miles/backends/fsdp_utils/sglang_attn_bridge/triton_attn_bwd.py": "2d57b033d82235f1b5ebefaacd7c293aca6be604e42dca2c8bd0a82dcb9618ff",
   "miles/backends/fsdp_utils/update_weight_utils.py": "2a1f96d29903a0f5d95186ebafe092a3814c340a1b4293764661f2bba86783b2",
+  "miles/backends/megatron_utils/__init__.py": "9f429da0b5a97a9a81aebc5f3aa83e83a53aee2a41e6f7c3effa173c1c992730",
   "miles/backends/megatron_utils/arguments.py": "07725785aed8545096eaa6c66bbc8c7c5ec51c0dd68b7d7953e22674798d24ed",
   "miles/backends/megatron_utils/ci_utils.py": "fb427eb841d91088c158f56125236353f3eae685fcccff785921073d2833fe35",
   "miles/backends/megatron_utils/fp32_param_utils.py": "5bb11145df90a4cb7aa65849023fab89ac25d6c0f1847f6727d4e00dcaf9454d",
@@ -1127,6 +1120,7 @@
   "miles/rollout/generate_utils/prefill_logprobs.py": "d8370d4b8abdfca3fe705f5f2354ea2710929ca41d974269ccadba4fb192f5c4",
   "miles/rollout/inference_rollout/__init__.py": "49d49c5fe0d19ae701f62bc444c661a63d62b9495cca9459d1bf2d037cdc0da6",
   "miles/rollout/inference_rollout/compatibility.py": "d55d682bf15673cd90aefee59ad174b82d77497c880fd2537b577c2faf3feca0",
+  "miles/rollout/inference_rollout/inference_rollout_common.py": "96e3cba12ae033527e823ed3dd8cb43c31d244775756ecf0bab4ad81eb4f06a4",
   "miles/rollout/multi_lora/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/rollout/multi_lora/async_rollout.py": "9911b4e701a346e3653e5d05e3e1525b3af8d9497f60d78180287714c53b179b",
   "miles/rollout/multi_lora/data_source.py": "deaec764ae00935fc41b901a15b8563b7ecf2e25a4fd66ae32c6c535bd7bf606",
@@ -1311,6 +1305,7 @@
   "miles_plugins/mbridge/joyai_llm_flash.py": "8f7972413a9f4f0b97d1ceac685d619dd13eb0de5ec3b9a0491fd1f598dd9bd9",
   "miles_plugins/mbridge/mimo.py": "a2d675914083ca810954373d73a6c2e885c5943b863e4adffe02420c04a69820",
   "miles_plugins/mbridge/qwen3_next.py": "fd3e0ceda5dd23bdad56671e3cbc350da85f025a2b1c7659b10dc5a35398f02a",
+  "miles_plugins/megatron_bridge/__init__.py": "977a157cceee722f57a857749850b46029a68710f60f60e24eacc8767282b1f0",
   "miles_plugins/megatron_bridge/nemotron_h.py": "2cddf9ed6f67306d12e6a60a661f5278f78101e08b2ad8878212329bf1fae185",
   "miles_plugins/models/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles_plugins/models/cp_utils.py": "1e6eb160c1952247f895478dd9f2676038cd2205d7ba1568513e776346ec2eca",
@@ -2193,7 +2188,6 @@
   "tools/convert_hf_to_mxfp8.py": "ada860e4569372acfac37d60c5d667ad843847ef1b9defe4b77a69ac24cfe167",
   "tools/convert_kimi_int4_to_bf16.py": "ebb44035010692281d790869fcdf45a1746787a40b98fc4d5e5756d7e1526d15",
   "tools/convert_mxfp4_to_fp8.py": "f450a224f74c1dbfe93c5ac1d9dc50fe67bfe852f99371ce55ff63c595ab2ec9",
-  "tools/convert_torch_dist_to_hf.py": "332bf9eedb5c72f83de69ac8e993d43c4ab4c2c30d4d2e60f6ba466ac5ea6390",
   "tools/cpu_memory_profiler.py": "ad7a9dc7eed50647ef60803db7b514c173dee5173b0f4e93bfcd276b4d472988",
   "tools/param_name_remap.py": "042412e447e9a49d4c20e2d93f9aa59654124b47ca2fd473b58955953ef920b3",
   "tools/visualize/cpu_memory_profiler_visualize.py": "d98346c6c0038f10776f5dea7aaee20ecc2c9a51334e28f223a4f11e4f54b350",

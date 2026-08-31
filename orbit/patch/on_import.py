@@ -53,13 +53,29 @@ def fired() -> set[tuple[str, int]]:
     return set(_FIRED)
 
 
-def on_import(module: str, callback: Callable[[], object]) -> None:
+def on_import(
+    module: str, callback: Callable[[], object], relevant_names: tuple[str, ...] = ()
+) -> None:
     """Run ``callback()`` right after ``module`` is first imported.
 
     Idempotent per (module, callback): the vendored ``import`` line this
     replaces ran once, because the module it lived in was cached after its first
     execution. Re-importing the target does not re-run the callback.
+
+    ``relevant_names`` narrows who has to be armed for the seam. A function patch
+    changes what an existing call returns, so tools/check_arming.py can ask which
+    processes call that name; a seam has no such name, and asking instead "who
+    imports the module" over-approximates badly -- miles' ~39 launcher scripts
+    import ``miles.backends.megatron_utils`` to build a command line and never
+    touch a bridge. Naming what the seam actually installs (e.g. the classes
+    ``AutoBridge`` resolves) gives the guard the same precision it has for
+    patches. Left empty, module reachability is used, which is conservative.
+
+    Stashed on the callback rather than widening the registry tuple, so
+    ``registry()`` keeps its shape for every existing reader.
     """
+    if relevant_names:
+        callback.orbit_relevant_names = tuple(relevant_names)
     _REGISTRY.append((module, callback))
     _arm()
     if module in sys.modules:

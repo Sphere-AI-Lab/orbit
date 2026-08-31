@@ -107,12 +107,12 @@ async def generate_and_rm(
         if sink is not None:
             sink.attempt_end(sample)
 
-    # Follow-up change to `if not args.group_rm: do reward model` for more clarity after the refactor below
+    # TODO change to `if not args.group_rm: do reward model` for more clarity after the refactor below
     # for the rm that need the whole group, we will not do the rm here
     if args.group_rm:
         return sample
 
-    # Follow-up: unify the two branches into one if we decide to use list as output type
+    # TODO: unify the two branches into one if we decide to use list as output type
     # multi samples
     if isinstance(sample, list):
         samples = sample
@@ -183,7 +183,6 @@ async def generate_and_rm_group(
     return group
 
 
-# ORBIT-SEAM: per-call stop/min_new_tokens overrides for per-eval-dataset sampling and OPD scoring
 def compute_sampling_params(
     args,
     *,
@@ -192,24 +191,18 @@ def compute_sampling_params(
     top_p,
     top_k,
     max_new_tokens,
-    stop=None,
-    stop_token_ids=None,
-    min_new_tokens=None,
 ):
-    sampling_params = dict(
+    return dict(
         temperature=temperature,
         top_p=top_p,
         top_k=top_k,
         max_new_tokens=max_new_tokens,
-        stop=args.rollout_stop if stop is None else stop,
-        stop_token_ids=args.rollout_stop_token_ids if stop_token_ids is None else stop_token_ids,
+        stop=args.rollout_stop,
+        stop_token_ids=args.rollout_stop_token_ids,
         skip_special_tokens=args.rollout_skip_special_tokens,
         no_stop_trim=True,
         spaces_between_special_tokens=False,
     )
-    if min_new_tokens is not None:
-        sampling_params["min_new_tokens"] = min_new_tokens
-    return sampling_params
 
 
 class InferenceRolloutFn:

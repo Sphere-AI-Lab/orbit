@@ -19,6 +19,12 @@ tracked = subprocess.run(
 # positives (the rule is doing exactly what it's supposed to on every one of
 # these), but pre-existing findings the guard surfaces without fixing.
 ALLOWLIST: dict[tuple[str, int], str] = {
+    ("tests/fast/test_arming.py", 76): (
+        "deliberately transient: the arming guard's falsification test writes this "
+        "probe, runs the checker against it and deletes it in a finally block, so it "
+        "must NOT exist in the working tree. The anchor itself is correct -- which is "
+        "the point, since the test needs the probe to land somewhere the checker scans"
+    ),
     ("miles/rollout/rm_hub/ifbench.py", 16): (
         "stale reference: examples/eval_multi_task/ does not exist in this repo "
         "(inherited from upstream at Orbit's public-release commit); the read is "

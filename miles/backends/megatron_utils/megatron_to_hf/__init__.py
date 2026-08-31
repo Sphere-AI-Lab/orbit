@@ -13,19 +13,26 @@ from .qwen3_next import convert_qwen3_next_to_hf
 from .qwen3moe import convert_qwen3moe_to_hf
 
 
-# Follow-up unify w/ `convert_to_hf`
+# TODO unify w/ `convert_to_hf`
 def postprocess_hf_param(args, megatron_param_name, hf_param_name, param):
-    # ORBIT-SEAM: newer megatron-bridge HFWeightTuple drops the megatron name; pad-strip falls back to the HF name (upstream candidate)
-    # Newer megatron-bridge no longer exposes the megatron name in its
-    # HFWeightTuple; fall back to the HF name which remove_padding also
-    # recognizes for embedding/output layers.
+    # ORBIT-SEAM: newer megatron-bridge HFWeightTuple drops the megatron name; pad-strip falls
+    # back to the HF name, which remove_padding also recognizes for embedding/output layers.
+    #
+    # NOT movable to orbit/patch on this base, unlike every other converter change. This module
+    # is a PACKAGE whose line-2 `from .deepseekv4 import ...` reaches
+    # update_weight/common.py, and that vendored file imports orbit at module scope. So
+    # `import orbit` -- and with it install_hook() -- runs while this package is still
+    # executing: a patch declared against it is applied when it is half-built, before this
+    # function exists, and aborts with UpstreamDrift. The per-model converters below are
+    # patched safely because they are leaf modules imported after that point.
+    # Follow-up: lifting common.py's orbit import breaks the cycle and lets this move too.
     name_for_padding = megatron_param_name if megatron_param_name else hf_param_name
     param = remove_padding(name_for_padding, param, args.vocab_size)
-    # Follow-up support quant
+    # TODO support quant
     return param
 
 
-# Follow-up optimize code details
+# TODO optimize code details
 def convert_to_hf(args, model_name, name, param, quantization_config=None):
     param = remove_padding(name, param, args.vocab_size)
 
@@ -34,7 +41,7 @@ def convert_to_hf(args, model_name, name, param, quantization_config=None):
     return quantize_params(args, name, converted_named_tensors, quantization_config)
 
 
-# Follow-up optimize code details
+# TODO optimize code details
 def _convert_to_hf_core(args, model_name, name, param):
     model_name = model_name.lower()
     if (
