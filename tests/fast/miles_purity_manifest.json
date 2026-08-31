@@ -229,8 +229,8 @@
    "sha": "5204bdf2935bd8334e22ad5a65af89d6a5e061bf4fcf7206c1718a4f5a64d3c2"
   },
   "miles/ray/train_actor.py": {
-   "delta_lines": 13,
-   "sha": "81ef6a87b166f02b54922c7238a236328fbd7112e9ccddccd7abd61ae2e9f606"
+   "delta_lines": 7,
+   "sha": "92f723be136c06da05c9bb64c042bce1d60cb8cd4a9e726f4871265e3e050fdd"
   },
   "miles/rollout/data_source.py": {
    "delta_lines": 264,

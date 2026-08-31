@@ -1,10 +1,5 @@
 {
  "shadowed": {
-  "miles.ray.train_actor::TrainRayActor.compute_eval_nll": {
-   "mixin": "orbit.megatron.actor_ext.OrbitTrainActorExtensions",
-   "sha": "eb0003bb81b2dc14ffb0d8acdbdc0dd9b5a6c889811c97785cec552fb49c9c9d",
-   "via": "miles/backends/megatron_utils/actor.py::MegatronTrainRayActor"
-  },
   "miles.ray.train_actor::TrainRayActor.sleep": {
    "mixin": "orbit.megatron.actor_ext.OrbitTrainActorExtensions",
    "sha": "93793265c2c5107092a98cdb0ed7a63f68ce03267a45b1f7300542dc14bf5724",

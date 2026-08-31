@@ -20,6 +20,7 @@ from miles.utils.logging_utils import configure_logger
 from miles.utils.memory_utils import clear_memory, print_memory
 from miles.utils.test_utils.det_process_group import DET_NCCL_BACKEND_NAME, register_det_nccl_backend
 from miles.utils.test_utils.fault_injector import inject_fault as _inject_fault
+from orbit.utils.train_actor_ext import OrbitTrainRayActorExtensions
 
 if TYPE_CHECKING:
     from miles.ray.rollout.rollout_manager import EnginesAndLock
@@ -36,7 +37,8 @@ def get_local_gpu_id():
         return cvd.split(",").index(str(ray.get_gpu_ids()[0]))
 
 
-class TrainRayActor(RayActor):
+# ORBIT-SEAM: compute_eval_nll (the held-out NLL API) lives in the mixin
+class TrainRayActor(OrbitTrainRayActorExtensions, RayActor):
     def __init__(
         self,
         args,
@@ -170,16 +172,6 @@ class TrainRayActor(RayActor):
     def export_hf(self, rollout_id: int, path: str) -> None:
         """Export current weights as an HF checkpoint to ``path`` (eval snapshots)."""
         raise NotImplementedError(f"{type(self).__name__} does not support HF export")
-
-    # ORBIT-SEAM: optional held-out NLL API, consumed by orbit/utils/eval_nll.py
-    def compute_eval_nll(self, rollout_id):
-        """Forward-only held-out NLL. Returns the reduced statistics on exactly
-        one rank and None on all others, so the caller can dedupe TP/PP replicas
-        without knowing the parallel layout. Optional: backends that do not
-        implement it simply do not support --eval-nll-data."""
-        raise NotImplementedError(
-            f"{type(self).__name__} does not implement compute_eval_nll; --eval-nll-data is unsupported."
-        )
 
     @abc.abstractmethod
     def update_weights(self, info: "EnginesAndLock") -> None:
