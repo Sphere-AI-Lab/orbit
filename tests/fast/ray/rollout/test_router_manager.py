@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from tests.fast.ray.rollout.conftest import make_args
 
+import miles.ray.rollout.router_manager as router_manager
 from miles.ray.rollout.router_manager import _resolve_session_server_ports, start_router, start_session_server
 
 
@@ -21,6 +23,101 @@ class TestStartRouter:
         # No mocks needed — the function returns before touching anything.
         ip, port = start_router(args, force_new=False)
         assert (ip, port) == ("10.1.2.3", 4567)
+
+    def test_oft_rejects_unmarked_existing_router(self):
+        args = make_args(
+            peft_method="oft",
+            use_miles_router=False,
+            sglang_router_ip="10.1.2.3",
+            sglang_router_port=4567,
+        )
+
+        with pytest.raises(ValueError, match="--use-miles-router"):
+            start_router(args)
+
+        assert args.use_miles_router is False
+
+    def test_oft_reuses_existing_router_marked_as_miles_passthrough(self):
+        args = make_args(
+            peft_method="oft",
+            use_miles_router=True,
+            sglang_router_ip="10.1.2.3",
+            sglang_router_port=4567,
+        )
+
+        assert start_router(args) == ("10.1.2.3", 4567)
+
+    def test_oft_without_existing_router_auto_launches_miles_passthrough(self):
+        started_processes = []
+
+        class RecordingProcess:
+            def __init__(self, *, target, args):
+                self.daemon = False
+                self.target = target
+                self.args = args
+                self.started = False
+                started_processes.append(self)
+
+            def start(self):
+                self.started = True
+
+        args = make_args(
+            peft_method="oft",
+            use_miles_router=False,
+            sglang_router_ip=None,
+            sglang_router_port=None,
+        )
+        with patch("miles.ray.rollout.router_manager.get_host_info", return_value=("h", "127.0.0.1")), patch(
+            "miles.ray.rollout.router_manager.find_available_port", return_value=20000
+        ), patch("miles.ray.rollout.router_manager.is_port_available", return_value=True), patch(
+            "miles.ray.rollout.router_manager.multiprocessing.get_context",
+            return_value=SimpleNamespace(Process=RecordingProcess),
+        ), patch(
+            "miles.ray.rollout.router_manager.wait_for_server_ready"
+        ):
+            result = start_router(args)
+
+        assert result == ("127.0.0.1", 20000)
+        assert args.use_miles_router is True
+        assert len(started_processes) == 1
+        assert started_processes[0].target is router_manager.run_miles_router
+        assert started_processes[0].started is True
+
+    def test_oft_force_new_ignores_unmarked_existing_router_and_launches_miles_passthrough(self):
+        started_processes = []
+
+        class RecordingProcess:
+            def __init__(self, *, target, args):
+                self.daemon = False
+                self.target = target
+                self.args = args
+                self.started = False
+                started_processes.append(self)
+
+            def start(self):
+                self.started = True
+
+        args = make_args(
+            peft_method="oft",
+            use_miles_router=False,
+            sglang_router_ip="10.1.2.3",
+            sglang_router_port=4567,
+        )
+        with patch("miles.ray.rollout.router_manager.get_host_info", return_value=("h", "127.0.0.1")), patch(
+            "miles.ray.rollout.router_manager.find_available_port", return_value=20000
+        ), patch("miles.ray.rollout.router_manager.is_port_available", return_value=True), patch(
+            "miles.ray.rollout.router_manager.multiprocessing.get_context",
+            return_value=SimpleNamespace(Process=RecordingProcess),
+        ), patch(
+            "miles.ray.rollout.router_manager.wait_for_server_ready"
+        ):
+            result = start_router(args, force_new=True)
+
+        assert result == ("127.0.0.1", 20000)
+        assert args.use_miles_router is True
+        assert len(started_processes) == 1
+        assert started_processes[0].target is router_manager.run_miles_router
+        assert started_processes[0].started is True
 
     def test_pd_disagg_with_miles_router_asserts(self):
         args = make_args(use_miles_router=True, sglang_router_ip=None, sglang_router_port=None)

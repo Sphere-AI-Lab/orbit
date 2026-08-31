@@ -6,13 +6,17 @@ from miles.rollout.generate_utils.generate_endpoint_utils import attach_peft_req
 def _args(peft_method: str) -> Namespace:
     return Namespace(
         peft_method=peft_method,
+        lora_rank=8 if peft_method == "lora" else 0,
+        lora_adapter_path=None,
+        lora_train_only=False,
         rollout_max_context_len=None,
         rollout_max_response_len=8,
+        use_rollout_indexer_replay=False,
         use_rollout_routing_replay=False,
     )
 
 
-def test_compute_request_payload_attaches_lora_adapter():
+def test_compute_request_payload_omits_legacy_selector_for_unified_lora():
     payload, halt_status = compute_request_payload(
         _args("lora"),
         input_ids=[1, 2, 3],

@@ -72,7 +72,7 @@ def compute_request_payload(
         "return_routed_experts": args.use_rollout_routing_replay,
         "return_indexer_topk": args.use_rollout_indexer_replay,
     }
-    if lora_rollout_enabled(args):
+    if lora_rollout_enabled(args) and get_peft_method(args) != "lora":
         payload["lora_path"] = LORA_ADAPTER_NAME
     if image_data := (multimodal_inputs or {}).get("images"):
         payload["image_data"] = [encode_image_for_rollout_engine(image) for image in image_data]

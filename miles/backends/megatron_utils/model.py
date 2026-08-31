@@ -915,11 +915,9 @@ def save(
     if should_disable_forward_pre_hook(args):
         disable_forward_pre_hook(model)
 
-    if is_peft_model(model):
-        save_checkpoint_with_peft(iteration, model, optimizer, opt_param_scheduler)
-    elif is_lora_model(model):
-        save_checkpoint_with_lora(iteration, model, optimizer, opt_param_scheduler)
-    else:
+    peft_model = is_peft_model(model)
+    lora_model = not peft_model and is_lora_model(model)
+    if non_persistent_ckpt or not (peft_model or lora_model):
         save_checkpoint(
             iteration,
             model,
@@ -931,6 +929,10 @@ def save(
             checkpointing_context=checkpointing_context,
             non_persistent_ckpt=non_persistent_ckpt,
         )
+    elif peft_model:
+        save_checkpoint_with_peft(iteration, model, optimizer, opt_param_scheduler)
+    elif lora_model:
+        save_checkpoint_with_lora(iteration, model, optimizer, opt_param_scheduler)
 
     if hashes is not None:
         save_model_hashes(args, model, iteration, hashes)

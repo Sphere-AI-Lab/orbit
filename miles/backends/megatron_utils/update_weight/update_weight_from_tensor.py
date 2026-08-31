@@ -83,6 +83,31 @@ def _sync_type_label(peft_method: str) -> str:
     return "Base model"
 
 
+def _raise_distributed_peft_failure(local_error: Exception | None) -> None:
+    """Make a source-only adapter failure visible to every trainer rank."""
+    rank = dist.get_rank()
+    failure_record = None
+    if local_error is not None:
+        failure_record = {
+            "source_rank": rank,
+            "error": f"{type(local_error).__name__}: {local_error}",
+        }
+
+    gloo_group = get_gloo_group()
+    failure_records = [None] * dist.get_world_size(gloo_group)
+    dist.all_gather_object(failure_records, failure_record, group=gloo_group)
+    failure_record = next((record for record in failure_records if record is not None), None)
+    if failure_record is None:
+        return
+
+    message = (
+        "PEFT adapter dispatch failed on source rank " f"{failure_record['source_rank']}: {failure_record['error']}"
+    )
+    if local_error is not None and failure_record["source_rank"] == rank:
+        raise RuntimeError(message) from local_error
+    raise RuntimeError(message)
+
+
 class UpdateWeightFromTensor:
     """
     Update rollout engines from tensor dict:
@@ -190,13 +215,17 @@ class UpdateWeightFromTensor:
                 engine_gpu_offsets.append(offset)
                 offset += c
 
-        # Compute colocated engine count: engines whose GPUs fall within actor GPU range.
-        total_actor_gpus = self.args.actor_num_nodes * self.args.actor_num_gpus_per_node
-        colocate_engine_nums = 0
-        for gpu_offset, gpu_count in zip(engine_gpu_offsets, engine_gpu_counts, strict=True):
-            if gpu_offset + gpu_count > total_actor_gpus:
-                break
-            colocate_engine_nums += 1
+        # In non-colocated launches, rollout offsets are relative to the rollout
+        # placement-group slice, so offset zero is still outside the actor GPUs.
+        if self._peft_sync_spec is not None and not getattr(self.args, "colocate", True):
+            colocate_engine_nums = 0
+        else:
+            total_actor_gpus = self.args.actor_num_nodes * self.args.actor_num_gpus_per_node
+            colocate_engine_nums = 0
+            for gpu_offset, gpu_count in zip(engine_gpu_offsets, engine_gpu_counts, strict=True):
+                if gpu_offset + gpu_count > total_actor_gpus:
+                    break
+                colocate_engine_nums += 1
 
         self.use_distribute = len(rollout_engines) > colocate_engine_nums
 
@@ -410,9 +439,19 @@ class UpdateWeightFromTensor:
 
         sync_chunk_count = 0
         for hf_named_tensors in weight_chunks:
-            refs, long_lived_tensors, completed_results = self._send_adapter_params(hf_named_tensors)
-            results = completed_results if completed_results is not None else ray.get(refs)
-            _check_weight_sync_results(results, is_lora=self._peft_sync_spec.method == "lora")
+            if self.use_distribute:
+                chunk_error = None
+                try:
+                    refs, long_lived_tensors, completed_results = self._send_adapter_params(hf_named_tensors)
+                    results = completed_results if completed_results is not None else ray.get(refs)
+                    _check_weight_sync_results(results, is_lora=self._peft_sync_spec.method == "lora")
+                except Exception as exc:  # noqa: BLE001 -- synchronized below
+                    chunk_error = exc
+                _raise_distributed_peft_failure(chunk_error)
+            else:
+                refs, long_lived_tensors, completed_results = self._send_adapter_params(hf_named_tensors)
+                results = completed_results if completed_results is not None else ray.get(refs)
+                _check_weight_sync_results(results, is_lora=self._peft_sync_spec.method == "lora")
             del long_lived_tensors
             sync_chunk_count += 1
 
