@@ -2980,7 +2980,19 @@ def _common_orbit_validate_args(args):
                     "--opd-teacher-load should not be set when --opd-type=sglang. "
                     "In sglang mode, teacher log-probs are obtained from external server during rollout."
                 )
-    else:
+    # ORBIT-SEAM: base's `else:` assumed --use-opd is the only way OPD gets enabled. Orbit has a
+    # second, older spelling -- pure MOPD, `--advantage-estimator on_policy_distillation` -- which
+    # leaves use_opd False (that flag gates the BLEND: apply_opd_kl_to_advantages in
+    # backends/training_utils/loss.py), so these two raises rejected every pure-MOPD run that names a
+    # teacher. needs_opd_teacher() is the union of the two spellings and is already imported above.
+    #
+    # Narrowed rather than routed into the `if args.use_opd:` branch above: that branch also asserts
+    # a student-side --opd-top-k-strategy needs the v1 rollout, which is not true for orbit (see the
+    # student top-logprob capture seam in rollout/sglang_rollout.py) and would break the sglang and
+    # teacher-pool smokes. Nothing is lost by skipping it -- orbit's own _validate_opd_args, called
+    # from orbit_validate_args below, enforces a strict superset of these teacher rules for exactly
+    # the runs this now lets through.
+    elif not needs_opd_teacher(args):
         if args.opd_teacher_load is not None:
             raise ValueError("--opd-teacher-load is set but --use-opd is not enabled. Please add --use-opd flag.")
         if args.opd_teacher_urls:
