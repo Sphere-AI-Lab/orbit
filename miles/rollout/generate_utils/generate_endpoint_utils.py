@@ -135,7 +135,7 @@ def should_request_rollout_logprobs(args, evaluation: bool = False) -> bool:
     # ORBIT-SEAM: the RadixTreeMiddleware clause is inert after the dbbab156 merge (upstream deleted
     # miles/router/middleware_hub/); the getattr guards keep it a no-op, and it stays so the contract
     # is restored for free if orbit re-lands the middleware.
-    if getattr(args, "use_orbit_router", False) and "RadixTreeMiddleware" in getattr(
+    if getattr(args, "use_miles_router", False) and "RadixTreeMiddleware" in getattr(
         args, "miles_router_middleware_paths", []
     ):
         return True

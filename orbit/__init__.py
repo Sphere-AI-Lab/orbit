@@ -35,6 +35,7 @@ from orbit.megatron import training_utils_patches as _training_utils_patches  # 
 from orbit.utils import metric_utils_patches as _metric_utils_patches  # noqa: F401
 from orbit.utils import miles_utils_patches as _miles_utils_patches  # noqa: F401
 from orbit.utils import processing_utils_patches as _processing_utils_patches  # noqa: F401
+from orbit.utils import replay_ext as _replay_ext  # noqa: F401
 from orbit.rewards import rm_hub_patches as _rm_hub_patches  # noqa: F401
 from orbit.rollout import inference_rollout_patches as _inference_rollout_patches  # noqa: F401
 

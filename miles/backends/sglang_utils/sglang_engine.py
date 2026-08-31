@@ -341,9 +341,8 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
                 force_native_ops=getattr(self.args, "sglang_force_native_ops", False),
             )
 
-        # ORBIT-SEAM: use_miles_router renamed use_orbit_router (orbit's naming split)
         if self.node_rank == 0 and self.router_ip and self.router_port:
-            if parse(sglang_router.__version__) <= parse("0.2.1") or self.args.use_orbit_router:
+            if parse(sglang_router.__version__) <= parse("0.2.1") or self.args.use_miles_router:
                 assert (
                     self.worker_type == "regular"
                 ), "pd disaggregation is not supported in old router or miles router."
@@ -594,8 +593,7 @@ class SGLangEngine(OrbitEngineExtensions, RayActor):
         if self.node_rank == 0:
             worker_url = f"http://{self.server_host}:{self.server_port}"
             response = None
-            # ORBIT-SEAM: use_miles_router renamed use_orbit_router (orbit's naming split)
-            if parse(sglang_router.__version__) <= parse("0.2.1") or self.args.use_orbit_router:
+            if parse(sglang_router.__version__) <= parse("0.2.1") or self.args.use_miles_router:
                 response = requests.post(
                     f"http://{self.router_ip}:{self.router_port}/remove_worker?url=http://{self.server_host}:{self.server_port}"
                 )

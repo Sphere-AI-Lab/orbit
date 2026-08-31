@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 # ORBIT-SEAM (re-anchored from miles/ray/rollout.py::_start_router, which upstream dbbab156 moved
 # here as start_router): OFT rollout needs Orbit's pass-through router (preserves oft_path/adapter_path)
 def _requires_orbit_router_passthrough(args) -> bool:
-    return getattr(args, "peft_method", "none") == "oft" and not getattr(args, "use_orbit_router", False)
+    return getattr(args, "peft_method", "none") == "oft" and not getattr(args, "use_miles_router", False)
 
 # Readiness budget for the spawned router/session-server children. The spawn
 # context re-imports the heavy transformers/megatron chain (~13s typical in
@@ -41,7 +41,7 @@ def start_router(args, *, has_pd_disaggregation: bool = False, force_new: bool =
         logger.warning(
             "Forcing Orbit router for OFT rollout because the installed sglang_router does not preserve oft_path."
         )
-        args.use_orbit_router = True
+        args.use_miles_router = True
 
     if not force_new and args.sglang_router_ip is not None:
         return args.sglang_router_ip, args.sglang_router_port
@@ -54,8 +54,7 @@ def start_router(args, *, has_pd_disaggregation: bool = False, force_new: bool =
         if router_port is None:
             router_port = find_available_port(random.randint(3000, 4000))
 
-    # ORBIT-SEAM: use_miles_router flag renamed use_orbit_router (orbit's own pass-through router, see above)
-    if args.use_orbit_router:
+    if args.use_miles_router:
         assert not has_pd_disaggregation, "miles router does not support PD disaggregation."
 
         run_router = run_miles_router

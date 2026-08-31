@@ -11,59 +11,6 @@ def _get_rank():
     return dist.get_rank() if dist.is_initialized() else 0
 
 
-# ORBIT-SEAM: replaces base's inline `top_indices[padding_mask] = arange(...) % num_experts` padding
-# repair (used at the call site below) -- that scheme could reintroduce duplicate/out-of-range expert
-# ids across a token's own topk row; this validates ranges/duplicates up front and repairs each -1 slot
-# by scanning for an expert id that doesn't conflict with anything already assigned to that token
-def _sanitize_replay_top_indices(top_indices: torch.Tensor, num_experts: int) -> torch.Tensor:
-    """Keep replayed MoE routes valid for Megatron's sparse dispatch map."""
-    if top_indices.numel() == 0:
-        return top_indices
-    num_tokens, topk = top_indices.shape
-    if topk > num_experts:
-        raise ValueError(
-            f"replay topk ({topk}) cannot be represented with {num_experts} experts"
-        )
-
-    out_of_range = top_indices >= num_experts
-    if bool(out_of_range.any().item()):
-        raise ValueError("replay top_indices contain expert ids out of range")
-
-    valid = top_indices >= 0
-    if topk > 1:
-        duplicate_pairs = top_indices.unsqueeze(2) == top_indices.unsqueeze(1)
-        duplicate_pairs &= valid.unsqueeze(2) & valid.unsqueeze(1)
-        duplicate_pairs = duplicate_pairs.triu(diagonal=1)
-        if bool(duplicate_pairs.any().item()):
-            raise ValueError("replay top_indices contain duplicate expert ids")
-
-    padding_mask = top_indices < 0
-    if not bool(padding_mask.any().item()):
-        return top_indices
-
-    sanitized = top_indices.clone()
-    device = sanitized.device
-    dtype = sanitized.dtype
-    expert_ids = torch.arange(num_experts, device=device, dtype=dtype).unsqueeze(0)
-    row_offsets = torch.arange(num_tokens, device=device, dtype=dtype).unsqueeze(1) * topk
-
-    for col in range(topk):
-        current = sanitized[:, col]
-        repair = current < 0
-        if not bool(repair.any().item()):
-            continue
-
-        candidates = (expert_ids + row_offsets + col) % num_experts
-        conflicts = ((candidates.unsqueeze(1) == top_indices.unsqueeze(2)) & valid.unsqueeze(2)).any(dim=1)
-        if col > 0:
-            conflicts |= (candidates.unsqueeze(1) == sanitized[:, :col].unsqueeze(2)).any(dim=1)
-        replacement_pos = (~conflicts).int().argmax(dim=1)
-        replacements = candidates.gather(1, replacement_pos.unsqueeze(1)).squeeze(1)
-        sanitized[:, col] = torch.where(repair, replacements, current)
-
-    return sanitized
-
-
 class Replay:
     def __init__(self, stream_idx: int | None = None):
         self.stream_idx = stream_idx
@@ -152,11 +99,14 @@ class BaseReplayManager:
             if self.enable_check_replay_result:
                 self.check_replay_result(old_topk_fn, scores, topk, top_indices, *args, **kwargs)
 
-            # ORBIT-SEAM: replaces upstream's inline padding repair with the validated,
-            # conflict-aware _sanitize_replay_top_indices defined above. Upstream now repairs
-            # only rows that are entirely -1 (arange % num_experts broadcast via torch.where)
-            # and leaves partially-padded rows holding -1; orbit repairs every -1 slot.
-            top_indices = _sanitize_replay_top_indices(top_indices, scores.shape[1])
+            # fill padding tokens with arange to avoid invalid reading
+            all_invalid = (top_indices == -1).all(dim=-1)
+            if all_invalid.any():
+                ar = (
+                    torch.arange(top_indices.shape[1], device=top_indices.device, dtype=top_indices.dtype)
+                    % scores.shape[1]
+                )
+                top_indices = torch.where(all_invalid.unsqueeze(-1), ar, top_indices)
 
             if return_probs:
                 return scores.gather(1, top_indices), top_indices

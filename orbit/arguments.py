@@ -1779,9 +1779,6 @@ def orbit_normalize_peft_args(args) -> None:
 
 
 def orbit_validate_args(args) -> None:
-    # Upstream code added after the flag rename (dashboard, examples) still reads
-    # args.use_miles_router; keep it as a read-only alias of orbit's renamed flag.
-    args.use_miles_router = args.use_orbit_router
     """Orbit's reward-side validator bundle, called from one seam in miles_validate_args."""
     _validate_opd_args(args)
     _validate_judge_args(args)
@@ -1899,6 +1896,56 @@ def add_peft_arguments(parser):
 
 def add_orbit_arguments(parser):
     """Every orbit-added argument, plus orbit's overrides of miles defaults."""
+    # Orbit's spelling of the inherited router flag, registered as an ALIAS onto
+    # upstream's dest rather than by renaming upstream's own flag. Renaming it in
+    # the vendored tree cost 17 seam lines across 6 miles files -- every reader
+    # had to be edited too -- for a naming preference. As an alias it costs one
+    # registration here, both spellings work, and miles stays pristine.
+    parser.add_argument(
+        "--use-orbit-router",
+        dest="use_miles_router",
+        action="store_true",
+        default=False,
+        help=(
+            "Orbit's spelling of --use-miles-router: use MilesRouter for "
+            "text-based routing instead of SGLang token-based routing."
+        ),
+    )
+    # The rest of the router group, aliased for the same reason. orbit-main
+    # spelled all five `--orbit-router-*`; the isolation campaign restored
+    # upstream's spelling in the vendored tree, which silently dropped the orbit
+    # ones from the CLI. Recipes kept outside this repo still pass them, so they
+    # are re-offered here as aliases onto upstream's dests -- types and defaults
+    # mirror the vendored registration exactly.
+    parser.add_argument(
+        "--orbit-router-middleware-paths",
+        dest="miles_router_middleware_paths",
+        type=str,
+        nargs="+",
+        default="",
+        help="Orbit's spelling of --miles-router-middleware-paths.",
+    )
+    parser.add_argument(
+        "--orbit-router-timeout",
+        dest="miles_router_timeout",
+        type=float,
+        default=None,
+        help="Orbit's spelling of --miles-router-timeout.",
+    )
+    parser.add_argument(
+        "--orbit-router-max-connections",
+        dest="miles_router_max_connections",
+        type=int,
+        default=None,
+        help="Orbit's spelling of --miles-router-max-connections.",
+    )
+    parser.add_argument(
+        "--orbit-router-health-check-failure-threshold",
+        dest="miles_router_health_check_failure_threshold",
+        type=int,
+        default=3,
+        help="Orbit's spelling of --miles-router-health-check-failure-threshold.",
+    )
     parser.add_argument(
         "--offload-train-grad-buffers",
         action=argparse.BooleanOptionalAction,
