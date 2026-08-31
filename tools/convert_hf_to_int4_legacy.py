@@ -13,6 +13,10 @@ from transformers import AutoModelForCausalLM
 
 from miles.utils.processing_utils import load_tokenizer
 
+# ORBIT-SEAM: arms orbit's load_tokenizer patch (see convert_hf_to_hf_int4.py).
+import orbit  # noqa: F401,E402  -- arming side effect only
+
+
 
 def parse_args():
     parser = argparse.ArgumentParser()

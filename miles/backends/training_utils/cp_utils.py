@@ -38,13 +38,7 @@ def get_logits_and_tokens_offset_with_cp(
 
     prompt_length = total_length - response_length
     if qkv_format == "thd":
-        # ORBIT-SEAM: thd chunk size must follow max_seq_len so CP slices align with padded batches (upstream candidate)
-        seq_len_for_chunks = max_seq_len if max_seq_len is not None else total_length
-        assert seq_len_for_chunks >= total_length, (
-            f"max_seq_len must be >= total_length for qkv_format=thd, "
-            f"got max_seq_len={max_seq_len}, total_length={total_length}"
-        )
-        chunk_size = (seq_len_for_chunks + 2 * cp_size - 1) // (2 * cp_size)
+        chunk_size = (total_length + 2 * cp_size - 1) // (2 * cp_size)
     else:
         assert max_seq_len is not None, "max_seq_len must be provided for qkv_format=bshd"
         chunk_size = (max_seq_len + 2 * cp_size - 1) // (2 * cp_size)
@@ -276,12 +270,6 @@ def slice_with_cp(
 
     if qkv_format == "bshd":
         assert max_seq_len is not None
-    # ORBIT-SEAM: validate thd max_seq_len (same fix)
-    elif max_seq_len is not None:
-        assert max_seq_len >= len(tokens), (
-            f"max_seq_len must be >= token length for qkv_format=thd, "
-            f"got max_seq_len={max_seq_len}, token_len={len(tokens)}"
-        )
 
     def pad_tokens(tokens, pad):
         if isinstance(pad_value, Callable):
@@ -300,9 +288,10 @@ def slice_with_cp(
         return tokens
 
     token_len = len(tokens)
-    # ORBIT-SEAM: unified thd/bshd chunk sizing (same fix)
-    seq_len_for_chunks = max_seq_len if max_seq_len is not None else token_len
-    chunk_size = (seq_len_for_chunks + 2 * cp_size - 1) // (2 * cp_size)
+    if qkv_format == "thd":
+        chunk_size = (token_len + 2 * cp_size - 1) // (2 * cp_size)
+    else:
+        chunk_size = (max_seq_len + 2 * cp_size - 1) // (2 * cp_size)
 
     # pad
     pad = 2 * cp_size * chunk_size - token_len

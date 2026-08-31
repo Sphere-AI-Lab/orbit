@@ -43,6 +43,10 @@ from miles.utils.types import Sample
 
 from tools.lora_regret.prepare_data import ANSWER_INSTRUCTION, COMPLETION_STOP, render_prompt
 
+# ORBIT-SEAM: arms orbit's async_rm patch, which adds orbit's math_alignment rm_type.
+import orbit  # noqa: F401,E402  -- arming side effect only
+
+
 DEFAULT_MODEL = "/lustre/fast/fast/zqiu/hf_models/Llama-3.1-8B"
 DEFAULT_DATA_DIR = Path("/lustre/fast/fast/groups/ei-slm/data/lora_regret")
 

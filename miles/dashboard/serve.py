@@ -24,6 +24,12 @@ from miles.dashboard.dump_reader import DumpReader
 from miles.dashboard.server import make_app
 from miles.dashboard.store import MetricStore
 
+# ORBIT-SEAM: arms orbit's patches. This entrypoint's import closure calls the
+# patched load_tokenizer and CP offset helpers, and unarmed it would render from
+# upstream's versions with no error. Costs this file its pristine status.
+import orbit  # noqa: F401,E402  -- arming side effect only
+
+
 FOLLOW_INTERVAL_SECONDS = 2.0
 
 

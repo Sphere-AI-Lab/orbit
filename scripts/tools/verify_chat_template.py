@@ -33,6 +33,13 @@ import sys
 
 from miles.utils.chat_template_utils.tito_tokenizer import VALID_APPEND_ROLES, TITOTokenizerType
 
+# ORBIT-SEAM: arms orbit's load_tokenizer patch. This tool exists to check what a
+# tokenizer renders, so running it unarmed makes it verify the WRONG object for a
+# DSV4 checkpoint -- a wrong answer from the tool whose job is the answer. The
+# file leaves the pristine set for this line, deliberately.
+import orbit  # noqa: F401,E402  -- arming side effect only
+
+
 
 def _load_template_from_file(path: str) -> str:
     with open(path) as f:

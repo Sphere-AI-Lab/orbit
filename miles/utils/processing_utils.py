@@ -13,9 +13,6 @@ from transformers import AutoProcessor, AutoTokenizer, PreTrainedTokenizerBase, 
 
 from miles.utils.hf_config import register_hf_config_aliases
 
-# ORBIT-SEAM: DSV4 tokenizer wrapper hook
-from orbit.utils.chat_template_utils.deepseek_v4 import maybe_wrap_deepseek_v4_tokenizer
-
 logger = logging.getLogger(__name__)
 
 
@@ -94,9 +91,6 @@ def load_tokenizer(name_or_path: str, chat_template_path: str | None = None, **k
         with open(chat_template_path) as f:
             tokenizer.chat_template = f.read()
         logger.info("Loaded custom chat template from %s", chat_template_path)
-    # ORBIT-SEAM: wrap DSV4 tokenizers (no-op otherwise); wrap before upstream's cache store so
-    # cache hits hand back the wrapped tokenizer too
-    tokenizer = maybe_wrap_deepseek_v4_tokenizer(tokenizer, name_or_path)
 
     if cache_key is not None:
         _TOKENIZER_CACHE[cache_key] = tokenizer
@@ -175,13 +169,13 @@ def process_vision_info(prompt, processor):
     if hasattr(processor, "extract_media"):
         return processor.extract_media(prompt)
 
-    # Follow-up: temporary solution, will write image utils for orbit later
+    # TODO: temporary solution, will write image utils for miles later
     from qwen_vl_utils import process_vision_info as qwen_process_vision_info
 
     if hasattr(processor.image_processor, "patch_size"):
         image_patch_size = processor.image_processor.patch_size
     else:
-        logger.debug(f"Using default patch size: {DEFAULT_PATCH_SIZE}")
+        logger.info(f"Using default patch size: {DEFAULT_PATCH_SIZE}")
         image_patch_size = DEFAULT_PATCH_SIZE
     images, videos = qwen_process_vision_info(prompt, image_patch_size=image_patch_size)
     multimodal_inputs = {"images": images, "videos": videos}

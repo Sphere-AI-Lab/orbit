@@ -47,20 +47,6 @@ async def async_rm(args, sample: Sample, **kwargs):
         rm_function = load_function(custom_rm_path)
         return await rm_function(args, sample, **kwargs)
 
-    return await default_async_rm(args, sample)
-
-
-# ORBIT-SEAM: pass-through RM entry so a --custom-rm-path hijacker (OPD teacher scoring) still reaches the task reward
-async def default_async_rm(args, sample: Sample):
-    """The rule-based/remote RM dispatch, bypassing any --custom-rm-path.
-
-    Exposed so custom rms that hijack the reward slot for non-reward transports
-    (e.g. OPD teacher scoring) can still hand evaluation samples to the real
-    task reward.
-    """
-    # ORBIT-SEAM: rm_type now comes from upstream's _resolve_reward_config (reward-spec aware),
-    # with its custom_rm_path half deliberately discarded -- that is what "bypass" means here.
-    _, rm_type = _resolve_reward_config(args, sample)
     response = sample.response
     label = sample.label
     metadata = sample.metadata if isinstance(sample.metadata, dict) else {}
@@ -78,10 +64,6 @@ async def default_async_rm(args, sample: Sample):
         return get_gemma_math_reward(response, label)
     elif rm_type == "dapo":
         return compute_score_dapo(response, label)
-    elif rm_type == "math_alignment":
-        from orbit.rewards.math_alignment import grade_math_alignment
-
-        return 1 if grade_math_alignment(response, label, metadata) else 0
     elif rm_type == "math":
         return 1 if grade_answer_verl(response, label) else 0
     elif rm_type == "f1":

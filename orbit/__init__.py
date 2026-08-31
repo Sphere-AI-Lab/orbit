@@ -31,8 +31,11 @@ from orbit.megatron import bridge_plugins as _bridge_plugins  # noqa: F401
 
 # The rest of the delegating patches, grouped by the vendored package they cover.
 from orbit.megatron import megatron_utils_patches as _megatron_utils_patches  # noqa: F401
+from orbit.megatron import training_utils_patches as _training_utils_patches  # noqa: F401
 from orbit.utils import metric_utils_patches as _metric_utils_patches  # noqa: F401
 from orbit.utils import miles_utils_patches as _miles_utils_patches  # noqa: F401
+from orbit.utils import processing_utils_patches as _processing_utils_patches  # noqa: F401
+from orbit.rewards import rm_hub_patches as _rm_hub_patches  # noqa: F401
 from orbit.rollout import inference_rollout_patches as _inference_rollout_patches  # noqa: F401
 
 _install_hook()

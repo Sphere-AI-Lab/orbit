@@ -11,6 +11,12 @@ from transformers import AutoModelForCausalLM
 
 from miles.utils.processing_utils import load_tokenizer
 
+# ORBIT-SEAM: arms orbit's load_tokenizer patch (DSV4 tokenizers carry their chat
+# encoding as a python module, not a jinja template; unarmed this tool writes an
+# unwrapped tokenizer that cannot render a conversation).
+import orbit  # noqa: F401,E402  -- arming side effect only
+
+
 # ORBIT-SEAM: upstream bug fixed locally -- main() read args.local_data_path and
 # args.model_id, which no option registers (the parser declares --data-dir and
 # --input-dir), so this script raised AttributeError on every invocation. Fixed
