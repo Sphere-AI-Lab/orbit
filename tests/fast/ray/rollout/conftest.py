@@ -83,11 +83,11 @@ def make_args(**overrides: Any) -> Namespace:
         sglang_model_routers=None,
         prefill_num_servers=None,
         # routers / session server
+        # orbit spells this --use-orbit-router on the CLI, but that flag is an ALIAS
+        # registered onto upstream's dest (orbit/arguments.py::add_orbit_arguments), so
+        # `use_miles_router` is the only attribute argparse ever produces. Seeding a
+        # `use_orbit_router` attribute here would model a namespace that cannot exist.
         use_miles_router=False,
-        # orbit: --use-miles-router is registered as --use-orbit-router (orbit_validate_args
-        # keeps use_miles_router as a read-only alias for upstream code that still reads it).
-        # miles/ray/rollout/router_manager.py reads the orbit name.
-        use_orbit_router=False,
         use_session_server=False,
         session_server_ip=None,
         session_server_port=None,

@@ -414,11 +414,11 @@
   },
   "tests/fast/ray/rollout/conftest.py": {
    "delta_lines": 4,
-   "sha": "fc8e41a26e7fb01db2cdd010d596fe841b320ac9b107c55f1b044a06cd5ebd4a"
+   "sha": "0f94810d383aa4ace9a3cf7d165eb8ea78be4f7ff63bf2e8ab8b23fd3f88302a"
   },
   "tests/fast/ray/rollout/test_router_manager.py": {
-   "delta_lines": 3,
-   "sha": "63d819367e87b4d224da636a4c6f645b8b131bbb561267444f9da7fb317547e6"
+   "delta_lines": 2,
+   "sha": "3f4d670e4323be9481860bc25c8eeb02cecc80bb974203948323917ad258b0bf"
   },
   "tests/fast/ray/test_placement_group_shared_ppo.py": {
    "delta_lines": 22,
@@ -490,7 +490,7 @@
   },
   "tools/convert_torch_dist_to_hf_ray.py": {
    "delta_lines": 16,
-   "sha": "57534a70e54b54dc0e0689b4fafdf7799663f6cca054e90b984ae286c1118b90"
+   "sha": "56f4be1fcb30bbab0c0ebc4290a807fc1c7f6b6e66dbe81e053b21413b4b52f1"
   },
   "tools/fp8_cast_bf16.py": {
    "delta_lines": 14,

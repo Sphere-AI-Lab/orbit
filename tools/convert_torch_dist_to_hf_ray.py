@@ -103,7 +103,7 @@ from typing_extensions import override
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Arm orbit's converter patches before the converters are imported: they supply
+# ORBIT-SEAM: arm orbit's converter patches before the converters are imported: they supply
 # the parameter names upstream does not map, and install via a hook that
 # `import orbit` arms. This arms the DRIVER ONLY -- Ray actors do NOT re-import
 # this module when it is __main__ (the documented invocation), which is what the
@@ -1128,7 +1128,7 @@ def initialize_ray() -> None:
     os.environ.setdefault("RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES", "1")
     if ray.is_initialized():
         return
-    # Arm orbit's patches in every worker this job starts, not just the driver:
+    # ORBIT-SEAM: arm orbit's patches in every worker this job starts, not just the driver:
     # ConversionWorker ships by value, so the actor cannot rely on its defining
     # module being imported worker-side. See orbit/ray_setup.py.
     runtime_env = {"worker_process_setup_hook": WORKER_SETUP_HOOK}
