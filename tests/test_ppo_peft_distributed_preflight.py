@@ -128,7 +128,12 @@ def _distributed_load_worker(
 
         distributed_utils.GLOO_GROUP = None
         peft_utils.mpu.get_tensor_model_parallel_rank = lambda: rank
+        peft_utils.mpu.get_tensor_model_parallel_world_size = lambda: world_size
         peft_utils.mpu.get_pipeline_model_parallel_rank = lambda: 0
+        peft_utils.mpu.get_expert_model_parallel_rank = lambda: 0
+        peft_utils.mpu.get_expert_model_parallel_world_size = lambda: 1
+        peft_utils.mpu.get_expert_tensor_parallel_rank = lambda: rank
+        peft_utils.mpu.get_expert_tensor_parallel_world_size = lambda: world_size
         for case in ("mixed_native", "mixed_sidecar", "corrupt_sidecar", "embedded_param_state"):
             adapter_dir = adapter_dirs[case]
             optimizer = _CountingOptimizer()
