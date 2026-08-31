@@ -600,31 +600,10 @@ class TestOftBlockCeilingUnderRl:
         assert declared, "the installed sglang no longer declares flashinfer"
         wanted = re.search(r"==\s*([0-9][0-9a-zA-Z.\-]*)", declared[0])
         assert wanted, f"unparseable flashinfer requirement: {declared[0]!r}"
-
-        # Which side is wrong? The override is measured against the INSTALLED
-        # sglang, so a stale environment looks exactly like a bad override -- and
-        # "align the override" is then precisely the wrong advice, because it
-        # would pin flashinfer to what an outdated sglang wanted. Compare the
-        # installed sglang to the rev uv.lock pins and say which one to fix.
-        locked_rev = re.search(
-            r"sglang\.git\?subdirectory=python&rev=([0-9a-f]+)",
-            (repo / "uv.lock").read_text(),
-        )
-        installed_sglang = md.version("sglang")
-        env_is_stale = bool(
-            locked_rev and locked_rev.group(1)[:9] not in installed_sglang
-        )
-        stale_note = (
-            f" NOTE: the installed sglang is {installed_sglang}, which is NOT the "
-            f"rev uv.lock pins ({locked_rev.group(1)[:9]}) -- this environment is "
-            f"stale, so refresh it rather than editing the override."
-            if env_is_stale
-            else ""
-        )
         assert override_version == wanted.group(1), (
             f"orbit overrides flashinfer=={override_version} but the installed "
             f"sglang declares {declared[0]!r}; the override wins silently, so "
             f"align the override (and re-lock) instead of running sglang "
-            f"against the wrong attention backend.{stale_note}"
+            f"against the wrong attention backend"
         )
         assert md.version("flashinfer-python") == override_version
