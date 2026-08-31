@@ -60,8 +60,11 @@ from miles.utils.tracking_utils import init_tracking
 from miles.utils.types import Sample, collect_teacher_topk_data
 
 from ..utils.metric_utils import has_repetition
-# ORBIT-SEAM: NOSET_VISIBLE_DEVICES_ENV_VARS_LIST replaced by build_noset_visible_devices_env_vars() (same env vars, function form)
-from .utils import Lock, build_noset_visible_devices_env_vars
+# ORBIT-SEAM: NOSET_VISIBLE_DEVICES_ENV_VARS_LIST replaced by build_noset_visible_devices_env_vars()
+# (same env vars, function form), lifted to orbit/utils/ray_env.py so miles/ray/utils.py stays pristine
+from orbit.utils.ray_env import build_noset_visible_devices_env_vars
+
+from .utils import Lock
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)

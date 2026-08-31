@@ -5,10 +5,11 @@ import ray
 from ray.util.placement_group import PlacementGroup
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
-# ORBIT-SEAM: NOSET_VISIBLE_DEVICES_ENV_VARS_LIST replaced by build_noset_visible_devices_env_vars();
-# _uses_dsv4_deepep/_build_train_actor_env add DSV4 DeepEP NCCL symmetric-memory env vars and the PEFT
+# ORBIT-SEAM: NOSET_VISIBLE_DEVICES_ENV_VARS_LIST replaced by build_noset_visible_devices_env_vars(),
+# lifted to orbit/utils/ray_env.py so miles/ray/utils.py stays pristine; _uses_dsv4_deepep/
+# _build_train_actor_env add DSV4 DeepEP NCCL symmetric-memory env vars and the PEFT
 # expandable_segments fragmentation workaround (colocated rollout hands the GPU back every step)
-from miles.ray.utils import build_noset_visible_devices_env_vars
+from orbit.utils.ray_env import build_noset_visible_devices_env_vars
 
 
 def _uses_dsv4_deepep(args) -> bool:

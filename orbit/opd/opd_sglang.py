@@ -1010,7 +1010,7 @@ async def reward_func(args, sample: Sample, **kwargs) -> float:
     # eval pass-rate (and, in full_vocab mode, ship eval-length hidden states for
     # nothing). Delegate to the rule-based RM dispatch instead.
     if kwargs.get("evaluation"):
-        from miles.rollout.rm_hub import default_async_rm
+        from orbit.rewards.rm_hub_patches import default_async_rm
 
         return await default_async_rm(args, sample)
 
@@ -1025,7 +1025,7 @@ async def reward_func(args, sample: Sample, **kwargs) -> float:
         # rollout, then annotates the samples with teacher hidden states. Keep
         # that metric behavior here even though opd_jsd_loss never reads the
         # reward (compute_advantages_and_returns is forced off in validation).
-        from miles.rollout.rm_hub import default_async_rm
+        from orbit.rewards.rm_hub_patches import default_async_rm
 
         return await default_async_rm(args, sample)
     elif _get_opd_top_k(args) > 0:

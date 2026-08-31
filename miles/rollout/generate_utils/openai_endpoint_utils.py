@@ -160,15 +160,6 @@ def compute_samples_from_openai_records(
     return samples
 
 
-# ORBIT-SEAM: normalized policy-version extraction for the true-on-policy contract
-def _record_policy_version(sample, meta_info: dict) -> None:
-    from miles.utils.types import _extract_policy_version
-
-    version = _extract_policy_version(meta_info)
-    if version is not None:
-        sample.weight_versions.append(version)
-
-
 def _compute_sample_from_openai_record(
     args: Namespace, input_sample: Sample, record: SessionRecord, tokenizer, trim_count: int = 0
 ) -> Sample:
@@ -199,7 +190,7 @@ def _compute_sample_from_openai_record(
     if trim_count > 0:
         sample.strip_last_output_tokens(trim_count, tokenizer)
 
-    # Follow-up unify with Sample.update_from_meta_info
+    # TODO unify with Sample.update_from_meta_info
     match choice["finish_reason"]:
         case "stop" | "tool_calls":
             sample.status = Sample.Status.COMPLETED
@@ -208,7 +199,8 @@ def _compute_sample_from_openai_record(
         case "abort":
             sample.status = Sample.Status.ABORTED
 
-    _record_policy_version(sample, choice["meta_info"])
+    if "weight_version" in choice["meta_info"]:
+        sample.weight_versions.append(choice["meta_info"]["weight_version"])
 
     return sample
 

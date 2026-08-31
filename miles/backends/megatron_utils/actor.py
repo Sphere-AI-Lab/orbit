@@ -204,8 +204,9 @@ class MegatronTrainRayActor(OrbitTrainActorExtensions, TrainRayActor):
         start_rollout_id = _start_rollout_id_from_checkpoint(self.args, loaded_rollout_id)
 
         # ORBIT-SEAM: wire rollout routing replay into the freshly built model chunks
+        # (the wiring pass lives in orbit/megatron/routing_replay.py so replay_utils.py stays pristine)
         if role != "critic" and getattr(self.args, "use_rollout_routing_replay", False):
-            from miles.backends.megatron_utils.replay_utils import wire_routing_replay_to_models
+            from orbit.megatron.routing_replay import wire_routing_replay_to_models
 
             wire_routing_replay_to_models(self.model)
 

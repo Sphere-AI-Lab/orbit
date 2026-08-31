@@ -79,6 +79,12 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+# This harness loads the rollout tokenizer through miles.utils.processing_utils,
+# whose load_tokenizer orbit patches (DSV4 chat-encoding wrap). The patch installs
+# through a hook `import orbit` arms, so without this line the harness would
+# silently build an unwrapped tokenizer. Must follow the sys.path bootstrap above.
+import orbit  # noqa: E402,F401  -- imported for the patch-arming side effect
+
 from checkpoint_parity_core import (  # noqa: E402
     RuntimeParityReport,
     RuntimeParityThresholds,

@@ -1,4 +1,5 @@
-from miles.rollout.rm_hub.deepscaler import get_deepscaler_rule_based_reward, get_gemma_math_reward
+from miles.rollout.rm_hub.deepscaler import get_deepscaler_rule_based_reward
+from orbit.rewards.gemma_math import get_gemma_math_reward
 
 
 def test_gemma_reward_grades_text_after_channel_marker():
@@ -18,7 +19,8 @@ def test_gemma_reward_without_marker_grades_whole_response():
 
 
 def test_deepscaler_reward_unchanged_by_refactor():
-    # regression: the _grade_boxed_solution refactor preserves existing behavior
+    # regression: the vendored grader is upstream's again (orbit's gemma reward
+    # reuses it from orbit/rewards/gemma_math.py instead of splitting it)
     assert get_deepscaler_rule_based_reward("reasoning </think> \\boxed{42}", "42") == 1
     assert get_deepscaler_rule_based_reward("reasoning </think> \\boxed{7}", "42") == 0
     assert get_deepscaler_rule_based_reward("no marker \\boxed{42}", "42") == 0

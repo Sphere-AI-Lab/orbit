@@ -15,6 +15,10 @@ from miles.utils.env_report import collect_and_print_node_env_report
 from miles.utils.logging_utils import configure_logger
 from miles.utils.memory_utils import clear_memory, print_memory
 
+# ORBIT-SEAM: orbit's added optional compute_eval_nll hook lives in the home layer
+# (orbit/utils/train_actor_ext.py); TrainRayActor below lists its mixin first.
+from orbit.utils.train_actor_ext import OrbitTrainRayActorExtensions
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,7 +30,7 @@ def get_local_gpu_id():
         return cvd.split(",").index(str(ray.get_gpu_ids()[0]))
 
 
-class TrainRayActor(RayActor):
+class TrainRayActor(OrbitTrainRayActorExtensions, RayActor):
     def __init__(self, world_size, rank, master_addr, master_port):
         configure_logger()
 
@@ -43,7 +47,7 @@ class TrainRayActor(RayActor):
         os.environ["MASTER_PORT"] = str(self.master_port)
         os.environ["WORLD_SIZE"] = str(self._world_size)
         os.environ["RANK"] = str(self._rank)
-        # Follow-up: currently this doesn't work as ray has already set torch.cuda.device_count().
+        # TODO: currently this doesn't work as ray has already set torch.cuda.device_count().
         # os.environ.pop("CUDA_VISIBLE_DEVICES", None)
         # os.environ["LOCAL_RANK"] = str(ray.get_gpu_ids()[0])
         os.environ["LOCAL_RANK"] = str(get_local_gpu_id())
@@ -125,16 +129,6 @@ class TrainRayActor(RayActor):
     @abc.abstractmethod
     def save_model(self, rollout_id, force_sync=False):
         raise NotImplementedError
-
-    # ORBIT-SEAM: optional held-out NLL API, consumed by orbit/utils/eval_nll.py
-    def compute_eval_nll(self, rollout_id):
-        """Forward-only held-out NLL. Returns the reduced statistics on exactly
-        one rank and None on all others, so the caller can dedupe TP/PP replicas
-        without knowing the parallel layout. Optional: backends that do not
-        implement it simply do not support --eval-nll-data."""
-        raise NotImplementedError(
-            f"{type(self).__name__} does not implement compute_eval_nll; --eval-nll-data is unsupported."
-        )
 
     @abc.abstractmethod
     def update_weights(self):

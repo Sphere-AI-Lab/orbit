@@ -37,8 +37,8 @@
    "sha": "18b143b216df0e213cf5327df0fdbb50da49c173f90c2ebaffff68ff0d0411bf"
   },
   "miles/backends/megatron_utils/actor.py": {
-   "delta_lines": 604,
-   "sha": "90d5fe794a8fd6b094ab5149f138c9d4111c08f17dfb7b077b183b7265cd22c7"
+   "delta_lines": 605,
+   "sha": "9d3f5523de4a0afed8854080bc9ee31cb631fbf3cb6039dc5f2707645fe8592e"
   },
   "miles/backends/megatron_utils/arguments.py": {
    "delta_lines": 44,
@@ -60,10 +60,6 @@
    "delta_lines": 516,
    "sha": "cdc396f32ba2ff4cfbec3e903e6224bc4d56c51cbd25da7716f82535babca96f"
   },
-  "miles/backends/megatron_utils/megatron_to_hf/__init__.py": {
-   "delta_lines": 20,
-   "sha": "58a92a94ad4922960cc1144ea9ef4eb3e1a844e61a609537710da318e6c42c73"
-  },
   "miles/backends/megatron_utils/megatron_to_hf/processors/padding_remover.py": {
    "delta_lines": 22,
    "sha": "6b802e25a448e752cbbd128c6bb380a1a8d9778dea96d2f1082229a388045715"
@@ -80,17 +76,13 @@
    "delta_lines": 64,
    "sha": "f5a5145ca3ccb6896e7b4553cf66dc8e6daa73c39c818f676549172eb35b041d"
   },
-  "miles/backends/megatron_utils/replay_utils.py": {
-   "delta_lines": 81,
-   "sha": "ce7ade3fd592fe5e2866bf9e96c4e1a254c22a3f170d7c8923605e874800c173"
-  },
   "miles/backends/megatron_utils/update_weight/common.py": {
    "delta_lines": 74,
    "sha": "c29a63f33676d10ea8f786d50f970c998c6d0c2e74ac3449dd77fcaa3aa7e711"
   },
   "miles/backends/megatron_utils/update_weight/hf_weight_iterator_base.py": {
-   "delta_lines": 17,
-   "sha": "27a8e64a2ee30959d60e2b28c55199005173eaee4f1a51f7d1727be703f1b6db"
+   "delta_lines": 13,
+   "sha": "dad5fcf6c00224b38140627c5489070186c96f0b281710720fe5ba86daeaf5b1"
   },
   "miles/backends/megatron_utils/update_weight/hf_weight_iterator_bridge.py": {
    "delta_lines": 89,
@@ -129,24 +121,20 @@
    "sha": "8f13f9024dbc4d41af5837b75b4780f1b96c8fa809af078af3c95330dfb18c87"
   },
   "miles/ray/actor_group.py": {
-   "delta_lines": 140,
-   "sha": "4f88c8c4f4c6e078583297e9aa3cb870028c5a589e2d59fa5e831e6ffcc91a45"
+   "delta_lines": 141,
+   "sha": "16499128889b7ae9eac99fdc24cac90e5e0dcbc5a0ae04973279cd696a251f11"
   },
   "miles/ray/placement_group.py": {
    "delta_lines": 116,
    "sha": "f6f77104c1f324f1005ca3acd4bc4e5f398bdbbc5768d5de4752c0170542c50a"
   },
   "miles/ray/rollout.py": {
-   "delta_lines": 238,
-   "sha": "f1ac62f2aef43acdf63058f3cc494ff2ea5d9b1eee80ac6614fc08cb8fefffdd"
+   "delta_lines": 241,
+   "sha": "5ad1d487deb4abba64438f7edfd3477fe48e59d2c10722f2add70e30798c98d5"
   },
   "miles/ray/train_actor.py": {
-   "delta_lines": 16,
-   "sha": "d5e845c7e09111d1c2b78c767554e3726fae2a28d40bb6db7e24839d7013430a"
-  },
-  "miles/ray/utils.py": {
-   "delta_lines": 24,
-   "sha": "4ef8d8844f3b7098e8ca7628825b3c92c13dc93f73e2bc08ccf8cdab5fdc40e8"
+   "delta_lines": 10,
+   "sha": "5427535d22aa0030910564770d2c3591029a7c72e9d8b02b4204c8680db81f4c"
   },
   "miles/rollout/data_source.py": {
    "delta_lines": 264,
@@ -164,29 +152,13 @@
    "delta_lines": 103,
    "sha": "0e31e0191123659555ceed75fbb9e8c1758bf9324c511c5abbe753d0fd2bea19"
   },
-  "miles/rollout/generate_utils/openai_endpoint_utils.py": {
-   "delta_lines": 14,
-   "sha": "e7d1b96881bd8043c87ec6bb9f88bf77d34555fd1c9dabef2c6f09c0cc05a92a"
-  },
   "miles/rollout/generate_utils/sample_utils.py": {
    "delta_lines": 133,
    "sha": "521feb29eba2af655ebbc8bf56bae4560bf893087346fbb601ceb30552bd6acd"
   },
-  "miles/rollout/inference_rollout/inference_rollout_common.py": {
-   "delta_lines": 17,
-   "sha": "eba1e70260bc4a556b0bbe7d330b96b9cb175930f84c1a32e760a341744af7dc"
-  },
   "miles/rollout/inference_rollout/inference_rollout_eval.py": {
    "delta_lines": 117,
    "sha": "0ed4a37d8a3d03e1a3a47de4cff0c55c50c9fd78370c7be1930b8cd6fc67ed19"
-  },
-  "miles/rollout/rm_hub/__init__.py": {
-   "delta_lines": 20,
-   "sha": "13705c917c908baf1a6871da108836de60a35046421125b345461fc7deece43a"
-  },
-  "miles/rollout/rm_hub/deepscaler.py": {
-   "delta_lines": 29,
-   "sha": "fec5dfa9e32a8d788cc556c7ecde49c9685f52852b9a5bb6064031ed700cb195"
   },
   "miles/rollout/session/session_server.py": {
    "delta_lines": 2,
@@ -197,16 +169,16 @@
    "sha": "91f29c2a21a88f6658a278dae6569c6c28230c0f4aa8757065ef663373ddfeac"
   },
   "miles/router/router.py": {
-   "delta_lines": 87,
-   "sha": "b7cf7f75d46bd7e972f615d2b1e2b0b6841594ff85e5b890d61fb7b73e2ea3f0"
+   "delta_lines": 54,
+   "sha": "cabcdcb54fd2bb20a2961d9c968437b082e5233c6862b37f115f07e17f2ae6fe"
   },
   "miles/utils/arguments.py": {
    "delta_lines": 152,
    "sha": "03c28c29482b3dabd5d498cd1249487e8a4e44fec5413081393e5a39c32a326a"
   },
   "miles/utils/chat_template_utils/tito_tokenizer.py": {
-   "delta_lines": 37,
-   "sha": "15900fd1fa7357775eb4396c1f14784e3d3e11b9a270fe420d3c574f66a37718"
+   "delta_lines": 11,
+   "sha": "65350f6f8733709b6c0464dc38e809fc4a10128c1029ade9b9c0e01459d72197"
   },
   "miles/utils/data.py": {
    "delta_lines": 25,
@@ -240,21 +212,13 @@
    "delta_lines": 319,
    "sha": "0feaa54beadc0d7526756ea52bc7209ab7415259282b3707b8a3eaf76baf751f"
   },
-  "miles/utils/processing_utils.py": {
-   "delta_lines": 10,
-   "sha": "d09018b701448929f52d01bb89feb37745a302975dc45b4684d3431cdadb66ce"
-  },
-  "miles/utils/replay_base.py": {
-   "delta_lines": 62,
-   "sha": "54d82e73fa0326689dcf267322b8b37ad656876f958fd9ba308c941fb2f5594b"
-  },
   "miles/utils/tensor_backper.py": {
    "delta_lines": 15,
    "sha": "213e80bd7fd3d4580cb1eebb301df2c63f42bb14b42042170086d6ac0a4ec718"
   },
   "miles/utils/test_utils/mock_sglang_server.py": {
-   "delta_lines": 109,
-   "sha": "1b87df30d7ced98fed85b632136b10facf130aa95884b227b6be53fdc2dae8fe"
+   "delta_lines": 39,
+   "sha": "8acb8afeedc6ff35ae9931ce450427f56dfc60dc018e5abdda840162bfdc06c7"
   },
   "miles/utils/train_metric_utils.py": {
    "delta_lines": 8,
@@ -269,8 +233,8 @@
    "sha": "4bf9329d7e3b44fb99ff15d50d3294b3e75d0529642620182cfd393ff0dde181"
   },
   "miles_plugins/mbridge/qwen3_5.py": {
-   "delta_lines": 72,
-   "sha": "675989ed3d206b19f8f05522ad767058e3b38047725b34b83474385284e85fa8"
+   "delta_lines": 27,
+   "sha": "7d821584ec42ba38e38ffe2db3fe5b3d68c5472807a9ded91748888899879113"
   },
   "miles_plugins/models/glm4.py": {
    "delta_lines": 8,
@@ -754,6 +718,7 @@
   "miles/backends/megatron_utils/ci_utils.py": "03a1209522d11d8f4edc844cd5386bb08b2c8fd73a1772eaa173b8c22ab21677",
   "miles/backends/megatron_utils/kernels/int4_qat/fake_int4_quant_cuda.cu": "d2b291133d84cd824b0e2b0fbbb539b2d2e62b969f0a097a37a1551766c6bcb7",
   "miles/backends/megatron_utils/kernels/int4_qat/setup.py": "f8a9389797532d24701698e96222ca35d6a81236fe02a4a0dbcc04515614cde6",
+  "miles/backends/megatron_utils/megatron_to_hf/__init__.py": "3a72a151cb5e5b888f8b1a5551fca9d52688cb1dc448e6b765367dce812b2700",
   "miles/backends/megatron_utils/megatron_to_hf/deepseekv3.py": "dfab14f4b938525798fb4bd05195e43b8f267de34671808a5d0cfeb64019341f",
   "miles/backends/megatron_utils/megatron_to_hf/glm4.py": "fdc2a52fa21e7f9b526b0cffeee97801cc3a28990a8ace7d33809c6044d4283e",
   "miles/backends/megatron_utils/megatron_to_hf/glm4moe.py": "5e84f368481c5d713907d6a32de0424d3b58fe96b22d8de4ef8375626c762969",
@@ -769,6 +734,7 @@
   "miles/backends/megatron_utils/megatron_to_hf/qwen3_next.py": "911d9ef0f5c11dd54bf59a1e66e861da24b8657a128e80d841d4731ef1e4d8c7",
   "miles/backends/megatron_utils/megatron_to_hf/qwen3moe.py": "59aef122cc8e193e69e8bc46b2a22fbb73daa28b5f5b9da06bb53a471dbbc5b9",
   "miles/backends/megatron_utils/parallel.py": "c03c41d52fc9fa7cb87c673f7759d5af441a0d865a34cb554b21fd7c11275d8e",
+  "miles/backends/megatron_utils/replay_utils.py": "cfd008582ffac69e2e85c7f038b141619d1d11f63ed0d465cba189192161130d",
   "miles/backends/megatron_utils/sglang.py": "ab1010b886238582ebe1879f3a29b4ae074363d6a1f06fd2921748d678e509cf",
   "miles/backends/megatron_utils/update_weight/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/backends/megatron_utils/update_weight/update_weight_from_distributed/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -783,6 +749,7 @@
   "miles/backends/training_utils/parallel.py": "5b7c666b8bdb602331efb9a53d6670908e6c844c9d723d6681b26648831fe4e5",
   "miles/ray/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/ray/ray_actor.py": "f01d53cf01d248878261db7929790b96bc63d25705b33546b5ca26ab96c7662f",
+  "miles/ray/utils.py": "464032cdeb94e67b2270764eb3e8f41f25ee884f183ccb66319e9422af61fad1",
   "miles/rollout/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "miles/rollout/base_types.py": "c572a587dcef72ad53715dcba13d564ed8badec271aa51d4de2f22cde245a7e5",
   "miles/rollout/filter_hub/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -792,10 +759,14 @@
   "miles/rollout/generate_hub/agentic_tool_call.py": "cf668cee669c233aefddc1acf7e76f568212ef2fbb718b058f72348ce2ded8f4",
   "miles/rollout/generate_hub/benchmarkers.py": "8b466270e8c4aa5941602ea042e35880079678e73dfaa2305a921c5af3a7c625",
   "miles/rollout/generate_utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "miles/rollout/generate_utils/openai_endpoint_utils.py": "f8ed3559177466246b33f080b80290ff212da024b5c0a670632d8d1ef643b205",
   "miles/rollout/generate_utils/tool_call_utils.py": "2f686b3862732b931eb18b98bc35ed1a514da474975160413479662dae888a2c",
   "miles/rollout/inference_rollout/__init__.py": "49d49c5fe0d19ae701f62bc444c661a63d62b9495cca9459d1bf2d037cdc0da6",
   "miles/rollout/inference_rollout/compatibility.py": "d55d682bf15673cd90aefee59ad174b82d77497c880fd2537b577c2faf3feca0",
+  "miles/rollout/inference_rollout/inference_rollout_common.py": "b053dff2f13b8a0237129c5f117e3dd789b0f7553ee943d5cdb93b0aa3ef4a8a",
   "miles/rollout/inference_rollout/inference_rollout_train.py": "20e55fc60cdd35b4b2adcfe6d78f406277a8ba3d6208b60cc2427cabe5014258",
+  "miles/rollout/rm_hub/__init__.py": "3c75217eaac649c27069118dc7cb06bb8d1b19805442fde9098a20b41d404b8a",
+  "miles/rollout/rm_hub/deepscaler.py": "7be863a12650d5054f5245bee0a9f01e1efe4b314db2e272c9d4261e18feb0a0",
   "miles/rollout/rm_hub/f1.py": "89457e8e95d7acdacd52a39044dd0a4b0c5d4cfa638dc1cdb8ce96e03620de6b",
   "miles/rollout/rm_hub/gpqa.py": "cc79c1d6ddebabbe6d7c2a40c32e35151eddfe737a1efccb106d690b8756a4b1",
   "miles/rollout/rm_hub/ifbench.py": "fa3e2475b676714dedd0bef56ef45febe694f673eb331c3dcddf6b3bfb2ebb83",
@@ -835,10 +806,12 @@
   "miles/utils/metric_checker.py": "13d407e4df672592e9e959cf673efa9cb5bfa738eb2ad3545246469edf32bb6d",
   "miles/utils/metric_utils.py": "cf917c030c2a0d49838d34479702b5e43e22ccf9f3be6fc26de367d0ba828d77",
   "miles/utils/misc.py": "e7d33db74be887ed4332e96e8e7a0c4f4a5829b2541a86794eea4bbcdce48a15",
+  "miles/utils/processing_utils.py": "0f5d21ab892d27ea91fab1053ca489e514c82f11fb83098ef8c1ffdbf57be0fb",
   "miles/utils/profile_utils.py": "f620b223dfcb3e6893c33c8f2ec4491d9628388b01e07d21dcb18919ca14fae4",
   "miles/utils/prometheus_utils.py": "3a165daf154f0dfcd686bb6da19af8526c88cc89bd3038b47b6e8d2d4accc63f",
   "miles/utils/ray_utils.py": "3bdf5470e5a56318b50c44e6d320b226dacdf532e48fe5c23d3230b4852b542d",
   "miles/utils/reloadable_process_group.py": "2dfc82fa67789049ca05e9f95f022e7d965217503b4550e997c5db975cd99b48",
+  "miles/utils/replay_base.py": "b4176a859ce020bb214387092124180e7063a048e90e7ed0921a747fdcdb4d18",
   "miles/utils/rocm_checkpoint_writer.py": "6f29a85785a5b40e09e3b28b34e4dfb8007730039ba059863d7bbacef557e6a4",
   "miles/utils/seqlen_balancing.py": "2054f39c167898c104824666b514647c31008ed6be4cb90c07b3869f75550984",
   "miles/utils/tensorboard_utils.py": "6f919b68fd2378f9489398e2655040761cc93bfd09b53dcc5f4b3f8619c9b683",

@@ -6,21 +6,19 @@ from megatron.core.models.gpt.gpt_layer_specs import get_gpt_mtp_block_spec
 from mbridge.core import register_model
 from mbridge.models import Qwen2MoEBridge
 
+# ORBIT-SEAM: orbit's Qwen3.6 MTP-expert packing support lives in the home layer
+# (orbit/megatron/qwen3_5_ext.py); the class below lists its mixin first.
+from orbit.megatron.qwen3_5_ext import OrbitQwen35BridgeExtensions
 
-# ORBIT-SEAM: registers this bridge for Qwen3.6 too (shares the qwen3_5_moe HF config schema);
-# docstring below documents the one structural difference (MTP expert packing, autodetected)
+
+# ORBIT-SEAM: registers this bridge for Qwen3.6 too -- it shares the qwen3_5_moe HF config schema.
+# Its one structural difference (MTP experts packed fused, autodetected) is handled by the mixin.
 @register_model(["qwen3_5", "qwen3_5_moe", "qwen3_6", "qwen3_6_moe"])
-class Qwen3_5Bridge(Qwen2MoEBridge):
+class Qwen3_5Bridge(OrbitQwen35BridgeExtensions, Qwen2MoEBridge):
     """
-    Bridge for Qwen3.5 / Qwen3.6 models (both dense and MoE variants).
-    These share the ``qwen3_5_moe`` HF config schema: VLM layout under
-    ``model.language_model.layers``, separate ``in_proj_qkv`` + ``in_proj_z``
-    for linear attention, and nested ``text_config``.
-
-    Qwen3.6-35B-A3B's only structural difference is MTP-expert packing —
-    fused 3-D ``gate_up_proj`` / ``down_proj`` tensors instead of the
-    per-expert ``.weight`` files used by Qwen3.5 — which
-    ``_mtp_experts_fused()`` autodetects from the safetensor index.
+    Bridge for Qwen3.5 models (both dense and MoE variants).
+    Qwen3.5 is a VLM model with weights under model.language_model.layers prefix,
+    separate in_proj_qkv + in_proj_z for linear attention, and nested text_config.
     """
 
     _DIRECT_MAPPING = {
@@ -97,23 +95,13 @@ class Qwen3_5Bridge(Qwen2MoEBridge):
         "mlp.experts.linear_fc2": ["model.language_model.layers.{layer_number}.mlp.experts.down_proj"],
     }
 
-    # ORBIT-SEAM: base's single _MTP_MLP_MAPPING (unfused-only) split into UNFUSED/FUSED variants,
-    # selected at runtime by the _MTP_MLP_MAPPING property below (Qwen3.6 packs MTP experts fused)
-    # MTP MLP expert mapping — the format depends on the HF weights.
-    # Qwen3.5-35B-A3B ships MTP experts as individual per-expert tensors;
-    # Qwen3.6-35B-A3B packs them as fused 3-D tensors (like regular layers).
-    # ``_mtp_experts_fused_cached`` is resolved lazily from safetensor_io.
-    _MTP_MLP_MAPPING_UNFUSED = {
+    # MTP layer uses individual expert format (not fused)
+    _MTP_MLP_MAPPING = {
         "mlp.experts.linear_fc1": [
             "mtp.layers.{layer_number}.mlp.experts.{expert_id}.gate_proj.weight",
             "mtp.layers.{layer_number}.mlp.experts.{expert_id}.up_proj.weight",
         ],
         "mlp.experts.linear_fc2": ["mtp.layers.{layer_number}.mlp.experts.{expert_id}.down_proj.weight"],
-    }
-    # ORBIT-SEAM: fused counterpart of _MTP_MLP_MAPPING_UNFUSED above, for Qwen3.6's packed MTP experts
-    _MTP_MLP_MAPPING_FUSED = {
-        "mlp.experts.linear_fc1": ["mtp.layers.{layer_number}.mlp.experts.gate_up_proj"],
-        "mlp.experts.linear_fc2": ["mtp.layers.{layer_number}.mlp.experts.down_proj"],
     }
 
     # Override to make ffn_hidden_size optional (Qwen3.5 MoE has no intermediate_size)
@@ -203,42 +191,13 @@ class Qwen3_5Bridge(Qwen2MoEBridge):
             raise NotImplementedError(f"Unsupported parameter name: {name}")
         return convert_names
 
-    # ORBIT-SEAM: new method + property - autodetects fused vs. unfused MTP expert weights from
-    # the safetensor index and makes _MTP_MLP_MAPPING resolve to the matching variant above
-    def _mtp_experts_fused(self) -> bool:
-        """Detect whether MTP expert weights are stored in fused 3-D tensors.
-
-        Qwen3.5 MoE-A3B: unfused per-expert tensors (keys end in ``.weight``).
-        Qwen3.6 MoE-A3B: fused ``gate_up_proj`` / ``down_proj`` tensors.
-        Resolved from ``safetensor_io.index`` on first call; result is only
-        cached once ``safetensor_io`` is available, so early pre-init access
-        (e.g. from tests that instantiate via ``__new__``) does not lock in
-        a wrong answer.
-        """
-        cached = getattr(self, "_mtp_experts_fused_cached", None)
-        if cached is not None:
-            return cached
-        io = getattr(self, "safetensor_io", None)
-        index = getattr(io, "index", None) if io is not None else None
-        if not index:
-            return False
-        fused = any(
-            "mtp.layers." in k and "mlp.experts." in k and (k.endswith("gate_up_proj") or k.endswith("down_proj"))
-            for k in index
-        )
-        self._mtp_experts_fused_cached = fused
-        return fused
-
-    @property
-    def _MTP_MLP_MAPPING(self):
-        return self._MTP_MLP_MAPPING_FUSED if self._mtp_experts_fused() else self._MTP_MLP_MAPPING_UNFUSED
-
-    # ORBIT-SEAM: docstring updated - per-expert vs. fused format is now runtime-detected (see
-    # _mtp_experts_fused above), not hardcoded to always-unfused as base's docstring claimed
     def _weight_name_mapping_mtp_mlp(self, name: str) -> list[str]:
+        # ORBIT-SEAM: docstring corrected -- the per-expert vs fused format is runtime-detected
         """Handle MTP MLP mappings; per-expert format is detected from HF weights."""
         layer_number = name.split(".")[2]
-        mapping = self._MTP_MLP_MAPPING if "mlp.experts.linear_fc" in name else self._MLP_MAPPING
+        # ORBIT-SEAM: _orbit_mtp_mlp_mapping (orbit/megatron/qwen3_5_ext.py) returns the pristine
+        # _MTP_MLP_MAPPING above for Qwen3.5, or the fused variant for Qwen3.6
+        mapping = self._orbit_mtp_mlp_mapping if "mlp.experts.linear_fc" in name else self._MLP_MAPPING
         convert_names = []
         for keyword, mapping_names in mapping.items():
             if keyword in name:

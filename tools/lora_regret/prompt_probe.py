@@ -38,6 +38,7 @@ import random
 from pathlib import Path
 from types import SimpleNamespace
 
+import orbit  # noqa: F401  -- arms orbit's async_rm patch (orbit's rm_types)
 from miles.rollout.rm_hub import async_rm
 from miles.utils.types import Sample
 

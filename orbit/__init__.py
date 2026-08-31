@@ -34,4 +34,15 @@ from orbit.megatron import megatron_utils_patches as _megatron_utils_patches  # 
 from orbit.megatron import training_utils_patches as _training_utils_patches  # noqa: F401
 from orbit.utils import metric_utils_patches as _metric_utils_patches  # noqa: F401
 
+from orbit.megatron import megatron_to_hf_patches as _megatron_to_hf_patches  # noqa: F401
+from orbit.rollout import inference_rollout_patches as _inference_rollout_patches  # noqa: F401
+from orbit.rollout import openai_endpoint_patches as _openai_endpoint_patches  # noqa: F401
+from orbit.utils import processing_utils_patches as _processing_utils_patches  # noqa: F401
+
+# Batch A of the tier-2 reuse slice: an import seam over miles.utils.replay_base's
+# BaseReplayManager.get_topk_fn, and the delegating patch that adds orbit's two
+# rm_types to miles.rollout.rm_hub.async_rm. Both name their targets as strings.
+from orbit.utils import replay_ext as _replay_ext  # noqa: F401
+from orbit.rewards import rm_hub_patches as _rm_hub_patches  # noqa: F401
+
 _install_hook()
