@@ -54,17 +54,23 @@ tracked = [f for f in _ls_files("*.py") if not f.startswith("tests/")]
 # Reads the guard is right to flag but that it must not fail on today, as
 # (file, attribute). Every entry is a standing debt, not an exemption class.
 ALLOWLIST = {
-    # UPSTREAM BUG, inherited verbatim (present at refs/miles/base): nothing
-    # registers --offload-optimizer-states, so this assert raises on the
-    # --stream-optimizer-state-to-disk path. Left unfixed deliberately -- a fix
-    # here is a behavioural divergence in a vendored file, and it belongs
-    # upstream. Report it to radixark/miles rather than seaming around it.
-    ("miles/utils/arguments.py", "offload_optimizer_states"),
     # megatron.training.arguments.validate_args() derives args.data_parallel_size
     # after parsing, so it is a real namespace attribute but not a parser dest.
     ("miles/backends/megatron_utils/initialize.py", "data_parallel_size"),
-    # Megatron flags newer than the pinned Megatron-LM commit; the CLI test for
-    # them skips when absent (see tests/fast/test_megatron_cli_flags.py).
+    # KNOWN BROKEN, deferred by decision (2026-08-31): GLM-4 is unusable on the
+    # current Megatron pin. Neither name is a registered dest, AND neither exists
+    # anywhere in Sphere-AI-Lab/Megatron-LM @ 83879096b -- not in the layer-spec
+    # signatures, not anywhere in its history -- so the call raises AttributeError
+    # and then TypeError. Reachable, despite looking dead to static analysis:
+    # miles_plugins/model_args/glm4-{9B,32B}.sh dispatch it dynamically via
+    # `--spec "miles_plugins.models.glm4" "get_glm_spec"`.
+    #
+    # NOT fixable by deleting the kwargs, unlike moe_use_legacy_grouped_gemm:
+    # miles_plugins/mbridge/glm4.py passes both as hardcoded True because GLM-4's
+    # architecture uses post-attention/post-MLP layernorms (sandwich norm), so
+    # dropping them would silently build the WRONG model rather than crash. The
+    # real fix is to implement the two parameters in our Megatron fork; that is
+    # out of scope for now, so GLM-4 stays knowingly broken here.
     ("miles_plugins/models/glm4.py", "post_self_attn_layernorm"),
     ("miles_plugins/models/glm4.py", "post_mlp_layernorm"),
 }
