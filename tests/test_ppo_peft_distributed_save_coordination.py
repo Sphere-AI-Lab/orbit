@@ -3,8 +3,6 @@ import json
 from contextlib import nullcontext
 from datetime import timedelta
 from pathlib import Path
-from types import SimpleNamespace
-
 import pytest
 import torch
 import torch.distributed as dist
@@ -79,15 +77,13 @@ def _distributed_adapter_save_worker(
         from miles.utils import distributed_utils, megatron_bridge_utils
 
         distributed_utils.GLOO_GROUP = None
-        peft_utils.get_parallel_state = lambda: SimpleNamespace(
-            # Both CP replicas are rank zero when CP is excluded from DP.
-            intra_dp=SimpleNamespace(rank=0, size=1),
-            # The combined group has one writer for their shared TP/PP shard.
-            intra_dp_cp=SimpleNamespace(rank=rank, size=world_size),
-            cp=SimpleNamespace(rank=rank, size=world_size),
-        )
         peft_utils.mpu.get_tensor_model_parallel_rank = lambda: 0
+        peft_utils.mpu.get_tensor_model_parallel_world_size = lambda: 1
         peft_utils.mpu.get_pipeline_model_parallel_rank = lambda: 0
+        peft_utils.mpu.get_expert_model_parallel_rank = lambda: 0
+        peft_utils.mpu.get_expert_model_parallel_world_size = lambda: 1
+        peft_utils.mpu.get_expert_tensor_parallel_rank = lambda: 0
+        peft_utils.mpu.get_expert_tensor_parallel_world_size = lambda: 1
         peft_utils.native_adapter_state = lambda _model: {(0, "lora_A"): torch.ones(1)}
         megatron_bridge_utils.patch_megatron_model = lambda _model: nullcontext()
 

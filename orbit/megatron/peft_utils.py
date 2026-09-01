@@ -15,7 +15,6 @@ from megatron.core import mpu
 from safetensors.torch import save_file as safetensors_save_file
 
 from miles.backends.megatron_utils.update_weight.common import is_dsv4_grouped_moe_oft_param_name
-from miles.backends.training_utils.parallel import get_parallel_state
 from orbit.utils.adapter_tensors import AdapterTensorKey, adapter_named_parameters, adapter_tensor_key_digest
 
 logger = logging.getLogger(__name__)
@@ -405,6 +404,98 @@ class PeftCheckpointPreflight:
     native_shard_binding: _CheckpointFileBinding | None
     training_state_binding: _CheckpointFileBinding | None
     optimizer_parameter_state_binding: _CheckpointFileBinding | None
+    native_shard_path: str | None = None
+
+
+@dataclass(frozen=True)
+class _NativeAdapterShardCoordinates:
+    tp_rank: int
+    tp_size: int
+    pp_rank: int
+    ep_rank: int
+    ep_size: int
+    etp_rank: int
+    etp_size: int
+
+
+def _local_native_adapter_shard_coordinates() -> _NativeAdapterShardCoordinates:
+    """Resolve the local native-shard identity from Megatron's MPU state."""
+    if not dist.is_initialized():
+        return _NativeAdapterShardCoordinates(
+            tp_rank=0,
+            tp_size=1,
+            pp_rank=0,
+            ep_rank=0,
+            ep_size=1,
+            etp_rank=0,
+            etp_size=1,
+        )
+    return _NativeAdapterShardCoordinates(
+        tp_rank=mpu.get_tensor_model_parallel_rank(),
+        tp_size=mpu.get_tensor_model_parallel_world_size(),
+        pp_rank=mpu.get_pipeline_model_parallel_rank(),
+        ep_rank=mpu.get_expert_model_parallel_rank(),
+        ep_size=mpu.get_expert_model_parallel_world_size(),
+        etp_rank=mpu.get_expert_tensor_parallel_rank(),
+        etp_size=mpu.get_expert_tensor_parallel_world_size(),
+    )
+
+
+def _native_adapter_shard_name(
+    tp_rank: int,
+    pp_rank: int,
+    ep_rank: int,
+    ep_size: int,
+    etp_rank: int,
+    etp_size: int,
+    tp_size: int,
+) -> str:
+    """Name one native shard, preserving the legacy name for redundant axes."""
+    name = f"adapter_megatron_tp{tp_rank}_pp{pp_rank}"
+    if ep_size > 1:
+        name += f"_ep{ep_rank}"
+    if tp_size % etp_size != 0:
+        name += f"_etp{etp_rank}"
+    return name + ".pt"
+
+
+def _local_native_adapter_shard_path(adapter_dir: str | Path) -> Path:
+    coordinates = _local_native_adapter_shard_coordinates()
+    return Path(adapter_dir) / _native_adapter_shard_name(
+        coordinates.tp_rank,
+        coordinates.pp_rank,
+        coordinates.ep_rank,
+        coordinates.ep_size,
+        coordinates.etp_rank,
+        coordinates.etp_size,
+        coordinates.tp_size,
+    )
+
+
+def _local_native_adapter_shard_candidates(adapter_dir: str | Path) -> tuple[Path, Path]:
+    """Return the current coordinate shard and safe legacy global-rank shard."""
+    rank = dist.get_rank() if dist.is_initialized() else 0
+    adapter_dir = Path(adapter_dir)
+    return (
+        _local_native_adapter_shard_path(adapter_dir),
+        adapter_dir / f"adapter_megatron_rank{rank}.pt",
+    )
+
+
+def _preflight_native_adapter_paths(
+    adapter_dir: str | Path,
+    preflight: PeftCheckpointPreflight,
+) -> tuple[Path, tuple[Path, Path]]:
+    candidates = tuple(
+        _absolute_checkpoint_path(path) for path in _local_native_adapter_shard_candidates(adapter_dir)
+    )
+    selected = preflight.native_shard_path
+    if selected is None and preflight.native_shard_binding is not None:
+        selected = preflight.native_shard_binding.path
+    selected_path = _absolute_checkpoint_path(selected) if selected is not None else candidates[0]
+    if selected_path not in candidates:
+        raise RuntimeError(f"native adapter preflight path is not valid for this rank: {selected_path}")
+    return selected_path, candidates
 
 
 def preflight_peft_adapter_checkpoint(adapter_path: str | Path) -> PeftCheckpointPreflight:
@@ -415,27 +506,37 @@ def preflight_peft_adapter_checkpoint(adapter_path: str | Path) -> PeftCheckpoin
     )
 
     def capture_local_bindings():
-        if dist.is_initialized():
-            tp_rank = mpu.get_tensor_model_parallel_rank()
-            pp_rank = mpu.get_pipeline_model_parallel_rank()
-        else:
-            tp_rank = pp_rank = 0
-        native_path = adapter_dir / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt"
+        native_paths = tuple(
+            _absolute_checkpoint_path(path) for path in _local_native_adapter_shard_candidates(adapter_dir)
+        )
+        native_bindings = tuple(_capture_checkpoint_file_binding(path) for path in native_paths)
+        present = [(path, binding) for path, binding in zip(native_paths, native_bindings, strict=True) if binding]
+        if len(present) > 1:
+            raise RuntimeError(f"multiple native adapter shards match this rank: {[str(path) for path, _ in present]}")
+        native_path, native_binding = present[0] if present else (native_paths[0], None)
+        native_layout = None
+        if native_binding is not None:
+            native_layout = "coordinate" if native_path == native_paths[0] else "global-rank"
         return (
-            _capture_checkpoint_file_binding(native_path),
+            str(native_path),
+            native_binding,
             _capture_checkpoint_file_binding(_training_state_path(adapter_dir)),
             _capture_checkpoint_file_binding(_optimizer_parameter_state_path(adapter_dir)),
+            native_layout,
         )
 
-    native_binding, training_binding, optimizer_parameter_binding = _coordinated_checkpoint_call(
-        "PEFT checkpoint snapshot capture",
-        capture_local_bindings,
+    native_path, native_binding, training_binding, optimizer_parameter_binding, native_layout = (
+        _coordinated_checkpoint_call(
+            "PEFT checkpoint snapshot capture",
+            capture_local_bindings,
+        )
     )
     local_presence = (
         str(adapter_dir),
         native_binding is not None,
         training_binding is not None,
         optimizer_parameter_binding is not None,
+        native_layout,
     )
     presence_by_rank = _all_gather_checkpoint_object(local_presence)
 
@@ -443,6 +544,7 @@ def preflight_peft_adapter_checkpoint(adapter_path: str | Path) -> PeftCheckpoin
     native_presence = [presence[1] for presence in presence_by_rank]
     training_presence = [presence[2] for presence in presence_by_rank]
     optimizer_parameter_presence = [presence[3] for presence in presence_by_rank]
+    native_layouts = [presence[4] for presence in presence_by_rank]
     inconsistencies = []
     if len(set(adapter_dirs)) != 1:
         inconsistencies.append(f"adapter paths differ across ranks: {adapter_dirs}")
@@ -452,6 +554,8 @@ def preflight_peft_adapter_checkpoint(adapter_path: str | Path) -> PeftCheckpoin
             f"{[rank for rank, present in enumerate(native_presence) if present]} and missing on ranks "
             f"{[rank for rank, present in enumerate(native_presence) if not present]}"
         )
+    elif native_presence[0] and len(set(native_layouts)) != 1:
+        inconsistencies.append(f"native adapter shard layouts differ across ranks: {native_layouts}")
     if len(set(training_presence)) != 1:
         inconsistencies.append(
             "training-state sidecars are present on ranks "
@@ -473,6 +577,7 @@ def preflight_peft_adapter_checkpoint(adapter_path: str | Path) -> PeftCheckpoin
         native_shard_binding=native_binding,
         training_state_binding=training_binding,
         optimizer_parameter_state_binding=optimizer_parameter_binding,
+        native_shard_path=native_path,
     )
 
 
@@ -486,19 +591,24 @@ def _validate_preflight_adapter_dir(adapter_dir: str | Path, preflight: PeftChec
     )
 
     def resolve_local_paths():
+        native_path, native_candidates = _preflight_native_adapter_paths(normalized_adapter_dir, preflight)
+        native_layout = None
+        if preflight.native_shard_binding is not None:
+            native_layout = "coordinate" if native_path == native_candidates[0] else "global-rank"
         if dist.is_initialized():
-            tp_rank = mpu.get_tensor_model_parallel_rank()
-            pp_rank = mpu.get_pipeline_model_parallel_rank()
             rank = dist.get_rank()
         else:
-            tp_rank = pp_rank = rank = 0
+            rank = 0
         return (
-            str(_absolute_checkpoint_path(Path(normalized_adapter_dir) / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt")),
-            str(_absolute_checkpoint_path(_training_state_path(normalized_adapter_dir, rank))),
-            str(_absolute_checkpoint_path(_optimizer_parameter_state_path(normalized_adapter_dir, rank))),
+            (
+                str(native_path),
+                str(_absolute_checkpoint_path(_training_state_path(normalized_adapter_dir, rank))),
+                str(_absolute_checkpoint_path(_optimizer_parameter_state_path(normalized_adapter_dir, rank))),
+            ),
+            native_layout,
         )
 
-    expected_paths = _coordinated_checkpoint_call(
+    expected_paths, native_layout = _coordinated_checkpoint_call(
         "PEFT checkpoint preflight path resolution",
         resolve_local_paths,
     )
@@ -507,6 +617,7 @@ def _validate_preflight_adapter_dir(adapter_dir: str | Path, preflight: PeftChec
         normalized_preflight_dir,
         preflight.native_shards_present,
         preflight.training_state_present,
+        native_layout,
     )
     bindings = _all_gather_checkpoint_object(local_binding)
     local_error = None
@@ -539,15 +650,10 @@ def _validate_peft_checkpoint_snapshot(preflight: PeftCheckpointPreflight) -> No
     adapter_dir = Path(preflight.adapter_dir)
 
     def validate_local_snapshot() -> None:
-        if dist.is_initialized():
-            tp_rank = mpu.get_tensor_model_parallel_rank()
-            pp_rank = mpu.get_pipeline_model_parallel_rank()
-        else:
-            tp_rank = pp_rank = 0
-        _verify_checkpoint_file_binding(
-            adapter_dir / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt",
-            preflight.native_shard_binding,
-        )
+        selected_path, candidate_paths = _preflight_native_adapter_paths(adapter_dir, preflight)
+        for candidate_path in candidate_paths:
+            binding = preflight.native_shard_binding if candidate_path == selected_path else None
+            _verify_checkpoint_file_binding(candidate_path, binding)
         _verify_checkpoint_file_binding(
             _training_state_path(adapter_dir),
             preflight.training_state_binding,
@@ -2038,7 +2144,12 @@ class _PeftSaveRankRoles:
     native_writer: bool
     hf_writer: bool
     tp_rank: int
+    tp_size: int
     pp_rank: int
+    ep_rank: int
+    ep_size: int
+    etp_rank: int
+    etp_size: int
 
 
 def _validate_peft_save_request(
@@ -2089,17 +2200,34 @@ def _validate_peft_save_request(
 def _resolve_peft_save_rank_roles() -> _PeftSaveRankRoles:
     """Resolve write ownership without excluding ranks from save collectives.
 
-    Native shard names encode TP and PP only.  The combined DP+CP group holds
-    replicas of that same shard, so exactly its rank zero may write.  The HF
-    exporter produces a complete state on every participant and therefore has
-    one global writer.
+    EP and ETP ranks can own different expert adapter tensors, so native shard
+    identity includes TP, PP, EP, and ETP. Exactly the lowest global rank among
+    replicas of each realized coordinate writes that shard. The HF exporter
+    produces a complete state on every participant and therefore has one global
+    writer.
     """
-    parallel_state = get_parallel_state()
+    coordinates = _local_native_adapter_shard_coordinates()
+    coordinate_key = (
+        coordinates.tp_rank,
+        coordinates.pp_rank,
+        coordinates.ep_rank,
+        coordinates.etp_rank,
+    )
+    global_rank = dist.get_rank() if dist.is_initialized() else 0
+    gathered = _all_gather_checkpoint_object((coordinate_key, global_rank))
+    native_writer = global_rank == min(
+        rank for rank_coordinates, rank in gathered if rank_coordinates == coordinate_key
+    )
     return _PeftSaveRankRoles(
-        native_writer=parallel_state.intra_dp_cp.rank == 0,
+        native_writer=native_writer,
         hf_writer=not dist.is_initialized() or dist.get_rank() == 0,
-        tp_rank=mpu.get_tensor_model_parallel_rank(),
-        pp_rank=mpu.get_pipeline_model_parallel_rank(),
+        tp_rank=coordinates.tp_rank,
+        tp_size=coordinates.tp_size,
+        pp_rank=coordinates.pp_rank,
+        ep_rank=coordinates.ep_rank,
+        ep_size=coordinates.ep_size,
+        etp_rank=coordinates.etp_rank,
+        etp_size=coordinates.etp_size,
     )
 
 
@@ -2111,7 +2239,15 @@ def _save_native_adapter_shard(
     if not roles.native_writer:
         return None
     adapter_state = native_adapter_state(model)
-    native_path = save_path / f"adapter_megatron_tp{roles.tp_rank}_pp{roles.pp_rank}.pt"
+    native_path = save_path / _native_adapter_shard_name(
+        roles.tp_rank,
+        roles.pp_rank,
+        roles.ep_rank,
+        roles.ep_size,
+        roles.etp_rank,
+        roles.etp_size,
+        roles.tp_size,
+    )
     torch.save(adapter_state, native_path)
     return len(adapter_state), native_path
 
@@ -2179,7 +2315,7 @@ def save_peft_adapter_checkpoint(
         else None,
     )
 
-    # Megatron-native format (per TP/PP rank, fast resume)
+    # Megatron-native format (per realized TP/PP/EP coordinate, fast resume)
     native_result = _coordinated_checkpoint_call(
         "PEFT native adapter shard save",
         lambda: _save_native_adapter_shard(model, save_path, roles),
@@ -2329,7 +2465,7 @@ def load_peft_adapter_checkpoint(
         logger.warning(
             f"Found HF PEFT adapter at {found} but direct HF PEFT loading into "
             f"Megatron is not yet supported. Please save using Megatron-native format "
-            f"(adapter_megatron_tp*_pp*.pt files) for checkpoint resume."
+            f"(adapter_megatron_tp*_pp*[_ep*].pt files) for checkpoint resume."
         )
         return False, None
 
@@ -2343,24 +2479,26 @@ def load_adapter_tensors_for_teacher(
 ) -> dict[AdapterTensorKey, torch.Tensor]:
     """Load a frozen teacher adapter as a chunk-aware tensor dict.
 
-    Requires Megatron-native shards (adapter_megatron_tp{tp}_pp{pp}.pt) as
-    written by save_peft_checkpoint; HF-only artifacts are rejected — the
-    engine side consumes those, the trainer side needs native names/shapes.
+    Requires the rank-local Megatron-native shard written by
+    save_peft_checkpoint; HF-only artifacts are rejected — the engine side
+    consumes those, while the trainer side needs native names and shapes.
     """
     adapter_dir = Path(adapter_path)
-    tp_rank = mpu.get_tensor_model_parallel_rank()
-    pp_rank = mpu.get_pipeline_model_parallel_rank()
-    native_path = adapter_dir / f"adapter_megatron_tp{tp_rank}_pp{pp_rank}.pt"
-    if not native_path.exists():
+    checkpoint_preflight = preflight_peft_adapter_checkpoint(adapter_dir)
+    _validate_peft_checkpoint_snapshot(checkpoint_preflight)
+    if not checkpoint_preflight.native_shards_present:
+        native_path = _local_native_adapter_shard_path(adapter_dir)
         raise FileNotFoundError(
             f"OPD teacher adapter needs Megatron-native shards, missing {native_path}. "
             "Save the teacher with orbit's save_peft_checkpoint (HF-only artifacts are not "
             "loadable trainer-side)."
         )
-    state_dict = torch.load(native_path, map_location="cpu", weights_only=True)
-    resolved = resolve_native_adapter_state(model, state_dict)
-    params = adapter_named_parameters(model, is_adapter_param_name)
-    return {
-        key: resolved[key].to(device=parameter.device, dtype=parameter.dtype).detach().clone()
-        for key, parameter in params.items()
-    }
+    native_binding = checkpoint_preflight.native_shard_binding
+    if native_binding is None:  # guarded by the preflight presence invariant
+        raise RuntimeError("native adapter preflight binding is missing")
+    native_path = Path(native_binding.path)
+    converted, params = _coordinated_checkpoint_call(
+        "OPD teacher native adapter shard parse/validation",
+        lambda: _load_and_convert_native_adapter_state(model, native_path, native_binding),
+    )
+    return {key: converted[key].detach().clone() for key in params}
