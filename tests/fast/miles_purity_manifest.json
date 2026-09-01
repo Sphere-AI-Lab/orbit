@@ -213,8 +213,8 @@
    "sha": "d6e7ad5f1b9cc3e8c2d6d187273fea9d6eadd1e5006b88e883f226c98b7124fd"
   },
   "miles/ray/rollout/router_manager.py": {
-   "delta_lines": 17,
-   "sha": "03fde1db5c6050681b3575ead250a4a6732fbd4be071f3641a8158c45105e24f"
+   "delta_lines": 22,
+   "sha": "a5f14a3a6a6cf9023f84e05ea54ecba7be885601451f9d9c09c2bf3a991d5847"
   },
   "miles/ray/rollout/server_group.py": {
    "delta_lines": 24,

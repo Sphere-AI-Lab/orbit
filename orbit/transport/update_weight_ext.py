@@ -77,6 +77,35 @@ from orbit.transport.slots import (
 logger = logging.getLogger(__name__)
 
 
+
+# Ported from orbit-main 55e137fd. It lives here rather than in the vendored
+# update_weight_from_tensor.py (where orbit-main keeps it) because on this base the
+# only caller -- the PEFT chunk loop below -- is already lifted into this mixin.
+def _raise_distributed_peft_failure(local_error: Exception | None) -> None:
+    """Make a source-only adapter failure visible to every trainer rank."""
+    rank = dist.get_rank()
+    failure_record = None
+    if local_error is not None:
+        failure_record = {
+            "source_rank": rank,
+            "error": f"{type(local_error).__name__}: {local_error}",
+        }
+
+    gloo_group = get_gloo_group()
+    failure_records = [None] * dist.get_world_size(gloo_group)
+    dist.all_gather_object(failure_records, failure_record, group=gloo_group)
+    failure_record = next((record for record in failure_records if record is not None), None)
+    if failure_record is None:
+        return
+
+    message = (
+        "PEFT adapter dispatch failed on source rank "
+        f"{failure_record['source_rank']}: {failure_record['error']}"
+    )
+    if local_error is not None and failure_record["source_rank"] == rank:
+        raise RuntimeError(message) from local_error
+    raise RuntimeError(message)
+
 class OrbitUpdateWeightExtensions:
     def __init__(
         self,
@@ -471,18 +500,29 @@ class OrbitUpdateWeightExtensions:
 
             for hf_named_tensors in weight_chunks:
                 # the home mixin's transport send, which may already hold completed results
-                refs, long_lived_tensors, completed_results = self._send_adapter_params(hf_named_tensors)
-                results = completed_results if completed_results is not None else ray.get(refs)
-                _log_weight_sync_event(
-                    "chunk_results_received",
-                    rank=rank,
-                    world_size=world_size,
-                    weight_version=self.weight_version,
-                    chunk_idx=sync_chunk_count,
-                    results_count=len(results),
-                )
-                _check_peft_weight_sync_results(results, sync_type=_sync_type_label(self.peft_method))
-                del long_lived_tensors
+                # Ported from orbit-main 55e137fd: under --use-distribute only the source rank
+                # sees a dispatch error, so it is gathered and re-raised on every rank instead
+                # of leaving the peers to hang at the next barrier.
+                chunk_error = None
+                try:
+                    refs, long_lived_tensors, completed_results = self._send_adapter_params(hf_named_tensors)
+                    results = completed_results if completed_results is not None else ray.get(refs)
+                    _log_weight_sync_event(
+                        "chunk_results_received",
+                        rank=rank,
+                        world_size=world_size,
+                        weight_version=self.weight_version,
+                        chunk_idx=sync_chunk_count,
+                        results_count=len(results),
+                    )
+                    _check_peft_weight_sync_results(results, sync_type=_sync_type_label(self.peft_method))
+                    del long_lived_tensors
+                except Exception as exc:  # noqa: BLE001 -- synchronized across ranks below
+                    chunk_error = exc
+                if self.use_distribute:
+                    _raise_distributed_peft_failure(chunk_error)
+                elif chunk_error is not None:
+                    raise chunk_error
                 sync_chunk_count += 1
             torch.cuda.ipc_collect()
             torch.cuda.empty_cache()

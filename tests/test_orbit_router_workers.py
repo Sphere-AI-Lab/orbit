@@ -1,11 +1,15 @@
 import asyncio
 from argparse import Namespace
+from types import SimpleNamespace
 
 import httpx
 from fastapi.testclient import TestClient
 import pytest
 
-from miles.router.router import MilesRouter
+# on this miles base miles/ray/rollout is a package; start_router lives in
+# its router_manager submodule (and lost its leading underscore)
+import miles.ray.rollout.router_manager as rollout_module
+from miles.router.router import MilesRouter, run_router
 
 
 def _router_args():
@@ -19,6 +23,108 @@ def _router_args():
         rollout_num_gpus_per_engine=1,
         sglang_server_concurrency=1,
     )
+
+
+def _rollout_router_args(**overrides):
+    values = dict(
+        peft_method="oft",
+        use_miles_router=False,
+        sglang_router_ip=None,
+        sglang_router_port=None,
+    )
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_oft_rejects_unmarked_existing_router():
+    args = _rollout_router_args(sglang_router_ip="10.1.2.3", sglang_router_port=4567)
+
+    with pytest.raises(ValueError, match="--use-orbit-router"):
+        rollout_module.start_router(args)
+
+    assert args.use_miles_router is False
+
+
+def test_oft_reuses_existing_router_marked_as_orbit_passthrough():
+    args = _rollout_router_args(
+        use_miles_router=True,
+        sglang_router_ip="10.1.2.3",
+        sglang_router_port=4567,
+    )
+
+    assert rollout_module.start_router(args) == ("10.1.2.3", 4567)
+
+
+def test_oft_without_existing_router_auto_launches_orbit_passthrough(monkeypatch):
+    started_processes = []
+
+    class RecordingProcess:
+        def __init__(self, *, target, args):
+            self.daemon = False
+            self.target = target
+            self.args = args
+            self.started = False
+            started_processes.append(self)
+
+        def start(self):
+            self.started = True
+
+    args = _rollout_router_args()
+    monkeypatch.setattr(rollout_module, "get_host_info", lambda: ("h", "127.0.0.1"))
+    monkeypatch.setattr(rollout_module, "find_available_port", lambda _start: 20000)
+    monkeypatch.setattr(rollout_module, "is_port_available", lambda _port: True)
+    # this base spawns via multiprocessing.get_context("spawn").Process, so patching
+    # multiprocessing.Process alone would leave the real constructor in play
+    monkeypatch.setattr(
+        rollout_module.multiprocessing,
+        "get_context",
+        lambda _method: SimpleNamespace(Process=RecordingProcess),
+    )
+    monkeypatch.setattr(rollout_module, "wait_for_server_ready", lambda *_args, **_kwargs: None)
+
+    result = rollout_module.start_router(args)
+
+    assert result == ("127.0.0.1", 20000)
+    assert args.use_miles_router is True
+    assert len(started_processes) == 1
+    assert started_processes[0].target is run_router
+    assert started_processes[0].started is True
+
+
+def test_oft_force_new_ignores_unmarked_existing_router_and_launches_orbit_passthrough(monkeypatch):
+    started_processes = []
+
+    class RecordingProcess:
+        def __init__(self, *, target, args):
+            self.daemon = False
+            self.target = target
+            self.args = args
+            self.started = False
+            started_processes.append(self)
+
+        def start(self):
+            self.started = True
+
+    args = _rollout_router_args(sglang_router_ip="10.1.2.3", sglang_router_port=4567)
+    monkeypatch.setattr(rollout_module, "get_host_info", lambda: ("h", "127.0.0.1"))
+    monkeypatch.setattr(rollout_module, "find_available_port", lambda _start: 20000)
+    monkeypatch.setattr(rollout_module, "is_port_available", lambda _port: True)
+    # this base spawns via multiprocessing.get_context("spawn").Process, so patching
+    # multiprocessing.Process alone would leave the real constructor in play
+    monkeypatch.setattr(
+        rollout_module.multiprocessing,
+        "get_context",
+        lambda _method: SimpleNamespace(Process=RecordingProcess),
+    )
+    monkeypatch.setattr(rollout_module, "wait_for_server_ready", lambda *_args, **_kwargs: None)
+
+    result = rollout_module.start_router(args, force_new=True)
+
+    assert result == ("127.0.0.1", 20000)
+    assert args.use_miles_router is True
+    assert len(started_processes) == 1
+    assert started_processes[0].target is run_router
+    assert started_processes[0].started is True
 
 
 def test_orbit_router_worker_compat_endpoints():
