@@ -3,13 +3,7 @@
 This directory is reserved for orbit-owned shell entrypoints for checkpoint
 conversion workflows.
 
-Current orbit-owned conversion entrypoints:
-- `convert_fp8_checkpoint_direct.sh`: Orbit shell wrapper for direct-write HF
-  FP8 -> Megatron conversion via `tools/convert_fp8_checkpoint_direct.py`.
-- `convert_int4_checkpoint_direct.sh`: Orbit shell wrapper for direct-write HF
-  INT4 -> Megatron conversion via `tools/convert_int4_checkpoint_direct.py`.
-- `convert_nvfp4_checkpoint_direct.sh`: Orbit shell wrapper for direct-write HF
-  NVFP4 -> Megatron conversion via `tools/convert_nvfp4_checkpoint_direct.py`.
+Current orbit-owned conversion entrypoint:
 - `convert_dsv4_hf_to_megatron.sh`: Orbit shell wrapper for DeepSeek V4
   Flash/Pro. By default it stages with DeepSeek's official `inference/convert.py`
   at mp1, keeps routed experts in FP4, patches the staged HF config with
@@ -22,8 +16,6 @@ Shared conventions:
 - default output is `${REPO_ROOT}/checkpoints/<model_name>`
 - if `megatron.bridge` is not importable from the active Python environment,
   set `MEGATRON_BRIDGE_ROOT` to a Megatron-Bridge checkout
-- low-precision FP8 and INT4 conversions intentionally expose only the direct
-  conversion paths, which retain the metadata needed for QOFT and parity checks
 
 DeepSeek V4 Orbit flow:
 - Keep the official HF checkpoint unchanged. Copy it to node-local/NVMe storage
@@ -51,13 +43,3 @@ DeepSeek V4 Orbit flow:
   `num_nextn_predict_layers`/`n_mtp_layers` and trims `compress_ratios` to
   `num_hidden_layers`. Set `DSV4_DROP_MTP=0` only when the downstream DSV4
   path supports MTP.
-
-Progress logging:
-- `ORBIT_CONVERSION_PROGRESS=1` enables periodic conversion progress logs and
-  defaults to on for the Orbit wrappers
-- `ORBIT_CONVERSION_PROGRESS=0` disables those logs
-- `ORBIT_CONVERSION_PROGRESS_INTERVAL=10` controls the progress interval in
-  seconds
-- `convert_nvfp4_checkpoint_direct.sh` forwards those generic settings to
-  `MEGATRON_BRIDGE_DIRECT_SAVE_PROGRESS` and
-  `MEGATRON_BRIDGE_DIRECT_SAVE_PROGRESS_INTERVAL` unless they are already set

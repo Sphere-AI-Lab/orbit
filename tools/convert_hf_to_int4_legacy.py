@@ -1,6 +1,7 @@
 #!/usr/bin/env python
-"""Standalone INT4 conversion (legacy path). Prefer tools/quantize_to_int4.py
-for the patch-based flow used by current launchers."""
+"""Standalone INT4 conversion (legacy path).
+
+Prefer Megatron-Bridge's examples/conversion/quantize_to_int4.py."""
 import argparse
 import os
 import random
