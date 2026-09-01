@@ -37,6 +37,13 @@ from typing import Any
 GROUPING_SCHEMES = ("single-batch", "reversed-triples", "singletons")
 
 
+def _num_sequences(value: str) -> int:
+    count = int(value)
+    if count < 2:
+        raise argparse.ArgumentTypeError("num-sequences must be at least 2 to vary batch composition")
+    return count
+
+
 def make_groupings(n: int, scheme: str) -> list[list[int]]:
     """Partition indices 0..n-1 into ordered batches per the named scheme."""
     if scheme == "single-batch":
@@ -63,18 +70,14 @@ def build_scoring_payload(input_ids: list[list[int]]) -> dict[str, Any]:
     }
 
 
-def compare_logprob_sets(
-    a: list[list[float]], b: list[list[float]]
-) -> tuple[bool, float, int]:
+def compare_logprob_sets(a: list[list[float]], b: list[list[float]]) -> tuple[bool, float, int]:
     """Exact comparison of two per-sequence log-prob sets.
 
     Returns (identical, max_abs_diff, n_mismatching_tokens). Raises on shape
     mismatch — a scoring bug, not a determinism finding.
     """
     if len(a) != len(b) or any(len(x) != len(y) for x, y in zip(a, b, strict=True)):
-        raise ValueError(
-            f"logprob set shape mismatch: {[len(x) for x in a]} vs {[len(y) for y in b]}"
-        )
+        raise ValueError(f"logprob set shape mismatch: {[len(x) for x in a]} vs {[len(y) for y in b]}")
     max_diff = 0.0
     n_mismatch = 0
     for seq_a, seq_b in zip(a, b, strict=True):
@@ -185,7 +188,7 @@ def main() -> int:
     parser.add_argument("--hf-checkpoint", required=True)
     parser.add_argument("--prompts", required=True, help="JSONL with a prompt column")
     parser.add_argument("--prompt-key", default="prompt")
-    parser.add_argument("--num-sequences", type=int, default=16)
+    parser.add_argument("--num-sequences", type=_num_sequences, default=16)
     parser.add_argument("--gen-tokens", type=int, default=64)
     args = parser.parse_args()
 

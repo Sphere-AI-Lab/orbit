@@ -109,31 +109,23 @@ def test_main_save_megatron_writes_shard(tmp_path):
     assert (out / "merged_megatron" / "adapter_config.json").exists()
 
 
-def test_main_end_to_end_with_oft_original_method_writes_reference_merge(tmp_path):
+def test_main_rejects_dsv4_native_merge_for_oft_original(tmp_path):
     k = "decoder.layers.0.mlp.experts.w1_oft_r"
-    inputs = []
     adapters = []
     for name, seed in (("a", 31), ("b", 32), ("c", 33)):
         tensor = torch.randn(2, 3, 6, generator=torch.Generator().manual_seed(seed))
-        inputs.append(tensor)
         adapters.append(_write_adapter(tmp_path / name, state_dict={k: tensor}))
     out = tmp_path / "out"
-    rc = cli.main([
-        "--adapters", *(str(adapter) for adapter in adapters),
-        "--output", str(out),
-        "--method", "oft-original",
-    ])
-    assert rc == 0
-    merged_dir = out / "merged_adapter"
-    got = load_file(str(merged_dir / "adapter_model.safetensors"))
-    expected = orthomerge_original_merge(inputs)
-    default_oft_for_dsv4_key = torch.stack([tensor.float() for tensor in inputs]).mean(0)
-    assert torch.allclose(got[k], expected, atol=1e-6)
-    assert not torch.allclose(got[k], default_oft_for_dsv4_key, atol=1e-6)
+    with pytest.raises(NotImplementedError, match="DSV4"):
+        cli.main([
+            "--adapters", *(str(adapter) for adapter in adapters),
+            "--output", str(out),
+            "--method", "oft-original",
+        ])
 
 
 def test_script_uses_worktree_orbit_package_for_oft_original(tmp_path):
-    k = "decoder.layers.0.mlp.experts.w1_oft_r"
+    k = "decoder.layers.0.self_attention.linear_qkv.adapter.oft_r"
     inputs = []
     adapters = []
     for name, seed in (("a", 41), ("b", 42)):
