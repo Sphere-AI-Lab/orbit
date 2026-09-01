@@ -147,6 +147,10 @@ class RayTrainGroup:
     async def offload(self):
         await self._broadcast("sleep")
 
+    async def prefetch_train_state(self, rollout_id: int):
+        """Begin flat-backend train-state reload on every actor rank."""
+        await self._broadcast("prefetch_train_state", rollout_id)
+
     async def clear_memory(self):
         await self._broadcast("clear_memory")
 

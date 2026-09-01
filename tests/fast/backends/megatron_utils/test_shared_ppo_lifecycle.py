@@ -240,6 +240,105 @@ def test_wake_up_resumes_offloaded_model_once(actor_module, monkeypatch):
     assert worker._asleep is False
 
 
+def _flat_lifecycle_worker(actor_module, monkeypatch, *, asleep):
+    worker = object.__new__(actor_module.MegatronTrainRayActor)
+    worker.args = Namespace(
+        offload_train=True,
+        offload_train_adapter=True,
+        offload_train_grad_buffers=True,
+        offload_train_optimizer=True,
+        offload_train_async=True,
+        offload_train_frozen_base_mode="flat",
+        peft_method="oft",
+        rematerialize_param_from_master_weight=False,
+    )
+    worker.role = "actor"
+    worker.model = [object()]
+    worker.optimizer = object()
+    worker._asleep = asleep
+    worker._wake_up_event = None
+    worker._wake_up_stream = Mock(name="wake_stream")
+
+    saver = Mock()
+    manual = {}
+    for name in (
+        "offload_megatron_grad_buffers",
+        "offload_megatron_optimizer",
+        "offload_megatron_frozen_base_to_cpu",
+        "load_megatron_frozen_base_to_gpu",
+        "load_megatron_adapter_to_gpu",
+        "load_megatron_optimizer",
+        "load_megatron_grad_buffers",
+    ):
+        manual[name] = Mock(name=name)
+        monkeypatch.setattr(actor_module, name, manual[name], raising=False)
+
+    monkeypatch.setattr(actor_module, "torch_memory_saver", saver)
+    monkeypatch.setattr(actor_module, "clear_memory", Mock())
+    monkeypatch.setattr(actor_module, "print_memory", Mock())
+    monkeypatch.setattr(actor_module, "destroy_process_groups", Mock())
+    monkeypatch.setattr(actor_module, "reload_process_groups", Mock())
+    monkeypatch.setattr(actor_module, "is_first_replica_megatron_main_rank", lambda: False)
+    monkeypatch.setattr(actor_module, "is_lora_enabled", lambda _args: False)
+    return worker, saver, manual
+
+
+def test_flat_sleep_uses_orbit_offloader_without_tms_pause(actor_module, monkeypatch):
+    worker, saver, manual = _flat_lifecycle_worker(actor_module, monkeypatch, asleep=False)
+
+    worker.sleep()
+
+    manual["offload_megatron_grad_buffers"].assert_called_once_with(worker.model)
+    manual["offload_megatron_optimizer"].assert_called_once_with(worker.optimizer)
+    manual["offload_megatron_frozen_base_to_cpu"].assert_called_once_with(worker.model)
+    saver.pause.assert_not_called()
+    assert worker._asleep is True
+
+
+def test_flat_wake_loads_orbit_state_without_tms_resume(actor_module, monkeypatch):
+    worker, saver, manual = _flat_lifecycle_worker(actor_module, monkeypatch, asleep=True)
+    worker.args.offload_train_async = False
+
+    worker.wake_up()
+
+    manual["load_megatron_frozen_base_to_gpu"].assert_called_once_with(worker.model)
+    manual["load_megatron_adapter_to_gpu"].assert_called_once_with(worker.model)
+    manual["load_megatron_optimizer"].assert_called_once_with(worker.optimizer)
+    manual["load_megatron_grad_buffers"].assert_called_once_with(worker.model)
+    saver.resume.assert_not_called()
+    assert worker._asleep is False
+
+
+def test_flat_async_prefetch_uses_dedicated_stream(actor_module, monkeypatch):
+    worker, _saver, manual = _flat_lifecycle_worker(actor_module, monkeypatch, asleep=True)
+    event = Mock(name="wake_event")
+    monkeypatch.setattr(actor_module.torch.cuda, "Event", Mock(return_value=event))
+
+    worker.prefetch_train_state(7)
+
+    manual["load_megatron_frozen_base_to_gpu"].assert_called_once_with(
+        worker.model,
+        stream=worker._wake_up_stream,
+    )
+    manual["load_megatron_adapter_to_gpu"].assert_called_once_with(
+        worker.model,
+        stream=worker._wake_up_stream,
+    )
+    event.record.assert_called_once_with(worker._wake_up_stream)
+    assert worker._wake_up_event is event
+
+
+def test_flat_async_prefetch_skips_critic_only_rollouts(actor_module, monkeypatch):
+    worker, _saver, manual = _flat_lifecycle_worker(actor_module, monkeypatch, asleep=True)
+    worker.args.num_critic_only_steps = 3
+
+    worker.prefetch_train_state(2)
+
+    manual["load_megatron_frozen_base_to_gpu"].assert_not_called()
+    manual["load_megatron_adapter_to_gpu"].assert_not_called()
+    assert worker._wake_up_event is None
+
+
 def _actor_train_args(**overrides):
     defaults = dict(
         compute_advantages_and_returns=True,
@@ -247,6 +346,9 @@ def _actor_train_args(**overrides):
         keep_old_actor=False,
         get_mismatch_metrics=False,
         skip_actor_forward_only=False,
+        kl_coef=0,
+        use_kl_loss=False,
+        peft_method="none",
     )
     return Namespace(**(defaults | overrides))
 
@@ -333,7 +435,7 @@ def test_actor_logprob_forward_is_explicit_single_step_opt_in(
 
 
 def test_skip_actor_forward_only_preserves_reference_teacher_and_training_forwards(actor_module, monkeypatch):
-    worker = _actor_reuse_worker(actor_module, skip_actor_forward_only=True)
+    worker = _actor_reuse_worker(actor_module, skip_actor_forward_only=True, kl_coef=0.1)
     worker.weights_backuper.backup_tags = {"ref", "teacher"}
     worker.compute_log_prob.side_effect = lambda *_args, store_prefix, **_kwargs: {
         f"{store_prefix}log_probs": [object()]
@@ -344,6 +446,52 @@ def test_skip_actor_forward_only_preserves_reference_teacher_and_training_forwar
     worker.train_actor(7, rollout_data, witness_info=None, attempt=0)
 
     assert [call.kwargs["store_prefix"] for call in worker.compute_log_prob.call_args_list] == ["ref_", "teacher_"]
+    actor_module.train.assert_called_once()
+
+
+def test_peft_reference_forward_temporarily_disables_adapter(actor_module, monkeypatch):
+    worker = object.__new__(actor_module.MegatronTrainRayActor)
+    worker.args = Namespace(kl_coef=0.1, use_kl_loss=False, peft_method="lora")
+    worker.model = [object()]
+    worker.weights_backuper = Mock(backup_tags=set())
+    worker._set_replay_stage = Mock()
+    worker.compute_log_prob = Mock(return_value={"ref_log_probs": [object()]})
+    disable_adapter = Mock(return_value=nullcontext())
+    peft = Namespace(disable_adapter=disable_adapter)
+    monkeypatch.setattr(actor_module, "create_peft_instance", Mock(return_value=peft), raising=False)
+    monkeypatch.setattr(actor_module, "is_peft_enabled", Mock(return_value=True), raising=False)
+    data_iterator = [object()]
+
+    result = worker.compute_ref_log_probs(data_iterator, [1], rollout_id=7)
+
+    assert result == worker.compute_log_prob.return_value
+    disable_adapter.assert_called_once_with(worker.model)
+    worker.compute_log_prob.assert_called_once_with(data_iterator, [1], rollout_id=7, store_prefix="ref_")
+    worker._set_replay_stage.assert_called_once_with("fallthrough")
+
+
+def test_direct_loss_reference_forward_restores_actor_before_training(actor_module, monkeypatch):
+    worker = _actor_reuse_worker(actor_module, compute_advantages_and_returns=False)
+    worker._active_model_tag = "actor"
+
+    def compute_ref(*_args, **_kwargs):
+        worker._active_model_tag = "ref"
+        return {"ref_log_probs": [object()]}
+
+    def switch_model(tag):
+        worker._active_model_tag = tag
+
+    worker.compute_ref_log_probs = Mock(side_effect=compute_ref)
+    worker._switch_model = Mock(side_effect=switch_model)
+    _patch_actor_reuse_dependencies(actor_module, monkeypatch, num_microbatches=[1])
+    rollout_data = {"num_rollouts": [1], "total_lengths": [1]}
+
+    worker.train_actor(7, rollout_data, witness_info=None, attempt=0)
+
+    worker.compute_ref_log_probs.assert_called_once()
+    assert "ref_log_probs" in rollout_data
+    worker._switch_model.assert_called_once_with("actor")
+    actor_module.compute_advantages_and_returns.assert_not_called()
     actor_module.train.assert_called_once()
 
 

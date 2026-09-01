@@ -186,11 +186,14 @@ class RolloutManager:
             if callable(mark_rollout_complete):
                 mark_rollout_complete(
                     rollout_id,
-                    snapshot_for_save=should_run_periodic_action(
-                        rollout_id,
-                        self.args.save_interval,
-                        self.get_num_rollout_per_epoch(),
-                        self.args.num_rollout,
+                    snapshot_for_save=(
+                        getattr(self.args, "save_trigger_sentinel", None) is not None
+                        or should_run_periodic_action(
+                            rollout_id,
+                            self.args.save_interval,
+                            self.get_num_rollout_per_epoch(),
+                            self.args.num_rollout,
+                        )
                     ),
                 )
         return dict(sample_indices=sample_indices, data_ref=data_ref)

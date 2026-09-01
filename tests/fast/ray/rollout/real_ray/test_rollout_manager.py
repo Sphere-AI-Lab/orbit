@@ -648,6 +648,42 @@ class TestGenerate:
             # 8 samples / 2 dp = 4 per rank
             assert len(partition["tokens"]) == 4
 
+    async def test_external_save_configuration_snapshots_every_completed_rollout(
+        self,
+        ray_local_mode,
+        placement_group_factory,
+        tmp_path,
+        patch_low_level,
+    ):
+        args = _make_test_args(tmp_path, models=[("actor", True)])
+        args.global_batch_size = 8
+        args.rollout_global_dataset = True
+        args.save_interval = None
+        args.save_trigger_sentinel = str(tmp_path / "save-now")
+        pg = placement_group_factory(2)
+        manager = _make_manager(args, pg)
+        manager.train_parallel_config = {"dp_size": 2}
+
+        class RecordingDataSource:
+            def __init__(self):
+                self.marks = []
+
+            def get_buffer_length(self):
+                return None
+
+            def mark_rollout_complete(self, rollout_id, *, snapshot_for_save):
+                self.marks.append((rollout_id, snapshot_for_save))
+
+        manager.data_source = RecordingDataSource()
+        manager.generate_rollout = lambda _input: RolloutFnTrainOutput(
+            samples=[make_samples_grouped(n_groups=2, group_size=4)],
+            metrics={},
+        )
+
+        await manager.generate(rollout_id=0)
+
+        assert manager.data_source.marks == [(0, True)]
+
 
 @pytest.mark.asyncio
 class TestEval:

@@ -37,6 +37,13 @@ from typing import Any
 GROUPING_SCHEMES = ("single-batch", "reversed-triples", "singletons")
 
 
+def _num_sequences(value: str) -> int:
+    count = int(value)
+    if count < 2:
+        raise argparse.ArgumentTypeError("num-sequences must be at least 2 to vary batch composition")
+    return count
+
+
 def make_groupings(n: int, scheme: str) -> list[list[int]]:
     """Partition indices 0..n-1 into ordered batches per the named scheme."""
     if scheme == "single-batch":
@@ -181,7 +188,7 @@ def main() -> int:
     parser.add_argument("--hf-checkpoint", required=True)
     parser.add_argument("--prompts", required=True, help="JSONL with a prompt column")
     parser.add_argument("--prompt-key", default="prompt")
-    parser.add_argument("--num-sequences", type=int, default=16)
+    parser.add_argument("--num-sequences", type=_num_sequences, default=16)
     parser.add_argument("--gen-tokens", type=int, default=64)
     args = parser.parse_args()
 

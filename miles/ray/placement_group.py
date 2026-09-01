@@ -92,10 +92,16 @@ def _create_placement_group(num_gpus):
 def _actor_needs_reference_weights(args) -> bool:
     """Whether the actor should load a separate reference checkpoint.
 
-    True only for full-FT KL runs. PEFT runs derive the reference policy by
-    disabling adapters on the actor model and never load a "ref" tag.
+    Megatron PEFT runs derive the reference policy by disabling adapters on
+    the actor model. FSDP does not implement that path yet and still needs the
+    separate reference model.
     """
-    return (args.kl_coef != 0 or args.use_kl_loss) and getattr(args, "peft_method", "none") == "none"
+    if args.kl_coef == 0 and not args.use_kl_loss:
+        return False
+    is_megatron_peft = (
+        getattr(args, "train_backend", "megatron") == "megatron" and getattr(args, "peft_method", "none") != "none"
+    )
+    return not is_megatron_peft
 
 
 def _get_placement_group_layout(args) -> tuple[int, int]:

@@ -222,7 +222,6 @@ def _launch_server_with_miles_compat(server_args: ServerArgs, force_native_ops: 
 def launch_server_process(server_args: ServerArgs, force_native_ops: bool = False) -> multiprocessing.Process:
 
     multiprocessing.set_start_method("spawn", force=True)
-    server_args.host = server_args.host.strip("[]")
     _prepare_child_native_ops_env(force_native_ops)
     p = multiprocessing.Process(target=_launch_server_with_miles_compat, args=(server_args, force_native_ops))
     p.start()
@@ -398,6 +397,10 @@ class SGLangEngine(RayActor):
 
     def _init_normal(self, server_args_dict):
         logger.info(f"Launch HttpServerEngineAdapter at: {self.server_host}:{self.server_port}")
+        # Current SGLang resolves ServerArgs during construction and treats its
+        # public fields as read-only afterward. Normalize IPv6 brackets before
+        # constructing it instead of mutating the resolved object.
+        server_args_dict = {**server_args_dict, "host": server_args_dict["host"].strip("[]")}
         self.process = launch_server_process(
             ServerArgs(**server_args_dict),
             force_native_ops=getattr(self.args, "sglang_force_native_ops", False),
@@ -476,6 +479,8 @@ class SGLangEngine(RayActor):
         flush_cache: bool = False,
         weight_version: str | None = None,
         selector: str = "all",
+        adapter_config: dict | None = None,
+        adapter_name: str | None = None,
     ):
         """
         Update model weights from tensor data. The HTTP server will only post meta data, and the real weights will be copied directly from GPUs.
@@ -491,6 +496,10 @@ class SGLangEngine(RayActor):
         }
         if weight_version is not None:
             payload["weight_version"] = weight_version
+        if adapter_config is not None:
+            payload["adapter_config"] = adapter_config
+        if adapter_name is not None:
+            payload["adapter_name"] = adapter_name
         return self._make_request(
             "update_weights_from_tensor",
             payload,

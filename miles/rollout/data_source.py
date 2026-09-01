@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 _ITERATION_DIRECTORY_RE = re.compile(r"iter_([0-9]+)")
 _MAX_ROLLOUT_COUNTER = 2**63 - 1
+# The async trainer can prefetch one rollout while training the preceding one.
+_MAX_PENDING_ROLLOUT_SNAPSHOTS = 2
 
 
 def _canonical_miles_iteration_directory(iteration_path: Path) -> int | None:
@@ -285,6 +287,9 @@ class RolloutDataSource(DataSource):
         self._latest_completed_rollout_id = rollout_id
         if snapshot_for_save:
             self._rollout_state_snapshots[rollout_id] = self._state_dict()
+            while len(self._rollout_state_snapshots) > _MAX_PENDING_ROLLOUT_SNAPSHOTS:
+                oldest_rollout_id = next(iter(self._rollout_state_snapshots))
+                self._rollout_state_snapshots.pop(oldest_rollout_id)
 
     def save(self, rollout_id):
         if not self.args.rollout_global_dataset:

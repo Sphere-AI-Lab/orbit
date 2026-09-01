@@ -293,6 +293,10 @@ class RayTrainGroup:
         # Catch *without* retry: cells w/ exceptions are auto marked errored, and will not be used
         await self._execute_all_alive_and_catch("sleep")
 
+    async def prefetch_train_state(self, rollout_id: int):
+        """Begin flat-backend train-state reload on every live cell."""
+        await self._execute_all_alive_and_catch("prefetch_train_state", rollout_id)
+
     async def clear_memory(self):
         # Catch *without* retry: cells w/ exceptions are auto marked errored, and will not be used
         await self._execute_all_alive_and_catch("clear_memory")

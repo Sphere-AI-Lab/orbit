@@ -105,6 +105,8 @@ def _build_batch_prefill_scoring_payload(
     }
     if (lora_path := next(iter(lora_paths))) is not None:
         batch_payload["lora_path"] = lora_path
+    if (adapter_path := payloads[0].get("adapter_path")) is not None:
+        batch_payload["adapter_path"] = adapter_path
     return batch_payload
 
 

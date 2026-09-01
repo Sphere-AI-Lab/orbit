@@ -132,14 +132,14 @@ def test_lora_a_init_method_reaches_bridge_as_capital_a_kwarg(monkeypatch):
     _install_stub_bridge_peft(monkeypatch)
     lora_utils = _load_real_lora_utils(monkeypatch)
 
-    args = _make_args(lora_a_init_method="kaiming")
+    args = _make_args(lora_a_init_method="uniform")
     lora_utils.create_lora_instance(args)
 
     assert _RecordingLoRA.last_kwargs is not None, "LoRA() was never constructed"
     assert (
         "lora_A_init_method" in _RecordingLoRA.last_kwargs
     ), "create_lora_instance did not pass lora_A_init_method (capital A) to Bridge's LoRA"
-    assert _RecordingLoRA.last_kwargs["lora_A_init_method"] == "kaiming"
+    assert _RecordingLoRA.last_kwargs["lora_A_init_method"] == "uniform"
     # The lowercase CLI attribute name must never leak through as the kwarg name --
     # that mismatch is the exact silent-failure mode this test guards against.
     assert "lora_a_init_method" not in _RecordingLoRA.last_kwargs

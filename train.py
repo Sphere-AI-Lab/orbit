@@ -113,6 +113,9 @@ async def train(args):
                 offload_tags.append(GPU_MEMORY_TYPE_WEIGHTS)
             await rollout_manager.offload.remote(tags=offload_tags)
 
+        if args.offload_train and args.offload_train_async:
+            await actor_model.prefetch_train_state(rollout_id)
+
         if args.use_critic:
             values = await critic_model.train(rollout_id, rollout_data_pack)
             if args.offload_train:

@@ -71,3 +71,33 @@ def test_oft_adapter_preserves_peft_type_validation(tmp_path):
 
     with pytest.raises(ValueError, match="peft_type=LORA, expected OFT"):
         _normalize_peft_args(_oft_args(tmp_path))
+
+
+@pytest.mark.parametrize(
+    ("q_lora_rank", "expected_q_modules"),
+    [
+        (None, ["q_proj"]),
+        (128, ["q_a_proj", "q_b_proj"]),
+    ],
+)
+def test_oft_all_linear_uses_mla_projection_names(tmp_path, q_lora_rank, expected_q_modules):
+    _write_adapter_config(tmp_path)
+    args = _oft_args(
+        tmp_path,
+        target_modules="all-linear",
+        multi_latent_attention=True,
+        q_lora_rank=q_lora_rank,
+    )
+
+    _normalize_peft_args(args)
+
+    assert args.target_modules == expected_q_modules + [
+        "kv_a_proj_with_mqa",
+        "kv_b_proj",
+        "o_proj",
+        "gate_proj",
+        "up_proj",
+        "down_proj",
+    ]
+    assert "k_proj" not in args.target_modules
+    assert "v_proj" not in args.target_modules

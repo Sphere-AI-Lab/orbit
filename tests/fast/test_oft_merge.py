@@ -148,33 +148,13 @@ def test_oft_original_strategy_merges_native_oft_r_key():
     assert torch.allclose(got, ref, atol=1e-6)
 
 
-def test_oft_original_strategy_merges_dsv4_grouped_moe_oft_keys():
-    keys = [
-        "decoder.layers.0.mlp.experts.w1_oft_r",
-        "decoder.layers.0.mlp.experts.w2_oft_r",
-        "decoder.layers.0.mlp.experts.w3_oft_r",
-    ]
-    adapters = [
-        {key: _rand_vec(num_blocks=3, block_size=4, seed=s + i) for i, key in enumerate(keys)} for s in (211, 221, 231)
-    ]
-    merged = get_strategy("oft-original").merge(adapters)
-    for key in keys:
-        tensors = [ad[key] for ad in adapters]
-        ref = _ref_orthomerge(tensors, block_size=4)
-        plain_mean = torch.stack([t.float() for t in tensors]).mean(0)
-        assert torch.allclose(merged[key].double(), ref, atol=1e-6)
-        assert not torch.allclose(merged[key], plain_mean.to(merged[key].dtype), atol=1e-6)
-
-
-def test_oft_original_strategy_merges_dsv4_shaped_grouped_moe_oft_tensor():
+@pytest.mark.parametrize("method", ["oft", "oft-original", "oft-naive"])
+def test_oft_strategies_reject_dsv4_native_tensor(method):
     key = "decoder.layers.0.mlp.experts.w1_oft_r"
-    adapters = [{key: _rand_vec(num_blocks=12, block_size=4, seed=s).reshape(4, 3, 6)} for s in (241, 242, 243)]
-    merged = get_strategy("oft-original").merge(adapters)[key]
-    ref = _ref_orthomerge([ad[key].reshape(-1, 6) for ad in adapters], block_size=4).reshape(4, 3, 6)
-    plain_mean = torch.stack([ad[key].float() for ad in adapters]).mean(0)
-    assert merged.shape == (4, 3, 6)
-    assert torch.allclose(merged.double(), ref, atol=1e-6)
-    assert not torch.allclose(merged, plain_mean.to(merged.dtype), atol=1e-6)
+    adapters = [{key: _rand_vec(num_blocks=12, block_size=4, seed=s).reshape(4, 3, 6)} for s in (241, 242)]
+
+    with pytest.raises(NotImplementedError, match="DSV4"):
+        get_strategy(method).merge(adapters)
 
 
 def test_oft_original_strategy_does_not_treat_soft_or_classifier_keys_as_oft():

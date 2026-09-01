@@ -3,7 +3,7 @@ from argparse import Namespace
 import pytest
 
 from miles.ray import placement_group as placement_group_module
-from miles.ray.placement_group import _get_placement_group_layout
+from miles.ray.placement_group import _actor_needs_reference_weights, _get_placement_group_layout
 
 
 def _layout_args(**overrides):
@@ -38,6 +38,27 @@ def test_debug_train_only_counts_actor_bundles_once():
 
 def test_external_rollout_only_reserves_no_local_bundles():
     assert _get_placement_group_layout(_layout_args(debug_rollout_only=True, rollout_external=True)) == (0, 0)
+
+
+@pytest.mark.parametrize(
+    ("train_backend", "peft_method", "expected"),
+    [
+        ("megatron", "none", True),
+        ("megatron", "lora", False),
+        ("megatron", "oft", False),
+        ("fsdp", "lora", True),
+        ("fsdp", "oft", True),
+    ],
+)
+def test_reference_checkpoint_is_skipped_only_for_megatron_peft(train_backend, peft_method, expected):
+    args = Namespace(
+        kl_coef=0.1,
+        use_kl_loss=False,
+        train_backend=train_backend,
+        peft_method=peft_method,
+    )
+
+    assert _actor_needs_reference_weights(args) is expected
 
 
 async def test_critic_role_disables_reward_kl_and_preserves_actor_args(monkeypatch):

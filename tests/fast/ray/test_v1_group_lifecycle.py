@@ -106,3 +106,18 @@ async def test_debug_only_update_is_silent(debug_flag: str) -> None:
         await group.update_weights(2)
 
     assert events == []
+
+
+@pytest.mark.asyncio
+async def test_prefetch_train_state_broadcasts_to_every_v1_actor() -> None:
+    events: list = []
+    group = _make_group(events)
+
+    async def broadcast(method, *args, **kwargs):
+        events.append((method, args, kwargs))
+
+    group._broadcast = broadcast
+
+    await group.prefetch_train_state(9)
+
+    assert events == [("prefetch_train_state", (9,), {})]

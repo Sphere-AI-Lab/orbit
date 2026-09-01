@@ -136,6 +136,14 @@ class TestInit:
         all_handles = [h for handles in handles_per_cell for h in handles]
         assert len(set(id(h) for h in all_handles)) == 6
 
+    async def test_prefetch_train_state_reaches_every_alive_v2_cell(self):
+        group = RayTrainGroup.__new__(RayTrainGroup)
+        group._execute_all_alive_and_catch = AsyncMock()
+
+        await group.prefetch_train_state(11)
+
+        group._execute_all_alive_and_catch.assert_awaited_once_with("prefetch_train_state", 11)
+
     def test_single_cell_no_tcp_store(self):
         # indep_dp=False forces single cell regardless of TP/PP/CP product;
         # the autouse fixture handles allocate_gpus_for_actor.

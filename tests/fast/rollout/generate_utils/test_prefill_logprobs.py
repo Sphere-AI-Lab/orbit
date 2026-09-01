@@ -303,6 +303,16 @@ def test_batch_payload_rejects_mixed_lora_paths():
         prefill_logprobs._build_batch_prefill_scoring_payload(args, samples, {})
 
 
+def test_batch_payload_preserves_oft_adapter_selector(monkeypatch):
+    monkeypatch.delenv("MILES_DSV4_DISABLE_OFT_REQUEST", raising=False)
+    samples = [Sample(tokens=[10, 11, 20], response_length=1)]
+    args = SimpleNamespace(peft_method="oft", lora_rank=0)
+
+    payload = prefill_logprobs._build_batch_prefill_scoring_payload(args, samples, {})
+
+    assert payload["adapter_path"] == "miles_oft"
+
+
 @pytest.mark.asyncio
 async def test_recompute_samples_batches_by_logprob_start_len(monkeypatch):
     samples = [

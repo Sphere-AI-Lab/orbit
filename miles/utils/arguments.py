@@ -205,7 +205,26 @@ def _normalize_peft_args(args):
             args.oft_block_size > 0 or args.oft_adapter_path is not None
         ), "--peft-method oft requires --oft-block-size > 0 or an adapter path"
         if args.target_modules == "all-linear":
-            args.target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+            if getattr(args, "multi_latent_attention", False) and getattr(args, "peft_variant", "standard") != "dsv4":
+                q_modules = ["q_proj"] if getattr(args, "q_lora_rank", None) is None else ["q_a_proj", "q_b_proj"]
+                args.target_modules = q_modules + [
+                    "kv_a_proj_with_mqa",
+                    "kv_b_proj",
+                    "o_proj",
+                    "gate_proj",
+                    "up_proj",
+                    "down_proj",
+                ]
+            else:
+                args.target_modules = [
+                    "q_proj",
+                    "k_proj",
+                    "v_proj",
+                    "o_proj",
+                    "gate_proj",
+                    "up_proj",
+                    "down_proj",
+                ]
         elif isinstance(args.target_modules, str):
             args.target_modules = [name.strip() for name in args.target_modules.split(",")]
 
@@ -2097,7 +2116,7 @@ def get_miles_extra_args_provider(add_custom_arguments=None):
             )
             parser.add_argument(
                 "--lora-a-init-method",
-                choices=["xavier", "zeros", "normal"],
+                choices=["xavier", "uniform"],
                 default="xavier",
                 help="Initialization method for LoRA A matrices.",
             )
@@ -3354,6 +3373,59 @@ def _validate_model_response_trace_args(args: argparse.Namespace) -> None:
         raise ValueError("--model-response-trace-max-samples-per-step must be a positive integer")
 
 
+_FLAT_TRAIN_OFFLOAD_CONTROLS = (
+    "offload_train_adapter",
+    "offload_train_grad_buffers",
+    "offload_train_optimizer",
+    "offload_train_async",
+)
+
+
+def resolve_train_offload_mode(args: argparse.Namespace) -> str:
+    """Resolve the train-offload backend while preserving Miles's TMS default."""
+    mode = getattr(args, "offload_train_frozen_base_mode", "auto") or "auto"
+    if mode not in {"auto", "flat", "tms"}:
+        raise ValueError("--offload-train-frozen-base-mode must be one of: auto, flat, tms")
+    if mode != "auto":
+        return mode
+    return "flat" if any(bool(getattr(args, name, False)) for name in _FLAT_TRAIN_OFFLOAD_CONTROLS) else "tms"
+
+
+def _finalize_train_offload_args(args: argparse.Namespace) -> None:
+    """Normalize offload flags and reject unsupported backend combinations."""
+    if getattr(args, "offload_train", None) is None:
+        args.offload_train = False
+    if getattr(args, "offload_train_frozen_base_mode", None) is None:
+        args.offload_train_frozen_base_mode = "auto"
+
+    for name in _FLAT_TRAIN_OFFLOAD_CONTROLS:
+        if getattr(args, name, None) is None:
+            setattr(args, name, False)
+        if getattr(args, name) and not args.offload_train:
+            raise ValueError(f"--{name.replace('_', '-')} requires --offload-train")
+
+    requested_mode = args.offload_train_frozen_base_mode
+    resolved_mode = resolve_train_offload_mode(args)
+    flat_controls = [name for name in _FLAT_TRAIN_OFFLOAD_CONTROLS if getattr(args, name)]
+    if requested_mode == "tms" and flat_controls:
+        flags = ", ".join(f"--{name.replace('_', '-')}" for name in flat_controls)
+        raise ValueError(f"{flags} require --offload-train-frozen-base-mode=flat")
+
+    if not args.offload_train or resolved_mode != "flat":
+        return
+
+    if getattr(args, "offload_train_target", "cpu") != "cpu":
+        raise ValueError("--offload-train-frozen-base-mode=flat supports CPU offload only")
+    if getattr(args, "peft_variant", "standard") == "dsv4":
+        raise NotImplementedError("DSV4 is not supported by the flat train-offload backend")
+    if getattr(args, "peft_method", "none") == "none":
+        raise ValueError("--offload-train-frozen-base-mode=flat requires LoRA or OFT PEFT training")
+    if getattr(args, "rematerialize_param_from_master_weight", False):
+        raise ValueError(
+            "--rematerialize-param-from-master-weight is only supported by " "--offload-train-frozen-base-mode=tms"
+        )
+
+
 def _validate_rematerialize_param_from_master_weight(args):
     if not args.rematerialize_param_from_master_weight:
         return
@@ -3898,17 +3970,7 @@ def miles_validate_args(args):
         args.offload_train = False
     if args.offload_rollout is None:
         args.offload_rollout = False
-    for name in (
-        "offload_train_adapter",
-        "offload_train_grad_buffers",
-        "offload_train_optimizer",
-        "offload_train_async",
-    ):
-        if getattr(args, name, None) is None:
-            setattr(args, name, False)
-        if getattr(args, name) and not args.offload_train:
-            raise ValueError(f"--{name.replace('_', '-')} requires --offload-train")
-
+    _finalize_train_offload_args(args)
     if args.offload_train:
         args.disable_grad_buffers_cpu_backup = True
         args.disable_param_buffers_cpu_backup = True

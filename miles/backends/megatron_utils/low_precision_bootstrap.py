@@ -900,11 +900,27 @@ def load_dist_checkpoint(parallel_model, dist_weight_path: str, *, is_value_mode
 
         orig_apply_swiglu = moe_experts.apply_swiglu_sharded_factory
 
-        def _safe_apply_swiglu(original_sh_ten, sharded_offsets, singleton_local_shards=False):
+        def _safe_apply_swiglu(
+            original_sh_ten,
+            sharded_offsets,
+            singleton_local_shards=False,
+            tp_group=None,
+            dp_group=None,
+        ):
             local_shape = getattr(original_sh_ten, "local_shape", None)
             if local_shape is not None and len(local_shape) > 0 and local_shape[0] == 0:
                 return original_sh_ten
-            return orig_apply_swiglu(original_sh_ten, sharded_offsets, singleton_local_shards)
+            group_kwargs = {}
+            if tp_group is not None:
+                group_kwargs["tp_group"] = tp_group
+            if dp_group is not None:
+                group_kwargs["dp_group"] = dp_group
+            return orig_apply_swiglu(
+                original_sh_ten,
+                sharded_offsets,
+                singleton_local_shards,
+                **group_kwargs,
+            )
 
         moe_experts.apply_swiglu_sharded_factory = _safe_apply_swiglu
 
@@ -960,13 +976,19 @@ def load_dist_checkpoint(parallel_model, dist_weight_path: str, *, is_value_mode
             if int4_mode or fp8_mode or nvfp4_mode:
                 _materialize_meta_sharded_tensor_data(sharded_state_dict)
 
+            validate_access_integrity = torch.distributed.is_initialized() and torch.distributed.get_world_size() > 1
             if strict_handling is None:
-                loaded_state_dict = dist_checkpointing.load(sharded_state_dict, resolved_dist_path)
+                loaded_state_dict = dist_checkpointing.load(
+                    sharded_state_dict,
+                    resolved_dist_path,
+                    validate_access_integrity=validate_access_integrity,
+                )
             else:
                 loaded_state_dict = dist_checkpointing.load(
                     sharded_state_dict,
                     resolved_dist_path,
                     strict=strict_handling,
+                    validate_access_integrity=validate_access_integrity,
                 )
 
             post_load_state_dict = loaded_state_dict if loaded_state_dict is not None else sharded_state_dict

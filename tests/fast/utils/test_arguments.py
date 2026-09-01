@@ -9,6 +9,7 @@ import pytest
 from miles.backends.sglang_utils.arguments import add_sglang_arguments, collect_eval_sglang_overrides
 from miles.backends.sglang_utils.arguments import validate_args as validate_sglang_args
 from miles.utils.arguments import (
+    _finalize_train_offload_args,
     _maybe_apply_dumper_overrides,
     _resolve_ft_components,
     _resolve_rollout_functions,
@@ -21,6 +22,7 @@ from miles.utils.arguments import (
     hf_validate_args,
     miles_validate_args,
     resolve_rollout_function_paths,
+    resolve_train_offload_mode,
     validate_async_off_policy_correction,
     validate_skip_actor_forward_only,
 )
@@ -28,6 +30,67 @@ from miles.utils.misc import function_registry
 
 PATH_ARGS = ["--rollout-function-path", "--custom-generate-function-path"]
 REQUIRED_ARGS = ["--rollout-batch-size", "64"]
+
+
+def _train_offload_args(**overrides) -> SimpleNamespace:
+    defaults = dict(
+        offload_train=True,
+        offload_train_adapter=False,
+        offload_train_grad_buffers=False,
+        offload_train_optimizer=False,
+        offload_train_async=False,
+        offload_train_frozen_base_mode="auto",
+        offload_train_target="cpu",
+        peft_method="oft",
+        peft_variant="standard",
+    )
+    defaults.update(overrides)
+    return SimpleNamespace(**defaults)
+
+
+def test_train_offload_auto_preserves_miles_tms_default():
+    assert resolve_train_offload_mode(_train_offload_args()) == "tms"
+
+
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "offload_train_adapter",
+        "offload_train_grad_buffers",
+        "offload_train_optimizer",
+        "offload_train_async",
+    ],
+)
+def test_train_offload_auto_selects_flat_backend_for_orbit_controls(flag):
+    assert resolve_train_offload_mode(_train_offload_args(**{flag: True})) == "flat"
+
+
+def test_explicit_tms_rejects_orbit_only_controls():
+    args = _train_offload_args(
+        offload_train_frozen_base_mode="tms",
+        offload_train_async=True,
+    )
+
+    with pytest.raises(ValueError, match="flat"):
+        _finalize_train_offload_args(args)
+
+
+def test_flat_offload_rejects_disk_and_dsv4():
+    with pytest.raises(ValueError, match="CPU"):
+        _finalize_train_offload_args(
+            _train_offload_args(
+                offload_train_frozen_base_mode="flat",
+                offload_train_target="disk",
+            )
+        )
+
+    with pytest.raises(NotImplementedError, match="DSV4"):
+        _finalize_train_offload_args(
+            _train_offload_args(
+                offload_train_frozen_base_mode="flat",
+                peft_variant="dsv4",
+            )
+        )
 
 
 class TestValidateModelResponseTraceArgs:
@@ -128,6 +191,17 @@ class TestAddArgumentsSupport:
         ):
             parser = argparse.ArgumentParser()
             get_miles_extra_args_provider()(parser)
+
+
+def test_lora_a_init_cli_matches_bridge_supported_methods():
+    parser = argparse.ArgumentParser()
+    get_miles_extra_args_provider()(parser)
+
+    args, _ = parser.parse_known_args(["--rollout-batch-size", "1", "--lora-a-init-method", "uniform"])
+    assert args.lora_a_init_method == "uniform"
+
+    with pytest.raises(SystemExit):
+        parser.parse_known_args(["--rollout-batch-size", "1", "--lora-a-init-method", "normal"])
 
 
 class TestMaybeApplyDumperOverrides:

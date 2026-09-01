@@ -64,6 +64,15 @@ def _is_oft_key(name: StateKey) -> bool:
     return ".oft_" in _local_name(name)
 
 
+def _is_dsv4_grouped_moe_oft_key(name: StateKey) -> bool:
+    return _local_name(name).lower().replace("/", ".").rsplit(".", 1)[-1] in _DSV4_GROUPED_MOE_OFT_PARAM_NAMES
+
+
+def _reject_dsv4_grouped_moe_oft_keys(keys: list[StateKey]) -> None:
+    if any(_is_dsv4_grouped_moe_oft_key(key) for key in keys):
+        raise NotImplementedError("DSV4 native OFT adapter merging is not supported")
+
+
 def _is_original_oft_key(name: StateKey) -> bool:
     parts = _local_name(name).lower().replace("/", ".").split(".")
     if any("classifier" in part for part in parts):
@@ -154,6 +163,7 @@ class OFTLieAlgebraMerge(MergeStrategy):
         if len(adapters) < 2:
             raise ValueError("OFT merge requires >= 2 adapters")
         keys = list(adapters[0].keys())
+        _reject_dsv4_grouped_moe_oft_keys(keys)
         key_set = set(keys)
         for i, ad in enumerate(adapters[1:], start=1):
             if set(ad.keys()) != key_set:
@@ -194,6 +204,7 @@ class OFTOriginalFormulaMerge(MergeStrategy):
         if len(adapters) < 2:
             raise ValueError("OFT original merge requires >= 2 adapters")
         keys = list(adapters[0].keys())
+        _reject_dsv4_grouped_moe_oft_keys(keys)
         key_set = set(keys)
         for i, ad in enumerate(adapters[1:], start=1):
             if set(ad.keys()) != key_set:
@@ -234,6 +245,7 @@ class OFTNaiveMerge(MergeStrategy):
         if len(adapters) < 2:
             raise ValueError("OFT merge requires >= 2 adapters")
         keys = list(adapters[0].keys())
+        _reject_dsv4_grouped_moe_oft_keys(keys)
         key_set = set(keys)
         for i, ad in enumerate(adapters[1:], start=1):
             if set(ad.keys()) != key_set:

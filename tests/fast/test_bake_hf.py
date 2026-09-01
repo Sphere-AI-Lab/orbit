@@ -1,7 +1,31 @@
 import pytest
 import torch
 
+import miles.merge.bake_hf as bake_hf
 from miles.merge.bake_hf import bake_linear_weight, cayley_neumann, skew_from_vec
+
+
+class _FakeSaver:
+    def save_pretrained(self, _output_dir):
+        return None
+
+
+class _FakeModel(_FakeSaver):
+    def __init__(self, state):
+        self.state = state
+
+    def to(self, _device):
+        return self
+
+    def state_dict(self):
+        return self.state
+
+
+def _install_fake_hf_model(monkeypatch, state):
+    model = _FakeModel(state)
+    monkeypatch.setattr("transformers.AutoModelForCausalLM.from_pretrained", lambda *_args, **_kwargs: model)
+    monkeypatch.setattr(bake_hf, "load_tokenizer", lambda _base: _FakeSaver())
+    return model
 
 
 def test_skew_is_antisymmetric():
@@ -36,6 +60,52 @@ def test_bake_rejects_dim_mismatch():
     R = torch.linalg.qr(torch.randn(3, 4, 4))[0]
     with pytest.raises(AssertionError):
         bake_linear_weight(W, R)
+
+
+def test_bake_embedding_uses_output_rotation_orientation():
+    weight = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    rotation = torch.tensor([[[0.0, -1.0], [1.0, 0.0]]])
+
+    baked = bake_hf.bake_embedding_weight(weight, rotation)
+
+    assert torch.equal(baked, torch.tensor([[2.0, -1.0], [4.0, -3.0]]))
+
+
+def test_bake_linear_repeats_shared_rotation_for_every_input_block():
+    weight = torch.tensor([[1.0, 2.0, 3.0, 4.0]])
+    rotation = torch.tensor([[[0.0, -1.0], [1.0, 0.0]]])
+
+    baked = bake_linear_weight(weight, rotation, block_share=True)
+
+    assert torch.equal(baked, torch.tensor([[-2.0, 1.0, -4.0, 3.0]]))
+
+
+def test_bake_hf_model_dispatches_embedding_output_rotation(monkeypatch, tmp_path):
+    adapter_dir = tmp_path / "adapter"
+    adapter_dir.mkdir()
+    (adapter_dir / "adapter_config.json").write_text('{"block_share": false}')
+    state = {"model.embed_tokens.weight": torch.tensor([[1.0, 2.0], [3.0, 4.0]])}
+    model = _install_fake_hf_model(monkeypatch, state)
+    adapter = {"base_model.model.model.embed_tokens.oft_R.weight": torch.tensor([[0.5]])}
+
+    bake_hf.bake_hf_model("base", str(adapter_dir), 2, str(tmp_path / "output"), adapter=adapter)
+
+    expected = torch.tensor([[-0.9375, 1.8750], [-1.3125, 4.5000]])
+    assert torch.equal(model.state["model.embed_tokens.weight"], expected)
+
+
+def test_bake_hf_model_honors_block_share_config(monkeypatch, tmp_path):
+    adapter_dir = tmp_path / "adapter"
+    adapter_dir.mkdir()
+    (adapter_dir / "adapter_config.json").write_text('{"block_share": true}')
+    state = {"model.layers.0.q_proj.weight": torch.tensor([[1.0, 2.0, 3.0, 4.0]])}
+    model = _install_fake_hf_model(monkeypatch, state)
+    adapter = {"base_model.model.model.layers.0.q_proj.oft_R.weight": torch.tensor([[0.5]])}
+
+    bake_hf.bake_hf_model("base", str(adapter_dir), 2, str(tmp_path / "output"), adapter=adapter)
+
+    expected = torch.tensor([[2.0625, 0.3750, 4.6875, 0.0000]])
+    assert torch.equal(model.state["model.layers.0.q_proj.weight"], expected)
 
 
 def test_hf_weight_key_mapping():
