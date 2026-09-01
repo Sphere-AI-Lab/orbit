@@ -603,11 +603,6 @@ def test_peft_checkpoint_save_threads_no_save_optim_from_args(monkeypatch, tmp_p
 
     monkeypatch.setattr(bridge_module, "AutoBridge", _Bridge, raising=False)
     monkeypatch.setattr(megatron_bridge_utils, "patch_megatron_model", lambda model: nullcontext())
-    monkeypatch.setattr(
-        peft_utils,
-        "get_parallel_state",
-        lambda: SimpleNamespace(intra_dp_cp=SimpleNamespace(rank=0)),
-    )
     monkeypatch.setattr(peft_utils.mpu, "get_tensor_model_parallel_rank", lambda: 0, raising=False)
     monkeypatch.setattr(peft_utils.mpu, "get_pipeline_model_parallel_rank", lambda: 0, raising=False)
     monkeypatch.setattr(peft_utils, "native_adapter_state", lambda model: {"adapter": torch.ones(1)})
