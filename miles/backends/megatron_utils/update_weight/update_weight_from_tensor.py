@@ -45,6 +45,38 @@ from .update_weight_from_distributed.broadcast import (
 logger = logging.getLogger(__name__)
 
 
+def _barrier_with_logging(stage: str, *, group, rank: int, world_size: int, **fields) -> None:
+    _log_weight_sync_event(f"{stage}_enter", rank=rank, world_size=world_size, **fields)
+    dist.barrier(group=group)
+    _log_weight_sync_event(f"{stage}_exit", rank=rank, world_size=world_size, **fields)
+
+
+def _raise_distributed_peft_failure(local_error: Exception | None) -> None:
+    """Make a source-only adapter failure visible to every trainer rank."""
+    rank = dist.get_rank()
+    failure_record = None
+    if local_error is not None:
+        failure_record = {
+            "source_rank": rank,
+            "error": f"{type(local_error).__name__}: {local_error}",
+        }
+
+    gloo_group = get_gloo_group()
+    failure_records = [None] * dist.get_world_size(gloo_group)
+    dist.all_gather_object(failure_records, failure_record, group=gloo_group)
+    failure_record = next((record for record in failure_records if record is not None), None)
+    if failure_record is None:
+        return
+
+    message = (
+        "PEFT adapter dispatch failed on source rank "
+        f"{failure_record['source_rank']}: {failure_record['error']}"
+    )
+    if local_error is not None and failure_record["source_rank"] == rank:
+        raise RuntimeError(message) from local_error
+    raise RuntimeError(message)
+
+
 # ORBIT-SEAM: the mixin carries orbit's added methods (_send_adapter_params, push_teacher_adapter,
 # _sync_mode_label); base's own four methods keep their names and signatures here
 class UpdateWeightFromTensor(OrbitUpdateWeightExtensions):
@@ -388,9 +420,49 @@ class UpdateWeightFromTensor(OrbitUpdateWeightExtensions):
             # ORBIT-SEAM: base sends every chunk through _send_hf_params; a PEFT run instead goes
             # through the home mixin's transport send, which may already hold completed results
             completed_results = None
-            if self._peft_sync_spec is not None:
+            if self._peft_sync_spec is not None and self.use_distribute:
+                chunk_error = None
+                try:
+                    refs, long_lived_tensors, completed_results = self._send_adapter_params(hf_named_tensors)
+                    results = completed_results if completed_results is not None else ray.get(refs)
+                    _log_weight_sync_event(
+                        "chunk_results_received",
+                        rank=rank,
+                        world_size=world_size,
+                        weight_version=self.weight_version,
+                        chunk_idx=sync_chunk_count,
+                        results_count=len(results),
+                    )
+                    _check_weight_sync_results(results, sync_type=_sync_type_label(self.peft_method))
+                except Exception as exc:  # noqa: BLE001 -- synchronized below
+                    chunk_error = exc
+                _raise_distributed_peft_failure(chunk_error)
+            elif self._peft_sync_spec is not None:
                 refs, long_lived_tensors, completed_results = self._send_adapter_params(hf_named_tensors)
+                results = completed_results if completed_results is not None else ray.get(refs)
+                _log_weight_sync_event(
+                    "chunk_results_received",
+                    rank=rank,
+                    world_size=world_size,
+                    weight_version=self.weight_version,
+                    chunk_idx=sync_chunk_count,
+                    results_count=len(results),
+                )
+                _check_weight_sync_results(results, sync_type=_sync_type_label(self.peft_method))
             else:
+                refs, long_lived_tensors = self._send_base_params(hf_named_tensors)
+                results = ray.get(refs)
+                _log_weight_sync_event(
+                    "chunk_results_received",
+                    rank=rank,
+                    world_size=world_size,
+                    weight_version=self.weight_version,
+                    chunk_idx=sync_chunk_count,
+                    results_count=len(results),
+                )
+                _check_weight_sync_results(results, sync_type=_sync_type_label(self.peft_method))
+
+
                 refs, long_lived_tensors = self._send_hf_params(hf_named_tensors)
             results = completed_results if completed_results is not None else ray.get(refs)
             _log_weight_sync_event(

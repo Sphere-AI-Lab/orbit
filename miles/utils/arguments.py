@@ -69,6 +69,35 @@ def reset_arg(parser, name, **kwargs):
         parser.add_argument(name, **kwargs)
 
 
+def _normalize_and_validate_peft_args(args):
+    _normalize_peft_args(args)
+
+    if args.peft_method != "none":
+        assert args.megatron_to_hf_mode == "bridge", "PEFT requires --megatron-to-hf-mode bridge."
+
+    return args
+
+
+def _validate_dsv4_cp_args(args):
+    if (getattr(args, "context_parallel_size", 1) or 1) <= 1:
+        return args
+    if getattr(args, "peft_variant", "standard") != "dsv4":
+        return args
+
+    requirement = (
+        "DeepSeek V4 CP currently requires qkv_format='thd', allgather_cp=False, "
+        "and Orbit dsv4_cu_seqlens metadata for Megatron packed THD zigzag CP"
+    )
+    if getattr(args, "qkv_format", None) != "thd":
+        raise ValueError(f"{requirement}; got qkv_format={getattr(args, 'qkv_format', None)!r}.")
+    if getattr(args, "allgather_cp", False):
+        raise ValueError(f"{requirement}; got allgather_cp=True.")
+    if int(getattr(args, "dsv4_cp_chunk_size_multiple", 128) or 0) <= 0:
+        raise ValueError("--dsv4-cp-chunk-size-multiple must be positive.")
+
+    return args
+
+
 def get_miles_extra_args_provider(add_custom_arguments=None):
     def add_miles_arguments(parser):
         # Ray

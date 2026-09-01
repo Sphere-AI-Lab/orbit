@@ -97,8 +97,8 @@
    "sha": "31f96696164bef449cfccf7506fe3be034076ff8227dcbfae4aecdabea51374f"
   },
   "miles/backends/megatron_utils/update_weight/update_weight_from_tensor.py": {
-   "delta_lines": 520,
-   "sha": "ecd91df3966caf7d2b4203c0d6c8c9e6b26de7beec4d52cf63e368b848827026"
+   "delta_lines": 592,
+   "sha": "9516c6d29f8b62a3a64ea1efd8c12aa7159e6fdb0bb259f30107cbad51cfdacf"
   },
   "miles/backends/sglang_utils/arguments.py": {
    "delta_lines": 138,
@@ -129,8 +129,8 @@
    "sha": "f6f77104c1f324f1005ca3acd4bc4e5f398bdbbc5768d5de4752c0170542c50a"
   },
   "miles/ray/rollout.py": {
-   "delta_lines": 241,
-   "sha": "5ad1d487deb4abba64438f7edfd3477fe48e59d2c10722f2add70e30798c98d5"
+   "delta_lines": 246,
+   "sha": "9a5b1de0a98da78d703e7c5f9f6c46d6750a239a9f61d8faf0474837088a76a3"
   },
   "miles/ray/train_actor.py": {
    "delta_lines": 10,
@@ -173,8 +173,8 @@
    "sha": "cabcdcb54fd2bb20a2961d9c968437b082e5233c6862b37f115f07e17f2ae6fe"
   },
   "miles/utils/arguments.py": {
-   "delta_lines": 152,
-   "sha": "03c28c29482b3dabd5d498cd1249487e8a4e44fec5413081393e5a39c32a326a"
+   "delta_lines": 181,
+   "sha": "b2b006923bf76873a65a433bc47f2fa48385f07e760580a9293c600d8645f81d"
   },
   "miles/utils/chat_template_utils/tito_tokenizer.py": {
    "delta_lines": 11,

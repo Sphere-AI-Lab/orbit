@@ -1031,6 +1031,11 @@ def _start_router(args, *, has_pd_disaggregation: bool = False, force_new: bool 
     """
     # ORBIT-SEAM: force Orbit's pass-through router for OFT rollout (sglang_router does not preserve oft_path)
     if _requires_orbit_router_passthrough(args):
+        if not force_new and args.sglang_router_ip is not None:
+            raise ValueError(
+                "OFT rollout cannot reuse --sglang-router-ip unless --use-orbit-router marks it as "
+                "a compatible pass-through router."
+            )
         if has_pd_disaggregation:
             raise RuntimeError(
                 "OFT rollout requires Orbit's pass-through router, which does not support PD disaggregation."
