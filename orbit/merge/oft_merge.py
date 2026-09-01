@@ -1,4 +1,5 @@
 """OrthoMerge OFT merge: magnitude-corrected Lie-algebra average on raw oft_R vectors."""
+
 from __future__ import annotations
 
 import logging
@@ -41,9 +42,9 @@ def magnitude_corrected_merge(
     if w.sum().abs().item() < eps:
         raise ValueError("weights sum to zero")
     w = w / w.sum()  # normalize to sum 1
-    weighted_sum = (w.view(n, 1, 1) * stacked).sum(dim=0)         # (B, P)
-    per_norms = stacked.flatten(1).norm(dim=1)                    # (N,)
-    target_mag = (w * per_norms).sum()                           # weighted avg strength
+    weighted_sum = (w.view(n, 1, 1) * stacked).sum(dim=0)  # (B, P)
+    per_norms = stacked.flatten(1).norm(dim=1)  # (N,)
+    target_mag = (w * per_norms).sum()  # weighted avg strength
     norm_of_sum = weighted_sum.norm()
     merged = target_mag * weighted_sum / (norm_of_sum + eps)
     return merged.to(out_dtype)
@@ -52,14 +53,7 @@ def magnitude_corrected_merge(
 def _local_name(key: StateKey) -> str:
     if type(key) is str:
         return key
-    if (
-        type(key) is tuple
-        and len(key) == 2
-        and type(key[0]) is int
-        and key[0] >= 0
-        and type(key[1]) is str
-        and key[1]
-    ):
+    if type(key) is tuple and len(key) == 2 and type(key[0]) is int and key[0] >= 0 and type(key[1]) is str and key[1]:
         return key[1]
     raise TypeError(f"invalid adapter state key {key!r}")
 
@@ -68,6 +62,15 @@ def _is_oft_key(name: StateKey) -> bool:
     # Mirrors orbit.megatron.oft_utils.is_oft_weight_name without
     # importing the megatron-coupled module.
     return ".oft_" in _local_name(name)
+
+
+def _is_dsv4_grouped_moe_oft_key(name: StateKey) -> bool:
+    return _local_name(name).lower().replace("/", ".").rsplit(".", 1)[-1] in _DSV4_GROUPED_MOE_OFT_PARAM_NAMES
+
+
+def _reject_dsv4_grouped_moe_oft_keys(keys: list[StateKey]) -> None:
+    if any(_is_dsv4_grouped_moe_oft_key(key) for key in keys):
+        raise NotImplementedError("DSV4 native OFT adapter merging is not supported")
 
 
 def _is_original_oft_key(name: StateKey) -> bool:
@@ -99,9 +102,7 @@ def oft_params_to_skew_matrix(oft_params: torch.Tensor, block_size: int | None =
         block_size = infer_oft_block_size(num_params)
     expected = block_size * (block_size - 1) // 2
     if num_params != expected:
-        raise ValueError(
-            f"num_params_per_block={num_params} does not match block_size={block_size}"
-        )
+        raise ValueError(f"num_params_per_block={num_params} does not match block_size={block_size}")
     leading_shape = oft_params.shape[:-1]
     flat_params = oft_params.reshape(-1, num_params)
     indices = torch.triu_indices(block_size, block_size, offset=1, device=oft_params.device)
@@ -162,14 +163,12 @@ class OFTLieAlgebraMerge(MergeStrategy):
         if len(adapters) < 2:
             raise ValueError("OFT merge requires >= 2 adapters")
         keys = list(adapters[0].keys())
+        _reject_dsv4_grouped_moe_oft_keys(keys)
         key_set = set(keys)
         for i, ad in enumerate(adapters[1:], start=1):
             if set(ad.keys()) != key_set:
                 missing = key_set ^ set(ad.keys())
-                raise ValueError(
-                    f"adapter {i} key set differs; symmetric diff: "
-                    f"{sorted(missing, key=repr)[:5]}"
-                )
+                raise ValueError(f"adapter {i} key set differs; symmetric diff: " f"{sorted(missing, key=repr)[:5]}")
         merged: StateDict = {}
         non_oft: list[StateKey] = []
         for key in keys:
@@ -205,14 +204,12 @@ class OFTOriginalFormulaMerge(MergeStrategy):
         if len(adapters) < 2:
             raise ValueError("OFT original merge requires >= 2 adapters")
         keys = list(adapters[0].keys())
+        _reject_dsv4_grouped_moe_oft_keys(keys)
         key_set = set(keys)
         for i, ad in enumerate(adapters[1:], start=1):
             if set(ad.keys()) != key_set:
                 missing = key_set ^ set(ad.keys())
-                raise ValueError(
-                    f"adapter {i} key set differs; symmetric diff: "
-                    f"{sorted(missing, key=repr)[:5]}"
-                )
+                raise ValueError(f"adapter {i} key set differs; symmetric diff: " f"{sorted(missing, key=repr)[:5]}")
         merged: StateDict = {}
         non_oft: list[StateKey] = []
         for key in keys:
@@ -248,6 +245,7 @@ class OFTNaiveMerge(MergeStrategy):
         if len(adapters) < 2:
             raise ValueError("OFT merge requires >= 2 adapters")
         keys = list(adapters[0].keys())
+        _reject_dsv4_grouped_moe_oft_keys(keys)
         key_set = set(keys)
         for i, ad in enumerate(adapters[1:], start=1):
             if set(ad.keys()) != key_set:
@@ -257,7 +255,7 @@ class OFTNaiveMerge(MergeStrategy):
         wsum = float(sum(w))
         merged: StateDict = {}
         for key in keys:
-            stacked = torch.stack([ad[key].float() for ad in adapters])           # (N, ...)
+            stacked = torch.stack([ad[key].float() for ad in adapters])  # (N, ...)
             wt = torch.tensor(w, dtype=torch.float32).view(n, *([1] * (stacked.dim() - 1)))
             merged[key] = ((wt * stacked).sum(0) / wsum).to(adapters[0][key].dtype)
         return merged

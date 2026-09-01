@@ -170,3 +170,13 @@ async def test_recompute_samples_batches_by_logprob_start_len(monkeypatch):
     assert calls[1][1]["input_ids"] == [[10, 11, 20], [10, 11, 22]]
     assert calls[3][1]["logprob_start_len"] == 2
     assert calls[3][1]["input_ids"] == [[10, 11, 12, 21]]
+
+
+def test_batch_payload_preserves_oft_adapter_selector(monkeypatch):
+    monkeypatch.delenv("ORBIT_DSV4_DISABLE_OFT_REQUEST", raising=False)
+    samples = [Sample(tokens=[10, 11, 20], response_length=1)]
+    args = SimpleNamespace(peft_method="oft")
+
+    payload = prefill_logprobs._build_batch_prefill_scoring_payload(args, samples, {})
+
+    assert payload["adapter_path"] == "orbit_oft"

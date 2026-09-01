@@ -63,12 +63,12 @@ uv pip install "nvidia-ml-py>=12.560.30" "fastapi[standard]>=0.115.0" "optree>=0
 uv pip install nvidia-mathdx==25.6.0
 ```
 
-### 5. TransformerEngine @ 71bbefbf153418f943640df0f7373625dc93fa46
+### 5. TransformerEngine @ f031cf87bd054c7558b887df7bed93975456667f
 
 ```bash
 uv pip install pybind11
 # export NVTE_FRAMEWORK=pytorch
-# MAX_JOBS=16 NVTE_BUILD_THREADS_PER_JOB=2 uv pip install --reinstall --no-cache --no-build-isolation git+https://github.com/NVIDIA/TransformerEngine.git@71bbefbf153418f943640df0f7373625dc93fa46
+# MAX_JOBS=16 NVTE_BUILD_THREADS_PER_JOB=2 uv pip install --reinstall --no-cache --no-build-isolation git+https://github.com/NVIDIA/TransformerEngine.git@f031cf87bd054c7558b887df7bed93975456667f
 uv pip install "$ORBIT_BUILD_WHEELS/transformer_engine-2.14.0-cp312-cp312-linux_x86_64.whl"
 ```
 

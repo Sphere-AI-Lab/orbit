@@ -5,8 +5,10 @@ what orbit serves: R via the 5-term Cayley-Neumann series (mirrors
 megatron.bridge.orbit.oft.oft_layers._cayley_batch), applied as a block-diagonal INPUT
 rotation (W' = W @ blockdiag(R^T), matching the forward einsum '...rk,rkc->...rc').
 """
+
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import torch
@@ -37,7 +39,7 @@ def cayley_neumann(oft_r: torch.Tensor, block_size: int, num_terms: int = 5) -> 
     carries coefficient 1.0, matching megatron.bridge.orbit.oft.oft_layers._cayley_batch
     and its Triton kernel exactly.
     """
-    Q = skew_from_vec(oft_r.float(), block_size)             # (nb, b, b)
+    Q = skew_from_vec(oft_r.float(), block_size)  # (nb, b, b)
     nb, b, _ = Q.shape
     R = torch.eye(b, device=Q.device, dtype=Q.dtype).expand(nb, b, b).clone()
     if num_terms > 1:
@@ -45,12 +47,28 @@ def cayley_neumann(oft_r: torch.Tensor, block_size: int, num_terms: int = 5) -> 
         q_power = Q
         for term in range(2, num_terms):
             q_power = torch.bmm(q_power, Q)
-            coeff = 2.0 if term < num_terms - 1 else 1.0   # last term coefficient is 1
+            coeff = 2.0 if term < num_terms - 1 else 1.0  # last term coefficient is 1
             R = R + coeff * q_power
     return R
 
 
-def bake_linear_weight(weight: torch.Tensor, rotation: torch.Tensor) -> torch.Tensor:
+def _expand_shared_rotation(rotation: torch.Tensor, in_features: int, block_share: bool) -> torch.Tensor:
+    if not block_share:
+        return rotation
+    if rotation.shape[0] != 1:
+        raise ValueError(f"block-shared OFT expects one rotation block, got {rotation.shape[0]}")
+    block_size = rotation.shape[1]
+    if in_features % block_size != 0:
+        raise ValueError(f"input width {in_features} is not divisible by block size {block_size}")
+    return rotation.repeat(in_features // block_size, 1, 1)
+
+
+def bake_linear_weight(
+    weight: torch.Tensor,
+    rotation: torch.Tensor,
+    *,
+    block_share: bool = False,
+) -> torch.Tensor:
     """W' = W @ blockdiag(R^T): the input-side block rotation baked into a linear's
     weight. weight:(out, in), rotation:(num_blocks, b, b), in == num_blocks*b.
 
@@ -59,12 +77,43 @@ def bake_linear_weight(weight: torch.Tensor, rotation: torch.Tensor) -> torch.Te
     W'[o, r, k] = sum_c W[o, r, c] * R[r, k, c].
     """
     out_f, in_f = weight.shape
+    rotation = _expand_shared_rotation(rotation, in_f, block_share)
     nb, b, b2 = rotation.shape
     assert b == b2, f"non-square rotation block: {rotation.shape}"
     assert in_f == nb * b, f"in_features {in_f} != num_blocks*block_size {nb * b}"
     w_blocked = weight.float().reshape(out_f, nb, b)
     w_prime = torch.einsum("orc,rkc->ork", w_blocked, rotation.float())
     return w_prime.reshape(out_f, in_f).to(weight.dtype)
+
+
+def bake_embedding_weight(
+    weight: torch.Tensor,
+    rotation: torch.Tensor,
+    *,
+    block_share: bool = False,
+) -> torch.Tensor:
+    """Bake an output-side OFT rotation into an embedding table as ``W @ R``."""
+    vocab_size, hidden_size = weight.shape
+    rotation = _expand_shared_rotation(rotation, hidden_size, block_share)
+    num_blocks, block_size, block_size_2 = rotation.shape
+    assert block_size == block_size_2, f"non-square rotation block: {rotation.shape}"
+    assert (
+        hidden_size == num_blocks * block_size
+    ), f"hidden_size {hidden_size} != num_blocks*block_size {num_blocks * block_size}"
+    blocked = weight.float().reshape(vocab_size, num_blocks, block_size)
+    baked = torch.einsum("vrc,rck->vrk", blocked, rotation.float())
+    return baked.reshape(vocab_size, hidden_size).to(weight.dtype)
+
+
+def _is_embedding_weight_key(weight_key: str) -> bool:
+    return weight_key.endswith(
+        (
+            ".embed_tokens.weight",
+            ".word_embeddings.weight",
+            ".tok_embeddings.weight",
+            ".wte.weight",
+        )
+    )
 
 
 def _hf_weight_key(oft_key: str) -> str:
@@ -94,7 +143,12 @@ def bake_hf_model(
 
     if adapter is None:
         from safetensors.torch import load_file
+
         adapter = load_file(str(Path(merged_adapter_dir) / "adapter_model.safetensors"))
+    config = json.loads((Path(merged_adapter_dir) / "adapter_config.json").read_text())
+    block_share = config.get("block_share", False)
+    if type(block_share) is not bool:
+        raise ValueError(f"adapter block_share must be a boolean, got {block_share!r}")
     model = AutoModelForCausalLM.from_pretrained(base_model_path, torch_dtype=torch.bfloat16)
     model.to(device)
     state = model.state_dict()
@@ -107,7 +161,11 @@ def bake_hf_model(
             if weight_key not in state:
                 raise KeyError(f"no HF weight {weight_key!r} for adapter key {oft_key!r}")
             rotation = cayley_neumann(oft_r.to(device), block_size)
-            state[weight_key].copy_(bake_linear_weight(state[weight_key], rotation))
+            if _is_embedding_weight_key(weight_key):
+                baked_weight = bake_embedding_weight(state[weight_key], rotation, block_share=block_share)
+            else:
+                baked_weight = bake_linear_weight(state[weight_key], rotation, block_share=block_share)
+            state[weight_key].copy_(baked_weight)
             baked += 1
     if baked == 0:
         raise ValueError("no .oft_ keys found in merged adapter; nothing baked")
