@@ -407,6 +407,16 @@ def test_ipc_send_adapter_records_flat_tensor_bytes(monkeypatch):
             object_gather_list[0] = obj
 
     monkeypatch.setattr(ipc_mod.dist, "gather_object", fake_gather_object)
+    # orbit-main c49e7fca added _synchronize_source_result, which makes a source-rank RPC
+    # failure visible to every trainer rank over the GLOBAL gloo group. Production always
+    # has that group (train_actor.py calls init_gloo_group at actor init); this unit test
+    # does not, so stub the group and its one collective.
+    monkeypatch.setattr(ipc_mod, "get_gloo_group", lambda: None)
+
+    def fake_all_gather_object(records, record, group=None):
+        records[0] = record
+
+    monkeypatch.setattr(ipc_mod.dist, "all_gather_object", fake_all_gather_object)
     monkeypatch.setattr(
         ipc_mod.MultiprocessingSerializer, "serialize", staticmethod(lambda obj, output_str=False: "blob")
     )
