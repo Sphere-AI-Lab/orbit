@@ -97,7 +97,7 @@ def _build_batch_prefill_scoring_payload(
         "return_logprob": True,
         "logprob_start_len": logprob_start_len,
     }
-    for adapter_key in ("lora_path", "oft_path"):
+    for adapter_key in ("lora_path", "oft_path", "adapter_path"):
         if adapter_key in payloads[0]:
             batch_payload[adapter_key] = payloads[0][adapter_key]
     return batch_payload

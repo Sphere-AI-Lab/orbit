@@ -245,7 +245,7 @@ sglang = { git = "https://github.com/Sphere-AI-Lab/sglang.git", rev = "0ab4a2de7
 # race (tilelang's libcudart_stub.so shadows the real lib). Keep source build until
 # that orbit/tilelang issue is fixed.
 # (Prebuilt alt: { url = "https://github.com/liulixinkerry/orbit-build-wheels/releases/download/cu132-torch211-ubuntu2204/transformer_engine-2.14.0-cp312-cp312-linux_x86_64.whl" })
-transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", rev = "71bbefbf153418f943640df0f7373625dc93fa46" }
+transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", rev = "f031cf87bd054c7558b887df7bed93975456667f" }
 fast-hadamard-transform = { git = "https://github.com/Dao-AILab/fast-hadamard-transform.git", rev = "e7706faf8d1c3b9f241e36860640ad1dac644ede" }
 deep-gemm-official = { git = "https://github.com/liulixinkerry/DeepGEMM.git", rev = "18db30e9db9703b906e9ab3803fbbc1a64be1520" }
 # The v0.5.18 base moved the kernel tree from sgl-kernel/ to

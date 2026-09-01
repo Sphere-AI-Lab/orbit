@@ -910,12 +910,16 @@ def load_dist_checkpoint(parallel_model, dist_weight_path: str, *, is_value_mode
             local_shape = getattr(original_sh_ten, "local_shape", None)
             if local_shape is not None and len(local_shape) > 0 and local_shape[0] == 0:
                 return original_sh_ten
+            group_kwargs = {}
+            if tp_group is not None:
+                group_kwargs["tp_group"] = tp_group
+            if dp_group is not None:
+                group_kwargs["dp_group"] = dp_group
             return orig_apply_swiglu(
                 original_sh_ten,
                 sharded_offsets,
                 singleton_local_shards,
-                tp_group=tp_group,
-                dp_group=dp_group,
+                **group_kwargs,
             )
 
         moe_experts.apply_swiglu_sharded_factory = _safe_apply_swiglu

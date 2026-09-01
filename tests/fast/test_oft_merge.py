@@ -21,11 +21,13 @@ def _rand_vec(num_blocks=3, block_size=4, seed=0):
 def _ref_orthomerge(vecs, block_size):
     """Reference: OrthoMerge's merge_cayley_Q_list via full skew matrices (equal weights)."""
     idx = torch.triu_indices(block_size, block_size, 1)
+
     def to_skew(v):
         B, _ = v.shape
         S = torch.zeros(B, block_size, block_size, dtype=torch.float64)
         S[:, idx[0], idx[1]] = v.double()
         return S - S.transpose(-1, -2)
+
     Ss = [to_skew(v) for v in vecs]
     stack = torch.stack(Ss, 0)
     merged_sum = stack.sum(0)
@@ -146,37 +148,13 @@ def test_oft_original_strategy_merges_native_oft_r_key():
     assert torch.allclose(got, ref, atol=1e-6)
 
 
-def test_oft_original_strategy_merges_dsv4_grouped_moe_oft_keys():
-    keys = [
-        "decoder.layers.0.mlp.experts.w1_oft_r",
-        "decoder.layers.0.mlp.experts.w2_oft_r",
-        "decoder.layers.0.mlp.experts.w3_oft_r",
-    ]
-    adapters = [
-        {key: _rand_vec(num_blocks=3, block_size=4, seed=s + i) for i, key in enumerate(keys)}
-        for s in (211, 221, 231)
-    ]
-    merged = get_strategy("oft-original").merge(adapters)
-    for key in keys:
-        tensors = [ad[key] for ad in adapters]
-        ref = _ref_orthomerge(tensors, block_size=4)
-        plain_mean = torch.stack([t.float() for t in tensors]).mean(0)
-        assert torch.allclose(merged[key].double(), ref, atol=1e-6)
-        assert not torch.allclose(merged[key], plain_mean.to(merged[key].dtype), atol=1e-6)
-
-
-def test_oft_original_strategy_merges_dsv4_shaped_grouped_moe_oft_tensor():
+@pytest.mark.parametrize("method", ["oft", "oft-original", "oft-naive"])
+def test_oft_strategies_reject_dsv4_native_tensor(method):
     key = "decoder.layers.0.mlp.experts.w1_oft_r"
-    adapters = [
-        {key: _rand_vec(num_blocks=12, block_size=4, seed=s).reshape(4, 3, 6)}
-        for s in (241, 242, 243)
-    ]
-    merged = get_strategy("oft-original").merge(adapters)[key]
-    ref = _ref_orthomerge([ad[key].reshape(-1, 6) for ad in adapters], block_size=4).reshape(4, 3, 6)
-    plain_mean = torch.stack([ad[key].float() for ad in adapters]).mean(0)
-    assert merged.shape == (4, 3, 6)
-    assert torch.allclose(merged.double(), ref, atol=1e-6)
-    assert not torch.allclose(merged, plain_mean.to(merged.dtype), atol=1e-6)
+    adapters = [{key: _rand_vec(num_blocks=12, block_size=4, seed=s).reshape(4, 3, 6)} for s in (241, 242)]
+
+    with pytest.raises(NotImplementedError, match="DSV4"):
+        get_strategy(method).merge(adapters)
 
 
 def test_oft_original_strategy_does_not_treat_soft_or_classifier_keys_as_oft():
@@ -186,10 +164,7 @@ def test_oft_original_strategy_does_not_treat_soft_or_classifier_keys_as_oft():
         "some_oft_config",
         "classifier.oft_R.weight",
     ]
-    adapters = [
-        {key: _rand_vec(num_blocks=3, block_size=4, seed=s) for key in keys}
-        for s in (201, 202, 203)
-    ]
+    adapters = [{key: _rand_vec(num_blocks=3, block_size=4, seed=s) for key in keys} for s in (201, 202, 203)]
     merged = get_strategy("oft-original").merge(adapters)
     for key in keys:
         expected = torch.stack([ad[key].float() for ad in adapters]).mean(0)
