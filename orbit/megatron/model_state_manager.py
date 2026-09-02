@@ -60,7 +60,16 @@ class FullModelStateManager:
     mode = "full_model"
 
     def __init__(self, source_getter: TensorSource, single_tag: str | None):
-        self._backuper = TensorBackuper.create(source_getter=source_getter, single_tag=single_tag)
+        # Upstream (dbbab1566) retired --enable-weights-backuper and the single_tag
+        # argument of TensorBackuper.create (now create(source_getter, main_cast_ctx=None));
+        # the fork base's _TensorBackuperNoop(single_tag) has no counterpart here, so a
+        # non-None tag cannot be honoured and must not be dropped silently.
+        if single_tag is not None:
+            raise ValueError(
+                f"FullModelStateManager: single_tag={single_tag!r} is unsupported on this miles base "
+                "(the weights-backuper opt-out was retired upstream); pass None."
+            )
+        self._backuper = TensorBackuper.create(source_getter=source_getter)
 
     @property
     def backup_tags(self):
