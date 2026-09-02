@@ -245,8 +245,8 @@
    "sha": "c1d4decf5402a2eec54a20aa162657b6b2f03f499adc43e9b255062ad6e09874"
   },
   "pyproject.toml": {
-   "delta_lines": 294,
-   "sha": "fd1b24924aa3307196b8e7194d44d92f3cadac6deecf7e42390e82cf8cdf5937"
+   "delta_lines": 288,
+   "sha": "097dcb680dde66e9408cd765b075fb15c14dcfe29d6395ee319740ed04f3a9e4"
   },
   "requirements.txt": {
    "delta_lines": 38,
