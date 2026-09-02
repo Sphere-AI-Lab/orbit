@@ -49,7 +49,10 @@ PERF_KEYS = (
     "perf/step_time",
     "perf/update_weights_time",
     "perf/update_weights_pause_time",
+    "perf/update_weights_payload_bytes",
     "perf/rollout_time",
+    "perf/actor_train_time",
+    "perf/actor_train_tflops",
     "perf/train_wait_time",
     "perf/tokens_per_gpu_per_sec",
 )
@@ -215,7 +218,12 @@ def run_summary(run: RunSeries, *, last_k: int, warm_from: int) -> dict[str, Any
         "step_s": perf_mean["perf/step_time"],
         "update_s": perf_mean["perf/update_weights_time"],
         "pause_s": perf_mean["perf/update_weights_pause_time"],
+        "payload_mb": (perf_mean["perf/update_weights_payload_bytes"] or 0) / 1e6
+        if perf_mean["perf/update_weights_payload_bytes"] is not None
+        else None,
         "rollout_s": perf_mean["perf/rollout_time"],
+        "train_s": perf_mean["perf/actor_train_time"],
+        "tflops": perf_mean["perf/actor_train_tflops"],
         "train_wait_s": perf_mean["perf/train_wait_time"],
         "tok_per_gpu_s": perf_mean["perf/tokens_per_gpu_per_sec"],
         # Train/inference mismatch. Step 0 is the pure-numerics floor (engine and trainer
@@ -254,7 +262,10 @@ def arm_summary(
         arm_runs = [r for r in runs if r.mode == mode and r.rollouts]
         summaries = [run_summary(r, last_k=last_k, warm_from=warm_from) for r in arm_runs]
         row: dict[str, Any] = {"mode": mode, "n_seeds": len(arm_runs)}
-        keys = ("reward_last_k", "wall_s", "step_s", "update_s", "pause_s", "train_wait_s", "tok_per_gpu_s", "lp_gap")
+        keys = (
+            "reward_last_k", "wall_s", "step_s", "rollout_s", "train_s", "tflops", "update_s", "pause_s",
+            "payload_mb", "train_wait_s", "tok_per_gpu_s", "lp_gap",
+        )
         for key in keys:
             row[key], row[key + "_std"] = _mean_std([s[key] for s in summaries if s[key] is not None])
         # Runs whose warm-mean gap leaves the qualified envelope cannot support parity.
@@ -268,10 +279,19 @@ def arm_summary(
 
 
 def attribution(arm_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Wall-clock decomposition: sync -> async_fullft (overlap, not adapter-specific)
-    -> async_db (the adapter contribution: payload + swap). Missing arms are skipped."""
+    """Wall-clock decomposition over the same sample budget.
+
+    sync OFT -> async full-FT changes two things at once (the async loop AND the
+    absence of adapter kernels on both engine and trainer), so it is labelled as such
+    rather than as pure "overlap"; async full-FT -> async OFT isolates the adapter arm's
+    own cost or gain (OFT kernels on both sides plus the adapter sync path). Read the
+    per-arm rollout/train/update columns to see which phase moved. Missing arms skip.
+    """
     by_mode = {row["mode"]: row for row in arm_rows if row.get("wall_s") is not None}
-    steps = [("sync", "async_fullft", "overlap (any async system)"), ("async_fullft", "async_db", "adapter push + swap")]
+    steps = [
+        ("sync", "async_fullft", "sync OFT -> async full-FT (async loop + no adapter kernels)"),
+        ("async_fullft", "async_db", "async full-FT -> async OFT (adapter kernels + adapter sync)"),
+    ]
     rows = []
     for src, dst, label in steps:
         if src in by_mode and dst in by_mode:
@@ -279,7 +299,8 @@ def attribution(arm_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             rows.append({"from": src, "to": dst, "what": label, "wall_s_from": a, "wall_s_to": b, "speedup": a / b if b else None})
     if "sync" in by_mode and "async_db" in by_mode:
         a, b = by_mode["sync"]["wall_s"], by_mode["async_db"]["wall_s"]
-        rows.append({"from": "sync", "to": "async_db", "what": "total", "wall_s_from": a, "wall_s_to": b, "speedup": a / b if b else None})
+        rows.append({"from": "sync", "to": "async_db", "what": "sync OFT -> async OFT (total)", "wall_s_from": a,
+                     "wall_s_to": b, "speedup": a / b if b else None})
     return rows
 
 
@@ -305,25 +326,32 @@ def render_markdown(
     summaries = [run_summary(run, last_k=last_k, warm_from=warm_from) for run in runs]
     out.append("## Per run")
     out.append(
-        f"| run | mode | seed | rollouts | samples | wall s | reward (last {last_k}) | step s | update s | "
-        "pause s | wait s | tok/GPU/s | lp gap |"
+        f"| run | mode | seed | rollouts | samples | wall s | reward (last {last_k}) | step s | rollout s | train s | "
+        "TFLOP/s | update s | pause s | payload MB | wait s | tok/GPU/s | lp gap |"
     )
-    out.append("|:--|:--|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|")
+    out.append("|:--|:--|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|")
     for s in summaries:
         out.append(
             f"| {s['run_id']} | {s['mode']} | {_fmt(s['seed'])} | {s['n_rollouts']} | {s['samples']} | {_fmt(s['wall_s'], 0)} | "
-            f"{_fmt(s['reward_last_k'])} | {_fmt(s['step_s'], 2)} | {_fmt(s['update_s'])} | {_fmt(s['pause_s'])} | "
+            f"{_fmt(s['reward_last_k'])} | {_fmt(s['step_s'], 2)} | {_fmt(s['rollout_s'], 2)} | {_fmt(s['train_s'], 2)} | "
+            f"{_fmt(s['tflops'], 0)} | {_fmt(s['update_s'])} | {_fmt(s['pause_s'])} | {_fmt(s['payload_mb'], 0)} | "
             f"{_fmt(s['train_wait_s'], 2)} | {_fmt(s['tok_per_gpu_s'], 0)} | {_fmt(s['lp_gap'], 4)} |"
         )
     out.append("")
     out.append(f"## Per arm (mean ± std over seeds; timings over warm rollouts >= {warm_from})")
-    out.append(f"| arm | seeds | reward (last {last_k}) | wall s | step s | update s | pause s | wait s | tok/GPU/s | lp gap | mismatch |")
-    out.append("|:--|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|")
+    out.append(
+        f"| arm | seeds | reward (last {last_k}) | wall s | step s | rollout s | train s | TFLOP/s | update s | pause s | "
+        "payload MB | wait s | tok/GPU/s | lp gap | mismatch |"
+    )
+    out.append("|:--|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|")
     for row in arm_rows:
         out.append(
             f"| {row['mode']} | {row['n_seeds']} | {_fmt_pm(row['reward_last_k'], row['reward_last_k_std'])} | "
             f"{_fmt_pm(row['wall_s'], row['wall_s_std'], 0)} | {_fmt_pm(row['step_s'], row['step_s_std'], 2)} | "
+            f"{_fmt_pm(row['rollout_s'], row['rollout_s_std'], 2)} | {_fmt_pm(row['train_s'], row['train_s_std'], 2)} | "
+            f"{_fmt_pm(row['tflops'], row['tflops_std'], 0)} | "
             f"{_fmt_pm(row['update_s'], row['update_s_std'])} | {_fmt_pm(row['pause_s'], row['pause_s_std'])} | "
+            f"{_fmt_pm(row['payload_mb'], row['payload_mb_std'], 0)} | "
             f"{_fmt_pm(row['train_wait_s'], row['train_wait_s_std'], 2)} | {_fmt_pm(row['tok_per_gpu_s'], row['tok_per_gpu_s_std'], 0)} | "
             f"{_fmt_pm(row['lp_gap'], row['lp_gap_std'], 4)} | {row['n_mismatch']}/{row['n_seeds']} |"
         )
