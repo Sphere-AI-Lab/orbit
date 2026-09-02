@@ -14,15 +14,24 @@ def _write_run(root: Path, run_id: str, seed: int, rewards: list[float], step_s:
     )
     lines = ["noise line"]
     for i, reward in enumerate(rewards):
-        stamp = f"[2026-09-02 18:{(t0 + int(i * step_s)) // 60:02d}:{(t0 + int(i * step_s)) % 60:02d}]"
+        secs = t0 + int(i * step_s)
+        # Real prefix: ANSI colour, ray actor tag, "[date time.ms logger]" stamp.
+        stamp = f"[2026-09-02 18:{secs // 60:02d}:{secs % 60:02d}.887 actor_cell0_rank0]"
         lines.append(
-            f"\x1b[36m(MegatronTrainRayActor pid=1)\x1b[0m {stamp} log_utils.py:182 - rollout {i}: "
-            f"{{'rollout/raw_reward': {reward}, 'rollout/rewards': 0.0}}"
+            f"\x1b[36m(MegatronTrainRayActor pid=1)\x1b[0m {stamp} log_utils.py:259 - rollout {i}: "
+            f"{{'rollout/response_lengths': 98.0, 'rollout/raw_reward': {reward}, 'rollout/rewards': 0.0}}"
+        )
+        # One rollout's perf keys arrive in two records: the rollout manager's (which prints
+        # numpy scalars as np.float64(...)) and the trainer's.
+        lines.append(
+            f"(RolloutManager pid=2) {stamp} metrics.py:120 - perf {i}: "
+            f"{{'rollout/num_training_samples': 32, 'perf/rollout_time': np.float64({step_s * 0.6}), "
+            f"'perf/tokens_per_gpu_per_sec': np.float64(1000.0)}}"
         )
         lines.append(
             f"(MegatronTrainRayActor pid=1) {stamp} train_metric_utils.py:50 - perf {i}: "
-            f"{{'perf/step_time': {step_s}, 'perf/update_weights_time': 0.1, 'perf/update_weights_pause_time': 0.05, "
-            f"'perf/rollout_time': {step_s * 0.6}, 'perf/train_wait_time': {step_s * 0.3}, 'perf/tokens_per_gpu_per_sec': 1000.0}}"
+            f"{{'perf/update_weights_pause_time': 0.05, 'perf/update_weights_time': 0.1, "
+            f"'perf/train_wait_time': {step_s * 0.3}, 'perf/step_time': {step_s}}}"
         )
         lines.append(f"(MegatronTrainRayActor pid=1) {stamp} model.py:847 - step {i}: {{'train/train_rollout_logprob_abs_diff': 0.01}}")
     (run_dir / "console.log").write_text("\n".join(lines) + "\n")
@@ -60,6 +69,8 @@ def test_run_summary_uses_warm_rollouts_and_last_k(tmp_path):
     assert s["n_rollouts"] == 4 and s["samples"] == 128 and s["wall_s"] == 9.0
     assert abs(s["reward_last_k"] - 0.4) < 1e-9
     assert s["step_s"] == 3.0 and abs(s["train_wait_s"] - 0.9) < 1e-9
+    # merged across the two perf records of each rollout
+    assert s["tok_per_gpu_s"] == 1000.0 and abs(s["rollout_s"] - 1.8) < 1e-9
 
 
 def test_arm_summary_aggregates_seeds_and_checkpoints(tmp_path):

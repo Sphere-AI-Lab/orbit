@@ -40,7 +40,9 @@ RUN_ID_RE = re.compile(
     r"(?P<peft>[^_]+)_(?P<mode>sync|async|async_db|async_fullft)_g"
 )
 RECORD_RE = re.compile(r"\b(?P<kind>rollout|perf|step) (?P<rollout>\d+): (?P<payload>\{.*\})")
-STAMP_RE = re.compile(r"\[(?P<stamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]")
+# Loggers stamp "[2026-09-02 18:38:59.887 actor_cell0_rank0]" (ms + logger name) or the
+# bare "[2026-09-02 18:38:59]"; seconds resolution is enough for wall-clock curves.
+STAMP_RE = re.compile(r"\[(?P<stamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})(?:\.\d+)?(?: [^\]]*)?\]")
 
 REWARD_KEY = "rollout/raw_reward"
 PERF_KEYS = (
@@ -81,6 +83,18 @@ class RunSeries:
         return (self.stamp[rollout] - first).total_seconds()
 
 
+# The rollout manager's perf record prints numpy scalars as "np.float64(853.88)",
+# which ast.literal_eval rejects; unwrap them so the record is not dropped.
+_NUMPY_SCALAR_RE = re.compile(r"\bnp\.(?:float\d*|int\d*|bool_)\(([^()]*)\)")
+
+
+def _parse_record_payload(text: str) -> dict[str, Any] | None:
+    payload = parse_payload(text)
+    if payload is None:
+        payload = parse_payload(_NUMPY_SCALAR_RE.sub(r"\1", text))
+    return payload
+
+
 def _parse_stamp(line: str) -> datetime | None:
     match = STAMP_RE.search(line)
     return datetime.strptime(match.group("stamp"), "%Y-%m-%d %H:%M:%S") if match else None
@@ -118,7 +132,7 @@ def parse_run(run_dir: Path, id_match: re.Match[str]) -> RunSeries:
             match = RECORD_RE.search(line)
             if not match:
                 continue
-            payload = parse_payload(match.group("payload"))
+            payload = _parse_record_payload(match.group("payload"))
             if not payload:
                 continue
             rollout = int(match.group("rollout"))
@@ -128,8 +142,12 @@ def parse_run(run_dir: Path, id_match: re.Match[str]) -> RunSeries:
                 stamp = _parse_stamp(line)
                 if stamp is not None:
                     series.stamp.setdefault(rollout, stamp)
-            elif kind == "perf" and "perf/step_time" in payload:
-                series.perf[rollout] = {k: float(payload[k]) for k in PERF_KEYS if k in payload}
+            elif kind == "perf":
+                # One rollout's perf keys arrive in several records (the rollout manager
+                # and the trainer each emit their own), so merge rather than replace.
+                wanted = {k: float(payload[k]) for k in PERF_KEYS if k in payload}
+                if wanted:
+                    series.perf.setdefault(rollout, {}).update(wanted)
             elif kind == "step" and LOGPROB_GAP_KEY in payload:
                 series.logprob_gap.setdefault(rollout, float(payload[LOGPROB_GAP_KEY]))
     return series
