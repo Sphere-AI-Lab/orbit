@@ -107,7 +107,8 @@ PERF_ARGS=(
     --expert-model-parallel-size 1
     --expert-tensor-parallel-size 1
     --use-dynamic-batch-size
-    --max-tokens-per-gpu 16384
+    # env-overridable (default unchanged); kept in step with the full-FT async launcher
+    --max-tokens-per-gpu "${MAX_TOKENS_PER_GPU:-16384}"
     --recompute-granularity full
     --recompute-method uniform
     --recompute-num-layers 1

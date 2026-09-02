@@ -634,6 +634,8 @@ def write_manifest(job: Job, env: dict[str, str]) -> None:
         "SEED",
         "LR",
         "SGLANG_ATTENTION_BACKEND",
+        "USE_DISTRIBUTED_OPTIMIZER",
+        "MAX_TOKENS_PER_GPU",
     ]
     manifest = {
         "run_id": job.run_id,

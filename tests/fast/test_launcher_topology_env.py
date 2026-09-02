@@ -221,3 +221,19 @@ def test_a3_launcher_distributed_optimizer_is_env_gated(tmp_path, launcher):
     proc = _run(launcher, env)
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert "--use-distributed-optimizer" in _argv_lines(proc.stdout)
+
+
+@pytest.mark.parametrize("launcher", A3_4B_LAUNCHERS)
+def test_a3_launcher_max_tokens_per_gpu_is_env_overridable(tmp_path, launcher):
+    # Recipe default 16384; the 4B full-FT arm runs at 8192 to fit the loss-time
+    # activation peak (151k-vocab cross-entropy) next to Adam state on 80 GB GPUs.
+    env = _a3_env(tmp_path)
+    env.pop("MAX_TOKENS_PER_GPU", None)
+    proc = _run(launcher, env)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert _adjacent_pair_present(_argv_lines(proc.stdout), "--max-tokens-per-gpu", "16384")
+
+    env["MAX_TOKENS_PER_GPU"] = "8192"
+    proc = _run(launcher, env)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert _adjacent_pair_present(_argv_lines(proc.stdout), "--max-tokens-per-gpu", "8192")

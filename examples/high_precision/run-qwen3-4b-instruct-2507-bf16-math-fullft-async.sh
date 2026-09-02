@@ -115,7 +115,9 @@ PERF_ARGS=(
     --expert-model-parallel-size 1
     --expert-tensor-parallel-size 1
     --use-dynamic-batch-size
-    --max-tokens-per-gpu 16384
+    # env-overridable: full-FT of the 4B model needs 8192 on 80 GB GPUs (the 151k-vocab
+    # cross-entropy over 16k tokens is the activation peak that OOMs the second backward)
+    --max-tokens-per-gpu "${MAX_TOKENS_PER_GPU:-16384}"
     --recompute-granularity full
     --recompute-method uniform
     --recompute-num-layers 1
