@@ -71,12 +71,12 @@ class HfWeightIteratorBridge(HfWeightIteratorBase):
     def _export_named_weights(self, renamed_megatron_local_weights, weight_type: str):
         if weight_type == "lora":
             if self.peft_method == "oft":
-                # Free function (megatron.bridge.orbit namespace, post-reattach),
-                # not a bridge method -- takes the bridge as an explicit first arg.
-                from megatron.bridge.orbit.conversion.oft_export import export_oft_adapter_weights
+                # The pinned Bridge (988d6426) exposes this as an AutoBridge method;
+                # orbit-main's Bridge lineage as a free function taking the bridge
+                # first. oft_adapter_exporter binds whichever is installed.
+                from orbit.megatron.oft_export_compat import oft_adapter_exporter
 
-                return export_oft_adapter_weights(
-                    self._bridge,
+                return oft_adapter_exporter(self._bridge)(
                     self.model,
                     cpu=False,
                     show_progress=False,

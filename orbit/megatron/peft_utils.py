@@ -2300,7 +2300,6 @@ def save_peft_adapter_checkpoint(
         iteration=iteration,
         active_student_version=active_student_version,
     )
-    import functools
 
     from megatron.bridge import AutoBridge
 
@@ -2332,13 +2331,11 @@ def save_peft_adapter_checkpoint(
     def _select_exporter():
         if method != "oft":
             return bridge.export_adapter_weights
-        # export_oft_adapter_weights is a free function (megatron.bridge.orbit
-        # namespace, post-reattach), not a bridge method like
-        # export_adapter_weights -- bind it so callers keep a uniform
-        # exporter(model, ...) call shape.
-        from megatron.bridge.orbit.conversion.oft_export import export_oft_adapter_weights
+        # Uniform exporter(model, ...) shape whichever Bridge API is installed:
+        # the pinned Bridge's AutoBridge method or orbit-main's free function.
+        from orbit.megatron.oft_export_compat import oft_adapter_exporter
 
-        return functools.partial(export_oft_adapter_weights, bridge)
+        return oft_adapter_exporter(bridge)
 
     exporter = _coordinated_checkpoint_call(
         "PEFT bridge exporter selection",
