@@ -70,6 +70,13 @@ class UpdateWeightFromDistributedBridge(DistBucketedWeightUpdateMixin):
         self.weight_version = 0
         self._group_name = "orbit-bridge-sync"
         self._model_update_groups = None
+        # Engine-connection state, same contract as upstream's distributed updaters
+        # (update_weight_from_distributed/broadcast.py): the actor's update_weights
+        # asks is_rollout_engines_fresh() before every sync and its engine-recovery
+        # path calls mark_engine_connection_stale().
+        self.rollout_engines: Sequence[ActorHandle] | None = None
+        self.rollout_engine_lock: ActorHandle | None = None
+        self._connection_stale: bool = False
         self._hf_weight_iterator = HfWeightIteratorBase.create(
             args=args,
             model=model,
@@ -83,6 +90,12 @@ class UpdateWeightFromDistributedBridge(DistBucketedWeightUpdateMixin):
         """Single global source: the bridge export yields full tensors everywhere."""
         return dist.get_rank() == 0
 
+    def is_rollout_engines_fresh(self) -> bool:
+        return self.rollout_engines is not None and not self._connection_stale
+
+    def mark_engine_connection_stale(self) -> None:
+        self._connection_stale = True
+
     def connect_rollout_engines(
         self,
         rollout_engines: Sequence[ActorHandle],
@@ -92,6 +105,7 @@ class UpdateWeightFromDistributedBridge(DistBucketedWeightUpdateMixin):
     ) -> None:
         self.rollout_engines = rollout_engines
         self.rollout_engine_lock = rollout_engine_lock
+        self._connection_stale = False
         if self._is_source:
             if self._model_update_groups is not None:
                 disconnect_rollout_engines_from_distributed(
