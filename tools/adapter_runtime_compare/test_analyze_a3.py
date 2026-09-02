@@ -128,7 +128,9 @@ def test_attribution_decomposes_wall_clock(tmp_path):
 def test_main_renders_markdown_and_writes_json(tmp_path, capsys):
     root = _campaign(tmp_path)
     out_json = tmp_path / "series.json"
-    rc = analyze_a3.main([str(root), "--last-k", "2", "--checkpoints", "64,128", "--window", "1", "--json", str(out_json)])
+    rc = analyze_a3.main(
+        [str(root), "--last-k", "2", "--checkpoints", "64,128", "--window", "1", "--min-rollouts", "1", "--json", str(out_json)]
+    )
 
     assert rc == 0
     text = capsys.readouterr().out
@@ -137,6 +139,40 @@ def test_main_renders_markdown_and_writes_json(tmp_path, capsys):
     assert len(series) == 4
     first = next(s for s in series if s["mode"] == "sync")
     assert first["rollouts"][3]["samples"] == 128 and first["rollouts"][3]["step_time"] == 8.0
+
+
+def test_rerun_appended_to_the_same_log_supersedes_the_aborted_attempt(tmp_path):
+    # The harness opens console.log in append mode, so a rerun into the same run dir
+    # follows the aborted attempt's records. Rewards, stamps and gaps must all come
+    # from the second attempt, and rollouts the aborted attempt reached must not linger.
+    root = tmp_path / "a3"
+    run_dir = _write_run(root, "r00_runtime_qwen3_4b_bf16_none_async_fullft_g0123", 1234, [0.9, 0.9, 0.9, 0.9], 4.0, 0)
+    aborted = run_dir / "console.log"
+    aborted_text = aborted.read_text()
+    aborted.unlink()
+    rerun_dir = _write_run(tmp_path / "rerun", "r00_runtime_qwen3_4b_bf16_none_async_fullft_g0123", 1234, [0.1, 0.2], 5.0, 1800)
+    (run_dir / "console.log").write_text(aborted_text + "Training driver exited with code 1\n" + (rerun_dir / "console.log").read_text())
+
+    run = next(r for r in analyze_a3.iter_runs(root) if r.run_id.startswith("r00"))
+
+    assert run.rollouts == [0, 1]
+    assert run.reward == {0: 0.1, 1: 0.2}
+    assert run.wall_s(1) == 5.0  # measured within the second attempt, not from the aborted one
+    assert run.perf[1]["perf/step_time"] == 5.0
+
+
+def test_main_excludes_short_runs_from_arm_statistics(tmp_path, capsys):
+    root = _campaign(tmp_path)
+    # a stub that died after 2 rollouts must not count as a seed for its arm
+    _write_run(root, "r01_runtime_qwen3_4b_bf16_none_async_fullft_g0123", 1235, [0.5, 0.5], 4.0, 0)
+
+    rc = analyze_a3.main([str(root), "--last-k", "2", "--min-rollouts", "3"])
+
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "excluded from arm statistics" in captured.err and "r01_runtime_qwen3_4b_bf16_none_async_fullft_g0123" in captured.err
+    arm_line = next(line for line in captured.out.splitlines() if line.startswith("| async_fullft |"))
+    assert arm_line.split("|")[2].strip() == "1"  # seeds column counts only the complete run
 
 
 def test_runs_without_records_are_kept_only_when_nothing_else_parsed(tmp_path):

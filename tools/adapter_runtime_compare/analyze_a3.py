@@ -145,10 +145,16 @@ def parse_run(run_dir: Path, id_match: re.Match[str]) -> RunSeries:
             rollout = int(match.group("rollout"))
             kind = match.group("kind")
             if kind == "rollout" and REWARD_KEY in payload:
+                if rollout == 0 and series.reward:
+                    # The harness appends a rerun to the same console.log, so a second
+                    # "rollout 0" reward record means a fresh attempt: drop the aborted
+                    # attempt's records (its rollout-0 engine perf record is lost with
+                    # them, which only touches the warm-excluded rollout 0).
+                    _reset(series)
                 series.reward[rollout] = float(payload[REWARD_KEY])
                 stamp = _parse_stamp(line)
                 if stamp is not None:
-                    series.stamp.setdefault(rollout, stamp)
+                    series.stamp[rollout] = stamp
             elif kind == "perf":
                 # One rollout's perf keys arrive in several records (the rollout manager
                 # and the trainer each emit their own), so merge rather than replace.
@@ -156,10 +162,16 @@ def parse_run(run_dir: Path, id_match: re.Match[str]) -> RunSeries:
                 if wanted:
                     series.perf.setdefault(rollout, {}).update(wanted)
             elif kind == "step" and LOGPROB_GAP_KEY in payload:
-                series.logprob_gap.setdefault(rollout, float(payload[LOGPROB_GAP_KEY]))
+                # last write wins: a rerun appended to the log supersedes the aborted attempt
+                series.logprob_gap[rollout] = float(payload[LOGPROB_GAP_KEY])
                 if LOGPROB_GAP_MAX_KEY in payload:
-                    series.logprob_gap_max.setdefault(rollout, float(payload[LOGPROB_GAP_MAX_KEY]))
+                    series.logprob_gap_max[rollout] = float(payload[LOGPROB_GAP_MAX_KEY])
     return series
+
+
+def _reset(series: RunSeries) -> None:
+    for store in (series.reward, series.stamp, series.perf, series.logprob_gap, series.logprob_gap_max):
+        store.clear()
 
 
 def iter_runs(campaign_dir: Path) -> list[RunSeries]:
@@ -392,6 +404,12 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_LP_GAP_ENVELOPE,
         help="max acceptable warm-mean train/rollout |Δ logp| per step; runs above it are flagged MISMATCH",
     )
+    parser.add_argument(
+        "--min-rollouts",
+        type=int,
+        default=10,
+        help="runs with fewer rollouts (aborted attempts) are listed per run but excluded from arm statistics",
+    )
     parser.add_argument("--csv", help="write per-run rows here")
     parser.add_argument("--json", help="write per-rollout series here")
     args = parser.parse_args(argv)
@@ -402,8 +420,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no runs under {args.campaign_dir}", file=sys.stderr)
         return 1
     checkpoints = [int(c) for c in args.checkpoints.split(",") if c.strip()]
+    complete = [r for r in runs if len(r.rollouts) >= args.min_rollouts]
+    if len(complete) < len(runs):
+        skipped = ", ".join(f"{r.run_id} ({len(r.rollouts)} rollouts)" for r in runs if r not in complete)
+        print(f"excluded from arm statistics (< {args.min_rollouts} rollouts): {skipped}", file=sys.stderr)
     arm_rows = arm_summary(
-        runs,
+        complete,
         last_k=args.last_k,
         warm_from=args.warm_from,
         checkpoints=checkpoints,
@@ -429,7 +451,7 @@ def main(argv: list[str] | None = None) -> int:
             writer.writeheader()
             writer.writerows(rows)
     if args.json:
-        Path(args.json).write_text(json.dumps(series_json(runs), indent=2) + "\n")
+        Path(args.json).write_text(json.dumps(series_json(complete), indent=2) + "\n")
     return 0
 
 
