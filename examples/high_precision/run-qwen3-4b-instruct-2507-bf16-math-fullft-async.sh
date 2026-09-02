@@ -120,6 +120,11 @@ PERF_ARGS=(
     --recompute-method uniform
     --recompute-num-layers 1
     --sequence-parallel
+    # USE_DISTRIBUTED_OPTIMIZER=1 shards fp32 master + Adam state across DP ranks
+    # (Megatron ZeRO-1). Full-FT of a 4B model at TP=1 on 80 GB GPUs OOMs in the
+    # second backward otherwise (Adam moments land after the first optimizer step).
+    # Off by default so the recipe argv is unchanged.
+    ${USE_DISTRIBUTED_OPTIMIZER:+--use-distributed-optimizer}
 )
 
 EVAL_ARGS=(

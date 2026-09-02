@@ -112,6 +112,8 @@ PERF_ARGS=(
     --recompute-method uniform
     --recompute-num-layers 1
     --sequence-parallel
+    # env-gated (default off); kept in step with the full-FT async launcher
+    ${USE_DISTRIBUTED_OPTIMIZER:+--use-distributed-optimizer}
 )
 
 EVAL_ARGS=(

@@ -205,3 +205,19 @@ def test_a3_launcher_env_overrides_seed_lr_and_backend(tmp_path, launcher):
     assert _adjacent_pair_present(lines, "--lr", "7e-7")
     assert _adjacent_pair_present(lines, "--sglang-attention-backend", "triton")
     assert "flashinfer" not in lines
+
+
+@pytest.mark.parametrize("launcher", A3_4B_LAUNCHERS)
+def test_a3_launcher_distributed_optimizer_is_env_gated(tmp_path, launcher):
+    # Off by default (recipe argv unchanged); USE_DISTRIBUTED_OPTIMIZER=1 adds the flag,
+    # which the 4B full-FT arm needs to fit Adam state on 80 GB GPUs at TP=1.
+    env = _a3_env(tmp_path)
+    env.pop("USE_DISTRIBUTED_OPTIMIZER", None)
+    proc = _run(launcher, env)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert "--use-distributed-optimizer" not in _argv_lines(proc.stdout)
+
+    env["USE_DISTRIBUTED_OPTIMIZER"] = "1"
+    proc = _run(launcher, env)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert "--use-distributed-optimizer" in _argv_lines(proc.stdout)
