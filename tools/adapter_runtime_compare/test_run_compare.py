@@ -68,6 +68,9 @@ def make_args(**overrides):
         batch_profile="bench",
         output_dir="/tmp/adapter_runtime_compare_test",
         campaign="test",
+        seeds=None,
+        fullft_lr=None,
+        gpu_slice=None,
     )
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -235,3 +238,80 @@ def test_rollout_gpus_per_engine_override_is_honored():
     env = run_compare.job_env(make_job(case, "async"))
     assert env["ROLLOUT_NUM_GPUS_PER_ENGINE"] == "1"
     assert env["ROLLOUT_NUM_GPUS"] == str(case.rollout_gpus_async)
+
+
+# --- A3 seed axis and per-arm learning rate ---
+
+
+def _a3_jobs(**overrides):
+    args = make_args(profile="q3_4b", branches="runtime", pefts="oft", precisions="bf16", **overrides)
+    return [job for wave in run_compare.build_waves(args) for job in wave]
+
+
+def test_seeds_expand_repeats_and_stamp_seed_env():
+    jobs = _a3_jobs(modes="sync", seeds="1234,1235,1236")
+
+    assert [job.repeat for job in jobs] == [0, 1, 2]
+    assert [job.seed for job in jobs] == [1234, 1235, 1236]
+    assert [run_compare.job_env(job)["SEED"] for job in jobs] == ["1234", "1235", "1236"]
+    assert [job.run_id[:3] for job in jobs] == ["r00", "r01", "r02"]
+
+
+def test_no_seeds_leaves_seed_env_unset_and_uses_repeats():
+    jobs = _a3_jobs(modes="sync", repeats=2)
+
+    assert [job.seed for job in jobs] == [None, None]
+    assert all("SEED" not in run_compare.job_env(job) for job in jobs)
+
+
+def test_fullft_lr_applies_only_to_the_fullft_arm():
+    jobs = _a3_jobs(modes="async_db,async_fullft", fullft_lr="7e-7")
+    by_mode = {job.mode: run_compare.job_env(job) for job in jobs}
+
+    assert by_mode["async_fullft"]["LR"] == "7e-7"
+    assert "LR" not in by_mode["async_db"]
+
+
+def test_manifest_records_seed_and_lr():
+    import tempfile
+
+    job = next(iter(_a3_jobs(modes="async_fullft", seeds="7", fullft_lr="7e-7")))
+    with tempfile.TemporaryDirectory() as tmp:
+        job = dataclasses_replace_run_dir(job, Path(tmp) / job.run_id)
+        run_compare.write_manifest(job, run_compare.job_env(job))
+        manifest = json.loads(job.manifest_path.read_text())
+
+    assert manifest["seed"] == 7
+    assert manifest["lr"] == "7e-7"
+    assert manifest["env"]["SEED"] == "7"
+    assert manifest["env"]["LR"] == "7e-7"
+
+
+def dataclasses_replace_run_dir(job, run_dir):
+    import dataclasses
+
+    return dataclasses.replace(job, run_dir=run_dir)
+
+
+def test_gpu_slice_pins_every_wave_on_a_four_gpu_node():
+    # Default alternation parks odd repeats on GPUs 4-7, which a 4-GPU node lacks.
+    jobs = _a3_jobs(modes="sync,async_db", seeds="1234,1235", gpu_slice="0,1,2,3")
+
+    assert {job.gpu_ids for job in jobs} == {(0, 1, 2, 3)}
+    assert all(job.run_id.endswith("_g0123") for job in jobs)
+    assert all(run_compare.job_env(job)["CUDA_VISIBLE_DEVICES"] == "0,1,2,3" for job in jobs)
+
+
+def test_gpu_slice_unset_keeps_repeat_alternation():
+    jobs = _a3_jobs(modes="sync", seeds="1234,1235")
+
+    assert [job.gpu_ids for job in jobs] == [(0, 1, 2, 3), (4, 5, 6, 7)]
+
+
+def test_gpu_slice_rejects_malformed_values():
+    import pytest
+
+    with pytest.raises(SystemExit):
+        run_compare.parse_gpu_slice("0,x")
+    with pytest.raises(SystemExit):
+        run_compare.parse_gpu_slice("0,0")

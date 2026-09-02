@@ -264,6 +264,10 @@ class Job:
     eval_interval: int
     skip_eval_before_train: bool
     batch_profile: str
+    # A3 axes: per-repeat seed (--seeds) and a per-arm learning rate
+    # (--fullft-lr, applied to the async_fullft arm only). None -> launcher default.
+    seed: int | None = None
+    lr: str | None = None
 
     @property
     def run_log(self) -> Path:
@@ -336,6 +340,37 @@ def default_rollouts(profile: str) -> int:
     return 30
 
 
+def parse_seeds(value: str | None) -> tuple[int, ...]:
+    """``--seeds 1234,1235`` -> (1234, 1235); empty/None -> () (no seed axis)."""
+    if not value:
+        return ()
+    try:
+        seeds = tuple(int(item.strip()) for item in value.split(",") if item.strip())
+    except ValueError as exc:
+        raise SystemExit(f"--seeds must be comma-separated integers, got {value!r}") from exc
+    if len(set(seeds)) != len(seeds):
+        raise SystemExit(f"--seeds contains duplicates: {value!r}")
+    return seeds
+
+
+def parse_gpu_slice(value: str | None) -> tuple[int, ...]:
+    """``--gpu-slice 0,1,2,3`` -> (0, 1, 2, 3); empty/None -> () (default alternation).
+
+    The default wave layout alternates odd repeats onto GPUs 4-7 (two branches on an
+    8-GPU node); a pinned slice runs every wave on the same GPUs, which is what a
+    single-branch campaign on a 4-GPU node needs.
+    """
+    if not value:
+        return ()
+    try:
+        gpus = tuple(int(item.strip()) for item in value.split(",") if item.strip())
+    except ValueError as exc:
+        raise SystemExit(f"--gpu-slice must be comma-separated integers, got {value!r}") from exc
+    if not gpus or len(set(gpus)) != len(gpus) or any(gpu < 0 for gpu in gpus):
+        raise SystemExit(f"--gpu-slice must be distinct non-negative GPU ids, got {value!r}")
+    return gpus
+
+
 def build_waves(args: argparse.Namespace) -> list[list[Job]]:
     branches = selected_branches(args)
     cases = selected_cases(args)
@@ -345,9 +380,15 @@ def build_waves(args: argparse.Namespace) -> list[list[Job]]:
     output_root = Path(args.output_dir).resolve() / campaign
     rollouts = args.num_rollout if args.num_rollout is not None else default_rollouts(args.profile)
     eval_enabled = args.eval if args.eval is not None else args.profile != "pilot"
+    seeds = parse_seeds(getattr(args, "seeds", None))
+    fullft_lr = getattr(args, "fullft_lr", None)
+    gpu_slice = parse_gpu_slice(getattr(args, "gpu_slice", None))
+    # --seeds is the repeat axis when given: one repeat per seed, in order.
+    repeats = len(seeds) if seeds else args.repeats
     waves: list[list[Job]] = []
 
-    for repeat in range(args.repeats):
+    for repeat in range(repeats):
+        seed = seeds[repeat] if seeds else None
         for case in cases:
             for mode in modes:
                 if arm_script(case, mode) is None:
@@ -370,12 +411,14 @@ def build_waves(args: argparse.Namespace) -> list[list[Job]]:
                                     case,
                                     mode,
                                     repeat,
-                                    tuple(range(8)),
+                                    gpu_slice or tuple(range(8)),
                                     rollouts,
                                     eval_enabled,
                                     args.eval_interval,
                                     args.skip_eval_before_train,
                                     args.batch_profile,
+                                    seed=seed,
+                                    fullft_lr=fullft_lr,
                                 )
                             ]
                         )
@@ -385,7 +428,7 @@ def build_waves(args: argparse.Namespace) -> list[list[Job]]:
                 high = (4, 5, 6, 7)
                 if repeat % 2 == 1:
                     low, high = high, low
-                gpu_slices = [low, high]
+                gpu_slices = [gpu_slice] if gpu_slice else [low, high]
                 wave = []
                 for index, branch in enumerate(branch_order):
                     wave.append(
@@ -401,6 +444,8 @@ def build_waves(args: argparse.Namespace) -> list[list[Job]]:
                             args.eval_interval,
                             args.skip_eval_before_train,
                             args.batch_profile,
+                            seed=seed,
+                            fullft_lr=fullft_lr,
                         )
                     )
                 waves.append(wave)
@@ -421,6 +466,9 @@ def make_job(
     eval_interval: int,
     skip_eval_before_train: bool,
     batch_profile: str,
+    *,
+    seed: int | None = None,
+    fullft_lr: str | None = None,
 ) -> Job:
     script = arm_script(case, mode)
     if script is None:
@@ -445,6 +493,8 @@ def make_job(
         eval_interval=eval_interval,
         skip_eval_before_train=skip_eval_before_train,
         batch_profile=batch_profile,
+        seed=seed,
+        lr=fullft_lr if mode == "async_fullft" else None,
     )
 
 
@@ -472,6 +522,12 @@ def job_env(job: Job) -> dict[str, str]:
     env["RUN_LOG"] = str(job.run_log)
     env["SAVE_DIR"] = str(DEFAULT_CKPT_ROOT / job.run_id)
     env["NUM_ROLLOUT"] = str(job.num_rollout)
+    # Launchers read SEED / LR with their recipe literals as defaults, so an
+    # unset axis leaves the recipe untouched (and the manifest omits the key).
+    if job.seed is not None:
+        env["SEED"] = str(job.seed)
+    if job.lr is not None:
+        env["LR"] = str(job.lr)
     env["DISABLE_EVAL"] = "0" if job.eval_enabled else "1"
     env["SKIP_EVAL_BEFORE_TRAIN"] = "1" if job.skip_eval_before_train else "0"
     env["EVAL_INTERVAL"] = str(job.eval_interval)
@@ -575,6 +631,8 @@ def write_manifest(job: Job, env: dict[str, str]) -> None:
         "SGLANG_LORA_BACKEND",
         "SAVE_DIR",
         "RUN_LOG",
+        "SEED",
+        "LR",
     ]
     manifest = {
         "run_id": job.run_id,
@@ -592,6 +650,8 @@ def write_manifest(job: Job, env: dict[str, str]) -> None:
         "eval_enabled": job.eval_enabled,
         "eval_interval": job.eval_interval,
         "batch_profile": job.batch_profile,
+        "seed": job.seed,
+        "lr": job.lr,
         "env": {key: env[key] for key in public_env_keys if key in env},
     }
     job.manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
@@ -950,6 +1010,27 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument("--repeats", type=int, default=1)
+    parser.add_argument(
+        "--seeds",
+        help=(
+            "Comma-separated --seed values, one repeat per seed (overrides --repeats); "
+            "stamped into the launcher env as SEED and recorded in run.json"
+        ),
+    )
+    parser.add_argument(
+        "--fullft-lr",
+        help=(
+            "Learning rate for the async_fullft arm only (launcher env LR); the adapter arms keep "
+            "their recipe LR. A3 seeds it from the e4 full-FT window rather than reusing the OFT LR"
+        ),
+    )
+    parser.add_argument(
+        "--gpu-slice",
+        help=(
+            "Comma-separated GPU ids to run EVERY wave on (e.g. 0,1,2,3 on a 4-GPU node); "
+            "default alternates odd repeats onto GPUs 4-7 for two-branch 8-GPU campaigns"
+        ),
+    )
     parser.add_argument("--num-rollout", type=int)
     parser.add_argument("--eval", dest="eval", action="store_true", default=None)
     parser.add_argument("--no-eval", dest="eval", action="store_false")

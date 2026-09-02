@@ -74,7 +74,9 @@ ROLLOUT_ARGS=(
 
 OPTIMIZER_ARGS=(
     --optimizer adam
-    --lr 3e-6
+    # LR / SEED are env-overridable (literals as defaults) so the A3 harness can
+    # run a per-arm learning rate and a per-repeat seed; recipe values unchanged.
+    --lr "${LR:-3e-6}"
     --lr-decay-style constant
     --weight-decay 0.01
     --adam-beta1 0.9
@@ -144,6 +146,7 @@ MISC_ARGS=(
     --no-offload-train
     --no-offload-train-async
     --offload-rollout
+    --seed "${SEED:-1234}"
 )
 
 DEBUG_ARGS=(
