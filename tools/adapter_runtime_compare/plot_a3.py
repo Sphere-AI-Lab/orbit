@@ -37,6 +37,8 @@ ARM_LABELS = {
     "async_db": "async OFT, double-buffer",
     "async": "async OFT, single slot",
 }
+# End-of-line direct labels: short so they fit in the right margin of each panel.
+ARM_SHORT = {"sync": "sync OFT", "async_fullft": "full-FT", "async_db": "async OFT", "async": "async 1-slot"}
 ARM_ORDER = ("sync", "async_fullft", "async_db", "async")
 SURFACE, INK, INK_2, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
 
@@ -116,7 +118,10 @@ def draw(curves: dict[str, dict[str, list[float]]], *, lp_gap_envelope: float, t
             hi = [m + s for m, s in zip(c["reward"], c["reward_std"], strict=True)]
             ax.fill_between(xs, lo, hi, color=color, alpha=0.15, linewidth=0)
             ax.plot(xs, c["reward"], color=color, linewidth=2, label=label)
-            _direct_label(ax, xs[-1], c["reward"][-1], ARM_LABELS[mode].split(",")[0], color)
+            _direct_label(ax, xs[-1], c["reward"][-1], ARM_SHORT[mode], color)
+    for ax, key in ((ax_samples, "samples"), (ax_wall, "wall_s")):
+        xmax = max(max(c[key]) for c in curves.values())
+        ax.set_xlim(0, xmax * 1.25)  # room for the end-of-line labels inside the panel
         glo = [m - s for m, s in zip(c["gap"], c["gap_std"], strict=True)]
         ghi = [m + s for m, s in zip(c["gap"], c["gap_std"], strict=True)]
         ax_gap.fill_between(c["samples"], glo, ghi, color=color, alpha=0.15, linewidth=0)
