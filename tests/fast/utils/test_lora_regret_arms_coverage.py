@@ -555,22 +555,37 @@ class TestOftBlockCeilingUnderRl:
             f"rev={bridge_sha}"
         )
 
-    def test_flashinfer_override_matches_what_sglang_declares(self):
-        """orbit forces flashinfer through [tool.uv] override-dependencies, and
-        a uv override silently outvotes the requirement a package declares for
-        itself. That is exactly how sglang v0.5.16 -- which declares
-        flashinfer_python[cu13]==0.6.14, aligned with its Dockerfile jit-cache
-        -- ran against 0.6.3 here: the override predated sglang's bump and
-        nothing shouted. flashinfer is the attention backend, so a silent
-        downgrade is a runtime difference, not a packaging nicety.
+    # The flashinfer version the lora-no-regret campaign runs on. It is a DELIBERATE
+    # pin, not drift: it matches what orbit-main pins, and it is the Blackwell
+    # 2CTA-cubin fix line (flashinfer PR 3973; 0.6.15.post1 also carries the host-side
+    # MLA/MoE dispatch fix that got the plain 0.6.15 bump reverted upstream). The
+    # pinned sglang declares a different version (0.6.17 at 0ab4a2de7); that is
+    # reported below, not enforced. Bumping this constant is the one place to do it.
+    LORA_NO_REGRET_FLASHINFER_PIN = "0.6.15.post1"
 
-        Guard: the override must say exactly what the installed sglang
-        declares, and the environment must actually contain that version. The
-        next sglang flashinfer bump then fails here, loudly, instead of being
-        overridden back down."""
+    def test_flashinfer_override_matches_the_deliberate_pin(self):
+        """orbit forces flashinfer through [tool.uv] override-dependencies, and a
+        uv override silently outvotes the requirement a package declares for
+        itself. flashinfer is the attention backend, so a silent version change
+        is a runtime difference, not a packaging nicety.
+
+        Guard, in two parts. (1) The override must equal
+        LORA_NO_REGRET_FLASHINFER_PIN -- so the pin cannot drift by accident and
+        can only move by editing the constant, with its reason. (2) The
+        environment must actually contain that version -- this is what catches
+        a half-applied install (python / cubin / jit-cache must move together;
+        a mismatched trio makes ``import flashinfer`` raise).
+
+        What is deliberately NOT asserted: equality with the version the pinned
+        sglang declares for itself. Earlier this test required that, and its
+        "align the override" advice then pointed the wrong way twice -- once
+        toward an outdated sglang's pin, once away from the campaign's. The
+        declared version is surfaced as a warning so a future sglang bump stays
+        visible without turning a decision into a red test."""
         import importlib.metadata as md
         import re
         import tomllib
+        import warnings
         from pathlib import Path
 
         import pytest
@@ -588,6 +603,21 @@ class TestOftBlockCeilingUnderRl:
             "test with it"
         )
         override_version = overrides[0].split("==", 1)[1].strip()
+        assert override_version == self.LORA_NO_REGRET_FLASHINFER_PIN, (
+            f"pyproject overrides flashinfer=={override_version} but the "
+            f"lora-no-regret pin is {self.LORA_NO_REGRET_FLASHINFER_PIN}; change "
+            f"LORA_NO_REGRET_FLASHINFER_PIN (and say why) rather than the override alone"
+        )
+
+        try:
+            installed = md.version("flashinfer-python")
+        except md.PackageNotFoundError:
+            pytest.skip("flashinfer-python is not installed in this environment")
+        assert installed == override_version, (
+            f"installed flashinfer-python is {installed} but the override says "
+            f"{override_version}; reinstall the trio (python, cubin, jit-cache) at "
+            f"the override version -- a mismatched trio makes `import flashinfer` raise"
+        )
 
         try:
             declared = [
@@ -596,14 +626,12 @@ class TestOftBlockCeilingUnderRl:
                 if re.match(r"flashinfer[-_]python\b", r)
             ]
         except md.PackageNotFoundError:
-            pytest.skip("sglang is not installed in this environment")
-        assert declared, "the installed sglang no longer declares flashinfer"
-        wanted = re.search(r"==\s*([0-9][0-9a-zA-Z.\-]*)", declared[0])
-        assert wanted, f"unparseable flashinfer requirement: {declared[0]!r}"
-        assert override_version == wanted.group(1), (
-            f"orbit overrides flashinfer=={override_version} but the installed "
-            f"sglang declares {declared[0]!r}; the override wins silently, so "
-            f"align the override (and re-lock) instead of running sglang "
-            f"against the wrong attention backend"
-        )
-        assert md.version("flashinfer-python") == override_version
+            declared = []
+        wanted = re.search(r"==\s*([0-9][0-9a-zA-Z.\-]*)", declared[0]) if declared else None
+        if wanted and wanted.group(1) != override_version:
+            warnings.warn(
+                f"the installed sglang declares {declared[0]!r} but orbit deliberately "
+                f"pins flashinfer=={override_version} for lora-no-regret; revisit "
+                f"LORA_NO_REGRET_FLASHINFER_PIN when the campaign moves",
+                stacklevel=1,
+            )
