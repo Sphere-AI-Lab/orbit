@@ -118,13 +118,7 @@ override-dependencies = [
     "numpy==2.3.5",
     "cuda-python==13.2.0",
     # Keep the Python package aligned with the cu130 cubin and JIT-cache artifacts.
-    # This MUST equal what the pinned sglang declares for itself: a uv override
-    # silently outvotes a package's own requirement, and flashinfer is the
-    # attention backend, so a mismatch is a runtime difference rather than a
-    # packaging nicety. sglang @ 0ab4a2de7 (the rev uv.lock pins) declares
-    # flashinfer_python[cu13]==0.6.17, aligned with its Dockerfile jit-cache.
-    # tests/fast/utils/test_lora_regret_arms_coverage.py is the gate.
-    "flashinfer-python==0.6.17",
+    "flashinfer-python==0.6.15.post1",
     "megatron-core",
     "nvidia-cublas==13.4.1.1",
     "nvidia-cuda-cupti==13.2.75",
