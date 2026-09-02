@@ -450,7 +450,7 @@ class UpdateWeightFromTensor(OrbitUpdateWeightExtensions):
                 )
                 _check_weight_sync_results(results, sync_type=_sync_type_label(self.peft_method))
             else:
-                refs, long_lived_tensors = self._send_base_params(hf_named_tensors)
+                refs, long_lived_tensors = self._send_hf_params(hf_named_tensors)
                 results = ray.get(refs)
                 _log_weight_sync_event(
                     "chunk_results_received",
@@ -461,19 +461,6 @@ class UpdateWeightFromTensor(OrbitUpdateWeightExtensions):
                     results_count=len(results),
                 )
                 _check_weight_sync_results(results, sync_type=_sync_type_label(self.peft_method))
-
-
-                refs, long_lived_tensors = self._send_hf_params(hf_named_tensors)
-            results = completed_results if completed_results is not None else ray.get(refs)
-            _log_weight_sync_event(
-                "chunk_results_received",
-                rank=rank,
-                world_size=world_size,
-                weight_version=self.weight_version,
-                chunk_idx=sync_chunk_count,
-                results_count=len(results),
-            )
-            _check_weight_sync_results(results, sync_type=_sync_type_label(self.peft_method))
             del long_lived_tensors
             sync_chunk_count += 1
 
