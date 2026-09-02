@@ -54,6 +54,12 @@ PERF_KEYS = (
     "perf/tokens_per_gpu_per_sec",
 )
 LOGPROB_GAP_KEY = "train/train_rollout_logprob_abs_diff"
+LOGPROB_GAP_MAX_KEY = "train/train_rollout_logprob_abs_diff_max"
+# Train/inference mismatch envelope the adapter path was qualified in (mean |Δ logp| per
+# step: 0.0081-0.0099 on the 0.5B e2e smokes, 0.010-0.014 across the Phase-0 adapter
+# runs). A run whose warm-mean gap exceeds this cannot support a parity claim: its
+# trainer and engine disagree about the policy that produced the samples.
+DEFAULT_LP_GAP_ENVELOPE = 0.014
 ARM_ORDER = ("sync", "async_fullft", "async_db", "async")
 
 
@@ -66,7 +72,8 @@ class RunSeries:
     reward: dict[int, float] = field(default_factory=dict)
     stamp: dict[int, datetime] = field(default_factory=dict)
     perf: dict[int, dict[str, float]] = field(default_factory=dict)
-    logprob_gap: dict[int, float] = field(default_factory=dict)
+    logprob_gap: dict[int, float] = field(default_factory=dict)  # per-step mean |Δ logp|
+    logprob_gap_max: dict[int, float] = field(default_factory=dict)  # per-step worst token
 
     @property
     def rollouts(self) -> list[int]:
@@ -150,6 +157,8 @@ def parse_run(run_dir: Path, id_match: re.Match[str]) -> RunSeries:
                     series.perf.setdefault(rollout, {}).update(wanted)
             elif kind == "step" and LOGPROB_GAP_KEY in payload:
                 series.logprob_gap.setdefault(rollout, float(payload[LOGPROB_GAP_KEY]))
+                if LOGPROB_GAP_MAX_KEY in payload:
+                    series.logprob_gap_max.setdefault(rollout, float(payload[LOGPROB_GAP_MAX_KEY]))
     return series
 
 
@@ -197,7 +206,13 @@ def run_summary(run: RunSeries, *, last_k: int, warm_from: int) -> dict[str, Any
         "rollout_s": perf_mean["perf/rollout_time"],
         "train_wait_s": perf_mean["perf/train_wait_time"],
         "tok_per_gpu_s": perf_mean["perf/tokens_per_gpu_per_sec"],
-        "logprob_gap": _mean(list(run.logprob_gap.values())),
+        # Train/inference mismatch. Step 0 is the pure-numerics floor (engine and trainer
+        # hold identical weights); in async arms later steps also carry one-version policy
+        # drift, so the warm mean is what the envelope is judged on.
+        "lp_gap_step0": run.logprob_gap.get(0),
+        "lp_gap": _mean([g for r, g in run.logprob_gap.items() if r >= warm_from]),
+        "lp_gap_worst_step": max(run.logprob_gap.values()) if run.logprob_gap else None,
+        "lp_token_max": max(run.logprob_gap_max.values()) if run.logprob_gap_max else None,
     }
 
 
@@ -213,7 +228,13 @@ def reward_at_samples(run: RunSeries, target_samples: int, *, window: int) -> fl
 
 
 def arm_summary(
-    runs: list[RunSeries], *, last_k: int, warm_from: int, checkpoints: list[int], window: int
+    runs: list[RunSeries],
+    *,
+    last_k: int,
+    warm_from: int,
+    checkpoints: list[int],
+    window: int,
+    lp_gap_envelope: float = DEFAULT_LP_GAP_ENVELOPE,
 ) -> list[dict[str, Any]]:
     rows = []
     modes = [m for m in ARM_ORDER if any(r.mode == m for r in runs)]
@@ -221,8 +242,11 @@ def arm_summary(
         arm_runs = [r for r in runs if r.mode == mode and r.rollouts]
         summaries = [run_summary(r, last_k=last_k, warm_from=warm_from) for r in arm_runs]
         row: dict[str, Any] = {"mode": mode, "n_seeds": len(arm_runs)}
-        for key in ("reward_last_k", "wall_s", "step_s", "update_s", "pause_s", "train_wait_s", "tok_per_gpu_s"):
+        keys = ("reward_last_k", "wall_s", "step_s", "update_s", "pause_s", "train_wait_s", "tok_per_gpu_s", "lp_gap")
+        for key in keys:
             row[key], row[key + "_std"] = _mean_std([s[key] for s in summaries if s[key] is not None])
+        # Runs whose warm-mean gap leaves the qualified envelope cannot support parity.
+        row["n_mismatch"] = sum(1 for s in summaries if s["lp_gap"] is not None and s["lp_gap"] > lp_gap_envelope)
         for target in checkpoints:
             values = [v for r in arm_runs if (v := reward_at_samples(r, target, window=window)) is not None]
             row[f"reward@{target}"] = _mean(values)
@@ -263,32 +287,52 @@ def _fmt_pm(mean: Any, std: Any, digits: int = 3) -> str:
 
 def render_markdown(
     runs: list[RunSeries], arm_rows: list[dict[str, Any]], attr_rows: list[dict[str, Any]], *,
-    last_k: int, warm_from: int, checkpoints: list[int]
+    last_k: int, warm_from: int, checkpoints: list[int], lp_gap_envelope: float = DEFAULT_LP_GAP_ENVELOPE
 ) -> str:
     out = []
+    summaries = [run_summary(run, last_k=last_k, warm_from=warm_from) for run in runs]
     out.append("## Per run")
     out.append(
         f"| run | mode | seed | rollouts | samples | wall s | reward (last {last_k}) | step s | update s | "
         "pause s | wait s | tok/GPU/s | lp gap |"
     )
     out.append("|:--|:--|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|")
-    for run in runs:
-        s = run_summary(run, last_k=last_k, warm_from=warm_from)
+    for s in summaries:
         out.append(
             f"| {s['run_id']} | {s['mode']} | {_fmt(s['seed'])} | {s['n_rollouts']} | {s['samples']} | {_fmt(s['wall_s'], 0)} | "
             f"{_fmt(s['reward_last_k'])} | {_fmt(s['step_s'], 2)} | {_fmt(s['update_s'])} | {_fmt(s['pause_s'])} | "
-            f"{_fmt(s['train_wait_s'], 2)} | {_fmt(s['tok_per_gpu_s'], 0)} | {_fmt(s['logprob_gap'], 4)} |"
+            f"{_fmt(s['train_wait_s'], 2)} | {_fmt(s['tok_per_gpu_s'], 0)} | {_fmt(s['lp_gap'], 4)} |"
         )
     out.append("")
     out.append(f"## Per arm (mean ± std over seeds; timings over warm rollouts >= {warm_from})")
-    out.append(f"| arm | seeds | reward (last {last_k}) | wall s | step s | update s | pause s | wait s | tok/GPU/s |")
-    out.append("|:--|--:|--:|--:|--:|--:|--:|--:|--:|")
+    out.append(f"| arm | seeds | reward (last {last_k}) | wall s | step s | update s | pause s | wait s | tok/GPU/s | lp gap | mismatch |")
+    out.append("|:--|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|")
     for row in arm_rows:
         out.append(
             f"| {row['mode']} | {row['n_seeds']} | {_fmt_pm(row['reward_last_k'], row['reward_last_k_std'])} | "
             f"{_fmt_pm(row['wall_s'], row['wall_s_std'], 0)} | {_fmt_pm(row['step_s'], row['step_s_std'], 2)} | "
             f"{_fmt_pm(row['update_s'], row['update_s_std'])} | {_fmt_pm(row['pause_s'], row['pause_s_std'])} | "
-            f"{_fmt_pm(row['train_wait_s'], row['train_wait_s_std'], 2)} | {_fmt_pm(row['tok_per_gpu_s'], row['tok_per_gpu_s_std'], 0)} |"
+            f"{_fmt_pm(row['train_wait_s'], row['train_wait_s_std'], 2)} | {_fmt_pm(row['tok_per_gpu_s'], row['tok_per_gpu_s_std'], 0)} | "
+            f"{_fmt_pm(row['lp_gap'], row['lp_gap_std'], 4)} | {row['n_mismatch']}/{row['n_seeds']} |"
+        )
+    out.append("")
+    out.append(f"## Train/rollout log-prob gap (mean |Δ logp| per step; envelope {lp_gap_envelope:g})")
+    out.append(
+        "Step 0 is the pure-numerics floor (engine and trainer at identical weights); in async arms the warm "
+        "mean also carries one-version policy drift. A run above the envelope cannot support a parity claim."
+    )
+    out.append("| run | mode | gap @ step 0 | warm mean | worst step mean | worst token | verdict |")
+    out.append("|:--|:--|--:|--:|--:|--:|:--|")
+    for s in summaries:
+        if s["lp_gap"] is None:
+            verdict = "no data"
+        elif s["lp_gap"] > lp_gap_envelope:
+            verdict = "MISMATCH"
+        else:
+            verdict = "ok"
+        out.append(
+            f"| {s['run_id']} | {s['mode']} | {_fmt(s['lp_gap_step0'], 4)} | {_fmt(s['lp_gap'], 4)} | "
+            f"{_fmt(s['lp_gap_worst_step'], 4)} | {_fmt(s['lp_token_max'], 2)} | {verdict} |"
         )
     if checkpoints:
         out.append("")
@@ -326,6 +370,7 @@ def series_json(runs: list[RunSeries]) -> list[dict[str, Any]]:
                     "reward": run.reward[r],
                     **{k.split("/", 1)[1]: v for k, v in run.perf.get(r, {}).items()},
                     "logprob_gap": run.logprob_gap.get(r),
+                    "logprob_gap_max": run.logprob_gap_max.get(r),
                 }
                 for r in run.rollouts
             ],
@@ -341,6 +386,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--warm-from", type=int, default=1, help="first rollout counted in timing means")
     parser.add_argument("--checkpoints", default="", help="comma-separated sample counts for the parity table")
     parser.add_argument("--window", type=int, default=10, help="rollouts averaged at each checkpoint")
+    parser.add_argument(
+        "--lp-gap-envelope",
+        type=float,
+        default=DEFAULT_LP_GAP_ENVELOPE,
+        help="max acceptable warm-mean train/rollout |Δ logp| per step; runs above it are flagged MISMATCH",
+    )
     parser.add_argument("--csv", help="write per-run rows here")
     parser.add_argument("--json", help="write per-rollout series here")
     args = parser.parse_args(argv)
@@ -351,9 +402,26 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no runs under {args.campaign_dir}", file=sys.stderr)
         return 1
     checkpoints = [int(c) for c in args.checkpoints.split(",") if c.strip()]
-    arm_rows = arm_summary(runs, last_k=args.last_k, warm_from=args.warm_from, checkpoints=checkpoints, window=args.window)
+    arm_rows = arm_summary(
+        runs,
+        last_k=args.last_k,
+        warm_from=args.warm_from,
+        checkpoints=checkpoints,
+        window=args.window,
+        lp_gap_envelope=args.lp_gap_envelope,
+    )
     attr_rows = attribution(arm_rows)
-    sys.stdout.write(render_markdown(runs, arm_rows, attr_rows, last_k=args.last_k, warm_from=args.warm_from, checkpoints=checkpoints))
+    sys.stdout.write(
+        render_markdown(
+            runs,
+            arm_rows,
+            attr_rows,
+            last_k=args.last_k,
+            warm_from=args.warm_from,
+            checkpoints=checkpoints,
+            lp_gap_envelope=args.lp_gap_envelope,
+        )
+    )
     if args.csv:
         rows = [run_summary(r, last_k=args.last_k, warm_from=args.warm_from) for r in runs]
         with open(args.csv, "w", newline="") as handle:

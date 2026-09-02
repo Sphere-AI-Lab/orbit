@@ -33,7 +33,12 @@ def _write_run(root: Path, run_id: str, seed: int, rewards: list[float], step_s:
             f"{{'perf/update_weights_pause_time': 0.05, 'perf/update_weights_time': 0.1, "
             f"'perf/train_wait_time': {step_s * 0.3}, 'perf/step_time': {step_s}}}"
         )
-        lines.append(f"(MegatronTrainRayActor pid=1) {stamp} model.py:847 - step {i}: {{'train/train_rollout_logprob_abs_diff': 0.01}}")
+        # step 0 is the numerics floor; later steps drift up slightly; one spiky token per step
+        gap = 0.008 if i == 0 else 0.010 + 0.001 * i
+        lines.append(
+            f"(MegatronTrainRayActor pid=1) {stamp} model.py:847 - step {i}: "
+            f"{{'train/train_rollout_logprob_abs_diff': {gap}, 'train/train_rollout_logprob_abs_diff_max': {2.0 + i}}}"
+        )
     (run_dir / "console.log").write_text("\n".join(lines) + "\n")
     return run_dir
 
@@ -58,7 +63,27 @@ def test_parse_run_extracts_reward_wall_and_perf(tmp_path):
     assert sync.samples_per_rollout == 32 and sync.samples(3) == 128
     assert sync.wall_s(0) == 0.0 and sync.wall_s(3) == 24.0
     assert sync.perf[2]["perf/step_time"] == 8.0
-    assert sync.logprob_gap[1] == 0.01
+    assert sync.logprob_gap[0] == 0.008 and abs(sync.logprob_gap[1] - 0.011) < 1e-12
+    assert sync.logprob_gap_max[3] == 5.0
+
+
+def test_logprob_gap_summary_and_envelope_verdict(tmp_path):
+    root = _campaign(tmp_path)
+    runs = {r.run_id: r for r in analyze_a3.iter_runs(root)}
+    s = analyze_a3.run_summary(runs["r00_runtime_qwen3_4b_bf16_oft_sync_g0123"], last_k=2, warm_from=1)
+
+    assert s["lp_gap_step0"] == 0.008  # numerics floor: identical weights on both sides
+    assert abs(s["lp_gap"] - (0.011 + 0.012 + 0.013) / 3) < 1e-12  # warm mean excludes step 0
+    assert abs(s["lp_gap_worst_step"] - 0.013) < 1e-12
+    assert s["lp_token_max"] == 5.0
+
+    # envelope at 0.0125: the warm mean 0.012 stays inside; at 0.011 it is flagged
+    ok_rows = analyze_a3.arm_summary(list(runs.values()), last_k=1, warm_from=1, checkpoints=[], window=1, lp_gap_envelope=0.0125)
+    bad_rows = analyze_a3.arm_summary(list(runs.values()), last_k=1, warm_from=1, checkpoints=[], window=1, lp_gap_envelope=0.011)
+    assert {r["mode"]: r["n_mismatch"] for r in ok_rows} == {"sync": 0, "async_fullft": 0, "async_db": 0}
+    assert {r["mode"]: r["n_mismatch"] for r in bad_rows} == {"sync": 2, "async_fullft": 1, "async_db": 1}
+    text = analyze_a3.render_markdown(list(runs.values()), bad_rows, [], last_k=1, warm_from=1, checkpoints=[], lp_gap_envelope=0.011)
+    assert "MISMATCH" in text and "| 2/2 |" in text
 
 
 def test_run_summary_uses_warm_rollouts_and_last_k(tmp_path):
