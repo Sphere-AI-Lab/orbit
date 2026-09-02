@@ -32,6 +32,8 @@ def patched(monkeypatch):
 def _args(**overrides):
     base = dict(
         use_rollout_logprobs=False,
+        # upstream arg (dbbab1566): compute_advantages_and_returns reads it unconditionally
+        skip_actor_forward_only=False,
         kl_coef=0,
         advantage_estimator="grpo",
         use_opd=True,

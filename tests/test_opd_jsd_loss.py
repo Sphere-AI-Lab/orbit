@@ -75,13 +75,34 @@ def _build_inputs() -> tuple[torch.Tensor, torch.Tensor, dict]:
 
 def _single_state() -> None:
     single = GroupInfo(rank=0, size=1, group=None)
-    set_parallel_state(ParallelState(intra_dp=single, intra_dp_cp=single, cp=single, tp=single))
+    # upstream's ParallelState gained required pp/ep/etp/indep_dp groups; trivial here.
+    set_parallel_state(
+        ParallelState(
+            intra_dp=single,
+            intra_dp_cp=single,
+            cp=single,
+            tp=single,
+            pp=single,
+            ep=single,
+            etp=single,
+            indep_dp=single,
+        )
+    )
 
 
 def _cp_state(rank: int, size: int) -> None:
     single = GroupInfo(rank=0, size=1, group=None)
     set_parallel_state(
-        ParallelState(intra_dp=single, intra_dp_cp=single, cp=GroupInfo(rank=rank, size=size, group=None), tp=single)
+        ParallelState(
+            intra_dp=single,
+            intra_dp_cp=single,
+            cp=GroupInfo(rank=rank, size=size, group=None),
+            tp=single,
+            pp=single,
+            ep=single,
+            etp=single,
+            indep_dp=single,
+        )
     )
 
 
@@ -159,6 +180,10 @@ def _tp_worker(rank: int, tp_size: int, port: int, beta: float, results) -> None
             intra_dp_cp=single,
             cp=single,
             tp=GroupInfo(rank=rank, size=tp_size, group=dist.group.WORLD),
+            pp=single,
+            ep=single,
+            etp=single,
+            indep_dp=single,
         )
     )
     tp_loss, tp_metrics, tp_grad = _run_loss(

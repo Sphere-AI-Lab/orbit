@@ -3,6 +3,15 @@ import torch
 
 import miles.backends.training_utils.loss as training_loss
 
+# Upstream decomposed loss.py into loss_hub/: `policy_loss_function` now lives in
+# loss_hub.losses and resolves its collaborators (get_parallel_state,
+# get_log_probs_and_entropy, compute_policy_loss, vanilla_tis_function,
+# get_sum_of_sample_mean, _response_masked_max) from THAT module's globals.
+# loss.py only re-exports them, so monkeypatching the names on training_loss is
+# inert; the stubs below must land on losses_module.
+from miles.backends.training_utils.loss_hub import losses as losses_module
+from miles.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
+
 
 _ORIGINAL_VANILLA_TIS = training_loss.vanilla_tis_function
 
@@ -185,6 +194,9 @@ def _exercise_policy_ratio(
         (),
         {
             "use_rollout_logprobs": False,
+            # upstream args (dbbab1566): policy_loss_function reads both unconditionally
+            "skip_actor_forward_only": False,
+            "observe_training_entropy": False,
             "use_opsm": False,
             "advantage_estimator": "on_policy_distillation",
             "force_on_policy_ratio": force_on_policy_ratio,
@@ -213,9 +225,24 @@ def _exercise_policy_ratio(
         "unconcat_tokens": [torch.arange(3)],
     }
 
-    monkeypatch.setattr(training_loss, "get_parallel_state", lambda: object())
+    # A real trivial ParallelState rather than a `lambda: object()` stub: upstream's
+    # policy_loss_function reaches get_parallel_state through cp_utils
+    # (get_local_response_loss_masks) as well, so the global must be set.
+    trivial = GroupInfo(rank=0, size=1, group=None)
+    set_parallel_state(
+        ParallelState(
+            intra_dp=trivial,
+            intra_dp_cp=trivial,
+            cp=trivial,
+            tp=trivial,
+            pp=trivial,
+            ep=trivial,
+            etp=trivial,
+            indep_dp=trivial,
+        )
+    )
     monkeypatch.setattr(
-        training_loss,
+        losses_module,
         "get_log_probs_and_entropy",
         lambda *args, **kwargs: {
             "log_probs": [current_log_probs],
@@ -234,7 +261,7 @@ def _exercise_policy_ratio(
         captures["ppo_ratio"] = ratio.detach().clone()
         return -(advantages * ratio), torch.zeros_like(ratio)
 
-    monkeypatch.setattr(training_loss, "compute_policy_loss", policy_loss)
+    monkeypatch.setattr(losses_module, "compute_policy_loss", policy_loss)
     def capture_tis(**kwargs):
         train = torch.cat(kwargs["train_log_probs"])
         rollout = torch.cat(kwargs["rollout_log_probs"])
@@ -246,18 +273,18 @@ def _exercise_policy_ratio(
         captures["tis_rollout_log_probs"] = rollout.clone()
         return _ORIGINAL_VANILLA_TIS(**kwargs)
 
-    monkeypatch.setattr(training_loss, "vanilla_tis_function", capture_tis)
+    monkeypatch.setattr(losses_module, "vanilla_tis_function", capture_tis)
 
     def reduce(values: torch.Tensor) -> torch.Tensor:
         return values.mean()
 
     monkeypatch.setattr(
-        training_loss,
+        losses_module,
         "get_sum_of_sample_mean",
         lambda *args, **kwargs: reduce,
     )
     monkeypatch.setattr(
-        training_loss,
+        losses_module,
         "_response_masked_max",
         lambda values, **kwargs: values.max(),
     )

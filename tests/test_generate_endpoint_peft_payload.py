@@ -9,6 +9,8 @@ def _args(peft_method: str) -> Namespace:
         rollout_max_context_len=None,
         rollout_max_response_len=8,
         use_rollout_routing_replay=False,
+        # upstream arg (dbbab1566); compute_request_payload reads it unconditionally
+        use_rollout_indexer_replay=False,
     )
 
 

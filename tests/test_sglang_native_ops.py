@@ -113,6 +113,8 @@ def _oft_server_args(
         sglang_pp_size=1,
         sglang_ep_size=1,
         use_rollout_routing_replay=False,
+        # upstream arg (dbbab1566); _compute_server_args reads it unconditionally
+        use_rollout_indexer_replay=False,
         fp16=False,
         bf16=True,
         opd_type="sglang",

@@ -29,7 +29,9 @@ class _Axis:
 def _fake_parallel_state():
     # CP=1, TP=1, single DP rank -- the simplest layout, and the one that
     # currently crashes because the list->tensor conversion is skipped.
-    return SimpleNamespace(cp=_Axis(1), tp=_Axis(1), intra_dp=_Axis(1))
+    # upstream (dbbab1566) reads parallel_state.effective_dp.{rank,size,group} in
+    # get_rollout_data; with a trivial indep_dp it resolves to intra_dp.
+    return SimpleNamespace(cp=_Axis(1), tp=_Axis(1), intra_dp=_Axis(1), effective_dp=_Axis(1))
 
 
 @pytest.fixture
@@ -48,7 +50,13 @@ def patched(monkeypatch):
     monkeypatch.setattr(data, "get_parallel_state", lambda: fake)
     monkeypatch.setattr(cp_utils, "get_parallel_state", lambda: fake)
     # process_rollout_data would DP-split via ray; return the prepared dict as-is.
-    monkeypatch.setattr(data, "process_rollout_data", lambda args, ref, rank, size: ref)
+    # upstream (dbbab1566) passes witness_info= and returns
+    # (rollout_data, object_store_get_result), mirrored by tests/fast/test_opd_cp_data.py.
+    monkeypatch.setattr(
+        data,
+        "process_rollout_data",
+        lambda args, ref, rank, size, witness_info=None: (ref, object()),
+    )
 
 
 def _base_rollout_data():
@@ -63,11 +71,26 @@ def _base_rollout_data():
     }
 
 
+def _args() -> Namespace:
+    # upstream's get_rollout_data (dbbab1566) also consults enable_witness,
+    # compress_ratios and data_pad_size_multiplier; the dtype helper reads the
+    # precision flags. Same set as tests/fast/test_opd_cp_data.py::_args.
+    return Namespace(
+        qkv_format="thd",
+        enable_witness=False,
+        compress_ratios=[],
+        data_pad_size_multiplier=16,
+        true_on_policy_mode=False,
+        bf16=False,
+        fp16=False,
+    )
+
+
 def test_get_rollout_data_tensorizes_teacher_log_probs(patched):
-    args = Namespace(qkv_format="thd")
+    args = _args()
     rollout_data = _base_rollout_data()
 
-    out = data.get_rollout_data(args, rollout_data)
+    out, _store_get_result = data.get_rollout_data(args, rollout_data)
 
     teacher = out["teacher_log_probs"]
     assert isinstance(teacher, list) and len(teacher) == 1
@@ -81,11 +104,11 @@ def test_get_rollout_data_tensorizes_teacher_log_probs(patched):
 
 def test_get_rollout_data_no_teacher_key_is_noop(patched):
     # Non-OPD path: no teacher_log_probs present -> key stays absent.
-    args = Namespace(qkv_format="thd")
+    args = _args()
     rollout_data = _base_rollout_data()
     del rollout_data["teacher_log_probs"]
 
-    out = data.get_rollout_data(args, rollout_data)
+    out, _store_get_result = data.get_rollout_data(args, rollout_data)
 
     assert "teacher_log_probs" not in out
 
@@ -93,12 +116,12 @@ def test_get_rollout_data_no_teacher_key_is_noop(patched):
 def test_get_rollout_data_leaves_already_tensor_teacher_untouched(patched):
     # Megatron path guard: if teacher_log_probs are already tensors (as produced
     # by compute_log_prob), they must not be re-processed.
-    args = Namespace(qkv_format="thd")
+    args = _args()
     rollout_data = _base_rollout_data()
     existing = torch.tensor([-1.1, -1.2, -1.3], dtype=torch.float32)
     rollout_data["teacher_log_probs"] = [existing]
 
-    out = data.get_rollout_data(args, rollout_data)
+    out, _store_get_result = data.get_rollout_data(args, rollout_data)
 
     assert out["teacher_log_probs"][0] is existing
 

@@ -275,6 +275,8 @@ def test_engine_init_persists_launched_nnodes_from_server_args(monkeypatch):
             sglang_pp_size=1,
             sglang_ep_size=1,
             use_rollout_routing_replay=False,
+            # upstream arg (dbbab1566); _compute_server_args reads it unconditionally
+            use_rollout_indexer_replay=False,
             fp16=False,
             peft_method="none",
         ),
