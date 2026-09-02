@@ -633,6 +633,7 @@ def write_manifest(job: Job, env: dict[str, str]) -> None:
         "RUN_LOG",
         "SEED",
         "LR",
+        "SGLANG_ATTENTION_BACKEND",
     ]
     manifest = {
         "run_id": job.run_id,

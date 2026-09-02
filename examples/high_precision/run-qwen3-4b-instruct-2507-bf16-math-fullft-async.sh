@@ -138,7 +138,8 @@ SGLANG_ARGS=(
     --rollout-num-gpus "${ROLLOUT_NUM_GPUS}"
     --sglang-max-running-requests 1024
     --sglang-chunked-prefill-size 4096
-    --sglang-attention-backend flashinfer
+    # env-overridable (recipe default flashinfer); see the sync OFT launcher's note.
+    --sglang-attention-backend "${SGLANG_ATTENTION_BACKEND:-flashinfer}"
     --router-disable-circuit-breaker
 )
 

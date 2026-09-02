@@ -133,7 +133,10 @@ SGLANG_ARGS=(
     --rollout-num-gpus "${ROLLOUT_NUM_GPUS}"
     --sglang-max-running-requests 1024
     --sglang-chunked-prefill-size 4096
-    --sglang-attention-backend flashinfer
+    # env-overridable (recipe default flashinfer): the sglang checkout's flashinfer
+    # backend asserts flashinfer_python >= 0.6.17, which the cu130 env deliberately
+    # pins below; A3 runs every arm on triton via SGLANG_ATTENTION_BACKEND.
+    --sglang-attention-backend "${SGLANG_ATTENTION_BACKEND:-flashinfer}"
     --router-disable-circuit-breaker
 )
 

@@ -166,3 +166,42 @@ def test_oft_block_size_default_is_128(tmp_path, launcher):
     proc = _run(launcher, env)
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert _adjacent_pair_present(_argv_lines(proc.stdout), "--oft-block-size", "128")
+
+
+# --- A3 (Qwen3-4B) launcher knobs: SEED, LR and the sglang attention backend ---
+
+A3_4B_LAUNCHERS = [
+    "examples/high_precision/run-qwen3-4b-instruct-2507-bf16-math-oft.sh",
+    "examples/high_precision/run-qwen3-4b-instruct-2507-bf16-math-oft-async.sh",
+    FULLFT_4B_LAUNCHER,
+]
+
+
+def _a3_env(tmp_path: Path) -> dict[str, str]:
+    env = _base_env(tmp_path)
+    for key in ("SEED", "LR", "SGLANG_ATTENTION_BACKEND"):
+        env.pop(key, None)
+    return env
+
+
+@pytest.mark.parametrize("launcher", A3_4B_LAUNCHERS)
+def test_a3_launcher_defaults_preserved(tmp_path, launcher):
+    proc = _run(launcher, _a3_env(tmp_path))
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    lines = _argv_lines(proc.stdout)
+    assert _adjacent_pair_present(lines, "--seed", "1234")
+    assert _adjacent_pair_present(lines, "--lr", "3e-6")
+    assert _adjacent_pair_present(lines, "--sglang-attention-backend", "flashinfer")
+
+
+@pytest.mark.parametrize("launcher", A3_4B_LAUNCHERS)
+def test_a3_launcher_env_overrides_seed_lr_and_backend(tmp_path, launcher):
+    env = _a3_env(tmp_path)
+    env.update({"SEED": "7", "LR": "7e-7", "SGLANG_ATTENTION_BACKEND": "triton"})
+    proc = _run(launcher, env)
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    lines = _argv_lines(proc.stdout)
+    assert _adjacent_pair_present(lines, "--seed", "7")
+    assert _adjacent_pair_present(lines, "--lr", "7e-7")
+    assert _adjacent_pair_present(lines, "--sglang-attention-backend", "triton")
+    assert "flashinfer" not in lines
