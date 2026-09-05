@@ -22,7 +22,7 @@ flowchart LR
 | Object                                 | Role                                                           | Lives in                                                                                            |
 | -------------------------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | **Prompt dataset**                     | Source of prompts (plus optional metadata)                     | JSONL on disk (`--prompt-data`, `--input-key`)                                                      |
-| **Rollout (sglang-diffusion engines)** | Denoises prompts into images/videos and records the trajectory | One engine per `--rollout-num-gpus-per-engine` GPUs; shipped diffusion recipes explicitly enable the miles router with `--use-miles-router` |
+| **Rollout (sglang-diffusion engines)** | Denoises prompts into images/videos and records the trajectory | One engine per `--rollout-num-gpus-per-engine` GPUs; shipped diffusion recipes explicitly enable the orbit router with `--use-orbit-router` |
 | **Reward workers**                     | Map `(prompt, generated output) → score`                       | Built-in `rm_hub` (`--rm-type ocr / pickscore`) or custom (`--custom-rm-path`) — Ray actor pools    |
 | **Actor (FSDP2 + diffusers)**          | The DiT being trained, usually via LoRA                        | HF checkpoint (`--hf-checkpoint`), family resolved by `TrainPipelineConfig`                         |
 
@@ -53,7 +53,7 @@ Every flag in miles-diffusion configures one of these four phases.
 In miles-diffusion a sample is a whole denoising **trajectory**, and the fan-out continues below it: a step strategy
 picks the trained timesteps, and micro-batching counts **(x_t → x_{t+1}) pairs**. One equation per level.
 
-**Trajectory level** — the four-knob invariant, enforced in `miles/utils/arguments.py`. `rollout_batch_size` is
+**Trajectory level** — the four-knob invariant, enforced in `orbit/utils/arguments.py`. `rollout_batch_size` is
 required and `n_samples_per_prompt` defaults to 1; of the right-hand pair, set one and the other is derived
 (passing both with contradicting values aborts):
 
@@ -80,7 +80,7 @@ Two independent knobs control physical batching, one per side of the loop:
 | `--micro-batch-size`          | training | Train pairs per DiT **forward** |
 
 And one knob controls the trajectory→pair fan-out itself: `--diffusion-step-strategy-path` picks the SDE step subset per
-rollout (`sde_window`, `epoch_global_random_choice`, or your own function in `miles/rollout/step_strategy_hub.py`).
+rollout (`sde_window`, `epoch_global_random_choice`, or your own function in `orbit/rollout/step_strategy_hub.py`).
 Training the full 10-step schedule would multiply the pair count by 10× in the example below.
 
 Here is a full example with the numbers:

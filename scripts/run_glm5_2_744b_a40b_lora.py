@@ -49,7 +49,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 app = typer.Typer()
 
@@ -232,7 +232,7 @@ def _train(args: ScriptArgs):
     if args.dapo_dynamic_sampling:
         rollout_args += (
             f"--over-sampling-batch-size {args.over_sampling_batch_size} "
-            "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
+            "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
         )
 
     grpo_args = "--advantage-estimator grpo --kl-loss-coef 0.00 --kl-loss-type low_var_kl --kl-coef 0.00 --entropy-coef 0.00 --eps-clip 0.2 --eps-clip-high 0.28 "

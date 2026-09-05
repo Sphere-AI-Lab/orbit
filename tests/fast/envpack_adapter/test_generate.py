@@ -10,11 +10,11 @@ from unittest.mock import patch
 try:
     import torch  # noqa: F401
 
-    from miles.rollout.base_types import GenerateFnInput
-    from miles.utils.types import Sample
-    from miles_plugins.envpack_adapter import generate as generate_mod
-    from miles_plugins.envpack_adapter.config import EnvpackConfigError
-    from miles_plugins.envpack_adapter.renderer import RenderedObservation
+    from orbit.rollout.base_types import GenerateFnInput
+    from orbit.utils.types import Sample
+    from orbit_plugins.envpack_adapter import generate as generate_mod
+    from orbit_plugins.envpack_adapter.config import EnvpackConfigError
+    from orbit_plugins.envpack_adapter.renderer import RenderedObservation
 except ModuleNotFoundError:
     torch = None
 
@@ -149,7 +149,7 @@ class _FakeBundle:
 class EnvpackGenerateTest(unittest.TestCase):
     def test_routing_headers_use_sample_routing_key(self) -> None:
         if torch is None:
-            self.skipTest("requires torch because Miles Sample imports torch")
+            self.skipTest("requires torch because Orbit Sample imports torch")
 
         sample = Sample(routing_key="episode-1")
         for policy in ("consistent_hashing", "manual"):
@@ -164,7 +164,7 @@ class EnvpackGenerateTest(unittest.TestCase):
 
     def test_refillability_honors_explicit_retryable_false_before_status_code(self) -> None:
         if torch is None:
-            self.skipTest("requires torch because Miles imports torch")
+            self.skipTest("requires torch because Orbit imports torch")
 
         exc = RuntimeError("terminal outcome unknown")
         exc.error = SimpleNamespace(retryable=False)
@@ -174,7 +174,7 @@ class EnvpackGenerateTest(unittest.TestCase):
 
     def test_system_message_uses_vlm_content_blocks_when_processor_is_present(self) -> None:
         if torch is None:
-            self.skipTest("requires torch because Miles imports torch")
+            self.skipTest("requires torch because Orbit imports torch")
 
         prompt_bundle = SimpleNamespace(system="system prompt")
         self.assertEqual(
@@ -186,9 +186,9 @@ class EnvpackGenerateTest(unittest.TestCase):
             {"role": "system", "content": "system prompt"},
         )
 
-    def test_generate_golden_path_preserves_miles_sample_contract(self) -> None:
+    def test_generate_golden_path_preserves_orbit_sample_contract(self) -> None:
         if torch is None:
-            self.skipTest("requires torch because Miles Sample imports torch")
+            self.skipTest("requires torch because Orbit Sample imports torch")
 
         bundle = _FakeBundle()
         calls = []
@@ -243,8 +243,8 @@ class EnvpackGenerateTest(unittest.TestCase):
             custom_rm_path=None,
             rollout_external=False,
             use_rollout_routing_replay=False,
-            use_miles_router=False,
-            miles_router_middleware_paths=[],
+            use_orbit_router=False,
+            orbit_router_middleware_paths=[],
         )
         state = SimpleNamespace(args=args, tokenizer=_Tokenizer(), processor=None)
         fake_envpack = _fake_envpack_modules()
@@ -306,7 +306,7 @@ class EnvpackGenerateTest(unittest.TestCase):
 
     def test_generate_rejects_structural_pool_env_config_override(self) -> None:
         if torch is None:
-            self.skipTest("requires torch because Miles Sample imports torch")
+            self.skipTest("requires torch because Orbit Sample imports torch")
 
         bundle = _FakeBundle()
         sample = Sample(
@@ -339,8 +339,8 @@ class EnvpackGenerateTest(unittest.TestCase):
             custom_rm_path=None,
             rollout_external=False,
             use_rollout_routing_replay=False,
-            use_miles_router=False,
-            miles_router_middleware_paths=[],
+            use_orbit_router=False,
+            orbit_router_middleware_paths=[],
         )
         state = SimpleNamespace(args=args, tokenizer=_Tokenizer(), processor=None)
 
@@ -362,7 +362,7 @@ class EnvpackGenerateTest(unittest.TestCase):
 
     def test_generate_refills_same_prompt_after_system_failure(self) -> None:
         if torch is None:
-            self.skipTest("requires torch because Miles Sample imports torch")
+            self.skipTest("requires torch because Orbit Sample imports torch")
 
         client = _StepFailsOnceClient()
         bundle = _FakeBundle(client=client)
@@ -413,8 +413,8 @@ class EnvpackGenerateTest(unittest.TestCase):
             custom_rm_path=None,
             rollout_external=False,
             use_rollout_routing_replay=False,
-            use_miles_router=False,
-            miles_router_middleware_paths=[],
+            use_orbit_router=False,
+            orbit_router_middleware_paths=[],
         )
         state = SimpleNamespace(args=args, tokenizer=_Tokenizer(), processor=None)
         fake_envpack = _fake_envpack_modules()
@@ -434,7 +434,7 @@ class EnvpackGenerateTest(unittest.TestCase):
                                     media_hashes=["init-sha"],
                                     artifacts=[],
                                 )
-                                with self.assertLogs("miles_plugins.envpack_adapter.generate", level="WARNING"):
+                                with self.assertLogs("orbit_plugins.envpack_adapter.generate", level="WARNING"):
                                     output = asyncio.run(
                                         generate_mod.generate(
                                             GenerateFnInput(
@@ -456,7 +456,7 @@ class EnvpackGenerateTest(unittest.TestCase):
         self.assertEqual(client.created_requests[0].seed, client.created_requests[1].seed)
         self.assertEqual(client.created_requests[0].env_config, client.created_requests[1].env_config)
         self.assertNotEqual(client.created_requests[0].episode_id, client.created_requests[1].episode_id)
-        self.assertEqual(client.cancelled, [(client.created_requests[0].episode_id, "miles_adapter_cleanup")])
+        self.assertEqual(client.cancelled, [(client.created_requests[0].episode_id, "orbit_adapter_cleanup")])
         self.assertEqual(len(calls), 2)
         refill = result.metadata["envpack"]["refill"]
         self.assertEqual(refill["attempt_index"], 1)
@@ -465,7 +465,7 @@ class EnvpackGenerateTest(unittest.TestCase):
 
     def test_generate_does_not_refill_plain_runtime_error(self) -> None:
         if torch is None:
-            self.skipTest("requires torch because Miles Sample imports torch")
+            self.skipTest("requires torch because Orbit Sample imports torch")
 
         client = _BuggyStepClient()
         bundle = _FakeBundle(client=client)
@@ -512,8 +512,8 @@ class EnvpackGenerateTest(unittest.TestCase):
             custom_rm_path=None,
             rollout_external=False,
             use_rollout_routing_replay=False,
-            use_miles_router=False,
-            miles_router_middleware_paths=[],
+            use_orbit_router=False,
+            orbit_router_middleware_paths=[],
         )
         state = SimpleNamespace(args=args, tokenizer=_Tokenizer(), processor=None)
         fake_envpack = _fake_envpack_modules()

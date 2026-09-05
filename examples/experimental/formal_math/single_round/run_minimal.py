@@ -8,7 +8,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from miles.utils.external_utils.model_args_utils import shell_safe_model_args
+from orbit.utils.external_utils.model_args_utils import shell_safe_model_args
 
 repo_base_dir = Path(os.path.abspath(__file__)).resolve().parents[4]
 
@@ -20,8 +20,8 @@ ckpt_args = (
     f"--hf-checkpoint /root/models/{MODEL_NAME}/ "
     f"--ref-load /root/models/{MODEL_NAME}_torch_dist "
     "--save-interval 20 "
-    f"--load /root/{MODEL_NAME}_miles "
-    f"--save /root/{MODEL_NAME}_miles "
+    f"--load /root/{MODEL_NAME}_orbit "
+    f"--save /root/{MODEL_NAME}_orbit "
 )
 
 rollout_args = (
@@ -100,7 +100,7 @@ misc_args = (
 wandb_args = (
     (
         "--use-wandb "
-        "--wandb-project miles-formal-math-run-minimal "
+        "--wandb-project orbit-formal-math-run-minimal "
         "--wandb-group demo "
         f"--wandb-key '{wandb_api_key}' "
     )

@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-import miles.utils.external_utils.model_args_utils as model_args_utils
-from miles.utils.external_utils.model_args_utils import (
+import orbit.utils.external_utils.model_args_utils as model_args_utils
+from orbit.utils.external_utils.model_args_utils import (
     load_model_args,
     load_sibling_model_args,
     moe_layer_freq,
@@ -45,7 +45,7 @@ def model_script(monkeypatch, tmp_path):
     path = tmp_path / "fake-model.4layer.py"
     path.write_text(_SCRIPT_BODY)
     (tmp_path / "fake-wrapper.py").write_text(_WRAPPER_BODY)
-    monkeypatch.setattr("miles.utils.external_utils.model_args_utils.MODEL_SCRIPT_DIR", tmp_path)
+    monkeypatch.setattr("orbit.utils.external_utils.model_args_utils.MODEL_SCRIPT_DIR", tmp_path)
     monkeypatch.delenv("MODEL_ARGS_NUM_LAYERS", raising=False)
     return path
 

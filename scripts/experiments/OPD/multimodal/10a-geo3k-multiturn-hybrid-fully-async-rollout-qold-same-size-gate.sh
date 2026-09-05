@@ -20,7 +20,7 @@ source "$SCRIPT_DIR/09b-geo3k-multiturn-hybrid-fully-async-same-size-gate.sh"
 # Keep this as a clean old-policy-source experiment. TIS is incompatible with
 # rollout logprobs, while mismatch-metrics mode would restore the trainer
 # pre-update forward and invalidate the systems-cost comparison.
-for arg in "${MILES_ARGS[@]}"; do
+for arg in "${ORBIT_ARGS[@]}"; do
    case "$arg" in
       --use-rollout-logprobs | --use-tis | --get-mismatch-metrics)
          echo "FATAL: milestone 10 owns the rollout-q_old switch (found inherited $arg)" >&2
@@ -29,4 +29,4 @@ for arg in "${MILES_ARGS[@]}"; do
    esac
 done
 
-MILES_ARGS+=(--use-rollout-logprobs)
+ORBIT_ARGS+=(--use-rollout-logprobs)

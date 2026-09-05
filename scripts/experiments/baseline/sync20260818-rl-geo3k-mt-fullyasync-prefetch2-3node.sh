@@ -7,4 +7,4 @@
 # full baseline name goes through JOB_NAME (submit.sh) rather than WANDB_RUN_NAME.
 export WANDB_PROJECT=${WANDB_PROJECT:-baseline}
 export JOB_NAME=${JOB_NAME:-sync20260818-rl-geo3k-mt-fullyasync-prefetch2-3node}
-source "$MILES_REPO/scripts/experiments/async/geo3k-vlm-multi-turn-fully-async-prefetch2-3node.sh"
+source "$ORBIT_REPO/scripts/experiments/async/geo3k-vlm-multi-turn-fully-async-prefetch2-3node.sh"

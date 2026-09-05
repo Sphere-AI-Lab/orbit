@@ -3,17 +3,17 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import ray
 
-from miles.ray.train.cell_monitor import compute_cell_status, create_trainer_cell_health_checker
-from miles.ray.train.cell_state import (
+from orbit.ray.train.cell_monitor import compute_cell_status, create_trainer_cell_health_checker
+from orbit.ray.train.cell_state import (
     StateAllocatedAlive,
     StateAllocatedErrored,
     StateAllocatedUninitialized,
     StatePending,
     StateStopped,
 )
-from miles.utils.ft_utils.control_server.models import TriState
-from miles.utils.ft_utils.health_checker import SimpleHealthCheckerConfig
-from miles.utils.ft_utils.indep_dp import IndepDPInfo
+from orbit.utils.ft_utils.control_server.models import TriState
+from orbit.utils.ft_utils.health_checker import SimpleHealthCheckerConfig
+from orbit.utils.ft_utils.indep_dp import IndepDPInfo
 
 
 def _make_actor_handle_mock() -> MagicMock:

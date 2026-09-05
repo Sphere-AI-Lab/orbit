@@ -10,8 +10,8 @@ pattern (interleaved Mamba and attention blocks, no RoPE, squared-relu FFNs)
 scaled to **120 B total / 12 B active** with a sparse MoE FFN, and shipped as
 an **FP8-native** checkpoint.
 
-miles loads it through the `megatron.bridge` AutoBridge with the shared
-**NemotronH MoE bridge shim** (`miles_plugins/megatron_bridge/nemotron_h.py`)
+orbit loads it through the `megatron.bridge` AutoBridge with the shared
+**NemotronH MoE bridge shim** (`orbit_plugins/megatron_bridge/nemotron_h.py`)
 that wires `routed_scaling_factor`, `n_group`, and `topk_group` onto the
 Megatron provider — without the shim the routed output is silently scaled 1.0×,
 the same drift class that affects the Nano-MoE recipe.
@@ -41,7 +41,7 @@ hf download nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-FP8 \
 ```
 
 Those are the `--data-dir` and `--model-dir` defaults; on the cluster they are
-`/cluster_public/miles_data/datasets` and `/cluster_public/miles_data/models`. `--model-name`
+`/cluster_public/orbit_data/datasets` and `/cluster_public/orbit_data/models`. `--model-name`
 names the checkpoint directory inside `--model-dir` and defaults to the BF16 release, so pass
 `--model-name NVIDIA-Nemotron-3-Super-120B-A12B-FP8` for the FP8 one.
 
@@ -65,7 +65,7 @@ AutoBridge + the NemotronH MoE shim load the FP8 HF checkpoint directly. Both
 The two pods take different roles, and each runs exactly one command:
 
 ```bash
-cd /root/miles
+cd /root/orbit
 
 # on each worker pod — joins the head's ray cluster and blocks
 python scripts/run_nemotron_3_super_120b_a12b.py worker --head-ip <head_ip>

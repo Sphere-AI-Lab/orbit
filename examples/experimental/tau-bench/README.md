@@ -1,14 +1,14 @@
 # Tau bench 
-This example shows miles training in an agentic multi-turn tool use environment. 
+This example shows orbit training in an agentic multi-turn tool use environment. 
 
 
 ## Environment Setup 
-Use the `zhuzilin/miles:latest` image and initialize the environment required for Search-R1:
+Use the `zhuzilin/orbit:latest` image and initialize the environment required for Search-R1:
 
 ```bash
 cd /root/
-git clone https://github.com/radixark/miles.git
-cd miles
+git clone https://github.com/Sphere-AI-Lab/orbit.git
+cd orbit
 pip install -e . --no-deps
 # for tau bench 
 cd /root/
@@ -18,10 +18,10 @@ git checkout feature/litellm-retry
 pip install -e . --no-deps 
 ```
 
-Use the following script to generate mock data for miles training. 
+Use the following script to generate mock data for orbit training. 
 
 ```bash
-cd /root/miles/examples/experimental/tau-bench
+cd /root/orbit/examples/experimental/tau-bench
 python tau1_mock.py --local_dir /root/tau-bench/
 ```
 
@@ -32,8 +32,8 @@ Initialize the Qwen2.5-3B-Instruct model needed for tool use:
 hf download Qwen/Qwen3-4B-Instruct-2507 --local-dir /root/Qwen3-4B-Instruct-2507
 
 # mcore checkpoint
-cd /root/miles
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py qwen3-4B-Instruct-2507)" || exit 1
+cd /root/orbit
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py qwen3-4B-Instruct-2507)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
     ${MODEL_ARGS[@]} \
@@ -55,7 +55,7 @@ export TAU_USER_MODEL_PROVIDER=deepseek
 export TAU_USER_MODEL=deepseek-chat
 export DEEPSEEK_API_KEY=sk-...
 
-cd /root/miles
+cd /root/orbit
 bash examples/experimental/tau-bench/run_qwen3_4B.sh
 ```
 
@@ -66,7 +66,7 @@ export TAU_USER_MODEL_PROVIDER=gemini          # optional, this is the default
 export TAU_USER_MODEL=gemini-2.5-flash-lite    # optional, this is the default
 export GEMINI_API_KEY=...
 
-cd /root/miles
+cd /root/orbit
 bash examples/experimental/tau-bench/run_qwen3_4B.sh
 ```
 

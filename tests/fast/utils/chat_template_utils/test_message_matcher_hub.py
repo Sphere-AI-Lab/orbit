@@ -11,16 +11,16 @@ from typing import Any
 
 import pytest
 
-import miles.utils.chat_template_utils as chat_template_utils
-from miles.utils.chat_template_utils import message_matcher_hub, template
-from miles.utils.chat_template_utils.message_matcher_hub import (
+import orbit.utils.chat_template_utils as chat_template_utils
+from orbit.utils.chat_template_utils import message_matcher_hub, template
+from orbit.utils.chat_template_utils.message_matcher_hub import (
     SessionMessageMatcherError,
     loose_tool_call_message_matches,
     resolve_session_message_matcher,
     role_content_only_message_matches,
     strict_message_matches,
 )
-from miles.utils.chat_template_utils.message_matcher_hub.funcs import _validated
+from orbit.utils.chat_template_utils.message_matcher_hub.funcs import _validated
 
 _MISSING = object()
 
@@ -489,13 +489,13 @@ def test_hub_import_keeps_misc_lazy_until_a_custom_path_is_resolved() -> None:
 import importlib
 import sys
 
-assert "miles.utils.misc" not in sys.modules
-hub = importlib.import_module("miles.utils.chat_template_utils.message_matcher_hub")
-assert "miles.utils.misc" not in sys.modules
+assert "orbit.utils.misc" not in sys.modules
+hub = importlib.import_module("orbit.utils.chat_template_utils.message_matcher_hub")
+assert "orbit.utils.misc" not in sys.modules
 assert hub.resolve_session_message_matcher("strict").__wrapped__ is hub.strict_message_matches
-assert "miles.utils.misc" not in sys.modules
+assert "orbit.utils.misc" not in sys.modules
 hub.resolve_session_message_matcher("operator.eq")
-assert "miles.utils.misc" in sys.modules
+assert "orbit.utils.misc" in sys.modules
 """
     subprocess.run([sys.executable, "-c", code], check=True, capture_output=True, text=True, timeout=120)
 
@@ -503,18 +503,18 @@ assert "miles.utils.misc" in sys.modules
 @pytest.mark.parametrize(
     "first_import",
     [
-        "miles.utils.chat_template_utils.message_matcher_hub",
-        "miles.utils.chat_template_utils.template",
-        "miles.utils.chat_template_utils",
-        "miles.utils.chat_template_utils.tito_tokenizer",
+        "orbit.utils.chat_template_utils.message_matcher_hub",
+        "orbit.utils.chat_template_utils.template",
+        "orbit.utils.chat_template_utils",
+        "orbit.utils.chat_template_utils.tito_tokenizer",
     ],
 )
 def test_supported_import_orders_have_no_cycle(first_import: str) -> None:
     modules = (
-        "miles.utils.chat_template_utils.message_matcher_hub",
-        "miles.utils.chat_template_utils.template",
-        "miles.utils.chat_template_utils",
-        "miles.utils.chat_template_utils.tito_tokenizer",
+        "orbit.utils.chat_template_utils.message_matcher_hub",
+        "orbit.utils.chat_template_utils.template",
+        "orbit.utils.chat_template_utils",
+        "orbit.utils.chat_template_utils.tito_tokenizer",
     )
     code = f"import importlib\nimportlib.import_module({first_import!r})\nmodules = {modules!r}\nfor module in modules:\n    importlib.import_module(module)\n"
     subprocess.run([sys.executable, "-c", code], check=True, capture_output=True, text=True, timeout=120)

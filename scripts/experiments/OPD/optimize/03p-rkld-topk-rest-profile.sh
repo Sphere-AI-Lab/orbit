@@ -17,7 +17,7 @@ export OPD_NUM_ROLLOUT=${OPD_NUM_ROLLOUT:-8}
 export TRAIN_TP_SIZE=2
 export TRAIN_PP_SIZE=1
 export WANDB_RUN_NAME=${WANDB_RUN_NAME:-03p-rkld${OPD_KL_COEF}-top${OPD_DAGGER_TOP_K}-rest${OPD_DAGGER_COEF}-profile}
-export MILES_PROFILE_OPD_DAGGER=1
+export ORBIT_PROFILE_OPD_DAGGER=1
 
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/../math_3nodes/qwen3-8B.sh"
@@ -34,7 +34,7 @@ if (( PROFILE_STEP_END > OPD_NUM_ROLLOUT )); then
 fi
 
 OPD_PROFILE_DIR=${OPD_PROFILE_DIR:-${HF_CACHE_DIR}/opd_profiles/${WANDB_RUN_NAME}}
-MILES_ARGS+=(
+ORBIT_ARGS+=(
    --use-pytorch-profiler
    --profile-target train_overall
    --profile-step-start "$PROFILE_STEP_START"

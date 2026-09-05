@@ -1,12 +1,12 @@
 ---
 title: Architecture Overview
-description: The 30-minute tour of how Miles is organized internally.
+description: The 30-minute tour of how Orbit is organized internally.
 ---
 A reading guide before you start patching.
 
 ## The processes
 
-A Miles run is three kinds of processes wrapped in a Ray cluster:
+A Orbit run is three kinds of processes wrapped in a Ray cluster:
 
 ```mermaid
 flowchart TB
@@ -16,10 +16,10 @@ flowchart TB
             T2[Actor rank 1]
             T3[Actor rank ...]
         end
-        subgraph "Rollout (N SGLang servers + Miles Router)"
+        subgraph "Rollout (N SGLang servers + Orbit Router)"
             R1[SGLang server 1]
             R2[SGLang server 2]
-            MR[Miles Router]
+            MR[Orbit Router]
             R1 -. health, route .- MR
             R2 -. health, route .- MR
         end
@@ -34,7 +34,7 @@ flowchart TB
 * **Trainer ranks** — Megatron processes that load `torch_dist` checkpoints and run the
   RL loop.
 * **SGLang servers** — independent HTTP services that produce rollouts.
-* **Miles Router** — FastAPI proxy that distributes rollout requests, preserves
+* **Orbit Router** — FastAPI proxy that distributes rollout requests, preserves
   metadata (R3), and enforces health checks.
 * **Data Source** — Python object owned by the trainer; reads prompt JSONL and acts as
   a buffer between rollout and training.
@@ -42,7 +42,7 @@ flowchart TB
 ## The package layout
 
 ```text
-miles/
+orbit/
 ├── backends/             # one directory per backend, plus what they share
 │   ├── megatron_utils/   # Megatron actor, update_weight/, checkpointing, fp32 markers
 │   ├── fsdp_utils/       # FSDP2 actor, adaptations/ per architecture, MoE kernels
@@ -62,7 +62,7 @@ miles/
 └── utils/                # arguments.py, async / IO / distributed helpers, audit_utils/
 ```
 
-The `miles_plugins/` tree sits beside it. Nothing in `miles/` imports it directly: a plugin
+The `orbit_plugins/` tree sits beside it. Nothing in `orbit/` imports it directly: a plugin
 is loaded only when a run names its import path in a flag (`--spec`, or one of the
 `--custom-*-path` flags). `models/` holds Megatron specs and HF module wrappers, `mbridge/`
 per-architecture weight bridges, `megatron_bridge/` the `megatron.bridge` shims, and
@@ -79,7 +79,7 @@ For a single GRPO iteration:
 sequenceDiagram
     participant T as Trainer
     participant DS as DataSource
-    participant MR as MilesRouter
+    participant MR as OrbitRouter
     participant SG as SGLang
     participant RM as RewardFn
 
@@ -102,18 +102,18 @@ from the trainer loop and uses a continuously-running worker.
 
 | You want to … | Edit |
 |---|---|
-| Add a new RL algorithm | `miles/backends/training_utils/loss.py` and `loss_hub/`, plus the enum in `miles/utils/arguments.py` |
-| Add a new built-in reward type | `miles/rollout/rm_hub/` (the `rm_type` dispatch lives in its `__init__.py`) |
-| Add a new built-in filter | `miles/rollout/filter_hub/` |
-| Support a new architecture on Megatron | `miles_plugins/models/<model>.py` + a bridge in `miles_plugins/mbridge/` |
-| Support a new architecture on FSDP | `miles/backends/fsdp_utils/adaptations/specs/<arch>.py` |
-| Add a new flag | `miles/utils/arguments.py` |
-| Change weight sync | `miles/backends/megatron_utils/update_weight/` (Megatron) or `miles/backends/fsdp_utils/update_weight_utils.py` (FSDP) |
-| Change rollout buffer | `miles/rollout/data_source.py` |
+| Add a new RL algorithm | `orbit/backends/training_utils/loss.py` and `loss_hub/`, plus the enum in `orbit/utils/arguments.py` |
+| Add a new built-in reward type | `orbit/rollout/rm_hub/` (the `rm_type` dispatch lives in its `__init__.py`) |
+| Add a new built-in filter | `orbit/rollout/filter_hub/` |
+| Support a new architecture on Megatron | `orbit_plugins/models/<model>.py` + a bridge in `orbit_plugins/mbridge/` |
+| Support a new architecture on FSDP | `orbit/backends/fsdp_utils/adaptations/specs/<arch>.py` |
+| Add a new flag | `orbit/utils/arguments.py` |
+| Change weight sync | `orbit/backends/megatron_utils/update_weight/` (Megatron) or `orbit/backends/fsdp_utils/update_weight_utils.py` (FSDP) |
+| Change rollout buffer | `orbit/rollout/data_source.py` |
 
 ## Extension points (the right way)
 
-The trainer is plug-in-friendly. Most extensions don't need a code change inside Miles —
+The trainer is plug-in-friendly. Most extensions don't need a code change inside Orbit —
 just pass a `--something-path my_pkg.thing`. See [Customization](/user-guide/customization)
 for the full list.
 
@@ -144,12 +144,12 @@ run `tests/e2e` before landing anything that touches the train loop.
 
 ## Where to look first when reading the code
 
-If you have 30 minutes and want to understand Miles end-to-end:
+If you have 30 minutes and want to understand Orbit end-to-end:
 
 1. `train.py` — the loop, top-to-bottom.
-2. `miles/rollout/sglang_rollout.py:generate_rollout` — how prompts become samples.
-3. `miles/backends/training_utils/loss.py` — the loss and advantage computation.
-4. `miles/router/router.py` — the FastAPI proxy.
-5. `miles/backends/megatron_utils/update_weight/` — how trained weights reach the engines.
+2. `orbit/rollout/sglang_rollout.py:generate_rollout` — how prompts become samples.
+3. `orbit/backends/training_utils/loss.py` — the loss and advantage computation.
+4. `orbit/router/router.py` — the FastAPI proxy.
+5. `orbit/backends/megatron_utils/update_weight/` — how trained weights reach the engines.
 
 That's the spine. Everything else hangs off it.

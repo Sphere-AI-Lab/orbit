@@ -11,7 +11,7 @@ SDE kernel.
 
 **Key highlights for RL training:**
 
-- **Native model package, not diffusers.** `miles/backends/fsdp_utils/models/ltx/` supplies
+- **Native model package, not diffusers.** `orbit/backends/fsdp_utils/models/ltx/` supplies
   loading, modeling, attention, and the FSDP plan directly against `ltx_core`; FSDP wraps
   `BasicAVTransformerBlock`. Requires `ltx-core` (pinned in `requirements.txt`, baked into the
   Docker image).
@@ -32,7 +32,7 @@ SDE kernel.
 
 ## 3. Family config
 
-Registered in `miles/backends/fsdp_utils/configs/ltx.py`:
+Registered in `orbit/backends/fsdp_utils/configs/ltx.py`:
 
 | Property | Value | Why |
 |---|---|---|

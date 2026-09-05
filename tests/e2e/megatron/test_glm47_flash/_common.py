@@ -1,12 +1,12 @@
 import os
 from dataclasses import dataclass
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 MODEL_NAME = "GLM-4.7-Flash"
 MODEL_TYPE = "glm4.7-flash"
 
-TIGHT_HOST_MEMORY = bool(int(os.environ.get("MILES_TEST_TIGHT_HOST_MEMORY", "1")))
+TIGHT_HOST_MEMORY = bool(int(os.environ.get("ORBIT_TEST_TIGHT_HOST_MEMORY", "1")))
 
 
 @dataclass
@@ -46,7 +46,7 @@ def build_train_args(case: CaseConfig, *, wandb_file: str) -> str:
     are always on for this suite; case-specific rollout and DeepEP knobs are
     exposed via CaseConfig.
     """
-    enable_eval = bool(int(os.environ.get("MILES_TEST_ENABLE_EVAL", "0")))
+    enable_eval = bool(int(os.environ.get("ORBIT_TEST_ENABLE_EVAL", "0")))
 
     ckpt_args = f"--hf-checkpoint /root/models/{MODEL_NAME} " f"--ref-load /root/{MODEL_NAME}_torch_dist "
 
@@ -169,7 +169,7 @@ def build_train_args(case: CaseConfig, *, wandb_file: str) -> str:
 
 def execute(case: CaseConfig, *, wandb_file: str) -> None:
     # Loosen replay mismatch threshold for GLM-4.7-Flash with MTP
-    os.environ["MILES_TEST_R3_THRESHOLD"] = "0.05"
+    os.environ["ORBIT_TEST_R3_THRESHOLD"] = "0.05"
 
     train_args = build_train_args(case, wandb_file=wandb_file)
 

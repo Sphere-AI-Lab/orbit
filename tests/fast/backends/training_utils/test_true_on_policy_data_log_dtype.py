@@ -4,9 +4,9 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from miles.backends.training_utils import cp_utils
-from miles.backends.training_utils import data as data_utils
-from miles.backends.training_utils import log_utils
+from orbit.backends.training_utils import cp_utils
+from orbit.backends.training_utils import data as data_utils
+from orbit.backends.training_utils import log_utils
 
 
 def _local_mean(metrics, key):

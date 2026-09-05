@@ -9,11 +9,11 @@ from dataclasses import replace
 
 import pytest
 
-import miles.rollout.fully_async_data_buffer as data_buffer
-import miles.rollout.fully_async_rollout as fully_async
-from miles.rollout.base_types import RolloutFnConstructorInput, RolloutFnEvalInput, RolloutFnTrainInput
-from miles.rollout.filter_hub.base_types import DynamicFilterOutput
-from miles.utils.types import Sample
+import orbit.rollout.fully_async_data_buffer as data_buffer
+import orbit.rollout.fully_async_rollout as fully_async
+from orbit.rollout.base_types import RolloutFnConstructorInput, RolloutFnEvalInput, RolloutFnTrainInput
+from orbit.rollout.filter_hub.base_types import DynamicFilterOutput
+from orbit.utils.types import Sample
 
 N_SAMPLES_PER_PROMPT = 2
 

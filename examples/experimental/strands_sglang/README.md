@@ -1,6 +1,6 @@
-# miles x Strands-SGLang
+# orbit x Strands-SGLang
 
-This example connects `miles` with [`strands-sglang`](https://github.com/horizon-rl/strands-sglang) (SGLang extension for the agentic scaffolding [`strands`](https://github.com/strands-agents/sdk-python)) for agentic RL training.
+This example connects `orbit` with [`strands-sglang`](https://github.com/horizon-rl/strands-sglang) (SGLang extension for the agentic scaffolding [`strands`](https://github.com/strands-agents/sdk-python)) for agentic RL training.
 
 ## Why `strands-sglang`?
 
@@ -19,9 +19,9 @@ This example connects `miles` with [`strands-sglang`](https://github.com/horizon
 ## Install Dependencies
 
 1. Pull the `radixark/miles:latest` image and enter it
-2. Go to miles folder: `cd /root/miles`
-3. Install miles: `pip install -e . --no-deps`
-4. Go to the example folder: `cd /root/miles/examples/experimental/strands_sglang`
+2. Go to orbit folder: `cd /root/orbit`
+3. Install orbit: `pip install -e . --no-deps`
+4. Go to the example folder: `cd /root/orbit/examples/experimental/strands_sglang`
 5. Install other dependencies: `pip install -r requirements.txt`
 
 > NOTE: `strands-sglang` is under rapid development, so we recommend using the GitHub repo version: `strands-sglang @ git+https://github.com/horizon-rl/strands-sglang.git`
@@ -35,8 +35,8 @@ This example connects `miles` with [`strands-sglang`](https://github.com/horizon
 hf download Qwen/Qwen3-8B --local-dir /root/models/Qwen/Qwen3-8B
 
 # mcore checkpoint
-cd /root/miles
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py qwen3-8B)" || exit 1
+cd /root/orbit
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py qwen3-8B)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
     ${MODEL_ARGS[@]} \
@@ -67,7 +67,7 @@ ds.to_json("/root/data/aime-2024.jsonl", orient="records", lines=True)
 ## Run Training
 
 ```bash
-cd /root/miles
+cd /root/orbit
 export WANDB_KEY=$your_wandb_key
 bash examples/experimental/strands_sglang/strands_qwen3_8b.sh
 ```

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from miles.dashboard.store import EngineSample, Meta, MetricStore, Stream
+from orbit.dashboard.store import EngineSample, Meta, MetricStore, Stream
 
 
 def make_store(tmp_path: Path, samples: list[EngineSample]) -> MetricStore:

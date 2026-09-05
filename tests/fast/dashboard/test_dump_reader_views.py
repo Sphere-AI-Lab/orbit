@@ -6,7 +6,7 @@ import polars as pl
 import pytest
 from tests.fast.dashboard.dummy_dump import dump_dummy_run
 
-from miles.dashboard.dump_reader import DumpReader
+from orbit.dashboard.dump_reader import DumpReader
 
 REMOVED = (3,)  # within-step positions marked remove_sample=True by the fixture
 
@@ -184,11 +184,11 @@ def test_joined_lru_eviction(tmp_path):
 
 
 @pytest.mark.skipif(
-    "MILES_DASHBOARD_REALDATA_DIR" not in os.environ,
-    reason="set MILES_DASHBOARD_REALDATA_DIR to a real --dump-details dir",
+    "ORBIT_DASHBOARD_REALDATA_DIR" not in os.environ,
+    reason="set ORBIT_DASHBOARD_REALDATA_DIR to a real --dump-details dir",
 )
 def test_realdata_views(tmp_path):
-    reader = DumpReader(os.environ["MILES_DASHBOARD_REALDATA_DIR"], cache_dir=tmp_path)
+    reader = DumpReader(os.environ["ORBIT_DASHBOARD_REALDATA_DIR"], cache_dir=tmp_path)
     df = reader.summary(0)
     assert df.height == 256
     assert df["truncated"].cast(int).sum() == 112  # measured on qwen30b-dash step 0
@@ -215,7 +215,7 @@ def test_summary_and_tokens_survive_dump_without_log_probs(tmp_path):
 
     from tests.fast.dashboard.dummy_dump import dump_dummy_run
 
-    from miles.dashboard.dump_reader import DumpReader
+    from orbit.dashboard.dump_reader import DumpReader
 
     dump_dummy_run(tmp_path)
     for shard in (tmp_path / "train_data").glob("0_*.pt"):

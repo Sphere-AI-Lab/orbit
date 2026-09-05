@@ -5,7 +5,7 @@ description: Launch recipes for Gemma-4 26B-A4B-it (MoE) and 31B-it (dense) via 
 ## 1. Model Introduction
 
 [Gemma-4](https://huggingface.co/google) is Google's multimodal model line.
-miles trains both released instruction-tuned sizes as language models, on the
+orbit trains both released instruction-tuned sizes as language models, on the
 base VLM checkpoint directly.
 
 Both go through the HF to Megatron bridge (`--megatron-to-hf-mode bridge`), and
@@ -59,7 +59,7 @@ The bridge reads the HF checkpoint directly, so `--hf-checkpoint` and
 ## 4. Launch
 
 ```bash
-cd /root/miles
+cd /root/orbit
 
 # MoE, single node
 python scripts/run_gemma_4_26b_a4b.py full-train --num-nodes 1
@@ -130,12 +130,12 @@ The MoE recipe pins sglang to conservative kernels:
 
 `--use-rollout-routing-replay` replays the rollout's expert routing during the
 training forward pass, so train log-probs match rollout log-probs. Every
-sigmoid- or softmax-routed MoE recipe in miles needs this; the dense 31B does
+sigmoid- or softmax-routed MoE recipe in orbit needs this; the dense 31B does
 not.
 
 ### 5.4 Notable quirks
 
-- **Trained on the VLM checkpoint.** miles does not strip the vision tower; the
+- **Trained on the VLM checkpoint.** orbit does not strip the vision tower; the
   bridge and sglang both handle the multimodal config, and the RL recipe simply
   trains the language stack.
 - `--attention-backend unfused` on the training side for the MoE recipe.

@@ -10,11 +10,11 @@ from scripts.run_glm5_744b_a40b import (
 from tests.ci.ci_register import register_cuda_ci
 from tests.ci.metric_history import register_ci_gate
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 # Basic smoke test that exercises the rollout indexer-topk replay path on
 # GLM-5 (every layer has an indexer). Enabling --use-rollout-indexer-replay
-# also forces --use-indexer-replay via miles_validate_args, so the training
+# also forces --use-indexer-replay via orbit_validate_args, so the training
 # side consumes the per-layer topk emitted by SGLang.
 
 register_cuda_ci(

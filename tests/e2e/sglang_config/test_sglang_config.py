@@ -3,7 +3,7 @@ import tempfile
 
 from tests.ci.ci_register import register_cuda_ci, register_rocm_ci
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 register_cuda_ci(est_time=400, suite="stage-c-8-gpu-h100", labels=["short"])
 register_rocm_ci(est_time=600, suite="nightly-stage-c-8-gpu-mi350", labels=["short"])
@@ -57,7 +57,7 @@ def execute():
         "--rollout-max-response-len 1024 "
         "--rollout-temperature 0.8 "
         "--over-sampling-batch-size 16 "
-        "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
+        "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
         "--global-batch-size 32 "
     )
 

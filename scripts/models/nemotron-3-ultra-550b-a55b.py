@@ -6,8 +6,8 @@
 #   moe_shared_expert_intermediate_size=10240  routed_scaling_factor=5.0
 #   moe_latent_size=2048  n_group=1  topk_group=1  sigmoid routing + aux-free expert bias
 #   num_nextn_predict_layers=1 (MTP head)   mamba n_groups=8
-# Same AutoBridge path as Super-120B (--megatron-to-hf-mode bridge) + miles
-# NemotronHBridge MoE/latent shim (miles_plugins/megatron_bridge/nemotron_h.py).
+# Same AutoBridge path as Super-120B (--megatron-to-hf-mode bridge) + orbit
+# NemotronHBridge MoE/latent shim (orbit_plugins/megatron_bridge/nemotron_h.py).
 # NOTE: Mamba n_groups=8 forces attention/mamba tensor-parallel <= 8 (n_groups % tp == 0).
 
 
@@ -33,7 +33,7 @@ def model_args() -> str:
         "--moe-shared-expert-intermediate-size 10240 "
         # Ultra-550B bottlenecks expert input/output through a 2048-dim latent
         # (routed experts run on moe_latent_size, not hidden_size; two extra fc1/fc2
-        # latent projections per MoE layer). Surfaced from HF config by the miles
+        # latent projections per MoE layer). Surfaced from HF config by the orbit
         # NemotronH bridge; the CLI arg keeps Megatron's parser happy.
         "--moe-latent-size 2048 "
         "--moe-router-score-function sigmoid "

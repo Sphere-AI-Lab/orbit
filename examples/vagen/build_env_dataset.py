@@ -3,7 +3,7 @@
 Runs `env.reset(seed)` once per row, writes the turn-0 PIL as a PNG, and
 emits one jsonl row carrying `metadata.vagen.{env_name, seed, config,
 max_turns, response_length_per_turn, env_uuid, image_path, split, heldout}`.
-The jsonl is the single source of truth — both training and miles eval
+The jsonl is the single source of truth — both training and orbit eval
 load it via `--prompt-data` / `--eval-prompt-data`.
 
 See `examples/vagen/docs/dataset.md` for the row schema, drift-detection
@@ -194,7 +194,7 @@ async def _build(
                     continue
                 kept_uuids.add(uuid)
                 # source_format + drift_check_required let both consumer paths
-                # (train data_source / miles eval Dataset) skip re-deriving them.
+                # (train data_source / orbit eval Dataset) skip re-deriving them.
                 render_mode = (spec_config or {}).get("render_mode")
                 row = {
                     "input": "vagen_placeholder",

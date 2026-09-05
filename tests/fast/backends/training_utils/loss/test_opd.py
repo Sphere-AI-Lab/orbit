@@ -11,8 +11,8 @@ from argparse import Namespace
 import pytest
 import torch
 
-from miles.backends.training_utils import loss as loss_utils
-from miles.backends.training_utils.loss_hub.opd import apply_opd_kl_to_advantages
+from orbit.backends.training_utils import loss as loss_utils
+from orbit.backends.training_utils.loss_hub.opd import apply_opd_kl_to_advantages
 
 # This module intentionally has no explicit CI registration call: modules under
 # tests/fast are implicitly assigned to the stage-a-cpu suite by the CI collector

@@ -58,7 +58,7 @@ register_ci_gate(metric_key="rollout/raw_reward")  # standard metric: steps + co
 
 Three roles, connected only by JSONL files and one DB — there is no long-lived "metrics manager"; the pipeline is per-test, driven by the harness:
 
-- **Collector (training process)** — `miles.utils.tracking_utils.TrackingManager` fans every `log()` out to all enabled backends; `WandbBackend` and `CiHistoryBackend` are parallel siblings in that registry, so wandb receives the same data independently and nothing downstream ever reads it back. `CiHistoryBackend` snapshots the fixed metric whitelist into per-process JSONL files under the harness-assigned record dir (`MILES_CI_GATE_RECORD_DIR`, injected by the CI harness; no CLI flag).
+- **Collector (training process)** — `orbit.utils.tracking_utils.TrackingManager` fans every `log()` out to all enabled backends; `WandbBackend` and `CiHistoryBackend` are parallel siblings in that registry, so wandb receives the same data independently and nothing downstream ever reads it back. `CiHistoryBackend` snapshots the fixed metric whitelist into per-process JSONL files under the harness-assigned record dir (`ORBIT_CI_GATE_RECORD_DIR`, injected by the CI harness; no CLI flag).
 - **Harness / finalizer (CI runner)** — `run_suite.py` builds the store from env (`NEON_DATABASE_URL`, a CI secret), resolves the baseline-write signal + provenance, and allocates the record dir (CUDA suites only); `ci_utils.run_unittest_files` hands each attempt its own record subdir and merges the PASSING attempt's per-process records into the merged per-run JSONL record (a metric key appearing in several processes gets its series concatenated and sorted by step); `ci_utils.run_gate_hook` then assigns identity, runs the gate, and acts on the verdict.
 - **Gate library (pure functions, read-only against storage)** — `register.py` parses `register_ci_gate` declarations out of the test file's AST at evaluation time (the call itself is a runtime no-op; nothing registers at runtime), `selection.py` picks comparison coordinates, `constraints.py` judges pass/fail, `gate.py:evaluate_gate` composes them over the store's baseline read.
 
@@ -66,7 +66,7 @@ One CUDA test run, end to end:
 
 ```mermaid
 flowchart TD
-    subgraph training_process["training process (miles core)"]
+    subgraph training_process["training process (orbit core)"]
         training_code["training code"] -- "log()" --> tracking_manager["TrackingManager"]
         tracking_manager -- "fan-out (parallel)" --> wandb_backend["WandbBackend<br>write-only sink, never read back"]
         tracking_manager --> ci_history_backend["CiHistoryBackend"]

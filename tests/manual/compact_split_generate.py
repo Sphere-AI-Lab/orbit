@@ -4,9 +4,9 @@ training samples that share the parent's rollout_id. Use via
 
 import copy
 
-from miles.rollout.base_types import GenerateFnInput, GenerateFnOutput
-from miles.rollout.generate_hub.single_turn import generate as single_turn_generate
-from miles.utils.types import Sample
+from orbit.rollout.base_types import GenerateFnInput, GenerateFnOutput
+from orbit.rollout.generate_hub.single_turn import generate as single_turn_generate
+from orbit.utils.types import Sample
 
 
 async def generate(input: GenerateFnInput) -> GenerateFnOutput:

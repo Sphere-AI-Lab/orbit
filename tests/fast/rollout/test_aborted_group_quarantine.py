@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from miles.utils.types import Sample
+from orbit.utils.types import Sample
 
 
 class _Progress:
@@ -39,7 +39,7 @@ def _collector_args(*, partial_rollout: bool) -> Namespace:
 
 
 def test_group_helpers_find_nested_abort_and_reject_nested_partial_retry():
-    from miles.rollout.group_utils import group_has_aborted_sample, prepare_partial_retry_group
+    from orbit.rollout.group_utils import group_has_aborted_sample, prepare_partial_retry_group
 
     completed = Sample(response="first", status=Sample.Status.COMPLETED)
     aborted = Sample(response="second", status=Sample.Status.ABORTED)
@@ -65,7 +65,7 @@ async def test_group_rm_skips_group_with_nested_aborted_leaf(monkeypatch, refact
     args = Namespace(group_rm=True, sglang_enable_deterministic_inference=False)
 
     if refactored:
-        from miles.rollout.inference_rollout import inference_rollout_common as rollout
+        from orbit.rollout.inference_rollout import inference_rollout_common as rollout
 
         state = SimpleNamespace(args=args, aborted=False)
 
@@ -81,7 +81,7 @@ async def test_group_rm_skips_group_with_nested_aborted_leaf(monkeypatch, refact
         monkeypatch.setattr(rollout, "batched_async_rm", group_rm)
         result = await rollout.generate_and_rm_group(state, group, {})
     else:
-        from miles.rollout import sglang_rollout as rollout
+        from orbit.rollout import sglang_rollout as rollout
 
         async def generate(_args, sample, _sampling_params, evaluation=False):
             assert evaluation is False
@@ -104,7 +104,7 @@ async def test_group_rm_skips_group_with_nested_aborted_leaf(monkeypatch, refact
 @pytest.mark.asyncio
 @pytest.mark.parametrize("partial_rollout", [False, True])
 async def test_legacy_collector_quarantines_before_filter(monkeypatch, partial_rollout):
-    from miles.rollout import sglang_rollout
+    from orbit.rollout import sglang_rollout
 
     aborted_group = [
         Sample(index=1, response="partial", status=Sample.Status.ABORTED),
@@ -167,7 +167,7 @@ async def test_legacy_collector_quarantines_before_filter(monkeypatch, partial_r
 @pytest.mark.asyncio
 @pytest.mark.parametrize("partial_rollout", [False, True])
 async def test_refactored_collector_quarantines_before_filter(monkeypatch, partial_rollout):
-    from miles.rollout.inference_rollout import inference_rollout_train
+    from orbit.rollout.inference_rollout import inference_rollout_train
 
     aborted_group = [
         Sample(index=1, response="partial", status=Sample.Status.ABORTED),

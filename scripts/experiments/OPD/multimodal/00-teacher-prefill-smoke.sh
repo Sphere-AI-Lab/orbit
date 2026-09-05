@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Exact VLM teacher-prefill contract probe. This is not a training recipe:
-# launch_miles starts one TP=8 Qwen3-VL teacher sidecar, then the Ray job runs
+# launch_orbit starts one TP=8 Qwen3-VL teacher sidecar, then the Ray job runs
 # teacher_prefill_smoke.py on the head node without creating trainer or rollout
 # actors.
 #
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}
 
 EXPERIMENT_NODES=1
 EXPERIMENT_TIME=02:00:00
@@ -67,11 +67,11 @@ case "$OPD_TEACHER_LAUNCH" in
 esac
 
 export ENVPACK_SERVER_WAIT_TIMEOUT=${ENVPACK_SERVER_WAIT_TIMEOUT:-1800}
-export MILES_TRAIN_ENTRY="scripts/experiments/OPD/multimodal/teacher_prefill_smoke.py"
+export ORBIT_TRAIN_ENTRY="scripts/experiments/OPD/multimodal/teacher_prefill_smoke.py"
 
-# launch_miles appends --wandb-run-id to every entrypoint. The probe accepts and
+# launch_orbit appends --wandb-run-id to every entrypoint. The probe accepts and
 # ignores it; no W&B run is created.
-MILES_ARGS=(
+ORBIT_ARGS=(
    --teacher-url "$OPD_TEACHER_URL"
    --student-model-dir "$HF_MODEL_DIR"
    --dataset "$HF_TRAIN_DATA"

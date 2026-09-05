@@ -34,7 +34,7 @@ training curve.
 
 ## 3. Family config
 
-From `miles/backends/fsdp_utils/configs/cosmos3.py`:
+From `orbit/backends/fsdp_utils/configs/cosmos3.py`:
 
 
 | Property       | Value                                            | Why                                                                                                 |

@@ -15,7 +15,7 @@ import os
 from tests.ci.ci_register import register_cuda_ci, register_rocm_ci
 from tests.ci.metric_history import register_ci_gate
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 MODEL_NAME = "Qwen3-4B"
 MODEL_TYPE = "qwen3-4B"
@@ -25,12 +25,12 @@ OFFLOAD_DIR = "/root/train_offload_disk_stream"
 register_cuda_ci(
     est_time=600,
     suite="stage-c-4-gpu-h200",
-    labels=["miles-plugin"],
+    labels=["orbit-plugin"],
 )
 register_rocm_ci(
     est_time=600,
     suite="stage-c-4-gpu-mi350",
-    labels=["miles-plugin", "amd"],
+    labels=["orbit-plugin", "amd"],
     disabled="FIXME: re-enable once this case passes on the MI350 runners.",
 )
 

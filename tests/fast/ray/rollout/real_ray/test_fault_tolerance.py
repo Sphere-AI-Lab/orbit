@@ -9,9 +9,9 @@ import pytest
 import ray
 from tests.fast.ray.rollout.conftest import make_args
 
-from miles.ray.rollout.addr_allocator import PortCursors
-from miles.ray.rollout.server_engine import ServerEngine
-from miles.ray.rollout.server_group import ServerGroup
+from orbit.ray.rollout.addr_allocator import PortCursors
+from orbit.ray.rollout.server_engine import ServerEngine
+from orbit.ray.rollout.server_group import ServerGroup
 
 
 def _build_group(

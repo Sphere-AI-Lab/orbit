@@ -124,13 +124,13 @@ def _mock_megatron_environment():
             },
         )
         _stub_module(
-            "miles.backends.megatron_utils.bridge_lora_helpers",
+            "orbit.backends.megatron_utils.bridge_lora_helpers",
             {
                 "_ensure_model_list": MagicMock(),
                 "_setup_lora_model_via_bridge": MagicMock(),
             },
         )
-        _stub_module("miles.backends.megatron_utils.model_provider", {"get_model_provider_func": MagicMock()})
+        _stub_module("orbit.backends.megatron_utils.model_provider", {"get_model_provider_func": MagicMock()})
         yield
     finally:
         sys.modules.clear()
@@ -138,13 +138,13 @@ def _mock_megatron_environment():
 
 
 def _patch_initialize_side_effects(stack: ExitStack) -> None:
-    stack.enter_context(patch("miles.backends.megatron_utils.model.clear_memory"))
-    stack.enter_context(patch("miles.backends.megatron_utils.model.check_peak_gpu_memory_after_load"))
-    stack.enter_context(patch("miles.backends.megatron_utils.model.check_model_hashes"))
+    stack.enter_context(patch("orbit.backends.megatron_utils.model.clear_memory"))
+    stack.enter_context(patch("orbit.backends.megatron_utils.model.check_peak_gpu_memory_after_load"))
+    stack.enter_context(patch("orbit.backends.megatron_utils.model.check_model_hashes"))
 
 
 def test_initialize_does_not_step_scheduler_restored_from_checkpoint():
-    from miles.backends.megatron_utils.model import initialize_model_and_optimizer
+    from orbit.backends.megatron_utils.model import initialize_model_and_optimizer
 
     args = Namespace(use_checkpoint_opt_param_scheduler=True, global_batch_size=8)
     model = [_FakeModelChunk()]
@@ -154,11 +154,11 @@ def test_initialize_does_not_step_scheduler_restored_from_checkpoint():
     with ExitStack() as stack:
         stack.enter_context(
             patch(
-                "miles.backends.megatron_utils.model.setup_model_and_optimizer",
+                "orbit.backends.megatron_utils.model.setup_model_and_optimizer",
                 return_value=(model, optimizer, opt_param_scheduler),
             )
         )
-        stack.enter_context(patch("miles.backends.megatron_utils.model.load_checkpoint", return_value=(100, 0)))
+        stack.enter_context(patch("orbit.backends.megatron_utils.model.load_checkpoint", return_value=(100, 0)))
         _patch_initialize_side_effects(stack)
         result = initialize_model_and_optimizer(args)
 
@@ -167,7 +167,7 @@ def test_initialize_does_not_step_scheduler_restored_from_checkpoint():
 
 
 def test_initialize_steps_scheduler_when_checkpoint_did_not_restore_it():
-    from miles.backends.megatron_utils.model import initialize_model_and_optimizer
+    from orbit.backends.megatron_utils.model import initialize_model_and_optimizer
 
     args = Namespace(use_checkpoint_opt_param_scheduler=False, global_batch_size=8)
     model = [_FakeModelChunk()]
@@ -177,11 +177,11 @@ def test_initialize_steps_scheduler_when_checkpoint_did_not_restore_it():
     with ExitStack() as stack:
         stack.enter_context(
             patch(
-                "miles.backends.megatron_utils.model.setup_model_and_optimizer",
+                "orbit.backends.megatron_utils.model.setup_model_and_optimizer",
                 return_value=(model, optimizer, opt_param_scheduler),
             )
         )
-        stack.enter_context(patch("miles.backends.megatron_utils.model.load_checkpoint", return_value=(100, 0)))
+        stack.enter_context(patch("orbit.backends.megatron_utils.model.load_checkpoint", return_value=(100, 0)))
         _patch_initialize_side_effects(stack)
         result = initialize_model_and_optimizer(args)
 
@@ -201,7 +201,7 @@ def test_initialize_steps_scheduler_when_checkpoint_did_not_restore_it():
     ids=["weights-only", "load-failed", "iteration-zero", "iteration-seven"],
 )
 def test_bridge_bootstrap_start_id_uses_actual_adapter_state(tmp_path, tracker, adapter_result, expected_start):
-    from miles.backends.megatron_utils import checkpoint as checkpoint_module
+    from orbit.backends.megatron_utils import checkpoint as checkpoint_module
 
     base = tmp_path / "base"
     base.mkdir()
@@ -230,7 +230,7 @@ def test_bridge_bootstrap_start_id_uses_actual_adapter_state(tmp_path, tracker, 
 
 
 def test_numeric_bridge_checkpoint_uses_loaded_iteration_for_weights_only_adapter(tmp_path):
-    from miles.backends.megatron_utils import checkpoint as checkpoint_module
+    from orbit.backends.megatron_utils import checkpoint as checkpoint_module
 
     base = tmp_path / "base"
     base.mkdir()

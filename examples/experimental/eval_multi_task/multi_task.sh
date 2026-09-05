@@ -25,7 +25,7 @@ echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../.." &>/dev/null && pwd)"
-MODEL_ARGS_LINE="$(python3 "${REPO_ROOT}/miles/utils/external_utils/model_args_utils.py" "qwen3-4B")" || exit 1
+MODEL_ARGS_LINE="$(python3 "${REPO_ROOT}/orbit/utils/external_utils/model_args_utils.py" "qwen3-4B")" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 EVAL_CONFIG_PATH="${REPO_ROOT}/examples/experimental/eval_multi_task/multi_task.yaml"
 
@@ -33,8 +33,8 @@ CKPT_ARGS=(
    --hf-checkpoint /root/Qwen3-4B
    #--hf-checkpoint /root/Qwen3-4B-FP8
    --ref-load /root/Qwen3-4B_torch_dist
-   --load /root/Qwen3-4B_miles/
-   --save /root/Qwen3-4B_miles/
+   --load /root/Qwen3-4B_orbit/
+   --save /root/Qwen3-4B_orbit/
    --save-interval 20
 )
 

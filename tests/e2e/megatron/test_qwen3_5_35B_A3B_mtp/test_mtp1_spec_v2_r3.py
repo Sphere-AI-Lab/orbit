@@ -2,7 +2,7 @@
 
 MTP training is on with one draft layer, so the rollout MTP/draft weights are synced
 from training (selector "all" checks both target and draft). Vision weights are still
-excluded: miles has no VLM/vision implementation on the training side.
+excluded: orbit has no VLM/vision implementation on the training side.
 """
 
 import os
@@ -32,7 +32,7 @@ CASE = CaseConfig(
     sglang_ep_size=8,
     enable_mtp_training=True,
     use_r3=True,
-    # miles has no VLM/vision implementation on the training side, so vision weights are
+    # orbit has no VLM/vision implementation on the training side, so vision weights are
     # never synced; exclude them from the weight-equality check.
     check_weight_update_skip_list=("visual",),
 )

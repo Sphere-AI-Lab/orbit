@@ -42,12 +42,12 @@ docker run --rm \
   -it radixark/miles:latest /bin/bash
 ```
 
-That drops you into a shell inside the container, with Miles at `/root/miles` and
+That drops you into a shell inside the container, with Orbit at `/root/orbit` and
 Megatron-LM at `/root/Megatron-LM`. Refresh the editable install so you run the
 latest main:
 
 ```bash
-cd /root/miles && git pull && pip install -e . --no-deps
+cd /root/orbit && git pull && pip install -e . --no-deps
 ```
 
 **Everything from here on runs inside the container.**
@@ -71,9 +71,9 @@ Megatron reads its own sharded checkpoint format, so convert the HuggingFace
 weights once:
 
 ```bash
-cd /root/miles
+cd /root/orbit
 # Load MODEL_ARGS, the Megatron-side description of the architecture
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py qwen3-4B)" || exit 1
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py qwen3-4B)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 
 # Map the HuggingFace weights into a sharded torch_dist checkpoint
@@ -116,7 +116,7 @@ responses, drifting upward as the policy improves. You have a live RL run.
 
 ## What's happening
 
-A Miles job combines two engines: [SGLang](https://github.com/sgl-project/sglang)
+A Orbit job combines two engines: [SGLang](https://github.com/sgl-project/sglang)
 generates responses from the current policy (the *rollout*), and
 [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) updates the policy from those
 responses (the *training*). In this recipe both share the same 8 GPUs, taking
@@ -140,7 +140,7 @@ Every iteration runs the same loop:
 3. Compute the GRPO objective from the scores and step the optimizer.
 4. Sync the updated weights back into the SGLang engines, and go again.
 
-The batch-sizing knobs satisfy one identity, and Miles fills in whichever side you
+The batch-sizing knobs satisfy one identity, and Orbit fills in whichever side you
 leave unset:
 
 ```

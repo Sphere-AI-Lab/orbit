@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from miles.utils.timer import Timer, inverse_timer, timer
+from orbit.utils.timer import Timer, inverse_timer, timer
 
 
 @pytest.fixture

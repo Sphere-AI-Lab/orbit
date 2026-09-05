@@ -3,8 +3,8 @@ import logging
 
 import pytest
 
-from miles.dashboard.args import add_dashboard_arguments, collector_config_from_args, validate_dashboard_args
-from miles.dashboard.sglang_scraper import DEFAULT_METRIC_WHITELIST
+from orbit.dashboard.args import add_dashboard_arguments, collector_config_from_args, validate_dashboard_args
+from orbit.dashboard.sglang_scraper import DEFAULT_METRIC_WHITELIST
 
 
 def parse(argv):
@@ -14,7 +14,7 @@ def parse(argv):
 
 
 def full_args(**overrides):
-    args = parse(["--use-miles-dashboard"])
+    args = parse(["--use-orbit-dashboard"])
     args.dump_details = "/tmp/dump"
     args.use_rollout_entropy = True
     args.wandb_group = "my-run"
@@ -26,7 +26,7 @@ def full_args(**overrides):
 
 def test_defaults():
     args = parse([])
-    assert args.use_miles_dashboard is False
+    assert args.use_orbit_dashboard is False
     assert args.dashboard_flush_interval == 5.0
     assert args.dashboard_gpu_sample_interval == 1.0
     assert args.dashboard_sglang_scrape_mode == "auto"
@@ -70,4 +70,4 @@ def test_collector_config_whitelist_override_and_run_name_fallback():
     args.dashboard_sglang_metrics = "sglang_gen_throughput,sglang_token_usage"
     config = collector_config_from_args(args, start_ts=0.0)
     assert config.metric_whitelist == ("sglang_gen_throughput", "sglang_token_usage")
-    assert config.run_name == "miles-run"
+    assert config.run_name == "orbit-run"

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from miles.backends.fsdp_utils.arguments import FSDPArgs, load_fsdp_args
+from orbit.backends.fsdp_utils.arguments import FSDPArgs, load_fsdp_args
 
 
 def _config(tmp_path: Path, **entries) -> str:

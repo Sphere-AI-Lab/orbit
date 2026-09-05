@@ -7,7 +7,7 @@ mirrors ``swe-agent-harbor-docker/generate.py:reward_func`` so it works for both
 single-sample (``async_rm``) and batched (``--custom-rm-path``) call paths.
 """
 
-from miles.utils.types import Sample
+from orbit.utils.types import Sample
 
 
 async def reward_func(args, samples: Sample | list[Sample], **kwargs) -> float | list[float]:

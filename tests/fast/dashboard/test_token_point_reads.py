@@ -5,7 +5,7 @@ import pytest
 import torch
 from tests.fast.dashboard.dummy_dump import dump_dummy_run
 
-from miles.dashboard.dump_reader import DumpReader
+from orbit.dashboard.dump_reader import DumpReader
 
 
 @pytest.fixture

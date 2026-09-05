@@ -34,7 +34,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 _MODEL_NAMES = Literal["Qwen3-4B-Base", "Qwen3-235B-A22B"]
 
@@ -83,7 +83,7 @@ def execute(args: ScriptArgs):
     )
 
     sft_args = (
-        "--rollout-function-path miles.rollout.sft_rollout.generate_rollout "
+        "--rollout-function-path orbit.rollout.sft_rollout.generate_rollout "
         f"--prompt-data {args.data_dir}/openhermes2_5.parquet "
         "--input-key messages "
         # no --apply-chat-template: sft_rollout renders the raw messages itself, together

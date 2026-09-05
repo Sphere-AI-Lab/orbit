@@ -3,10 +3,10 @@ import logging
 import numpy as np
 import pytest
 
-from miles.dashboard import backend, hooks
-from miles.dashboard.hooks import BATCH_MAX_EVENTS, BATCH_MAX_SECONDS, _Identity
-from miles.dashboard.store import Role
-from miles.utils.timer import Timer
+from orbit.dashboard import backend, hooks
+from orbit.dashboard.hooks import BATCH_MAX_EVENTS, BATCH_MAX_SECONDS, _Identity
+from orbit.dashboard.store import Role
+from orbit.utils.timer import Timer
 
 
 class FakeRemoteMethod:
@@ -119,14 +119,14 @@ def test_attach_is_idempotent_and_detach_flushes():
 
 def test_register_train_actor_disabled_is_free(monkeypatch):
     monkeypatch.setattr(backend, "resolve_collector", lambda: pytest.fail("must not resolve when disabled"))
-    hooks.register_train_actor(type("Args", (), {"use_miles_dashboard": False})())
+    hooks.register_train_actor(type("Args", (), {"use_orbit_dashboard": False})())
     assert Timer().event_sinks == []
 
 
 def test_register_train_actor_attaches_train_sink(monkeypatch):
     handle = FakeHandle()
     monkeypatch.setattr(backend, "resolve_collector", lambda: handle)
-    hooks.register_train_actor(type("Args", (), {"use_miles_dashboard": True})())
+    hooks.register_train_actor(type("Args", (), {"use_orbit_dashboard": True})())
     [sink] = Timer().event_sinks
     assert sink.role == Role.TRAIN
 
@@ -287,7 +287,7 @@ def test_report_data_buffer_swallows_push_failures(monkeypatch, caplog):
 
 
 def test_phase_sink_begin_pushes_open_event_immediately():
-    from miles.dashboard.store import PhaseEvent
+    from orbit.dashboard.store import PhaseEvent
 
     handle = FakeHandle()
     hooks.attach_phase_sink(handle, Role.TRAIN)

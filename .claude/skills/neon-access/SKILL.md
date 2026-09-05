@@ -1,6 +1,6 @@
 ---
 name: neon-access
-description: Run arbitrary PostgreSQL SQL against the Miles Neon database through the repository-authorized GitHub workflow and return the encrypted result. Use when a repository writer asks to query, inspect, update, migrate, or otherwise operate on Neon without exposing NEON_DATABASE_URL. The SQL is not classified, rewritten, split, or restricted; the database role remains the authorization boundary.
+description: Run arbitrary PostgreSQL SQL against the Orbit Neon database through the repository-authorized GitHub workflow and return the encrypted result. Use when a repository writer asks to query, inspect, update, migrate, or otherwise operate on Neon without exposing NEON_DATABASE_URL. The SQL is not classified, rewritten, split, or restricted; the database role remains the authorization boundary.
 ---
 
 # Neon Access

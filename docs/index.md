@@ -1,9 +1,9 @@
 ---
 title: Welcome
 sidebarTitle: Overview
-description: Miles is an open-source RL framework for large-scale LLM post-training, pairing SGLang rollout with Megatron-LM training at trillion-parameter scale.
+description: Orbit is an open-source RL framework for large-scale LLM post-training, pairing SGLang rollout with Megatron-LM training at trillion-parameter scale.
 ---
-Miles is a high-performance, enterprise-ready reinforcement learning framework for
+Orbit is a high-performance, enterprise-ready reinforcement learning framework for
 **large-scale model post-training**. It pairs [SGLang](https://github.com/sgl-project/sglang)
 for high-throughput rollout with [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) for
 scalable training, and ships the precision, stability and observability features an RL run
@@ -39,17 +39,17 @@ the largest models all live on Megatron-LM. See
   [every model and every black-box harness](/user-guide/agentic-rollout), with no
   detokenize and retokenize round-trip between rollout and training.
 - **Rollout Routing Replay (R3).** Expert routing recorded during rollout is
-  [replayed in the trainer's forward pass](/advanced/miles-router), removing the MoE routing
+  [replayed in the trainer's forward pass](/advanced/orbit-router), removing the MoE routing
   mismatch that destabilizes large runs, with compute and communication overlapped to keep
   the cost down.
-- **Fault tolerance.** When an SGLang engine dies, Miles
+- **Fault tolerance.** When an SGLang engine dies, Orbit
   [recovers it and resumes the run in place](/advanced/fault-tolerance): no restart, no
   pause.
 
-### What Miles runs
+### What Orbit runs
 
 - **Day-0 model support.** DeepSeek-V4, Kimi-K3, GLM-5.2, Inkling and Nemotron landed on
-  release day. Beyond day 0, nearly every frontier model runs on Miles, including Kimi-K2.6
+  release day. Beyond day 0, nearly every frontier model runs on Orbit, including Kimi-K2.6
   and Qwen3.5. See [Supported models](#supported-models).
 - **Extensive hardware support.** NVIDIA from H100 through GB300, and AMD MI300X through
   MI355X via ROCm. See [Supported hardware](#supported-hardware).
@@ -68,7 +68,7 @@ the largest models all live on Megatron-LM. See
 ## Supported models
 
 Each model name links to its recipe page or launch script. The table is not
-exhaustive — it highlights recent releases; many more models run on Miles out
+exhaustive — it highlights recent releases; many more models run on Orbit out
 of the box, including older generations of the families below.
 
 | Family | Models |
@@ -80,7 +80,7 @@ of the box, including older generations of the families below.
 | **Kimi** | [Kimi-K3](/models/kimi/kimi-k3)<br/>[Kimi-K2.6](/models/kimi/kimi-k2.5)<br/>[Kimi-K2.5](/models/kimi/kimi-k2.5) |
 | **Nemotron** | [Nemotron-3-Ultra-550B-A55B](/models/nemotron/nemotron-3-ultra)<br/>[Nemotron-3-Super-120B-A12B-FP8](/models/nemotron/nemotron-3-super)<br/>[Nemotron-3-Nano MoE](/models/nemotron/nemotron-3-nano-moe)<br/>[Nemotron-3-Nano](/models/nemotron/nemotron-3-nano) |
 | **Gemma** | [Gemma-4 26B-A4B](/models/gemma/gemma-4)<br/>[Gemma-4 31B](/models/gemma/gemma-4) |
-| **JoyAI** | [JoyAI-LLM-Flash](https://github.com/radixark/miles/blob/main/scripts/run_joy_ai_llm_flash.py) |
+| **JoyAI** | [JoyAI-LLM-Flash](https://github.com/Sphere-AI-Lab/orbit/blob/main/scripts/run_joy_ai_llm_flash.py) |
 | **Stable Diffusion** | [SD3.5](/diffusion/models/sd3/sd3) |
 | **Qwen-Image** | [Qwen-Image](/diffusion/models/qwen-image/qwen-image) |
 | **Wan** | [Wan2.2-T2V-A14B](/diffusion/models/wan/wan2-2) |
@@ -101,22 +101,22 @@ and the container images for each.
 
 ## News
 
-- [2026/08] 🔥 Miles v0.1 is released! Read the blog post here: [Miles v0.1: Production-level Post-training](https://www.lmsys.org/blog/2026-08-18-miles-v0-1).
-- [2026/07] Towards Blackwell-Native 8-bit and 4-bit RL: End-to-End MXFP8 and NVFP4 RL in Miles ([blog](https://www.lmsys.org/blog/2026-07-29-mxfp8-nvfp4-rl)).
-- [2026/07] 🔥 SGLang and Miles add day-0 support for Kimi K3 ([blog](https://www.lmsys.org/blog/2026-07-27-kimi-k3-day0-support)).
-- [2026/07] On-policy distillation lands in Miles ([blog](https://www.lmsys.org/blog/2026-07-18-opd-support-in-miles)).
-- [2026/07] 🔥 SGLang and Miles add day-0 support for Inkling, a frontier multimodal model ([blog](https://www.lmsys.org/blog/2026-07-15-inkling-day0-support)).
-- [2026/07] DeepSeek-V4 Flash RL training comes to AMD Instinct MI355X with Miles ([blog](https://www.lmsys.org/blog/2026-07-10-rocm-miles-dsv4)).
-- [2026/06] SGLang and Miles add day-0 support for NVIDIA Nemotron 3 Ultra ([blog](https://www.lmsys.org/blog/2026-06-04-nvidia-run-nemotron-3-ultra)).
-- [2026/05] No token left behind: token-in-token-out in Miles ([blog](https://www.lmsys.org/blog/2026-05-13-no-token-left-behind)).
+- [2026/08] 🔥 Orbit v0.1 is released! Read the blog post here: [Orbit v0.1: Production-level Post-training](https://www.lmsys.org/blog/2026-08-18-orbit-v0-1).
+- [2026/07] Towards Blackwell-Native 8-bit and 4-bit RL: End-to-End MXFP8 and NVFP4 RL in Orbit ([blog](https://www.lmsys.org/blog/2026-07-29-mxfp8-nvfp4-rl)).
+- [2026/07] 🔥 SGLang and Orbit add day-0 support for Kimi K3 ([blog](https://www.lmsys.org/blog/2026-07-27-kimi-k3-day0-support)).
+- [2026/07] On-policy distillation lands in Orbit ([blog](https://www.lmsys.org/blog/2026-07-18-opd-support-in-orbit)).
+- [2026/07] 🔥 SGLang and Orbit add day-0 support for Inkling, a frontier multimodal model ([blog](https://www.lmsys.org/blog/2026-07-15-inkling-day0-support)).
+- [2026/07] DeepSeek-V4 Flash RL training comes to AMD Instinct MI355X with Orbit ([blog](https://www.lmsys.org/blog/2026-07-10-rocm-orbit-dsv4)).
+- [2026/06] SGLang and Orbit add day-0 support for NVIDIA Nemotron 3 Ultra ([blog](https://www.lmsys.org/blog/2026-06-04-nvidia-run-nemotron-3-ultra)).
+- [2026/05] No token left behind: token-in-token-out in Orbit ([blog](https://www.lmsys.org/blog/2026-05-13-no-token-left-behind)).
 - [2026/04] Updating 1 T parameters in seconds: P2P weight transfer in large-scale distributed RL ([blog](https://www.lmsys.org/blog/2026-04-29-p2p-update)).
-- [2026/04] 🔥 DeepSeek-V4 on day 0: from fast inference to verified RL with SGLang and Miles ([blog](https://www.lmsys.org/blog/2026-04-25-deepseek-v4)).
+- [2026/04] 🔥 DeepSeek-V4 on day 0: from fast inference to verified RL with SGLang and Orbit ([blog](https://www.lmsys.org/blog/2026-04-25-deepseek-v4)).
 
 ## Start here
 
 1. **[Installation](/getting-started/installation)** — Docker, bare metal, AMD.
 2. **[Quick Start](/getting-started/quick-start)** — a training job up and running in under an hour.
-3. **[Core concepts](/user-guide/concepts)** — the four objects in every Miles job.
+3. **[Core concepts](/user-guide/concepts)** — the four objects in every Orbit job.
 4. **[Launch script](/user-guide/launch-script)** — what `python scripts/run_*.py` does
    and how to override a recipe.
 5. **[Training backends](/user-guide/training-backend)** — Megatron-LM and FSDP: parallelism,
@@ -124,18 +124,18 @@ and the container images for each.
 
 ## Acknowledgment
 
-Miles was forked from [slime](https://github.com/THUDM/slime), and integrates
+Orbit was forked from [slime](https://github.com/THUDM/slime), and integrates
 [SGLang](https://github.com/sgl-project/sglang),
 [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) and
 [torch_memory_saver](https://github.com/fzyzcjy/torch_memory_saver).
 
-Miles is shaped by the teams that build on it and support its development,
+Orbit is shaped by the teams that build on it and support its development,
 from hardware and cloud to model labs, agent infrastructure, and academia:
 
-![Organizations building on, contributing to, and collaborating with Miles](/assets/images/acknowledgment.png)
+![Organizations building on, contributing to, and collaborating with Orbit](/assets/images/acknowledgment.png)
 
 ## Contribute
 
-- GitHub: [github.com/radixark/miles](https://github.com/radixark/miles)
-- Slack: [slack.sglang.ai](https://slack.sglang.ai), channel `#miles-rl`
+- GitHub: [github.com/radixark/miles](https://github.com/Sphere-AI-Lab/orbit)
+- Slack: [slack.sglang.ai](https://slack.sglang.ai), channel `#orbit-rl`
 - Contributing: [developer guide](/developer/contributor-guide)

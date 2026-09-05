@@ -1,7 +1,7 @@
 #!/bin/bash
 # Historical characterization wrapper for the teacher-top-k rebuild.
 #
-# This intentionally preserves the current Miles only-teacher implementation:
+# This intentionally preserves the current Orbit only-teacher implementation:
 # teacher [T,K] -> response-wide ID union U -> student SGLang [N,U] rescore ->
 # per-position [T,K] gather -> detached [T] scalar -> sampled-token PPO/GRPO.
 # Job 24749 showed that the student-rescore leg crashes decode-concurrent

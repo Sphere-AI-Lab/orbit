@@ -1,7 +1,7 @@
 import pytest
 
-from miles.rollout.generate_utils.tool_call_utils import _DUMMY_USER, _build_dummy_assistant, tokenize_tool_responses
-from miles.utils.processing_utils import load_tokenizer
+from orbit.rollout.generate_utils.tool_call_utils import _DUMMY_USER, _build_dummy_assistant, tokenize_tool_responses
+from orbit.utils.processing_utils import load_tokenizer
 
 TOOL_CALL_TEST_MODELS = [
     "Qwen/Qwen2.5-0.5B-Instruct",

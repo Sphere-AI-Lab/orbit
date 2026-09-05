@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from miles.utils.ft_utils.control_server.registry import _CellRegistry
+from orbit.utils.ft_utils.control_server.registry import _CellRegistry
 
 from .conftest import MockHandle
 
@@ -22,7 +22,7 @@ class TestGetCells:
         resp = await async_client.get("/api/v1/cells")
         assert resp.status_code == 200
         assert resp.json() == {
-            "apiVersion": "miles.io/v1",
+            "apiVersion": "orbit.io/v1",
             "kind": "CellList",
             "items": [],
         }
@@ -48,15 +48,15 @@ class TestGetCells:
         resp = await async_client.get("/api/v1/cells")
         assert resp.status_code == 200
         assert resp.json() == {
-            "apiVersion": "miles.io/v1",
+            "apiVersion": "orbit.io/v1",
             "kind": "CellList",
             "items": [
                 {
-                    "apiVersion": "miles.io/v1",
+                    "apiVersion": "orbit.io/v1",
                     "kind": "Cell",
                     "metadata": {
                         "name": "actor-0",
-                        "labels": {"miles.io/cell-type": "actor", "miles.io/cell-index": "0"},
+                        "labels": {"orbit.io/cell-type": "actor", "orbit.io/cell-index": "0"},
                     },
                     "spec": {"suspend": False},
                     "status": {
@@ -80,11 +80,11 @@ class TestGetCells:
                     },
                 },
                 {
-                    "apiVersion": "miles.io/v1",
+                    "apiVersion": "orbit.io/v1",
                     "kind": "Cell",
                     "metadata": {
                         "name": "rollout-0",
-                        "labels": {"miles.io/cell-type": "rollout", "miles.io/cell-index": "0"},
+                        "labels": {"orbit.io/cell-type": "rollout", "orbit.io/cell-index": "0"},
                     },
                     "spec": {"suspend": True},
                     "status": {
@@ -120,11 +120,11 @@ class TestGetCell:
         resp = await async_client.get("/api/v1/cells/actor-0")
         assert resp.status_code == 200
         assert resp.json() == {
-            "apiVersion": "miles.io/v1",
+            "apiVersion": "orbit.io/v1",
             "kind": "Cell",
             "metadata": {
                 "name": "actor-0",
-                "labels": {"miles.io/cell-type": "actor", "miles.io/cell-index": "0"},
+                "labels": {"orbit.io/cell-type": "actor", "orbit.io/cell-index": "0"},
             },
             "spec": {"suspend": False},
             "status": {

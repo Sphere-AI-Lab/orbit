@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from miles.utils.audit_utils.checksum_utils import flatten_inference_engine_checksums
+from orbit.utils.audit_utils.checksum_utils import flatten_inference_engine_checksums
 
 
 def _engine_body(*, success: bool, ranks: list[dict[str, Any]] | None) -> dict[str, Any]:

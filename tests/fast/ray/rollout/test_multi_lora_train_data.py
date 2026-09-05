@@ -10,9 +10,9 @@ register_cpu_ci(est_time=60, suite="stage-a-cpu")
 
 from tests.fast.ray.rollout.conftest import make_args, make_sample
 
-from miles.ray.rollout.rollout_data_conversion import postprocess_rollout_data
-from miles.ray.rollout.train_data_conversion import convert_samples_to_train_data
-from miles.utils.types import AdapterRef
+from orbit.ray.rollout.rollout_data_conversion import postprocess_rollout_data
+from orbit.ray.rollout.train_data_conversion import convert_samples_to_train_data
+from orbit.utils.types import AdapterRef
 
 
 def multi_lora_args(**overrides):

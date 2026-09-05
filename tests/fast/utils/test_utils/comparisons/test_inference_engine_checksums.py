@@ -5,10 +5,10 @@ from typing import Any
 
 import pytest
 
-from miles.utils.audit_utils.event_logger.logger import EventLogger
-from miles.utils.audit_utils.event_logger.models import InferenceEngineWeightChecksumEvent
-from miles.utils.audit_utils.process_identity import MainProcessIdentity
-from miles.utils.test_utils.comparisons.inference_engine_checksums import compare_inference_engine_checksums
+from orbit.utils.audit_utils.event_logger.logger import EventLogger
+from orbit.utils.audit_utils.event_logger.models import InferenceEngineWeightChecksumEvent
+from orbit.utils.audit_utils.process_identity import MainProcessIdentity
+from orbit.utils.test_utils.comparisons.inference_engine_checksums import compare_inference_engine_checksums
 
 
 def _write_inference_engine_events(side_dir: Path, partials: list[dict[str, Any]]) -> None:

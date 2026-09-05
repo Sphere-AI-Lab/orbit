@@ -19,7 +19,7 @@ set -ex
 
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MODEL_ARGS_LINE="$(python3 "${SCRIPT_DIR}/../../miles/utils/external_utils/model_args_utils.py" "qwen2.5-3B")" || exit 1
+MODEL_ARGS_LINE="$(python3 "${SCRIPT_DIR}/../../orbit/utils/external_utils/model_args_utils.py" "qwen2.5-3B")" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 CKPT_ARGS=(
    --hf-checkpoint /root/Qwen2.5-3B-Instruct/
@@ -98,7 +98,7 @@ OPTIMIZER_ARGS=(
 WANDB_ARGS=(
    # --use-wandb
    --wandb-host https://wandb.ai/
-   --wandb-project miles-lora-update-weight-refactory
+   --wandb-project orbit-lora-update-weight-refactory
    --wandb-group qwen2.5-3B-lora-benchmark
 )
 

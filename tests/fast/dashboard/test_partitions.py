@@ -6,9 +6,9 @@ import pytest
 from fastapi.testclient import TestClient
 from tests.fast.dashboard.dummy_telemetry import dump_dummy_telemetry
 
-from miles.dashboard.dump_reader import DumpReader
-from miles.dashboard.server import make_app
-from miles.dashboard.store import GpuSample, Meta, MetricStore, PhaseEvent, Role, Stream, _hour_key, _PartitionReader
+from orbit.dashboard.dump_reader import DumpReader
+from orbit.dashboard.server import make_app
+from orbit.dashboard.store import GpuSample, Meta, MetricStore, PhaseEvent, Role, Stream, _hour_key, _PartitionReader
 
 # hour-aligned base so partition boundaries land where the test says they do
 BASE = ((1_000_000 // 3600) + 1) * 3600.0

@@ -21,8 +21,8 @@ adapters/
 
 The implementation lives in the library: the driver is `train_multi_lora_async.py`
 at the repo root (next to `train.py`/`train_async.py`), the rollout fn and data
-source are `miles/rollout/multi_lora/`, and the controller is
-`miles/ray/multi_lora/` (registry + backend + HTTP API, plus the named Ray
+source are `orbit/rollout/multi_lora/`, and the controller is
+`orbit/ray/multi_lora/` (registry + backend + HTTP API, plus the named Ray
 actor pinned to the head node).
 
 ## Design (decoupled per-adapter optimizers)

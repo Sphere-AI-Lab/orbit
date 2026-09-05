@@ -11,9 +11,9 @@ from copy import deepcopy
 
 import pytest
 
-from miles.utils.chat_template_utils import TITOTokenizerType, resolve_fixed_chat_template
-from miles.utils.chat_template_utils.template import apply_chat_template_from_str, load_hf_chat_template
-from miles.utils.test_utils.chat_template_verify import (
+from orbit.utils.chat_template_utils import TITOTokenizerType, resolve_fixed_chat_template
+from orbit.utils.chat_template_utils.template import apply_chat_template_from_str, load_hf_chat_template
+from orbit.utils.test_utils.chat_template_verify import (
     CaseSpec,
     assert_pretokenized_equals_standard,
     enable_thinking_variants,
@@ -21,7 +21,7 @@ from miles.utils.test_utils.chat_template_verify import (
     select_cases,
     simulate_pretokenized_path,
 )
-from miles.utils.test_utils.mock_trajectories import (
+from orbit.utils.test_utils.mock_trajectories import (
     MultiTurnTrajectory,
     MultiUserTurnThinkingTrajectory,
     SingleToolTrajectory,

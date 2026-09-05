@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from miles.ray.actor_group import RayTrainGroup
+from orbit.ray.actor_group import RayTrainGroup
 
-_GROUP_LOGGER = logging.getLogger("miles.ray.actor_group")
+_GROUP_LOGGER = logging.getLogger("orbit.ray.actor_group")
 
 
 class _RemoteCall:

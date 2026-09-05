@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from miles.utils.misc import FunctionRegistry, filter_keys, function_registry, load_function
+from orbit.utils.misc import FunctionRegistry, filter_keys, function_registry, load_function
 
 
 def _fn_a():
@@ -88,7 +88,7 @@ class TestFilterKeys:
     def test_missing_key_raises_key_error_and_logs(self, caplog):
         """A missing key raises KeyError and logs the error with context."""
         d = {"a": 1}
-        with caplog.at_level(logging.ERROR, logger="miles.utils.misc"):
+        with caplog.at_level(logging.ERROR, logger="orbit.utils.misc"):
             with pytest.raises(KeyError):
                 filter_keys(d, ["a", "missing"])
         assert any("filter_keys" in record.message for record in caplog.records)

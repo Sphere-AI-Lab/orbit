@@ -2,12 +2,12 @@ import os
 
 from tests.ci.ci_register import register_cuda_ci, register_rocm_ci
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 register_cuda_ci(est_time=400, suite="stage-c-8-gpu-h100", labels=["short", "mooncake"])
 register_rocm_ci(est_time=240, suite="nightly-stage-c-8-gpu-mi350", labels=["short", "mooncake"])
 
-FEW_GPU = U.get_bool_env_var("MILES_TEST_FEW_GPU", "0")
+FEW_GPU = U.get_bool_env_var("ORBIT_TEST_FEW_GPU", "0")
 
 MODEL_NAME = "Qwen2.5-0.5B-Instruct"
 MODEL_TYPE = "qwen2.5-0.5B"
@@ -38,7 +38,7 @@ def execute():
         "--rollout-max-response-len 1024 "
         "--rollout-temperature 0.8 "
         "--over-sampling-batch-size 16 "
-        "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
+        "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
         "--global-batch-size 32 "
     )
 

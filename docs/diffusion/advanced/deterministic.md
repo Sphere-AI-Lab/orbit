@@ -9,7 +9,7 @@ that do not support deterministic execution may still pass validation.
 
 ## What it turns on
 
-### At actor spawn (`miles/ray/actor_group.py`)
+### At actor spawn (`orbit/ray/actor_group.py`)
 
 ```bash
 NCCL_DETERMINISTIC=1
@@ -23,7 +23,7 @@ explicit value in `--train-env-vars` wins.
 `:4096:8` rather than `:16:8`: both are deterministic, but the larger workspace keeps cuBLASLt
 from being workspace-limited. Costs roughly 32 MiB per handle.
 
-### In the actor (`miles/backends/fsdp_utils/actor.py`)
+### In the actor (`orbit/backends/fsdp_utils/actor.py`)
 
 ```python
 torch.backends.cudnn.deterministic = True
@@ -45,7 +45,7 @@ classified explicitly:
 | `--fsdp-attention-backend`             | How determinism is obtained                                                                     |
 | -------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | unset, `*native*`, `*math*` (SDPA)     | torch's global flag covers it. `math` backends are deterministic by construction.               |
-| `*flash*` (flash-attn, FA3)            | torch's flag cannot reach it — miles patches `deterministic=True` onto the kernel entry points. |
+| `*flash*` (flash-attn, FA3)            | torch's flag cannot reach it — orbit patches `deterministic=True` onto the kernel entry points. |
 | `sage`, `xformers`, `flex`, `aiter`, … | No hook exists. **Rejected.**                                                                   |
 
 
@@ -56,7 +56,7 @@ A flash backend that is installed but exposes no `deterministic` parameter is al
 
 ### How the flash patch works
 
-For diffusers-backed families, miles wraps the dispatch functions diffusers routes flash through:
+For diffusers-backed families, orbit wraps the dispatch functions diffusers routes flash through:
 
 ```
 flash_attn_func         flash_attn_varlen_func

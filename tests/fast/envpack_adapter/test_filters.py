@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from miles_plugins.envpack_adapter.filters import check_envpack_success_nonzero_std
+from orbit_plugins.envpack_adapter.filters import check_envpack_success_nonzero_std
 
 
 class _Sample:

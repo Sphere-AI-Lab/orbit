@@ -7,7 +7,7 @@
 
 ### 1
 "python3"
-"<REPO_ROOT>/examples/on_policy_distillation/../../miles/utils/external_utils/model_args_utils.py"
+"<REPO_ROOT>/examples/on_policy_distillation/../../orbit/utils/external_utils/model_args_utils.py"
 "qwen3-8B"
 
 ### 2
@@ -68,9 +68,9 @@
 "--ref-load"
 "/root/Qwen3-8B_torch_dist"
 "--load"
-"/root/Qwen3-8B_miles/"
+"/root/Qwen3-8B_orbit/"
 "--save"
-"/root/Qwen3-8B_miles/"
+"/root/Qwen3-8B_orbit/"
 "--save-interval"
 "20"
 "--prompt-data"

@@ -1,4 +1,4 @@
-"""NeMo Gym launcher (Qwen3-4B-Instruct-2507): Miles <-> mini_swe_agent_2 orchestration.
+"""NeMo Gym launcher (Qwen3-4B-Instruct-2507): Orbit <-> mini_swe_agent_2 orchestration.
 
 Defaults are the exact configuration of the validated smoke run (4x H200,
 2026-07-28): 3 GRPO steps at tiny scale against a NeMo Gym server running the
@@ -20,7 +20,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -55,7 +55,7 @@ class ScriptArgs(U.ExecuteTrainConfig):
     # Trainer address reachable from the NeMo Gym host; only needed when that
     # host cannot resolve the trainer's hostname (e.g. it dials back over a
     # tailnet).
-    router_external_host: str = os.environ.get("MILES_ROUTER_EXTERNAL_HOST", "")
+    router_external_host: str = os.environ.get("ORBIT_ROUTER_EXTERNAL_HOST", "")
 
 
 def cleanup():
@@ -141,10 +141,10 @@ def execute(args: ScriptArgs):
     sglang_args = "--rollout-num-gpus-per-engine 1 --sglang-mem-fraction-static 0.7 "
 
     agent_args = (
-        "--custom-generate-function-path miles.rollout.generate_hub.agentic_tool_call.generate "
+        "--custom-generate-function-path orbit.rollout.generate_hub.agentic_tool_call.generate "
         "--custom-agent-function-path nemogym_agent_function.run "
         "--custom-rm-path nemogym_generate.reward_func "
-        "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_no_aborted "
+        "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_no_aborted "
         "--use-session-server "
         # 0.0.0.0 so the NeMo Gym host can dial in on any interface (e.g. a
         # tailnet address); internal calls resolve it to localhost.
@@ -183,7 +183,7 @@ def execute(args: ScriptArgs):
         "NEMO_GYM_URL": args.nemo_gym_url,
     }
     if args.router_external_host:
-        extra_env_vars["MILES_ROUTER_EXTERNAL_HOST"] = args.router_external_host
+        extra_env_vars["ORBIT_ROUTER_EXTERNAL_HOST"] = args.router_external_host
 
     U.execute_train(
         train_args=train_args,

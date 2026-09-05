@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Show pin state of vendored submodules vs upstream branch HEAD, and bump on demand.
 
-miles' Dockerfile resolves Megatron-LM / sglang / Megatron-Bridge by *branch*
+orbit' Dockerfile resolves Megatron-LM / sglang / Megatron-Bridge by *branch*
 name (not commit), so every docker build picks up whatever's at branch HEAD at
 build time. Our fork promotes these to git submodules so the parent repo's
 tree locks each one to a specific commit — but that means we have to bump

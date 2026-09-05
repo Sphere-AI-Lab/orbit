@@ -16,7 +16,7 @@
 #
 # Submit (strip SLURM_* if inside an salloc):
 #   JOB_NAME=diag-easy14-cold WANDB_RUN_PREFIX=diag WANDB_INIT_TIMEOUT=300 \
-#   TIME=2:00:00 NODES=2 ENVPACK_SERVER_NODE_COUNT=1 MILES_ENV_NAME=miles_imp \
+#   TIME=2:00:00 NODES=2 ENVPACK_SERVER_NODE_COUNT=1 ORBIT_ENV_NAME=orbit \
 #   bash scripts/slurm/submit.sh \
 #     server_train/sokoban_1box/envpack-sokoban-easy14-coldstart-diag-qwen3vl8b-frozenvit-remote-2node
 
@@ -42,7 +42,7 @@ WANDB_RUN_PREFIX=${WANDB_RUN_PREFIX:-diag}
 source "$SCRIPT_DIR/../_qwen3vl8b_common.sh"
 
 MODEL_ARGS+=( --freeze-vision-model )
-MILES_ARGS+=( --freeze-vision-model )
+ORBIT_ARGS+=( --freeze-vision-model )
 
 # Diagnostic schedule overrides (argparse last-wins): short cold-start probe.
-MILES_ARGS+=( --num-rollout 3 --eval-interval 1000 )
+ORBIT_ARGS+=( --num-rollout 3 --eval-interval 1000 )

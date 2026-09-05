@@ -5,8 +5,8 @@ NVIDIA Nemotron-3-Ultra-550B-A55B GRPO RL training script.
 
 nemotron_h is a hybrid Mamba2 + Attention + latent-MoE architecture (108 layers,
 512 experts top-22, moe_latent_size=2048). It loads through NVIDIA
-``megatron.bridge`` (``--megatron-to-hf-mode bridge``) plus the miles
-NemotronHBridge MoE/latent shim in ``miles_plugins/megatron_bridge/nemotron_h.py``.
+``megatron.bridge`` (``--megatron-to-hf-mode bridge``) plus the orbit
+NemotronHBridge MoE/latent shim in ``orbit_plugins/megatron_bridge/nemotron_h.py``.
 
 Tested on H200.
 
@@ -23,7 +23,7 @@ Args:
   --check-weight-update-equal: Assert the Megatron -> SGLang weight sync restores
       every tensor exactly (poisons SGLang's weights first).
 
-Weights load straight from the HF checkpoint: miles' load_checkpoint dispatches on
+Weights load straight from the HF checkpoint: orbit' load_checkpoint dispatches on
 what --load points at, and an HF directory routes to _load_checkpoint_hf, i.e. the
 same megatron.bridge path this model is mapped through. No offline Megatron dist
 conversion step is needed.
@@ -64,7 +64,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 app = typer.Typer()
 

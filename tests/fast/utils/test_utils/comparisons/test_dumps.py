@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from miles.utils.test_utils.comparisons.dumps import _find_leaf_dump_dirs
+from orbit.utils.test_utils.comparisons.dumps import _find_leaf_dump_dirs
 
 
 class TestFindLeafDumpDirs:

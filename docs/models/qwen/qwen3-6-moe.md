@@ -13,8 +13,8 @@ reaches 262 K and extends past 1 M; weights are Apache 2.0 in BF16 and FP8.
 Qwen3.6 also ships native Multi-Token Prediction for speculative decoding,
 which this recipe trains and serves via EAGLE.
 
-In miles, Qwen3.6-35B-A3B reuses the Qwen3.5 spec
-(`miles_plugins.models.qwen3_5.get_qwen3_5_spec`) and bakes in MTP training
+In orbit, Qwen3.6-35B-A3B reuses the Qwen3.5 spec
+(`orbit_plugins.models.qwen3_5.get_qwen3_5_spec`) and bakes in MTP training
 plus a shared-expert gate.
 
 **Key highlights:**
@@ -46,8 +46,8 @@ hf download Qwen/Qwen3.6-35B-A3B --local-dir /root/models/Qwen3.6-35B-A3B
 ### 3.2 HF → Megatron `torch_dist` conversion
 
 ```bash
-cd /root/miles
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py qwen3.6-35B-A3B)" || exit 1
+cd /root/orbit
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py qwen3.6-35B-A3B)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM torchrun --nproc-per-node 8 \
    tools/convert_hf_to_torch_dist.py \
@@ -67,7 +67,7 @@ The launcher is a parametrized Typer script (8 × H200) that exercises arbitrary
 (TP, EP, CP, PP, ETP) cells:
 
 ```bash
-cd /root/miles
+cd /root/orbit
 python scripts/run_qwen3_6_35b_a3b_mtp.py \
    --tp 1 --ep 8 --cp 1 --pp 1 --etp 1 \
    --num-rollout 10
@@ -139,14 +139,14 @@ CPU Adam is enabled (`--optimizer-cpu-offload --overlap-cpu-optimizer-d2h-h2d --
 
 From `scripts/models/qwen3.6-35B-A3B.py` and `scripts/run_qwen3_6_35b_a3b_mtp.py`:
 
-- `--spec miles_plugins.models.qwen3_5 get_qwen3_5_spec` — Qwen3.6 reuses the Qwen3.5 spec.
+- `--spec orbit_plugins.models.qwen3_5 get_qwen3_5_spec` — Qwen3.6 reuses the Qwen3.5 spec.
 - 256 experts, `--moe-router-topk 8`, `--moe-router-score-function softmax`.
 - `--moe-shared-expert-gate` and `--moe-shared-expert-intermediate-size 512`.
 - Megatron-side dispatcher overridden to `--moe-token-dispatcher-type flex` at runtime; conversion uses `alltoall`.
 - `--moe-grouped-gemm`, `--moe-token-drop-policy probs`, `--moe-router-dtype fp32`, `--moe-permute-fusion`, `--moe-aux-loss-coeff 0`.
 - `--attention-output-gate`, `--rotary-base 10000000`, `--rotary-percent 0.25`, `--vocab-size 248320`.
 
-See [Backends Beyond Megatron](/advanced/architecture-support) for FP32 parameter handling and how miles wires the spec.
+See [Backends Beyond Megatron](/advanced/architecture-support) for FP32 parameter handling and how orbit wires the spec.
 
 ## 6. Pairs Well With
 

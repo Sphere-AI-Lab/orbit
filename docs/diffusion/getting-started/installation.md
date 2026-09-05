@@ -25,7 +25,7 @@ hardcoded to cu129 and no CI covers it.
 
 ```bash
 git clone https://github.com/radixark/miles_diffusion.git
-cd miles_diffusion
+cd orbit_diffusion
 docker build -f docker/Dockerfile -t miles-diffusion:$(cat docker/version.txt) .
 ```
 
@@ -37,7 +37,7 @@ Useful build args:
 | `SGLANG_DIFFUSION_BRANCH` | `main` | sglang branch the rollout engine is built from. |
 | `SGLANG_DIFFUSION_COMMIT` | `none` | Pin a sglang sha; `none` follows the branch tip. |
 | `FA3_WHEELS_TAG` | `cu129-x86_64` | Which prebuilt FlashAttention-3 wheel to pull. |
-| `MILES_DIFFUSION_COMMIT` | `main` | Ref of miles_diffusion baked into the image. |
+| `ORBIT_DIFFUSION_COMMIT` | `main` | Ref of orbit_diffusion baked into the image. |
 
 ### Run
 
@@ -57,7 +57,7 @@ The image ships with:
 - sglang built from main (`/sgl-workspace/sglang`, editable) with `sglang.multimodal_gen`
 - FlashAttention-3 (`flash_attn_interface`), `sglang-kernel==0.4.5`, `torch_memory_saver==0.0.9`
 - `diffusers`, `peft`, `transformers`, `ray`, `wandb`, and `ltx-core` from `requirements.txt`
-- miles_diffusion installed editable at `/root/miles_diffusion`
+- orbit_diffusion installed editable at `/root/orbit_diffusion`
 - PaddleOCR's English det/rec/cls weights pre-downloaded (the OCR reward would otherwise
   race-download them at runtime)
 - `nccl-tests` binaries on `PATH` for link diagnostics
@@ -65,8 +65,8 @@ The image ships with:
 To run your own working tree instead of the baked copy, bind-mount it and reinstall:
 
 ```bash
-docker run ... -v $PWD:/root/miles_diffusion -it radixark/miles_diffusion:latest /bin/bash
-cd /root/miles_diffusion && pip install -e . --no-deps
+docker run ... -v $PWD:/root/orbit_diffusion -it radixark/miles_diffusion:latest /bin/bash
+cd /root/orbit_diffusion && pip install -e . --no-deps
 ```
 
 ## Method 2: Update an existing container
@@ -74,7 +74,7 @@ cd /root/miles_diffusion && pip install -e . --no-deps
 If you already run the image and want the latest code:
 
 ```bash
-cd /root/miles_diffusion
+cd /root/orbit_diffusion
 git pull --rebase
 pip install -e . --no-deps
 ```
@@ -95,7 +95,7 @@ already there. Do not run it on a machine you use for anything else.
 ```bash
 apt-get update && apt-get install -y --no-install-recommends git ca-certificates
 git clone https://github.com/radixark/miles_diffusion.git
-cd miles_diffusion
+cd orbit_diffusion
 bash .claude/skills/install-miles-diffusion/install.sh
 ```
 
@@ -124,7 +124,7 @@ installer handles.
 
 ```bash
 # package imports
-python -c "import miles; print('miles-diffusion import OK')"
+python -c "import orbit; print('miles-diffusion import OK')"
 
 # rollout engine is present
 python -c "from sglang.multimodal_gen.runtime.server_args import ServerArgs; print('sglang-d OK')"
@@ -163,7 +163,7 @@ so the floor is set by whichever of the two needs more memory, not by their sum.
 | `HF_TOKEN` | Gated checkpoints. SD3.5 needs it **even when the weights are cached** — sglang still fetches `model_index.json` from the hub at startup. |
 | `WANDB_API_KEY` | Without it the launch scripts silently drop all `--use-wandb` flags. |
 | `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` | Set by every launch script; reduces fragmentation OOMs. |
-| `MILES_DIFFUSION_MODEL_FAMILY` | Escape hatch when `--diffusion-model-family` is unset. It overrides checkpoint-name auto-detection, but an explicit CLI family takes precedence. |
+| `ORBIT_DIFFUSION_MODEL_FAMILY` | Escape hatch when `--diffusion-model-family` is unset. It overrides checkpoint-name auto-detection, but an explicit CLI family takes precedence. |
 
 ## Next
 

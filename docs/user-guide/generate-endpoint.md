@@ -19,19 +19,19 @@ chat messages instead of tokens — see
 
 `--custom-generate-function-path` accepts two forms. The difference is only
 the signature you write — `load_generate_function`
-(`miles/rollout/inference_rollout/compatibility.py`) adapts an old-form
+(`orbit/rollout/inference_rollout/compatibility.py`) adapts an old-form
 function automatically at load time:
 
 | | New form (recommended) | Old form |
 |---|---|---|
 | Signature | `async def generate(input: GenerateFnInput) -> GenerateFnOutput` | `async def generate(args, sample, sampling_params) -> Sample` |
-| `--custom-generate-function-path` | `miles.rollout.generate_hub.single_turn.generate`, `miles.rollout.generate_hub.multi_turn.generate` | `miles.rollout.sglang_rollout.generate` |
-| Example file | [miles/rollout/generate_hub/single_turn.py](https://github.com/radixark/miles/blob/main/miles/rollout/generate_hub/single_turn.py), [miles/rollout/generate_hub/multi_turn.py](https://github.com/radixark/miles/blob/main/miles/rollout/generate_hub/multi_turn.py) | [miles/rollout/sglang_rollout.py](https://github.com/radixark/miles/blob/main/miles/rollout/sglang_rollout.py) |
+| `--custom-generate-function-path` | `orbit.rollout.generate_hub.single_turn.generate`, `orbit.rollout.generate_hub.multi_turn.generate` | `orbit.rollout.sglang_rollout.generate` |
+| Example file | [orbit/rollout/generate_hub/single_turn.py](https://github.com/Sphere-AI-Lab/orbit/blob/main/orbit/rollout/generate_hub/single_turn.py), [orbit/rollout/generate_hub/multi_turn.py](https://github.com/Sphere-AI-Lab/orbit/blob/main/orbit/rollout/generate_hub/multi_turn.py) | [orbit/rollout/sglang_rollout.py](https://github.com/Sphere-AI-Lab/orbit/blob/main/orbit/rollout/sglang_rollout.py) |
 | Status | what all `generate_hub` built-ins use | kept for backward compatibility; adapted automatically at load time |
 
 <Note>
 
-The class-based rollout path is the default; `MILES_USE_LEGACY_ROLLOUT_V1=1`
+The class-based rollout path is the default; `ORBIT_USE_LEGACY_ROLLOUT_V1=1`
 selects the deprecated v1 path. Both generate-function forms work on either.
 
 </Note>
@@ -42,7 +42,7 @@ Either way, your function does the same three things:
 2. Executes it against SGLang.
 3. Updates the `Sample` with tokens, logprobs, loss mask, status.
 
-`GenerateFnInput` / `GenerateFnOutput` live in `miles/rollout/base_types.py`.
+`GenerateFnInput` / `GenerateFnOutput` live in `orbit/rollout/base_types.py`.
 The input carries:
 
 - `state`: tokenizer, processor, args, sampling defaults.
@@ -53,8 +53,8 @@ The input carries:
 Minimal skeleton (new form):
 
 ```python
-from miles.rollout.base_types import GenerateFnInput, GenerateFnOutput
-from miles.utils.types import Sample
+from orbit.rollout.base_types import GenerateFnInput, GenerateFnOutput
+from orbit.utils.types import Sample
 
 
 async def generate(input: GenerateFnInput) -> GenerateFnOutput:
@@ -87,12 +87,12 @@ parsed into `input.args` and available everywhere in your generator.
 Helpers:
 
 - `compute_prompt_ids_from_sample` and `compute_request_payload` from
-  `miles/rollout/generate_utils/generate_endpoint_utils.py` build `/generate` requests.
+  `orbit/rollout/generate_utils/generate_endpoint_utils.py` build `/generate` requests.
 - A generate function can set `GenerateFnOutput.samples` to a `Sample` or `list[Sample]`.
 
 ## Reference generators
 
-`miles/rollout/generate_hub/` ships reusable token-level generate functions
+`orbit/rollout/generate_hub/` ships reusable token-level generate functions
 that compose with tool use and multi-turn logic:
 
 - **`single_turn.py`**: single-turn generation via `/generate`. Text or multimodal prompts.

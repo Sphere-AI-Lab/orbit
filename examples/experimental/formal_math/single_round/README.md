@@ -14,11 +14,11 @@ This directory contains an example of training a model to solve formal math prob
 You need Docker installed and a specific network for communication between the training process and the Kimina verifier:
 
 ```bash
-# Create a docker network for kimina and miles to communicate
+# Create a docker network for kimina and orbit to communicate
 docker network create formal_math
 ```
 
-**Note**: The training script will launch a `kimina-lean-server` container. It requires mounting the host Docker socket (`/var/run/docker.sock`) so the script can manage sibling containers. Connect miles container to the same docker network.
+**Note**: The training script will launch a `kimina-lean-server` container. It requires mounting the host Docker socket (`/var/run/docker.sock`) so the script can manage sibling containers. Connect orbit container to the same docker network.
 
 ### Install Dependencies
 
@@ -39,10 +39,10 @@ python examples/experimental/formal_math/single_round/prepare_data.py --output-n
 ```
 
 ### Prepare Models & Environment
-Use `run.py` to download the base model (e.g., Qwen3-8B) and set up the environment. We skip the actual training submission here (`MILES_SCRIPT_ENABLE_RAY_SUBMIT=0`) as we will use the minimal runner next.
+Use `run.py` to download the base model (e.g., Qwen3-8B) and set up the environment. We skip the actual training submission here (`ORBIT_SCRIPT_ENABLE_RAY_SUBMIT=0`) as we will use the minimal runner next.
 
 ```bash
-MILES_SCRIPT_ENABLE_RAY_SUBMIT=0 python examples/experimental/formal_math/single_round/run.py
+ORBIT_SCRIPT_ENABLE_RAY_SUBMIT=0 python examples/experimental/formal_math/single_round/run.py
 ```
 
 ### Run Training
@@ -54,7 +54,7 @@ python examples/experimental/formal_math/single_round/run_minimal.py
 
 ## Advanced Usage
 
-For full-scale training or standard runs, use `run.py`. This script leverages `miles.utils.external_utils.command_utils` to handle cluster setup and execution.
+For full-scale training or standard runs, use `run.py`. This script leverages `orbit.utils.external_utils.command_utils` to handle cluster setup and execution.
 
 ```bash
 python examples/experimental/formal_math/single_round/run.py

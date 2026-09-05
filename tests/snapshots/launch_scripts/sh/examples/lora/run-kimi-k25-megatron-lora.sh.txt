@@ -45,7 +45,7 @@
 
 ### 9
 "python3"
-"<REPO_ROOT>/examples/lora/../../miles/utils/external_utils/model_args_utils.py"
+"<REPO_ROOT>/examples/lora/../../orbit/utils/external_utils/model_args_utils.py"
 "kimi-k25"
 
 ### 10
@@ -225,7 +225,7 @@
 "--use-tis"
 "--use-wandb"
 "--wandb-project"
-"miles-kimi-k25"
+"orbit-kimi-k25"
 "--wandb-group"
 "kimi-k25-lora"
 "--disable-wandb-random-suffix"

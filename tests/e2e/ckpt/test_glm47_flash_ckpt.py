@@ -2,7 +2,7 @@ import os
 
 from tests.ci.ci_register import register_cuda_ci
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 # FIXME: need to modify megatron, better fix later.
 register_cuda_ci(est_time=2400, suite="stage-c-8-gpu-h100", labels=["ckpt"], disabled="Disabled due to bugs.")
@@ -10,7 +10,7 @@ register_cuda_ci(est_time=2400, suite="stage-c-8-gpu-h100", labels=["ckpt"], dis
 ENABLE_EVAL = 0
 USE_DEEPEP = 0
 
-TIGHT_HOST_MEMORY = bool(int(os.environ.get("MILES_TEST_TIGHT_HOST_MEMORY", "0")))
+TIGHT_HOST_MEMORY = bool(int(os.environ.get("ORBIT_TEST_TIGHT_HOST_MEMORY", "0")))
 
 MODEL_NAME = "GLM-4.7-Flash"
 MODEL_TYPE = "glm4.7-flash"
@@ -18,7 +18,7 @@ NUM_GPUS = 8
 
 
 def _get_latest_checkpointed_iteration() -> int:
-    latest_path = f"/root/models/{MODEL_NAME}_miles/latest_checkpointed_iteration.txt"
+    latest_path = f"/root/models/{MODEL_NAME}_orbit/latest_checkpointed_iteration.txt"
     with open(latest_path, encoding="utf-8") as f:
         latest_text = f.read().strip()
     if not latest_text.isdigit():
@@ -29,7 +29,7 @@ def _get_latest_checkpointed_iteration() -> int:
 def prepare():
     U.exec_command_cpu("mkdir -p /root/models /root/datasets")
     U.exec_command_cpu(f"hf download zai-org/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
-    U.exec_command_cpu(f"rm -rf /root/models/{MODEL_NAME}_miles")
+    U.exec_command_cpu(f"rm -rf /root/models/{MODEL_NAME}_orbit")
     U.hf_download_dataset("zhuzilin/dapo-math-17k")
     U.hf_download_dataset("zhuzilin/aime-2024")
 
@@ -44,15 +44,15 @@ def prepare():
 def execute(mode: str = "", ckpt_step: int | None = None):
     ckpt_args = f"--hf-checkpoint /root/models/{MODEL_NAME}/ " f"--ref-load /root/models/{MODEL_NAME}_torch_dist "
     if mode == "save":
-        ckpt_args += f"--save /root/models/{MODEL_NAME}_miles "
+        ckpt_args += f"--save /root/models/{MODEL_NAME}_orbit "
         ckpt_args += "--save-interval 2 "
     elif mode == "async_save":
-        ckpt_args += f"--save /root/models/{MODEL_NAME}_miles "
+        ckpt_args += f"--save /root/models/{MODEL_NAME}_orbit "
         ckpt_args += "--save-interval 2 "
         ckpt_args += "--async-save "
         ckpt_args += "--use-persistent-ckpt-worker "
     elif mode == "load":
-        ckpt_args += f"--load /root/models/{MODEL_NAME}_miles "
+        ckpt_args += f"--load /root/models/{MODEL_NAME}_orbit "
         ckpt_args += f"--ckpt-step {ckpt_step} "
 
     rollout_args = (
@@ -177,7 +177,7 @@ def execute(mode: str = "", ckpt_step: int | None = None):
         num_gpus_per_node=NUM_GPUS,
         megatron_model_type=MODEL_TYPE,
         extra_env_vars={
-            "MILES_TEST_R3_THRESHOLD": "1.0",
+            "ORBIT_TEST_R3_THRESHOLD": "1.0",
         },
     )
 

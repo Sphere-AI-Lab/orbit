@@ -1,6 +1,6 @@
 ### 0
 pkill -9 sglang; sleep 3; ray stop
-  --force; pkill -9 ray; pkill -9 miles; sleep 3; pkill -9 ray; pkill -9 miles; pkill -9 redis; true; 
+  --force; pkill -9 ray; pkill -9 orbit; sleep 3; pkill -9 ray; pkill -9 orbit; pkill -9 redis; true; 
 
 ### 1
 export PYTHONUNBUFFERED=1 && ray start
@@ -11,7 +11,7 @@ export PYTHONUNBUFFERED=1 && ray start
 
 ### 2
 for worker_ip in $(awk '{print $1}' /root/mpi_rack_hostfile); do if [ "$worker_ip" = 127.0.0.1 ]; then continue; fi; echo "Starting Ray worker on $worker_ip"; ssh root@"$worker_ip" "pkill -9 sglang ; ray stop
-  --force ; pkill -9 miles ; ray start
+  --force ; pkill -9 orbit ; ray start
   --address=127.0.0.1:6379
   --num-gpus 8
   --node-ip-address $worker_ip
@@ -25,7 +25,7 @@ export no_proxy=127.0.0.1 && export PYTHONUNBUFFERED=1 && ray job submit
   --address="http://127.0.0.1:8265"
   --runtime-env-json='{"env_vars": {"PYTHONUNBUFFERED": "1", "CUDA_DEVICE_MAX_CONNECTIONS": "1", "NCCL_NVLS_ENABLE": "0", "no_proxy": "127.0.0.1,127.0.0.1", "MASTER_ADDR": "127.0.0.1", "PYTHONPATH": "<REPO_ROOT>:/root/Megatron-LM:/frozen/pythonpath"}}'
   -- python3 <REPO_ROOT>/train.py
-  --spec miles_plugins.models.qwen3_next get_qwen3_next_spec
+  --spec orbit_plugins.models.qwen3_next get_qwen3_next_spec
   --disable-bias-linear
   --qk-layernorm
   --group-query-attention
@@ -93,7 +93,7 @@ export no_proxy=127.0.0.1 && export PYTHONUNBUFFERED=1 && ray job submit
   --entropy-coef 0.00
   --eps-clip 4e-4 
   --use-wandb
-  --wandb-project miles-run_qwen3_next_80b_a3b
+  --wandb-project orbit-run_qwen3_next_80b_a3b
   --wandb-group 260101-000000-000
   --wandb-key 'frozen-wandb-api-key'
   --disable-wandb-random-suffix 

@@ -5,7 +5,7 @@ checkpoint draft, whose MTP weights are never synced from training, so this case
 sets the weight-check selector to "target": only the target (main) model is
 checked, skipping the draft.
 
-Vision weights are also excluded (--check-weight-update-skip-list visual): miles has no
+Vision weights are also excluded (--check-weight-update-skip-list visual): orbit has no
 VLM/vision implementation on the training side, so they are never synced.
 """
 
@@ -39,7 +39,7 @@ CASE = CaseConfig(
     enable_mtp_training=False,
     use_r3=False,
     check_weight_update_selector="target",
-    # miles has no VLM/vision implementation on the training side, so vision weights are
+    # orbit has no VLM/vision implementation on the training side, so vision weights are
     # never synced; exclude them from the weight-equality check.
     check_weight_update_skip_list=("visual",),
 )

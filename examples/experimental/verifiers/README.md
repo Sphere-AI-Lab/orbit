@@ -1,14 +1,14 @@
 # Verifiers (Prime Intellect) rollout integration
 
 Train on a [Verifiers](https://github.com/PrimeIntellect-ai/verifiers) V1
-environment instead of a Miles prompt dataset. Verifiers owns grouped episode
-execution and reward computation; Miles keeps the model, sampling, engines and
+environment instead of a Orbit prompt dataset. Verifiers owns grouped episode
+execution and reward computation; Orbit keeps the model, sampling, engines and
 weight updates, filtering, advantages, and the optimizer.
 
 The adapter is a **rollout function** (`verifiers_rollout.py`): it replaces
-Miles' batch-orchestration layer, runs `n` rollouts per task through Verifiers,
-and returns ordinary Miles `Sample` groups. Renderers renders messages to token
-ids and `MilesSGLangTransport` translates its wire format to Miles' SGLang
+Orbit' batch-orchestration layer, runs `n` rollouts per task through Verifiers,
+and returns ordinary Orbit `Sample` groups. Renderers renders messages to token
+ids and `OrbitSGLangTransport` translates its wire format to Orbit' SGLang
 `/generate`, so training sees the exact sampled token ids and logprobs.
 
 Requires Python 3.11+ and Verifiers 0.2.0. (Verifiers 0.2.1 requires OpenAI
@@ -53,13 +53,13 @@ python examples/experimental/verifiers/run.py --verifiers-config /path/to/verifi
 
 The launcher points `VERIFIERS_CONFIG` at the file and selects the adapter with
 `--rollout-function-path verifiers_rollout.VerifiersRolloutFn` (the
-`generate_rollout` function entry under `MILES_USE_LEGACY_ROLLOUT_V1=1`) plus
+`generate_rollout` function entry under `ORBIT_USE_LEGACY_ROLLOUT_V1=1`) plus
 `--disable-rollout-global-dataset`. To wire a hand-rolled command, set the same
 three things and put this directory on `PYTHONPATH`.
 
-Standard Miles options keep their meaning:
+Standard Orbit options keep their meaning:
 
-| Miles option | Verifiers behavior |
+| Orbit option | Verifiers behavior |
 |---|---|
 | `--rollout-batch-size` | Task groups per training rollout |
 | `--n-samples-per-prompt` | Rollouts per training task |
@@ -86,18 +86,18 @@ The adapter raises at construction rather than producing wrong data:
 - `--multimodal-keys`, `--use-opd`, routing replay, indexer replay — the
   transport does not carry that token metadata.
 - Streaming, Responses/Anthropic dialects, and auxiliary relay routes.
-- Traces with multiple graph branches, including compaction: Miles does not
+- Traces with multiple graph branches, including compaction: Orbit does not
   preserve a trace's rollout-group boundary when flattening, which would make
   group-relative advantages wrong.
 
 ## Evaluation
 
 `run.py --eval-interval N` evaluates the whole taskset every N training
-rollouts. Miles asserts that eval datasets are configured whenever
+rollouts. Orbit asserts that eval datasets are configured whenever
 `--eval-interval` is set, so the launcher works around that by naming the
 taskset and pointing the placeholder `--eval-prompt-data` at the EnvConfig it is
 defined in; the adapter serves evaluation, so the built-in loader never opens
-that path. Scoping the assertion Miles-side is worth revisiting once a second
+that path. Scoping the assertion Orbit-side is worth revisiting once a second
 rollout function owns its evaluation set.
 
 Group rewards rank rollouts within a task, so evaluation needs

@@ -1,8 +1,8 @@
-"""Representative session-layer smoke tests for miles-maintained fixed templates.
+"""Representative session-layer smoke tests for orbit-maintained fixed templates.
 
 These tests intentionally stay narrow:
 
-- only bundled fixed templates maintained by miles
+- only bundled fixed templates maintained by orbit
 - only tool-only multi-turn session flow
 - only session/TITO plumbing + mismatch taxonomy checks
 
@@ -27,8 +27,8 @@ from tests.fast.router.session_pretokenized_test_utils import (
     teardown_router_env,
 )
 
-from miles.utils.chat_template_utils import TITOTokenizerType, resolve_fixed_chat_template
-from miles.utils.test_utils.mock_trajectories import LongChainTrajectory, build_trajectory
+from orbit.utils.chat_template_utils import TITOTokenizerType, resolve_fixed_chat_template
+from orbit.utils.test_utils.mock_trajectories import LongChainTrajectory, build_trajectory
 
 
 @dataclass(frozen=True)

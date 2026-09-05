@@ -6,8 +6,8 @@ import requests
 
 def test_init_normal_normalizes_ipv6_host_before_server_args_resolution(monkeypatch):
     pytest.importorskip("sglang")
-    import miles.backends.sglang_utils.sglang_engine as engine_module
-    from miles.backends.sglang_utils.sglang_engine import SGLangEngine
+    import orbit.backends.sglang_utils.sglang_engine as engine_module
+    from orbit.backends.sglang_utils.sglang_engine import SGLangEngine
 
     constructed = []
 
@@ -39,7 +39,7 @@ def test_flush_cache_sleeps_between_pending_request_retries(monkeypatch):
     in-flight generation to drain — and flush_cache raises TimeoutError
     almost immediately after pause_generation instead of after ~60s."""
     pytest.importorskip("sglang")
-    from miles.backends.sglang_utils.sglang_engine import SGLangEngine
+    from orbit.backends.sglang_utils.sglang_engine import SGLangEngine
 
     engine = SGLangEngine.__new__(SGLangEngine)
     engine.node_rank = 0
@@ -137,7 +137,7 @@ def test_nccl_adapter_methods_post_the_sglang_endpoint_contract(
 ):
     """NCCL sync must reach SGLang with the adapter versioning contract intact."""
     pytest.importorskip("sglang")
-    from miles.backends.sglang_utils.sglang_engine import SGLangEngine
+    from orbit.backends.sglang_utils.sglang_engine import SGLangEngine
 
     engine = SGLangEngine.__new__(SGLangEngine)
     engine.node_rank = 0

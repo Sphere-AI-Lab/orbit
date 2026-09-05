@@ -10,7 +10,7 @@ whether DeepEP drives the Megatron MoE dispatch.
 
 The checkpoint must already be converted to Megatron `torch_dist`; this script only
 submits the training job. It also assumes a Ray cluster that is already joined
-across all 32 nodes, so run it with `MILES_SCRIPT_EXTERNAL_RAY=1`: the launcher then
+across all 32 nodes, so run it with `ORBIT_SCRIPT_EXTERNAL_RAY=1`: the launcher then
 skips `ray start` and submits straight to the running cluster.
 
 =====================
@@ -25,7 +25,7 @@ Args:
 
 =====================
 
-  MILES_SCRIPT_EXTERNAL_RAY=1 python scripts/run_kimi_k2.py --model-name Kimi-K2-Thinking
+  ORBIT_SCRIPT_EXTERNAL_RAY=1 python scripts/run_kimi_k2.py --model-name Kimi-K2-Thinking
 """
 
 from dataclasses import dataclass
@@ -33,7 +33,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 _MODEL_NAMES = Literal["Kimi-K2-Instruct", "Kimi-K2-Thinking"]
 
@@ -115,7 +115,7 @@ def execute(args: ScriptArgs):
         "--rollout-temperature 1 "
         # over-sample, then drop the prompts whose rewards carry no gradient signal
         "--over-sampling-batch-size 256 "
-        "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
+        "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
         "--num-steps-per-rollout 4 "
         "--balance-data "
     )

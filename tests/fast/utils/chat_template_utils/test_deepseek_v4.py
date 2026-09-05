@@ -21,7 +21,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from miles.utils.chat_template_utils import apply_chat_template, deepseek
+from orbit.utils.chat_template_utils import apply_chat_template, deepseek
 
 _MSGS_BASIC = [{"role": "user", "content": "Hello"}]
 
@@ -338,7 +338,7 @@ def test_accept_none_tools_and_known_kwargs():
 
 
 # ---------------------------------------------------------------------------
-# enable_thinking -> thinking_mode translation (miles alias for the encoder knob)
+# enable_thinking -> thinking_mode translation (orbit alias for the encoder knob)
 # ---------------------------------------------------------------------------
 
 

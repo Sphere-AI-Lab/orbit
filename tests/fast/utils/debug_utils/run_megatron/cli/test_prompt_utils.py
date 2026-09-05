@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from transformers import AutoTokenizer
 
-from miles.utils.debug_utils.run_megatron.cli.prompt_utils import (
+from orbit.utils.debug_utils.run_megatron.cli.prompt_utils import (
     PromptConfig,
     _build_math_sequence,
     _resolve_raw_text,

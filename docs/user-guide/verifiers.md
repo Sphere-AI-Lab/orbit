@@ -1,9 +1,9 @@
 ---
 title: Verifiers (Prime Intellect)
-description: Train on Prime Intellect Verifiers environments with Miles.
+description: Train on Prime Intellect Verifiers environments with Orbit.
 ---
 
-Miles can train on a Verifiers environment in place of a prompt dataset. The
+Orbit can train on a Verifiers environment in place of a prompt dataset. The
 integration requires Python 3.11 or newer and Verifiers 0.2.0. Verifiers 0.2.1
 requires OpenAI 2.9 or newer, while SGLang 0.5.15 pins OpenAI 2.6.1.
 
@@ -47,7 +47,7 @@ id = "gsm8k-v1"
 
 The config may also define the harness, runtime, judges, retries, and environment
 limits supported by Verifiers. Verifiers applies per-rollout and group rewards before
-the completed traces are returned to Miles.
+the completed traces are returned to Orbit.
 
 The integration implements Verifiers' V1 environment contract. Legacy V0 environment
 configs are rejected during startup.
@@ -55,24 +55,24 @@ configs are rejected during startup.
 ## Run
 
 The integration is a rollout function under
-[`examples/experimental/verifiers`](https://github.com/radixark/miles/tree/main/examples/experimental/verifiers);
+[`examples/experimental/verifiers`](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/verifiers);
 its launcher wires everything up:
 
 ```bash
 python examples/experimental/verifiers/run.py --verifiers-config /path/to/verifiers.toml
 ```
 
-The launcher selects the adapter with `--rollout-function-path`, turns off Miles
+The launcher selects the adapter with `--rollout-function-path`, turns off Orbit
 prompt-data loading with `--disable-rollout-global-dataset`, and points
-`VERIFIERS_CONFIG` at the file. This uses the configured taskset instead of Miles
-prompt data. Environment behavior comes from the Verifiers config, while Miles
+`VERIFIERS_CONFIG` at the file. This uses the configured taskset instead of Orbit
+prompt data. Environment behavior comes from the Verifiers config, while Orbit
 continues to own the model, sampling, batching, concurrency, reward hooks, and
-optimizer settings. The Renderers library formats environment messages with Miles'
+optimizer settings. The Renderers library formats environment messages with Orbit'
 model and tokenizer settings.
 
-The standard Miles rollout options keep their existing meaning:
+The standard Orbit rollout options keep their existing meaning:
 
-| Miles option | Verifiers behavior |
+| Orbit option | Verifiers behavior |
 |---|---|
 | `--rollout-batch-size` | Number of task groups returned by each training rollout |
 | `--n-samples-per-prompt` | Rollouts per training task |
@@ -81,10 +81,10 @@ The standard Miles rollout options keep their existing meaning:
 | `--rollout-*` / `--eval-*` sampling options | Sampling and context limits |
 | `--apply-chat-template-kwargs` | Typed template options passed to renderers |
 | `--sglang-server-concurrency` | Physical engine capacity |
-| Miles reward and filtering options | Applied after Verifiers scoring using the standard Miles hooks |
+| Orbit reward and filtering options | Applied after Verifiers scoring using the standard Orbit hooks |
 
 Evaluation covers every task in the taskset. Training cycles the taskset and advances
-from the current Miles rollout ID when a run resumes.
+from the current Orbit rollout ID when a run resumes.
 
 ## Environment Support
 
@@ -94,13 +94,13 @@ model identity in `--hf-checkpoint` or the existing `--sglang-tokenizer-path` op
 User simulators, multi-turn episodes, environment runtimes, per-rollout rewards, and
 group rewards run through the standard Verifiers environment lifecycle.
 
-Verifiers group rewards apply during both training and evaluation. Miles
-`--group-rm` hooks remain training-only, matching the standard Miles rollout path.
+Verifiers group rewards apply during both training and evaluation. Orbit
+`--group-rm` hooks remain training-only, matching the standard Orbit rollout path.
 
 ## Limitations
 
 `--eval-interval` works through the launcher, which evaluates the whole taskset at
-that interval. Miles asserts that eval datasets are configured whenever the flag is
+that interval. Orbit asserts that eval datasets are configured whenever the flag is
 set, so the launcher passes a placeholder `--eval-prompt-data` naming the taskset and
 pointing at its EnvConfig; the adapter serves evaluation, so the built-in loader never
 opens that path.
@@ -117,6 +117,6 @@ Streaming model requests, Responses and Anthropic dialects, multimodal inputs, O
 routing replay, and indexer replay are not supported by the transport. The adapter
 rejects the corresponding CLI options at startup.
 
-Traces with multiple graph branches, including compaction, are rejected. Miles does
+Traces with multiple graph branches, including compaction, are rejected. Orbit does
 not currently preserve a trace's rollout-group boundary when it flattens multiple
 training samples, which would make group-relative advantages incorrect.

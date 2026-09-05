@@ -6,8 +6,8 @@ failure.
 
 ## Revisions
 
-- Miles PR branch: `opd-mm/01-exact-action-scoring`
-- SGLang revision source: the checked-out Miles commit's
+- Orbit PR branch: `opd-mm/01-exact-action-scoring`
+- SGLang revision source: the checked-out Orbit commit's
   `thirdparty/sglang` gitlink
 - Current `sglang-miles` and PR gitlink snapshot:
   `27d5e97c3b26127d2282900823a4abd172a3b6d5`
@@ -17,7 +17,7 @@ failure.
   `25e50d4cca14e22a3e2af5b46091bc594526a1b7`
 
 The gitlink, rather than a mutable SGLang branch name, defines the exact server
-implementation under validation. After updating Miles, derive the expected
+implementation under validation. After updating Orbit, derive the expected
 revision from that checkout and make the submodule working tree match it:
 
 ```bash
@@ -29,12 +29,12 @@ git submodule sync --recursive
 git submodule update --init --recursive thirdparty/sglang
 ACTUAL_SGLANG_SHA="$(git -C thirdparty/sglang rev-parse HEAD)"
 test "$ACTUAL_SGLANG_SHA" = "$EXPECTED_SGLANG_SHA"
-printf 'Miles %s pins SGLang %s\n' \
+printf 'Orbit %s pins SGLang %s\n' \
   "$(git rev-parse HEAD)" "$EXPECTED_SGLANG_SHA"
 ```
 
 Do not manually switch the submodule to another branch or commit after this
-check. The Miles gitlink is the source of truth; validating any other SGLang
+check. The Orbit gitlink is the source of truth; validating any other SGLang
 tree does not validate this PR.
 
 ## Gate 1: SGLang Contract
@@ -62,7 +62,7 @@ The E2E deliberately constructs a non-canonical text suffix. It passes only
 when the returned token IDs are exactly the submitted suffix IDs. A request
 without `scoring_suffix_ids` remains on the existing SGLang path.
 
-Before the multi-turn gates, also run the Miles-side one-GPU generation E2E:
+Before the multi-turn gates, also run the Orbit-side one-GPU generation E2E:
 
 ```bash
 SGLANG_VLM_E2E_MODEL_PATH="${HF_CACHE_DIR:-/data/shared/hf_cache}/models/Qwen3-VL-8B-Instruct" \
@@ -79,7 +79,7 @@ media placeholders. The rollout independently checks
 `meta_info.prompt_tokens` on every multimodal turn and stops immediately if the
 server rebuilt a different-length history.
 
-## Gate 2: Miles Production Scoring
+## Gate 2: Orbit Production Scoring
 
 Pre-stage the target teacher if it is not already present:
 
@@ -128,11 +128,11 @@ The current gitlink advances that exact-suffix merge to
 HF-processor-produced Qwen-VL token IDs in the existing legacy multimodal
 loading path. It does not replace the `scoring_suffix_ids` contract validated
 by Gate 1/01; it closes the separate Student SGLang multi-turn generation
-boundary described below. Before merging the multi-turn PR, run the Miles
+boundary described below. Before merging the multi-turn PR, run the Orbit
 one-GPU generation E2E and Gate 7 against this exact gitlink.
 
 Future reproductions must still use the dynamic gitlink assertion above and
-record the printed Miles and SGLang commits with their artifacts.
+record the printed Orbit and SGLang commits with their artifacts.
 
 ## Gate 3: Five-Step Trainer Smoke
 
@@ -164,7 +164,7 @@ it never exercises `scoring_suffix_ids`.
 
 ## Gate 5: Five-Step Top-K + Rest Smoke
 
-Run the focused Miles contract, transport, loss, metric, and argument coverage
+Run the focused Orbit contract, transport, loss, metric, and argument coverage
 in the server environment before consuming the three-node allocation:
 
 ```bash
@@ -206,7 +206,7 @@ explicit CE, Rest CE, total CE, coarse KL, teacher/student Rest mass,
 request counts and bytes, scoring latency, actor memory, and step time. Rest CE
 decline without non-worsening Rest-mass error does not pass the algorithm gate.
 Compare performance to `02b` only after normalizing for generated token count;
-profile a short rerun with `MILES_PROFILE_OPD_DAGGER=1` only if the functional
+profile a short rerun with `ORBIT_PROFILE_OPD_DAGGER=1` only if the functional
 gate shows more than 10% steady-step regression.
 
 ## Gate 7: Five-Step Geo3K Multi-Turn Sampled-RKLD Smoke
@@ -316,7 +316,7 @@ with job ID, commit, nodes, duration, exact configuration, and explicit missing
 evidence. Use steps 1-19 for steady-state timing summaries unless step 0 is
 separately identified as setup cost.
 
-**Result: passed.** Job `26594` (slinky-[10,36,31], 38 min, miles `fd503f25`)
+**Result: passed.** Job `26594` (slinky-[10,36,31], 38 min, orbit `fd503f25`)
 completed all twenty steps on 2026-07-16 after the focused subset passed 82/82.
 Teacher requests equaled kept samples at every step (1,280 = 1,280, zero
 retries, zero student requests, zero alignment/mask errors). The historical
@@ -369,7 +369,7 @@ OPD_DAGGER_LOSS=cross_entropy
 
 The 04 and 05 wrappers retain fixed objective values and source the same
 objective-free `geo3k-multiturn-overlay.sh`; the helper changes only data,
-rollout assembly and multi-turn telemetry before rebuilding `MILES_ARGS`.
+rollout assembly and multi-turn telemetry before rebuilding `ORBIT_ARGS`.
 
 Advance only when all five optimizer steps finish and:
 
@@ -425,7 +425,7 @@ regression. Passing Gate 10 establishes a synchronous multi-turn pure-DAgger
 reference, not model-quality improvement. Hybrid training remains a separate
 later gate.
 
-**Result: passed.** Job `27156` (29 min, miles `2dfc12cc`) completed all twenty
+**Result: passed.** Job `27156` (29 min, orbit `2dfc12cc`) completed all twenty
 steps on 2026-07-17. Every Gate 9 invariant held at every step: identities
 exact, `pg_loss` = 0, 1,280 = 1,280 teacher requests with zero retries, zero
 student requests, zero alignment/mask errors, round max > 1 and raw > active
@@ -523,7 +523,7 @@ from steady-state timing and compare active-token-normalized cost with both
 reference required before async scheduling work. It does not prove model
 quality or coefficient optimality.
 
-**Result: passed.** Job `27208` (41 min, slinky-[11,44,13], miles `51f7571b`)
+**Result: passed.** Job `27208` (41 min, slinky-[11,44,13], orbit `51f7571b`)
 completed all twenty steps on 2026-07-18. Every Gate 11 invariant held at every
 step; additivity max residual 5.96e-8. First-five/last-five windows: sampled
 RKLD 0.322 → 0.221 and coarse KL 0.379 → 0.162. The hybrid reaches a similar
@@ -556,7 +556,7 @@ coefficients, teacher scoring contract, optimizer and
 TP=4/DP=2/SP/PP=1/CP=1 layout. It changes scheduling only:
 
 ```text
-MILES_TRAIN_ENTRY=train_async.py
+ORBIT_TRAIN_ENTRY=train_async.py
 rollout_function=generate_rollout_fully_async
 prefetch_batches=1
 completed_queue_soft_cap=32 prompt groups
@@ -612,7 +612,7 @@ both DAgger identities ≤ 5.96e-8, both branches nonzero, completed queue 0 at
 every drain (cap 32 never approached), weight versions finite
 (mean 1.0 → 3.58), zero alignment/malformed/rescore events, and a clean
 `16 tasks stop → worker stopped → thread stopped` shutdown (the tail
-tracebacks are wandb atexit teardown noise, not miles state).
+tracebacks are wandb atexit teardown noise, not orbit state).
 
 ## Gate 14: Twenty-Step Geo3K Multi-Turn Hybrid Fully-Async Reference
 
@@ -637,7 +637,7 @@ Do not interpret raw step-time boundaries as equivalent between synchronous and
 fully-async drivers, and do not claim model quality or an unbiased off-policy
 estimator from this short bounded-staleness run.
 
-**Result: passed.** Job `27272` (36 min, slinky-[26,44,13], miles `6253d3f5`)
+**Result: passed.** Job `27272` (36 min, slinky-[26,44,13], orbit `6253d3f5`)
 completed all twenty steps on 2026-07-18. (The first submission, job `27266`,
 was killed by the preflight NCCL probe: slinky-30 memlock 8 MiB regression,
 `ibv_create_cq ENOMEM` on all 8 of its ranks — the 7th node minted by the
@@ -697,7 +697,7 @@ Retain per-step raw reward, advantage mean/min/max, sampled RKLD, DAgger loss,
 coarse KL, total loss, gradient norm and request counts.
 
 **Result: passed.** Focused suite `141/141`, then job `27415` (22 min,
-slinky-[5,28,56], miles `38ad568a`) completed all five steps on 2026-07-18.
+slinky-[5,28,56], orbit `38ad568a`) completed all five steps on 2026-07-18.
 Every 06a invariant held: additivity max residual 5.96e-8, CE identity
 7.45e-8, coarse-KL identity 2.98e-8, both branches nonzero, 64 = 64 = 64
 sample/request/teacher-request per step, zero retries, zero alignment errors,
@@ -738,7 +738,7 @@ synchronous reference for separating task-objective behavior from scheduling
 effects; retain a machine-readable snapshot with all three branches and the
 same timing/memory evidence contract as `06b`.
 
-**Result: passed.** Job `27423` (32 min, slinky-[5,28,56], miles `38ad568a`)
+**Result: passed.** Job `27423` (32 min, slinky-[5,28,56], orbit `38ad568a`)
 completed all twenty steps on 2026-07-18. Every Gate 15 invariant held:
 additivity max residual 8.94e-8, identities ≤ 1.19e-7, 64 = 64 = 64 with zero
 retries and zero alignment errors, `valid_position_ratio` = 1.0, rounds > 1
@@ -815,7 +815,7 @@ evidence. Passing this gate validates the OPD + task-RL mechanism under bounded
 fully-async scheduling; it does not establish downstream quality from twenty
 shuffled optimizer steps.
 
-**Result: passed.** Job `27427` (18 min, slinky-[5,56,28], miles `38ad568a`)
+**Result: passed.** Job `27427` (18 min, slinky-[5,56,28], orbit `38ad568a`)
 completed all twenty steps on 2026-07-18. Every Gate 15/17 invariant held:
 additivity ≤ 8.94e-8, identities ≤ 8.94e-8, 64 = 64 with zero retries and
 zero alignment errors, `valid_position_ratio` = 1.0, and the task component
@@ -865,7 +865,7 @@ the batches are shuffled online samples consumed in completion order.
 
 **Result: passed.** `Qwen/Qwen3-VL-8B-Thinking` was downloaded to the shared
 cache (17 GB, vision tower verified in `config.json` alongside both existing
-checkpoints). Job `27430` (15.5 min, slinky-[20,36,52], miles `77bc0c79`)
+checkpoints). Job `27430` (15.5 min, slinky-[20,36,52], orbit `77bc0c79`)
 completed all five steps on 2026-07-18. Teacher identity confirmed in the
 serving line (`--model-path .../Qwen3-VL-8B-Thinking --tp 8`); the pure-hybrid
 contract is doubly fingerprinted — `train/pg_loss` equals
@@ -894,7 +894,7 @@ The only intended model-contract difference from Gate 19 is the teacher
 checkpoint: `Qwen3-VL-30B-A3B-Thinking`. Keep the 8B-Instruct student, TP=8
 teacher service, objective, data, sampler, prefetch window and age bound fixed.
 
-**Result: passed.** Job `27429` (13 min, slinky-[5,56,28], miles `77bc0c79`)
+**Result: passed.** Job `27429` (13 min, slinky-[5,56,28], orbit `77bc0c79`)
 completed all five steps on 2026-07-18 with the established 30B teacher at the
 identical prefetch-2 contract. Same double fingerprint of the pure-hybrid
 objective (bit-equal `pg_loss`/`opd_reverse_kl`, hard-zero `rollout/rewards`),
@@ -919,7 +919,7 @@ both OPD branches, DAgger identities, teacher transport, gradient, staleness,
 queue behavior and active-token cost. Confirm `num-rollout=200` and that the
 effective command contains no checkpoint-save option.
 
-**Result: passed.** Job `27432` (73 min, slinky-[52,36,20], miles `77bc0c79`)
+**Result: passed.** Job `27432` (73 min, slinky-[52,36,20], orbit `77bc0c79`)
 completed all 200 steps on 2026-07-18 — the ladder's first long window. Every
 invariant held at every step: additivity 5.96e-8, identities ≤ 8.94e-8, the
 pure-hybrid double fingerprint (bit-equal `pg_loss`/`opd_reverse_kl` at 200/200
@@ -1256,7 +1256,7 @@ and reuses the Student SGLang engines. The 30 prompt tasks are nevertheless
 submitted concurrently under the existing SGLang semaphore; only turns inside a
 single trajectory are sequential. Treat eval as explicit wall-clock overhead,
 but do not assume a particular training step timer includes it. The normal Slurm
-launcher must inject `MILES_RUN_DIR`; a warning about a missing value means the
+launcher must inject `ORBIT_RUN_DIR`; a warning about a missing value means the
 aggregate metrics may exist but the required per-prompt JSONL evidence does not.
 Student recipe overrides require `OPD_EVAL_INTERVAL >= 2`: interval 1 makes the
 pre-train and post-step-1 callbacks share `rollout_id=0`, so the overlay rejects

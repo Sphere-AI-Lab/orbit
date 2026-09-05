@@ -12,9 +12,9 @@ except Exception:  # pragma: no cover - optional dependency
     orjson = None
 from examples.geo3k_vlm.multi_turn.base_env import BaseInteractionEnv
 
-from miles.rollout.rm_hub import grade_answer_verl
-from miles.rollout.rm_hub.math_utils import extract_answer as extract_boxed_answer
-from miles.utils.types import Sample
+from orbit.rollout.rm_hub import grade_answer_verl
+from orbit.rollout.rm_hub.math_utils import extract_answer as extract_boxed_answer
+from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)
 

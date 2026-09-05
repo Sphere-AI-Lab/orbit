@@ -31,7 +31,7 @@ import random
 
 import httpx
 
-from miles.utils.test_utils.openai_stream_client import stream_chat_completions
+from orbit.utils.test_utils.openai_stream_client import stream_chat_completions
 
 logger = logging.getLogger(__name__)
 

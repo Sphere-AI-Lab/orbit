@@ -3,11 +3,11 @@ import torch.distributed as dist
 from megatron.core import mpu
 from transformers import AutoModelForCausalLM
 
-import miles.backends.megatron_utils as megatron_utils
-from miles.backends.megatron_utils import update_weight_utils
-from miles.utils.arguments import parse_args
-from miles.utils.hf_config import load_hf_config
-from miles.utils.processing_utils import load_tokenizer
+import orbit.backends.megatron_utils as megatron_utils
+from orbit.backends.megatron_utils import update_weight_utils
+from orbit.utils.arguments import parse_args
+from orbit.utils.hf_config import load_hf_config
+from orbit.utils.processing_utils import load_tokenizer
 
 
 def add_checkpoint_args(parser):
@@ -27,7 +27,7 @@ def add_checkpoint_args(parser):
 
 
 def main(args):
-    from miles.utils.ft_utils.indep_dp import IndepDPInfo
+    from orbit.utils.ft_utils.indep_dp import IndepDPInfo
 
     megatron_utils.init(
         args,

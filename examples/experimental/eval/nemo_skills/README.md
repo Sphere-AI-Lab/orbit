@@ -4,10 +4,10 @@ This directory contains configuration and utilities for offloading complex evalu
 
 ## Overview
 
-The setup allows miles to delegate evaluation tasks to a dedicated "Skills" server. This creates a clear separation of concerns:
+The setup allows orbit to delegate evaluation tasks to a dedicated "Skills" server. This creates a clear separation of concerns:
 
-1.  **miles Container**: Runs the main training loop and hosts the model using SGLang.
-2.  **Skills Container**: Hosts the `nemo_skills` environment, runs the evaluation logic, and queries the model running in the miles container.
+1.  **orbit Container**: Runs the main training loop and hosts the model using SGLang.
+2.  **Skills Container**: Hosts the `nemo_skills` environment, runs the evaluation logic, and queries the model running in the orbit container.
 
 ## Prerequisites
 
@@ -18,15 +18,15 @@ The setup allows miles to delegate evaluation tasks to a dedicated "Skills" serv
 
 ### Prepare Host Network
 
-Create a Docker network to allow communication between the miles and Skills containers.
+Create a Docker network to allow communication between the orbit and Skills containers.
 
 ```bash
 docker network create skills-net
 ```
 
-### Launch the miles Container
+### Launch the orbit Container
 
-Start the main container where miles and the model will run. Replace `<miles container name>` with your desired name (e.g., `miles_main`).
+Start the main container where orbit and the model will run. Replace `<orbit container name>` with your desired name (e.g., `orbit_main`).
 
 ```bash
 docker run \
@@ -38,7 +38,7 @@ docker run \
   --ipc=host \
   --privileged \
   --network skills-net \
-  --name <miles container name> \
+  --name <orbit container name> \
   radixark/miles:latest \
   /bin/bash
 ```
@@ -71,8 +71,8 @@ Enter the **Skills container** and set up the environment.
 
 ```bash
 # Clone repositories
-git clone -b miles_skills https://github.com/guapisolo/miles.git /opt/miles
-git clone -b miles https://github.com/guapisolo/Skills.git /opt/Skills
+git clone -b orbit_skills https://github.com/guapisolo/orbit.git /opt/orbit
+git clone -b orbit https://github.com/guapisolo/Skills.git /opt/Skills
 
 # Install Skills package
 cd /opt/Skills
@@ -92,10 +92,10 @@ python3 arena-hard/prepare.py
 
 **c) Start the Evaluation Server**
 
-Start the server that listens for evaluation requests from miles.
+Start the server that listens for evaluation requests from orbit.
 
 ```bash
-cd /opt/miles
+cd /opt/orbit
 python examples/experimental/eval/nemo_skills/skills_server.py \
   --host 0.0.0.0 \
   --port 9050 \
@@ -103,20 +103,20 @@ python examples/experimental/eval/nemo_skills/skills_server.py \
   --config-dir examples/experimental/eval/nemo_skills/config \
   --cluster local_cluster \
   --max-concurrent-requests 512 \
-  --openai-model-name miles-openai-model
+  --openai-model-name orbit-openai-model
 ```
-*Note: You can now connect to the server at `skills_server:9050` from within the `skills-net` Docker network. The server always proxies evaluation traffic to an OpenAI-compatible sglang router (miles starts and manage the router), so adjust `--openai-model-name` and `--max-concurrent-requests` as needed for your deployment.
+*Note: You can now connect to the server at `skills_server:9050` from within the `skills-net` Docker network. The server always proxies evaluation traffic to an OpenAI-compatible sglang router (orbit starts and manage the router), so adjust `--openai-model-name` and `--max-concurrent-requests` as needed for your deployment.
 
 ## Running Evaluation
 
 The example scripts are located in `examples/experimental/eval/scripts`. Here is an example workflow for training Qwen3-4B with delegated evaluation.
 
-### Prepare miles Container
+### Prepare orbit Container
 
-Enter the **miles container** and install the package.
+Enter the **orbit container** and install the package.
 
 ```bash
-cd /root/miles
+cd /root/orbit
 git pull
 pip install -e . --no-deps
 ```
@@ -138,7 +138,7 @@ You need to convert the HF model to the format required by Megatron-LM. Ensure y
 
 ```bash
 # Source model arguments
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py qwen3-4B)" || exit 1
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py qwen3-4B)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 
 # Convert model

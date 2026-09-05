@@ -38,8 +38,8 @@ hf download --repo-type dataset zhuzilin/aime-2024     --local-dir /root/dataset
 ### 3.2 HF → Megatron `torch_dist` conversion
 
 ```bash
-cd /root/miles
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py qwen3-4B)" || exit 1
+cd /root/orbit
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py qwen3-4B)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
    ${MODEL_ARGS[@]} \
@@ -54,7 +54,7 @@ The converter auto-derives PP from `WORLD_SIZE`; for larger sizes drive it with 
 ### 4.1 Quick start
 
 ```bash
-cd /root/miles
+cd /root/orbit
 python scripts/run_qwen3_dense.py --model-name Qwen3-4B
 ```
 

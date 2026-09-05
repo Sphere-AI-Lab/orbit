@@ -1,9 +1,9 @@
-"""Tests for miles.utils.audit_utils.event_logger.checkpoint."""
+"""Tests for orbit.utils.audit_utils.event_logger.checkpoint."""
 
 from argparse import Namespace
 from pathlib import Path
 
-from miles.utils.audit_utils.event_logger import checkpoint as event_logger_checkpoint
+from orbit.utils.audit_utils.event_logger import checkpoint as event_logger_checkpoint
 
 
 def _args(*, event_dir: Path | None, save: Path | None = None, load: Path | None = None) -> Namespace:

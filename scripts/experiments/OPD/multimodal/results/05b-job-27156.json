@@ -7,7 +7,7 @@
   "status": "passed",
   "historical_budget_note": "This run predates response/context budget separation. Its configured response limit was reduced by the processor-expanded initial prompt, so it does not validate corrected response-cap or length-cap-ratio semantics.",
   "source": {
-    "miles_commit": "2dfc12cc",
+    "orbit_commit": "2dfc12cc",
     "run_dir": "runs/opd-mm-05b-mt-dagger-gate/260717_232938",
     "duration_minutes": 29,
     "provenance": "Exact series extracted from the retained cluster run log (log_utils step/perf/multi_turn dict lines)."

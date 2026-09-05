@@ -24,12 +24,12 @@ This is an example of FP8 training and FP8 inference. Under FP8 training and inf
 
 2. Convert your HuggingFace model weights to FP8 format.
 
-   You can use `tools/convert_hf_to_fp8.py` to convert bf16 weights to fp8 format. Ensure that the `--hf-checkpoint` parameter points to a directory where the `config.json` contains the correct `quantization_config`. miles will automatically use FP8 quantization during weight updates.
+   You can use `tools/convert_hf_to_fp8.py` to convert bf16 weights to fp8 format. Ensure that the `--hf-checkpoint` parameter points to a directory where the `config.json` contains the correct `quantization_config`. orbit will automatically use FP8 quantization during weight updates.
 
 3. Start FP8 training.
 
    ```bash
-   cd miles
+   cd orbit
 
    # Qwen3‑4B FP8 training (single node)
    bash examples/infra_features/low_precision/run-qwen3-4b-fp8.sh
@@ -46,13 +46,13 @@ This is an example of FP8 training and FP8 inference. Under FP8 training and inf
 
 ## Quick Explanation
 
-Here's a quick explanation of how FP8 training is currently implemented in miles:
+Here's a quick explanation of how FP8 training is currently implemented in orbit:
 
 1. Initialization: If FP8 recipe is enabled, layers will be built in FP8 context.
 
 2. Training: During training, weights and activations are quantized online to nvfp8 format, and cuBLAS FP8 GEMM is called for various GEMM computations in forward and backward passes.
 
-3. Weight updates: During RL weight updates, Megatron first dequantizes FP8 weights to bf16 format, then miles quantizes these bf16 weights to fp8 format and sends them to sglang. (This additional dequantization and quantization is not elegant, but we haven't modified the interface yet for framework compatibility.)
+3. Weight updates: During RL weight updates, Megatron first dequantizes FP8 weights to bf16 format, then orbit quantizes these bf16 weights to fp8 format and sends them to sglang. (This additional dequantization and quantization is not elegant, but we haven't modified the interface yet for framework compatibility.)
 
 4. Save checkpoint: Similar to weight updates, if checkpoints need to be saved from the training engine, they will also be dequantized back to bf16 and saved to `torch_dist` format checkpoints.
 
@@ -63,7 +63,7 @@ Currently, FP8 is far from being a complete feature and still has the following 
 
 - FP8 weights (`--fp8-param-gather`) can provide memory savings benefits, but currently FP8 weights must be used with TransformerEngine's FusedAdam, which conflicts with the commonly used Adam CPU offload technique in Megatron-LM.
 
-The miles team will continue to collaborate with the NVIDIA team to contribute more complete FP8 training infrastructure to the community.
+The orbit team will continue to collaborate with the NVIDIA team to contribute more complete FP8 training infrastructure to the community.
 
 ***
 
@@ -83,7 +83,7 @@ This guide provides examples for INT4 STE (Straight-Through Estimator) training 
 First, download the PTQ (Post-Training Quantization) calibration dataset from HuggingFace:
 [https://huggingface.co/datasets/Salesforce/wikitext/tree/main/wikitext-2-raw-v1](https://huggingface.co/datasets/Salesforce/wikitext/tree/main/wikitext-2-raw-v1)
 
-Next, use the `tools/convert_hf_to_hf_int4.py` script to convert BF16 weights to INT4 format. Ensure that the `--hf-checkpoint` parameter points to a directory where `config.json` contains the correct `quantization_config`. miles will automatically utilize INT4 quantization during weight updates.
+Next, use the `tools/convert_hf_to_hf_int4.py` script to convert BF16 weights to INT4 format. Ensure that the `--hf-checkpoint` parameter points to a directory where `config.json` contains the correct `quantization_config`. orbit will automatically utilize INT4 quantization during weight updates.
 
 ```bash
 python tools/convert_hf_to_hf_int4.py \

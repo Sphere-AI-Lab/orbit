@@ -5,8 +5,8 @@ from unittest.mock import MagicMock
 import pytest
 from tests.fast.ray.rollout.conftest import make_args, make_sglang_config_yaml
 
-from miles.backends.sglang_utils.sglang_config import ModelConfig, ServerGroupConfig, SglangConfig
-from miles.ray.rollout.rollout_server import _resolve_sglang_config
+from orbit.backends.sglang_utils.sglang_config import ModelConfig, ServerGroupConfig, SglangConfig
+from orbit.ray.rollout.rollout_server import _resolve_sglang_config
 
 # ----------------------------- _resolve_sglang_config matrix -----------------------------
 
@@ -168,7 +168,7 @@ class TestPdDisaggregation:
 
 class TestRolloutExternalPath:
     def test_external_addrs_consumed_in_allocator(self):
-        from miles.ray.rollout.addr_allocator import allocate_rollout_engine_addr_and_ports_external
+        from orbit.ray.rollout.addr_allocator import allocate_rollout_engine_addr_and_ports_external
 
         args = make_args(
             rollout_external_engine_addrs=[

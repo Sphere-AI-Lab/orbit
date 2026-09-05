@@ -19,8 +19,8 @@ import json
 import pytest
 from sglang.srt.entrypoints.openai import encoding_dsv32 as upstream
 
-from miles.utils.chat_template_utils import apply_chat_template, deepseek
-from miles.utils.chat_template_utils.templates import encoding_dsv32 as vendored
+from orbit.utils.chat_template_utils import apply_chat_template, deepseek
+from orbit.utils.chat_template_utils.templates import encoding_dsv32 as vendored
 
 _MSGS_BASIC = [{"role": "user", "content": "Hello"}]
 
@@ -160,7 +160,7 @@ def test_thinking_mode_changes_output():
 
 
 # ---------------------------------------------------------------------------
-# Miles extension: render-level drop_thinking=False (vendored encoder)
+# Orbit extension: render-level drop_thinking=False (vendored encoder)
 # ---------------------------------------------------------------------------
 
 _THINKING_HISTORY = [
@@ -361,7 +361,7 @@ def test_accept_none_tools_and_known_kwargs():
 
 
 # ---------------------------------------------------------------------------
-# enable_thinking -> thinking_mode translation (miles alias for the encoder knob)
+# enable_thinking -> thinking_mode translation (orbit alias for the encoder knob)
 # ---------------------------------------------------------------------------
 
 
@@ -492,7 +492,7 @@ def test_apply_chat_template_is_generation_ready(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Miles extension: injected system / assistant appends (role-independent)
+# Orbit extension: injected system / assistant appends (role-independent)
 # ---------------------------------------------------------------------------
 
 _INJECT_SHAPES = {

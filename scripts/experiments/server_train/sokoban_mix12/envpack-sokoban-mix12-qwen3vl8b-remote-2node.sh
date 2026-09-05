@@ -6,7 +6,7 @@
 #
 # Submit:
 #   JOB_NAME=rv2-8b-viton-mix12 WANDB_RUN_PREFIX= TIME=72:00:00 \
-#   WANDB_INIT_TIMEOUT=300 NODES=2 ENVPACK_SERVER_NODE_COUNT=1 MILES_ENV_NAME=miles_imp \
+#   WANDB_INIT_TIMEOUT=300 NODES=2 ENVPACK_SERVER_NODE_COUNT=1 ORBIT_ENV_NAME=orbit \
 #   bash scripts/slurm/submit.sh \
 #     server_train/sokoban_mix12/envpack-sokoban-mix12-qwen3vl8b-remote-2node
 

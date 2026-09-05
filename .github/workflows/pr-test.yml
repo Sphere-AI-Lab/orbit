@@ -30,7 +30,7 @@ on:
         type: string
         default: ''
       ci_image_tag:
-        description: 'Miles Docker image tag (default: dev)'
+        description: 'Orbit Docker image tag (default: dev)'
         required: false
         type: string
         default: 'dev'
@@ -46,7 +46,7 @@ on:
         type: string
         default: 'release'
       image_tag:
-        description: 'Miles Docker image tag to run suites in (e.g. a frozen dev-<timestamp> tag).'
+        description: 'Orbit Docker image tag to run suites in (e.g. a frozen dev-<timestamp> tag).'
         required: false
         type: string
         default: ''
@@ -196,7 +196,7 @@ jobs:
   # Gated by the `run-ci-h200-gpu` label: this fork has no self-hosted GPU runners
   # registered (`runs_on: ["h200", "2gpu"]`) — without the gate the job would
   # queue forever on every PR. Remove the label check (or just keep adding the
-  # label) once GPU runners are attached to impossible-inc/miles-imp.
+  # label) once GPU runners are attached to Sphere-AI-Lab/orbit.
   stage-b-2-gpu-h200:
     needs: [resolve-ci-policy, resolve-ci-image, stage-a-cpu]
     if: |
@@ -223,7 +223,7 @@ jobs:
   # Gated by `run-ci-h100-gpu` (8-GPU H100) / `run-ci-h200-gpu` (8-/4-/2-GPU H200) for the same reason as Stage B: this fork has no
   # self-hosted GPU runners, so without the gate these jobs would queue forever
   # on every PR. Remove the label check (or just keep adding the label) once GPU
-  # runners are attached to impossible-inc/miles-imp.
+  # runners are attached to Sphere-AI-Lab/orbit.
   stage-c-8-gpu-h100:
     needs: [resolve-ci-policy, resolve-ci-image, stage-a-cpu]
     if: |

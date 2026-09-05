@@ -11,7 +11,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 # ray_lifecycle.sh launches this entry point instead of the synchronous driver.
-export MILES_TRAIN_ENTRY=train_async.py
+export ORBIT_TRAIN_ENTRY=train_async.py
 
 # Pin the canonical smoke identity before sourcing 06a. Objective coefficients
 # remain owned by 06a and cannot be changed by this scheduling wrapper.
@@ -42,4 +42,4 @@ FULLY_ASYNC_ARGS=(
    --update-weights-interval 1
 )
 
-MILES_ARGS+=("${FULLY_ASYNC_ARGS[@]}")
+ORBIT_ARGS+=("${FULLY_ASYNC_ARGS[@]}")

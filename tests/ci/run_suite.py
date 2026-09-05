@@ -241,11 +241,11 @@ def run_a_suite(args):
     gate_provenance = gate_provenance_from_env()
 
     # The gate collects only when a record directory exists. CI does not set
-    # MILES_CI_GATE_RECORD_DIR, so allocate a job-local one whenever a store is
+    # ORBIT_CI_GATE_RECORD_DIR, so allocate a job-local one whenever a store is
     # configured (CUDA suites only -- the gate is CUDA-only). The training
     # subprocesses' CiHistoryBackend and the merge/gate steps read it from env.
     if gate_store is not None and hw == HWBackend.CUDA and not os.environ.get(CI_GATE_RECORD_DIR_ENV):
-        os.environ[CI_GATE_RECORD_DIR_ENV] = tempfile.mkdtemp(prefix="miles-ci-gate-")
+        os.environ[CI_GATE_RECORD_DIR_ENV] = tempfile.mkdtemp(prefix="orbit-ci-gate-")
 
     return run_unittest_files(
         ci_tests,

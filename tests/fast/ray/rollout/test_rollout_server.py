@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from tests.fast.ray.rollout.conftest import make_args, make_dataclass_group
 
-from miles.ray.rollout.rollout_server import (
+from orbit.ray.rollout.rollout_server import (
     RolloutServer,
     _compute_megatron_num_gpus,
     _compute_rollout_offset,
@@ -136,7 +136,7 @@ class TestRolloutServerPureFunctions:
 
     async def test_probe_and_mark_dead(self, monkeypatch):
         """recover() only restarts engines already marked stopped, so something has to mark them."""
-        import miles.ray.rollout.rollout_server as rollout_server_mod
+        import orbit.ray.rollout.rollout_server as rollout_server_mod
 
         monkeypatch.setattr(rollout_server_mod.ray, "kill", lambda handle: None)
 

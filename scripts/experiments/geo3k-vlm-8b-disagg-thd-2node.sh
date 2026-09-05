@@ -16,7 +16,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}
 RECIPE_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
 
 EXPERIMENT_NODES=2
@@ -36,7 +36,7 @@ HF_EVAL_DATA="$HF_CACHE_DIR/data/geo3k_imgurl/test.parquet"
 # ---------------------------------------------------------------------------
 MODEL_ARGS_ROTARY_BASE=5000000
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-8B.sh"
+source "$ORBIT_REPO/scripts/models/qwen3-8B.sh"
 MODEL_ARGS+=( --megatron-to-hf-mode bridge )
 
 RUN_NAME=${SLURM_JOB_NAME:-$RECIPE_NAME}
@@ -149,7 +149,7 @@ LAYOUT_ARGS=(
    --rollout-num-gpus       8
 )
 
-MILES_ARGS=(
+ORBIT_ARGS=(
    "${LAYOUT_ARGS[@]}"
    "${MODEL_ARGS[@]}"
    "${CKPT_ARGS[@]}"

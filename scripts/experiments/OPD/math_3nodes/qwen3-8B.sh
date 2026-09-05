@@ -4,7 +4,7 @@
 # Qwen3-8B student <- Qwen3-32B SGLang teacher, 3 dedicated nodes:
 #
 #   node 1 (head):   teacher — whole node, SGLang TP=8 on GPUs 0-7.
-#                    MILES_RAY_HEAD_NUM_GPUS=0 keeps Ray from scheduling any
+#                    ORBIT_RAY_HEAD_NUM_GPUS=0 keeps Ray from scheduling any
 #                    actor/rollout bundle onto the head, so the teacher owns
 #                    its GPUs outright (no mem-fraction squeeze, no GPU-7
 #                    corner like the 1-node baseline).
@@ -41,7 +41,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}
 RECIPE_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
 
 # ---------------------------------------------------------------------------
@@ -73,10 +73,10 @@ OPD_TEACHER_GPUS=${OPD_TEACHER_GPUS:-0,1,2,3,4,5,6,7}
 OPD_TEACHER_MEM_FRACTION=${OPD_TEACHER_MEM_FRACTION:-0.8}
 
 # Keep Ray off the head node's GPUs — the teacher owns them (see header).
-export MILES_RAY_HEAD_NUM_GPUS=0
+export ORBIT_RAY_HEAD_NUM_GPUS=0
 
 # Routable teacher URL (NOT 127.0.0.1 — the reward fn runs on a worker node in
-# this layout). In-job the recipe is re-sourced by launch_miles.sbatch on the
+# this layout). In-job the recipe is re-sourced by launch_orbit.sbatch on the
 # head node with HEAD_IP already resolved (getent, the same address workers
 # use to join Ray — guaranteed worker-routable, unlike `hostname -I` whose
 # first field can be any interface on a multi-homed node). The hostname
@@ -91,13 +91,13 @@ if [[ ! -f "$OPD_TEACHER_MODEL_DIR/config.json" ]]; then
     return 1 2>/dev/null || exit 1
 fi
 
-# Launcher local-server hook (see launch_miles.sbatch "envpack session
+# Launcher local-server hook (see launch_orbit.sbatch "envpack session
 # server" — generic enough to host any HTTP sidecar on the head node).
 # TRITON_CACHE_DIR is pinned to a per-user dir: the TP>1 server path ends up
 # compiling into a shared /tmp/triton otherwise, which is owned by whichever
 # user touched the node first (job 23835 died to another user's dir on
-# slinky-36 — same landmine class as the miles engines' TRITON/deep_gemm
-# fixes, but this sidecar bypasses miles' env plumbing).
+# slinky-36 — same landmine class as the orbit engines' TRITON/deep_gemm
+# fixes, but this sidecar bypasses orbit' env plumbing).
 export ENVPACK_LOCAL_SERVER_CMD="TRITON_CACHE_DIR=/tmp/triton_${USER:-unknown}/opd_teacher \
     CUDA_VISIBLE_DEVICES=$OPD_TEACHER_GPUS python3 -m sglang.launch_server \
     --model-path $OPD_TEACHER_MODEL_DIR \
@@ -114,7 +114,7 @@ export ENVPACK_SERVER_WAIT_TIMEOUT=${ENVPACK_SERVER_WAIT_TIMEOUT:-1800}
 # train.py args
 # ---------------------------------------------------------------------------
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-8B.sh"
+source "$ORBIT_REPO/scripts/models/qwen3-8B.sh"
 
 # Training-layout overrides are used by the numbered OPD parallel smokes. The
 # canonical recipe remains TP=2, PP=1, hence DP=4 on the 8-GPU actor node.
@@ -172,8 +172,8 @@ ROLLOUT_ARGS=(
 # response-token log-probs; DAgger mode additionally retains native [T,K]
 # targets from the same response.
 RM_ARGS=(
-   --custom-rm-path miles.rollout.on_policy_distillation.reward_func
-   --custom-reward-post-process-path miles.rollout.on_policy_distillation.post_process_rewards
+   --custom-rm-path orbit.rollout.on_policy_distillation.reward_func
+   --custom-reward-post-process-path orbit.rollout.on_policy_distillation.post_process_rewards
    --rm-url "$OPD_TEACHER_URL/generate"
    # The custom RM still owns teacher scoring. OPD separately invokes this
    # built-in verifier and records its scalar only as rollout/raw_reward.
@@ -266,7 +266,7 @@ WANDB_ARGS=(
    --wandb-project OPD
    --wandb-group   "$RUN_NAME"
    --disable-wandb-random-suffix
-   # WANDB_API_KEY comes from the env (exported by submit.sh / launch_miles.sbatch);
+   # WANDB_API_KEY comes from the env (exported by submit.sh / launch_orbit.sbatch);
    # we don't pass it on the CLI because it would leak into run.log and args.json.
 )
 
@@ -283,7 +283,7 @@ LAYOUT_ARGS=(
    --rollout-num-gpus       8
 )
 
-MILES_ARGS=(
+ORBIT_ARGS=(
    "${LAYOUT_ARGS[@]}"
    "${MODEL_ARGS[@]}"
    "${CKPT_ARGS[@]}"

@@ -1,9 +1,9 @@
 ---
 title: Gemma
 sidebarTitle: Overview
-description: Miles recipes for Google's Gemma-4 line, trained on the base VLM checkpoint through the HF to Megatron bridge.
+description: Orbit recipes for Google's Gemma-4 line, trained on the base VLM checkpoint through the HF to Megatron bridge.
 ---
-Miles supports Google's Gemma-4 in both released instruction-tuned sizes. Both train as
+Orbit supports Google's Gemma-4 in both released instruction-tuned sizes. Both train as
 language models on the base VLM checkpoint, through the HF to Megatron bridge
 (`--megatron-to-hf-mode bridge`), so there is no offline `torch_dist` conversion.
 
@@ -19,7 +19,7 @@ language models on the base VLM checkpoint, through the HF to Megatron bridge
 Both recipes run on a single 8-GPU node:
 
 ```bash
-cd /root/miles
+cd /root/orbit
 python scripts/run_gemma_4_26b_a4b.py full-train --num-nodes 1
 ```
 

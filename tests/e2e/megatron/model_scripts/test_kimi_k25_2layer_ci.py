@@ -4,7 +4,7 @@ from scripts.run_kimi_k25 import ScriptArgs, _convert_to_bf16, _execute_train, _
 from tests.ci.ci_register import register_cuda_ci
 from tests.ci.metric_history import register_ci_gate
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 # Smoke test for the Kimi-K2.5 (MoE + MLA, INT4 rollout + BF16 Megatron bridge) training
 # script. It runs the 2-layer pruned model on a single 4-GPU H200 node and only verifies that

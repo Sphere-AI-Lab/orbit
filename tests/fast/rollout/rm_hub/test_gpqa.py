@@ -1,6 +1,6 @@
 import pytest
 
-from miles.rollout.rm_hub.gpqa import (
+from orbit.rollout.rm_hub.gpqa import (
     _extract_letter_from_response,
     _normalize_text,
     _strip_chain_of_thought,

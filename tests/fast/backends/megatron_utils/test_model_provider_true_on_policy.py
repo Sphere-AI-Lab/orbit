@@ -28,7 +28,7 @@ def _make_args():
 
 
 def _patch_local_model_provider(monkeypatch):
-    from miles.backends.megatron_utils import model_provider as provider_module
+    from orbit.backends.megatron_utils import model_provider as provider_module
 
     captured = {}
 

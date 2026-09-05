@@ -8,7 +8,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from miles.utils.tracking_utils.base import WandbBackend
+from orbit.utils.tracking_utils.base import WandbBackend
 
 
 class WandbBackendTest(unittest.TestCase):
@@ -19,7 +19,7 @@ class WandbBackendTest(unittest.TestCase):
         sys.modules["wandb"] = fake_wandb
         try:
             backend = WandbBackend()
-            with patch("miles.utils.tracking_utils.base.time.time_ns", side_effect=[1000, 1000]):
+            with patch("orbit.utils.tracking_utils.base.time.time_ns", side_effect=[1000, 1000]):
                 backend.log({"rollout/step": 3, "rollout/pre_filter_solve_rate": 0.25}, step=3)
                 backend.log({"eval/step": 1, "eval/solve_rate": 0.5}, step=1)
         finally:
@@ -36,11 +36,11 @@ class WandbInitTest(unittest.TestCase):
     def test_primary_exports_run_id_for_secondary_actors(self) -> None:
         fake_wandb = _fake_wandb(run_id="run-123")
         previous_wandb = sys.modules.get("wandb")
-        previous_module = sys.modules.pop("miles.utils.tracking_utils.wandb_utils", None)
+        previous_module = sys.modules.pop("orbit.utils.tracking_utils.wandb_utils", None)
         previous_env = os.environ.pop("WANDB_RUN_ID", None)
         sys.modules["wandb"] = fake_wandb
         try:
-            wandb_utils = importlib.import_module("miles.utils.tracking_utils.wandb_utils")
+            wandb_utils = importlib.import_module("orbit.utils.tracking_utils.wandb_utils")
             args = _wandb_args(wandb_run_id=None)
 
             self.assertTrue(wandb_utils.init_wandb_primary(args))
@@ -52,18 +52,18 @@ class WandbInitTest(unittest.TestCase):
                 os.environ.pop("WANDB_RUN_ID", None)
             else:
                 os.environ["WANDB_RUN_ID"] = previous_env
-            _restore_module("miles.utils.tracking_utils.wandb_utils", previous_module)
+            _restore_module("orbit.utils.tracking_utils.wandb_utils", previous_module)
             _restore_module("wandb", previous_wandb)
 
     def test_secondary_uses_run_id_from_environment(self) -> None:
         fake_wandb = _fake_wandb(run_id="ignored")
         previous_wandb = sys.modules.get("wandb")
-        previous_module = sys.modules.pop("miles.utils.tracking_utils.wandb_utils", None)
+        previous_module = sys.modules.pop("orbit.utils.tracking_utils.wandb_utils", None)
         previous_env = os.environ.get("WANDB_RUN_ID")
         os.environ["WANDB_RUN_ID"] = "run-from-env"
         sys.modules["wandb"] = fake_wandb
         try:
-            wandb_utils = importlib.import_module("miles.utils.tracking_utils.wandb_utils")
+            wandb_utils = importlib.import_module("orbit.utils.tracking_utils.wandb_utils")
             args = _wandb_args(wandb_run_id=None)
 
             self.assertTrue(wandb_utils.init_wandb_secondary(args))
@@ -76,7 +76,7 @@ class WandbInitTest(unittest.TestCase):
                 os.environ.pop("WANDB_RUN_ID", None)
             else:
                 os.environ["WANDB_RUN_ID"] = previous_env
-            _restore_module("miles.utils.tracking_utils.wandb_utils", previous_module)
+            _restore_module("orbit.utils.tracking_utils.wandb_utils", previous_module)
             _restore_module("wandb", previous_wandb)
 
 

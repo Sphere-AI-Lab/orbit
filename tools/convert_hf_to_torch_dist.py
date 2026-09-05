@@ -9,13 +9,13 @@ from megatron.training.arguments import parse_args, validate_args
 from megatron.training.checkpointing import get_checkpoint_name, get_checkpoint_tracker_filename, save_checkpoint
 from megatron.training.training import get_model
 
-import miles_plugins.mbridge  # noqa: F401
+import orbit_plugins.mbridge  # noqa: F401
 from mbridge import AutoBridge
-from miles.backends.megatron_utils.arguments import set_default_megatron_args
-from miles.backends.megatron_utils.initialize import init
-from miles.backends.megatron_utils.model_provider import get_model_provider_func
-from miles.utils.logging_utils import configure_logger_raw
-from miles.utils.memory_utils import print_memory
+from orbit.backends.megatron_utils.arguments import set_default_megatron_args
+from orbit.backends.megatron_utils.initialize import init
+from orbit.backends.megatron_utils.model_provider import get_model_provider_func
+from orbit.utils.logging_utils import configure_logger_raw
+from orbit.utils.memory_utils import print_memory
 
 
 def add_conversion_args(parser):
@@ -35,7 +35,7 @@ def add_conversion_args(parser):
             "Path to a custom model provider function (e.g. for models like Inkling whose mcore "
             "module structure differs from a plain GPTModel -- model-level embed_norm, custom "
             "router/shared-experts). When set, the offline mcore model is built by this provider "
-            "(via miles' get_model_provider_func), then the mbridge bridge populates its weights. "
+            "(via orbit' get_model_provider_func), then the mbridge bridge populates its weights. "
             "Signature: def provider(pre_process, post_process, vp_stage=None) -> GPTModel."
         ),
     )

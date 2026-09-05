@@ -29,7 +29,7 @@ import pytest
 import torch
 import torch.nn as nn
 
-from miles.backends.megatron_utils.fp32_param_utils import (
+from orbit.backends.megatron_utils.fp32_param_utils import (
     FORCED_PARAM_DTYPE_ATTR,
     enforce_marked_param_dtypes,
     mark_param_dtype,
@@ -150,7 +150,7 @@ def bridge_stub():
     we set directly, so skipping init is safe and lets this test stay
     CPU-only and dep-free."""
     pytest.importorskip("mbridge")
-    from miles_plugins.mbridge.qwen3_5 import Qwen3_5Bridge
+    from orbit_plugins.mbridge.qwen3_5 import Qwen3_5Bridge
 
     bridge = Qwen3_5Bridge.__new__(Qwen3_5Bridge)
     return bridge

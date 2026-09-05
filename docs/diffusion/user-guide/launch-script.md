@@ -21,7 +21,7 @@ node's GPUs.
 | Layer | Location | Role |
 |---|---|---|
 | Launch script | `scripts/run_*.py` | Holds the recipe: the flag blocks and tuned values |
-| Command utilities | `miles/utils/external_utils/command_utils.py` | Starts Ray and submits the job |
+| Command utilities | `orbit/utils/external_utils/command_utils.py` | Starts Ray and submits the job |
 | Training entrypoint | `train_diffusion.py` | The train loop (~90 lines), run inside the Ray job |
 
 ## The structure of a launch script
@@ -47,11 +47,11 @@ def execute(args, data_dir) -> None:
 def main(args): execute(args, prepare(args))
 ```
 
-### ScriptArgs — script options as flags and `MILES_SCRIPT_*` env vars
+### ScriptArgs — script options as flags and `ORBIT_SCRIPT_*` env vars
 
 `@U.dataclass_cli` exposes each `ScriptArgs` field twice: as a `--kebab-case` CLI option
-(`--num-rollout`) and as an environment variable with the `MILES_SCRIPT_` prefix
-(`MILES_SCRIPT_NUM_ROLLOUT`). A command-line value beats the env var, which beats the field
+(`--num-rollout`) and as an environment variable with the `ORBIT_SCRIPT_` prefix
+(`ORBIT_SCRIPT_NUM_ROLLOUT`). A command-line value beats the env var, which beats the field
 default. The env form is how wrappers and cluster tooling inject machine-specific values
 without editing the script.
 
@@ -101,7 +101,7 @@ From lightest to heaviest:
        --num-rollout 50 --extra-args "--diffusion-kl-beta 0.02"
    ```
 
-2. **Set a script option, as a flag or a `MILES_SCRIPT_*` env var.**
+2. **Set a script option, as a flag or a `ORBIT_SCRIPT_*` env var.**
 3. **Edit the script.** The launcher is the canonical home of a recipe's hyperparameters; change
    the flag blocks directly for anything you want to keep.
 
@@ -112,7 +112,7 @@ drives them the same way you do.
 
 ## What execute_train runs on your machine
 
-1. Kills stale `sglang` / `ray` / `miles` processes.
+1. Kills stale `sglang` / `ray` / `orbit` processes.
 2. Starts a fresh cluster with `export CUDA_VISIBLE_DEVICES=... && ray start --head` — the
    device list must be in the raylet's own environment; set per job or per actor it never
    reaches the scheduler, which then places work on excluded GPUs.
@@ -122,8 +122,8 @@ drives them the same way you do.
 
 | Env var | Effect |
 |---|---|
-| `MILES_SCRIPT_EXTERNAL_RAY=1` | A scheduler already built the Ray cluster: skip the teardown and `ray start`, only submit. `--cuda-visible-devices` must be empty here — export it before each `ray start` instead. Used by the multi-node recipe below. |
-| `MILES_SCRIPT_ENABLE_RAY_SUBMIT=0` | Run everything except the submission — shows what a launcher would do |
+| `ORBIT_SCRIPT_EXTERNAL_RAY=1` | A scheduler already built the Ray cluster: skip the teardown and `ray start`, only submit. `--cuda-visible-devices` must be empty here — export it before each `ray start` instead. Used by the multi-node recipe below. |
+| `ORBIT_SCRIPT_ENABLE_RAY_SUBMIT=0` | Run everything except the submission — shows what a launcher would do |
 | `MASTER_ADDR` | Where the single-node `ray start --head` binds, default `127.0.0.1`. The training process group does NOT use it: rank 0 negotiates its real node IP and a free port at runtime, so multi-node needs no setting here |
 
 ## The batch-size arithmetic
@@ -188,7 +188,7 @@ Start from the closest existing script and change one group at a time:
 The worked example is `scripts/run_diffusion_grpo_wan22_pickscore_17gpu_multinode.py`:
 wan2.2-A14B full finetune on 2 nodes × 8 GPUs (train + rollout colocated) plus 1 reward GPU on a
 separate node. Multi-node runs submit into a cluster you build yourself; the launcher only submits
-(`MILES_SCRIPT_EXTERNAL_RAY=1`).
+(`ORBIT_SCRIPT_EXTERNAL_RAY=1`).
 
 ### Bring up the cluster
 
@@ -233,7 +233,7 @@ ray start --address=<head-ip>:6379 --num-gpus 1
 
 ```bash
 ulimit -n 1000000   # the driver needs it too
-MILES_SCRIPT_EXTERNAL_RAY=1 python3 scripts/run_diffusion_grpo_wan22_pickscore_17gpu_multinode.py
+ORBIT_SCRIPT_EXTERNAL_RAY=1 python3 scripts/run_diffusion_grpo_wan22_pickscore_17gpu_multinode.py
 ```
 
 Reward workers (`--pickscore-num-workers 4 --pickscore-num-gpus-per-worker 0.25`, no

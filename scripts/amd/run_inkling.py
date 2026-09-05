@@ -24,7 +24,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 app = typer.Typer()
 
@@ -213,7 +213,7 @@ def _train(args: ScriptArgs):
         "SGLANG_ENABLE_UNIFIED_RADIX_TREE": "1",
         "SGLANG_OPT_USE_INKLING_FUSED_AR_SCONV_NORM": "false",
         "SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK": "1",
-        "MILES_SGLANG_DUMMY_LOAD": "0",
+        "ORBIT_SGLANG_DUMMY_LOAD": "0",
         "SGLANG_SERVER_ENGINE_ROLLOUT_RETURN_LOGPROB": "1",
         "RAY_memory_monitor_refresh_ms": "0",
         "NCCL_MNNVL_ENABLE": "1",

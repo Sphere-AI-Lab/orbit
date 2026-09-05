@@ -1,11 +1,11 @@
-# `scripts/slurm/setup/` — one-time install of the `miles` conda env
+# `scripts/slurm/setup/` — one-time install of the `orbit` conda env
 
 Two scripts here, run once per account on a GPU-visible compute node.
 If you are starting from a login node, use an interactive 1-GPU `salloc`.
 
 | Script | When to run |
 |---|---|
-| `install_env.sh` | Always — builds the `miles` conda env from source |
+| `install_env.sh` | Always — builds the `orbit` conda env from source |
 | `convert_checkpoint.sh` | Optional — pre-convert a model to skip the auto-convert at launch time (Qwen3-4B-class converts happen automatically inside the launcher) |
 
 ## Build
@@ -13,7 +13,7 @@ If you are starting from a login node, use an interactive 1-GPU `salloc`.
 ```bash
 # Optional when already on a GPU-visible compute node:
 salloc --gres=gpu:1 --cpus-per-task=16 --mem=128G --time=2:00:00 --pty bash
-cd /data/home/$USER/workspace/miles-imp
+cd /data/home/$USER/workspace/orbit
 bash scripts/slurm/setup/install_env.sh
 ```
 
@@ -26,10 +26,10 @@ this README intentionally does **not** duplicate the install list.
 
 | Var | Default | What |
 |---|---|---|
-| `MILES_ENV_NAME` | `miles` | conda env name |
-| `MILES_PY_VERSION` | `3.12` | python version |
-| `MILES_REPO` | `$PWD` | this repo |
-| `THIRDPARTY_DIR` | `$MILES_REPO/thirdparty` | submodule dir |
+| `ORBIT_ENV_NAME` | `orbit` | conda env name |
+| `ORBIT_PY_VERSION` | `3.12` | python version |
+| `ORBIT_REPO` | `$PWD` | this repo |
+| `THIRDPARTY_DIR` | `$ORBIT_REPO/thirdparty` | submodule dir |
 | `PULL_REMOTE` | `0` | set to `1` to `git submodule update --remote` after init |
 | `CUDA_HOME` | auto (`/usr/local/cuda-12.{8,9}` / `/usr/local/cuda`) | override the CUDA toolkit path used for source builds |
 | `TORCH_VERSION` | `2.11.0` | matches `thirdparty/sglang`'s pin |
@@ -45,7 +45,7 @@ this README intentionally does **not** duplicate the install list.
 
 ## Convert HF → Megatron `torch_dist` (optional)
 
-`launch_miles.sbatch` auto-converts on the head node before training
+`launch_orbit.sbatch` auto-converts on the head node before training
 for any model where the torch_dist artifact is missing. Skip this
 section unless you want to pre-stage a large model:
 
@@ -69,7 +69,7 @@ Idempotent (checks `latest_checkpointed_iteration.txt`).
   knob table above doesn't answer your question.
 - [`docs/getting-started/installation.md`](../../../docs/getting-started/installation.md)
   + [`docker/Dockerfile`](../../../docker/Dockerfile) in the repo root — the
-  upstream miles install reference. `install_env.sh` mirrors the Dockerfile's
+  upstream orbit install reference. `install_env.sh` mirrors the Dockerfile's
   CUDA-12 / H100 path and intentionally rejects the CUDA-13 / Blackwell
   variant (cu13, TE 2.12, cudnn-cu13) — use the Dockerfile directly for that.
 - [`../docs/launcher.md`](../docs/launcher.md) — design notes for the slurm

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from miles.true_on_policy import (
+from orbit.true_on_policy import (
     QWEN3_DENSE_TRUE_ON_POLICY_V1,
     apply_true_on_policy_script_defaults,
     build_true_on_policy_launch_plan,
@@ -109,7 +109,7 @@ def test_legacy_sglang_target_override_does_not_change_contract_policy():
     assert "ROW_LINEAR_ENABLE_INV" not in plan.env_vars
 
 
-def test_contract_object_owns_miles_kernel_policy_values():
+def test_contract_object_owns_orbit_kernel_policy_values():
     args = _args(
         train_backend="megatron",
         tensor_model_parallel_size=2,
@@ -191,7 +191,7 @@ def test_megatron_tp2_cp4_normal_topology_has_complete_true_on_policy_contract(m
         "--no-bias-swiglu-fusion",
         "--no-rope-fusion",
     )
-    assert plan.miles_args.values == (
+    assert plan.orbit_args.values == (
         "--deterministic-mode",
         "--true-on-policy-mode",
         "--recompute-logprobs-via-prefill",

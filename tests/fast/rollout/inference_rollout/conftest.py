@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from miles.utils.arguments import parse_args
+from orbit.utils.arguments import parse_args
 
 
 def _build_mock_args(extra_argv: list[str] | None = None):
@@ -31,7 +31,7 @@ def _build_mock_args(extra_argv: list[str] | None = None):
         "label",
         "--rm-type",
         "math",
-        "--use-miles-router",
+        "--use-orbit-router",
         "--sglang-router-ip",
         "127.0.0.1",
         "--sglang-router-port",

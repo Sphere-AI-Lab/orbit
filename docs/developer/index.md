@@ -3,7 +3,7 @@ title: Developer Guide
 sidebarTitle: Overview
 description: Contribution conventions, internal architecture, dependency versions, and debugging.
 ---
-You're here because you want to change Miles, not just use it. This section is the
+You're here because you want to change Orbit, not just use it. This section is the
 short tour for new contributors.
 
 <CardGroup cols={2}>
@@ -16,13 +16,13 @@ short tour for new contributors.
 
   <Card title="Architecture Overview" icon="diagram-project" href="/developer/architecture">
 
-    The 30-minute tour of how Miles is organized internally.
+    The 30-minute tour of how Orbit is organized internally.
 
   </Card>
 
   <Card title="Versions and Images" icon="layer-group" href="/developer/versions">
 
-    How the miles, SGLang and Megatron-LM trees fit together, and how to bump one.
+    How the orbit, SGLang and Megatron-LM trees fit together, and how to bump one.
 
   </Card>
 
@@ -43,7 +43,7 @@ short tour for new contributors.
 ## TL;DR for first-time contributors
 
 1. Pick something small from `good first issue` on [GitHub](https://github.com/radixark/miles/issues).
-2. Run the [Reproducibility recipe](https://github.com/radixark/miles/tree/main/examples/experimental/reproducibility) so you can be sure
+2. Run the [Reproducibility recipe](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/reproducibility) so you can be sure
    "I changed X and it broke" actually means that.
 3. Use `--debug-train-only` or `--debug-rollout-only` to scope your changes, and
    `--list-only` to confirm your test is actually registered in CI.

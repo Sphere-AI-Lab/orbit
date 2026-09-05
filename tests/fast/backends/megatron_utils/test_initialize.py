@@ -1,5 +1,5 @@
-from miles.backends.megatron_utils import initialize
-from miles.backends.training_utils.parallel import GroupInfo, ParallelState
+from orbit.backends.megatron_utils import initialize
+from orbit.backends.training_utils.parallel import GroupInfo, ParallelState
 
 
 def _parallel_state(

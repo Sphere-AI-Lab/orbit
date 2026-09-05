@@ -1,8 +1,8 @@
 """Verifiers V1 rollout adapter: Verifiers owns grouped episode execution and
-reward computation, Miles owns everything around it.
+reward computation, Orbit owns everything around it.
 
 Wire it up with ``--rollout-function-path verifiers_rollout.VerifiersRolloutFn``
-(or ``.generate_rollout`` under ``MILES_USE_LEGACY_ROLLOUT_V1=1``) plus
+(or ``.generate_rollout`` under ``ORBIT_USE_LEGACY_ROLLOUT_V1=1``) plus
 ``--disable-rollout-global-dataset``, and point ``VERIFIERS_CONFIG`` at a
 Verifiers ``EnvConfig`` TOML file. ``run.py`` in this directory does all of
 that; see README.md.
@@ -27,7 +27,7 @@ from typing import Any
 import httpx
 from packaging.version import InvalidVersion, Version
 
-from miles.rollout.base_types import (
+from orbit.rollout.base_types import (
     RolloutFnConstructorInput,
     RolloutFnEvalInput,
     RolloutFnEvalOutput,
@@ -36,17 +36,17 @@ from miles.rollout.base_types import (
     RolloutFnTrainInput,
     RolloutFnTrainOutput,
 )
-from miles.rollout.filter_hub.base_types import MetricGatherer, call_dynamic_filter
-from miles.rollout.generate_utils.prefill_logprobs import recompute_samples_rollout_logprobs_via_prefill
-from miles.utils.lora import LORA_ADAPTER_NAME, is_lora_enabled
-from miles.utils.types import Sample
+from orbit.rollout.filter_hub.base_types import MetricGatherer, call_dynamic_filter
+from orbit.rollout.generate_utils.prefill_logprobs import recompute_samples_rollout_logprobs_via_prefill
+from orbit.utils.lora import LORA_ADAPTER_NAME, is_lora_enabled
+from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)
 
 _MIN_VERIFIERS_VERSION = Version("0.2.0")
 _MAX_VERIFIERS_VERSION = Version("0.2.1")
 _MIN_RENDERERS_VERSION = Version("0.1.8")
-_UNSUPPORTED_ERROR_PREFIX = "Miles' Verifiers adapter does not support"
+_UNSUPPORTED_ERROR_PREFIX = "Orbit' Verifiers adapter does not support"
 _CONFIG_ENV_VAR = "VERIFIERS_CONFIG"
 
 
@@ -68,7 +68,7 @@ def _load_config_data(path: str) -> dict[str, Any]:
 def _optional_dependency_error() -> RuntimeError:
     return RuntimeError(
         "Verifiers rollouts require Python 3.11+ and the optional dependencies. "
-        "Install Miles with `pip install -e '.[verifiers]'`."
+        "Install Orbit with `pip install -e '.[verifiers]'`."
     )
 
 
@@ -153,7 +153,7 @@ def _train_client(
     identity = _renderer_identity(model) or _renderer_identity(tokenizer_source)
 
     # TrainClient uses one path for both tokenizer loading and renderer lookup.
-    # Miles checkpoints are commonly local snapshots, so keep local tokenizer
+    # Orbit checkpoints are commonly local snapshots, so keep local tokenizer
     # files while restoring the canonical identity used by Renderers' registry.
     class TrainClient(runtime.TrainClient):
         @staticmethod
@@ -212,7 +212,7 @@ def _train_client(
             return self._pool
 
     return TrainClient(
-        MilesSGLangTransport(args, router_args=router_args),
+        OrbitSGLangTransport(args, router_args=router_args),
         pool_size=pool_size,
         renderer_model_name=tokenizer_source,
     )
@@ -228,15 +228,15 @@ def _generate_url(args: Namespace, endpoint: str = "/generate") -> str:
 
 
 async def _sglang_worker_urls(args: Namespace) -> list[str]:
-    from miles.utils.http_utils import get
+    from orbit.utils.http_utils import get
 
     router_url = _generate_url(args).removesuffix("/generate")
-    if not getattr(args, "use_miles_router", False):
+    if not getattr(args, "use_orbit_router", False):
         try:
             response = await get(f"{router_url}/workers")
             return [worker["url"] for worker in response["workers"]]
         except Exception:
-            logger.debug("SGLang /workers lookup failed; trying Miles /list_workers.", exc_info=True)
+            logger.debug("SGLang /workers lookup failed; trying Orbit /list_workers.", exc_info=True)
     response = await get(f"{router_url}/list_workers")
     return list(response["urls"])
 
@@ -250,8 +250,8 @@ def _finish_reason(output: dict[str, Any]) -> str:
     return finish_reason if finish_reason in {"stop", "length", "content_filter"} else "stop"
 
 
-class MilesSGLangTransport:
-    """Translate Renderers' /inference/v1/generate wire format to Miles' SGLang endpoint."""
+class OrbitSGLangTransport:
+    """Translate Renderers' /inference/v1/generate wire format to Orbit' SGLang endpoint."""
 
     def __init__(self, args: Namespace, *, router_args: Namespace | None = None):
         self.args = args
@@ -267,7 +267,7 @@ class MilesSGLangTransport:
 
     async def get(self, _path: str, **_kwargs) -> dict[str, list[Any]]:
         # Renderers probes this endpoint for an engine context cap (max_model_len).
-        # Miles owns separate prompt and response limits, so the transport
+        # Orbit owns separate prompt and response limits, so the transport
         # enforces them at POST time.
         return {"data": []}
 
@@ -307,7 +307,7 @@ class MilesSGLangTransport:
 
     async def post(self, endpoint: str, *, body: dict[str, Any], options=None, **_kwargs) -> httpx.Response:
         if body.get("features") is not None:
-            raise NotImplementedError("Miles Verifiers rollouts do not yet support multimodal renderer features.")
+            raise NotImplementedError("Orbit Verifiers rollouts do not yet support multimodal renderer features.")
 
         prompt_ids = list(body["token_ids"])
         headers = dict((options or {}).get("headers") or {})
@@ -342,7 +342,7 @@ class MilesSGLangTransport:
         if getattr(self.args, "sglang_router_policy", None) in ("consistent_hashing", "manual") and session_id:
             request_headers = {"X-SMG-Routing-Key": session_id}
 
-        from miles.utils.http_utils import post
+        from orbit.utils.http_utils import post
 
         output = await post(_generate_url(self.router_args), payload, headers=request_headers)
         meta_info = dict(output.get("meta_info") or {})
@@ -469,7 +469,7 @@ def trace_to_samples(args: Namespace, trace, *, group_index: int, index_start: i
         return []
     if len(trace.branches) != 1:
         raise NotImplementedError(
-            "Miles cannot yet preserve Verifiers trace groups when a rollout produces "
+            "Orbit cannot yet preserve Verifiers trace groups when a rollout produces "
             f"multiple graph branches (trace {trace.id} produced {len(trace.branches)})."
         )
     return [
@@ -549,14 +549,14 @@ def _config_path() -> str:
 
 
 def _validate_args(args: Namespace) -> None:
-    """Reject the Miles options this adapter cannot honor.
+    """Reject the Orbit options this adapter cannot honor.
 
     run.py never builds these combinations; this catches a hand-rolled command
     before an episode runs and produces silently wrong training data.
     """
     if getattr(args, "rollout_global_dataset", False):
         raise ValueError(
-            "Verifiers rollouts replace Miles prompt data with the configured taskset; "
+            "Verifiers rollouts replace Orbit prompt data with the configured taskset; "
             "pass --disable-rollout-global-dataset."
         )
     if args.partial_rollout:
@@ -598,10 +598,10 @@ class VerifiersRolloutFn:
         _validate_args(self.args)
         self.config = runtime.EnvConfig.model_validate(_load_config_data(_config_path()))
         if self.config.is_legacy:
-            raise ValueError("Miles' Verifiers integration supports V1 environment configs only.")
+            raise ValueError("Orbit' Verifiers integration supports V1 environment configs only.")
         if self.config.harness.id == "codex":
             raise ValueError(
-                "Miles' Verifiers adapter does not support the Codex harness because it uses the Responses dialect."
+                "Orbit' Verifiers adapter does not support the Codex harness because it uses the Responses dialect."
             )
 
         self.env = runtime.Environment(self.config)
@@ -624,7 +624,7 @@ class VerifiersRolloutFn:
         self.ctx = runtime.ModelContext(client=self.client, model=self.model, sampling=self.sampling)
         self.eval_ctx = runtime.ModelContext(client=self.eval_client, model=self.model, sampling=self.eval_sampling)
 
-        from miles.utils.misc import load_function
+        from orbit.utils.misc import load_function
 
         self.dynamic_filter = load_function(self.args.dynamic_sampling_filter_path)
         self._tasks = list(self.env.taskset.load())
@@ -687,8 +687,8 @@ class VerifiersRolloutFn:
             group.append(converted[0])
         return group if complete or preserve_empty else []
 
-    async def _apply_miles_rewards(self, group) -> None:
-        from miles.rollout.rm_hub import async_rm, batched_async_rm
+    async def _apply_orbit_rewards(self, group) -> None:
+        from orbit.rollout.rm_hub import async_rm, batched_async_rm
 
         samples = _flatten_samples(group)
         if self.args.group_rm:
@@ -698,12 +698,12 @@ class VerifiersRolloutFn:
         else:
             return
         if rewards is None or len(rewards) != len(samples):
-            raise ValueError("Miles reward model returned an unexpected number of rewards.")
+            raise ValueError("Orbit reward model returned an unexpected number of rewards.")
         for sample, reward in zip(samples, rewards, strict=True):
             sample.reward = reward
 
     async def _postprocess_train_samples(self, data, all_data) -> None:
-        from miles.utils.misc import load_function
+        from orbit.utils.misc import load_function
 
         if function := load_function(self.args.rollout_sample_filter_path):
             function(self.args, data)
@@ -727,7 +727,7 @@ class VerifiersRolloutFn:
             future.cancel()
         if pending:
             try:
-                from miles.utils.http_utils import post
+                from orbit.utils.http_utils import post
 
                 urls = await _sglang_worker_urls(self.args)
                 await asyncio.gather(
@@ -739,7 +739,7 @@ class VerifiersRolloutFn:
         await asyncio.gather(*futures, return_exceptions=True)
 
     async def _call_train(self, input: RolloutFnTrainInput) -> RolloutFnTrainOutput:
-        from miles.utils import dumper_utils
+        from orbit.utils import dumper_utils
 
         await dumper_utils.configure_sglang(self.args)
         target = self.args.rollout_batch_size
@@ -788,7 +788,7 @@ class VerifiersRolloutFn:
                         if len(group) != self.args.n_samples_per_prompt:
                             metrics.on_dynamic_filter_drop(reason="empty_trace")
                             continue
-                        await self._apply_miles_rewards(group)
+                        await self._apply_orbit_rewards(group)
                         all_groups.append(group)
                         result = call_dynamic_filter(
                             self.dynamic_filter,
@@ -813,7 +813,7 @@ class VerifiersRolloutFn:
     async def _call_eval(self, input: RolloutFnEvalInput) -> RolloutFnEvalOutput:
         assert not self.args.group_rm, "Group RM is not supported for eval rollout"
 
-        from miles.utils import dumper_utils
+        from orbit.utils import dumper_utils
 
         await dumper_utils.configure_sglang(self.args)
         semaphore = asyncio.Semaphore(self.max_concurrent)
@@ -840,20 +840,20 @@ class VerifiersRolloutFn:
         truncated = []
         all_traces = []
         reward_key = self.args.eval_reward_key or self.args.reward_key
-        use_miles_rewards = bool(self.args.custom_rm_path is not None or self.args.rm_type)
+        use_orbit_rewards = bool(self.args.custom_rm_path is not None or self.args.rm_type)
         for group_index, traces in enumerate(trace_groups):
             all_traces.extend(traces)
             _raise_for_unsupported_trace_errors(traces)
             group = self._convert_group(traces, group_index=group_index, preserve_empty=True)
             trainable = [value for value in group if value is not None]
-            await self._apply_miles_rewards(trainable)
+            await self._apply_orbit_rewards(trainable)
             samples.extend(_flatten_samples(trainable))
             for trace, value in zip(traces, group, strict=True):
-                if use_miles_rewards and value is not None:
+                if use_orbit_rewards and value is not None:
                     sample_rewards = [sample.get_reward_value(self.eval_args) for sample in _flatten_samples([value])]
                     reward = sum(sample_rewards) / len(sample_rewards)
                 else:
-                    reward = trace.reward if use_miles_rewards else _trace_eval_reward(trace, reward_key)
+                    reward = trace.reward if use_orbit_rewards else _trace_eval_reward(trace, reward_key)
                 rewards.append(reward)
                 truncated.append(trace.is_truncated)
         return RolloutFnEvalOutput(
@@ -878,8 +878,8 @@ def generate_rollout(
     data_source: Any,
     evaluation: bool = False,
 ) -> RolloutFnTrainOutput | RolloutFnEvalOutput:
-    """Legacy Miles entrypoint backed by one persistent rollout adapter."""
-    from miles.utils.async_utils import run
+    """Legacy Orbit entrypoint backed by one persistent rollout adapter."""
+    from orbit.utils.async_utils import run
 
     # The refactored rollout manager constructs separate train and eval adapters.
     # Preserve that lifecycle under the legacy function interface as well.

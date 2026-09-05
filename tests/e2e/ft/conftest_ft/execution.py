@@ -9,13 +9,13 @@ from pathlib import Path
 from tests.e2e.conftest_dumper import MEGATRON_PATCHER_YAMLS
 from tests.e2e.ft.conftest_ft.modes import DEBUG_ROLLOUT_DATA_HF_REPO, FTTestMode
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 _RUN_DIR: Path = Path(tempfile.mkdtemp(prefix="ft_test_dumper_"))
 _MEGATRON_SOURCE_PATCHER_CONFIG_PATH: Path = _RUN_DIR / "megatron_source_patcher.yaml"
-_MEGATRON_PATH: str = os.environ.get("MILES_SCRIPT_MEGATRON_PATH", "/root/Megatron-LM")
-_MODEL_DIR: str = os.environ.get("MILES_SCRIPT_MODEL_DIR", "/root/models")
-_DATA_DIR: str = os.environ.get("MILES_SCRIPT_DATA_DIR", "/root/datasets")
+_MEGATRON_PATH: str = os.environ.get("ORBIT_SCRIPT_MEGATRON_PATH", "/root/Megatron-LM")
+_MODEL_DIR: str = os.environ.get("ORBIT_SCRIPT_MODEL_DIR", "/root/models")
+_DATA_DIR: str = os.environ.get("ORBIT_SCRIPT_DATA_DIR", "/root/datasets")
 _DEBUG_ROLLOUT_DATA_DIR: str = f"{_DATA_DIR}/{DEBUG_ROLLOUT_DATA_HF_REPO.split('/')[-1]}"
 
 
@@ -168,11 +168,11 @@ _DETERMINISTIC_ENV_VARS: dict[str, str] = {
     "SGLANG_FLASHINFER_PREFILL_SPLIT_TILE_SIZE": "8192",
 }
 
-# Selects v2 RayTrainGroup (miles.ray.train.group). Required because
+# Selects v2 RayTrainGroup (orbit.ray.train.group). Required because
 # --ft-components train depends on cell-based indep_dp; the v1 default path
 # does not support it.
 _TRAINER_FT_ENV_VARS: dict[str, str] = {
-    "MILES_EXPERIMENTAL_FT_TRAINER": "1",
+    "ORBIT_EXPERIMENTAL_FT_TRAINER": "1",
 }
 
 

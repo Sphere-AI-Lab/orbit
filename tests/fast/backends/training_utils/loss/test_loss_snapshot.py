@@ -18,10 +18,10 @@ from pathlib import Path
 import pytest
 import torch
 
-from miles.backends.training_utils.loss import compute_advantages_and_returns, loss_function
-from miles.backends.training_utils.loss_hub.corrections import icepop_function, vanilla_tis_function
-from miles.backends.training_utils.loss_hub.logit_processors import get_log_probs_and_entropy, get_values
-from miles.backends.training_utils.loss_hub.losses import policy_loss_function, sft_loss_function, value_loss_function
+from orbit.backends.training_utils.loss import compute_advantages_and_returns, loss_function
+from orbit.backends.training_utils.loss_hub.corrections import icepop_function, vanilla_tis_function
+from orbit.backends.training_utils.loss_hub.logit_processors import get_log_probs_and_entropy, get_values
+from orbit.backends.training_utils.loss_hub.losses import policy_loss_function, sft_loss_function, value_loss_function
 
 from .loss_test_utils import (
     args_from_dict,
@@ -44,7 +44,7 @@ SEED = 42
 # Fork-only observability metrics are covered by
 # test_true_on_policy_loss_metrics.py. Keep them out of the upstream-owned
 # binary snapshot contract so adding diagnostics does not require publishing a
-# new miles-artifacts snapshot set.
+# new orbit-artifacts snapshot set.
 SNAPSHOT_EXEMPT_POLICY_METRICS = frozenset(
     {
         "current_rollout_logprob_abs_diff",
@@ -122,7 +122,7 @@ def mode(request):
 
 
 def _get_sum_of_sample_mean(batch, args, parallel_state):
-    from miles.backends.training_utils.cp_utils import get_sum_of_sample_mean
+    from orbit.backends.training_utils.cp_utils import get_sum_of_sample_mean
 
     return get_sum_of_sample_mean(
         batch["total_lengths"],

@@ -45,7 +45,7 @@
 
 ### 9
 "python3"
-"<REPO_ROOT>/examples/experimental/strands_sglang/../../../miles/utils/external_utils/model_args_utils.py"
+"<REPO_ROOT>/examples/experimental/strands_sglang/../../../orbit/utils/external_utils/model_args_utils.py"
 "qwen3-8B"
 
 ### 10
@@ -161,7 +161,7 @@
 "0.28"
 "--use-wandb"
 "--wandb-project"
-"strands-miles"
+"strands-orbit"
 "--wandb-group"
 "Qwen3-8B-strands-dapo"
 "--wandb-key"

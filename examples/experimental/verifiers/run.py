@@ -1,4 +1,4 @@
-"""Verifiers launcher (Qwen3-0.6B on code-golf-v1): Miles <-> Verifiers V1.
+"""Verifiers launcher (Qwen3-0.6B on code-golf-v1): Orbit <-> Verifiers V1.
 
 Defaults reproduce the two-GPU smoke configuration: 3 GRPO steps against the
 `code-golf-v1` taskset. Scale --num-rollout and the batch sizes for real
@@ -20,10 +20,10 @@ from pathlib import Path
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-LEGACY_ROLLOUT_ENV = "MILES_USE_LEGACY_ROLLOUT_V1"
+LEGACY_ROLLOUT_ENV = "ORBIT_USE_LEGACY_ROLLOUT_V1"
 
 
 @dataclass
@@ -93,7 +93,7 @@ def execute(args: ScriptArgs):
         "--save-interval 1000 "
     )
 
-    # Verifiers owns the taskset, so Miles loads no prompt data; the rollout
+    # Verifiers owns the taskset, so Orbit loads no prompt data; the rollout
     # function plug-point selects the adapter, which resolves as a bare module
     # because PYTHONPATH carries this directory into the rollout actor.
     rollout_fn = (
@@ -114,11 +114,11 @@ def execute(args: ScriptArgs):
         f"--rollout-num-gpus-per-engine 1 "
     )
 
-    # Workaround: the taskset is the evaluation set, but Miles asserts that eval
+    # Workaround: the taskset is the evaluation set, but Orbit asserts that eval
     # datasets are configured whenever --eval-interval is set, so name the taskset
     # and point the placeholder at the config it is defined in -- the adapter serves
     # eval, so the built-in loader never opens this path. Worth replacing with a
-    # Miles-side fix once a second rollout function owns its evaluation set.
+    # Orbit-side fix once a second rollout function owns its evaluation set.
     eval_args = (
         (
             f"--eval-interval {args.eval_interval} "

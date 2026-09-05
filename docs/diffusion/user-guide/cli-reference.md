@@ -7,9 +7,9 @@ places:
 
 | Source | Where | Notes |
 |---|---|---|
-| Training-backend flags | `FSDPArgs` in `miles/backends/fsdp_utils/arguments.py` | Every dataclass field becomes `--field-name` automatically |
-| miles flags | `miles/utils/arguments.py` | Added on top as an `extra_args_provider` |
-| sglang-d passthrough | The rollout engine's own CLI | Re-registered with a `--sglang-` prefix; a short skip list covers what miles sets itself (`model_path`, ports, `base_gpu_id`, `random_seed`, …) |
+| Training-backend flags | `FSDPArgs` in `orbit/backends/fsdp_utils/arguments.py` | Every dataclass field becomes `--field-name` automatically |
+| orbit flags | `orbit/utils/arguments.py` | Added on top as an `extra_args_provider` |
+| sglang-d passthrough | The rollout engine's own CLI | Re-registered with a `--sglang-` prefix; a short skip list covers what orbit sets itself (`model_path`, ports, `base_gpu_id`, `random_seed`, …) |
 
 `--custom-config-path <file.yaml>` loads YAML keys into the namespace after parsing. A key that
 collides with an existing argument **overrides it** (with a logged warning) — the YAML wins over
@@ -168,7 +168,7 @@ See [Dtype Control](/diffusion/advanced/dtype-control).
 |---|---|---|---|
 | `--hf-checkpoint` | str | – | **Required.** Pipeline to train and to serve; also the family source. |
 | `--diffusion-model-family` | str | – | Registered family key: `sd3`, `wan2_2`, `ltx`, `qwen_image`, `cosmos3`. Overrides name matching. |
-| `--rollout-function-path` | str | `miles.rollout.sglang_rollout.generate_rollout` | Generic Miles default. Diffusion recipes explicitly set `miles.rollout.sglang_diffusion_rollout.generate_rollout`. |
+| `--rollout-function-path` | str | `orbit.rollout.sglang_rollout.generate_rollout` | Generic Orbit default. Diffusion recipes explicitly set `orbit.rollout.sglang_diffusion_rollout.generate_rollout`. |
 | `--train-pipeline-config-path` | str | – | Your own `TrainPipelineConfig` for an unregistered family. Mutually exclusive with `--diffusion-model-family`. |
 | `--model-backend-path` | str | – | Override the family's model loader. |
 | `--diffusion-num-steps` | int | `10` | |
@@ -196,11 +196,11 @@ See [Dtype Control](/diffusion/advanced/dtype-control).
 | `--rollout-seed` | int | `42` | |
 | `--over-sampling-batch-size` | int | – | Must equal `--rollout-batch-size` today. |
 | `--sglang-server-concurrency` | int | `512` | Per-engine in-flight request cap. |
-| `--use-distributed-post` | flag | off | Rollout HTTP POSTs go through per-node Ray actors instead of the local client (`MILES_HTTP_POST_ACTORS_PER_NODE` sets the count). |
-| `--use-miles-router` | flag | off | **Required** — the SGLang router is not supported here. |
-| `--miles-router-timeout` | float | – | |
-| `--miles-router-max-connections` | int | – | |
-| `--miles-router-health-check-failure-threshold` | int | `3` | |
+| `--use-distributed-post` | flag | off | Rollout HTTP POSTs go through per-node Ray actors instead of the local client (`ORBIT_HTTP_POST_ACTORS_PER_NODE` sets the count). |
+| `--use-orbit-router` | flag | off | **Required** — the SGLang router is not supported here. |
+| `--orbit-router-timeout` | float | – | |
+| `--orbit-router-max-connections` | int | – | |
+| `--orbit-router-health-check-failure-threshold` | int | `3` | |
 
 ### Data and batching
 
@@ -339,8 +339,8 @@ Every one takes a dotted path.
 | `--disable-wandb-random-suffix` | flag | off | Run names include a random suffix by default; pass this flag to disable it. |
 | `--wandb-log-num-images` | int | `0` | Images/videos per rollout; `0` disables. |
 | `--wandb-log-image-interval` | int | `1` | Send media every N rollouts. |
-| `--use-miles-dashboard` | flag | off | Async phase/trajectory telemetry. |
-| `--miles-dashboard-workspace` | str | `./miles_dashboard` | |
+| `--use-orbit-dashboard` | flag | off | Async phase/trajectory telemetry. |
+| `--orbit-dashboard-workspace` | str | `./orbit_dashboard` | |
 
 ### Fault tolerance
 

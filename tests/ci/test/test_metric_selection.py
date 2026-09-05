@@ -373,7 +373,7 @@ def test_gate_defaults_within_capture_whitelist_and_valid(tmp_path):
     # Two table invariants: every defaulted key must be captured (a default for
     # an uncaptured metric guarantees an ERROR verdict), and every table entry
     # must survive the parser's own schema validation.
-    from miles.utils.tracking_utils.ci_history import TARGET_METRIC_KEYS
+    from orbit.utils.tracking_utils.ci_history import TARGET_METRIC_KEYS
 
     assert set(GATE_DEFAULTS) <= set(TARGET_METRIC_KEYS)
 

@@ -27,21 +27,21 @@ from sglang.srt.entrypoints.openai.protocol import ChatCompletionRequest
 from sglang.srt.entrypoints.openai.serving_chat import OpenAIServingChat
 from transformers import AutoTokenizer
 
-from miles.utils.chat_template_utils import (
+from orbit.utils.chat_template_utils import (
     TITOTokenizerType,
     get_tito_tokenizer,
     resolve_fixed_chat_template,
     strict_message_matches,
 )
-from miles.utils.chat_template_utils.template import apply_chat_template
-from miles.utils.processing_utils import load_tokenizer
-from miles.utils.test_utils.chat_template_verify import (
+from orbit.utils.chat_template_utils.template import apply_chat_template
+from orbit.utils.processing_utils import load_tokenizer
+from orbit.utils.test_utils.chat_template_verify import (
     CaseSpec,
     enable_thinking_variants,
     format_case_id,
     select_cases,
 )
-from miles.utils.test_utils.mock_trajectories import (
+from orbit.utils.test_utils.mock_trajectories import (
     MultiRoleSequenceTrajectory,
     SimpleNoToolTrajectory,
     SingleToolThinkingTrajectory,
@@ -356,7 +356,7 @@ def _build_dataset(tmp_path, tokenizer, row, **dataset_kwargs):
     import json as _json
     import os
 
-    from miles.utils.data import Dataset
+    from orbit.utils.data import Dataset
 
     path = os.path.join(tmp_path, "rows.jsonl")
     with open(path, "w", encoding="utf-8") as f:
@@ -365,7 +365,7 @@ def _build_dataset(tmp_path, tokenizer, row, **dataset_kwargs):
 
 
 class TestDatasetRouting:
-    """End-to-end check that ``miles.utils.data.Dataset`` renders prompts through
+    """End-to-end check that ``orbit.utils.data.Dataset`` renders prompts through
     the unified ``apply_chat_template`` wiring (tool_key parsing, per-sample
     rendering, ``Sample.prompt`` output)."""
 
@@ -408,12 +408,12 @@ class TestDeepSeekV32TITOAlignWithSGLang:
     """V3.2 TITO prompt tokenization must match sglang's dsv32 encoder.
 
     V3.2 ships no jinja chat_template; the ``DEEPSEEKV32`` TITO family rides
-    miles' ``apply_chat_template`` -> ``chat_template_utils.deepseek`` bridge,
+    orbit' ``apply_chat_template`` -> ``chat_template_utils.deepseek`` bridge,
     which mirrors sglang's ``chat_encoding_spec == "dsv32"`` branch.  These pin
     that ``get_tito_tokenizer(...).apply_chat_template`` produces identical
     prompt_ids to sglang for the tool surface actually used in training, with
     thinking on/off.  ``thinking`` is the sglang request knob; ``enable_thinking``
-    is the equivalent miles chat-template kwarg — both map to the encoder's
+    is the equivalent orbit chat-template kwarg — both map to the encoder's
     ``thinking_mode``.
     """
 

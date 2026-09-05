@@ -5,12 +5,12 @@ import urllib.request
 
 from tests.ci.ci_register import register_cuda_ci, register_rocm_ci
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 register_cuda_ci(est_time=400, suite="stage-c-8-gpu-h100", labels=["short"])
 register_rocm_ci(est_time=300, suite="nightly-stage-c-8-gpu-mi350", labels=["short"])
 
-TIGHT_DEVICE_MEMORY = U.get_bool_env_var("MILES_TEST_TIGHT_DEVICE_MEMORY", "1")
+TIGHT_DEVICE_MEMORY = U.get_bool_env_var("ORBIT_TEST_TIGHT_DEVICE_MEMORY", "1")
 
 MODEL_NAME = "Qwen2.5-0.5B-Instruct"
 MODEL_TYPE = "qwen2.5-0.5B"
@@ -132,8 +132,8 @@ def execute():
         )
 
         rm_args = (
-            "--custom-rm-path miles.rollout.on_policy_distillation.reward_func "
-            "--custom-reward-post-process-path miles.rollout.on_policy_distillation.post_process_rewards "
+            "--custom-rm-path orbit.rollout.on_policy_distillation.reward_func "
+            "--custom-reward-post-process-path orbit.rollout.on_policy_distillation.post_process_rewards "
             f"--rm-url http://{TEACHER_HOST}:{TEACHER_PORT}/generate "
         )
 
@@ -203,7 +203,7 @@ def execute():
             megatron_model_type=MODEL_TYPE,
             before_ray_job_submit=launch_teacher,
             # student-side top-k OPD needs opd_student_top_logprobs, produced only by v1
-            extra_env_vars={"MILES_USE_LEGACY_ROLLOUT_V1": "1"},
+            extra_env_vars={"ORBIT_USE_LEGACY_ROLLOUT_V1": "1"},
         )
     finally:
         if teacher_process:

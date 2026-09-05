@@ -85,7 +85,7 @@ only the trainer objective selected by:
 
 The production operator is
 `vocab_parallel_topk_rest_cross_entropy` in
-`miles/backends/training_utils/loss_hub/math_utils.py`. It evaluates the PDF
+`orbit/backends/training_utils/loss_hub/math_utils.py`. It evaluates the PDF
 Stable TP form
 
 ```text
@@ -119,7 +119,7 @@ the latter and uses these narrower rules:
 | Backward mass coefficient | Use the same represented `P+p_R` as forward | In exact arithmetic it is 1. Using the represented value makes custom backward exactly differentiate forward under FP32 roundoff without renormalizing teacher Top-K probabilities. |
 
 There is no DAgger advantage clamp, probability renormalization, importance
-ratio, or PPO clipping. Those mechanisms remain part of Miles' independent
+ratio, or PPO clipping. Those mechanisms remain part of Orbit' independent
 sampled-policy branch; `opd_dagger/cross_entropy` is added directly from current
 trainer logits. Full/Rest LSE, teacher mass, loss accumulation, and backward
 probabilities use FP32 for BF16/FP16 input logits.
@@ -151,7 +151,7 @@ zero-K/empty/all-masked graphs, near-zero student Rest under FP64/BF16/FP16,
 detached targets, protocol failures, padded-vocabulary zero gradients, response
 alignment, additive loss dispatch, and the `coef=0` argument contract.
 
-Then run the real process-group validator on a node with the Miles environment:
+Then run the real process-group validator on a node with the Orbit environment:
 
 ```bash
 # TP=1 local degeneration.
@@ -287,7 +287,7 @@ This makes the PDF's `stop_gradient` contract independent of how a custom data
 source constructed those tensors. It does not detach current trainer logits or
 change the numerical value produced by the normal HTTP/Ray path.
 Milestone 03 introduces no extra importance ratio: RKLD-PG continues through
-Miles' existing sampled policy-loss machinery, while Top-K + Rest continues to
+Orbit' existing sampled policy-loss machinery, while Top-K + Rest continues to
 bypass advantages, PPO clipping, TIS, and sampled-action reduction.
 
 Run the server fast-test gate first:
@@ -335,14 +335,14 @@ HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
   OPD/optimize/03p-rkld-topk-rest-profile
 ```
 
-`03p` uses Miles' existing `TrainProfiler` with `record_shapes`, stacks,
+`03p` uses Orbit' existing `TrainProfiler` with `record_shapes`, stacks,
 flops, and `profile_memory=True`. The default run has eight rollout steps: the
 profiler waits for one step, warms up for one, then records three complete
 post-warmup `train_overall` steps (`start=2`, `end=5`). This is deliberately
 bounded; profiling all 50 decision steps would create large traces and could
 change queueing or memory behavior.
 
-The environment flag `MILES_PROFILE_OPD_DAGGER=1` activates ranges that are
+The environment flag `ORBIT_PROFILE_OPD_DAGGER=1` activates ranges that are
 absent from normal runs:
 
 - `operator_forward|rows=...|vlocal=...|k=...` and `operator_backward`;

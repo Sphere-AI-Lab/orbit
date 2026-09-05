@@ -38,7 +38,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 _MODEL_NAMES = Literal[
     "Qwen3-4B",
@@ -80,7 +80,7 @@ _RECIPES: dict[str, _Recipe] = {
         num_rollout=5,
         extra_sglang_args=f"--sglang-cuda-graph-bs {_QWEN3_32B_CUDA_GRAPH_BS} ",
     ),
-    # SGLang TP>1 produces garbage output for Qwen3.5 on 0.5.9, which miles still pins
+    # SGLang TP>1 produces garbage output for Qwen3.5 on 0.5.9, which orbit still pins
     # (https://github.com/sgl-project/sglang/issues/21039), hence one GPU per engine.
     "Qwen3.5-4B": _Recipe("qwen3.5-4B", 2, 9216, 1, 0.7, False),
     "Qwen3.5-9B": _Recipe("qwen3.5-9B", 2, 9216, 1, 0.6, False),
@@ -205,7 +205,7 @@ def execute(args: ScriptArgs):
         f"--num-gpus-per-node {args.num_gpus_per_node} "
     )
     if args.recipe.use_dashboard:
-        misc_args += "--use-miles-dashboard " f"--dump-details {args.output_dir}/dump_details "
+        misc_args += "--use-orbit-dashboard " f"--dump-details {args.output_dir}/dump_details "
 
     train_args = (
         f"{ckpt_args} "

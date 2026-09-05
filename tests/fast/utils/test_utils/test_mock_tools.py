@@ -6,7 +6,7 @@ from sglang.srt.entrypoints.openai.protocol import Tool
 from sglang.srt.function_call.core_types import ToolCallItem
 from sglang.srt.function_call.function_call_parser import FunctionCallParser
 
-from miles.utils.test_utils.mock_tools import SAMPLE_TOOLS, TwoTurnStub, execute_tool_call
+from orbit.utils.test_utils.mock_tools import SAMPLE_TOOLS, TwoTurnStub, execute_tool_call
 
 
 class TestExecuteToolCall:
@@ -50,7 +50,7 @@ class TestApplyChatTemplateWithTools:
         ],
     )
     def test_apply_chat_template(self, tools, expected):
-        from miles.utils.processing_utils import load_tokenizer
+        from orbit.utils.processing_utils import load_tokenizer
 
         tokenizer = load_tokenizer("Qwen/Qwen3-0.6B", trust_remote_code=True)
         messages = [{"role": "user", "content": "What's the weather in Paris?"}]

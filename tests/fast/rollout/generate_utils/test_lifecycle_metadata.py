@@ -5,8 +5,8 @@ assembly and drops the one-line call, this fails loudly."""
 
 from types import SimpleNamespace
 
-from miles.utils.lifecycle import TrajectoryLifecycle, attach_lifecycle_metadata
-from miles.utils.types import Sample
+from orbit.utils.lifecycle import TrajectoryLifecycle, attach_lifecycle_metadata
+from orbit.utils.types import Sample
 
 
 def _record(ts, latency=None, arrived=None):

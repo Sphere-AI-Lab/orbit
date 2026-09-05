@@ -9,12 +9,12 @@ from argparse import Namespace
 from unittest.mock import MagicMock, patch
 
 
-_MODEL_MODULE = "miles.backends.megatron_utils.model"
+_MODEL_MODULE = "orbit.backends.megatron_utils.model"
 
 
 def test_non_persistent_peft_save_uses_the_in_memory_checkpoint_manager():
     """PEFT fault recovery needs the full trainer state, not adapter files on disk."""
-    from miles.backends.megatron_utils.model import save
+    from orbit.backends.megatron_utils.model import save
 
     checkpoint_manager = object()
     checkpointing_context = {"local_checkpoint_manager": checkpoint_manager}

@@ -1,7 +1,7 @@
 # Launcher design notes
 
 Why the slurm launcher is shaped the way it is. The main script is
-`scripts/slurm/launch_miles.sbatch`; mechanical bits live in
+`scripts/slurm/launch_orbit.sbatch`; mechanical bits live in
 `scripts/slurm/lib/`. If you just want to launch a run, read
 `.claude/skills/slurm-launch/SKILL.md` — this file is for "why does
 the script do X" questions.
@@ -11,7 +11,7 @@ the script do X" questions.
 The 2026-06 upstream sync through `radixark/miles@1e1679706` (commit date
 2026-06-01) bumped the sglang **source** to v0.5.12 (submodule
 `thirdparty/sglang`), but we keep running it on the **existing torch-2.9.1
-`miles` conda env** — we do *not* rebuild to torch 2.11. Upstream v0.5.12 pairs
+`orbit` conda env** — we do *not* rebuild to torch 2.11. Upstream v0.5.12 pairs
 with torch 2.11, whose `sgl-kernel` / `deep_gemm` are published **cu13-only**;
 this host is CUDA 12.8, so those kernels can't load. The torch-2.9.1 env (cu12
 `sgl-kernel` 0.4.1) runs the v0.5.12 source fine — validated end-to-end on geo3k
@@ -46,16 +46,16 @@ Caveats:
 - **The pin-model intentionally rejects this combo — don't regenerate or
   fresh-install.** `setup/{pins.env,extract_pins.py,install_env.sh}` are left
   exactly as `main` (the #12 pin bundle), so `pins.env` still pins the working
-  torch-2.9.1 / `cu129-x86_64` wheels — which is what the `miles` env actually
+  torch-2.9.1 / `cu129-x86_64` wheels — which is what the `orbit` env actually
   runs. But the submodule is now v0.5.12 (pyproject `torch==2.11`), *ahead* of
   that wheel bundle, so `extract_pins.py --check` and `install_env.sh` **fail
   closed with an ABI mismatch** (`wheels torch 2.9.1 != submodule torch 2.11`).
   That is expected: the source is deliberately ahead of the wheels. **Do not**
   `extract_pins.py --write` and **do not** fresh-install for this sync — use the
-  prebuilt `miles` env. (These guards are dev tooling, not CI-gated, so they do
+  prebuilt `orbit` env. (These guards are dev tooling, not CI-gated, so they do
   not fail the PR.) A clean-room installer for "torch-2.9.1 binaries + v0.5.12
   source" needs the parked torch-constraint work
-  (`docs/sync-records/miles-sync-2026-06-02/setup-scripts-vs-main.patch`) and is
+  (`docs/sync-records/orbit-sync-2026-06-02/setup-scripts-vs-main.patch`) and is
   follow-up.
 
 ## Step memory cap (`--mem=0` on every srun)
@@ -97,18 +97,18 @@ bring-up so a bad node/fabric never wastes a ~12 min model load.
    → 120 s watchdog → SIGABRT. RoCE/Ethernet rails (`mlx5_0/1`, 100 G)
    are ignored — NCCL doesn't auto-select them. Skips (non-blocking) if
    `ibstat` is missing or reports no IB rails. Opt out with
-   `MILES_HEALTHCHECK_IB=0`.
+   `ORBIT_HEALTHCHECK_IB=0`.
 4. **Tier weka — `bash lib/weka_probe.sh`** (~2–10 s, pure bash + `dd`, no
    torch). Reads ~64 MiB **O_DIRECT** from a large file on the shared FS (the
    conda env under `/data`, WekaFS). Catches a **wedged WekaFS client**: a
    healthy read returns in seconds, but a wedge makes `/data` reads hang in
    uninterruptible D-state, which otherwise stalls sglang engine/weight bring-up
    indefinitely with idle GPUs and no error (see
-   `docs/sync-records/miles-sync-2026-06-30/wekafs-wedge-2026-07-01.md`). O_DIRECT
+   `docs/sync-records/orbit-sync-2026-06-30/wekafs-wedge-2026-07-01.md`). O_DIRECT
    bypasses the page cache so a probe file left warm by a prior job can't mask
    the wedge; it targets a *wedge* (reads that never return), not slowness
    (64 MiB completes well within `HEALTHCHECK_TIMEOUT`). Skips (non-blocking) if
-   no sizable file is found. Opt out with `MILES_HEALTHCHECK_WEKA=0`.
+   no sizable file is found. Opt out with `ORBIT_HEALTHCHECK_WEKA=0`.
 
 Tiers 1–4 are per-node and **localizable** — a failure appends the node to
 `BAD_NODES` and rides the shared requeue machinery:
@@ -153,16 +153,16 @@ against an infinite loop.
    for infra. Rationale: the deterministic causes (Polling rail, memlock)
    are already auto-healed by tier-ib + the preamble, so a tier-nccl
    failure is a genuine fabric problem worth human eyes, not blind
-   requeue-thrash. Opt out / tune with `MILES_HEALTHCHECK_NCCL=0`,
+   requeue-thrash. Opt out / tune with `ORBIT_HEALTHCHECK_NCCL=0`,
    `NCCL_HEALTHCHECK_MAX_BYTES`, `NCCL_HEALTHCHECK_WALL`,
    `NCCL_HEALTHCHECK_MIN_BUSBW_GB` (default 50; 0 disables the bandwidth floor).
 
 Ad-hoc fabric check outside a run (e.g. to re-test a repaired node) — grab the
-nodes and run the same `lib/nccl_probe.py` with the miles env active:
+nodes and run the same `lib/nccl_probe.py` with the orbit env active:
 
     salloc -N2 --gres=gpu:8 --exclusive --nodelist=slinky-20,slinky-23
     srun --ntasks-per-node=8 --gpus-per-task=1 --cpus-per-task=8 bash -c '
-      source /data/shared/conda/miniconda3/etc/profile.d/conda.sh && conda activate miles
+      source /data/shared/conda/miniconda3/etc/profile.d/conda.sh && conda activate orbit
       ulimit -Sl "$(ulimit -Hl)"          # RDMA memlock, as in NODE_PREAMBLE
       export LD_LIBRARY_PATH="$(python -c "import site;print(site.getsitepackages()[0])")/nvidia/cudnn/lib:$LD_LIBRARY_PATH"
       python scripts/slurm/lib/nccl_probe.py'
@@ -170,12 +170,12 @@ nodes and run the same `lib/nccl_probe.py` with the miles env active:
 `NCCL_IB_HCA=mlx5_2 srun …` pins one rail; `NCCL_HEALTHCHECK_MAX_BYTES=8589934592`
 runs the full 8 GiB sweep.
 
-All `MILES_HEALTHCHECK_*` / `NCCL_HEALTHCHECK_*` toggles are read at launcher
+All `ORBIT_HEALTHCHECK_*` / `NCCL_HEALTHCHECK_*` toggles are read at launcher
 start, *before* the recipe is sourced — pass them as submit-time env vars
-(`MILES_HEALTHCHECK_NCCL=0 bash scripts/slurm/submit.sh <exp>`), not as recipe
+(`ORBIT_HEALTHCHECK_NCCL=0 bash scripts/slurm/submit.sh <exp>`), not as recipe
 knobs, or they will not take effect.
 
-Implementation: `launch_miles.sbatch` healthcheck sections + `lib/gpu_probe.py`,
+Implementation: `launch_orbit.sbatch` healthcheck sections + `lib/gpu_probe.py`,
 `lib/ib_probe.sh`, `lib/nccl_probe.py`.
 
 ## Two-phase cleanup + D-state gate
@@ -214,8 +214,8 @@ The launcher now:
    (rc 0), `FAILED` (rc 1), `STOPPED` (rc 2). A readable `RUNNING`/`PENDING`
    reply resets the grace counter. If the dashboard returns **unreadable**
    output for `RAY_STATUS_FAIL_GRACE=24` consecutive probes (= 6 min by
-   default), we consult the node-local `$MILES_TRAIN_STATUS_FILE` (set to
-   `${TMPDIR:-/tmp}/miles-$JOBID.train_status.json`), which `train.py` writes
+   default), we consult the node-local `$ORBIT_TRAIN_STATUS_FILE` (set to
+   `${TMPDIR:-/tmp}/orbit-$JOBID.train_status.json`), which `train.py` writes
    from inside the Ray job: a fresh `ALIVE` heartbeat means the
    actors are healthy and the dashboard is merely wedged, so the grace
    counter resets and polling continues; a completed sentinel resolves the
@@ -270,7 +270,7 @@ on the head plus `ray start --address … --block` on each worker (backgrounded
 `srun`s) — then polls until the cluster is ready. The poll watches **two** signals:
 
 - **`ray status`** — the GPUs registered with the head's GCS reach `EXPECTED_GPUS`
-  (= workers × 8 + `MILES_RAY_HEAD_NUM_GPUS`, default 8 — recipes hosting a
+  (= workers × 8 + `ORBIT_RAY_HEAD_NUM_GPUS`, default 8 — recipes hosting a
   whole-node GPU sidecar on the head, e.g. an OPD teacher, export 0).
 - **the head/worker srun PIDs** — each `ray start … --block` blocks forever on
   success, so a dead PID means that node's Ray exited and the cluster has collapsed.
@@ -342,8 +342,8 @@ node-level failures, never for code bugs.
 
 ```
 runs/<job-name>/<YYMMDD_HHMMSS>/
-├── run.log             # slurm --output, contains everything from launch_miles
-├── args.json           # MILES_ARGS array parsed into JSON for diffing across runs
+├── run.log             # slurm --output, contains everything from launch_orbit
+├── args.json           # ORBIT_ARGS array parsed into JSON for diffing across runs
 ├── ray_head.log        # stdout/stderr of `ray start --head` (last attempt)
 ├── ray_worker_<N>.log  # stdout/stderr of each `ray start --address` worker
 ├── ray-debug-attempt<N>/  # only on a failed bring-up attempt: that attempt's per-node
@@ -373,7 +373,7 @@ call just before `exit`.
 
 | File | Owns |
 |---|---|
-| [`launch_miles.sbatch`](../launch_miles.sbatch) | High-level orchestration: SBATCH headers, env defaults, run dir, healthcheck, cleanup, recipe sourcing, ray bring-up, teardown trap, calls into lib/. |
+| [`launch_orbit.sbatch`](../launch_orbit.sbatch) | High-level orchestration: SBATCH headers, env defaults, run dir, healthcheck, cleanup, recipe sourcing, ray bring-up, teardown trap, calls into lib/. |
 | [`lib/manifest.sh`](../lib/manifest.sh) | `write_manifest` (used by launcher) + `read_recent_manifests` (used by submit.sh). |
 | [`lib/gpu_probe.py`](../lib/gpu_probe.py) | Tier-2 healthcheck — `torch.cuda.set_device(i)` probe per GPU. |
 | [`lib/ib_probe.sh`](../lib/ib_probe.sh) | Tier-ib healthcheck — every InfiniBand rail must be LinkUp (catches a Polling rail). |
@@ -390,7 +390,7 @@ a new module — we keep the launcher boundary thin on purpose.
 
 - [`architecture.md`](architecture.md) — 30-second submit → sbatch → ray flow
   overview (the "what" if this file is the "why").
-- [`../setup/README.md`](../setup/README.md) — one-time install of the `miles`
+- [`../setup/README.md`](../setup/README.md) — one-time install of the `orbit`
   conda env, plus the env-var knob table.
 - [`slurm-launch` SKILL.md](../../../.claude/skills/slurm-launch/SKILL.md) — how
   to actually launch a run (filesystem layout, recipe pattern, dispatch flow).
@@ -399,7 +399,7 @@ a new module — we keep the launcher boundary thin on purpose.
 - [`sync-records/`](sync-records/) — the tracked upstream-sync history (`prs.md`,
   `pr-body.md`, `divergence.patch` / `.stat` per event; see its README). The
   v0.5.10 → v0.5.12 trail lives in
-  [`sync-records/miles-sync-2026-06-02/`](sync-records/miles-sync-2026-06-02/).
-- Upstream miles docs: [`docs/getting-started/installation.md`](../../../docs/getting-started/installation.md)
+  [`sync-records/orbit-sync-2026-06-02/`](sync-records/orbit-sync-2026-06-02/).
+- Upstream orbit docs: [`docs/getting-started/installation.md`](../../../docs/getting-started/installation.md)
   + [`docker/Dockerfile`](../../../docker/Dockerfile) — the canonical install
   reference that `setup/install_env.sh` mirrors.

@@ -324,7 +324,7 @@ def _eval_samples(size: int = 4) -> list[_EvalSample]:
 
 
 def test_eval_logger_records_accuracy_ci_and_exact_step(monkeypatch) -> None:
-    from miles.utils.tracking_utils import tracking
+    from orbit.utils.tracking_utils import tracking
 
     captured = {}
     monkeypatch.setattr(
@@ -364,7 +364,7 @@ def test_manifest_contract_rejects_duplicate_ids() -> None:
 
 
 def test_eval_logger_rejects_missing_truncation_rows(monkeypatch) -> None:
-    from miles.utils.tracking_utils import tracking
+    from orbit.utils.tracking_utils import tracking
 
     monkeypatch.setattr(tracking, "log", lambda *_args, **_kwargs: None)
     samples = _eval_samples()
@@ -388,7 +388,7 @@ def test_eval_logger_rejects_missing_truncation_rows(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_eval_generate_assigns_task_reward_before_custom_opd_rm(monkeypatch) -> None:
     from examples.geo3k_vlm.multi_turn import rollout
-    from miles.rollout import rm_hub
+    from orbit.rollout import rm_hub
 
     calls = []
 
@@ -402,14 +402,14 @@ async def test_eval_generate_assigns_task_reward_before_custom_opd_rm(monkeypatc
 
     monkeypatch.setattr(rollout, "generate", fake_generate)
     monkeypatch.setattr(rm_hub, "async_rm", fake_task_rm)
-    args = SimpleNamespace(custom_rm_path="miles.rollout.on_policy_distillation.reward_func")
+    args = SimpleNamespace(custom_rm_path="orbit.rollout.on_policy_distillation.reward_func")
     sample = SimpleNamespace(reward=None)
 
     result = await fixed_eval.generate(args, sample, {}, evaluation=True)
 
     assert result.reward == 1
     assert calls == ["generate", ("rm", None)]
-    assert args.custom_rm_path == "miles.rollout.on_policy_distillation.reward_func"
+    assert args.custom_rm_path == "orbit.rollout.on_policy_distillation.reward_func"
 
 
 def _source_recipe(
@@ -431,16 +431,16 @@ def _source_recipe(
     shell = f"""
 set -euo pipefail
 source {shlex.quote(str(recipe))}
-printf '__M11_META__%s|%s|%s|%s|%s|%s\n' "$EXPERIMENT_NODES" "${{MILES_TRAIN_ENTRY:-train.py}}" "$HF_MODEL_REPO" "$OPD_EVAL_INTERVAL" "${{OPD_TEACHER_MODEL_DIR:-}}" "$WANDB_RUN_NAME"
+printf '__M11_META__%s|%s|%s|%s|%s|%s\n' "$EXPERIMENT_NODES" "${{ORBIT_TRAIN_ENTRY:-train.py}}" "$HF_MODEL_REPO" "$OPD_EVAL_INTERVAL" "${{OPD_TEACHER_MODEL_DIR:-}}" "$WANDB_RUN_NAME"
 printf '__M11_ARGS_BEGIN__\n'
-printf '%s\n' "${{MILES_ARGS[@]}}"
+printf '%s\n' "${{ORBIT_ARGS[@]}}"
 """
     env = os.environ.copy()
     env.update(
         {
             "HEAD_IP": "127.0.0.1",
             "HF_CACHE_DIR": str(tmp_path),
-            "MILES_REPO": str(REPO_ROOT),
+            "ORBIT_REPO": str(REPO_ROOT),
             "OPD_NUM_ROLLOUT": "5",
         }
     )
@@ -483,7 +483,7 @@ def test_student_recipe_keeps_sync_hybrid_training_contract(
     assert _arg_value(args, "--opd-log-prob-top-k") == "0"
     assert _arg_value(args, "--opd-dagger-top-k") == "2"
     assert _arg_value(args, "--opd-dagger-coef") == "0.5"
-    assert _arg_value(args, "--custom-rm-path") == "miles.rollout.on_policy_distillation.reward_func"
+    assert _arg_value(args, "--custom-rm-path") == "orbit.rollout.on_policy_distillation.reward_func"
     assert _arg_value(args, "--custom-generate-function-path") == "examples.geo3k_vlm.multi_turn.rollout.generate"
     assert _arg_value(args, "--rollout-max-response-len") == "12000"
     assert _arg_value(args, "--rollout-max-context-len") == "12000"

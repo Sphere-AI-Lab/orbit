@@ -11,7 +11,7 @@ NHEADS = 64
 
 def model_args(n_moe_layers: int = 75) -> str:
     return (
-        "--spec miles_plugins.models.glm5.glm5 get_glm5_spec "
+        "--spec orbit_plugins.models.glm5.glm5 get_glm5_spec "
         f"--moe-layer-freq [0]*{N_DENSE_LAYERS}+[1]*{n_moe_layers} "
         f"--num-experts {MOE_ROUTED_EXPERTS} "
         f"--moe-shared-expert-intermediate-size {MOE_SHARED_EXPERT_INTERMEDIATE_SIZE} "

@@ -18,7 +18,7 @@ description: Launch recipe for Inkling-Small (276 B), the compact sibling of Ink
 Validated on 4 nodes × 8 H200 (TP4 SP PP8 EP4, DP1):
 
 ```bash
-cd /root/miles
+cd /root/orbit
 
 # Full-parameter GRPO. 276 B fits with the CPU-offloaded optimizer -
 # no NVMe streaming needed (unlike the 975 B recipe).

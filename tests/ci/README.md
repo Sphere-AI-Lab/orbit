@@ -2,33 +2,33 @@
 
 ## Configure GitHub secrets
 
-https://github.com/radixark/miles/settings/secrets/actions
+https://github.com/Sphere-AI-Lab/orbit/settings/secrets/actions
 
 * `WANDB_API_KEY`: get from https://wandb.ai/authorize
 
 ## Setup new GitHub runners
 
-### Step 0: Prepare `/data/miles_ci`
+### Step 0: Prepare `/data/orbit_ci`
 
-The miles CI workflow bind-mounts `/data/miles_ci` (and its `models`,
+The orbit CI workflow bind-mounts `/data/orbit_ci` (and its `models`,
 `datasets`, `hf_cache` subdirectories) from the host into every job container.
-Every CI host must provide `/data/miles_ci` either as a real directory on its
+Every CI host must provide `/data/orbit_ci` either as a real directory on its
 biggest disk or as a symlink to wherever the big disk is.
 [`tests/ci/skills/setup-ci-host`](skills/setup-ci-host/) automates this:
 
 ```shell
-cd /root/miles/tests/ci/skills/setup-ci-host
+cd /root/orbit/tests/ci/skills/setup-ci-host
 ./setup-host.sh
 ```
 
 The script probes mounts with `df`, picks the biggest non-system mount, and
-ensures `/data/miles_ci` resolves there (real dir if `/data` is biggest;
+ensures `/data/orbit_ci` resolves there (real dir if `/data` is biggest;
 symlink otherwise). Idempotent.
 
 ### Step 1: Env
 
 Write `.env` mimicking `.env.example`.
-The token can be found at https://github.com/radixark/miles/settings/actions/runners/new?arch=x64&os=linux.
+The token can be found at https://github.com/Sphere-AI-Lab/orbit/settings/actions/runners/new?arch=x64&os=linux.
 
 WARN: The `GITHUB_RUNNER_TOKEN` changes after a while.
 
@@ -48,7 +48,7 @@ ls -alh /home/runner/externals
 ### Step 3: Run
 
 ```shell
-cd /root/miles/tests/ci/github_runner
+cd /root/orbit/tests/ci/github_runner
 docker compose up -d
 ```
 
@@ -71,8 +71,8 @@ GPU exposure to inner CI job containers happens in two layers:
 * **CUDA layer**: each runner container sets `CUDA_VISIBLE_DEVICES` in its
   compose `environment:` block. `_run-ci.yml`'s `container.options` includes
   a bare `--env CUDA_VISIBLE_DEVICES` flag that propagates that env into the
-  inner job container. miles tests respect CVD (e.g. `miles/ray/train_actor.py`,
-  `miles/backends/sglang_utils/sglang_engine.py`), so CUDA-level partitioning
+  inner job container. orbit tests respect CVD (e.g. `orbit/ray/train_actor.py`,
+  `orbit/backends/sglang_utils/sglang_engine.py`), so CUDA-level partitioning
   is sufficient.
 
 Host conventions:
@@ -90,9 +90,9 @@ Host conventions:
   `--env CUDA_VISIBLE_DEVICES` forwards the "unset" state, and CUDA defaults
   to seeing every visible device.
 
-## /data/miles_ci path identity rule
+## /data/orbit_ci path identity rule
 
-`docker-compose.yml` mounts `/data/miles_ci:/data/miles_ci` — the SAME path on
+`docker-compose.yml` mounts `/data/orbit_ci:/data/orbit_ci` — the SAME path on
 both sides of the colon. This is mandatory: the runner process spawns sibling
 job containers through the mounted `/var/run/docker.sock`, and the runner's
 in-container `--work` path is forwarded verbatim to the host daemon. If the
@@ -100,7 +100,7 @@ host source and container target differ, the daemon resolves a host path the
 runner never wrote to, and the sibling container mounts an unrelated (or
 empty) tree.
 
-Step 0's `setup-host.sh` guarantees `/data/miles_ci` exists on the host
+Step 0's `setup-host.sh` guarantees `/data/orbit_ci` exists on the host
 (either as a real directory if `/data` is the big disk, or as a symlink to
 wherever the big disk is). Either way, the bind mount works uniformly across
 hosts.
@@ -108,7 +108,7 @@ hosts.
 The workflow `.github/workflows/_run-ci.yml`'s four data mounts use the same
 literal path (no parameterization). Tests hardcode the container-side targets
 (`/root/models`, `/root/datasets`, `/root/.cache/huggingface`); the host side
-is always `/data/miles_ci/...`.
+is always `/data/orbit_ci/...`.
 
 ## Restarting runners after compose changes
 

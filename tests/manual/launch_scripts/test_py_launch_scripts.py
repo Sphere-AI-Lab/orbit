@@ -163,6 +163,6 @@ class TestDiscovery:
 
     def test_execute_train_config_defaults_are_not_taken_from_a_slurm_allocation(self, monkeypatch):
         """SLURM_JOB_NUM_NODES is read at import time, so a stale allocation would skew every snapshot."""
-        import miles.utils.external_utils.command_utils as command_utils
+        import orbit.utils.external_utils.command_utils as command_utils
 
         assert command_utils.ExecuteTrainConfig().num_nodes == 1

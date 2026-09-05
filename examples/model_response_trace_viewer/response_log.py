@@ -9,13 +9,13 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
-from miles.utils.types import Sample
+from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
 # Turns are recorded on Sample.metadata rather than a core Sample field, so this
-# stays a customization-layer feature with no miles/ surface of its own.
+# stays a customization-layer feature with no orbit/ surface of its own.
 RESPONSE_TURNS_KEY = "response_turns"
 _OMIT = object()
 _MEDIA_TYPES = {

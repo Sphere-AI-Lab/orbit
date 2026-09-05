@@ -1,6 +1,6 @@
 ### 0
 pkill -9 sglang; sleep 3; ray stop
-  --force; pkill -9 ray; pkill -9 miles; sleep 3; pkill -9 ray; pkill -9 miles; pkill -9 redis; true; 
+  --force; pkill -9 ray; pkill -9 orbit; sleep 3; pkill -9 ray; pkill -9 orbit; pkill -9 redis; true; 
 
 ### 1
 export PYTHONUNBUFFERED=1 && ray start
@@ -17,7 +17,7 @@ export no_proxy=127.0.0.1 && export PYTHONUNBUFFERED=1 && ray job submit
   --address="http://127.0.0.1:8265"
   --runtime-env-json='{"env_vars": {"PYTHONUNBUFFERED": "1", "CUDA_DEVICE_MAX_CONNECTIONS": "1", "NCCL_NVLS_ENABLE": "0", "no_proxy": "127.0.0.1,127.0.0.1", "MASTER_ADDR": "127.0.0.1", "PYTHONPATH": "<REPO_ROOT>:/root/Megatron-LM:/frozen/pythonpath"}}'
   -- python3 <REPO_ROOT>/train.py
-  --spec miles_plugins.models.qwen3_5 get_qwen3_5_spec
+  --spec orbit_plugins.models.qwen3_5 get_qwen3_5_spec
   --disable-bias-linear
   --qk-layernorm
   --group-query-attention
@@ -83,7 +83,7 @@ export no_proxy=127.0.0.1 && export PYTHONUNBUFFERED=1 && ray job submit
   --eps-clip 0.2
   --eps-clip-high 0.28 
   --use-wandb
-  --wandb-project miles-run_qwen3_5_35b_a3b_lora
+  --wandb-project orbit-run_qwen3_5_35b_a3b_lora
   --wandb-group 260101-000000-000
   --wandb-key 'frozen-wandb-api-key'
   --disable-wandb-random-suffix 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from types import SimpleNamespace
 
-from miles_plugins.envpack_adapter.logging import (
+from orbit_plugins.envpack_adapter.logging import (
     ALL_SAMPLES_PROCESS_PATH,
     add_all_sample_rollout_metrics,
     add_bucket_solve_rate_metrics,

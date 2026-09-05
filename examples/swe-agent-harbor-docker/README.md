@@ -1,6 +1,6 @@
 # SWE-Agent training with Harbor on Docker sandboxes
 
-This example trains GLM-4.7-Flash on agentic coding and terminal tasks. Miles
+This example trains GLM-4.7-Flash on agentic coding and terminal tasks. Orbit
 runs synchronous GRPO and serves the policy through its session server; a
 separate [Harbor](https://github.com/harbor-framework/harbor) agent server
 creates the task sandboxes, runs the agents, and returns verifier rewards.
@@ -18,20 +18,20 @@ the Harbor task.
 | `run_glm52_lora_tb2_daytona.py` | Multi-node GLM-5.2 744B-A40B LoRA launcher (bf16 trainer, fp8 rollout). |
 | `swe_agent_function.py` | Sends each rollout to the Harbor agent server. |
 | `generate.py` | Builds rewards, metrics, and training samples. |
-| `download_and_process_data.py` | Converts supported datasets to Miles JSONL. |
+| `download_and_process_data.py` | Converts supported datasets to Orbit JSONL. |
 
 ## 1. Start the Harbor agent server
 
-Use the `harbor-miles-v0.20.0` branch of the `harbor-framework/harbor`
-repository, which carries the Miles integration:
+Use the `harbor-orbit-v0.20.0` branch of the `harbor-framework/harbor`
+repository, which carries the Orbit integration:
 
 ```bash
 git clone https://github.com/harbor-framework/harbor.git
 cd harbor
-git checkout harbor-miles-v0.20.0
+git checkout harbor-orbit-v0.20.0
 uv sync
 
-HARBOR_TASKS_DIR=/path/to/harbor_tasks uv run python miles_agent_server.py \
+HARBOR_TASKS_DIR=/path/to/harbor_tasks uv run python orbit_agent_server.py \
     --host 0.0.0.0 \
     --port 30000 \
     --dashboard-port 0 \
@@ -47,7 +47,7 @@ set `--max-concurrent` to at least one sandbox per trajectory in a rollout step
 (`--rollout-batch-size` times `--n-samples-per-prompt`). Keep `--agent-timeout`
 generous — agentic trials routinely run past an hour, and a short timeout kills
 them mid-episode. Verify `http://<agent-server>:30000/health` before launching
-Miles.
+Orbit.
 
 The two per-trial timeouts must be ordered. `--agent-timeout` is the authoritative
 one: when it fires, the agent server ends the trial and frees its sandbox. The
@@ -106,7 +106,7 @@ python examples/swe-agent-harbor-docker/run.py \
     --save-interval 20 \
     --agent-server-url http://<agent-server>:30000 \
     --router-external-host <trainer-host-reachable-from-agent-server> \
-    --miles-host-ip 0.0.0.0 \
+    --orbit-host-ip 0.0.0.0 \
     --save-traces-dir /path/to/traces
 ```
 
@@ -114,9 +114,9 @@ For a smoke test, set `--num-rollout 1`. Expect roughly 10 minutes per step at
 this shape; because synchronous rollout waits for the slowest trajectory in the
 batch, a step that draws an unusually slow task can take several times that.
 
-`--router-external-host` is the address Harbor sandboxes use to call the Miles
+`--router-external-host` is the address Harbor sandboxes use to call the Orbit
 session server and SGLang router. It must resolve and route from the agent-server
-machine. `--miles-host-ip 0.0.0.0` is useful when those services must accept
+machine. `--orbit-host-ip 0.0.0.0` is useful when those services must accept
 connections forwarded from another host. Ensure ports 30000 and 31000 are
 reachable end to end; Tailscale is one option when the machines are on different
 networks.
@@ -125,7 +125,7 @@ networks.
 
 Check both layers:
 
-1. Miles logs emit rollout metrics and write `rollout_data/*.pt` under the trace
+1. Orbit logs emit rollout metrics and write `rollout_data/*.pt` under the trace
    directory.
 2. Megatron logs emit `train/step` and the Ray job exits successfully.
 
@@ -136,4 +136,4 @@ arriving — which looks exactly like a frozen reward curve. The per-step
 are written by the trainer itself and are the authoritative progress signal.
 
 The synchronous launcher uses GLM-4.7 tool-call and reasoning parsers, TITO,
-the Miles session server, and the Megatron backend.
+the Orbit session server, and the Megatron backend.

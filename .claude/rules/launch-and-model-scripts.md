@@ -4,8 +4,8 @@ paths:
   - "scripts/**/*.sh"
   - "examples/**/*.py"
   - "examples/**/*.sh"
-  - "miles/utils/external_utils/command_utils.py"
-  - "miles/utils/external_utils/model_args_utils.py"
+  - "orbit/utils/external_utils/command_utils.py"
+  - "orbit/utils/external_utils/model_args_utils.py"
 ---
 
 # Launch And Model Scripts
@@ -84,7 +84,7 @@ definition, and when substantially modifying an existing one.
 - **Directories are fields, not literals.** `--model-dir` (`/root/models`),
   `--data-dir` (`/root/datasets`) and `--output-dir` (`/root/shared_data`, from
   `ExecuteTrainConfig`). Never hardcode `/root/<Model>`, and never hardcode a
-  checkout path such as `/root/miles` or `/workspace/miles` — use
+  checkout path such as `/root/orbit` or `/workspace/orbit` — use
   `U.repo_base_dir`, which a hygiene test enforces for shell scripts too.
 - **wandb comes from `U.get_default_wandb_args`,** which engages only when
   `WANDB_API_KEY` is set. No hardcoded project or group names.
@@ -97,7 +97,7 @@ definition, and when substantially modifying an existing one.
   `--colocate` is set — `arguments.py` documents and implements it as ignored
   there.
 - **A cluster that is already joined is expressed with
-  `MILES_SCRIPT_EXTERNAL_RAY=1`,** not by deleting the `ray start` from the
+  `ORBIT_SCRIPT_EXTERNAL_RAY=1`,** not by deleting the `ray start` from the
   launcher.
 
 ## One launcher per recipe family
@@ -119,7 +119,7 @@ definition, and when substantially modifying an existing one.
 
 - **Every public entrypoint of every launcher has a recording** at
   `tests/snapshots/launch_scripts/py/<path>/<entrypoint>.txt`. Regenerate with
-  `MILES_UPDATE_LAUNCH_SCRIPT_SNAPSHOTS=1 pytest tests/manual/launch_scripts`
+  `ORBIT_UPDATE_LAUNCH_SCRIPT_SNAPSHOTS=1 pytest tests/manual/launch_scripts`
   and read the resulting diff — it is what proves a launcher change does what it
   claims.
 - **A launcher must import and run its entrypoints with no GPU, no checkpoint

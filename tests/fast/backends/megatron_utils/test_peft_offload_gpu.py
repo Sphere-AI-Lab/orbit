@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from miles.backends.megatron_utils import peft_offload
+from orbit.backends.megatron_utils import peft_offload
 
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")

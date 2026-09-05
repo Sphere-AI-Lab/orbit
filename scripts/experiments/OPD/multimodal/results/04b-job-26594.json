@@ -7,7 +7,7 @@
   "status": "passed",
   "historical_budget_note": "This run predates response/context budget separation. Its configured response limit was reduced by the processor-expanded initial prompt, so it does not validate corrected response-cap or length-cap-ratio semantics.",
   "source": {
-    "miles_commit": "fd503f25",
+    "orbit_commit": "fd503f25",
     "run_dir": "runs/opd-mm-04b-geo3k-mt-gate/260716_093624",
     "nodes": "slinky-[10,36,31] (head/teacher slinky-10)",
     "duration_minutes": 38,

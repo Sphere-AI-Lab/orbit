@@ -16,7 +16,7 @@ export WANDB_RUN_NAME=${WANDB_RUN_NAME:-opd-mm-10b-geo3k-hybrid-async-rollout-qo
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/09d-geo3k-multiturn-hybrid-fully-async-big-small-gate.sh"
 
-for arg in "${MILES_ARGS[@]}"; do
+for arg in "${ORBIT_ARGS[@]}"; do
    case "$arg" in
       --use-rollout-logprobs | --use-tis | --get-mismatch-metrics)
          echo "FATAL: milestone 10 owns the rollout-q_old switch (found inherited $arg)" >&2
@@ -25,4 +25,4 @@ for arg in "${MILES_ARGS[@]}"; do
    esac
 done
 
-MILES_ARGS+=(--use-rollout-logprobs)
+ORBIT_ARGS+=(--use-rollout-logprobs)

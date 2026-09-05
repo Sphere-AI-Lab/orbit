@@ -21,7 +21,7 @@ End-to-end training workflows — the place to start.
 
 ## [Infra Features](./infra_features)
 
-Runtime and infrastructure plumbing rather than training recipes — how miles moves
+Runtime and infrastructure plumbing rather than training recipes — how orbit moves
 data and weights around.
 
 - **[fully_async](./infra_features/fully_async)**: Demonstrates fully asynchronous rollout generation for higher efficiency.
@@ -40,7 +40,7 @@ Not fully verified — for experimental and development use.
 - **[eval](./experimental/eval)**: Documentation and setup for evaluation environments using NeMo-Skills.
 - **[eval_multi_task](./experimental/eval_multi_task)**: Example for supporting OOD evaluation tasks, e.g., GPQA, IFBench.
 - **[formal_math](./experimental/formal_math)**: Examples related to formal math reasoning tasks, including a single round demo.
-- **[multi_agent](./experimental/multi_agent)**: Example of running multi-agent RL with `miles`.
+- **[multi_agent](./experimental/multi_agent)**: Example of running multi-agent RL with `orbit`.
 - **[nemo-gym](./experimental/nemo-gym)**: SWE-agent training with NVIDIA NeMo Gym as the environment ecosystem.
 - **[openenv](./experimental/openenv)**: Rollouts against OpenEnv-hosted environments.
 - **[reproducibility](./experimental/reproducibility)**: Guides on achieving bitwise experiment reproduction using deterministic modes.
@@ -48,13 +48,13 @@ Not fully verified — for experimental and development use.
 - **[strands_sglang](./experimental/strands_sglang)**: Integration example with the Strands-Agents scaffolding framework.
 - **[swe-agent-harbor-daytona](./experimental/swe-agent-harbor-daytona)**: The `swe-agent-harbor-docker` pipeline with task sandboxes hosted on Daytona instead of local Docker.
 - **[tau-bench](./experimental/tau-bench)**: Training in an agentic multi-turn tool use environment (Tau-bench).
-- **[verifiers](./experimental/verifiers)**: Training on a Prime Intellect Verifiers environment instead of a Miles prompt dataset.
+- **[verifiers](./experimental/verifiers)**: Training on a Prime Intellect Verifiers environment instead of a Orbit prompt dataset.
 
 <!-- docs:exclude:start -->
 ## These READMEs are the documentation site
 
 Every README outside `experimental/` is mirrored onto
-[miles.radixark.com/docs/examples](https://miles.radixark.com/docs/examples) by
+[spherelab.ai/orbit/examples](https://spherelab.ai/orbit/examples) by
 `scripts/tools/sync_example_docs.py`, which pre-commit runs for you. The docs site is
 generated from this directory and never edited directly, so a new example needs nothing
 beyond its README and an entry in the list above — the sync fails if either is missing.

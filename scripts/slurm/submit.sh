@@ -4,7 +4,7 @@
 # call sbatch.
 #
 # This is the only slurm script meant to be run by hand. Everything below
-# (launch_miles.sbatch, the per-node srun calls) is invoked by slurm itself.
+# (launch_orbit.sbatch, the per-node srun calls) is invoked by slurm itself.
 #
 # Usage:
 #   bash scripts/slurm/submit.sh <experiment-name>
@@ -30,12 +30,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ORBIT_REPO="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Scrub any inherited SLURM_* env. If submit.sh is run from inside an
 # salloc/srun, `sbatch --export=ALL` below would otherwise leak the caller's
 # allocation (SLURM_JOB_ID / SLURM_NODELIST / SLURM_*_GPUS / ...) into the new
-# batch job. That poisons launch_miles.sbatch's healthcheck `srun --jobid=...
+# batch job. That poisons launch_orbit.sbatch's healthcheck `srun --jobid=...
 # --overlap` step, which then fails with "Requested node configuration is not
 # available" and false-marks every allocated node BAD at startup.
 unset $(compgen -v | grep '^SLURM_') 2>/dev/null || true
@@ -43,11 +43,11 @@ unset $(compgen -v | grep '^SLURM_') 2>/dev/null || true
 if [[ $# -ne 1 ]]; then
     echo "Usage: bash $0 <experiment-name>" >&2
     echo "Available experiments:" >&2
-    ls "$MILES_REPO/scripts/experiments/" | sed 's/\.sh$//' | sed 's/^/  /' >&2
+    ls "$ORBIT_REPO/scripts/experiments/" | sed 's/\.sh$//' | sed 's/^/  /' >&2
     exit 64   # EX_USAGE
 fi
 EXP_NAME=$1
-RECIPE="$MILES_REPO/scripts/experiments/$EXP_NAME.sh"
+RECIPE="$ORBIT_REPO/scripts/experiments/$EXP_NAME.sh"
 if [[ ! -f "$RECIPE" ]]; then
     echo "FATAL: experiment '$EXP_NAME' not found at $RECIPE" >&2
     exit 66   # EX_NOINPUT
@@ -61,17 +61,17 @@ fi
 export HF_TOKEN WANDB_API_KEY
 
 CONDA_ROOT=${CONDA_ROOT:-/data/shared/conda/miniconda3}
-MILES_ENV_NAME=${MILES_ENV_NAME:-miles}
+ORBIT_ENV_NAME=${ORBIT_ENV_NAME:-orbit}
 # shellcheck disable=SC1091
 source "$CONDA_ROOT/etc/profile.d/conda.sh"
-conda activate "$MILES_ENV_NAME"
+conda activate "$ORBIT_ENV_NAME"
 
 # ---------- source the recipe to read metadata + asset list ---------------
 
 # shellcheck disable=SC1090
 source "$RECIPE"
 
-[[ -n "${MILES_ARGS+x}" ]]       || { echo "FATAL: $RECIPE did not define MILES_ARGS" >&2; exit 78; }
+[[ -n "${ORBIT_ARGS+x}" ]]       || { echo "FATAL: $RECIPE did not define ORBIT_ARGS" >&2; exit 78; }
 [[ -n "${HF_MODEL_REPO+x}" ]]    || { echo "FATAL: $RECIPE did not define HF_MODEL_REPO" >&2; exit 78; }
 [[ -n "${EXPERIMENT_NODES+x}" ]] || { echo "FATAL: $RECIPE did not define EXPERIMENT_NODES" >&2; exit 78; }
 
@@ -97,7 +97,7 @@ for repo in "${HF_DATASETS[@]}"; do
     fi
 done
 
-# If the Megatron torch_dist artifact is missing, launch_miles.sbatch will
+# If the Megatron torch_dist artifact is missing, launch_orbit.sbatch will
 # auto-convert on the head node before training starts (~5 min for Qwen3-4B).
 # For large multi-node models, pre-convert via scripts/slurm/setup/convert_checkpoint.sh.
 
@@ -111,19 +111,19 @@ SBATCH_EXTRA=${SBATCH_EXTRA:-}
 # Per-launch dir, named by wall-clock submit time. Created up-front so slurm
 # can write --output directly into it (no symlink, no tee).
 RUN_STAMP=$(date +%y%m%d_%H%M%S)
-RUN_DIR="$MILES_REPO/runs/$JOB_NAME/$RUN_STAMP"
+RUN_DIR="$ORBIT_REPO/runs/$JOB_NAME/$RUN_STAMP"
 mkdir -p "$RUN_DIR"
 
 # Warn if any of the last 3 runs for this job_name ended in a non-success state.
 # shellcheck disable=SC1091
-source "$MILES_REPO/scripts/slurm/lib/manifest.sh"
-read_recent_manifests "$MILES_REPO/runs/$JOB_NAME" 3 "$RUN_STAMP"
+source "$ORBIT_REPO/scripts/slurm/lib/manifest.sh"
+read_recent_manifests "$ORBIT_REPO/runs/$JOB_NAME" 3 "$RUN_STAMP"
 
 echo "[sbatch] $EXP_NAME  nodes=$NODES  time=$TIME  job-name=$JOB_NAME  run_dir=$RUN_DIR"
 exec sbatch \
     --nodes="$NODES" --time="$TIME" \
     --job-name="$JOB_NAME" \
     --output="$RUN_DIR/run.log" \
-    --export=ALL,MILES_REPO="$MILES_REPO",RECIPE="$RECIPE",RUN_DIR="$RUN_DIR" \
+    --export=ALL,ORBIT_REPO="$ORBIT_REPO",RECIPE="$RECIPE",RUN_DIR="$RUN_DIR" \
     $SBATCH_EXTRA \
-    "$MILES_REPO/scripts/slurm/launch_miles.sbatch"
+    "$ORBIT_REPO/scripts/slurm/launch_orbit.sbatch"

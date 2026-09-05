@@ -24,13 +24,13 @@ fi
 echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MODEL_ARGS_LINE="$(python3 "${SCRIPT_DIR}/../../../miles/utils/external_utils/model_args_utils.py" "kimi-k2-thinking")" || exit 1
+MODEL_ARGS_LINE="$(python3 "${SCRIPT_DIR}/../../../orbit/utils/external_utils/model_args_utils.py" "kimi-k2-thinking")" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 CKPT_ARGS=(
    --hf-checkpoint /root/Kimi-K2-Thinking/
    --ref-load /root/Kimi-K2_thinking_torch_dist/
-   --load /root/Kimi-K2-thinking_miles/
-   --save /root/Kimi-K2-thinking_miles/
+   --load /root/Kimi-K2-thinking_orbit/
+   --save /root/Kimi-K2-thinking_orbit/
    --save-interval 20
 )
 
@@ -52,7 +52,7 @@ ROLLOUT_ARGS=(
    # --global-batch-size 256
 
    --over-sampling-batch-size 256
-   --dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
+   --dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
 
    --num-steps-per-rollout 4
    --balance-data
@@ -111,7 +111,7 @@ OPTIMIZER_ARGS=(
 
 WANDB_ARGS=(
    # --use-wandb
-   # --wandb-project miles-dev
+   # --wandb-project orbit-dev
    # --wandb-group kimi-k2-thinking-test
    # --wandb-key ${WANDB_KEY}
 )
@@ -171,7 +171,7 @@ RUNTIME_ENV_JSON="{
 
 ray job submit --address="http://127.0.0.1:8265" \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
-   -- python3 /personal/miles/miles/train.py \
+   -- python3 /personal/orbit/orbit/train.py \
    --actor-num-nodes 32 \
    --actor-num-gpus-per-node 8 \
    --colocate \

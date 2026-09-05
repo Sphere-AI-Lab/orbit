@@ -22,8 +22,8 @@ bash -c export PYTHONUNBUFFERED=1 && ray job submit
   --hf-checkpoint /root/models/Qwen3-8B/
   --ref-load /root/models/Qwen3-8B_torch_dist
   --save-interval 20
-  --load /root/Qwen3-8B_miles
-  --save /root/Qwen3-8B_miles 
+  --load /root/Qwen3-8B_orbit
+  --save /root/Qwen3-8B_orbit 
   --prompt-data /root/datasets/formal_math_single_round/minimal_demo/flc_train.jsonl
   --input-key prompt
   --apply-chat-template
@@ -52,7 +52,7 @@ bash -c export PYTHONUNBUFFERED=1 && ray job submit
   --eps-clip 0.2
   --eps-clip-high 0.28 
   --use-wandb
-  --wandb-project miles-formal-math-run-minimal
+  --wandb-project orbit-formal-math-run-minimal
   --wandb-group demo
   --wandb-key 'frozen-wandb-api-key' 
   --tensor-model-parallel-size 2

@@ -26,10 +26,10 @@ The Dockerfile is the build recipe: it provides the cu13 defaults and emits one 
 | `ENABLE_CUDA_13`                                                                                       | `1` = CUDA 13 (default) and installs the Mooncake wheel from the selected wheels release; `0` = CUDA 12.9 and keeps the base image's Mooncake                                                                                                                                                                                                         |
 | `WHEELS_REPO`                                                                                          | prebuilt-wheels GitHub repo (`yueming-yuan/miles-wheels`)                                                                                                                                                                                                                                                                                           |
 | `WHEELS_TAG_X86` / `WHEELS_TAG_ARM64`                                                                  | the two **complete** wheels release tags selected by `TARGETARCH` and installed **verbatim**. cu13 uses the rolling `cu130-x86_64` / `cu130-aarch64` releases; cu12-x86 overrides `WHEELS_TAG_X86` with the rolling `cu129-x86_64` release                                                                                                                                                                                              |
-| `SGLANG_BRANCH` / `SGLANG_COMMIT`, `MEGATRON_REPO` / `MEGATRON_BRANCH` / `MEGATRON_COMMIT`, `MILES_COMMIT`, `SGL_ROUTER_*` | source pins for the layered repos; empty commit args follow their branch, while release builds provide exact SHAs |
+| `SGLANG_BRANCH` / `SGLANG_COMMIT`, `MEGATRON_REPO` / `MEGATRON_BRANCH` / `MEGATRON_COMMIT`, `ORBIT_COMMIT`, `SGL_ROUTER_*` | source pins for the layered repos; empty commit args follow their branch, while release builds provide exact SHAs |
 
 
-**Output** — one `radixark/miles` image for the platform buildx targets: the SGLang base, then the Python dependencies declared in `requirements.txt`, Megatron-LM at its branch default or caller-pinned commit, Miles, and the prebuilt wheels (`sgl-router` among them). A multi-arch build is one `buildx` run executed once per platform — `TARGETARCH` differs each time, so each arch installs its own wheels — and buildx pushes the two as a single manifest.
+**Output** — one `radixark/miles` image for the platform buildx targets: the SGLang base, then the Python dependencies declared in `requirements.txt`, Megatron-LM at its branch default or caller-pinned commit, Orbit, and the prebuilt wheels (`sgl-router` among them). A multi-arch build is one `buildx` run executed once per platform — `TARGETARCH` differs each time, so each arch installs its own wheels — and buildx pushes the two as a single manifest.
 
 `docker/Dockerfile.rocm` is the ROCm counterpart (build-args `GPU_ARCH` + a ROCm `SGLANG_IMAGE_TAG`; the 7.2 variants also set `APPLY_ROCR_VMMFIX=1`, which downloads the ROCr VMM-pause fix `.so` from the `WHEELS_TAG_ROCM` release and installs it — ROCm 7.0 has no such regression and leaves it off).
 
@@ -44,9 +44,9 @@ The Dockerfile is the build recipe: it provides the cu13 defaults and emits one 
 | `cu13-x86`     | `radixark/miles:dev`               | `linux/amd64`                 | x86-only build of the same image               |
 | `cu13-aarch64` | `radixark/miles:dev`               | `linux/arm64`                 | arm64-only build of the same image             |
 | `cu12-x86`     | `radixark/miles:dev-cu12`          | `linux/amd64`                 | CUDA 12.9 legacy                               |
-| `rocm700-mi30x` | `rocm/sgl-dev:miles-rocm700-mi30x` | native                       | AMD MI30x (`gfx942`, ROCm 7.0) — `docker/Dockerfile.rocm` |
-| `rocm700-mi35x` | `rocm/sgl-dev:miles-rocm700-mi35x` | native                       | AMD MI35x (`gfx950`, ROCm 7.0) — `docker/Dockerfile.rocm` |
-| `rocm720-mi35x` | `rocm/sgl-dev:miles-rocm720-mi35x` | native                       | AMD MI35x (`gfx950`, ROCm 7.2) — `docker/Dockerfile.rocm` |
+| `rocm700-mi30x` | `rocm/sgl-dev:orbit-rocm700-mi30x` | native                       | AMD MI30x (`gfx942`, ROCm 7.0) — `docker/Dockerfile.rocm` |
+| `rocm700-mi35x` | `rocm/sgl-dev:orbit-rocm700-mi35x` | native                       | AMD MI35x (`gfx950`, ROCm 7.0) — `docker/Dockerfile.rocm` |
+| `rocm720-mi35x` | `rocm/sgl-dev:orbit-rocm720-mi35x` | native                       | AMD MI35x (`gfx950`, ROCm 7.2) — `docker/Dockerfile.rocm` |
 
 
 The cu13 variants share one multi-arch CUDA base image and differ only in platforms. `cu13` runs a single `buildx --platform linux/amd64,linux/arm64` — buildx builds both arches and pushes them as one manifest in a single shot, with the Dockerfile picking each layer's wheels by `TARGETARCH` (see Dockerfile inputs), so `docker pull` auto-selects by host arch.
@@ -73,7 +73,7 @@ Non-docker PRs are untouched: `docker-paths` reports no change, `docker-build` i
 
 This workflow owns the rolling `dev` and `latest` image families. It has two jobs:
 
-- **`check-upstream`** (schedule / `simulate_schedule` only) — polls the inputs the image bakes: the HEAD SHA of sglang `sglang-miles` (`sgl-project/sglang`) and Megatron-LM `miles-main` (`radixark/Megatron-LM`) — the source branches it builds — plus a fingerprint of the selected `yueming-yuan/miles-wheels` rolling release, so a rebuilt sgl-router or other wheel also triggers a build (re-uploads to the same tag are caught by fingerprint, not commit SHA). It compares against the values cached from the last build and sets `should_build=true` if any moved. `miles` itself is intentionally not polled — that would rebuild far too often. This is what stops the 12-hour cron from rebuilding an unchanged image, with one staleness bound: because the image also bakes a `miles` checkout, `should_build` is forced to `true` once the last triggered build is **24h** old, so `dev` never drifts more than a day behind the `miles` repo even when sglang / Megatron / wheels are quiet. (The cache file's last line records the epoch of the last triggered build; it is only re-saved when a build fires.)
+- **`check-upstream`** (schedule / `simulate_schedule` only) — polls the inputs the image bakes: the HEAD SHA of sglang `sglang-miles` (`sgl-project/sglang`) and Megatron-LM `miles-main` (`radixark/Megatron-LM`) — the source branches it builds — plus a fingerprint of the selected `yueming-yuan/miles-wheels` rolling release, so a rebuilt sgl-router or other wheel also triggers a build (re-uploads to the same tag are caught by fingerprint, not commit SHA). It compares against the values cached from the last build and sets `should_build=true` if any moved. `orbit` itself is intentionally not polled — that would rebuild far too often. This is what stops the 12-hour cron from rebuilding an unchanged image, with one staleness bound: because the image also bakes a `orbit` checkout, `should_build` is forced to `true` once the last triggered build is **24h** old, so `dev` never drifts more than a day behind the `orbit` repo even when sglang / Megatron / wheels are quiet. (The cache file's last line records the epoch of the last triggered build; it is only re-saved when a build fires.)
 - **`build-and-push`** (self-hosted `docker-build` runner) — calls `docker/build.py` to build + push, then conditionally points `latest` at the new `dev` and prunes old timestamped tags.
 
 `build-and-push` runs when `check-upstream` was skipped, or ran and reported `should_build=true`.
@@ -102,7 +102,7 @@ All images push to **Docker Hub**. CUDA variants → `radixark/miles`; ROCm vari
 | --- | --- | --- |
 | `cu13` / `cu13-x86` / `cu13-aarch64` | `radixark/miles:dev` + `radixark/miles:dev-<YYYYMMDDHHMM>` | `radixark/miles:latest` |
 | `cu12-x86` | `radixark/miles:dev-cu12` (+ timestamped sibling) | `radixark/miles:latest-cu12` |
-| `rocm700-mi30x` / `rocm700-mi35x` / `rocm720-mi35x` | `rocm/sgl-dev:miles-rocm7xx-mi3xx` (+ timestamped sibling) | `rocm/sgl-dev:latest-rocm7xx-mi3xx` |
+| `rocm700-mi30x` / `rocm700-mi35x` / `rocm720-mi35x` | `rocm/sgl-dev:orbit-rocm7xx-mi3xx` (+ timestamped sibling) | `rocm/sgl-dev:latest-rocm7xx-mi3xx` |
 
 What **moves a shared tag**: `--image-tag dev` overwrites `:dev` (or `:dev-cu12`) and adds a timestamped sibling; on a **scheduled** run `latest`→`dev` *and* `latest-cu12`→`dev-cu12` both advance; pruning likewise runs **only on schedule**, keeping the newest 20 of **each** series — `dev-<ts>` and `dev-cu12-<ts>` independently. Any `workflow_dispatch` — **including** `simulate_schedule` — writes its own tag(s) but never moves `latest` or prunes; only the real cron mutates published tags. See the trigger table above.
 
@@ -143,7 +143,7 @@ Pushes use a Docker Hub credential, not your identity:
 
 ## Versioned release build (`release-docker.yml`)
 
-`release-docker.yml` checks out the supplied release ref, requires its committed `release-lock.json`, and passes the locked SGLang and Megatron-LM commits plus the checked-out Miles SHA as final `--build-arg` overrides. Rolling `docker-build.yml` keeps the branch defaults. Published tags and the guarded dispatch and retry procedure are documented in [Release a Version](/ci/04-release).
+`release-docker.yml` checks out the supplied release ref, requires its committed `release-lock.json`, and passes the locked SGLang and Megatron-LM commits plus the checked-out Orbit SHA as final `--build-arg` overrides. Rolling `docker-build.yml` keeps the branch defaults. Published tags and the guarded dispatch and retry procedure are documented in [Release a Version](/ci/04-release).
 
 ## Image retention (open)
 

@@ -10,8 +10,8 @@ from tau_bench.agents.tool_calling_agent import RESPOND_ACTION_NAME, ToolCalling
 from tau_bench.types import Action, RunConfig
 from transformers import AutoTokenizer
 
-from miles.rollout.sglang_rollout import GenerateState
-from miles.utils.http_utils import post
+from orbit.rollout.sglang_rollout import GenerateState
+from orbit.utils.http_utils import post
 
 # Set up logger for this module
 logger = logging.getLogger(__name__)

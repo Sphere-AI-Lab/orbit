@@ -50,7 +50,7 @@ LoRA target modules default from the model family's
 
 ## 3. Three weight-sync strategies
 
-Selection logic in `miles/backends/fsdp_utils/actor.py`:
+Selection logic in `orbit/backends/fsdp_utils/actor.py`:
 
 | Condition | Updater class | Behavior |
 |---|---|---|
@@ -58,7 +58,7 @@ Selection logic in `miles/backends/fsdp_utils/actor.py`:
 | `--use-lora`, no IPC | `DiffusionUpdateWeightFromTensorLoRA` | Merge `W + αBA/r` on train side, push merged weights |
 | `--use-lora --lora-ipc-weight-sync` | `DiffusionUpdateWeightFromTensorLoRAIPC` | Push only `lora_A`/`lora_B`; rollout merges via `weight_update_mode=lora_merge` |
 
-Implementation: `miles/backends/fsdp_utils/diffusion_update_weight_utils.py`.
+Implementation: `orbit/backends/fsdp_utils/diffusion_update_weight_utils.py`.
 
 ### Full-weight sync (no LoRA)
 
@@ -120,14 +120,14 @@ worker stderr under `~/.ray/session_latest/logs/`.
 
 | File | Role |
 |---|---|
-| `miles/backends/fsdp_utils/diffusion_update_weight_utils.py` | Three updater classes + `PeftLoRAKeyMapper` |
-| `miles/backends/fsdp_utils/actor.py` | Updater selection, LoRA apply via PEFT |
-| `miles/backends/sglang_diffusion_utils/sglang_diffusion_engine.py` | HTTP `update_weights_from_tensor` to rollout |
-| `miles/ray/rollout.py` | Engine env vars (`SGLANG_DIFFUSION_LORA_MERGE_FP32`) |
+| `orbit/backends/fsdp_utils/diffusion_update_weight_utils.py` | Three updater classes + `PeftLoRAKeyMapper` |
+| `orbit/backends/fsdp_utils/actor.py` | Updater selection, LoRA apply via PEFT |
+| `orbit/backends/sglang_diffusion_utils/sglang_diffusion_engine.py` | HTTP `update_weights_from_tensor` to rollout |
+| `orbit/ray/rollout.py` | Engine env vars (`SGLANG_DIFFUSION_LORA_MERGE_FP32`) |
 
 ## 5. Limitations
 
 - **Colocate only** — disaggregated train/rollout is not supported for LoRA IPC.
 - **Single adapter per run** — one set of `--lora-*` flags per job.
 - **FSDP backend** — LoRA weight sync is implemented for the FSDP diffusion
-  actor; Megatron LLM LoRA (in upstream Miles) uses a separate path.
+  actor; Megatron LLM LoRA (in upstream Orbit) uses a separate path.

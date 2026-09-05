@@ -15,7 +15,7 @@ import tempfile
 
 from tests.ci.ci_register import register_cuda_ci, register_rocm_ci
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 register_cuda_ci(est_time=500, suite="stage-c-8-gpu-h100", labels=["short"])
 register_rocm_ci(est_time=600, suite="nightly-stage-c-8-gpu-mi350", labels=["short"])

@@ -11,7 +11,7 @@ def model_args(nlayers: int | None = None, first_k_dense_replace: int | None = N
         else int(os.environ.get("MODEL_ARGS_FIRST_K_DENSE_REPLACE") or 3)
     )
     return (
-        "--spec miles_plugins.models.glm5.glm5 get_glm5_spec "
+        "--spec orbit_plugins.models.glm5.glm5 get_glm5_spec "
         "--disable-bias-linear "
         f"--num-layers {nlayers} "
         "--hidden-size 7168 "

@@ -12,7 +12,7 @@ register_cpu_ci(est_time=10, suite="stage-a-fast")
 def test_payload_tracker_is_available_and_counts_the_wire_payload():
     """Removing sync_metrics must fail before any PEFT transport can be built."""
     try:
-        from miles.backends.megatron_utils.update_weight.sync_metrics import WeightSyncPayloadTracker
+        from orbit.backends.megatron_utils.update_weight.sync_metrics import WeightSyncPayloadTracker
     except ModuleNotFoundError as exc:
         pytest.fail(f"PEFT transports require the weight-sync metrics module: {exc}")
 

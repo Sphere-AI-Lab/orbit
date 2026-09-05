@@ -4,12 +4,12 @@ from dataclasses import dataclass
 import pytest
 import torch
 
-from miles.backends.megatron_utils.peft_transport import build_peft_transport
-from miles.backends.megatron_utils.peft_transport.backends import ray_object as ray_backend
-from miles.backends.megatron_utils.peft_transport.backends.ray_object import RayObjectBackend
-from miles.backends.megatron_utils.peft_transport.registry import PEFT_METHODS, PeftMethodSpec
-from miles.backends.megatron_utils.peft_transport.runtime import resolve_peft_runtime_mode
-from miles.backends.megatron_utils.peft_utils import PeftSyncSpec
+from orbit.backends.megatron_utils.peft_transport import build_peft_transport
+from orbit.backends.megatron_utils.peft_transport.backends import ray_object as ray_backend
+from orbit.backends.megatron_utils.peft_transport.backends.ray_object import RayObjectBackend
+from orbit.backends.megatron_utils.peft_transport.registry import PEFT_METHODS, PeftMethodSpec
+from orbit.backends.megatron_utils.peft_transport.runtime import resolve_peft_runtime_mode
+from orbit.backends.megatron_utils.peft_utils import PeftSyncSpec
 
 
 class _RemoteMethod:
@@ -49,7 +49,7 @@ def _args(peft_method="lora", transport="ray", double_buffer=False):
 def _sync_spec(method="lora"):
     return PeftSyncSpec(
         method=method,
-        adapter_name=f"miles_{method}",
+        adapter_name=f"orbit_{method}",
         adapter_config={"peft_type": method.upper()},
         sync_transport=f"{method}_adapter",
     )
@@ -61,7 +61,7 @@ def _fake_ray_get(value):
 
 def test_build_peft_transport_selects_ray_backend(monkeypatch):
     monkeypatch.setattr(
-        "miles.backends.megatron_utils.peft_transport.build_peft_sync_spec",
+        "orbit.backends.megatron_utils.peft_transport.build_peft_sync_spec",
         lambda _args: _sync_spec("lora"),
     )
 
@@ -103,7 +103,7 @@ def test_ray_backend_sends_lora_adapter_and_weight_version(monkeypatch):
     assert load_call["payload_tag"] == "flattened_lora_payload"
     assert load_call["load_format"] == "lora_adapter"
     assert load_call["adapter_config"] == {"peft_type": "LORA"}
-    assert load_call["adapter_name"] == "miles_lora"
+    assert load_call["adapter_name"] == "orbit_lora"
     assert load_call["flat_tensor"].device.type == "cpu"
     assert engine.update_weight_version.calls == [{"weight_version": "7"}]
 
@@ -156,5 +156,5 @@ def test_ray_backend_sends_oft_adapter_and_weight_version(monkeypatch):
     assert load_call["entries"] == [("m0", 0)]
     assert load_call["load_format"] == "oft_adapter"
     assert load_call["adapter_config"] == {"peft_type": "OFT"}
-    assert load_call["adapter_name"] == "miles_oft"
+    assert load_call["adapter_name"] == "orbit_oft"
     assert engine.update_weight_version.calls == [{"weight_version": "11"}]

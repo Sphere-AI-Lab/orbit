@@ -9,12 +9,12 @@
 set -ex
 HF_IN=${1:?hf checkpoint dir}
 SAVE_OUT=${2:?torch_dist save dir}
-MILES_DIR=${MILES_DIR:-"$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." &>/dev/null && pwd)"}
+ORBIT_DIR=${ORBIT_DIR:-"$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." &>/dev/null && pwd)"}
 MEGATRON_PATH=${MEGATRON_PATH:-/root/Megatron-LM}
 
 # Identical architecture spec to phase2_gb200.sh's MODEL_ARGS.
 MODEL_ARGS=(
-   --spec miles_plugins.models.qwen3_5 get_qwen3_5_spec
+   --spec orbit_plugins.models.qwen3_5 get_qwen3_5_spec
    --disable-bias-linear --qk-layernorm --group-query-attention
    --num-attention-heads 16 --num-query-groups 2 --kv-channels 256
    --num-layers 40 --hidden-size 2048 --ffn-hidden-size 512
@@ -30,8 +30,8 @@ MODEL_ARGS=(
    --mtp-num-layers 1
 )
 
-cd "${MILES_DIR}"
-PYTHONPATH="${MILES_DIR}:${MEGATRON_PATH}" python3 "${MILES_DIR}/tools/convert_hf_to_torch_dist.py" \
+cd "${ORBIT_DIR}"
+PYTHONPATH="${ORBIT_DIR}:${MEGATRON_PATH}" python3 "${ORBIT_DIR}/tools/convert_hf_to_torch_dist.py" \
    "${MODEL_ARGS[@]}" \
    --hf-checkpoint "${HF_IN}" \
    --save "${SAVE_OUT}"

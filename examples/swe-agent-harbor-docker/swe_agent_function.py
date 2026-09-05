@@ -19,7 +19,7 @@ from urllib.parse import urlparse, urlsplit, urlunparse
 
 import httpx
 
-from miles.utils.http_utils import post
+from orbit.utils.http_utils import post
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ async def run(
     )
 
     session_url = f"{base_url}/v1"
-    external_host = os.getenv("MILES_ROUTER_EXTERNAL_HOST")
+    external_host = os.getenv("ORBIT_ROUTER_EXTERNAL_HOST")
     if external_host:
         parsed = urlparse(session_url)
         port = parsed.port
@@ -137,7 +137,7 @@ async def run(
 async def abort(args) -> None:
     """Teardown hook for oversampling abort (called by sglang_rollout.abort).
 
-    When Miles has enough samples and aborts SGLang, the in-flight Harbor trials
+    When Orbit has enough samples and aborts SGLang, the in-flight Harbor trials
     keep looping and hitting SGLang until they hit their own max_seq_len/timeout.
     Flush the agent server so it cancels those ``/run`` tasks and releases their
     containers. No-op unless AGENT_SERVER_URL and session_server_instance_id are

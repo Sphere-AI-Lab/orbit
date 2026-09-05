@@ -7,7 +7,7 @@ inference. Pipelines that train in BF16 and serve in FP8 accumulate per-layer
 numerical disagreement, which compounds into divergent log-probabilities and
 gradients pointing in unintended directions.
 
-Miles supports a unified low-precision path where rollout and training share
+Orbit supports a unified low-precision path where rollout and training share
 the same quantization logic on the forward pass. The same path is wired up for
 three formats today — **block-wise FP8**, **MXFP8**, and **NVFP4** — plus the
 lower-friction "BF16 train + FP8 inference" mode that's useful when standing
@@ -40,7 +40,7 @@ flags for the end-to-end MXFP8 and NVFP4 recipes below.
 
 ## Unified training recipe
 
-| Stage | Typical pipeline | Miles unified low-precision |
+| Stage | Typical pipeline | Orbit unified low-precision |
 |---|---|---|
 | Rollout (forward) | FP8 / MXFP8 / NVFP4 GEMM | Matching low-precision GEMM |
 | Trainer (forward) | BF16 GEMM | Matching low-precision GEMM |
@@ -69,7 +69,7 @@ CKPT_ARGS=(
 ```
 
 Reference recipe:
-[`examples/infra_features/low_precision/run-qwen3-4b-fp8.sh`](https://github.com/radixark/miles/blob/main/examples/infra_features/low_precision/run-qwen3-4b-fp8.sh)
+[`examples/infra_features/low_precision/run-qwen3-4b-fp8.sh`](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/infra_features/low_precision/run-qwen3-4b-fp8.sh)
 — single-node Qwen3-4B. It serves an FP8 checkpoint to SGLang and trains from a
 BF16 `torch_dist` checkpoint; it sets no `--fp8-recipe`, so the trainer forward
 stays BF16.
@@ -98,7 +98,7 @@ Block layout is 128×128 with FP32 scales.
 | `--use-tis` | Truncated Importance Sampling for residual precision drift. |
 
 `NVTE_FP8_BLOCK_SCALING_FP32_SCALES` is set for you in the actor env
-(`miles/ray/train/actor_factory.py`), defaulting by hardware: `1` on Hopper, and
+(`orbit/ray/train/actor_factory.py`), defaulting by hardware: `1` on Hopper, and
 `0` on Blackwell, where TransformerEngine emulates the block-wise recipe with
 MXFP8 and needs power-of-two scales. Override it only if you know you want the
 non-default for your GPU.
@@ -112,7 +112,7 @@ For MoE workloads, also consider `--use-rollout-routing-replay` (R3). The
 canonical recipe leaves it commented out by default but the flag is available.
 
 Reference recipe:
-[`examples/infra_features/low_precision/run-qwen3-30b-a3b-fp8-two-nodes.sh`](https://github.com/radixark/miles/blob/main/examples/infra_features/low_precision/run-qwen3-30b-a3b-fp8-two-nodes.sh)
+[`examples/infra_features/low_precision/run-qwen3-30b-a3b-fp8-two-nodes.sh`](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/infra_features/low_precision/run-qwen3-30b-a3b-fp8-two-nodes.sh)
 — two-node Qwen3-30B-A3B.
 
 ### 3. Unified MXFP8 (Blackwell)
@@ -153,7 +153,7 @@ The training path uses:
 SGLang selects the MoE and dense linear GEMM backends independently. Common
 MXFP8 choices are:
 
-| Workload | Miles flag | Backends |
+| Workload | Orbit flag | Backends |
 |---|---|---|
 | MoE | `--sglang-moe-runner-backend` | `flashinfer_trtllm_routed`, `flashinfer_trtllm`, `cutlass` |
 | Dense linear GEMM | `--sglang-fp8-gemm-backend` | `flashinfer_trtllm`, `flashinfer_cutlass`, `triton` |
@@ -176,7 +176,7 @@ higher-precision master weight copy remains present during training.
 ### 4. NVFP4 (Blackwell)
 
 NVFP4 stores E2M1 values in 16-value blocks with an E4M3 scale for each block
-and an outer FP32 scale. The Miles reference recipe combines NVFP4 and BF16
+and an outer FP32 scale. The Orbit reference recipe combines NVFP4 and BF16
 through tensor-level precision configuration.
 
 Activation scaling is computed per token. Gate and up projections are
@@ -286,7 +286,7 @@ export FLASHINFER_NVFP4_4OVER6_ERR_USE_FAST_MATH=0
 
 ## Fine-grained BF16 exceptions
 
-Miles supports per-layer precision configuration across checkpoint
+Orbit supports per-layer precision configuration across checkpoint
 conversion, Megatron training, SGLang rollout, and live weight export.
 
 | Control | Purpose |
@@ -322,5 +322,5 @@ contraction axis does not match a one-dimensional scaling layout.
 ## Further reading
 
 * [Blackwell MXFP8 and NVFP4 RL roadmap](https://github.com/radixark/miles/issues/615)
-* [Towards Blackwell-Native 8-bit and 4-bit RL: End-to-End MXFP8 and NVFP4 RL in Miles](https://www.lmsys.org/blog/2026-07-29-mxfp8-nvfp4-rl)
+* [Towards Blackwell-Native 8-bit and 4-bit RL: End-to-End MXFP8 and NVFP4 RL in Orbit](https://www.lmsys.org/blog/2026-07-29-mxfp8-nvfp4-rl)
 * [The 4-bitter Lesson](https://humansand.ai/blog/nvfp4-rl)

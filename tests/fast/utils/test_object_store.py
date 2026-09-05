@@ -10,8 +10,8 @@ import pytest
 import ray
 import torch
 
-from miles.ray.rollout.train_data_conversion import ROLLOUT_DATA_VALUE_SPEC
-from miles.utils import object_store
+from orbit.ray.rollout.train_data_conversion import ROLLOUT_DATA_VALUE_SPEC
+from orbit.utils import object_store
 
 
 def _mooncake_available() -> bool:

@@ -2,7 +2,7 @@
 adapter constructor under the exact keyword name Bridge expects.
 
 Why this file exists (and is not tests/fast/backends/megatron_utils/test_lora_utils.py):
-importing `miles.backends.megatron_utils` for real runs its `__init__.py`, which
+importing `orbit.backends.megatron_utils` for real runs its `__init__.py`, which
 unconditionally `import deep_ep` (CUDA-only, raises AssertionError via
 find_cuda_home() on this box), and `lora_utils.py` depends on `.peft_utils`,
 which does `from megatron.core import mpu` at module scope (needs a sourced
@@ -11,7 +11,7 @@ that's exactly why tests/fast/backends/megatron_utils/test_lora_utils.py is a
 pre-existing collection error here.
 
 Instead of importing the package, this test stubs those two dependencies in
-sys.modules and loads the real miles/backends/megatron_utils/lora_utils.py
+sys.modules and loads the real orbit/backends/megatron_utils/lora_utils.py
 straight from disk by file path, so create_lora_instance's actual logic
 executes completely unmodified -- only its imports are faked. Megatron-Bridge's
 `megatron.bridge.peft.lora.LoRA` / `canonical_lora.CanonicalLoRA` are stubbed
@@ -26,23 +26,23 @@ from pathlib import Path
 from types import ModuleType
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_LORA_UTILS_PATH = _REPO_ROOT / "miles" / "backends" / "megatron_utils" / "lora_utils.py"
+_LORA_UTILS_PATH = _REPO_ROOT / "orbit" / "backends" / "megatron_utils" / "lora_utils.py"
 
 
-def _install_stub_miles_backends_megatron_utils_package(monkeypatch):
-    # Prevent the real miles/backends/megatron_utils/__init__.py from running --
+def _install_stub_orbit_backends_megatron_utils_package(monkeypatch):
+    # Prevent the real orbit/backends/megatron_utils/__init__.py from running --
     # it unconditionally imports deep_ep, which raises AssertionError
     # (find_cuda_home) on a box with no CUDA toolchain.
-    pkg = ModuleType("miles.backends.megatron_utils")
+    pkg = ModuleType("orbit.backends.megatron_utils")
     pkg.__path__ = []
-    monkeypatch.setitem(sys.modules, "miles.backends.megatron_utils", pkg)
+    monkeypatch.setitem(sys.modules, "orbit.backends.megatron_utils", pkg)
 
 
 def _install_stub_peft_utils(monkeypatch):
     # The real peft_utils.py does `from megatron.core import mpu` at module
     # scope, which needs a sourced CUDA env. Fake just the names lora_utils.py
     # imports from it; create_lora_instance only actually calls the first two.
-    stub = ModuleType("miles.backends.megatron_utils.peft_utils")
+    stub = ModuleType("orbit.backends.megatron_utils.peft_utils")
 
     # lora_utils imports this for a type annotation only
     # (checkpoint_preflight: PeftCheckpointPreflight | None). The name still has
@@ -61,7 +61,7 @@ def _install_stub_peft_utils(monkeypatch):
     stub.parse_exclude_modules = lambda *a, **k: None
     stub.resolve_target_modules_hf = lambda *a, **k: []
     stub.save_peft_adapter_checkpoint = lambda *a, **k: None
-    monkeypatch.setitem(sys.modules, "miles.backends.megatron_utils.peft_utils", stub)
+    monkeypatch.setitem(sys.modules, "orbit.backends.megatron_utils.peft_utils", stub)
 
 
 class _RecordingLoRA:
@@ -96,11 +96,11 @@ def _install_stub_bridge_peft(monkeypatch):
 
 
 def _load_real_lora_utils(monkeypatch):
-    _install_stub_miles_backends_megatron_utils_package(monkeypatch)
+    _install_stub_orbit_backends_megatron_utils_package(monkeypatch)
     _install_stub_peft_utils(monkeypatch)
-    spec = importlib.util.spec_from_file_location("miles.backends.megatron_utils.lora_utils", _LORA_UTILS_PATH)
+    spec = importlib.util.spec_from_file_location("orbit.backends.megatron_utils.lora_utils", _LORA_UTILS_PATH)
     module = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, "miles.backends.megatron_utils.lora_utils", module)
+    monkeypatch.setitem(sys.modules, "orbit.backends.megatron_utils.lora_utils", module)
     spec.loader.exec_module(module)
     return module
 
@@ -120,7 +120,7 @@ def _make_args(**overrides):
 
 
 def test_lora_a_init_method_reaches_bridge_as_capital_a_kwarg(monkeypatch):
-    """The exact silent-failure mode this task exists to prevent: Miles's CLI
+    """The exact silent-failure mode this task exists to prevent: Orbit's CLI
     landing attribute is lowercase (`lora_a_init_method`, produced by argparse
     from `--lora-a-init-method`), but Megatron-Bridge's LoRA dataclass field is
     capital-A (`lora_A_init_method`). If lora_utils.py's getattr key ever drifts

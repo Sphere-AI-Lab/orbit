@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import torch
 
-from miles.utils.debug_utils.run_megatron.worker.output import (
+from orbit.utils.debug_utils.run_megatron.worker.output import (
     _compute_logprob_entries,
     _compute_output_info,
     compute_and_save_output_info,
@@ -122,8 +122,8 @@ class TestComputeLogprobEntries:
 # ---------------------------------------------------------------------------
 
 
-_MOCK_DIST = "miles.utils.debug_utils.run_megatron.worker.output.dist"
-_MOCK_GET_PARALLEL_STATE = "miles.utils.debug_utils.run_megatron.worker.output.get_parallel_state"
+_MOCK_DIST = "orbit.utils.debug_utils.run_megatron.worker.output.dist"
+_MOCK_GET_PARALLEL_STATE = "orbit.utils.debug_utils.run_megatron.worker.output.get_parallel_state"
 
 
 def _patch_distributed(

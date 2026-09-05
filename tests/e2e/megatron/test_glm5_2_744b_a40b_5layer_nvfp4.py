@@ -4,7 +4,7 @@ from pathlib import Path
 
 from tests.ci.ci_register import register_cuda_ci
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 register_cuda_ci(
     est_time=3600,
@@ -267,7 +267,7 @@ def execute():
 
     misc_args = (
         "--use-rollout-routing-replay "
-        "--use-miles-router "
+        "--use-orbit-router "
         "--sglang-disable-shared-experts-fusion "
         "--attention-dropout 0.0 "
         "--hidden-dropout 0.0 "
@@ -275,7 +275,7 @@ def execute():
         "--attention-softmax-in-fp32 "
         "--attention-backend flash "
         "--allgather-cp "
-        "--miles-dsa-topk-backend flashinfer "
+        "--orbit-dsa-topk-backend flashinfer "
         f"--update-weight-buffer-size {2 * 1024 ** 3} "
         "--actor-num-nodes 1 "
         f"--actor-num-gpus-per-node {ACTOR_NUM_GPUS} "

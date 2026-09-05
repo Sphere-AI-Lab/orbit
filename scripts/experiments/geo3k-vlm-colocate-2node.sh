@@ -2,9 +2,9 @@
 #
 # geo3k-vlm-colocate-2node — Qwen3-VL-8B-Instruct GRPO on geo3k, 2-node colocated.
 #
-# We are forced into colocate mode for VLM because miles' megatron→HF weight
+# We are forced into colocate mode for VLM because orbit' megatron→HF weight
 # converter only ships LLM mappings: dispatch in
-# miles/backends/megatron_utils/megatron_to_hf/__init__.py matches "qwen3"
+# orbit/backends/megatron_utils/megatron_to_hf/__init__.py matches "qwen3"
 # and routes to convert_qwen2_to_hf, which has no vision_model.* entries.
 # Disagg requires that converter to round-trip the full ViT+LLM state at
 # every update_weights — which is exactly where geo3k-vlm-disagg-2node
@@ -27,7 +27,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}
 RECIPE_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
 
 # ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ HF_EVAL_DATA="$HF_CACHE_DIR/data/geo3k_imgurl/test.parquet"
 # ---------------------------------------------------------------------------
 MODEL_ARGS_ROTARY_BASE=5000000
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-8B.sh"
+source "$ORBIT_REPO/scripts/models/qwen3-8B.sh"
 MODEL_ARGS+=( --megatron-to-hf-mode bridge )
 
 RUN_NAME=${SLURM_JOB_NAME:-$RECIPE_NAME}
@@ -163,7 +163,7 @@ LAYOUT_ARGS=(
    --rollout-num-gpus       16
 )
 
-MILES_ARGS=(
+ORBIT_ARGS=(
    "${LAYOUT_ARGS[@]}"
    "${MODEL_ARGS[@]}"
    "${CKPT_ARGS[@]}"

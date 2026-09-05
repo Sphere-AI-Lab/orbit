@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-# Emitted by Miles' own rollout metrics. Its presence proves the hook returned
+# Emitted by Orbit' own rollout metrics. Its presence proves the hook returned
 # False and layered, rather than suppressing the built-in logging.
 DEFAULT_METRICS_RE = re.compile(r"\bperf \d+:")
 
@@ -36,7 +36,7 @@ class Report:
 def _expected_from_args(run_dir: Path) -> tuple[int | None, int | None]:
     """Read the run's own args.json so expectations track the recipe, not a guess.
 
-    launch_miles.sbatch writes a flat {"flag-name": value} mapping (no leading
+    launch_orbit.sbatch writes a flat {"flag-name": value} mapping (no leading
     dashes). An argv list is also accepted so this keeps working if that changes.
     """
     args_path = run_dir / "args.json"
@@ -144,7 +144,7 @@ def main() -> int:
     # Images prove the prompt diagram survived into the trace, not just text.
     report.check(with_images > 0, "records carry images", f"{with_images}/{total_records}")
     # >1 turn proves multi-turn capture reached the trace via metadata, rather
-    # than only the single final response Miles would record on its own.
+    # than only the single final response Orbit would record on its own.
     report.check(multi_turn > 0, "at least one multi-turn record", f"{multi_turn} found")
 
     log = run_dir / "run.log"

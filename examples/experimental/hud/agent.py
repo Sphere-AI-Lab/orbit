@@ -1,4 +1,4 @@
-"""The agent Miles drives HUD environments with: HUD's own OpenAI-compatible
+"""The agent Orbit drives HUD environments with: HUD's own OpenAI-compatible
 harness, plus the one thing it lacks for computer use -- a screen
 (:mod:`.computer_tool` explains that gap). The loop, tool plumbing, trace
 recording and token-level ``Sample`` collection are all inherited unchanged.

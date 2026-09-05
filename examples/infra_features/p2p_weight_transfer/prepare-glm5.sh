@@ -93,7 +93,7 @@ snapshot_download('${HF_REPO}', local_dir='/root/models/${MODEL_NAME}')
 "
 
 python3 -c "
-from miles.utils.external_utils.command_utils import hf_download_dataset
+from orbit.utils.external_utils.command_utils import hf_download_dataset
 hf_download_dataset('zhuzilin/dapo-math-17k')
 "
 
@@ -207,7 +207,7 @@ if [ "${DOWNLOAD_ONLY}" -eq 0 ]; then
     fi
 
     python3 -c "
-from miles.utils.external_utils.command_utils import convert_checkpoint
+from orbit.utils.external_utils.command_utils import convert_checkpoint
 kwargs = dict(
     model_name='${MODEL_NAME}',
     megatron_model_type='${MODEL_TYPE}',

@@ -33,7 +33,7 @@ source "$SCRIPT_DIR/07a-geo3k-multiturn-hybrid-fully-async-smoke.sh"
 
 # These are training-dynamics runs, not checkpoint-producing jobs. Fail closed
 # if a future shared recipe introduces any checkpoint-save option.
-for arg in "${MILES_ARGS[@]}"; do
+for arg in "${ORBIT_ARGS[@]}"; do
    case "$arg" in
       --save | --save-* | --async-save)
          echo "FATAL: milestone 09 must not save checkpoints (found $arg)" >&2

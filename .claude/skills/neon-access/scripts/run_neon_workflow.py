@@ -63,7 +63,7 @@ def _create_recipient(temp_dir):
             "rsa:3072",
             "-nodes",
             "-subj",
-            "/CN=miles-neon-access",
+            "/CN=orbit-neon-access",
             "-days",
             "1",
             "-keyout",
@@ -127,7 +127,7 @@ def _delete_artifact(run_id, artifact_name):
 
 
 def _parse_args(argv):
-    parser = argparse.ArgumentParser(description="Run arbitrary SQL through the authorized Miles Neon workflow.")
+    parser = argparse.ArgumentParser(description="Run arbitrary SQL through the authorized Orbit Neon workflow.")
     parser.add_argument("sql_file", type=Path)
     parser.add_argument("--reason", required=True)
     parser.add_argument(
@@ -155,7 +155,7 @@ def main(argv=None):
         raise SystemExit(f"GitHub user {actor} has {permission!r}, not write/admin permission")
 
     repository = _gh_api(f"repos/{REPOSITORY}")
-    with tempfile.TemporaryDirectory(prefix="miles-neon-access-") as temp_name:
+    with tempfile.TemporaryDirectory(prefix="orbit-neon-access-") as temp_name:
         temp_dir = Path(temp_name)
         os.chmod(temp_dir, 0o700)
         key_path, cert_path, cert_base64 = _create_recipient(temp_dir)

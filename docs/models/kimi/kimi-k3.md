@@ -3,7 +3,7 @@ title: Kimi-K3
 description: LoRA RL recipe for Kimi-K3, a KDA + MLA hybrid with an 896-expert latent MoE, trained colocated with SGLang.
 ---
 
-The complete Kimi-K3 LoRA RL implementation is open at the Miles pull request:
+The complete Kimi-K3 LoRA RL implementation is open at the Orbit pull request:
 [`radixark/miles#1825`](https://github.com/radixark/miles/pull/1825). The scripts and image
 below come from that branch. Results and background are in the
 [LMSYS day-0 write-up](https://www.lmsys.org/blog/2026-07-27-kimi-k3-day0-support).
@@ -13,7 +13,7 @@ below come from that branch. Results and background are in the
 Kimi-K3 pairs two attention mechanisms in one stack, **KDA and MLA chosen per layer**,
 with an **896-expert latent MoE** at top-16. The checkpoint ships in **MXFP4**.
 
-miles trains it with **native LoRA adapters** rather than full fine-tuning, which is what
+orbit trains it with **native LoRA adapters** rather than full fine-tuning, which is what
 makes the recipe fit at all: the base weights stay frozen and only the adapters carry
 gradients. The adapters are implemented under TP, EP, PP and CP, with **shared-A and
 per-expert-B factors** across the 896 experts, and they are exported to the rollout engines
@@ -44,7 +44,7 @@ Architecture, from `scripts/models/kimi-k3.sh`: hidden 7168, FFN 33792, 96 atten
 
 ## 3. Environment Setup
 
-Use the `docker.io/radixark/miles:kimi-k3` image, which pins miles, SGLang (the
+Use the `docker.io/radixark/miles:kimi-k3` image, which pins orbit, SGLang (the
 [`sglang-miles-k3`](https://github.com/sgl-project/sglang/tree/sglang-miles-k3) branch) and
 flashinfer `0.6.15.post1` at the validated versions. On Hopper set
 `SGLANG_K3_ATTN_RES_MODE=jit`.
@@ -85,7 +85,7 @@ Training then takes the **MXFP4** directory as `--hf-checkpoint` and the convert
 ## 4. Launch
 
 Validated on **16 nodes × 4 GPUs**. One container per node; bring up a ray cluster across
-them, `export MILES_SCRIPT_EXTERNAL_RAY=1`, then:
+them, `export ORBIT_SCRIPT_EXTERNAL_RAY=1`, then:
 
 ```bash
 python scripts/run_kimi_k3_lora.py train \
@@ -166,8 +166,8 @@ weight sync, the adapter export is leaking and the run will die later rather tha
   benign PyTorch CUDA-IPC unlink race that otherwise aborts colocated weight sync at scale.
 - On Hopper, set `SGLANG_K3_ATTN_RES_MODE=jit`.
 - Weight conversion for K3 lives in
-  `miles/backends/megatron_utils/megatron_to_hf/kimi_k3.py`, and the model itself in
-  `miles_plugins/models/kimi_k3/`.
+  `orbit/backends/megatron_utils/megatron_to_hf/kimi_k3.py`, and the model itself in
+  `orbit_plugins/models/kimi_k3/`.
 
 ## 6. Pairs Well With
 

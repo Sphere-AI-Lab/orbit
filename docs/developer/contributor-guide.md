@@ -2,17 +2,17 @@
 title: Contributing
 description: Repository layout, the local loop, what enforces code style, what lives in .claude, and how to drive CI from a PR.
 ---
-Miles is open source under the LICENSE file in the repo. Contributions of every size are
+Orbit is open source under the LICENSE file in the repo. Contributions of every size are
 welcome: bug reports, doc fixes, new model recipes, full features.
 
 ## Repository layout
 
 ```text
-miles/
+orbit/
 ├── train.py                  # synchronous entry point
 ├── train_async.py            # fully-async entry point
 ├── train_multi_lora_async.py # multi-LoRA async entry point
-├── miles/                    # the package
+├── orbit/                    # the package
 │   ├── backends/
 │   │   ├── megatron_utils/   # Megatron actor, weight sync, checkpointing, fp32 markers
 │   │   ├── fsdp_utils/       # FSDP2 actor, per-arch adaptations, MoE kernels
@@ -20,11 +20,11 @@ miles/
 │   │   └── training_utils/   # loss / GRPO / PPO / GSPO / REINFORCE++, shared ParallelState
 │   ├── ray/                  # Ray actors, placement groups, the train and rollout groups
 │   ├── rollout/              # rollout functions, data source, filters, fully-async buffer
-│   ├── router/               # Miles Router (FastAPI proxy in router.py)
+│   ├── router/               # Orbit Router (FastAPI proxy in router.py)
 │   ├── dashboard/            # the run dashboard (collector + backend)
 │   ├── true_on_policy/       # true-on-policy contracts and model profiles
 │   └── utils/                # arguments.py, async / IO / distributed helpers, audit utils
-├── miles_plugins/            # opt-in plugins, imported by name from flags
+├── orbit_plugins/            # opt-in plugins, imported by name from flags
 │   ├── models/               # per-architecture Megatron specs and HF wrappers
 │   ├── mbridge/              # per-architecture weight bridges
 │   ├── megatron_bridge/      # megatron.bridge shims
@@ -40,7 +40,7 @@ miles/
 ## The local loop
 
 ```bash
-git remote add me git@github.com:<your_user>/miles.git
+git remote add me git@github.com:<your_user>/orbit.git
 git checkout -b feat/awesome
 
 pip install -e . --no-deps       # editable install, deps come from the image
@@ -63,27 +63,27 @@ you can reproduce it exactly with the same command locally.
 |---|---|
 | `ruff-check --fix` | Pycodestyle errors, Pyflakes, bugbear, pyupgrade. `E402` and `E501` are ignored on purpose |
 | `autoflake` | Removes unused imports in place |
-| `isort` | Import order, `--profile=black`, first-party is `miles` and `miles_plugins` |
+| `isort` | Import order, `--profile=black`, first-party is `orbit` and `orbit_plugins` |
 | `black` | Formatting at **line length 119** (`[tool.black]` in `pyproject.toml`) |
 | `check-yaml`, `check-case-conflict`, `detect-private-key`, `check-added-large-files` | Hygiene; files cap at 1000 KB |
 | `requirements-txt-fixer` | Keeps `requirements.txt` sorted |
 
-Three hooks are Miles-specific bans, each pointing at the API you should use instead:
+Three hooks are Orbit-specific bans, each pointing at the API you should use instead:
 
 | Ban | Use instead | Why |
 |---|---|---|
-| `mpu.get_*` | `get_parallel_state()` from `miles.backends.training_utils.parallel` | The two backends share one `ParallelState`; reading Megatron's `mpu` directly does not work under FSDP |
-| `AutoConfig.from_pretrained` / `AutoTokenizer.from_pretrained` | `load_hf_config` / `load_tokenizer` from `miles.utils` | The wrappers centralize trust, caching, and the multi-node file-system race |
+| `mpu.get_*` | `get_parallel_state()` from `orbit.backends.training_utils.parallel` | The two backends share one `ParallelState`; reading Megatron's `mpu` directly does not work under FSDP |
+| `AutoConfig.from_pretrained` / `AutoTokenizer.from_pretrained` | `load_hf_config` / `load_tokenizer` from `orbit.utils` | The wrappers centralize trust, caching, and the multi-node file-system race |
 | `huggingface-cli` | `hf` | The old CLI is deprecated upstream |
 
 If a commit legitimately needs an exception, the hooks carry `exclude` patterns; extend
 those in the same PR rather than disabling a hook.
 
 Beyond formatting, the conventions a reviewer will hold you to live in
-[`.claude/rules/general-code-style.md`](https://github.com/radixark/miles/blob/main/.claude/rules/general-code-style.md):
+[`.claude/rules/general-code-style.md`](https://github.com/Sphere-AI-Lab/orbit/blob/main/.claude/rules/general-code-style.md):
 prefer stateless and immutable, keep functions under roughly 100 lines and files under
 roughly 1000, initialize derived values once, keep imports at the top, use absolute
-imports, prefer keyword arguments where they add clarity. It applies to `miles/**/*.py`,
+imports, prefer keyword arguments where they add clarity. It applies to `orbit/**/*.py`,
 `scripts/**/*.py`, `tools/**/*.py`, `train.py` and `train_async.py`.
 
 ## What lives in `.claude`
@@ -124,7 +124,7 @@ Current sentinels, so you know when you have walked into one:
 | File | Governing document |
 |---|---|
 | `.github/workflows/pr-test.yml`, `pr-test-rocm.yml` | `docs/ci/00-stage.md`, `docs/ci/01-label.md` |
-| `.github/workflows/bot-bump-miles-version.yml`, `bot-cherry-pick.yml`, `release-*.yml` | `docs/ci/04-release.md` |
+| `.github/workflows/bot-bump-orbit-version.yml`, `bot-cherry-pick.yml`, `release-*.yml` | `docs/ci/04-release.md` |
 | `docker/build.py` | `docs/ci/02-docker-build.md` |
 | `tests/ci/metric_history/**` | `docs/ci/03-metric-history-gate.md` |
 
@@ -271,7 +271,7 @@ map it to a host.
 
 ## Where to ask
 
-* **Quick questions:** the `#miles-rl` channel of the [SGLang Slack](https://slack.sglang.ai).
+* **Quick questions:** the `#orbit-rl` channel of the [SGLang Slack](https://slack.sglang.ai).
 * **Design discussions:** a GitHub Discussion, or an Issue labeled `discussion`.
 * **CI internals:** [Stage](/ci/00-stage) (stages), [Labels](/ci/01-label) (label
   semantics), [Docker build](/ci/02-docker-build) (images),

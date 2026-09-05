@@ -1,8 +1,8 @@
 import random
 
-from miles.utils.misc import load_function
-from miles.utils.processing_utils import load_tokenizer
-from miles.utils.types import Sample
+from orbit.utils.misc import load_function
+from orbit.utils.processing_utils import load_tokenizer
+from orbit.utils.types import Sample
 
 MULTI_AGENT_CONFIGS = {
     "custom_multi_agent_function_path": "examples.experimental.multi_agent.agent_system.run_agent_system",

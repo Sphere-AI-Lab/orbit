@@ -3,7 +3,7 @@ default_language_version:
 
 # The vendored upstream module stays byte-diffable against its source; keep
 # formatters and linters away so upstream-tracking diffs remain minimal.
-exclude: '^miles/utils/chat_template_utils/templates/encoding_dsv32\.py$'
+exclude: '^orbit/utils/chat_template_utils/templates/encoding_dsv32\.py$'
 
 ci:
   autofix_prs: true
@@ -69,14 +69,14 @@ repos:
         language: pygrep
         entry: 'mpu\.get_'
         types: [python]
-        exclude: '(backends/megatron_utils/parallel\.py|tools/convert_to_hf\.py|miles_plugins/|examples/)'
+        exclude: '(backends/megatron_utils/parallel\.py|tools/convert_to_hf\.py|orbit_plugins/|examples/)'
 
       - id: ban-bare-auto-loaders
         name: Ban bare Auto{Config,Tokenizer}.from_pretrained (use load_hf_config / load_tokenizer)
         language: pygrep
         entry: '(AutoConfig|AutoTokenizer)\.from_pretrained'
         types: [python]
-        exclude: '(miles/utils/hf_config\.py|miles/utils/processing_utils\.py|tests/|test_utils/|miles_plugins/|examples/)'
+        exclude: '(orbit/utils/hf_config\.py|orbit/utils/processing_utils\.py|tests/|test_utils/|orbit_plugins/|examples/)'
 
       - id: ban-huggingface-cli
         name: Ban deprecated huggingface-cli (use hf)

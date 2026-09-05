@@ -10,8 +10,8 @@ description: Launch recipes for Kimi-K2-Instruct and Kimi-K2-Thinking — 32 nod
 
 - **Trillion-parameter MoE**: 1 T total / 32 B active per token, 61 layers (1 dense + the rest MoE), MLA attention shaped like DeepSeek-V3.
 - **Instruct and Thinking variants**: Instruct is the general-purpose chat / agentic post-train; Thinking adds step-by-step reasoning with a 256 K context and ships in native INT4.
-- **DeepSeek-V3-shaped architecture**: miles loads it through the DeepSeek-V3 path (one `sed` away), reusing the conversion + parallelism plumbing.
-- **INT4 QAT target**: Kimi-K2-Thinking is the canonical reference recipe for INT4 QAT in miles.
+- **DeepSeek-V3-shaped architecture**: orbit loads it through the DeepSeek-V3 path (one `sed` away), reusing the conversion + parallelism plumbing.
+- **INT4 QAT target**: Kimi-K2-Thinking is the canonical reference recipe for INT4 QAT in orbit.
 
 ## 2. Supported Variants
 
@@ -26,10 +26,10 @@ description: Launch recipes for Kimi-K2-Instruct and Kimi-K2-Thinking — 32 nod
 
 ```bash
 export MASTER_ADDR=<head node IP>
-export MILES_SCRIPT_EXTERNAL_RAY=1
+export ORBIT_SCRIPT_EXTERNAL_RAY=1
 ```
 
-`MASTER_ADDR` reaches the ray workers as the torch-distributed rendezvous address; `MILES_SCRIPT_EXTERNAL_RAY=1` tells the launcher the cluster is already up (see §4.2). Paths are Typer flags: `--model-dir` (default `/root/models`), `--data-dir` (default `/root/datasets`), `--output-dir` (default `/root/shared_data`) — all three on a shared FS reachable from every node.
+`MASTER_ADDR` reaches the ray workers as the torch-distributed rendezvous address; `ORBIT_SCRIPT_EXTERNAL_RAY=1` tells the launcher the cluster is already up (see §4.2). Paths are Typer flags: `--model-dir` (default `/root/models`), `--data-dir` (default `/root/datasets`), `--output-dir` (default `/root/shared_data`) — all three on a shared FS reachable from every node.
 
 ### 3.2 Download model + datasets
 
@@ -46,8 +46,8 @@ hf download --repo-type dataset zhuzilin/aime-2024     --local-dir /root/dataset
 Convert across 4 nodes (mirror the DeepSeek-V3 procedure):
 
 ```bash
-cd /root/miles
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py kimi-k2)" || exit 1   # or kimi-k2-thinking
+cd /root/orbit
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py kimi-k2)" || exit 1   # or kimi-k2-thinking
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM/ torchrun \
    --nproc-per-node 8 \
@@ -64,13 +64,13 @@ PYTHONPATH=/root/Megatron-LM/ torchrun \
 ### 4.1 Quick start
 
 ```bash
-cd /root/miles
+cd /root/orbit
 export MASTER_ADDR=...
 
-MILES_SCRIPT_EXTERNAL_RAY=1 python scripts/run_kimi_k2.py --model-name Kimi-K2-Thinking   # or Kimi-K2-Instruct
+ORBIT_SCRIPT_EXTERNAL_RAY=1 python scripts/run_kimi_k2.py --model-name Kimi-K2-Thinking   # or Kimi-K2-Instruct
 ```
 
-Both variants are one launcher selected by `--model-name`. With `MILES_SCRIPT_EXTERNAL_RAY=1` it skips `ray start` and submits to an **already-running Ray cluster** (`ray job submit ...`).
+Both variants are one launcher selected by `--model-name`. With `ORBIT_SCRIPT_EXTERNAL_RAY=1` it skips `ray start` and submits to an **already-running Ray cluster** (`ray job submit ...`).
 
 ### 4.2 Multi-node fan-out
 
@@ -114,7 +114,7 @@ Rollout shape (both):
 --rollout-max-response-len 32768   # Instruct
 --rollout-max-response-len 16384   # Thinking
 --over-sampling-batch-size 256
---dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
+--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
 --num-steps-per-rollout 4
 --balance-data
 ```

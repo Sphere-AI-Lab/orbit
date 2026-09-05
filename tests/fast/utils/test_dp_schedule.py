@@ -1,4 +1,4 @@
-"""CPU unit tests for miles.utils.dp_schedule.build_dp_schedule.
+"""CPU unit tests for orbit.utils.dp_schedule.build_dp_schedule.
 
 The tests assert the invariants documented at the top of dp_schedule.py against
 static / dynamic / VPP / oversize / balance / compact-rollout / trailing-trim
@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from miles.utils.dp_schedule import build_dp_schedule, has_full_schedule_config
+from orbit.utils.dp_schedule import build_dp_schedule, has_full_schedule_config
 
 
 def make_args(

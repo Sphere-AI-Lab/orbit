@@ -12,16 +12,16 @@
 #SBATCH --time=48:00:00
 set -uo pipefail
 
-: "${MILES_ROOT:?path to this miles checkout}"
-: "${CONTAINER_IMAGE:?squashfs image with the miles runtime}"
+: "${ORBIT_ROOT:?path to this orbit checkout}"
+: "${CONTAINER_IMAGE:?squashfs image with the orbit runtime}"
 : "${CONTAINER_MOUNTS:?must expose the checkouts, model/data dirs and node-local scratch}"
 : "${DAYTONA_ENV_FILE:?file exporting DAYTONA_API_KEY (chmod 600, never in git)}"
 : "${FABRIC_PREFIX:?leading octets of the compute-fabric IP, e.g. 10.4.}"
 
-RECIPE=$MILES_ROOT/examples/experimental/openenv/glm52_tbench2/run_glm5_2_744b_a40b_daytona.py
+RECIPE=$ORBIT_ROOT/examples/experimental/openenv/glm52_tbench2/run_glm5_2_744b_a40b_daytona.py
 RECIPE_ARGS=$(printf '%q ' "$@")
 C="--container-image=$CONTAINER_IMAGE --container-mounts=$CONTAINER_MOUNTS --container-name=ray"
-COMMON="export PYTHONNOUSERSITE=1 RAY_memory_monitor_refresh_ms=0 PYTHONPATH=$MILES_ROOT"
+COMMON="export PYTHONNOUSERSITE=1 RAY_memory_monitor_refresh_ms=0 PYTHONPATH=$ORBIT_ROOT"
 
 nodes=( $(scontrol show hostnames "$SLURM_JOB_NODELIST") )
 # Compute-fabric IP: `hostname -I` ordering varies and the management subnet
@@ -39,8 +39,8 @@ srun --overlap --nodes=1 --ntasks=1 --gpus-per-node=4 -w "${nodes[0]}" $C bash -
     echo \"waiting for ray nodes... (\$t/90)\"; sleep 10
   done
   source $DAYTONA_ENV_FILE
-  export MILES_SCRIPT_EXTERNAL_RAY=1 MASTER_ADDR=$head_ip OPENENV_RUN_ID=\${OPENENV_RUN_ID:-$SLURM_JOB_ID}
-  cd $MILES_ROOT
+  export ORBIT_SCRIPT_EXTERNAL_RAY=1 MASTER_ADDR=$head_ip OPENENV_RUN_ID=\${OPENENV_RUN_ID:-$SLURM_JOB_ID}
+  cd $ORBIT_ROOT
   python3 $RECIPE train --num-nodes $SLURM_JOB_NUM_NODES $RECIPE_ARGS
 " &
 HEAD_PID=$!

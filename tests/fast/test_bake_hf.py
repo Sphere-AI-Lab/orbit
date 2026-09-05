@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-import miles.merge.bake_hf as bake_hf
-from miles.merge.bake_hf import bake_linear_weight, cayley_neumann, skew_from_vec
+import orbit.merge.bake_hf as bake_hf
+from orbit.merge.bake_hf import bake_linear_weight, cayley_neumann, skew_from_vec
 
 
 class _FakeSaver:
@@ -109,7 +109,7 @@ def test_bake_hf_model_honors_block_share_config(monkeypatch, tmp_path):
 
 
 def test_hf_weight_key_mapping():
-    from miles.merge.bake_hf import _hf_weight_key
+    from orbit.merge.bake_hf import _hf_weight_key
 
     ok = "base_model.model.model.layers.0.self_attn.q_proj.oft_R.weight"
     assert _hf_weight_key(ok) == "model.layers.0.self_attn.q_proj.weight"

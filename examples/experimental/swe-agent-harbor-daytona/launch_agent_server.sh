@@ -2,7 +2,7 @@
 # Start the Harbor agent server in Daytona mode.
 #
 # Run this from the root of a harbor-framework/harbor checkout on the
-# harbor-miles-v0.20.0 branch, which carries the Miles integration, before
+# harbor-orbit-v0.20.0 branch, which carries the Orbit integration, before
 # launching examples/swe-agent-harbor-docker/run.py. Trials are graded inside Daytona cloud
 # sandboxes, so this host needs outbound HTTPS but no Docker daemon.
 set -euo pipefail
@@ -33,7 +33,7 @@ export HARBOR_RESPONSE_LENGTH_POLICY=abort
 
 mkdir -p "$TRIALS_DIR"
 
-exec python miles_agent_server.py \
+exec python orbit_agent_server.py \
     --host 0.0.0.0 \
     --port "$PORT" \
     --max-concurrent "$MAX_CONCURRENT" \

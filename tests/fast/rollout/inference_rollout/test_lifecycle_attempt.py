@@ -3,10 +3,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from miles.rollout.base_types import GenerateFnOutput
-from miles.rollout.inference_rollout import inference_rollout_common as common
-from miles.utils.lifecycle import TrajectoryLifecycle
-from miles.utils.types import Sample
+from orbit.rollout.base_types import GenerateFnOutput
+from orbit.rollout.inference_rollout import inference_rollout_common as common
+from orbit.utils.lifecycle import TrajectoryLifecycle
+from orbit.utils.types import Sample
 
 
 class RecordingSink:

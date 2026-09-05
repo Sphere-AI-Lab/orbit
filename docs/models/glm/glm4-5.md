@@ -20,7 +20,7 @@ description: Launch recipes for GLM-4.5 (355B-A32B) — the 8-node launcher and 
 | GLM-4.5-355B-A32B | 32 B / 355 B | [zai-org/GLM-4.5](https://huggingface.co/zai-org/GLM-4.5) |
 | GLM-4.5-Air (106B-A12B) | 12 B / 106 B | [zai-org/GLM-4.5-Air](https://huggingface.co/zai-org/GLM-4.5-Air) |
 
-The 106B-A12B variant has no launcher under `scripts/`; the canonical recipe is [`examples/infra_features/p2p_weight_transfer/GLM-4.5-Air.sh`](https://github.com/radixark/miles/blob/main/examples/infra_features/p2p_weight_transfer/GLM-4.5-Air.sh) (8-node, P2P weight transfer).
+The 106B-A12B variant has no launcher under `scripts/`; the canonical recipe is [`examples/infra_features/p2p_weight_transfer/GLM-4.5-Air.sh`](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/infra_features/p2p_weight_transfer/GLM-4.5-Air.sh) (8-node, P2P weight transfer).
 
 ## 3. Environment Setup
 
@@ -47,8 +47,8 @@ hf download --repo-type dataset zhuzilin/aime-2024     --local-dir /root/dataset
 The 8-node launcher does **not** convert for you — produce `/root/models/GLM-4.5-355B-A32B_torch_dist/` ahead of time:
 
 ```bash
-cd /root/miles
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py glm4.5-355B-A32B)" || exit 1
+cd /root/orbit
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py glm4.5-355B-A32B)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM torchrun --nproc-per-node 8 \
    tools/convert_hf_to_torch_dist.py \
@@ -65,7 +65,7 @@ PYTHONPATH=/root/Megatron-LM torchrun --nproc-per-node 8 \
 
 ```bash
 # 8-node launcher (8 nodes × 8 GPU)
-cd /root/miles
+cd /root/orbit
 export MASTER_ADDR=...
 python scripts/run_glm45_355b_a32b_8node.py
 
@@ -136,4 +136,4 @@ CPU Adam on:
 
 - [Low Precision RL](/advanced/low-precision)
 - [INT4 QAT](/advanced/int4-qat)
-- [Rollout Routing Replay (R3)](/advanced/miles-router) — opt-in via `--enable-mis` on `run_glm45_355b_a32b.py`.
+- [Rollout Routing Replay (R3)](/advanced/orbit-router) — opt-in via `--enable-mis` on `run_glm45_355b_a32b.py`.

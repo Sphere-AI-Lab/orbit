@@ -6,7 +6,7 @@ DeepSeek V4 training tracking issue: [`radixark/miles#1046`](https://github.com/
 
 ## 1. Model Introduction
 
-[DeepSeek-V4-Pro](https://huggingface.co/sgl-project/DeepSeek-V4-Pro-FP8) is a 49 B-active / 1.6 T-total MoE that scales up the same sparse-MLA + DSA-indexer + KV-compressor + hyper-connection stack as [V4-Flash](/models/deepseek/deepseek-v4-flash). The architecture family is identical; the deltas are size and a handful of tuned knobs (indexer top-k, output-projection groups, compression schedule). The miles + Megatron-Core integration ships in the same image as Flash and is selected with `--model-name DeepSeek-V4-Pro-FP8`.
+[DeepSeek-V4-Pro](https://huggingface.co/sgl-project/DeepSeek-V4-Pro-FP8) is a 49 B-active / 1.6 T-total MoE that scales up the same sparse-MLA + DSA-indexer + KV-compressor + hyper-connection stack as [V4-Flash](/models/deepseek/deepseek-v4-flash). The architecture family is identical; the deltas are size and a handful of tuned knobs (indexer top-k, output-projection groups, compression schedule). The orbit + Megatron-Core integration ships in the same image as Flash and is selected with `--model-name DeepSeek-V4-Pro-FP8`.
 
 **Key highlights** (deltas vs [V4-Flash](/models/deepseek/deepseek-v4-flash#1-model-introduction)):
 
@@ -33,7 +33,7 @@ DeepSeek V4 training tracking issue: [`radixark/miles#1046`](https://github.com/
 docker pull radixark/miles:latest
 
 # Production Pro run, inside the container
-cd /root/miles
+cd /root/orbit
 python scripts/run_deepseek_v4.py full-train \
    --model-name DeepSeek-V4-Pro-FP8 \
    --num-nodes 32 --num-gpus-per-node 8
@@ -50,7 +50,7 @@ The `full-train` subcommand chains `prepare-download → prepare-single → prep
 | `--model-local-dir` | unset → same as `--model-dir` | local NVMe path on each node; `prepare-cp` rsyncs the HF checkpoint and `_torch_dist` here so the trainer reads from local disk (set it when `--model-dir` is on shared/remote storage) |
 | `--save-dir` | `/root/models` | training checkpoints under `{save-dir}/{run-id}/checkpoints/` |
 
-Pro uses the same launcher as V4-Flash, so every option above can also be preconfigured via `MILES_SCRIPT_<FIELD_NAME_UPPER>` env vars (precedence: CLI flag > env var > built-in default) — see [V4-Flash §3.2](/models/deepseek/deepseek-v4-flash#32-launcher-path-defaults) for details.
+Pro uses the same launcher as V4-Flash, so every option above can also be preconfigured via `ORBIT_SCRIPT_<FIELD_NAME_UPPER>` env vars (precedence: CLI flag > env var > built-in default) — see [V4-Flash §3.2](/models/deepseek/deepseek-v4-flash#32-launcher-path-defaults) for details.
 
 ## 4. Script breakdown
 

@@ -30,7 +30,7 @@
 
 ### 6
 "python3"
-"<REPO_ROOT>/examples/lora/../../miles/utils/external_utils/model_args_utils.py"
+"<REPO_ROOT>/examples/lora/../../orbit/utils/external_utils/model_args_utils.py"
 "qwen2.5-3B"
 
 ### 7
@@ -124,7 +124,7 @@
 "--wandb-host"
 "https://wandb.ai/"
 "--wandb-project"
-"miles-lora-update-weight-refactory"
+"orbit-lora-update-weight-refactory"
 "--wandb-group"
 "qwen2.5-3B-lora-benchmark"
 "--tensor-model-parallel-size"

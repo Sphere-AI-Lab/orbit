@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download and convert datasets to Miles format for SWE-agent training.
+"""Download and convert datasets to Orbit format for SWE-agent training.
 
 Supports any task type — SWE-bench, Terminal-Bench, custom datasets, etc.
 Each record's metadata is enriched with ``agent_name`` so that
@@ -37,7 +37,7 @@ from datasets import load_dataset
 _PROMPT_KEY_FALLBACKS = ("problem_statement", "instruction", "prompt")
 
 
-def convert_to_miles_format(
+def convert_to_orbit_format(
     input_path: str,
     output_path: str,
     *,
@@ -47,7 +47,7 @@ def convert_to_miles_format(
     prompt_key: str = "problem_statement",
     append: bool = False,
 ) -> int:
-    """Convert JSONL to Miles format.
+    """Convert JSONL to Orbit format.
 
     Returns the number of records written.
     """
@@ -71,12 +71,12 @@ def convert_to_miles_format(
                     if prompt:
                         break
 
-            miles_sample = {
+            orbit_sample = {
                 "prompt": prompt,
                 "metadata": metadata,
             }
 
-            fout.write(json.dumps(miles_sample) + "\n")
+            fout.write(json.dumps(orbit_sample) + "\n")
             count += 1
 
     print(f"Converted {count} samples: {input_path} -> {output_path}")
@@ -85,7 +85,7 @@ def convert_to_miles_format(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Download dataset and convert to Miles format",
+        description="Download dataset and convert to Orbit format",
     )
     parser.add_argument(
         "--input",
@@ -138,7 +138,7 @@ def main():
 
     if input_path.exists() and input_path.suffix == ".jsonl":
         print(f"Processing local file: {args.input}")
-        convert_to_miles_format(args.input, args.output, **common_kwargs)
+        convert_to_orbit_format(args.input, args.output, **common_kwargs)
     else:
         print(f"Loading HuggingFace dataset: " f"{args.input} (split={args.split})")
         ds = load_dataset(args.input, split=args.split)
@@ -158,8 +158,8 @@ def main():
             print(f"Downloading to temporary file: {tmp_path}")
             ds.to_json(tmp_path)
 
-            print(f"Converting to Miles format: {args.output}")
-            convert_to_miles_format(tmp_path, args.output, **common_kwargs)
+            print(f"Converting to Orbit format: {args.output}")
+            convert_to_orbit_format(tmp_path, args.output, **common_kwargs)
         finally:
             if tmp_path and Path(tmp_path).exists():
                 Path(tmp_path).unlink()

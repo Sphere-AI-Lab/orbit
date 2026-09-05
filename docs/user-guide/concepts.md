@@ -1,8 +1,8 @@
 ---
 title: Core Concepts
-description: The four objects that make up every Miles job, and how data flows between them.
+description: The four objects that make up every Orbit job, and how data flows between them.
 ---
-A Miles training job is a loop over four objects. Once you understand what each one
+A Orbit training job is a loop over four objects. Once you understand what each one
 *is* and how data flows between them, every flag in the system has an obvious home.
 
 ## The four objects
@@ -51,7 +51,7 @@ for it in range(num_rollout):
     p2p_weight_transfer(actor → sglang_engines)
 ```
 
-That's the whole thing. Every flag in Miles configures one of these four steps.
+That's the whole thing. Every flag in Orbit configures one of these four steps.
 
 ## The four-knob invariant
 
@@ -64,8 +64,8 @@ rollout_batch_size × n_samples_per_prompt
 ```
 
 **Every sample produced by rollout is consumed by training, and every sample consumed
-by training was produced by rollout.** Set any three sides; Miles fills in the fourth.
-Set all four inconsistently and Miles aborts with a validation error.
+by training was produced by rollout.** Set any three sides; Orbit fills in the fourth.
+Set all four inconsistently and Orbit aborts with a validation error.
 
 ## Where every flag goes
 

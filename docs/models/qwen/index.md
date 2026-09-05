@@ -1,9 +1,9 @@
 ---
 title: Qwen
 sidebarTitle: Overview
-description: Miles recipes for the full Qwen3, Qwen3.5, and Qwen3-Next line — dense and MoE.
+description: Orbit recipes for the full Qwen3, Qwen3.5, and Qwen3-Next line — dense and MoE.
 ---
-Miles ships ready-to-run RL recipes for every generation of the Qwen line: the dense Qwen3 series (0.6 B → 32 B), the Qwen3.5 family with its gated-attention architecture, the Qwen3 and Qwen3.5 MoE variants, and the Gated-Delta-Net Qwen3-Next-80B-A3B.
+Orbit ships ready-to-run RL recipes for every generation of the Qwen line: the dense Qwen3 series (0.6 B → 32 B), the Qwen3.5 family with its gated-attention architecture, the Qwen3 and Qwen3.5 MoE variants, and the Gated-Delta-Net Qwen3-Next-80B-A3B.
 
 ## Variants
 
@@ -23,7 +23,7 @@ Miles ships ready-to-run RL recipes for every generation of the Qwen line: the d
 Qwen3-4B on a single 8× H100 node — the canonical starter recipe:
 
 ```bash
-cd /root/miles
+cd /root/orbit
 hf download Qwen/Qwen3-4B --local-dir /root/models/Qwen3-4B
 python scripts/run_qwen3_dense.py --model-name Qwen3-4B
 ```
@@ -32,7 +32,7 @@ Dataset is [DAPO-Math-17k](https://huggingface.co/datasets/zhuzilin/dapo-math-17
 
 ## Which variant do I pick?
 
-- **Learning Miles for the first time** → Qwen3-4B ([qwen3](/models/qwen/qwen3)). Fits one H100 node, fast loop.
+- **Learning Orbit for the first time** → Qwen3-4B ([qwen3](/models/qwen/qwen3)). Fits one H100 node, fast loop.
 - **Need MoE on a single node** → Qwen3-30B-A3B ([qwen3-moe](/models/qwen/qwen3-moe)).
 - **Scaling to multi-node** → Qwen3-235B-A22B ([qwen3-moe](/models/qwen/qwen3-moe)).
 - **Latest dense architecture (gated attention, A\_log FP32)** → Qwen3.5-4B ([qwen3-5](/models/qwen/qwen3-5)).

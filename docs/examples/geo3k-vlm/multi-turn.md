@@ -10,9 +10,9 @@ Note: Please make sure the cudnn version in the environment is 9.16.0.29 to prev
 pip install nvidia-cudnn-cu12==9.16.0.29
 ```
 
-The multi-turn rollout is implemented through a [custom generate function](https://github.com/radixark/miles/blob/main/examples/geo3k_vlm/multi_turn/rollout.py#L309), overriding the original generate function.
+The multi-turn rollout is implemented through a [custom generate function](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/geo3k_vlm/multi_turn/rollout.py#L309), overriding the original generate function.
 
-In terms of the environment interaction, this example initializes a [custom interactive environment](https://github.com/radixark/miles/blob/main/examples/geo3k_vlm/multi_turn/env_geo3k.py) with the APIs below.
+In terms of the environment interaction, this example initializes a [custom interactive environment](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/geo3k_vlm/multi_turn/env_geo3k.py) with the APIs below.
 
 <Accordion title="Environment API (geo3k)">
 
@@ -27,22 +27,22 @@ In terms of the environment interaction, this example initializes a [custom inte
 
 The reward model is the default math RM. 
 
-![VLM multi-turn geo3k reward](https://raw.githubusercontent.com/radixark/miles/main/examples/geo3k_vlm/multi_turn/geo3k_vlm_multi_turn_reward.png)
-![Rollout megatron](https://raw.githubusercontent.com/radixark/miles/main/examples/geo3k_vlm/multi_turn/rollout_experiment_result_megatron.png)
+![VLM multi-turn geo3k reward](https://raw.githubusercontent.com/Sphere-AI-Lab/orbit/main/examples/geo3k_vlm/multi_turn/geo3k_vlm_multi_turn_reward.png)
+![Rollout megatron](https://raw.githubusercontent.com/Sphere-AI-Lab/orbit/main/examples/geo3k_vlm/multi_turn/rollout_experiment_result_megatron.png)
 
 ## Reproduce
 ```bash
 # 1) Set environment variable
 export WANDB_API_KEY=...
-export MILES_SCRIPT_MODEL_NAME=Qwen3-VL-2B-Instruct
-export MILES_SCRIPT_NUM_GPUS=4
-export MILES_SCRIPT_TRAIN_BACKEND=megatron
+export ORBIT_SCRIPT_MODEL_NAME=Qwen3-VL-2B-Instruct
+export ORBIT_SCRIPT_NUM_GPUS=4
+export ORBIT_SCRIPT_TRAIN_BACKEND=megatron
 
 # 2) Download the dataset
 hf download --repo-type dataset VeraIsHere/geo3k_imgurl_processed --local-dir /root/datasets/geo3k_imgurl_processed
 
 # 3) Run the script:
-cd /root/miles
+cd /root/orbit
 python examples/geo3k_vlm/multi_turn/run_geo3k_vlm_multi_turn.py
 ```
 

@@ -35,9 +35,9 @@ Four launch scripts show the mode end to end, from a single-node smoke test to a
 
 | Script | What it covers |
 |---|---|
-| [`run_qwen3_30b_a3b_fully_async.py`](https://github.com/radixark/miles/blob/main/examples/infra_features/fully_async/run_qwen3_30b_a3b_fully_async.py) | The same pattern on a 30B MoE, with `tp=8`, `ep=8`, and one 8-GPU rollout engine |
-| [`run_qwen3_5_4b_fully_async_eval.py`](https://github.com/radixark/miles/blob/main/examples/infra_features/fully_async/run_qwen3_5_4b_fully_async_eval.py) | Both checkpoint eval backends behind one flag, `--eval-backend fleet` or `--eval-backend external` |
-| [`run_glm5_2_744b_a40b_daytona.py`](https://github.com/radixark/miles/blob/main/examples/experimental/openenv/glm52_tbench2/run_glm5_2_744b_a40b_daytona.py) | GLM-5.2 744B-A40B on 16 GB300 nodes, split 8 training and 8 inference, with multi-turn terminal-bench-2 episodes in per-task Daytona sandboxes. It runs 128 in-flight trajectories against a 64-sample train batch and evaluates on the shared rollout engines |
+| [`run_qwen3_30b_a3b_fully_async.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/infra_features/fully_async/run_qwen3_30b_a3b_fully_async.py) | The same pattern on a 30B MoE, with `tp=8`, `ep=8`, and one 8-GPU rollout engine |
+| [`run_qwen3_5_4b_fully_async_eval.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/infra_features/fully_async/run_qwen3_5_4b_fully_async_eval.py) | Both checkpoint eval backends behind one flag, `--eval-backend fleet` or `--eval-backend external` |
+| [`run_glm5_2_744b_a40b_daytona.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/experimental/openenv/glm52_tbench2/run_glm5_2_744b_a40b_daytona.py) | GLM-5.2 744B-A40B on 16 GB300 nodes, split 8 training and 8 inference, with multi-turn terminal-bench-2 episodes in per-task Daytona sandboxes. It runs 128 in-flight trajectories against a 64-sample train batch and evaluates on the shared rollout engines |
 
 ### Customizations
 
@@ -55,12 +55,12 @@ Starting from a working run, the rest of this page covers what you can change:
 ### How generation is scheduled
 
 The implementation lives in
-[`miles/rollout/fully_async_rollout.py`](https://github.com/radixark/miles/blob/main/miles/rollout/fully_async_rollout.py)
+[`orbit/rollout/fully_async_rollout.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/orbit/rollout/fully_async_rollout.py)
 (the worker) and
-[`miles/rollout/submission_scheduler.py`](https://github.com/radixark/miles/blob/main/miles/rollout/submission_scheduler.py)
+[`orbit/rollout/submission_scheduler.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/orbit/rollout/submission_scheduler.py)
 (the submission scheduler).
 
-Fully async rollout splits Miles into two concurrent loops:
+Fully async rollout splits Orbit into two concurrent loops:
 
 1. A background rollout worker keeps SGLang generation in flight and puts completed
    groups into a data buffer.
@@ -113,7 +113,7 @@ Three flags control how much generation stays in flight:
 ### The data buffer
 
 The implementation lives in
-[`miles/rollout/fully_async_data_buffer.py`](https://github.com/radixark/miles/blob/main/miles/rollout/fully_async_data_buffer.py).
+[`orbit/rollout/fully_async_data_buffer.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/orbit/rollout/fully_async_data_buffer.py).
 
 The **data buffer** is the store of finished groups between the two loops, and every
 group-level decision lives in it. The producer puts each group in as it completes, the
@@ -198,7 +198,7 @@ The fleet and an external backend each select a backend, so passing both is an e
 
 ### Mode 1: Shared engines
 
-The implementation lives in [`miles/rollout/fully_async_rollout.py`](https://github.com/radixark/miles/blob/main/miles/rollout/fully_async_rollout.py).
+The implementation lives in [`orbit/rollout/fully_async_rollout.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/orbit/rollout/fully_async_rollout.py).
 
 Eval runs on the rollout engines. The producer stops submitting for the duration of the
 blocking eval and resumes after; in-flight requests finish and buffer, and nothing is
@@ -209,7 +209,7 @@ strictly on time.
 
 ### Mode 2: Dedicated fleet
 
-The implementation lives in [`miles/ray/rollout/eval_fleet.py`](https://github.com/radixark/miles/blob/main/miles/ray/rollout/eval_fleet.py).
+The implementation lives in [`orbit/ray/rollout/eval_fleet.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/orbit/ray/rollout/eval_fleet.py).
 
 The fleet runs on its own GPUs behind its own router, synced by loading HF checkpoint
 snapshots rather than by joining training weight updates:
@@ -217,7 +217,7 @@ snapshots rather than by joining training weight updates:
 ```bash
 --eval-num-gpus 1  # dedicated eval engines, behind their own router
 --eval-interval K
---eval-hf-dir /dev/shm/miles_eval_hf  # snapshot staging; tmpfs avoids the disk dependency
+--eval-hf-dir /dev/shm/orbit_eval_hf  # snapshot staging; tmpfs avoids the disk dependency
 --eval-prompt-data aime /path/to/aime.jsonl
 ```
 
@@ -245,8 +245,8 @@ them explicitly with `--eval-sglang-*` if the fleet is large enough to want them
 
 ### Mode 3: External backend
 
-The contract lives in [`miles/rollout/checkpoint_eval.py`](https://github.com/radixark/miles/blob/main/miles/rollout/checkpoint_eval.py), with a
-reference implementation in [`examples/infra_features/fully_async/external_eval_fn.py`](https://github.com/radixark/miles/blob/main/examples/infra_features/fully_async/external_eval_fn.py).
+The contract lives in [`orbit/rollout/checkpoint_eval.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/orbit/rollout/checkpoint_eval.py), with a
+reference implementation in [`examples/infra_features/fully_async/external_eval_fn.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/infra_features/fully_async/external_eval_fn.py).
 
 Subclass `CheckpointEvalFn` and implement `evaluate_checkpoint(checkpoint_dir, input)`.
 The trainer hands over a snapshot path per eval point and owns dispatch, logging, and
@@ -261,7 +261,7 @@ response into `RolloutFnEvalOutput`.
 
 ### The weight snapshot pipeline
 
-The implementation lives in [`miles/ray/rollout/eval_dispatch.py`](https://github.com/radixark/miles/blob/main/miles/ray/rollout/eval_dispatch.py).
+The implementation lives in [`orbit/ray/rollout/eval_dispatch.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/orbit/ray/rollout/eval_dispatch.py).
 
 The fleet and an external backend both evaluate a checkpoint, so both need
 `--eval-interval` and one of these two snapshot sources:
@@ -317,7 +317,7 @@ starved.
 
 ### Async eval metrics
 
-The metrics are logged in [`miles/ray/rollout/metrics.py`](https://github.com/radixark/miles/blob/main/miles/ray/rollout/metrics.py).
+The metrics are logged in [`orbit/ray/rollout/metrics.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/orbit/ray/rollout/metrics.py).
 
 Every skipped point is logged at the step it would have landed on, with the reason:
 
@@ -355,7 +355,7 @@ For performance work, use the metrics below as a basic reference:
 ### Arguments: Logging options
 
 Two flags replace the default metric logging, both defined in
-[`miles/ray/rollout/metrics.py`](https://github.com/radixark/miles/blob/main/miles/ray/rollout/metrics.py):
+[`orbit/ray/rollout/metrics.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/orbit/ray/rollout/metrics.py):
 
 | Flag | Signature |
 |---|---|

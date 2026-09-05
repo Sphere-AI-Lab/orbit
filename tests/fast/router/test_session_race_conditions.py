@@ -27,10 +27,10 @@ from unittest.mock import patch
 
 import requests
 
-from miles.rollout.session.server import SessionServer
-from miles.utils.http_utils import find_available_port
-from miles.utils.test_utils.mock_sglang_server import MockSGLangServer, ProcessResult, with_mock_server
-from miles.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
+from orbit.rollout.session.server import SessionServer
+from orbit.utils.http_utils import find_available_port
+from orbit.utils.test_utils.mock_sglang_server import MockSGLangServer, ProcessResult, with_mock_server
+from orbit.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
 
 HF_CHECKPOINT = "Qwen/Qwen3-0.6B"
 
@@ -60,7 +60,7 @@ def _router_env(process_fn, *, latency: float = 0.0):
     with _patch_mock_chat_response():
         with with_mock_server(model_name=HF_CHECKPOINT, process_fn=process_fn, latency=latency) as backend:
             args = SimpleNamespace(
-                miles_router_timeout=30,
+                orbit_router_timeout=30,
                 hf_checkpoint=HF_CHECKPOINT,
                 chat_template_path=None,
                 trajectory_manager="linear_trajectory",

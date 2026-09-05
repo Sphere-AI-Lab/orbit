@@ -7,14 +7,14 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from miles.backends.fsdp_utils.adaptations.precision import (
+from orbit.backends.fsdp_utils.adaptations.precision import (
     apply_fp32_master,
     precision_forward_context,
     resolve_precision_policy,
 )
-from miles.backends.fsdp_utils.arguments import load_fsdp_args, parse_fsdp_cli
-from miles.backends.training_utils.data import _rollout_logprob_dtype
-from miles.true_on_policy.contracts import QWEN3_DENSE_TRUE_ON_POLICY_V1
+from orbit.backends.fsdp_utils.arguments import load_fsdp_args, parse_fsdp_cli
+from orbit.backends.training_utils.data import _rollout_logprob_dtype
+from orbit.true_on_policy.contracts import QWEN3_DENSE_TRUE_ON_POLICY_V1
 
 
 def test_resolve_precision_policy_uses_independent_fp32_master_switch_and_dtypes():
@@ -38,16 +38,16 @@ def test_resolve_precision_policy_uses_independent_fp32_master_switch_and_dtypes
 
 
 def test_fp32_master_cli_defaults_enabled_and_can_be_disabled(monkeypatch):
-    monkeypatch.setattr(sys, "argv", ["miles"])
+    monkeypatch.setattr(sys, "argv", ["orbit"])
     assert parse_fsdp_cli().keep_fp32_master
 
-    monkeypatch.setattr(sys, "argv", ["miles", "--no-keep-fp32-master"])
+    monkeypatch.setattr(sys, "argv", ["orbit", "--no-keep-fp32-master"])
     assert not parse_fsdp_cli().keep_fp32_master
 
 
 def test_fsdp_args_expose_effective_compute_precision(monkeypatch):
     for cli_args, expected_dtype in (([], torch.bfloat16), (["--fp16"], torch.float16)):
-        monkeypatch.setattr(sys, "argv", ["miles", *cli_args])
+        monkeypatch.setattr(sys, "argv", ["orbit", *cli_args])
         args = load_fsdp_args()
         args.true_on_policy_mode = True
 

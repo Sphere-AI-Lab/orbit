@@ -46,7 +46,7 @@ hf download Qwen/Qwen3-235B-A22B-FP8 --local-dir /root/models/Qwen3-235B-A22B-FP
 ### 3.3 HF → Megatron `torch_dist` conversion
 
 ```bash
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py qwen3-30B-A3B)" || exit 1
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py qwen3-30B-A3B)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM torchrun --nproc-per-node 8 \
    tools/convert_hf_to_torch_dist.py \
@@ -63,7 +63,7 @@ Drive the conversion across more GPUs / nodes for the 235 B variant; the launche
 
 ```bash
 # 30 B (1 node × 8 GPU) — launcher handles download + conversion + submit
-cd /root/miles
+cd /root/orbit
 python scripts/run_qwen3_30b_a3b.py
 
 # 235 B (8 actor nodes × 8 GPU + a 64-GPU rollout pool)
@@ -137,4 +137,4 @@ Both `run_qwen3_30b_a3b.py` (H100, 1 node) and `run_qwen3_235b_a22b.py` enable C
 ## 6. Pairs Well With
 
 - [Low Precision RL](/advanced/low-precision)
-- [Rollout Routing Replay (R3)](/advanced/miles-router)
+- [Rollout Routing Replay (R3)](/advanced/orbit-router)

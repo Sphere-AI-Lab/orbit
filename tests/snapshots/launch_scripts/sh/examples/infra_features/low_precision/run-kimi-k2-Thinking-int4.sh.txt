@@ -43,7 +43,7 @@
 
 ### 9
 "python3"
-"<REPO_ROOT>/examples/infra_features/low_precision/../../../miles/utils/external_utils/model_args_utils.py"
+"<REPO_ROOT>/examples/infra_features/low_precision/../../../orbit/utils/external_utils/model_args_utils.py"
 "kimi-k2-thinking"
 
 ### 10
@@ -54,7 +54,7 @@
 "--runtime-env-json={\n  \"env_vars\": {\n    \"PYTHONPATH\": \"/root/Megatron-LM/\",\n    \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",\n    \"NCCL_NVLS_ENABLE\": \"0\",\n    \"NCCL_TIMEOUT_MS\":\"360000000\",\n    \"no_proxy\": \"\",\n    \"MASTER_ADDR\": \"127.0.0.1\",\n    \"OPEN_TRAINING_INT4_FAKE_QAT_FLAG\": \"1\",\n    \"OPEN_TRAINING_INT4_GROUP_SIZE\": \"32\"\n  }\n}"
 "--"
 "python3"
-"/personal/miles/miles/train.py"
+"/personal/orbit/orbit/train.py"
 "--actor-num-nodes"
 "32"
 "--actor-num-gpus-per-node"
@@ -150,9 +150,9 @@
 "--ref-load"
 "/root/Kimi-K2_thinking_torch_dist/"
 "--load"
-"/root/Kimi-K2-thinking_miles/"
+"/root/Kimi-K2-thinking_orbit/"
 "--save"
-"/root/Kimi-K2-thinking_miles/"
+"/root/Kimi-K2-thinking_orbit/"
 "--save-interval"
 "20"
 "--prompt-data"
@@ -178,7 +178,7 @@
 "--over-sampling-batch-size"
 "256"
 "--dynamic-sampling-filter-path"
-"miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
+"orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
 "--num-steps-per-rollout"
 "4"
 "--balance-data"

@@ -1,5 +1,5 @@
 "--spec"
-"miles_plugins.models.qwen3_next"
+"orbit_plugins.models.qwen3_next"
 "get_qwen3_next_spec"
 "--disable-bias-linear"
 "--qk-layernorm"

@@ -4,7 +4,7 @@ import torch
 
 
 def test_qwen2_converter_accepts_explicit_true_on_policy_layernorm_names():
-    from miles.backends.megatron_utils.megatron_to_hf.qwen2 import convert_qwen2_to_hf
+    from orbit.backends.megatron_utils.megatron_to_hf.qwen2 import convert_qwen2_to_hf
 
     args = Namespace(
         hidden_size=4,

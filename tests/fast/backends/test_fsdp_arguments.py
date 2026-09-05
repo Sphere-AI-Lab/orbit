@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from miles.backends.fsdp_utils.arguments import FSDPArgs, parse_fsdp_cli
+from orbit.backends.fsdp_utils.arguments import FSDPArgs, parse_fsdp_cli
 
 
 def _parse(monkeypatch: pytest.MonkeyPatch, *argv: str):

@@ -22,6 +22,6 @@ export WANDB_RUN_NAME=${WANDB_RUN_NAME:-opd-mm-04a-geo3k-mt-rkld-smoke}
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/02a-singleturn-rkld-smoke.sh"
 
-# Replace only the single-turn data/rollout arrays, then rebuild MILES_ARGS.
+# Replace only the single-turn data/rollout arrays, then rebuild ORBIT_ARGS.
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/geo3k-multiturn-overlay.sh"

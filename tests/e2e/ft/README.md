@@ -94,7 +94,7 @@ PYTHONPATH=. python tests/e2e/ft/conftest_ft/scenario_no_failure.py generate-dat
 ls /tmp/gen_rollout/rollout_data/
 
 # Step 3: Upload to HF
-huggingface-cli upload --repo-type dataset fzyzcjy/miles-test-rollout-Qwen3-30B-A3B-5layer \
+huggingface-cli upload --repo-type dataset fzyzcjy/orbit-test-rollout-Qwen3-30B-A3B-5layer \
     /tmp/gen_rollout/rollout_data/
 ```
 

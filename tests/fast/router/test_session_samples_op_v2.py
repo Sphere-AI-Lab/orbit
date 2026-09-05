@@ -27,22 +27,22 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from tests.fast.rollout.session.test_samples import _make_record
 
-from miles.rollout.session.errors import TokenizationError
-from miles.rollout.session.samples.codec import COMPUTED_FIELDS_V2, decode_samples_and_merge_input_sample
-from miles.rollout.session.sessions import setup_session_routes
-from miles.rollout.session.v2.core import SessionCoreV2
-from miles.rollout.session.v2.session_state import SessionRegistryV2
-from miles.utils.chat_template_utils import get_tito_tokenizer
-from miles.utils.misc import function_registry
-from miles.utils.processing_utils import load_tokenizer
-from miles.utils.types import Sample
+from orbit.rollout.session.errors import TokenizationError
+from orbit.rollout.session.samples.codec import COMPUTED_FIELDS_V2, decode_samples_and_merge_input_sample
+from orbit.rollout.session.sessions import setup_session_routes
+from orbit.rollout.session.v2.core import SessionCoreV2
+from orbit.rollout.session.v2.session_state import SessionRegistryV2
+from orbit.utils.chat_template_utils import get_tito_tokenizer
+from orbit.utils.misc import function_registry
+from orbit.utils.processing_utils import load_tokenizer
+from orbit.utils.types import Sample
 
 NUM_LAYERS = 3
 TOPK = 2
 
 _ARGS = SimpleNamespace(
     use_session_server="v2",
-    miles_router_timeout=30,
+    orbit_router_timeout=30,
     hf_checkpoint="Qwen/Qwen3-0.6B",
     chat_template_path=None,
     apply_chat_template_kwargs={"enable_thinking": False},
@@ -50,8 +50,8 @@ _ARGS = SimpleNamespace(
     sglang_speculative_algorithm=None,
     session_server_instance_id=uuid.uuid4().hex,
     save_debug_trajectory_data=None,
-    session_sample_picker_path="miles.rollout.session.v2.picker_hub.drop_retries",
-    session_sample_postprocessor_path="miles.rollout.session.v2.postprocessor_hub.default_postprocess",
+    session_sample_picker_path="orbit.rollout.session.v2.picker_hub.drop_retries",
+    session_sample_postprocessor_path="orbit.rollout.session.v2.postprocessor_hub.default_postprocess",
     num_layers=NUM_LAYERS,
     moe_router_topk=TOPK,
 )
@@ -531,7 +531,7 @@ async def test_picker_warns_and_trims_longer_superseded_leaf(core, caplog):
     )
     state.active_leaf = retry
 
-    with caplog.at_level(logging.WARNING, logger="miles.rollout.session.v2.picker_hub.drop_retries"):
+    with caplog.at_level(logging.WARNING, logger="orbit.rollout.session.v2.picker_hub.drop_retries"):
         status, payload = await _collect_via_op(core, sid)
     assert status == 200
     reply = decode_samples_and_merge_input_sample(payload, Sample(), fields=COMPUTED_FIELDS_V2)
@@ -565,7 +565,7 @@ async def test_picker_warns_on_wall_clock_rollback_and_trims_by_seq(core, caplog
     )
     state.active_leaf = retry
 
-    with caplog.at_level(logging.WARNING, logger="miles.rollout.session.v2.picker_hub.drop_retries"):
+    with caplog.at_level(logging.WARNING, logger="orbit.rollout.session.v2.picker_hub.drop_retries"):
         status, payload = await _collect_via_op(core, sid)
     assert status == 200
     reply = decode_samples_and_merge_input_sample(payload, Sample(), fields=COMPUTED_FIELDS_V2)

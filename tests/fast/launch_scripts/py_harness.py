@@ -13,8 +13,8 @@ from types import ModuleType
 from tests.fast.launch_scripts.sh_harness import REPO_ROOT, sanitize
 from tests.fast.utils.command_recorder import record_commands
 
-import miles.utils.external_utils.command_utils as command_utils
-from miles.utils.external_utils.model_args_utils import import_module_from_path
+import orbit.utils.external_utils.command_utils as command_utils
+from orbit.utils.external_utils.model_args_utils import import_module_from_path
 
 FROZEN_RUN_ID = "260101-000000-000"
 
@@ -24,7 +24,7 @@ _FROZEN_PPID = 1001
 
 _FROZEN_ENV = {
     "MASTER_ADDR": "127.0.0.1",
-    "MILES_SCRIPT_ENABLE_RAY_SUBMIT": "1",
+    "ORBIT_SCRIPT_ENABLE_RAY_SUBMIT": "1",
     "PYTHONPATH": "/frozen/pythonpath",
     "WANDB_API_KEY": "frozen-wandb-api-key",
 }
@@ -34,8 +34,8 @@ CLEARED_ENV = (
     "GITHUB_COMMIT_NAME",
     "GLOO_SOCKET_IFNAME",
     "KEEP_MOE_LORA",
-    "MILES_SCRIPT_EXTERNAL_RAY",
-    "MILES_USE_LEGACY_ROLLOUT_V1",
+    "ORBIT_SCRIPT_EXTERNAL_RAY",
+    "ORBIT_USE_LEGACY_ROLLOUT_V1",
     "MLP_SOCKET_IFNAME",
     "MLP_WORKER_0_HOST",
     "MODEL_ARGS_FIRST_K_DENSE_REPLACE",
@@ -96,7 +96,7 @@ def install_shell_recorder(monkeypatch, sandbox: Path) -> Recording:
             args=command, returncode=0, stdout=_GPU_COUNT_ANY_WAIT_LOOP_ACCEPTS, stderr=""
         )
 
-    monkeypatch.setenv("MILES_LOG_DIR", str(sandbox))
+    monkeypatch.setenv("ORBIT_LOG_DIR", str(sandbox))
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(time, "sleep", lambda seconds: None)
     monkeypatch.setattr(os, "makedirs", lambda path, **kwargs: None)
@@ -127,7 +127,7 @@ def install_command_recorder(monkeypatch) -> Recording:
 
 
 def import_launch_script(path: Path) -> ModuleType:
-    name = "miles_launch_script_" + path.relative_to(REPO_ROOT).with_suffix("").as_posix().replace("/", "_")
+    name = "orbit_launch_script_" + path.relative_to(REPO_ROOT).with_suffix("").as_posix().replace("/", "_")
     return import_module_from_path(path, name)
 
 

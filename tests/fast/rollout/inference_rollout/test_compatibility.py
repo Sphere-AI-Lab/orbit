@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from miles.rollout.base_types import (
+from orbit.rollout.base_types import (
     GenerateFnInput,
     GenerateFnOutput,
     RolloutFnConstructorInput,
@@ -12,7 +12,7 @@ from miles.rollout.base_types import (
     RolloutFnTrainInput,
     RolloutFnTrainOutput,
 )
-from miles.rollout.inference_rollout.compatibility import (
+from orbit.rollout.inference_rollout.compatibility import (
     LegacyGenerateFnAdapter,
     LegacyRolloutFnAdapter,
     call_rollout_function,
@@ -20,9 +20,9 @@ from miles.rollout.inference_rollout.compatibility import (
     load_generate_function,
     load_rollout_function,
 )
-from miles.rollout.inference_rollout.hook_utils import call_all_samples_process_fn
-from miles.utils.async_utils import run
-from miles.utils.misc import function_registry
+from orbit.rollout.inference_rollout.hook_utils import call_all_samples_process_fn
+from orbit.utils.async_utils import run
+from orbit.utils.misc import function_registry
 
 
 @pytest.fixture

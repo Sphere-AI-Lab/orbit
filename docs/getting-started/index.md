@@ -1,6 +1,6 @@
 ---
 title: Getting Started
-description: Install Miles and run your first RL training job — the two pages you need to go from zero to a working loop.
+description: Install Orbit and run your first RL training job — the two pages you need to go from zero to a working loop.
 ---
 Two pages take you from a fresh machine to a running RL training job:
 

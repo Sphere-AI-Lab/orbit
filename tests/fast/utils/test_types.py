@@ -7,7 +7,7 @@ import pytest
 import torch
 from PIL import Image
 
-from miles.utils.types import Sample
+from orbit.utils.types import Sample
 
 
 def _make_sample(

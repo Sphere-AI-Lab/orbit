@@ -1,6 +1,6 @@
 import pytest
 
-from miles.rollout.rm_hub.f1 import f1_score, normalize_answer
+from orbit.rollout.rm_hub.f1 import f1_score, normalize_answer
 
 
 class TestNormalizeAnswer:

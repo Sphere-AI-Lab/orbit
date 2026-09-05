@@ -2,13 +2,13 @@
 
 ## Our Pledge
 
-We as members, contributors, maintainers, and leaders of the Miles community pledge to make participation in our project a harassment-free experience for everyone, regardless of age, body size, visible or invisible disability, ethnicity, sex characteristics, gender identity and expression, level of experience, education, socio-economic status, nationality, personal appearance, race, religion, caste, or sexual identity and orientation.
+We as members, contributors, maintainers, and leaders of the Orbit community pledge to make participation in our project a harassment-free experience for everyone, regardless of age, body size, visible or invisible disability, ethnicity, sex characteristics, gender identity and expression, level of experience, education, socio-economic status, nationality, personal appearance, race, religion, caste, or sexual identity and orientation.
 
 We pledge to act and interact in ways that contribute to an open, welcoming, diverse, inclusive, respectful, and healthy technical community.
 
 ## Our Standards
 
-Examples of behavior that contributes to a positive environment for the Miles community include:
+Examples of behavior that contributes to a positive environment for the Orbit community include:
 
 * Demonstrating empathy and kindness toward other people
 * Being respectful of differing opinions, viewpoints, backgrounds, and experiences
@@ -30,20 +30,20 @@ Examples of unacceptable behavior include:
 
 ## Enforcement Responsibilities
 
-Community leaders are responsible for clarifying and enforcing our standards of acceptable behavior. They will take appropriate and fair corrective action in response to behavior that they deem inappropriate, threatening, offensive, harmful, or disruptive to the Miles community.
+Community leaders are responsible for clarifying and enforcing our standards of acceptable behavior. They will take appropriate and fair corrective action in response to behavior that they deem inappropriate, threatening, offensive, harmful, or disruptive to the Orbit community.
 
 Community leaders have the right and responsibility to remove, edit, or reject comments, commits, code, documentation, wiki edits, issues, pull requests, discussions, and other contributions that are not aligned to this Code of Conduct. When appropriate, they will communicate reasons for moderation decisions.
 
 ## Scope
 
-This Code of Conduct applies within all Miles community spaces, including but not limited to:
+This Code of Conduct applies within all Orbit community spaces, including but not limited to:
 
 * GitHub repositories, issues, pull requests, discussions, and review comments
 * Documentation, examples, tutorials, and project websites
 * Community chat channels, mailing lists, forums, and meetings
 * Conferences, meetups, workshops, demos, and other online or offline events connected to the project
 
-This Code of Conduct also applies when an individual is officially representing the Miles project or community in public spaces. Examples of representing the project include using an official project email address, posting through an official social media account, publishing official documentation or release notes, speaking on behalf of the project at an event, or acting as an appointed project representative.
+This Code of Conduct also applies when an individual is officially representing the Orbit project or community in public spaces. Examples of representing the project include using an official project email address, posting through an official social media account, publishing official documentation or release notes, speaking on behalf of the project at an event, or acting as an appointed project representative.
 
 ## Enforcement
 
@@ -75,13 +75,13 @@ Community leaders will follow these Community Impact Guidelines in determining t
 
 **Community Impact:** A serious violation of community standards, including sustained inappropriate behavior.
 
-**Consequence:** A temporary ban from any sort of interaction or public communication with the Miles community for a specified period of time. No public or private interaction with the people involved, including unsolicited interaction with those enforcing the Code of Conduct, is allowed during this period. Violating these terms may lead to a permanent ban.
+**Consequence:** A temporary ban from any sort of interaction or public communication with the Orbit community for a specified period of time. No public or private interaction with the people involved, including unsolicited interaction with those enforcing the Code of Conduct, is allowed during this period. Violating these terms may lead to a permanent ban.
 
 ### 4. Permanent Ban
 
 **Community Impact:** Demonstrating a pattern of violation of community standards, including sustained inappropriate behavior, harassment of an individual, aggression toward others, or disparagement of classes of individuals.
 
-**Consequence:** A permanent ban from any sort of public interaction within the Miles community.
+**Consequence:** A permanent ban from any sort of public interaction within the Orbit community.
 
 ## Attribution
 

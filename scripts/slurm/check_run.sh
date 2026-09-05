@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# check_run.sh — concise health snapshot of a miles slurm run.
+# check_run.sh — concise health snapshot of a orbit slurm run.
 #
 # Read-only. Designed to be called every wake-up by the rl-monitor-loop skill;
 # no state, no side effects. Reads:
@@ -18,7 +18,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ORBIT_REPO="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 if [[ $# -lt 1 ]]; then
     echo "usage: $0 <run-dir|job-name>" >&2
@@ -29,12 +29,12 @@ ARG="$1"
 # Resolve ARG to a concrete run dir.
 if [[ -d "$ARG" && -f "$ARG/run.log" ]]; then
     RUN_DIR="$(cd "$ARG" && pwd)"
-elif [[ -d "$MILES_REPO/runs/$ARG" ]]; then
-    LATEST=$(ls -1 "$MILES_REPO/runs/$ARG" 2>/dev/null | sort | tail -1)
-    [[ -z "$LATEST" ]] && { echo "no runs found under $MILES_REPO/runs/$ARG/" >&2; exit 66; }
-    RUN_DIR="$MILES_REPO/runs/$ARG/$LATEST"
+elif [[ -d "$ORBIT_REPO/runs/$ARG" ]]; then
+    LATEST=$(ls -1 "$ORBIT_REPO/runs/$ARG" 2>/dev/null | sort | tail -1)
+    [[ -z "$LATEST" ]] && { echo "no runs found under $ORBIT_REPO/runs/$ARG/" >&2; exit 66; }
+    RUN_DIR="$ORBIT_REPO/runs/$ARG/$LATEST"
 else
-    echo "could not resolve '$ARG' as run dir or job-name under $MILES_REPO/runs/" >&2
+    echo "could not resolve '$ARG' as run dir or job-name under $ORBIT_REPO/runs/" >&2
     exit 66
 fi
 
@@ -42,7 +42,7 @@ RUN_LOG="$RUN_DIR/run.log"
 MANIFEST="$RUN_DIR/MANIFEST.json"
 [[ -f "$RUN_LOG" ]] || { echo "missing $RUN_LOG" >&2; exit 66; }
 
-echo "=== check_run ${RUN_DIR#$MILES_REPO/} ==="
+echo "=== check_run ${RUN_DIR#$ORBIT_REPO/} ==="
 
 # --- MANIFEST.json ---
 if [[ -f "$MANIFEST" ]]; then

@@ -2,7 +2,7 @@ from tests.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(est_time=20, suite="stage-a-cpu", labels=[])
 
-from miles.utils.processing_utils import extract_multimodal_train_inputs
+from orbit.utils.processing_utils import extract_multimodal_train_inputs
 
 
 def test_extract_multimodal_train_inputs_drops_qwen3_vl_token_metadata():

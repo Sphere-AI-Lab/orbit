@@ -2,7 +2,7 @@ import os
 
 from tests.ci.ci_register import register_cuda_ci, register_rocm_ci
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 register_cuda_ci(
     est_time=2200,
@@ -42,7 +42,7 @@ def execute():
         "--rollout-max-response-len 1024 "
         "--rollout-temperature 1 "
         "--over-sampling-batch-size 64 "
-        "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
+        "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
         "--global-batch-size 256 "
     )
 

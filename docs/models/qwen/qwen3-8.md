@@ -9,7 +9,7 @@ dense **Qwen3.8-27B** ships the same `config.json` as
 [Qwen3.5-27B](/models/qwen/qwen3-5) and [Qwen3.6-27B](/models/qwen/qwen3-6) —
 same hybrid GDN backbone, same gated attention, same tokenizer and vocabulary.
 It therefore reuses the Qwen3.5 Megatron spec
-(`miles_plugins.models.qwen3_5.get_qwen3_5_spec`), and
+(`orbit_plugins.models.qwen3_5.get_qwen3_5_spec`), and
 `scripts/models/qwen3.8-27B.py` is a one-line derivation of the Qwen3.5-27B
 model args; the three expand to byte-identical Megatron flags.
 
@@ -51,8 +51,8 @@ Run it on all eight GPUs; the tool shards the 64 layers over the ranks
 re-shards at load, so the conversion layout does not have to match the training one:
 
 ```bash
-cd /root/miles
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py qwen3.8-27B)" || exit 1
+cd /root/orbit
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py qwen3.8-27B)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM torchrun --nproc-per-node 8 \
    tools/convert_hf_to_torch_dist.py \
@@ -66,7 +66,7 @@ PYTHONPATH=/root/Megatron-LM torchrun --nproc-per-node 8 \
 ### 4.1 Quick start
 
 ```bash
-cd /root/miles
+cd /root/orbit
 python scripts/run_qwen3_dense.py --model-name Qwen3.8-27B
 ```
 
@@ -157,13 +157,13 @@ CPU Adam is enabled (`--optimizer-cpu-offload --overlap-cpu-optimizer-d2h-h2d --
 
 From `scripts/models/qwen3.8-27B.py`, which defers to `scripts/models/qwen3.5-27B.py`:
 
-- `--spec miles_plugins.models.qwen3_5 get_qwen3_5_spec` — Qwen3.8 reuses the Qwen3.5 spec (gated attention, FP32 `A_log`).
+- `--spec orbit_plugins.models.qwen3_5 get_qwen3_5_spec` — Qwen3.8 reuses the Qwen3.5 spec (gated attention, FP32 `A_log`).
 - `--rotary-base 10000000`, `--rotary-percent 0.25`.
 - `--vocab-size 248320`.
 - `--apply-layernorm-1p`, `--qk-layernorm`, `--group-query-attention`.
 - `--attention-output-gate`.
 
-See [Disk Offload](/advanced/disk-offload) for how miles keeps FP32-marked parameters like
+See [Disk Offload](/advanced/disk-offload) for how orbit keeps FP32-marked parameters like
 the GDN `A_log` out of the low-precision optimizer path.
 
 ## 6. Qwen3.8-2.4T-A95B
@@ -227,7 +227,7 @@ python scripts/run_qwen3_8.py
 ```
 
 Full model, validated on **16 nodes × 4 GB300** (bring up a ray cluster across the nodes,
-`export MILES_SCRIPT_EXTERNAL_RAY=1`, then run on the head):
+`export ORBIT_SCRIPT_EXTERNAL_RAY=1`, then run on the head):
 
 ```bash
 python scripts/run_qwen3_8.py \

@@ -6,7 +6,7 @@ after-update: [initial update_weights] -> snapshot -> reset_tensors -> second
 
 The initial update_weights lives in the drivers (train.py / train_async.py);
 _drive() reproduces that sequence around the two shared helpers in
-miles.ray.placement_group and the tests pin the resulting checker call order
+orbit.ray.placement_group and the tests pin the resulting checker call order
 plus selector/skip_list propagation. Pure CPU, no Ray or SGLang engines.
 """
 
@@ -16,7 +16,7 @@ from unittest import mock
 
 import pytest
 
-import miles.ray.placement_group as placement_group
+import orbit.ray.placement_group as placement_group
 
 
 class _ImmediateResult:

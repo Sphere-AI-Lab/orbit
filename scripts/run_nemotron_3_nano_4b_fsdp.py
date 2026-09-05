@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 HF_REPO = "nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16"
 MODEL_NAME = "NVIDIA-Nemotron-3-Nano-4B-BF16"
@@ -29,7 +29,7 @@ class ScriptArgs(U.ExecuteTrainConfig):
     num_rollout: int = 100
     data_dir: str = "/root"
     model_dir: str = "/root/models"
-    wandb_project: str = "miles-fsdp-curve"
+    wandb_project: str = "orbit-fsdp-curve"
     extra_args: str = ""
 
 

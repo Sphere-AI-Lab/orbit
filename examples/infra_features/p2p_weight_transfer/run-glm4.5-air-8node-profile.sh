@@ -71,8 +71,8 @@ NUM_TRAIN_NODES=$((NUM_TRAIN_GPUS / GPUS_PER_NODE))
 MODEL_NAME="GLM-4.5-Air"
 MODEL_TYPE="glm4.5-106B-A12B"
 
-MILES_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." &>/dev/null && pwd)"
-MODEL_ARGS_LINE="$(python3 "${MILES_ROOT}/miles/utils/external_utils/model_args_utils.py" "${MODEL_TYPE}")" || exit 1
+ORBIT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." &>/dev/null && pwd)"
+MODEL_ARGS_LINE="$(python3 "${ORBIT_ROOT}/orbit/utils/external_utils/model_args_utils.py" "${MODEL_TYPE}")" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 # Rotary base override
 export MODEL_ARGS_ROTARY_BASE=1000000
@@ -253,7 +253,7 @@ run_mode() {
     \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",
     \"NCCL_NVLS_ENABLE\": \"${NCCL_NVLS_VAL}\",
     \"MODEL_ARGS_ROTARY_BASE\": \"1000000\",
-    \"MILES_LOG_DIR\": \"${MILES_LOG_DIR:-}\"
+    \"ORBIT_LOG_DIR\": \"${ORBIT_LOG_DIR:-}\"
   }
 }"
 
@@ -273,7 +273,7 @@ run_mode() {
     fi
 
     # --- Signal file for worker synchronization (container env) ---
-    SIGNAL_DIR="${MILES_LOG_DIR:-/data/ray/signals}"
+    SIGNAL_DIR="${ORBIT_LOG_DIR:-/data/ray/signals}"
     mkdir -p "${SIGNAL_DIR}"
     DONE_FILE="${SIGNAL_DIR}/job_done_${mode}"
     rm -f "${DONE_FILE}"

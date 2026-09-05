@@ -20,13 +20,13 @@ from tools.convert_hf_to_nvfp4 import quantize_nvfp4 as tool_quantize_nvfp4
 from tools.convert_hf_to_nvfp4 import should_quantize as tool_should_quantize_nvfp4
 from transformer_engine.pytorch.custom_recipes.quantization_ref_nvfp4 import NVFP4QuantizerRef
 
-from miles.backends.megatron_utils.megatron_to_hf.processors.quantizer_nvfp4 import (
+from orbit.backends.megatron_utils.megatron_to_hf.processors.quantizer_nvfp4 import (
     quantize_nvfp4 as processor_quantize_nvfp4,
 )
-from miles.backends.megatron_utils.megatron_to_hf.processors.quantizer_nvfp4 import (
+from orbit.backends.megatron_utils.megatron_to_hf.processors.quantizer_nvfp4 import (
     quantize_params_nvfp4,
 )
-from miles.utils.nvfp4 import (
+from orbit.utils.nvfp4 import (
     NVFP4_GROUP_SIZE,
     nvfp4_global_decode_scale_te,
     nvfp4_quantize_1d_pair,
@@ -160,7 +160,7 @@ def test_nvfp4_quantize_params_omits_static_input_scale(monkeypatch):
         return (qweight, block_scale, global_scale), (qweight, block_scale, global_scale)
 
     monkeypatch.setattr(
-        "miles.backends.megatron_utils.megatron_to_hf.processors.quantizer_nvfp4.nvfp4_quantize_1d_pair",
+        "orbit.backends.megatron_utils.megatron_to_hf.processors.quantizer_nvfp4.nvfp4_quantize_1d_pair",
         fake_quantize_1d_pair,
     )
 

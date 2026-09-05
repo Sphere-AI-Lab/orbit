@@ -48,7 +48,7 @@ dynamic sampling and eval.
 The `torch_dist` conversion and the node-local rsync fan out across every node of the Ray
 cluster, so a multi-node run needs the whole cluster joined **before** the launcher starts, and
 the launcher must be told not to replace it. Bring up the head, join the workers, then run with
-`MILES_SCRIPT_EXTERNAL_RAY=1`:
+`ORBIT_SCRIPT_EXTERNAL_RAY=1`:
 
 ```bash
 # on node 0
@@ -59,7 +59,7 @@ ray start --address=${MASTER_ADDR}:6379 --num-gpus 8 \
           --node-ip-address ${WORKER_IP} --disable-usage-stats
 
 # back on node 0
-MILES_SCRIPT_EXTERNAL_RAY=1 python scripts/run_deepseek.py train \
+ORBIT_SCRIPT_EXTERNAL_RAY=1 python scripts/run_deepseek.py train \
    --num-nodes 16 --num-gpus-per-node 8
 ```
 
@@ -71,14 +71,14 @@ for WORKER_IP in $(awk '{print $1}' $BASE_DIR/mpi_hostfile); do
     continue
   fi
   ssh root@"${WORKER_IP}" \
-    "pkill -9 sglang ; ray stop --force ; pkill -9 miles ; \
+    "pkill -9 sglang ; ray stop --force ; pkill -9 orbit ; \
      ray start --address=${MASTER_ADDR}:6379 --num-gpus 8 \
                --node-ip-address ${WORKER_IP} --disable-usage-stats" &
 done
 wait
 ```
 
-Without `MILES_SCRIPT_EXTERNAL_RAY=1` the launcher runs `ray stop --force` and starts its own
+Without `ORBIT_SCRIPT_EXTERNAL_RAY=1` the launcher runs `ray stop --force` and starts its own
 single-node head, which is what the single-node invocation above relies on — the conversion then
 runs on that one node.
 
@@ -98,7 +98,7 @@ Then convert BF16 HF → Megatron `torch_dist`. Run on **4 separate nodes** (`NO
 `MASTER_ADDR` is the IP of node 0:
 
 ```bash
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py deepseek-v3)" || exit 1
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py deepseek-v3)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM/ torchrun \
    --nproc-per-node 8 \
@@ -142,8 +142,8 @@ production value is 16384). Raise it before you read any throughput number off t
 
 DeepSeek-V3 has 61 layers, which doesn't divide evenly into PP=4 —
 `--decoder-last-pipeline-num-layers 13` puts the extra layers on the last stage. With
-`--use-dynamic-batch-size`, miles packs samples up to `--max-tokens-per-gpu`; under CP=4, a CP
-group shares a `CP × max-tokens-per-gpu` budget. miles always trains with data packing and
+`--use-dynamic-batch-size`, orbit packs samples up to `--max-tokens-per-gpu`; under CP=4, a CP
+group shares a `CP × max-tokens-per-gpu` budget. orbit always trains with data packing and
 per-token loss, so dynamic batch size doesn't change the loss.
 
 ### 5.2 Algorithm
@@ -168,7 +168,7 @@ GRPO with DAPO-style dynamic sampling:
 --balance-data
 
 --over-sampling-batch-size 256
---dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
+--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
 ```
 
 `--use-kl-loss` is absent, so the reference model is never loaded and the zero KL coefficient
@@ -206,7 +206,7 @@ with attention DP 1 and 8 respectively.
 
 `--rollout-num-gpus-per-engine` corresponds to SGLang's `tp_size`. To exploit large-EP inference,
 the recipe sets EP64, DP-attention with DP8, and DeepEP `low_latency`.
-`--sglang-server-concurrency` is a miles-specific knob to keep the SGLang HTTP server from being
+`--sglang-server-concurrency` is a orbit-specific knob to keep the SGLang HTTP server from being
 swamped — default 512, raised to 1024 here so each of the 8 DP ranks gets 128 concurrent requests.
 `SGLANG_DEEPEP_NUM_MAX_DISPATCH_TOKENS_PER_RANK` is exported to match `--sglang-cuda-graph-max-bs`.
 
@@ -229,7 +229,7 @@ more nodes to widen parallelism rather than swapping.
 ### 5.5 Notable quirks
 
 - **Online FP8 quantization against the HF config**: `--hf-checkpoint` points at the FP8 HF
-  directory (also where the tokenizer is read from). miles applies the quantization config from
+  directory (also where the tokenizer is read from). orbit applies the quantization config from
   the HF checkpoint, so weights are block-wise quantized before being passed to SGLang. The BF16
   directory produced by the cast is used only as the conversion input.
 - **`--decoder-last-pipeline-num-layers 13`** is mandatory under PP=4 (61 layers don't divide

@@ -4,14 +4,14 @@
 #
 # 1-node analogue of geo3k-vlm-colocate-2node, sized for the 2B model.
 # Mirrors upstream examples/geo3k_vlm/run_geo3k_vlm.sh when invoked as
-# `MILES_SCRIPT_MODEL_NAME=Qwen3-VL-2B-Instruct MILES_SCRIPT_NUM_GPUS=8`:
+# `ORBIT_SCRIPT_MODEL_NAME=Qwen3-VL-2B-Instruct ORBIT_SCRIPT_NUM_GPUS=8`:
 #   - megatron backend, TP=4, DP=2 across 8 GPUs
 #   - colocate (rollout shares the same 8 GPUs as training)
 #   - VL-2B MODEL_ARGS come from scripts/models/qwen3-1.7B.sh
 #     (upstream maps Qwen3-VL-2B → qwen3-1.7B for the megatron arg block)
 #
 # Colocate (not disagg) for the same reason as the 2-node recipe:
-# miles' megatron→HF converter only ships LLM mappings; disagg's
+# orbit' megatron→HF converter only ships LLM mappings; disagg's
 # per-update HF round-trip dies on vision_model.* params.
 #
 # VLM-specific (same as 2-node recipe):
@@ -24,7 +24,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}
 RECIPE_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
 
 # ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ HF_EVAL_DATA="$HF_CACHE_DIR/data/geo3k_imgurl/test.parquet"
 # ---------------------------------------------------------------------------
 MODEL_ARGS_ROTARY_BASE=5000000
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-1.7B.sh"
+source "$ORBIT_REPO/scripts/models/qwen3-1.7B.sh"
 MODEL_ARGS+=( --megatron-to-hf-mode bridge )
 
 RUN_NAME=${SLURM_JOB_NAME:-$RECIPE_NAME}
@@ -138,7 +138,7 @@ MISC_ARGS=(
 
 WANDB_ARGS=(
    --use-wandb
-   --wandb-project miles-imp
+   --wandb-project orbit
    --wandb-group   "$RUN_NAME"
 )
 
@@ -155,7 +155,7 @@ LAYOUT_ARGS=(
    --rollout-num-gpus       8
 )
 
-MILES_ARGS=(
+ORBIT_ARGS=(
    "${LAYOUT_ARGS[@]}"
    "${MODEL_ARGS[@]}"
    "${CKPT_ARGS[@]}"

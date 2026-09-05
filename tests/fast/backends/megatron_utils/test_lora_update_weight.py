@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import torch
 
-from miles.backends.megatron_utils.lora_utils import is_lora_weight_name
+from orbit.backends.megatron_utils.lora_utils import is_lora_weight_name
 
 # ---------------------------------------------------------------------------
 # LoRA / base weight separation (pure logic, no distributed deps)
@@ -56,7 +56,7 @@ class TestLoraWeightSeparation:
 # UpdateWeightFromTensor._lora_config initialisation
 # ---------------------------------------------------------------------------
 
-_UW_MODULE = "miles.backends.megatron_utils.update_weight.update_weight_from_tensor"
+_UW_MODULE = "orbit.backends.megatron_utils.update_weight.update_weight_from_tensor"
 
 
 class TestUpdateWeightFromTensorLoraConfig:
@@ -77,7 +77,7 @@ class TestUpdateWeightFromTensorLoraConfig:
     @patch(f"{_UW_MODULE}.dist")
     @patch(f"{_UW_MODULE}.HfWeightIteratorBase")
     def test_lora_true_sets_config(self, mock_iter_base, mock_dist):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
+        from orbit.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
 
         mock_dist.get_world_size.return_value = 2
         mock_dist.get_rank.return_value = 0
@@ -100,7 +100,7 @@ class TestUpdateWeightFromTensorLoraConfig:
     @patch(f"{_UW_MODULE}.dist")
     @patch(f"{_UW_MODULE}.HfWeightIteratorBase")
     def test_lora_false_no_config(self, mock_iter_base, mock_dist):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
+        from orbit.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
 
         mock_dist.get_world_size.return_value = 2
         mock_dist.get_rank.return_value = 0

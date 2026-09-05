@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from miles.backends.megatron_utils.multi_lora_scheduler import install_slot_scheduler, step_slot_schedulers
+from orbit.backends.megatron_utils.multi_lora_scheduler import install_slot_scheduler, step_slot_schedulers
 
 LR = 2e-5
 
@@ -33,7 +33,7 @@ def make_optimizer(n_slots: int = 2) -> SimpleNamespace:
     children = [SimpleNamespace(param_groups=[{"lr": 0.0, "weight_decay": 0.0}]) for _ in range(n_slots)]
     return SimpleNamespace(
         chained_optimizers=children,
-        miles_slot_child_indices={slot: [slot] for slot in range(n_slots)},
+        orbit_slot_child_indices={slot: [slot] for slot in range(n_slots)},
     )
 
 

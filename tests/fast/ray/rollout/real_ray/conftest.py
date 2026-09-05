@@ -39,8 +39,8 @@ def mock_engine_class(ray_local_mode):
 
     Production wraps via ``ray.remote(SGLangEngine)``; substituting the
     already-wrapped class would double-wrap, so callers monkeypatch the
-    unwrapped class inside ``miles.ray.rollout.server_group``."""
-    from miles.utils.test_utils.mock_sglang_engine import MockSGLangEngine
+    unwrapped class inside ``orbit.ray.rollout.server_group``."""
+    from orbit.utils.test_utils.mock_sglang_engine import MockSGLangEngine
 
     return MockSGLangEngine.__ray_actor_class__
 
@@ -50,11 +50,11 @@ def patched_sglang_engine(monkeypatch, mock_engine_class):
     """Replace SGLangEngine with the mock + stub the addr allocator with a
     deterministic dict. The real allocator path is exercised separately by
     ``patched_sglang_engine_real_allocator`` and ``test_addr_allocator.py``."""
-    import miles.ray.rollout.server_group as mod
+    import orbit.ray.rollout.server_group as mod
 
     monkeypatch.setattr(mod, "SGLangEngine", mock_engine_class)
 
-    from miles.ray.rollout.addr_allocator import PortCursors
+    from orbit.ray.rollout.addr_allocator import PortCursors
 
     def _fake_alloc(*args, **kwargs):
         engines = kwargs["rollout_engines"]
@@ -77,6 +77,6 @@ def patched_sglang_engine_real_allocator(monkeypatch, mock_engine_class):
     """Replace SGLangEngine with the mock but keep the real addr allocator,
     so the actor → driver port round-trip via
     ``_get_current_node_ip_and_free_port.remote`` runs end-to-end."""
-    import miles.ray.rollout.server_group as mod
+    import orbit.ray.rollout.server_group as mod
 
     monkeypatch.setattr(mod, "SGLangEngine", mock_engine_class)

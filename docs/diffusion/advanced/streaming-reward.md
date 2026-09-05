@@ -10,7 +10,7 @@ off the critical path.
 
 ## 1. The per-microgroup pipeline
 
-`miles/rollout/sglang_diffusion_rollout.py` runs, per microgroup:
+`orbit/rollout/sglang_diffusion_rollout.py` runs, per microgroup:
 
 ```mermaid
 flowchart LR
@@ -35,7 +35,7 @@ The current path:
 - **msgpack raw-bytes transport.** The engine responds with `application/msgpack`; `post(..., raw=True)` returns the
   body untouched, and tensors decode directly from safetensors raw bytes — no base64.
 - **Unpacking runs inside Ray actors, not the event loop.** `RolloutImageResponseParserActor.apply_raw(samples, raw)`
-  does `msgpack.unpackb` + tensor decode in a separate process (`miles/utils/diffusion_rollout_response.py`), so the
+  does `msgpack.unpackb` + tensor decode in a separate process (`orbit/utils/diffusion_rollout_response.py`), so the
   rollout event loop never blocks on a multi-GB unpack.
 - **One call per microgroup.** A whole microgroup is parsed in a single `apply_raw` call — fewer Ray RPCs, one unpack
   per response.
@@ -69,12 +69,12 @@ overlaps with generation and deserialization of the others.
 
 ## 4. Diagnosing the pipeline
 
-The miles dashboard visualizes the lifetime of every request — the generate / deserialize / reward spans of each
-microgroup on one timeline, so overlap (or the lack of it) is visible directly. Launch with `--use-miles-dashboard`
-(telemetry lands under `--miles-dashboard-workspace`), then render:
+The orbit dashboard visualizes the lifetime of every request — the generate / deserialize / reward spans of each
+microgroup on one timeline, so overlap (or the lack of it) is visible directly. Launch with `--use-orbit-dashboard`
+(telemetry lands under `--orbit-dashboard-workspace`), then render:
 
 ```bash
-python -m miles.dashboard.viewer --workspace ./miles_dashboard --out dash.html
+python -m orbit.dashboard.viewer --workspace ./orbit_dashboard --out dash.html
 ```
 
 For quick triage from `perf/*` metrics alone:

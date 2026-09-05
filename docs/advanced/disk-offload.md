@@ -5,7 +5,7 @@ corresponding author: Zhichen Zeng (Zhichenzzz)
 ---
 
 Colocated RL keeps a training actor and a rollout engine on the same GPUs, so the actor
-must get out of the way while the engine generates. miles offloads the actor during that
+must get out of the way while the engine generates. orbit offloads the actor during that
 window, and by default the backup lives in pinned host memory. For large models that copy
 does not fit, and disk offload is the alternative.
 
@@ -13,7 +13,7 @@ does not fit, and disk offload is the alternative.
 
 ```bash
 --offload-train --offload-train-target disk \
---offload-train-disk-dir /scratch/miles_offload \
+--offload-train-disk-dir /scratch/orbit_offload \
 --offload-train-disk-chunk-mb 256
 ```
 
@@ -21,7 +21,7 @@ Instead of a pinned host copy, the paused actor is streamed to per-rank files th
 fixed-size pinned staging buffer, so host memory stays bounded by
 `--offload-train-disk-chunk-mb` regardless of how much is offloaded. Each rank writes to
 its own directory under `--offload-train-disk-dir` (defaults to
-`$SCRATCH/miles_train_offload_<uid>`), the files are overwritten in place every step, and
+`$SCRATCH/orbit_train_offload_<uid>`), the files are overwritten in place every step, and
 they are removed when the actor exits.
 
 Point the directory at real node-local NVMe. A tmpfs mount (including `/tmp` on many
@@ -32,7 +32,7 @@ systems) keeps the backup in RAM and defeats the purpose.
 This runs on [torch_memory_saver](https://github.com/fzyzcjy/torch_memory_saver), which
 hooks the allocator, so it does not care what the memory holds — weights, gradient
 buffers and optimizer state all move as one block when the actor is paused, and come back
-on resume. miles' part is choosing the per-rank directory, launching each actor with the
+on resume. orbit' part is choosing the per-rank directory, launching each actor with the
 matching `TMS_DISK_BACKUP_*` environment, and reclaiming the files at startup and exit.
 
 Because pause and resume happen at phase boundaries, everything is resident again by the
@@ -45,7 +45,7 @@ state does not fit the GPU *during* the step, actor offload cannot help; that ca
 ```bash
 --offload-train --offload-train-target disk \
 --stream-optimizer-state-to-disk \
---offload-train-disk-dir /scratch/miles_offload
+--offload-train-disk-dir /scratch/orbit_offload
 ```
 
 The two together are what this is for. Actor offload gets the paused actor out of HBM for
@@ -80,7 +80,7 @@ per-block scaling to survive 8-bit storage, which this does not implement.
 Three limits to know about. Resume is same-topology only — the on-disk layout follows this
 rank's DP shard, so changing TP/PP/DP/EP fails the layout assert rather than resharding.
 A checkpoint written before streaming was enabled cannot be resumed with it: the streamed
-state is the only optimizer state read, so miles refuses rather than silently restarting
+state is the only optimizer state read, so orbit refuses rather than silently restarting
 Adam from zero — pass `--no-load-optim` to accept a fresh optimizer state. And the
 optimizer state is copied to the checkpoint directory synchronously, outside
 `--async-save`, so expect checkpoint saves to take noticeably longer.
@@ -108,7 +108,7 @@ Streaming on its own is the disaggregated case: nothing else wants the training 
 rollout, so there is no actor to park and `--offload-train-target` is never read. Pass
 `--stream-optimizer-state-to-disk` alone there. Under `--offload-train`, though, the two go
 together — a run that cannot hold the optimizer state on the GPU for the step will not hold
-a pinned host copy of the whole actor either — and miles asserts that pairing.
+a pinned host copy of the whole actor either — and orbit asserts that pairing.
 
 Both mechanisms share `--offload-train-disk-dir` and `--offload-train-disk-chunk-mb`. Point the
 directory at real node-local NVMe: a tmpfs mount, which `/tmp` is on many systems, keeps

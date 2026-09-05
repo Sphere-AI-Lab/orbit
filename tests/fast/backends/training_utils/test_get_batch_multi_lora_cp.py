@@ -5,10 +5,10 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-import miles.backends.training_utils.cp_utils as cp_utils_mod
-import miles.backends.training_utils.data as data_mod
-from miles.backends.training_utils.cp_utils import slice_with_cp
-from miles.backends.training_utils.data import get_batch
+import orbit.backends.training_utils.cp_utils as cp_utils_mod
+import orbit.backends.training_utils.data as data_mod
+from orbit.backends.training_utils.cp_utils import slice_with_cp
+from orbit.backends.training_utils.data import get_batch
 
 
 def _parallel_state(cp_rank: int, cp_size: int, tp_size: int = 1) -> SimpleNamespace:

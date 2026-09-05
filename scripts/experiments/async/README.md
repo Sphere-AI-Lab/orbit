@@ -20,8 +20,8 @@ The "fully async" behavior comes from the **rollout function**, not the driver.
 pieces:
 
 ```bash
-MILES_TRAIN_ENTRY=train_async.py   # driver
---fully-async                      # worker (miles.rollout.fully_async_rollout.FullyAsyncRolloutFn)
+ORBIT_TRAIN_ENTRY=train_async.py   # driver
+--fully-async                      # worker (orbit.rollout.fully_async_rollout.FullyAsyncRolloutFn)
 ```
 
 ## Runnable multi-turn recipes
@@ -54,20 +54,20 @@ they are useful training experiments.
 
 ## How the slurm harness runs the async driver
 
-`scripts/slurm/lib/ray_lifecycle.sh` launches `python3 ${MILES_TRAIN_ENTRY:-train.py}`.
-The recipe sets `export MILES_TRAIN_ENTRY=train_async.py`; everything else
+`scripts/slurm/lib/ray_lifecycle.sh` launches `python3 ${ORBIT_TRAIN_ENTRY:-train.py}`.
+The recipe sets `export ORBIT_TRAIN_ENTRY=train_async.py`; everything else
 (asset download, ray cluster, W&B run-id) is the same path as the sync recipes.
 The default is unchanged (`train.py`), so existing recipes are unaffected.
 
 ## Submit
 
 ```bash
-JOB_NAME=geo3k-async-mt-8b TIME=72:00:00 NODES=3 MILES_ENV_NAME=miles \
+JOB_NAME=geo3k-async-mt-8b TIME=72:00:00 NODES=3 ORBIT_ENV_NAME=orbit \
 bash scripts/slurm/submit.sh async/geo3k-vlm-multi-turn-fully-async-3node
 ```
 
 - **W&B**: `entity=M3TRL`, `project=async_envpack`, `group=$JOB_NAME`. The
-  run-id is injected by `launch_miles.sbatch` as `SLURM_JOB_ID` (stable across
+  run-id is injected by `launch_orbit.sbatch` as `SLURM_JOB_ID` (stable across
   requeue). `WANDB_API_KEY` comes from `~/.config/secrets.env`.
 - **cudnn**: the env must have `nvidia-cudnn-cu12==9.16.0.29` (else conv3d perf
   regression in torch 2.9). Same caveat as the geo3k examples.

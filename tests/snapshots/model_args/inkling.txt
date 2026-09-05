@@ -52,4 +52,4 @@
 "--moe-grouped-gemm"
 "--qk-layernorm"
 "--custom-model-provider-path"
-"miles_plugins.models.inkling.model.inkling_model_provider"
+"orbit_plugins.models.inkling.model.inkling_model_provider"

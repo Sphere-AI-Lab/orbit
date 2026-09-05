@@ -2,12 +2,12 @@
 
 ## Introduction
 
-This example trains a SWE agent with Miles using NVIDIA's
+This example trains a SWE agent with Orbit using NVIDIA's
 [NeMo Gym](https://github.com/NVIDIA-NeMo/Gym) as the environment ecosystem:
 NeMo Gym's sandbox-backed `mini_swe_agent_2` agent runs the
 [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) v2 harness inside
 per-task SWE-bench containers (via the `nemo_gym.sandbox` provider API) and
-grades every episode with the official SWE-bench harness; Miles owns training,
+grades every episode with the official SWE-bench harness; Orbit owns training,
 batch orchestration, and lossless token recording.
 
 NeMo Gym plugs in at the **agent function** layer (see the
@@ -15,7 +15,7 @@ NeMo Gym plugs in at the **agent function** layer (see the
 shape as the Harbor and OpenEnv connectors:
 
 ```
-Miles trainer ── session server (records every chat-completions turn: token
+Orbit trainer ── session server (records every chat-completions turn: token
    │             ids + logprobs + loss masks, no re-tokenization)
    │  per-sample POST /run { task fields, policy_base_url = session URL }
    ▼
@@ -87,8 +87,8 @@ uv sync --extra dev
 
 # Global config. The model-server entry must boot but receives no policy
 # traffic in this setup — every /run carries its own policy_base_url override
-# pointing at a Miles session URL. policy_model_name is the model name the
-# harness sends on each request (any string Miles' router accepts).
+# pointing at a Orbit session URL. policy_model_name is the model name the
+# harness sends on each request (any string Orbit' router accepts).
 echo "policy_base_url: http://localhost:9/v1
 policy_api_key: dummy
 policy_model_name: model
@@ -113,11 +113,11 @@ port 12000 and uvicorn reports it running.
 
 ## Preparing data
 
-On the trainer, download the task instances and convert them to Miles' prompt
+On the trainer, download the task instances and convert them to Orbit' prompt
 data format. The validated smoke run uses **SWE-bench Verified**:
 
 ```bash
-cd miles/examples/experimental/nemo-gym
+cd orbit/examples/experimental/nemo-gym
 python download_and_process_data.py --input princeton-nlp/SWE-bench_Verified \
     --split test --subset verified --output /root/swe_verified.jsonl
 ```
@@ -148,7 +148,7 @@ skip):
 export NEMO_GYM_URL="http://<nemo-gym-host>:12000"
 # Only if the NeMo Gym host cannot resolve the trainer's hostname (e.g. it
 # reaches the trainer over a tailnet):
-export MILES_ROUTER_EXTERNAL_HOST="<trainer host/IP reachable from that host>"
+export ORBIT_ROUTER_EXTERNAL_HOST="<trainer host/IP reachable from that host>"
 python examples/experimental/nemo-gym/run.py
 ```
 
@@ -161,22 +161,22 @@ are this example's directory on `PYTHONPATH`, and:
 --metadata-key metadata
 --max-seq-len 16384
 
---custom-generate-function-path miles.rollout.generate_hub.agentic_tool_call.generate
+--custom-generate-function-path orbit.rollout.generate_hub.agentic_tool_call.generate
 --custom-agent-function-path nemogym_agent_function.run
 --custom-rm-path nemogym_generate.reward_func
---dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_no_aborted
+--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_no_aborted
 --use-session-server
 --session-server-ip 0.0.0.0  # listen on all interfaces for the dial-back
 --tito-model qwen3           # match your policy model's TITO family
 ```
 
-Per sample, `agentic_tool_call` opens a session on Miles' session server and
+Per sample, `agentic_tool_call` opens a session on Orbit' session server and
 hands its OpenAI-compatible URL to `nemogym_agent_function.run`, which POSTs
 the task to the NeMo Gym server's `/run` with `policy_base_url` set to that
 session URL and the sampling settings mapped onto `responses_create_params`
 (`temperature`, `top_p`, `max_output_tokens`). NeMo Gym's mini-swe-agent v2
 then talks to the policy exclusively through the session URL (litellm chat
-completions), so Miles records every turn losslessly — token ids, logprobs,
+completions), so Orbit records every turn losslessly — token ids, logprobs,
 and loss masks come from the session server, not from re-tokenizing message
 text. The episode grade rides back in the `/run` response (`reward`, with the
 SWE-bench eval report in `metadata` → `sample.metadata["eval_report"]`) and
@@ -225,7 +225,7 @@ on CPU-only machines, in three independent layers (all three pass as of
 ## Troubleshooting
 
 1. `train.py: error: unrecognized arguments: --max-seq-len
-   --custom-agent-function-path`: `MILES_USE_LEGACY_ROLLOUT_V1=1` is set in the
+   --custom-agent-function-path`: `ORBIT_USE_LEGACY_ROLLOUT_V1=1` is set in the
    training environment — the legacy path never registers the agentic flags.
 2. `mini_swe_agent_2` dies at spin-up with an unresolvable-dependency error
    (`openai==X` vs `nemo-gym depends on openai<=Y`): the main venv has extra
@@ -234,7 +234,7 @@ on CPU-only machines, in three independent layers (all three pass as of
 3. Slow episodes are usually docker pulls (each task has its own image,
    fetched on first use) or the in-container SWE-bench evaluation
    (server-side `eval_timeout`, default 1800s). `NEMO_GYM_RUN_TIMEOUT`
-   (default 3600s) caps one episode end-to-end on the Miles side.
+   (default 3600s) caps one episode end-to-end on the Orbit side.
 4. A failed episode surfaces as `sample.metadata["eval_report"]["error"]` with
    a traceback from the NeMo Gym server — check there before digging into
    server logs.

@@ -11,7 +11,7 @@ if sys.version_info < (3, 11):
     pytest.skip("Verifiers requires Python 3.11+", allow_module_level=True)
 
 from examples.experimental.verifiers.verifiers_rollout import (
-    MilesSGLangTransport,
+    OrbitSGLangTransport,
     VerifiersRolloutFn,
     _check_version,
     _config_path,
@@ -28,7 +28,7 @@ from examples.experimental.verifiers.verifiers_rollout import (
     trace_to_samples,
 )
 
-from miles.utils.types import Sample
+from orbit.utils.types import Sample
 
 
 def _args(**overrides) -> Namespace:
@@ -357,21 +357,21 @@ def test_successful_eval_trace_requires_configured_named_reward():
 
 
 def test_unsupported_trace_error_is_not_resampled_forever():
-    error = SimpleNamespace(message="Miles' Verifiers adapter does not support this request: ResponsesDialect")
+    error = SimpleNamespace(message="Orbit' Verifiers adapter does not support this request: ResponsesDialect")
 
     with pytest.raises(RuntimeError, match="ResponsesDialect"):
         _raise_for_unsupported_trace_errors([_trace(error=error, has_error=True)])
 
 
-def test_graph_branches_fail_before_miles_can_corrupt_trace_groups():
+def test_graph_branches_fail_before_orbit_can_corrupt_trace_groups():
     trace = _trace(branches=[_branch(index=0), _branch(index=1)])
 
     with pytest.raises(NotImplementedError, match="multiple graph branches"):
         trace_to_samples(_args(), trace, group_index=4, index_start=10)
 
 
-def test_convert_group_uses_standard_miles_group_shape():
-    from miles.ray.rollout.rollout_data_conversion import postprocess_rollout_data
+def test_convert_group_uses_standard_orbit_group_shape():
+    from orbit.ray.rollout.rollout_data_conversion import postprocess_rollout_data
 
     adapter = object.__new__(VerifiersRolloutFn)
     adapter.args = _args()
@@ -394,7 +394,7 @@ def test_convert_group_uses_standard_miles_group_shape():
 
 
 def test_standard_dynamic_filter_accepts_converted_branch_group():
-    from miles.rollout.filter_hub.dynamic_sampling_filters import check_reward_nonzero_std
+    from orbit.rollout.filter_hub.dynamic_sampling_filters import check_reward_nonzero_std
 
     adapter = object.__new__(VerifiersRolloutFn)
     adapter.args = _args()
@@ -481,7 +481,7 @@ async def test_verifiers_episode_owns_group_reward_computation():
     assert [trace.reward for trace in result] == [-1.0, 1.0]
 
 
-def test_sampling_config_preserves_miles_minimum_tokens():
+def test_sampling_config_preserves_orbit_minimum_tokens():
     class SamplingConfig:
         @staticmethod
         def model_validate(data):
@@ -540,8 +540,8 @@ async def test_transport_translates_renderer_request_to_sglang(monkeypatch):
             },
         }
 
-    monkeypatch.setattr("miles.utils.http_utils.post", fake_post)
-    transport = MilesSGLangTransport(_args(sglang_router_policy="manual"))
+    monkeypatch.setattr("orbit.utils.http_utils.post", fake_post)
+    transport = OrbitSGLangTransport(_args(sglang_router_policy="manual"))
 
     response = await transport.post(
         "http://127.0.0.1:30000/inference/v1/generate",
@@ -586,7 +586,7 @@ async def test_transport_translates_renderer_request_to_sglang(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_transport_rejects_multimodal_features():
-    transport = MilesSGLangTransport(_args())
+    transport = OrbitSGLangTransport(_args())
 
     with pytest.raises(NotImplementedError, match="multimodal"):
         await transport.post(
@@ -606,8 +606,8 @@ async def test_transport_bounds_seen_sessions(monkeypatch):
             }
         }
 
-    monkeypatch.setattr("miles.utils.http_utils.post", fake_post)
-    transport = MilesSGLangTransport(_args())
+    monkeypatch.setattr("orbit.utils.http_utils.post", fake_post)
+    transport = OrbitSGLangTransport(_args())
     transport._session_cache_size = 2
     body = {"token_ids": [10], "sampling_params": {}}
 
@@ -623,7 +623,7 @@ async def test_transport_bounds_seen_sessions(monkeypatch):
 
 def test_transport_resolves_router_address_lazily():
     args = _args(sglang_router_ip=None, sglang_router_port=None)
-    transport = MilesSGLangTransport(args)
+    transport = OrbitSGLangTransport(args)
 
     args.sglang_router_ip = "10.0.0.4"
     args.sglang_router_port = 3210
@@ -639,13 +639,13 @@ def test_transport_uses_default_model_router():
         }
     )
 
-    assert MilesSGLangTransport(args).base_url == "http://10.0.0.5:3211/v1"
+    assert OrbitSGLangTransport(args).base_url == "http://10.0.0.5:3211/v1"
 
 
 def test_eval_transport_keeps_live_router_args():
     rollout_args = _args(sglang_router_ip=None, sglang_router_port=None)
     eval_args = _args(sglang_router_ip=None, sglang_router_port=None)
-    transport = MilesSGLangTransport(eval_args, router_args=rollout_args)
+    transport = OrbitSGLangTransport(eval_args, router_args=rollout_args)
 
     rollout_args.sglang_model_routers = {"default": ("10.0.0.7", 3213)}
 
@@ -653,7 +653,7 @@ def test_eval_transport_keeps_live_router_args():
 
 
 @pytest.mark.asyncio
-async def test_eval_rejects_miles_group_reward_model():
+async def test_eval_rejects_orbit_group_reward_model():
     adapter = object.__new__(VerifiersRolloutFn)
     adapter.args = _args(group_rm=True)
 
@@ -662,8 +662,8 @@ async def test_eval_rejects_miles_group_reward_model():
 
 
 @pytest.mark.asyncio
-async def test_eval_extracts_structured_miles_reward(monkeypatch):
-    import miles.utils as miles_utils
+async def test_eval_extracts_structured_orbit_reward(monkeypatch):
+    import orbit.utils as orbit_utils
 
     @asynccontextmanager
     async def serving():
@@ -679,8 +679,8 @@ async def test_eval_extracts_structured_miles_reward(monkeypatch):
         group[0].reward = {"score": 0.75, "details": "ok"}
 
     dumper_utils = SimpleNamespace(configure_sglang=configure_sglang)
-    monkeypatch.setitem(sys.modules, "miles.utils.dumper_utils", dumper_utils)
-    monkeypatch.setattr(miles_utils, "dumper_utils", dumper_utils, raising=False)
+    monkeypatch.setitem(sys.modules, "orbit.utils.dumper_utils", dumper_utils)
+    monkeypatch.setattr(orbit_utils, "dumper_utils", dumper_utils, raising=False)
     adapter = object.__new__(VerifiersRolloutFn)
     adapter.args = _args(
         custom_rm_path="tests.fake_reward",
@@ -700,7 +700,7 @@ async def test_eval_extracts_structured_miles_reward(monkeypatch):
     adapter._tasks = [object()]
     adapter._next_sample_index = 0
     adapter._run_task_group = run_group
-    adapter._apply_miles_rewards = apply_reward
+    adapter._apply_orbit_rewards = apply_reward
 
     output = await adapter._call_eval(SimpleNamespace(rollout_id=0))
 

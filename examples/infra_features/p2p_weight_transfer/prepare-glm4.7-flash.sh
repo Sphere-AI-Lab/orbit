@@ -30,7 +30,7 @@ mkdir -p /root/models /root/datasets
 hf download "$HF_REPO" --local-dir "/root/models/${MODEL_NAME}"
 
 python3 -c "
-from miles.utils.external_utils.command_utils import hf_download_dataset
+from orbit.utils.external_utils.command_utils import hf_download_dataset
 hf_download_dataset('zhuzilin/dapo-math-17k')
 hf_download_dataset('zhuzilin/aime-2024')
 "
@@ -40,7 +40,7 @@ hf_download_dataset('zhuzilin/aime-2024')
 # ---------------------------------------------------------------------------
 mkdir -p /root/multinode
 python3 -c "
-from miles.utils.external_utils.command_utils import convert_checkpoint
+from orbit.utils.external_utils.command_utils import convert_checkpoint
 convert_checkpoint(
     model_name='${MODEL_NAME}',
     megatron_model_type='${MODEL_TYPE}',

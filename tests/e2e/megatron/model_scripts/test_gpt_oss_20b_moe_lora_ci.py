@@ -2,7 +2,7 @@ import os
 
 from tests.ci.ci_register import register_cuda_ci
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 # MoE-expert LoRA smoke test on gpt-oss-20b (expert-only targets, bridge mode; CI-sized
 # version of examples/lora/run-gpt-oss-20B-megatron-moe-lora.sh). Runs both serving

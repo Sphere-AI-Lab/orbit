@@ -50,7 +50,7 @@
 
 ### 10
 "python3"
-"<REPO_ROOT>/miles/utils/external_utils/model_args_utils.py"
+"<REPO_ROOT>/orbit/utils/external_utils/model_args_utils.py"
 "qwen3-30B-A3B"
 
 ### 11
@@ -75,7 +75,7 @@
 "job"
 "submit"
 "--address=http://127.0.0.1:8265"
-"--runtime-env-json={\n  \"env_vars\": {\n    \"MC_TRANSFER_TIMEOUT\": \"300\",\n    \"RAY_DEBUG\": \"1\",\n    \"PYTHONPATH\": \"/root/Megatron-LM/\",\n    \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",\n    \"NCCL_NVLS_ENABLE\": \"1\",\n    \"MILES_LOG_DIR\": \"\"\n  }\n}"
+"--runtime-env-json={\n  \"env_vars\": {\n    \"MC_TRANSFER_TIMEOUT\": \"300\",\n    \"RAY_DEBUG\": \"1\",\n    \"PYTHONPATH\": \"/root/Megatron-LM/\",\n    \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",\n    \"NCCL_NVLS_ENABLE\": \"1\",\n    \"ORBIT_LOG_DIR\": \"\"\n  }\n}"
 "--"
 "python3"
 "train.py"

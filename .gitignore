@@ -193,7 +193,7 @@ _examples_synced/
 .env
 .DS_Store
 
-# slurm launcher outputs (scripts/slurm/launch_miles.sbatch)
+# slurm launcher outputs (scripts/slurm/launch_orbit.sbatch)
 /runs/
 /checkpoints/
 /data/

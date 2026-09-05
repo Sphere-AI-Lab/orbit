@@ -9,7 +9,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
-export MILES_SCRIPT_GLOBAL_BATCH_SIZE=32
+export ORBIT_SCRIPT_GLOBAL_BATCH_SIZE=32
 
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/vagen-sokoban-main-qwen25vl3b-colocate-1node.sh"

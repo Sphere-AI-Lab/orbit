@@ -2,7 +2,7 @@
 
 This folder advances multimodal OPD through isolated cluster gates. Milestone
 `00` validates the direct SGLang teacher-prefill contract. Milestone `01` then
-exercises the same contract through Miles' production OPD scoring and parsing
+exercises the same contract through Orbit' production OPD scoring and parsing
 path. Milestone `02` is the first end-to-end trainer gate: single-turn Geo3K
 sampled RKLD on the three-node teacher/actor/rollout layout. Milestone `03`
 keeps that validated layout fixed and isolates trainer-side teacher Top-K + Rest
@@ -11,7 +11,7 @@ Geo3K multi-turn sampled-RKLD reference; milestone `05` applies the sparse
 Top-K + Rest objective to that same sequence. Milestone `06` composes both
 objectives from one teacher response. All synchronous smoke/reference pairs
 through `06` passed. Milestone `07` is now prepared as a scheduling-only
-comparison: it reuses the complete `06` hybrid contract in Miles' existing
+comparison: it reuses the complete `06` hybrid contract in Orbit' existing
 fully-async rollout worker, without adding another OPD algorithm path.
 
 ## Canonical 200-step baseline
@@ -49,16 +49,16 @@ The numbered `00`-`11` files remain as development gates and historical A/B
 evidence. New work should compare against the canonical baseline rather than
 reconstructing a launch through the milestone inheritance chain.
 
-The G11 correction used by `02` is an exact text-suffix scoring contract. Miles
+The G11 correction used by `02` is an exact text-suffix scoring contract. Orbit
 sends the rendered prompt and ordered raw images, the scoring SGLang server
 builds its own multimodal prefix, and only then appends the sampled response
 token IDs verbatim. It does not preserve or reuse a student-processor-expanded
-visual prefix. The Miles capability flag is
+visual prefix. The Orbit capability flag is
 `--sglang-mm-exact-scoring-suffix`; it defaults off so deployments using an
 unpatched SGLang server retain the legacy request shape. The multimodal 01/02
 recipes enable it explicitly.
 
-Validate the G11 correction in increasing-cost order. From the Miles repository
+Validate the G11 correction in increasing-cost order. From the Orbit repository
 root, first run the SGLang request/unit coverage and one-GPU generic VLM E2E on a
 cluster node:
 
@@ -126,7 +126,7 @@ hf download Qwen/Qwen3-VL-30B-A3B-Thinking \
   --local-dir "$HF_CACHE_DIR/models/Qwen3-VL-30B-A3B-Thinking"
 ```
 
-Submit the smoke through the normal Miles Slurm launcher:
+Submit the smoke through the normal Orbit Slurm launcher:
 
 ```bash
 HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh \
@@ -236,7 +236,7 @@ decode/re-tokenize path; supporting that later turn requires a second
 teacher-local processor pass over canonical messages and newly ordered media.
 The current Geo3K single-turn recipe and its text-only environment observations
 satisfy these constraints.
-With the flag disabled, Miles emits the historical `input_ids + image_data`
+With the flag disabled, Orbit emits the historical `input_ids + image_data`
 payload and never sends `scoring_suffix_ids`; that compatibility mode does not
 carry an exact-action guarantee and is not an acceptable G11 validation result.
 
@@ -362,7 +362,7 @@ Compare `03b` with the `02b` steady-step median of 38.94 seconds only after
 normalizing for response-token count. Up to 10% regression is acceptable for
 this correctness gate; 10–20% triggers a dedicated profile, and more than 20%
 blocks the hybrid until diagnosed. Do not enable profiling in the canonical
-run. If needed, rerun a short smoke with `MILES_PROFILE_OPD_DAGGER=1` so the
+run. If needed, rerun a short smoke with `ORBIT_PROFILE_OPD_DAGGER=1` so the
 existing Stable-TP operator ranges appear in the cluster profiler.
 
 ## 04a: synchronous Geo3K multi-turn sampled-RKLD gate
@@ -381,10 +381,10 @@ text-only feedback, so later turns do not add media. The generator retains two
 aligned representations: an expanded sequence for Megatron and a compact
 media-prefix sequence for Student SGLang. Every sampled action ID is appended
 verbatim to both; only SGLang expands the compact image placeholder. Assistant
-spans use `loss_mask=1`, while tool spans use `loss_mask=0`. Miles sends the
+spans use `loss_mask=1`, while tool spans use `loss_mask=0`. Orbit sends the
 complete position-preserving response suffix in one exact-suffix teacher
 request per sample. The teacher scores the full sequence for autoregressive
-context, then Miles makes masked tool rows inert before sampled RKLD reaches
+context, then Orbit makes masked tool rows inert before sampled RKLD reaches
 the trainer.
 
 Run the smoke after the focused server-side tests:
@@ -719,7 +719,7 @@ holds this synchronous hybrid contract fixed and changes scheduling only.
 
 Milestone `07` does not change the objective established by `06`. It switches
 the training entry point to `train_async.py` and selects `--fully-async`
-(`miles.rollout.fully_async_rollout.FullyAsyncRolloutFn` since the 2026-08 sync). The
+(`orbit.rollout.fully_async_rollout.FullyAsyncRolloutFn` since the 2026-08 sync). The
 persistent background worker continuously performs the existing per-sample
 sequence:
 
@@ -748,7 +748,7 @@ existing train/rollout mismatch instead.
 The canonical scheduling settings are intentionally conservative:
 
 ```text
-MILES_TRAIN_ENTRY=train_async.py
+ORBIT_TRAIN_ENTRY=train_async.py
 --fully-async-prefetch-batches 1
 --fully-async-max-completed-queue-groups 32
 --max-weight-staleness 2
@@ -842,7 +842,7 @@ measurements, not model-quality claims.
 Milestone `08` promotes the task score that earlier recipes logged only as
 `rollout/raw_reward` into an explicit, opt-in base RL objective. The logging
 contract does not change: without `--opd-optimize-task-reward`, optimization
-reward remains exactly zero. With the flag enabled, Miles applies the same
+reward remains exactly zero. With the flag enabled, Orbit applies the same
 group reward transformation as the standard GRPO path and then composes the
 three already-separated signals:
 
@@ -1085,7 +1085,7 @@ Milestone `10` is a paired old-policy-source experiment over the two completed
 `09` long-window arms. It keeps the model pair, pure-hybrid objective, Geo3K
 multi-turn data, prefetch-two scheduler, staleness bound, memory fractions,
 teacher topology, 200-step horizon, task-reward telemetry, and no-checkpoint
-contract fixed. The treatment adds exactly one existing Miles flag:
+contract fixed. The treatment adds exactly one existing Orbit flag:
 
 ```text
 --use-rollout-logprobs
@@ -1247,7 +1247,7 @@ checkpoint saving         = disabled
 The eval dataset selects `examples.geo3k_vlm.multi_turn.fixed_eval.generate`
 through a per-dataset `--eval-config`. Training keeps the original
 `examples.geo3k_vlm.multi_turn.rollout.generate` callback and metadata contract.
-On eval only, the wrapper assigns the built-in `math` task reward before Miles
+On eval only, the wrapper assigns the built-in `math` task reward before Orbit
 can invoke the OPD custom RM. Student evaluation therefore generates with the
 current Student SGLang weights but issues no teacher-scoring request and cannot
 enter the training batch or loss.
@@ -1331,8 +1331,8 @@ explicit noncanonical length study; the canonical rerun is 12,000.
 Primary W&B metrics live under `eval/geo3k_fixed/*`: `accuracy`,
 `accuracy_ci95_low/high`, `num_prompts`, `truncated_rate`, and mean/min/max for
 response, active, observation tokens, and rounds. Compact per-prompt JSONL
-evidence is written to `$MILES_RUN_DIR/fixed_eval/geo3k_fixed/step_XXXX.jsonl`.
-The standard Slurm launcher injects `MILES_RUN_DIR`; a nonstandard direct launch
+evidence is written to `$ORBIT_RUN_DIR/fixed_eval/geo3k_fixed/step_XXXX.jsonl`.
+The standard Slurm launcher injects `ORBIT_RUN_DIR`; a nonstandard direct launch
 without it still logs aggregate metrics but warns and skips JSONL. Gates 25-28
 continue to require the JSONL evidence. All rerun references share the same
 12,000-token, three-round contract; always interpret accuracy together with

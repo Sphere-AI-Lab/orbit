@@ -1,6 +1,6 @@
-"""Integration of the dashboard with miles core, on a local Ray instance.
+"""Integration of the dashboard with orbit core, on a local Ray instance.
 
-Exercises the REAL activation path: tracking registry -> MilesDashboardBackend
+Exercises the REAL activation path: tracking registry -> OrbitDashboardBackend
 -> init_dashboard (named collector actor + samplers) -> tracking.log
 fan-out -> Timer phase sink -> finish_tracking, then loads the produced
 directory with the store and serves it. GPU samples appear only on hosts with
@@ -12,15 +12,15 @@ from argparse import Namespace
 
 import pytest
 
-from miles.dashboard.dump_reader import DumpReader
-from miles.dashboard.server import make_app
-from miles.dashboard.store import MetricStore, Role, Stream
-from miles.utils.timer import Timer, timer
+from orbit.dashboard.dump_reader import DumpReader
+from orbit.dashboard.server import make_app
+from orbit.dashboard.store import MetricStore, Role, Stream
+from orbit.utils.timer import Timer, timer
 
 
 def _args(tmp_path) -> Namespace:
     return Namespace(
-        use_miles_dashboard=True,
+        use_orbit_dashboard=True,
         dump_details=str(tmp_path),
         wandb_group="wiring-e2e",
         use_rollout_entropy=True,
@@ -35,15 +35,15 @@ def _args(tmp_path) -> Namespace:
 
 def test_tracking_backend_end_to_end_local_ray(tmp_path):
     ray = pytest.importorskip("ray")
-    from miles.dashboard import backend, hooks
-    from miles.utils.tracking_utils.tracking import finish_tracking, init_tracking
-    from miles.utils.tracking_utils.tracking import log as tracking_log
+    from orbit.dashboard import backend, hooks
+    from orbit.utils.tracking_utils.tracking import finish_tracking, init_tracking
+    from orbit.utils.tracking_utils.tracking import log as tracking_log
 
     ray.init(num_cpus=2, include_dashboard=False, ignore_reinit_error=True, logging_level="ERROR")
     saved_sinks = list(Timer().event_sinks)
     args = _args(tmp_path)
     try:
-        # driver: registry picks MilesDashboardBackend from the args flag
+        # driver: registry picks OrbitDashboardBackend from the args flag
         init_tracking(args)
         assert backend.current_collector() is not None
 
@@ -84,18 +84,18 @@ def test_tracking_backend_end_to_end_local_ray(tmp_path):
 
 
 def test_registry_contains_dashboard_backend():
-    from miles.utils.tracking_utils.base import MilesDashboardBackend
-    from miles.utils.tracking_utils.tracking import BACKEND_REGISTRY
+    from orbit.utils.tracking_utils.base import OrbitDashboardBackend
+    from orbit.utils.tracking_utils.tracking import BACKEND_REGISTRY
 
-    cls, flag = BACKEND_REGISTRY["miles_dashboard"]
-    assert cls is MilesDashboardBackend
-    assert flag == "use_miles_dashboard"
+    cls, flag = BACKEND_REGISTRY["orbit_dashboard"]
+    assert cls is OrbitDashboardBackend
+    assert flag == "use_orbit_dashboard"
 
 
 def test_engine_topology_gpu_range_logic():
     # the pure slice of SGLangEngine.get_topology_info: node-physical range
     pytest.importorskip("sglang")
-    from miles.backends.sglang_utils.sglang_engine import SGLangEngine
+    from orbit.backends.sglang_utils.sglang_engine import SGLangEngine
 
     engine = SGLangEngine.__new__(SGLangEngine)
     engine.args = Namespace(num_gpus_per_node=8)

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import torch
 
-from miles.rollout.data_source import RolloutDataSource
+from orbit.rollout.data_source import RolloutDataSource
 
 
 class _Dataset:

@@ -11,12 +11,12 @@ REF_LOAD="${REF_LOAD:-${HOME}/models/Qwen2.5-0.5B-Instruct_torch_dist}"
 PROMPT_DATA="${PROMPT_DATA:-${HOME}/datasets/gsm8k/train.parquet}"
 NUM_GPUS="${NUM_GPUS:-2}"
 NUM_ROLLOUT="${NUM_ROLLOUT:-3}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-${PWD}/miles-runs/muon-smoke}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-${PWD}/orbit-runs/muon-smoke}"
 RUN_ID="${RUN_ID:-qwen2.5-0.5b-gsm8k-${OPTIMIZER}-$(date -u +%Y%m%dT%H%M%SZ)}"
 DRY_RUN="${DRY_RUN:-0}"
 LOG_TO_STDOUT_ONLY="${LOG_TO_STDOUT_ONLY:-0}"
-MILES_CONDA_ENV="${MILES_CONDA_ENV:-miles}"
-MILES_CONDA_SH="${MILES_CONDA_SH:-/data/shared/conda/miniconda3/etc/profile.d/conda.sh}"
+ORBIT_CONDA_ENV="${ORBIT_CONDA_ENV:-orbit}"
+ORBIT_CONDA_SH="${ORBIT_CONDA_SH:-/data/shared/conda/miniconda3/etc/profile.d/conda.sh}"
 
 die() {
    printf 'error: %s\n' "$*" >&2
@@ -119,7 +119,7 @@ TRAIN_COMMAND=(
    --actor-num-gpus-per-node "${NUM_GPUS}"
    --colocate
    --calculate-per-token-loss
-   --use-miles-router
+   --use-orbit-router
    "${MODEL_ARGS[@]}"
    "${CKPT_ARGS[@]}"
    "${ROLLOUT_ARGS[@]}"
@@ -144,17 +144,17 @@ fi
 RUN_DIR="${OUTPUT_ROOT}/${RUN_ID}"
 [[ ! -e "${RUN_DIR}" ]] || die "run directory already exists: ${RUN_DIR}"
 
-[[ -f "${MILES_CONDA_SH}" ]] || die "MILES_CONDA_SH file does not exist: ${MILES_CONDA_SH}"
-source "${MILES_CONDA_SH}"
-conda activate "${MILES_CONDA_ENV}" || die "failed to activate Conda environment: ${MILES_CONDA_ENV}"
-[[ "${CONDA_DEFAULT_ENV:-}" == "${MILES_CONDA_ENV}" ]] || \
-   die "Conda activated '${CONDA_DEFAULT_ENV:-unknown}', expected '${MILES_CONDA_ENV}'"
+[[ -f "${ORBIT_CONDA_SH}" ]] || die "ORBIT_CONDA_SH file does not exist: ${ORBIT_CONDA_SH}"
+source "${ORBIT_CONDA_SH}"
+conda activate "${ORBIT_CONDA_ENV}" || die "failed to activate Conda environment: ${ORBIT_CONDA_ENV}"
+[[ "${CONDA_DEFAULT_ENV:-}" == "${ORBIT_CONDA_ENV}" ]] || \
+   die "Conda activated '${CONDA_DEFAULT_ENV:-unknown}', expected '${ORBIT_CONDA_ENV}'"
 
 command -v python3 >/dev/null 2>&1 || die "python3 is not available in PATH"
 if [[ "${OPTIMIZER}" == "muon" ]] && ! python3 -c \
    'from emerging_optimizers.orthogonalized_optimizers import OrthogonalizedOptimizer, get_muon_scale_factor; from emerging_optimizers.orthogonalized_optimizers.muon_utils import newton_schulz_tp' \
    >/dev/null 2>&1; then
-   die "Muon requires Emerging Optimizers v0.1.0; install git+https://github.com/NVIDIA-NeMo/Emerging-Optimizers.git@v0.1.0 into ${MILES_CONDA_ENV}"
+   die "Muon requires Emerging Optimizers v0.1.0; install git+https://github.com/NVIDIA-NeMo/Emerging-Optimizers.git@v0.1.0 into ${ORBIT_CONDA_ENV}"
 fi
 command -v ray >/dev/null 2>&1 || die "ray is not available in PATH"
 command -v nvidia-smi >/dev/null 2>&1 || die "nvidia-smi is not available in PATH"

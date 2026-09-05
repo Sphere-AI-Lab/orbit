@@ -73,7 +73,7 @@ hf download
 
 ### 8
 pkill -9 sglang; sleep 3; ray stop
-  --force; pkill -9 ray; pkill -9 miles; sleep 3; pkill -9 ray; pkill -9 miles; pkill -9 redis; true; 
+  --force; pkill -9 ray; pkill -9 orbit; sleep 3; pkill -9 ray; pkill -9 orbit; pkill -9 redis; true; 
 
 ### 9
 export PYTHONUNBUFFERED=1 && ray start
@@ -158,7 +158,7 @@ export no_proxy=127.0.0.1 && export PYTHONUNBUFFERED=1 && ray job submit
   --eps-clip-high 2e-4
   --use-tis 
   --use-wandb
-  --wandb-project miles-run_glm45_355b_a32b
+  --wandb-project orbit-run_glm45_355b_a32b
   --wandb-group 260101-000000-000
   --wandb-key 'frozen-wandb-api-key'
   --disable-wandb-random-suffix 

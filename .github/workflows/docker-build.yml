@@ -124,8 +124,8 @@ jobs:
             echo "No upstream changes"
           fi
 
-          # miles commits alone never trigger rebuilds, so bound how stale the baked
-          # miles checkout can get.
+          # orbit commits alone never trigger rebuilds, so bound how stale the baked
+          # orbit checkout can get.
           MAX_BUILD_AGE_SECONDS=$(( 24 * 3600 ))
           NOW_EPOCH=$(date +%s)
           if [ "$SHOULD_BUILD" = "false" ]; then

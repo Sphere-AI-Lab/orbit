@@ -4,7 +4,7 @@ from scripts.run_nemotron_3_ultra_550b_a55b import ScriptArgs, _execute_train, _
 from tests.ci.ci_register import register_cuda_ci
 from tests.ci.metric_history import register_ci_gate
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 # Smoke test for the Nemotron-3-Ultra (nemotron_h: hybrid Mamba2 + Attention + latent-MoE)
 # training script. It runs a 4-layer slice on a single 8-GPU H200 node and only verifies that

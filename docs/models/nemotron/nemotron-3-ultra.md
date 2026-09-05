@@ -10,8 +10,8 @@ Nano and Super, scaled to **550 B total / 55 B active** across 108 layers, with
 a **latent MoE** (512 experts, top-22, `moe_latent_size=2048`) and one shared
 expert.
 
-miles loads it through the `megatron.bridge` AutoBridge with the shared
-NemotronH MoE shim (`miles_plugins/megatron_bridge/nemotron_h.py`), the same
+orbit loads it through the `megatron.bridge` AutoBridge with the shared
+NemotronH MoE shim (`orbit_plugins/megatron_bridge/nemotron_h.py`), the same
 path Super-120B uses. There is no offline `torch_dist` conversion.
 
 **Key highlights:**
@@ -65,7 +65,7 @@ AutoBridge plus the NemotronH shim read the HF checkpoint directly, so
 ### 4.1 Single-node smoke test
 
 ```bash
-cd /root/miles
+cd /root/orbit
 python scripts/run_nemotron_3_ultra_550b_a55b.py full-train \
     --model-name NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16-4layer --num-nodes 1
 ```
@@ -83,12 +83,12 @@ ray start --head --num-gpus 8 --disable-usage-stats
 ray start --address=${HEAD_IP}:6379 --num-gpus 8 --disable-usage-stats
 
 # then, on the head pod
-export MILES_SCRIPT_EXTERNAL_RAY=1
+export ORBIT_SCRIPT_EXTERNAL_RAY=1
 export RAY_ADDRESS=http://${HEAD_IP}:8265
 python scripts/run_nemotron_3_ultra_550b_a55b.py train --num-nodes 16
 ```
 
-Without `MILES_SCRIPT_EXTERNAL_RAY=1` the launcher runs `ray stop --force` and
+Without `ORBIT_SCRIPT_EXTERNAL_RAY=1` the launcher runs `ray stop --force` and
 starts a fresh single-node head, tearing down the cluster the workers joined.
 
 The recipe defaults to a 30-rollout run (`--num-rollout`), rollout batch 32 at 8

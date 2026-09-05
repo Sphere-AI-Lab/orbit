@@ -1,5 +1,5 @@
-from miles.utils.mask_utils import MultiTurnLossMaskGenerator
-from miles.utils.processing_utils import load_tokenizer
+from orbit.utils.mask_utils import MultiTurnLossMaskGenerator
+from orbit.utils.processing_utils import load_tokenizer
 
 
 def test_loss_mask_qwen3_simple(model_name: str = "Qwen/Qwen3-8B"):

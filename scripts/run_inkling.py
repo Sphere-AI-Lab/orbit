@@ -53,7 +53,7 @@ Usage patterns:
        python scripts/run_inkling.py full-train --model-name Inkling ...
 
   4. Fully-async disaggregated training:
-       MILES_SCRIPT_NUM_NODES=12 python scripts/run_inkling.py train \
+       ORBIT_SCRIPT_NUM_NODES=12 python scripts/run_inkling.py train \
            --model-name Inkling --fully-async --rollout-num-nodes 4 \
            --num-gpus-per-node 4 --num-rollout 100
 """
@@ -64,7 +64,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 app = typer.Typer()
 
@@ -361,7 +361,7 @@ def _train(args: ScriptArgs):
     if args.is_mm:
         # The mm provider wires the frozen HF vision/audio towers; it overrides the
         # text provider from the model sh (MODEL_ARGS precede train_args; last one wins).
-        inkling_args = "--custom-model-provider-path miles_plugins.models.inkling.model.inkling_mm_model_provider "
+        inkling_args = "--custom-model-provider-path orbit_plugins.models.inkling.model.inkling_mm_model_provider "
 
     misc_args = (
         "--transformer-impl transformer_engine "
@@ -387,7 +387,7 @@ def _train(args: ScriptArgs):
         "SGLANG_ENABLE_UNIFIED_RADIX_TREE": "1",
         "SGLANG_OPT_USE_INKLING_FUSED_AR_SCONV_NORM": "false",
         "SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK": "1",
-        "MILES_SGLANG_DUMMY_LOAD": "0",
+        "ORBIT_SGLANG_DUMMY_LOAD": "0",
         "SGLANG_SERVER_ENGINE_ROLLOUT_RETURN_LOGPROB": "1",
         "RAY_memory_monitor_refresh_ms": "0",
         "NCCL_MNNVL_ENABLE": "1",

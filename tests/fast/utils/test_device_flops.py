@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from miles.utils import device_flops
-from miles.utils.device_flops import local_peak_bf16_tflops, peak_bf16_tflops
+from orbit.utils import device_flops
+from orbit.utils.device_flops import local_peak_bf16_tflops, peak_bf16_tflops
 
 
 @pytest.mark.parametrize(

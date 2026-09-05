@@ -3,7 +3,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 
 MXFP8_HIGH_PRECISION_LAYERS_HF = ".kv_b_proj. .shared_experts."

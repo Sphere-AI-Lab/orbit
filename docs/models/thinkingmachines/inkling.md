@@ -5,11 +5,11 @@ description: Launch recipe for Inkling (975 B), Thinking Machines' multimodal Mo
 
 ## 1. Model Introduction
 
-[Inkling](https://huggingface.co/thinkingmachines/Inkling) is a mixture-of-experts transformer released by Thinking Machines Lab, with 975 B total parameters and 41 B active, a context window of up to 1 M tokens, and pretraining on 45 trillion tokens of text, images, audio and video. Its architecture introduces short convolution, attention with relative positional embedding, and a novel MoE design with a shared-expert sink. Miles implements Inkling as a native Megatron model: local and global relative attention, the residual ShortConv, the shared-sink router and experts, and the image and audio encoders, and the same backend drives both full-parameter and LoRA RL.
+[Inkling](https://huggingface.co/thinkingmachines/Inkling) is a mixture-of-experts transformer released by Thinking Machines Lab, with 975 B total parameters and 41 B active, a context window of up to 1 M tokens, and pretraining on 45 trillion tokens of text, images, audio and video. Its architecture introduces short convolution, attention with relative positional embedding, and a novel MoE design with a shared-expert sink. Orbit implements Inkling as a native Megatron model: local and global relative attention, the residual ShortConv, the shared-sink router and experts, and the image and audio encoders, and the same backend drives both full-parameter and LoRA RL.
 
 **Key highlights**:
 
-- **ShortConv**: a short causal convolution with a residual connection, applied on the K and V streams and on the attention and MLP/MoE outputs. Miles implements it with fused, packing-aware Triton kernels.
+- **ShortConv**: a short causal convolution with a residual connection, applied on the K and V streams and on the attention and MLP/MoE outputs. Orbit implements it with fused, packing-aware Triton kernels.
 - **Relative attention**: a learned relative-position bias replaces positional embeddings; the stack mixes sliding-window and full-attention layers, with context length up to 1 M tokens.
 - **Shared-expert sink MoE**: sigmoid top-k routing where the router also scores the shared experts and renormalizes their weights together with the selected routed experts'.
 - **Train–inference consistency by construction**: customized relative-attention score-mod, ShortConv, and FP32 SwiGLU/combine kernels, while Rollout Routing Replay (R3) replays the rollout's routed expert IDs, including over media-expanded multimodal sequences.
@@ -29,7 +29,7 @@ description: Launch recipe for Inkling (975 B), Thinking Machines' multimodal Mo
 docker pull radixark/miles:inkling
 
 # Full-parameter GRPO on 16 nodes x 4 GB300, inside the container
-cd /root/miles
+cd /root/orbit
 python scripts/run_inkling.py train \
    --model-name Inkling --train-mode full --task dapo_math \
    --num-nodes 16 --num-gpus-per-node 4
@@ -51,7 +51,7 @@ python scripts/run_inkling.py train \
 | `--data-dir` | `/root/datasets` | HF datasets (dapo-math-17k, geo3k, …) |
 | `--save-dir` | unset | training checkpoints |
 
-Every option can also be preconfigured via `MILES_SCRIPT_<FIELD_NAME_UPPER>` env vars (precedence: CLI flag > env var > built-in default). Pass any extra Miles / Megatron / SGLang flags through `--extra-args`.
+Every option can also be preconfigured via `ORBIT_SCRIPT_<FIELD_NAME_UPPER>` env vars (precedence: CLI flag > env var > built-in default). Pass any extra Orbit / Megatron / SGLang flags through `--extra-args`.
 
 ## 4. Script breakdown
 
@@ -73,8 +73,8 @@ Pass `--hf-checkpoint <path>` to the launcher when the weights are already on a 
 Inkling ships in BF16, so conversion is a single distributed `torch_dist` shard (no precision cast). The model definition comes from `scripts/models/inkling.py`:
 
 ```bash
-cd /root/miles
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py inkling)" || exit 1
+cd /root/orbit
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py inkling)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 CONVERT_KEEP_PP1=1 PYTHONPATH=/root/Megatron-LM torchrun \
    --nproc-per-node 4 --nnodes 4 \
@@ -104,7 +104,7 @@ ray start --head --num-gpus 4 --disable-usage-stats
 ray start --address=${HEAD_IP}:6379 --num-gpus 4 --disable-usage-stats
 ```
 
-Set `MILES_SCRIPT_EXTERNAL_RAY=1` to point the launcher at this existing Ray cluster. When it is unset, the launcher boots a local Ray head itself.
+Set `ORBIT_SCRIPT_EXTERNAL_RAY=1` to point the launcher at this existing Ray cluster. When it is unset, the launcher boots a local Ray head itself.
 
 ## 5. Example Recipe Configuration
 
@@ -123,7 +123,7 @@ GRPO with truncated importance sampling. The launcher defaults: global batch siz
 
 ### 5.3 Training attention backends
 
-The `MILES_INKLING_ATTN_BACKEND` environment variable selects the training-side attention implementation:
+The `ORBIT_INKLING_ATTN_BACKEND` environment variable selects the training-side attention implementation:
 
 | Backend | Role | 8K packed, rel-extent 1024, GB300 |
 |---|---|---|
@@ -180,7 +180,7 @@ Weight updates stream Megatron shards into SGLang's tensor layout in bounded buc
 --offload-train-disk-chunk-mb 256  # --fully-async
 ```
 
-Within a single GB300 rack the 975 B policy, gradients, and FP32 optimizer state exceed GPU memory, so Miles streams Megatron `DistributedOptimizer` state between a bounded GPU working set and node-local NVMe. The offload changes storage placement, not the update math. The paused training actor's weights are additionally disk-backed through `torch_memory_saver`. LoRA training skips both offloads and uses dynamic batching (`--use-dynamic-batch-size --max-tokens-per-gpu 4096`) instead of the fixed micro-batch.
+Within a single GB300 rack the 975 B policy, gradients, and FP32 optimizer state exceed GPU memory, so Orbit streams Megatron `DistributedOptimizer` state between a bounded GPU working set and node-local NVMe. The offload changes storage placement, not the update math. The paused training actor's weights are additionally disk-backed through `torch_memory_saver`. LoRA training skips both offloads and uses dynamic batching (`--use-dynamic-batch-size --max-tokens-per-gpu 4096`) instead of the fixed micro-batch.
 
 <Warning title="Inkling-specific caveats">
 
@@ -199,7 +199,7 @@ $$
 
 The adapter follows Inkling's released LoRA schema, covering the attention, dense MLP, MoE, and LM-head projections (defaults: rank 32, `alpha = 32`, all-linear). The routed experts use a shared-outer factorization: one factor is shared across experts while the expert-specific factors follow EP sharding.
 
-After each optimizer step, Miles exports a serving-ready adapter directly from the distributed training state and hands it to the colocated SGLang worker over CUDA IPC; the frozen base is never re-transferred. This cuts the weight update from 49.4 s to 2.5 s (20×) and brings training-step time to ~85 % of full-parameter training, with no optimizer offload needed. Released Inkling adapters in safetensors format support warm starts via `--lora-adapter-path`, and per-rank adapter checkpoints allow exact training resume.
+After each optimizer step, Orbit exports a serving-ready adapter directly from the distributed training state and hands it to the colocated SGLang worker over CUDA IPC; the frozen base is never re-transferred. This cuts the weight update from 49.4 s to 2.5 s (20×) and brings training-step time to ~85 % of full-parameter training, with no optimizer offload needed. Released Inkling adapters in safetensors format support warm starts via `--lora-adapter-path`, and per-rank adapter checkpoints allow exact training resume.
 
 ## 7. Multimodal RL
 

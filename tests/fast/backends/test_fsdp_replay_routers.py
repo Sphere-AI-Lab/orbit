@@ -8,11 +8,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from tests.fast.fixtures.replay_fixtures import reset_routing_replay_manager, wire_replay
 
-from miles.backends.fsdp_utils.models.replay_routers import (
+from orbit.backends.fsdp_utils.models.replay_routers import (
     install_glm4_moe_lite_router_replay,
     install_qwen3_router_replay,
 )
-from miles.utils.replay_base import routing_replay_manager
+from orbit.utils.replay_base import routing_replay_manager
 
 
 @pytest.fixture(autouse=True)

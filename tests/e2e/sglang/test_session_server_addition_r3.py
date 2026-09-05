@@ -12,11 +12,11 @@ from huggingface_hub import snapshot_download
 from tests.ci.ci_register import register_cuda_ci
 from tests.e2e.sglang.utils.sglang_server import start_sglang_server
 
-from miles.rollout.session.samples.codec import decode_samples_and_merge_input_sample
-from miles.rollout.session.server import SessionServer
-from miles.utils.http_utils import find_available_port
-from miles.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
-from miles.utils.types import Sample
+from orbit.rollout.session.samples.codec import decode_samples_and_merge_input_sample
+from orbit.rollout.session.server import SessionServer
+from orbit.utils.http_utils import find_available_port
+from orbit.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
+from orbit.utils.types import Sample
 
 register_cuda_ci(
     est_time=400,
@@ -68,7 +68,7 @@ def sglang_server():
 def _serve_session(backend_url: str) -> Iterator[str]:
     port = find_available_port(31000)
     args = SimpleNamespace(
-        miles_router_timeout=_HTTP_TIMEOUT_SECS,
+        orbit_router_timeout=_HTTP_TIMEOUT_SECS,
         hf_checkpoint=_MODEL_PATH,
         chat_template_path=None,
         apply_chat_template_kwargs={"enable_thinking": False},

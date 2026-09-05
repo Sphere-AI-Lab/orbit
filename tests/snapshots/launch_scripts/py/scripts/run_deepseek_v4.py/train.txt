@@ -1,6 +1,6 @@
 ### 0
 pkill -9 sglang; sleep 3; ray stop
-  --force; pkill -9 ray; pkill -9 miles; sleep 3; pkill -9 ray; pkill -9 miles; pkill -9 redis; true; 
+  --force; pkill -9 ray; pkill -9 orbit; sleep 3; pkill -9 ray; pkill -9 orbit; pkill -9 redis; true; 
 
 ### 1
 export PYTHONUNBUFFERED=1 && ray start
@@ -69,7 +69,7 @@ export no_proxy=127.0.0.1 && export PYTHONUNBUFFERED=1 && ray job submit
   --dsa-indexer-n-heads 64
   --dsa-indexer-head-dim 128
   --dsa-indexer-topk 512
-  --spec miles_plugins.models.deepseek_v4.deepseek_v4 get_dsv4_spec
+  --spec orbit_plugins.models.deepseek_v4.deepseek_v4 get_dsv4_spec
   --activation-func-clamp-value 10
   --no-bias-swiglu-fusion
   --no-activation-func-clamp-shared-expert
@@ -109,7 +109,7 @@ export no_proxy=127.0.0.1 && export PYTHONUNBUFFERED=1 && ray job submit
   --eps-clip 0.2
   --eps-clip-high 0.28 
   --use-wandb
-  --wandb-project miles-run_deepseek_v4
+  --wandb-project orbit-run_deepseek_v4
   --wandb-group 260101-000000-000
   --wandb-key 'frozen-wandb-api-key'
   --disable-wandb-random-suffix 

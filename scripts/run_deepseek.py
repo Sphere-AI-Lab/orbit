@@ -9,7 +9,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 app = typer.Typer()
 
@@ -132,7 +132,7 @@ def _execute_train(args: ScriptArgs, before_ray_job_submit=None):
     if args.mode != "debug_minimal":
         rollout_args += (
             "--over-sampling-batch-size 256 "
-            "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
+            "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
         )
 
     # sometimes disable eval to speed up debugging

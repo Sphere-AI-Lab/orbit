@@ -1,7 +1,7 @@
 """nccl_probe — multi-node NCCL all_reduce smoke test over torch.distributed.
 
 Bootstraps a process group from SLURM env vars and runs an all_reduce size
-sweep — the exact IB transport path miles training uses. Exits 0 on healthy
+sweep — the exact IB transport path orbit training uses. Exits 0 on healthy
 fabric; nonzero if a collective errors/hangs, or (with a bandwidth floor set)
 if NCCL silently falls back to sockets. Run by the launcher as the tier-nccl
 preflight; see docs/launcher.md "Healthcheck" for rationale + ad-hoc salloc recipe.

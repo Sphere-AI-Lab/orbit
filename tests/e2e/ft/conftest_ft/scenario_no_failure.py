@@ -6,12 +6,12 @@ from tests.e2e.ft.conftest_ft.app import create_comparison_app_and_run_ci
 from tests.e2e.ft.conftest_ft.execution import get_common_train_args, get_ft_args, get_train_env_vars_arg
 from tests.e2e.ft.conftest_ft.modes import FTTestMode
 
-from miles.utils.test_utils.comparisons.dumps import (
+from orbit.utils.test_utils.comparisons.dumps import (
     INPUT_TENSORS_ALLOW_FAILED_PATTERN,
     INPUT_TENSORS_SKIP_PATTERN,
     compare_dumps,
 )
-from miles.utils.test_utils.comparisons.metrics import compare_metrics
+from orbit.utils.test_utils.comparisons.metrics import compare_metrics
 
 NUM_STEPS: int = 2
 

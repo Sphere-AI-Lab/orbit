@@ -9,9 +9,9 @@ Wire it up with::
 Both writers no-op unless their own flag is set, so the hook is safe to leave
 configured on a recipe that has tracing switched off.
 
-The hook returns ``False`` so Miles still emits its default rollout metrics --
+The hook returns ``False`` so Orbit still emits its default rollout metrics --
 this observes rollouts, it does not replace the built-in logging. Note that
-Miles supports a single ``--custom-rollout-log-function-path``: a recipe that
+Orbit supports a single ``--custom-rollout-log-function-path``: a recipe that
 also needs its own logger should call both from one wrapper function rather
 than setting the flag twice.
 """
@@ -24,7 +24,7 @@ from typing import Any
 from examples.model_response_trace_viewer.response_log import save_model_response_log
 from examples.model_response_trace_viewer.response_trace import save_model_response_trace
 
-from miles.utils.types import Sample
+from orbit.utils.types import Sample
 
 
 def log_rollout_data(

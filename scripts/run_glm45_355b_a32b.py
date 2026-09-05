@@ -8,7 +8,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 app = typer.Typer()
 
@@ -137,7 +137,7 @@ def _execute_train(args: ScriptArgs):
     if args.dynamic_sampling and (args.mode != "debug_minimal"):
         rollout_args += (
             "--over-sampling-batch-size 256 "
-            "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
+            "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
         )
 
     # sometimes disable eval to speed up debugging
@@ -302,7 +302,7 @@ def _execute_train(args: ScriptArgs):
 
     if args.enable_benchmark:
         misc_args += (
-            "--custom-generate-function-path miles.rollout.generate_hub.benchmarkers.generate_with_random_osl "
+            "--custom-generate-function-path orbit.rollout.generate_hub.benchmarkers.generate_with_random_osl "
             "--rollout-batch-size 128 "
             "--n-samples-per-prompt 8 "
             "--use-distributed-post "

@@ -14,14 +14,14 @@ from unittest.mock import patch
 import pytest
 import requests
 
-from miles.rollout.data_source import DataSource, RolloutDataSourceWithBuffer
-from miles.rollout.session.server import SessionServer
-from miles.router.router import MilesRouter
-from miles.utils.arguments import parse_args
-from miles.utils.http_utils import find_available_port, init_http_client
-from miles.utils.misc import SingletonMeta
-from miles.utils.test_utils.mock_sglang_server import MockSGLangServer, with_mock_server
-from miles.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
+from orbit.rollout.data_source import DataSource, RolloutDataSourceWithBuffer
+from orbit.rollout.session.server import SessionServer
+from orbit.router.router import OrbitRouter
+from orbit.utils.arguments import parse_args
+from orbit.utils.http_utils import find_available_port, init_http_client
+from orbit.utils.misc import SingletonMeta
+from orbit.utils.test_utils.mock_sglang_server import MockSGLangServer, with_mock_server
+from orbit.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
 
 
 @dataclass(frozen=True)
@@ -67,7 +67,7 @@ def _build_args(*, data_path: str, router_port: int, extra_argv: list[str] | Non
         "--eval-prompt-data",
         "toy",
         data_path,
-        "--use-miles-router",
+        "--use-orbit-router",
         "--sglang-router-ip",
         "127.0.0.1",
         "--sglang-router-port",
@@ -82,8 +82,8 @@ def _build_args(*, data_path: str, router_port: int, extra_argv: list[str] | Non
 
 
 @contextmanager
-def _with_miles_router(args: Namespace) -> Iterator[UvicornThreadServer]:
-    router = MilesRouter(args, verbose=False)
+def _with_orbit_router(args: Namespace) -> Iterator[UvicornThreadServer]:
+    router = OrbitRouter(args, verbose=False)
     server = UvicornThreadServer(router.app, host=args.sglang_router_ip, port=args.sglang_router_port)
     try:
         server.start()
@@ -103,7 +103,7 @@ DEFAULT_DATA_ROWS = [{"input": "What is 1+7?", "label": "8"}]
 def _with_session_server(args: Namespace, backend_url: str) -> Iterator[UvicornThreadServer]:
     """Start a SessionServer for agentic variants that need TITO session tracking."""
     session_args = copy.copy(args)
-    session_args.miles_router_timeout = 30
+    session_args.orbit_router_timeout = 30
     session_server = SessionServer(session_args, backend_url=backend_url)
     port = find_available_port(31000)
     server = UvicornThreadServer(session_server.app, host="127.0.0.1", port=port)
@@ -136,7 +136,7 @@ def rollout_env(tmp_path, request) -> RolloutEnv:
     SingletonMeta.clear_all_instances()
 
     with with_mock_server(model_name=args.hf_checkpoint, latency=config.latency) as mock_server:
-        with _with_miles_router(args) as router_server:
+        with _with_orbit_router(args) as router_server:
             r = requests.post(
                 f"{router_server.url}/add_worker",
                 params={"url": mock_server.url},

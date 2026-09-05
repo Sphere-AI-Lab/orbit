@@ -1,7 +1,7 @@
-TRAIN_BACKEND=${MILES_SCRIPT_TRAIN_BACKEND:-"megatron"}
-MODEL_NAME=${MILES_SCRIPT_MODEL_NAME:-"Qwen3-VL-8B-Instruct"}
-DATASET_NAME=${MILES_SCRIPT_DATASET_NAME:-"chenhegu/geo3k_imgurl"}
-NUM_GPUS=${MILES_SCRIPT_NUM_GPUS:-8}
+TRAIN_BACKEND=${ORBIT_SCRIPT_TRAIN_BACKEND:-"megatron"}
+MODEL_NAME=${ORBIT_SCRIPT_MODEL_NAME:-"Qwen3-VL-8B-Instruct"}
+DATASET_NAME=${ORBIT_SCRIPT_DATASET_NAME:-"chenhegu/geo3k_imgurl"}
+NUM_GPUS=${ORBIT_SCRIPT_NUM_GPUS:-8}
 DATASET_LOCAL_NAME=$(basename "$DATASET_NAME")
 
 # Validate MODEL_NAME
@@ -25,7 +25,7 @@ fi
 MODEL_NAME_LOWER=$(echo "$MODEL_NAME" | tr '[:upper:]' '[:lower:]')
 
 # External Ray flag
-if [ -z "$MILES_SCRIPT_EXTERNAL_RAY" ] || [ "$MILES_SCRIPT_EXTERNAL_RAY" = "0" ]; then
+if [ -z "$ORBIT_SCRIPT_EXTERNAL_RAY" ] || [ "$ORBIT_SCRIPT_EXTERNAL_RAY" = "0" ]; then
    USE_EXTERNAL_RAY=0
 else
    USE_EXTERNAL_RAY=1
@@ -38,12 +38,12 @@ if [ "$USE_EXTERNAL_RAY" = "0" ]; then
    ray stop --force
    pkill -9 ray
 fi
-pkill -9 miles
+pkill -9 orbit
 sleep 3
 if [ "$USE_EXTERNAL_RAY" = "0" ]; then
    pkill -9 ray
 fi
-pkill -9 miles
+pkill -9 orbit
 pkill -9 redis
 
 set -ex
@@ -75,7 +75,7 @@ CKPT_ARGS=(
 )
 
 SFT_ARGS=(
-   --rollout-function-path miles.rollout.sft_rollout.generate_rollout
+   --rollout-function-path orbit.rollout.sft_rollout.generate_rollout
    --prompt-data /root/datasets/${DATASET_LOCAL_NAME}/train_formatted.parquet
    --input-key messages
    --apply-chat-template
@@ -108,7 +108,7 @@ OPTIMIZER_ARGS=(
 if [ -n "$WANDB_API_KEY" ]; then
     WANDB_ARGS=(
         --use-wandb
-        --wandb-project miles-geo3k-vlm-sft
+        --wandb-project orbit-geo3k-vlm-sft
         --wandb-group ${MODEL_NAME_LOWER}-${TRAIN_BACKEND}
         --wandb-key ${WANDB_API_KEY}
         --disable-wandb-random-suffix
@@ -149,10 +149,10 @@ else
     )
 
    # get MODEL_ARGS from scripts/models for megatron backend
-   MILES_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &>/dev/null && pwd)"
+   ORBIT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &>/dev/null && pwd)"
    MODEL_ARGS_FILE=$(echo "$MODEL_NAME" | sed 's/-Instruct//g; s/-Thinking//g; s/Qwen3-VL-/qwen3-/g; s/-2B/-1.7B/g')
    # VL models require rotary-base 5000000
-   MODEL_ARGS_LINE="$(MODEL_ARGS_ROTARY_BASE=5000000 python3 "${MILES_DIR}/miles/utils/external_utils/model_args_utils.py" "${MODEL_ARGS_FILE}")" || exit 1
+   MODEL_ARGS_LINE="$(MODEL_ARGS_ROTARY_BASE=5000000 python3 "${ORBIT_DIR}/orbit/utils/external_utils/model_args_utils.py" "${MODEL_ARGS_FILE}")" || exit 1
    read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 fi
 

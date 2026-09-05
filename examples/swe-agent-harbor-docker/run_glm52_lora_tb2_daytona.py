@@ -7,7 +7,7 @@ Combines two paths that previously did not meet:
 The 744B base does not fit on one node (bf16 ~1403 GiB vs 1123 GiB of HBM on 8x H200),
 so the trainer is sharded over ``--num-nodes`` (EP spans the whole world, TP stays
 intra-node) and the rollout is served from the fp8 checkpoint. Ray must already be up
-across every node, so set ``MILES_SCRIPT_EXTERNAL_RAY=1``.
+across every node, so set ``ORBIT_SCRIPT_EXTERNAL_RAY=1``.
 
 The two DSA backends differ by a sequence-length ceiling, so prefer ``tilelang``:
 
@@ -28,7 +28,7 @@ whose ``packed_seq_params`` is closure-captured by Megatron's checkpoint
 room to spare.
 
 Usage (4 nodes x 8 H200, ray already running):
-  MILES_SCRIPT_EXTERNAL_RAY=1 python run_glm52_lora_tb2_daytona.py \\
+  ORBIT_SCRIPT_EXTERNAL_RAY=1 python run_glm52_lora_tb2_daytona.py \\
       --num-nodes 4 --prompt-data /root/tb2_train.jsonl
 """
 
@@ -41,7 +41,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -115,7 +115,7 @@ class ScriptArgs(U.ExecuteTrainConfig):
     # The paused actor is ~50 GiB/rank, so a pinned host copy costs ~400 GiB/node on top of
     # sglang's own backup and OOMs a 2 TiB node during offload. Spill it to node-local disk
     # instead; host use then stays at one chunk per rank. Must not be tmpfs.
-    offload_train_disk_dir: str = "/scratch/miles_train_offload"
+    offload_train_disk_dir: str = "/scratch/orbit_train_offload"
     # sglang's own default (csgmv) crashes the DSA MoE-LoRA rollout under dp-attention
     sglang_lora_backend: str = "triton"
 
@@ -124,8 +124,8 @@ class ScriptArgs(U.ExecuteTrainConfig):
     agent_model_name: str = os.environ.get("AGENT_MODEL_NAME", "model")
     harbor_tasks_dir: str = os.environ.get("HARBOR_TASKS_DIR", "/root/harbor_tasks")
     # sgl-router binds with a Rust SocketAddr parse, so this MUST be a numeric IP.
-    router_external_host: str = os.environ.get("MILES_ROUTER_EXTERNAL_HOST", "")
-    miles_host_ip: str = os.environ.get("MILES_HOST_IP", "")
+    router_external_host: str = os.environ.get("ORBIT_ROUTER_EXTERNAL_HOST", "")
+    orbit_host_ip: str = os.environ.get("ORBIT_HOST_IP", "")
 
     # W&B settings
     wandb_key: str = os.environ.get("WANDB_KEY", os.environ.get("WANDB_API_KEY", ""))
@@ -311,11 +311,11 @@ def execute(args: ScriptArgs):
     r3_args = "--use-rollout-routing-replay " if args.use_r3 else ""
 
     agent_args = (
-        "--custom-generate-function-path miles.rollout.generate_hub.agentic_tool_call.generate "
+        "--custom-generate-function-path orbit.rollout.generate_hub.agentic_tool_call.generate "
         "--custom-agent-function-path swe_agent_function.run "
         "--custom-rm-path generate.reward_func "
         "--rollout-function-path generate.RolloutFn "
-        "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_no_aborted "
+        "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_no_aborted "
         "--tito-model glm47 "
         "--use-session-server "
         "--session-server-port 30001 "
@@ -342,7 +342,7 @@ def execute(args: ScriptArgs):
 
     traces_dir = args.save_traces_dir or f"{args.save_dir.rstrip('/')}/traces"
     if traces_dir != "disabled":
-        misc_args += f"--dump-details {traces_dir} --use-miles-dashboard "
+        misc_args += f"--dump-details {traces_dir} --use-orbit-dashboard "
 
     # train/entropy_loss is a hardcoded 0.0 unless this is set, and a falling entropy is the
     # earliest warning of policy collapse on a long agentic run.
@@ -351,7 +351,7 @@ def execute(args: ScriptArgs):
     # Under bf16 there is no grad scaler, so Megatron's prepare_grads() returns found_inf=False
     # unconditionally and a non-finite grad norm reaches the step, where clipping by
     # clip/(norm + eps) writes NaN into every adapter tensor. This flag routes the step through
-    # miles' own guard instead, which skips the offending step and leaves the weights intact.
+    # orbit' own guard instead, which skips the offending step and leaves the weights intact.
     misc_args += "--no-check-for-nan-in-loss-and-grad "
 
     debug_args = "--debug-rollout-only " if args.mode == "debug_rollout_only" else ""
@@ -393,10 +393,10 @@ def execute(args: ScriptArgs):
         f"{debug_args}"
     )
 
-    miles_root = U.repo_base_dir
+    orbit_root = U.repo_base_dir
 
     extra_env_vars = {
-        "PYTHONPATH": f"{args.megatron_path}:{SCRIPT_DIR}:{miles_root}",
+        "PYTHONPATH": f"{args.megatron_path}:{SCRIPT_DIR}:{orbit_root}",
         "AGENT_SERVER_URL": args.agent_server_url,
         "AGENT_MODEL_NAME": args.agent_model_name,
         "HARBOR_TASKS_DIR": args.harbor_tasks_dir,
@@ -413,9 +413,9 @@ def execute(args: ScriptArgs):
         "PYTORCH_CUDA_ALLOC_CONF": "garbage_collection_threshold:0.8,max_split_size_mb:512",
     }
     if args.router_external_host:
-        extra_env_vars["MILES_ROUTER_EXTERNAL_HOST"] = args.router_external_host
-    if args.miles_host_ip:
-        extra_env_vars["MILES_HOST_IP"] = args.miles_host_ip
+        extra_env_vars["ORBIT_ROUTER_EXTERNAL_HOST"] = args.router_external_host
+    if args.orbit_host_ip:
+        extra_env_vars["ORBIT_HOST_IP"] = args.orbit_host_ip
 
     U.execute_train(
         train_args=train_args,

@@ -1,6 +1,6 @@
 # Retool v2
 
-This example is an upgraded version of the original retool example, using the updated interfaces provided by the miles framework to implement multi-turn RL training with tool calls in a cleaner way.
+This example is an upgraded version of the original retool example, using the updated interfaces provided by the orbit framework to implement multi-turn RL training with tool calls in a cleaner way.
 
 ## Key Differences from v1
 
@@ -10,7 +10,7 @@ This example is an upgraded version of the original retool example, using the up
 
 | Argument | Description |
 |----------|-------------|
-| `--custom-generate-function-path` | Uses the built-in `miles.rollout.generate_hub.multi_turn.generate` — no need to implement the multi-turn loop yourself |
+| `--custom-generate-function-path` | Uses the built-in `orbit.rollout.generate_hub.multi_turn.generate` — no need to implement the multi-turn loop yourself |
 | `--generate-tool-specs-path` | Declare tool definitions (user-implemented) |
 | `--generate-execute-tool-function-path` | Implement tool execution logic (user-implemented) |
 | `--custom-rm-path` | Implement the reward function (user-implemented) |

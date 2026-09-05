@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from miles_plugins.envpack_adapter.analysis import summarize_dapo_groups
+from orbit_plugins.envpack_adapter.analysis import summarize_dapo_groups
 
 
 class EnvpackAnalysisTest(unittest.TestCase):

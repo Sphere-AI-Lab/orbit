@@ -1,4 +1,4 @@
-# miles watchdogs & job-killers — what can kill a run, why, and at which fully-async stage
+# orbit watchdogs & job-killers — what can kill a run, why, and at which fully-async stage
 
 Goal: one place to reason about every mechanism that can **fail the job**, **kill an
 engine/actor**, or **discard in-flight work**, so we can tell "infra blip" from "real
@@ -62,7 +62,7 @@ S7 training compute, "outer" = any time after submit.
   on actual training liveness.
 - **FIX (committed)**: a **heartbeat sentinel**. The driver writes
   `train_status.json` (`running` at start + every step, terminal at exit) to **node-local**
-  disk (`MILES_TRAIN_STATUS_FILE`, set by the launcher under `${TMPDIR:-/tmp}`). When the Ray API is unreadable
+  disk (`ORBIT_TRAIN_STATUS_FILE`, set by the launcher under `${TMPDIR:-/tmp}`). When the Ray API is unreadable
   but the heartbeat's `updated_at` is < `HEARTBEAT_MAX_AGE_S=600s` old, the watchdog prints
   `ALIVE`, **resets the grace counter, and keeps waiting** instead of killing. A stale
   heartbeat (driver not progressing) still falls through to CLUSTER_DEAD. Before the fix,
@@ -100,7 +100,7 @@ S7 training compute, "outer" = any time after submit.
 
 ## B. Stage-ordered gates
 
-### S1 — node healthcheck (before any miles code runs)  (`launch_miles.sbatch`, `lib/gpu_probe.py`)
+### S1 — node healthcheck (before any orbit code runs)  (`launch_orbit.sbatch`, `lib/gpu_probe.py`)
 - **T1 nvidia-smi** (`--query-gpu=count`) and **T2 gpu_probe** (`torch.cuda.set_device(i)` +
   tiny alloc per GPU), 60s/node. A failing node is recorded and the job **requeues excluding
   it** (`scontrol update ExcNodeList`, with an SBATCH_EXTRA `--exclude` HINT printed),
@@ -112,16 +112,16 @@ S7 training compute, "outer" = any time after submit.
   client** — reads hang in D-state and otherwise stall engine/weight bring-up with idle GPUs
   and no error (2026-07-01, j21623). Complements the cleanup gate: that flags only *leftover*
   D-state procs, this actively reads to catch a wedged mount on an otherwise-clean node. Opt
-  out `MILES_HEALTHCHECK_WEKA=0`.
+  out `ORBIT_HEALTHCHECK_WEKA=0`.
 - **Why**: never start training on a node with dead/orphaned GPU procs (leaked vLLM/sglang
   workers) — they'd OOM or hang the run. **This is what killed 21351/21352/21353** today:
   gpu_probe BAD on slinky-11/47/29/34/51 (leftover GPU procs). Note: the in-job
   `scontrol ExcNodeList` update can fail ("requeue may land on same bad nodes") → then you
   must resubmit with `SBATCH_EXTRA=--exclude=...` yourself. **Not a training/code problem.**
 
-### S2 — ray cluster assembly  (`launch_miles.sbatch` ~"did not assemble")
+### S2 — ray cluster assembly  (`launch_orbit.sbatch` ~"did not assemble")
 - The poll watches both `ray status` (must report `EXPECTED_GPUS` = workers×8 +
-  `MILES_RAY_HEAD_NUM_GPUS` (default 8; head-sidecar recipes export 0) within
+  `ORBIT_RAY_HEAD_NUM_GPUS` (default 8; head-sidecar recipes export 0) within
   `RAY_BRINGUP_TIMEOUT=300s`) **and** the head/worker `ray start … --block` srun PIDs.
   A dead PID = that node's Ray exited (cluster collapsed) → the poll stops at once
   instead of idling out the timeout. **Why**: a worker that never joins (network / a
@@ -142,7 +142,7 @@ S7 training compute, "outer" = any time after submit.
     training"). Async needs disagg.
   - **Qwen3-VL + CP>1 requires `calculate_per_token_loss`** — asserted in the bridge submodule
     `thirdparty/Megatron-Bridge/.../qwen_vl/modelling_qwen3_vl/model.py:203`. **This killed
-    cp2 (21102/21105).** Subtlety: the miles arg parses fine, but the bridge builds its
+    cp2 (21102/21105).** Subtlety: the orbit arg parses fine, but the bridge builds its
     `TransformerConfig` from the HF `config.json` and drops training-time args → fix is to
     set `provider.calculate_per_token_loss` after `to_megatron_provider()` (see
     `scripts/experiments/async/experimental/cp2-calculate-per-token-loss.md`).
@@ -156,7 +156,7 @@ S7 training compute, "outer" = any time after submit.
   hangs; that engine death then cascades (#8).
 
 ### S5 — steady state (continuous rollout ‖ training)
-- **7. Rollout engine health-monitor** (`miles/utils/health_monitor.py`): a background thread
+- **7. Rollout engine health-monitor** (`orbit/utils/health_monitor.py`): a background thread
   calls `engine.health_generate(timeout=300s)` every 30s. `< max_consecutive_failures(3)`
   → log + retry; `== 3` consecutive → **`stop_engines()` (ray.kill the actor)**.
   - **Why it cascades**: once an engine actor is killed, the next per-step **weight broadcast

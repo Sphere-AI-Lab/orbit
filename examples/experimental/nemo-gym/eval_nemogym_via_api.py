@@ -2,7 +2,7 @@
 """Validate the NeMo Gym leg without a GPU trainer (golden / API-policy scan).
 
 Drives a running mini_swe_agent_2 server through the same ``/run`` contract
-the miles agent function uses, so a pass here validates everything except the
+the orbit agent function uses, so a pass here validates everything except the
 session server and training itself:
 
   Golden scan (no model at all — sandbox + image + SWE-bench harness):
@@ -20,7 +20,7 @@ The server sends its own configured model name on every policy request, so
 start it with ``policy_model_name`` (env.yaml) set to the name the policy
 endpoint expects (e.g. ``deepseek-chat``).
 
-Input rows are miles prompt data (``{"prompt": ..., "metadata": {instance}}``,
+Input rows are orbit prompt data (``{"prompt": ..., "metadata": {instance}}``,
 the output of download_and_process_data.py) or raw SWE-bench instances.
 """
 
@@ -106,7 +106,7 @@ async def _main(args) -> int:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--input", required=True, help="miles prompt data or raw SWE-bench jsonl")
+    parser.add_argument("--input", required=True, help="orbit prompt data or raw SWE-bench jsonl")
     parser.add_argument("--nemo-gym-url", default=os.getenv("NEMO_GYM_URL", "http://localhost:12000"))
     parser.add_argument(
         "--golden", action="store_true", help="server must run with run_golden=true; expect reward 1.0"

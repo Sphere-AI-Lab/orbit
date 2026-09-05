@@ -6,9 +6,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../../.." && pwd)}
 RECIPE_NAME=${RECIPE_NAME:-$(basename "${BASH_SOURCE[0]}" .sh)}
-ENVPACK_ADAPTER_DIR=${ENVPACK_ADAPTER_DIR:-"$MILES_REPO/miles_plugins/envpack_adapter"}
+ENVPACK_ADAPTER_DIR=${ENVPACK_ADAPTER_DIR:-"$ORBIT_REPO/orbit_plugins/envpack_adapter"}
 # shellcheck disable=SC1091
 source "$ENVPACK_ADAPTER_DIR/recipes/common.sh"
 envpack_resolve_repo
@@ -35,7 +35,7 @@ HF_MODEL_DIR="$HF_CACHE_DIR/models/Qwen3-VL-2B-Instruct"
 ENVPACK_SAVE_DIR=${ENVPACK_SAVE_DIR:-"${RUN_DIR:-/tmp/envpack-mvp/${RECIPE_NAME}}/traces"}
 
 ENVPACK_DATASET_NAME=${ENVPACK_DATASET_NAME:-envpack-frozenlake-main}
-ENVPACK_DATA_ROOT=${ENVPACK_DATA_ROOT:-"$MILES_REPO/data/$ENVPACK_DATASET_NAME"}
+ENVPACK_DATA_ROOT=${ENVPACK_DATA_ROOT:-"$ORBIT_REPO/data/$ENVPACK_DATASET_NAME"}
 ENVPACK_TRAIN_DATA=${ENVPACK_TRAIN_DATA:-"$ENVPACK_DATA_ROOT/train/samples.jsonl"}
 ENVPACK_EVAL_DATA=${ENVPACK_EVAL_DATA:-"$ENVPACK_DATA_ROOT/eval/samples.jsonl"}
 ENVPACK_EVAL_NAME=${ENVPACK_EVAL_NAME:-envpack_frozenlake_val}
@@ -48,7 +48,7 @@ envpack_require_dataset "$ENVPACK_TRAIN_DATA" "$ENVPACK_EVAL_DATA" "$_BUILD_HINT
 # ---------------------------------------------------------------------------
 MODEL_ARGS_ROTARY_BASE=5000000
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-1.7B.sh"
+source "$ORBIT_REPO/scripts/models/qwen3-1.7B.sh"
 MODEL_ARGS+=( --megatron-to-hf-mode bridge )
 
 BASE_RUN_NAME=${SLURM_JOB_NAME:-$RECIPE_NAME}
@@ -62,7 +62,7 @@ fi
 # Human-facing experiment config
 # ---------------------------------------------------------------------------
 # Edit this block for normal training changes. The wiring below maps these
-# readable values into Miles args and envpack adapter YAML.
+# readable values into Orbit args and envpack adapter YAML.
 TRAINING_SCHEDULE_ARGS=(
     --num-rollout             400
     --rollout-batch-size       32
@@ -82,7 +82,7 @@ INTERACTION_BUDGET_ARGS=(
 ENABLE_DAPO=0
 DAPO_ARGS=(
     --eps-clip-high 0.28
-    --dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
+    --dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
     --over-sampling-batch-size auto
 )
 
@@ -167,7 +167,7 @@ EVAL_ARGS=(
     --eval-max-response-len    4096
 )
 
-# Miles fault tolerance.
+# Orbit fault tolerance.
 FT_ARGS=(
     --use-fault-tolerance
     --rollout-health-check-interval 30
@@ -175,7 +175,7 @@ FT_ARGS=(
     --rollout-health-check-first-wait 60
 )
 
-# Node/GPU ownership for Miles. Remote envpack server nodes are added by the
+# Node/GPU ownership for Orbit. Remote envpack server nodes are added by the
 # thin 2-node wrapper and excluded from Ray by the Slurm launcher.
 LAYOUT_ARGS=(
     --actor-num-nodes        1
@@ -207,7 +207,7 @@ if [[ "$ENABLE_DAPO" == "1" ]]; then
     fi
     GRPO_ARGS+=(
         --eps-clip-high "$(envpack_recipe_arg_value --eps-clip-high 0.28 "${DAPO_ARGS[@]}")"
-        --dynamic-sampling-filter-path "$(envpack_recipe_arg_value --dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "${DAPO_ARGS[@]}")"
+        --dynamic-sampling-filter-path "$(envpack_recipe_arg_value --dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "${DAPO_ARGS[@]}")"
         --over-sampling-batch-size "$EFFECTIVE_ROLLOUT_BATCH_SIZE"
     )
 fi
@@ -215,7 +215,7 @@ fi
 envpack_prepare_adapter_config frozenlake vision_free_think_local frozenlake-vision 5 512
 envpack_set_rollout_args
 
-MILES_ARGS=(
+ORBIT_ARGS=(
     "${LAYOUT_ARGS[@]}"
     "${MODEL_ARGS[@]}"
     "${CKPT_ARGS[@]}"

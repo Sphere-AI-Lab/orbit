@@ -1,7 +1,7 @@
 # OpenEnv Terminal-Bench-2 GRPO (GLM-4.7-Flash, single node)
 
 Train GLM-4.7-Flash with GRPO on the HuggingFace [OpenEnv](https://github.com/huggingface/openenv)
-**Terminal-Bench-2 (tbench2)** environment. A miles-side adapter runs the multi-turn
+**Terminal-Bench-2 (tbench2)** environment. A orbit-side adapter runs the multi-turn
 agentic loop (`reset(task_id)` → { policy emits one shell command → `step(exec)` →
 feed output back } → `evaluate`) against an unmodified OpenEnv env server; the reward
 is the binary pytest result (1.0 = all tests pass, else 0.0).
@@ -14,10 +14,10 @@ This guide targets a **single H200 node with 8 GPUs**. The run is colocated
 - Somewhere for the task environments to run, per step 2: an account with one of
   the hosted sandbox providers, a self-hosted AgentENV deployment, or a Docker
   host for the shared env server.
-- miles is installed and GLM-4.7-Flash weights are reachable (the launcher pulls
+- orbit is installed and GLM-4.7-Flash weights are reachable (the launcher pulls
   `zai-org/GLM-4.7-Flash` from HF and converts it to `torch_dist` on first run).
 - Install the OpenEnv tbench2 env client (isolate it if its deps clash with the
-  miles image):
+  orbit image):
 
   ```bash
   pip install -e <OpenEnv>/envs/tbench2_env

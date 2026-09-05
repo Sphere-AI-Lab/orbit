@@ -4,9 +4,9 @@ from fastapi.testclient import TestClient
 from tests.fast.dashboard.dummy_dump import dump_dummy_run
 from tests.fast.dashboard.dummy_telemetry import SAMPLES_PER_STEP, dump_dummy_telemetry
 
-from miles.dashboard.dump_reader import DumpReader
-from miles.dashboard.server import make_app
-from miles.dashboard.store import MetricStore, TrajectoryEvent, TrajectoryEventKind
+from orbit.dashboard.dump_reader import DumpReader
+from orbit.dashboard.server import make_app
+from orbit.dashboard.store import MetricStore, TrajectoryEvent, TrajectoryEventKind
 
 
 @pytest.fixture

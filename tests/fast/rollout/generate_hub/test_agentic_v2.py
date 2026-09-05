@@ -2,11 +2,11 @@ from types import SimpleNamespace
 
 import pytest
 
-import miles.rollout.generate_hub.agentic_tool_call as agentic_tool_call
-from miles.ray.rollout.rollout_data_conversion import validate_compact_rollout_ids
-from miles.rollout.base_types import GenerateFnInput
-from miles.rollout.session.samples.codec import SamplesReply
-from miles.utils.types import Sample
+import orbit.rollout.generate_hub.agentic_tool_call as agentic_tool_call
+from orbit.ray.rollout.rollout_data_conversion import validate_compact_rollout_ids
+from orbit.rollout.base_types import GenerateFnInput
+from orbit.rollout.session.samples.codec import SamplesReply
+from orbit.utils.types import Sample
 
 
 class _Tracer:

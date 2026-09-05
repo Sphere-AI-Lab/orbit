@@ -5,14 +5,14 @@
 #
 # Reads precomputed train/eval jsonl built by
 # examples/vagen/scripts/frozenlake-main.sh. See
-# examples/vagen/docs/launch_recipe.md for the VAGEN→miles knob mapping,
+# examples/vagen/docs/launch_recipe.md for the VAGEN→orbit knob mapping,
 # eval cadence, perf-args rationale, the Qwen3-VL <think>→<thinking> tag
 # swap (VAGEN_THINK_TAG below), and the Qwen3-VL rotary_base override.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}
 RECIPE_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
 
 # Qwen3-VL <think>→<thinking> swap (see docs/launch_recipe.md).
@@ -40,7 +40,7 @@ VAGEN_SAVE_DIR=${VAGEN_SAVE_DIR:-"${RUN_DIR:-/tmp/vagen-mvp/${RECIPE_NAME}}/trac
 # Dataset (model-agnostic — same artifact the 3B/7B recipes use)
 # ---------------------------------------------------------------------------
 VAGEN_DATASET_NAME=${VAGEN_DATASET_NAME:-frozenlake-main}
-VAGEN_DATA_ROOT=${VAGEN_DATA_ROOT:-"$MILES_REPO/data/$VAGEN_DATASET_NAME"}
+VAGEN_DATA_ROOT=${VAGEN_DATA_ROOT:-"$ORBIT_REPO/data/$VAGEN_DATASET_NAME"}
 VAGEN_TRAIN_DATA=${VAGEN_TRAIN_DATA:-"$VAGEN_DATA_ROOT/train/samples.jsonl"}
 VAGEN_EVAL_DATA=${VAGEN_EVAL_DATA:-"$VAGEN_DATA_ROOT/eval/samples.jsonl"}
 VAGEN_EVAL_NAME=${VAGEN_EVAL_NAME:-frozenlake_val}
@@ -63,15 +63,15 @@ fi
 # Qwen3-VL-2B rotary_base override (see docs/launch_recipe.md).
 MODEL_ARGS_ROTARY_BASE=5000000
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-1.7B.sh"
+source "$ORBIT_REPO/scripts/models/qwen3-1.7B.sh"
 MODEL_ARGS+=( --megatron-to-hf-mode bridge )
 
 RUN_NAME=${SLURM_JOB_NAME:-$RECIPE_NAME}
 
-NUM_ROLLOUT=${MILES_SCRIPT_NUM_ROLLOUT:-400}
-ROLLOUT_BATCH_SIZE=${MILES_SCRIPT_ROLLOUT_BATCH_SIZE:-32}
-N_SAMPLES_PER_PROMPT=${MILES_SCRIPT_N_SAMPLES_PER_PROMPT:-8}
-GLOBAL_BATCH_SIZE=${MILES_SCRIPT_GLOBAL_BATCH_SIZE:-$((ROLLOUT_BATCH_SIZE * N_SAMPLES_PER_PROMPT))}
+NUM_ROLLOUT=${ORBIT_SCRIPT_NUM_ROLLOUT:-400}
+ROLLOUT_BATCH_SIZE=${ORBIT_SCRIPT_ROLLOUT_BATCH_SIZE:-32}
+N_SAMPLES_PER_PROMPT=${ORBIT_SCRIPT_N_SAMPLES_PER_PROMPT:-8}
+GLOBAL_BATCH_SIZE=${ORBIT_SCRIPT_GLOBAL_BATCH_SIZE:-$((ROLLOUT_BATCH_SIZE * N_SAMPLES_PER_PROMPT))}
 
 CKPT_ARGS=(
     --hf-checkpoint  "$HF_MODEL_DIR"
@@ -122,11 +122,11 @@ GRPO_ARGS=(
     --eps-clip 0.2
 )
 
-if [[ "${MILES_VAGEN_DAPO:-0}" == "1" ]]; then
-    OVER_SAMPLING_BATCH_SIZE=${MILES_SCRIPT_OVER_SAMPLING_BATCH_SIZE:-$((ROLLOUT_BATCH_SIZE * 2))}
+if [[ "${ORBIT_VAGEN_DAPO:-0}" == "1" ]]; then
+    OVER_SAMPLING_BATCH_SIZE=${ORBIT_SCRIPT_OVER_SAMPLING_BATCH_SIZE:-$((ROLLOUT_BATCH_SIZE * 2))}
     GRPO_ARGS+=(
         --eps-clip-high 0.28
-        --dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
+        --dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
         --over-sampling-batch-size "$OVER_SAMPLING_BATCH_SIZE"
     )
 fi
@@ -182,7 +182,7 @@ LAYOUT_ARGS=(
     --rollout-num-gpus       8
 )
 
-MILES_ARGS=(
+ORBIT_ARGS=(
     "${LAYOUT_ARGS[@]}"
     "${MODEL_ARGS[@]}"
     "${CKPT_ARGS[@]}"

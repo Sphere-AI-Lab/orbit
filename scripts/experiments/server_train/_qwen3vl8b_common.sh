@@ -9,9 +9,9 @@
 set -euo pipefail
 
 COMMON_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$COMMON_DIR/../../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$COMMON_DIR/../../.." && pwd)}
 RECIPE_NAME=${RECIPE_NAME:-$(basename "${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}" .sh)}
-ENVPACK_ADAPTER_DIR=${ENVPACK_ADAPTER_DIR:-"$MILES_REPO/miles_plugins/envpack_adapter"}
+ENVPACK_ADAPTER_DIR=${ENVPACK_ADAPTER_DIR:-"$ORBIT_REPO/orbit_plugins/envpack_adapter"}
 # shellcheck disable=SC1091
 source "$ENVPACK_ADAPTER_DIR/recipes/common.sh"
 envpack_resolve_repo
@@ -27,17 +27,17 @@ EXPERIMENT_TIME=${EXPERIMENT_TIME:-72:00:00}
 # ---------------------------------------------------------------------------
 HF_CACHE_DIR=${HF_CACHE_DIR:-/data/shared/hf_cache}
 
-HF_MODEL_REPO=${MILES_SCRIPT_HF_MODEL_REPO:-"Qwen/Qwen3-VL-8B-Instruct"}
+HF_MODEL_REPO=${ORBIT_SCRIPT_HF_MODEL_REPO:-"Qwen/Qwen3-VL-8B-Instruct"}
 HF_DATASETS=()
-HF_MODEL_DIR=${MILES_SCRIPT_HF_MODEL_DIR:-"$HF_CACHE_DIR/models/Qwen3-VL-8B-Instruct"}
-MODEL_RECIPE=${MILES_SCRIPT_MODEL_RECIPE:-qwen3-8B.sh}
+HF_MODEL_DIR=${ORBIT_SCRIPT_HF_MODEL_DIR:-"$HF_CACHE_DIR/models/Qwen3-VL-8B-Instruct"}
+MODEL_RECIPE=${ORBIT_SCRIPT_MODEL_RECIPE:-qwen3-8B.sh}
 export VAGEN_THINK_TAG=${VAGEN_THINK_TAG:-thinking}
 export MODEL_ARGS_ROTARY_BASE=${MODEL_ARGS_ROTARY_BASE:-5000000}
 
 ENVPACK_DATASET_NAME=${ENVPACK_DATASET_NAME:-envpack-sokoban-main}
 ENVPACK_BUILD_TARGET=${ENVPACK_BUILD_TARGET:-sokoban}
 ENVPACK_SAVE_DIR=${ENVPACK_SAVE_DIR:-"${RUN_DIR:-/tmp/envpack-mvp/${RECIPE_NAME}}/traces"}
-ENVPACK_DATA_ROOT=${ENVPACK_DATA_ROOT:-"$MILES_REPO/data/$ENVPACK_DATASET_NAME"}
+ENVPACK_DATA_ROOT=${ENVPACK_DATA_ROOT:-"$ORBIT_REPO/data/$ENVPACK_DATASET_NAME"}
 ENVPACK_TRAIN_DATA=${ENVPACK_TRAIN_DATA:-"$ENVPACK_DATA_ROOT/train/samples.jsonl"}
 ENVPACK_EVAL_DATA=${ENVPACK_EVAL_DATA:-"$ENVPACK_DATA_ROOT/eval/samples.jsonl"}
 ENVPACK_EVAL_NAME=${ENVPACK_EVAL_NAME:-envpack_sokoban_val}
@@ -91,7 +91,7 @@ INTERACTION_BUDGET_ARGS=(
 )
 
 ENABLE_DAPO=${ENABLE_DAPO:-0}
-DAPO_DYNAMIC_FILTER_PATH=${DAPO_DYNAMIC_FILTER_PATH:-miles_plugins.envpack_adapter.filters.check_envpack_success_nonzero_std}
+DAPO_DYNAMIC_FILTER_PATH=${DAPO_DYNAMIC_FILTER_PATH:-orbit_plugins.envpack_adapter.filters.check_envpack_success_nonzero_std}
 DAPO_OVER_SAMPLING_BATCH_SIZE=${DAPO_OVER_SAMPLING_BATCH_SIZE:-32}
 SGLANG_SERVER_CONCURRENCY=${SGLANG_SERVER_CONCURRENCY:-}
 DAPO_ARGS=(
@@ -203,7 +203,7 @@ LAYOUT_ARGS=(
 # Derived wiring from the human-facing config above
 # ---------------------------------------------------------------------------
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/$MODEL_RECIPE"
+source "$ORBIT_REPO/scripts/models/$MODEL_RECIPE"
 MODEL_ARGS+=( --megatron-to-hf-mode bridge )
 
 NUM_ROLLOUT=$(envpack_recipe_arg_value --num-rollout 400 "${TRAINING_SCHEDULE_ARGS[@]}")
@@ -242,7 +242,7 @@ ENVPACK_CURRICULUM_STAGES=("${SOKOBAN_CURRICULUM_STAGES[@]}")
 envpack_prepare_adapter_config sokoban "$SOKOBAN_PROFILE" "$SOKOBAN_POOL_ID" "$MAX_ENV_TURNS_PER_SAMPLE" "$MAX_MODEL_TOKENS_PER_TURN"
 envpack_set_rollout_args
 
-MILES_ARGS=(
+ORBIT_ARGS=(
     "${LAYOUT_ARGS[@]}"
     "${MODEL_ARGS[@]}"
     "${CKPT_ARGS[@]}"

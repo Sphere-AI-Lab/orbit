@@ -1,9 +1,9 @@
 import os
 
-import miles.utils.external_utils.exec_command as U
-from miles.utils.external_utils.command_utils import execute_train
+import orbit.utils.external_utils.exec_command as U
+from orbit.utils.external_utils.command_utils import execute_train
 
-MODEL_NAME = os.environ.get("MILES_SCRIPT_MODEL_NAME", "Qwen3-VL-2B-Instruct")
+MODEL_NAME = os.environ.get("ORBIT_SCRIPT_MODEL_NAME", "Qwen3-VL-2B-Instruct")
 assert MODEL_NAME in {
     "Qwen3-VL-2B-Instruct",
     "Qwen3-VL-4B-Instruct",
@@ -13,9 +13,9 @@ assert MODEL_NAME in {
     "Qwen3-VL-8B-Thinking",
 }
 
-NUM_GPUS = int(os.environ.get("MILES_SCRIPT_NUM_GPUS", "4"))
-EXTERNAL_RAY = int(os.environ.get("MILES_SCRIPT_EXTERNAL_RAY", "0"))
-TRAIN_BACKEND = os.environ.get("MILES_SCRIPT_TRAIN_BACKEND", "megatron").lower()
+NUM_GPUS = int(os.environ.get("ORBIT_SCRIPT_NUM_GPUS", "4"))
+EXTERNAL_RAY = int(os.environ.get("ORBIT_SCRIPT_EXTERNAL_RAY", "0"))
+TRAIN_BACKEND = os.environ.get("ORBIT_SCRIPT_TRAIN_BACKEND", "megatron").lower()
 assert TRAIN_BACKEND in {"fsdp", "megatron"}
 
 DATASET_NAME = "VeraIsHere/geo3k_imgurl_processed"
@@ -45,7 +45,7 @@ def execute():
     wandb_args = (
         (
             "--use-wandb "
-            "--wandb-project miles-dev "
+            "--wandb-project orbit-dev "
             "--wandb-group geo3k_vlm_multi_turn "
             f"--wandb-key '{wandb_api_key}' "
         )

@@ -25,19 +25,19 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from tests.fast.rollout.session.test_samples import _make_record
 
-from miles.rollout.session.core import SessionCore
-from miles.rollout.session.linear_trajectory import SessionRegistry
-from miles.rollout.session.samples.codec import decode_samples_and_merge_input_sample
-from miles.rollout.session.sessions import setup_session_routes
-from miles.utils.chat_template_utils import get_tito_tokenizer
-from miles.utils.processing_utils import load_tokenizer
-from miles.utils.types import Sample
+from orbit.rollout.session.core import SessionCore
+from orbit.rollout.session.linear_trajectory import SessionRegistry
+from orbit.rollout.session.samples.codec import decode_samples_and_merge_input_sample
+from orbit.rollout.session.sessions import setup_session_routes
+from orbit.utils.chat_template_utils import get_tito_tokenizer
+from orbit.utils.processing_utils import load_tokenizer
+from orbit.utils.types import Sample
 
 NUM_LAYERS = 3
 TOPK = 2
 
 _ARGS = SimpleNamespace(
-    miles_router_timeout=30,
+    orbit_router_timeout=30,
     hf_checkpoint="Qwen/Qwen3-0.6B",
     chat_template_path=None,
     apply_chat_template_kwargs={"enable_thinking": False},

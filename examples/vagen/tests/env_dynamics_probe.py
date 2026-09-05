@@ -4,7 +4,7 @@ Asserts seed determinism (FrozenLake same/different seeds), valid action
 → reward ≥ format_reward AND state changes, invalid action → reward == 0
 AND no change. Vision mode mirrors text mode. Run via:
 
-    env -u LD_LIBRARY_PATH conda run -n miles python -m examples.vagen.tests.env_dynamics_probe
+    env -u LD_LIBRARY_PATH conda run -n orbit python -m examples.vagen.tests.env_dynamics_probe
 """
 
 import asyncio

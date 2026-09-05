@@ -40,7 +40,7 @@ from dataclasses import dataclass
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 
 @dataclass
@@ -121,7 +121,7 @@ def execute(args: ScriptArgs):
         "--rollout-max-response-len 32768 "
         "--rollout-temperature 1 "
         "--over-sampling-batch-size 256 "
-        "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
+        "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
         "--num-steps-per-rollout 4 "
         "--balance-data "
         "--rollout-stop-token-ids 151329 151336 151338 "

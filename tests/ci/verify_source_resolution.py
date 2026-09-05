@@ -4,8 +4,8 @@ from pathlib import Path
 
 
 MODULE_ROOT_ENV = {
-    "miles": "GITHUB_WORKSPACE",
-    "miles_plugins": "GITHUB_WORKSPACE",
+    "orbit": "GITHUB_WORKSPACE",
+    "orbit_plugins": "GITHUB_WORKSPACE",
     "sglang": "SGLANG_SOURCE_ROOT",
     "megatron.core": "MEGATRON_SOURCE_ROOT",
     "megatron.training": "MEGATRON_SOURCE_ROOT",

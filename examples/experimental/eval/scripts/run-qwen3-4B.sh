@@ -15,8 +15,8 @@ pkill -9 python
 
 set -ex
 
-SKILLS_OPENAI_MODEL_NAME=${SKILLS_OPENAI_MODEL_NAME:-"miles-openai-model"}
-MILES_OPTIMIZER=${MILES_OPTIMIZER:-adam}
+SKILLS_OPENAI_MODEL_NAME=${SKILLS_OPENAI_MODEL_NAME:-"orbit-openai-model"}
+ORBIT_OPTIMIZER=${ORBIT_OPTIMIZER:-adam}
 
 
 export PYTHONUNBUFFERED=1
@@ -31,7 +31,7 @@ echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../../.." &>/dev/null && pwd)"
-MODEL_ARGS_LINE="$(python3 "${REPO_ROOT}/miles/utils/external_utils/model_args_utils.py" "qwen3-4B")" || exit 1
+MODEL_ARGS_LINE="$(python3 "${REPO_ROOT}/orbit/utils/external_utils/model_args_utils.py" "qwen3-4B")" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 
 # Store eval/delegate settings in a YAML config similar to examples/experimental/eval_multi_task.
@@ -40,8 +40,8 @@ EVAL_CONFIG_PATH=${SKILLS_EVAL_CONFIG_PATH:-"${REPO_ROOT}/examples/experimental/
 CKPT_ARGS=(
    --hf-checkpoint /root/Qwen3-4B
    --ref-load /root/Qwen3-4B_torch_dist
-   --load /root/Qwen3-4B_miles/
-   --save /root/Qwen3-4B_miles/
+   --load /root/Qwen3-4B_orbit/
+   --save /root/Qwen3-4B_orbit/
    --save-interval 20
 )
 
@@ -94,25 +94,25 @@ GRPO_ARGS=(
    --eps-clip-high 0.28
 )
 
-if [ "${MILES_OPTIMIZER}" != "adam" ] && [ "${MILES_OPTIMIZER}" != "muon" ]; then
-   echo "Unsupported MILES_OPTIMIZER=${MILES_OPTIMIZER}; expected adam or muon" >&2
+if [ "${ORBIT_OPTIMIZER}" != "adam" ] && [ "${ORBIT_OPTIMIZER}" != "muon" ]; then
+   echo "Unsupported ORBIT_OPTIMIZER=${ORBIT_OPTIMIZER}; expected adam or muon" >&2
    exit 1
 fi
 OPTIMIZER_ARGS=(
-   --optimizer "${MILES_OPTIMIZER}"
+   --optimizer "${ORBIT_OPTIMIZER}"
    --lr 1e-6
    --lr-decay-style constant
    --weight-decay 0.1
    --adam-beta1 0.9
    --adam-beta2 0.98
 )
-if [ "${MILES_OPTIMIZER}" = "muon" ]; then
+if [ "${ORBIT_OPTIMIZER}" = "muon" ]; then
    OPTIMIZER_ARGS+=(--muon-momentum 0.9)
 fi
 
 WANDB_ARGS=(
    --use-wandb
-   --wandb-project miles-eval
+   --wandb-project orbit-eval
    --wandb-group qwen3-4b-eval
    --wandb-key ${WANDB_KEY}
 )

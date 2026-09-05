@@ -1,6 +1,6 @@
 """Custom multi-turn generate function for VAGEN envs.
 
-Wires miles' inference rollout to VAGEN's `GymImageEnv` async protocol:
+Wires orbit' inference rollout to VAGEN's `GymImageEnv` async protocol:
 build env from `sample.metadata['vagen']`, drift-check the live turn-0
 render, then loop inference / env.step / terminate-or-encode-next-obs up
 to `max_turns`. Finalizes `sample.reward`, `sample.response`, and the
@@ -22,10 +22,10 @@ from examples.vagen.env_adapter import (
     vagen_obs_to_chat_message,
 )
 
-from miles.rollout.base_types import GenerateFnInput, GenerateFnOutput
-from miles.utils.http_utils import post
-from miles.utils.processing_utils import encode_image_for_rollout_engine
-from miles.utils.types import Sample
+from orbit.rollout.base_types import GenerateFnInput, GenerateFnOutput
+from orbit.utils.http_utils import post
+from orbit.utils.processing_utils import encode_image_for_rollout_engine
+from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def _encode_with_processor(processor, messages, images, apply_kwargs):
     """Run the HF processor; return `(token_ids, mm_train_dict | None)`.
 
     Drops `attention_mask` / `mm_token_type_ids` from mm-train (HF-only,
-    not safely concat-able when miles merges per-turn inputs later).
+    not safely concat-able when orbit merges per-turn inputs later).
     """
     raw = processor.apply_chat_template(
         messages,

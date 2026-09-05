@@ -42,15 +42,15 @@ def _ensure_module(dotted: str) -> ModuleType:
     return sys.modules[dotted]
 
 
-# Import the real `miles` package tree before any stubbing below. `_ensure_module`
+# Import the real `orbit` package tree before any stubbing below. `_ensure_module`
 # walks dotted ancestors and stubs every missing segment, so stubbing a
-# `miles.backends.megatron_utils.*` leaf while `miles` is not yet imported would
-# replace the real `miles` package with an empty (non-package) stub -- and the
-# later `from miles.utils...main import` would then fail with "miles is not a
+# `orbit.backends.megatron_utils.*` leaf while `orbit` is not yet imported would
+# replace the real `orbit` package with an empty (non-package) stub -- and the
+# later `from orbit.utils...main import` would then fail with "orbit is not a
 # package". Importing the real parent package here registers the genuine
-# `miles`, `miles.backends`, and `miles.backends.megatron_utils` packages in
+# `orbit`, `orbit.backends`, and `orbit.backends.megatron_utils` packages in
 # sys.modules so only the leaf modules get stubbed.
-import miles.backends.megatron_utils  # noqa: E402,F401
+import orbit.backends.megatron_utils  # noqa: E402,F401
 
 # Stub modules whose top-level imports in main.py would fail.
 _STUBS: dict[str, dict[str, Any]] = {
@@ -80,12 +80,12 @@ for _mod_path, _attrs in _STUBS.items():
         # Replace the whole module with a MagicMock
         sys.modules[_mod_path] = _attrs
 
-# Also ensure miles.backends.megatron_utils sub-modules have their needed symbols
+# Also ensure orbit.backends.megatron_utils sub-modules have their needed symbols
 for _sub in [
-    "miles.backends.megatron_utils.arguments",
-    "miles.backends.megatron_utils.checkpoint",
-    "miles.backends.megatron_utils.initialize",
-    "miles.backends.megatron_utils.model_provider",
+    "orbit.backends.megatron_utils.arguments",
+    "orbit.backends.megatron_utils.checkpoint",
+    "orbit.backends.megatron_utils.initialize",
+    "orbit.backends.megatron_utils.model_provider",
 ]:
     mod = _ensure_module(_sub)
     # Provide any names imported by main.py from these modules
@@ -98,14 +98,14 @@ for _sub in [
         if not hasattr(mod, name):
             setattr(mod, name, MagicMock())
 
-from miles.utils.debug_utils.run_megatron.worker.main import (  # noqa: E402
+from orbit.utils.debug_utils.run_megatron.worker.main import (  # noqa: E402
     _apply_source_patches,
     _finalize_dumper,
     _parse_args,
     _run_forward_backward,
 )
 
-_MODULE = "miles.utils.debug_utils.run_megatron.worker.main"
+_MODULE = "orbit.utils.debug_utils.run_megatron.worker.main"
 
 
 class TestParseArgs:

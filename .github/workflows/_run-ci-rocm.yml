@@ -54,10 +54,10 @@ jobs:
         --ulimit stack=67108864
         --memory=0
         --memory-swap=0
-        -v /data/miles_ci:/data/miles_ci
-        -v /data/miles_ci/models:/root/models
-        -v /data/miles_ci/datasets:/root/datasets
-        -v /data/miles_ci/hf_cache:/root/.cache/huggingface
+        -v /data/orbit_ci:/data/orbit_ci
+        -v /data/orbit_ci/models:/root/models
+        -v /data/orbit_ci/datasets:/root/datasets
+        -v /data/orbit_ci/hf_cache:/root/.cache/huggingface
         --privileged
         --ulimit nofile=65535:65535
     defaults:
@@ -65,7 +65,7 @@ jobs:
         working-directory: ${{ github.workspace }}
     env:
       PYTHONPATH: ${{ github.workspace }}
-      MILES_HARDWARE_PLATFORM: rocm
+      ORBIT_HARDWARE_PLATFORM: rocm
       GITHUB_COMMIT_NAME: ${{ github.event.pull_request.head.sha || github.sha }}_${{ github.event.pull_request.number || 'non-pr' }}
       WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
 
@@ -161,7 +161,7 @@ jobs:
           cd $GITHUB_WORKSPACE && pip install -e . --no-deps --break-system-packages
           pip install polars zstandard xxhash blake3 --break-system-packages
 
-      - name: Install (miles only)
+      - name: Install (orbit only)
         if: ${{ inputs.skip_dependency_install }}
         shell: bash
         run: |

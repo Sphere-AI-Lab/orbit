@@ -2,28 +2,28 @@ from types import SimpleNamespace
 
 import pytest
 
-import miles.audit.peft_wrap as peft_audit
-import miles.backends.megatron_utils.bridge_peft_helpers as bridge_peft_helpers
-from miles.backends.megatron_utils.bridge_peft_helpers import (
+import orbit.audit.peft_wrap as peft_audit
+import orbit.backends.megatron_utils.bridge_peft_helpers as bridge_peft_helpers
+from orbit.backends.megatron_utils.bridge_peft_helpers import (
     _make_peft_pre_wrap_hook,
     _propagate_preloaded_checkpoint_identity,
 )
-from miles.backends.megatron_utils.low_precision_bootstrap import _dist_checkpoint_already_loaded
+from orbit.backends.megatron_utils.low_precision_bootstrap import _dist_checkpoint_already_loaded
 
 
 def test_peft_replacement_model_inherits_preloaded_checkpoint_identity():
     source = SimpleNamespace(
-        _miles_loaded_dist_checkpoint_path="/checkpoint/release",
-        _miles_loaded_dist_checkpoint_prefix="",
-        _miles_restored_modelopt_checkpoint_path="/checkpoint/release",
+        _orbit_loaded_dist_checkpoint_path="/checkpoint/release",
+        _orbit_loaded_dist_checkpoint_prefix="",
+        _orbit_restored_modelopt_checkpoint_path="/checkpoint/release",
     )
     transformed = SimpleNamespace()
 
     _propagate_preloaded_checkpoint_identity([source], [transformed])
 
-    assert transformed._miles_loaded_dist_checkpoint_path == "/checkpoint/release"
-    assert transformed._miles_loaded_dist_checkpoint_prefix == ""
-    assert transformed._miles_restored_modelopt_checkpoint_path == "/checkpoint/release"
+    assert transformed._orbit_loaded_dist_checkpoint_path == "/checkpoint/release"
+    assert transformed._orbit_loaded_dist_checkpoint_prefix == ""
+    assert transformed._orbit_restored_modelopt_checkpoint_path == "/checkpoint/release"
 
 
 def test_peft_preload_identity_rejects_changed_model_chunk_count():
@@ -48,8 +48,8 @@ def test_peft_pre_wrap_identity_reaches_final_replacement_chunks(monkeypatch):
         assert load_path == "/checkpoint"
         assert is_value_model is False
         for chunk in model:
-            chunk._miles_loaded_dist_checkpoint_path = "/checkpoint/release"
-            chunk._miles_loaded_dist_checkpoint_prefix = ""
+            chunk._orbit_loaded_dist_checkpoint_path = "/checkpoint/release"
+            chunk._orbit_loaded_dist_checkpoint_prefix = ""
 
     monkeypatch.setattr(bridge_peft_helpers, "is_distributed_checkpoint", lambda _path: True)
     monkeypatch.setattr(bridge_peft_helpers, "load_dist_checkpoint", mark_preloaded)

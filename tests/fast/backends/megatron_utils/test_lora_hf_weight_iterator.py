@@ -13,9 +13,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from miles.backends.megatron_utils.update_weight.hf_weight_iterator_base import HfWeightIteratorBase
+from orbit.backends.megatron_utils.update_weight.hf_weight_iterator_base import HfWeightIteratorBase
 
-_BASE_MODULE = "miles.backends.megatron_utils.update_weight.hf_weight_iterator_base"
+_BASE_MODULE = "orbit.backends.megatron_utils.update_weight.hf_weight_iterator_base"
 
 
 class TestHfWeightIteratorFactory:
@@ -29,7 +29,7 @@ class TestHfWeightIteratorFactory:
     @patch(f"{_BASE_MODULE}.HfWeightIteratorBase.__init__", return_value=None)
     def test_bridge_mode_creates_bridge_iterator(self, mock_init):
         """Factory should select HfWeightIteratorBridge for 'bridge' mode."""
-        from miles.backends.megatron_utils.update_weight.hf_weight_iterator_bridge import HfWeightIteratorBridge
+        from orbit.backends.megatron_utils.update_weight.hf_weight_iterator_bridge import HfWeightIteratorBridge
 
         with patch.object(HfWeightIteratorBridge, "__init__", return_value=None):
             args = self._make_args("bridge")
@@ -41,7 +41,7 @@ class TestHfWeightIteratorFactory:
     @patch(f"{_BASE_MODULE}.HfWeightIteratorBase.__init__", return_value=None)
     def test_raw_mode_creates_direct_iterator(self, mock_init):
         """Factory should select HfWeightIteratorDirect for 'raw' mode."""
-        from miles.backends.megatron_utils.update_weight.hf_weight_iterator_direct import HfWeightIteratorDirect
+        from orbit.backends.megatron_utils.update_weight.hf_weight_iterator_direct import HfWeightIteratorDirect
 
         with patch.object(HfWeightIteratorDirect, "__init__", return_value=None):
             args = self._make_args("raw")

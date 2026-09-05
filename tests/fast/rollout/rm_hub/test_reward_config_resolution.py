@@ -5,8 +5,8 @@ must not disable the fallbacks."""
 
 from types import SimpleNamespace
 
-from miles.rollout.rm_hub import _resolve_reward_config
-from miles.utils.types import RewardSpec, Sample
+from orbit.rollout.rm_hub import _resolve_reward_config
+from orbit.utils.types import RewardSpec, Sample
 
 
 def _args(**kwargs) -> SimpleNamespace:

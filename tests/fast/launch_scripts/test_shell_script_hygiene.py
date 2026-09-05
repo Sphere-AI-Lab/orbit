@@ -2,7 +2,7 @@ import re
 
 from tests.fast.launch_scripts.sh_harness import REPO_ROOT
 
-_HARDCODED_CHECKOUTS = ("/root/miles", "/workspace/miles")
+_HARDCODED_CHECKOUTS = ("/root/orbit", "/workspace/orbit")
 
 _REMOVED_COMMAND_HELPERS = re.compile(r"(?<![\w.])exec_command\s*\(")
 

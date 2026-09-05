@@ -72,6 +72,6 @@ def model_args(
         "--dsa-indexer-head-dim 128 "
         "--dsa-indexer-topk 1024 "
         # V4 model spec (plugin)
-        "--spec miles_plugins.models.deepseek_v4.deepseek_v4 get_dsv4_spec "
+        "--spec orbit_plugins.models.deepseek_v4.deepseek_v4 get_dsv4_spec "
         f"{SWIGLU_LIMIT_ARGS} "
     )

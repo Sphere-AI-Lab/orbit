@@ -3,11 +3,11 @@ from argparse import Namespace
 import pytest
 import torch
 
-from miles.backends.training_utils import cp_utils
-from miles.backends.training_utils import data as data_utils
-from miles.backends.training_utils import mm_data
-from miles.backends.training_utils.loss_hub.opd import apply_opd_kl_to_advantages
-from miles.backends.training_utils.parallel import GroupInfo, ParallelState
+from orbit.backends.training_utils import cp_utils
+from orbit.backends.training_utils import data as data_utils
+from orbit.backends.training_utils import mm_data
+from orbit.backends.training_utils.loss_hub.opd import apply_opd_kl_to_advantages
+from orbit.backends.training_utils.parallel import GroupInfo, ParallelState
 
 _ROLLOUT_LOG_PROBS = torch.tensor([-0.2, -1.3, -0.7, -2.1, -0.4, -3.2, -1.8])
 _OPD_VALUES = torch.tensor([0.1, 0.9, -0.3, 1.7, -1.1, 0.4, 2.3])

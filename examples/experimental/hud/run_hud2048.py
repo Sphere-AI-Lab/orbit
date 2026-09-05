@@ -11,12 +11,12 @@ function calling, and without the parser its tool calls stay unparsed text,
 every episode ends at turn 1, and training silently optimizes nothing.
 
 Env knobs:
-  MILES_SCRIPT_MODEL_NAME   default Qwen3-VL-4B-Instruct
-  MILES_SCRIPT_NUM_GPUS     default 8
-  MILES_SCRIPT_NUM_ROLLOUT  default 40
-  MILES_SCRIPT_MODE         normal | debug_rollout_only (skips training)
+  ORBIT_SCRIPT_MODEL_NAME   default Qwen3-VL-4B-Instruct
+  ORBIT_SCRIPT_NUM_GPUS     default 8
+  ORBIT_SCRIPT_NUM_ROLLOUT  default 40
+  ORBIT_SCRIPT_MODE         normal | debug_rollout_only (skips training)
                             | smoke (2 episodes, rollout only)
-  MILES_SCRIPT_OUTPUT_DIR   checkpoints and rollout dumps; point at storage
+  ORBIT_SCRIPT_OUTPUT_DIR   checkpoints and rollout dumps; point at storage
                             that outlives the node (default /root/hud2048-rl)
 
 MODE=smoke is the rung to use when checking that the plumbing works: the bugs
@@ -29,13 +29,13 @@ stability -- needs real training, so go there next rather than widening this.
 import os
 from pathlib import Path
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
-MODEL_NAME = os.environ.get("MILES_SCRIPT_MODEL_NAME", "Qwen3-VL-4B-Instruct")
-NUM_GPUS = int(os.environ.get("MILES_SCRIPT_NUM_GPUS", "8"))
-NUM_ROLLOUT = int(os.environ.get("MILES_SCRIPT_NUM_ROLLOUT", "40"))
-MODE = os.environ.get("MILES_SCRIPT_MODE", "normal")
-OUTPUT_DIR = os.environ.get("MILES_SCRIPT_OUTPUT_DIR", "/root/hud2048-rl")
+MODEL_NAME = os.environ.get("ORBIT_SCRIPT_MODEL_NAME", "Qwen3-VL-4B-Instruct")
+NUM_GPUS = int(os.environ.get("ORBIT_SCRIPT_NUM_GPUS", "8"))
+NUM_ROLLOUT = int(os.environ.get("ORBIT_SCRIPT_NUM_ROLLOUT", "40"))
+MODE = os.environ.get("ORBIT_SCRIPT_MODE", "normal")
+OUTPUT_DIR = os.environ.get("ORBIT_SCRIPT_OUTPUT_DIR", "/root/hud2048-rl")
 
 SMOKE = MODE == "smoke"
 # 4 prompts x 8 samples: the group size is what gives GRPO its within-group
@@ -137,7 +137,7 @@ def execute():
     # diagnosable after the fact; log-multi-turn adds per-turn counts and
     # lengths, the difference between "the reward moved" and knowing how many
     # actions produced it.
-    telemetry_args = "--use-miles-dashboard --dashboard-gpu-sample-interval 5 --log-multi-turn --log-passrate "
+    telemetry_args = "--use-orbit-dashboard --dashboard-gpu-sample-interval 5 --log-multi-turn --log-passrate "
 
     sglang_args = (
         "--rollout-num-gpus-per-engine 1 "
@@ -155,7 +155,7 @@ def execute():
         "--actor-num-nodes 1 "
         f"--actor-num-gpus-per-node {NUM_GPUS} "
         "--colocate "
-        # Point MILES_SCRIPT_OUTPUT_DIR at storage that outlives the node --
+        # Point ORBIT_SCRIPT_OUTPUT_DIR at storage that outlives the node --
         # without --save a multi-hour run leaves nothing but a metrics curve
         # behind, and a config change means relearning from the base model.
         f"--save {OUTPUT_DIR}/ckpt "

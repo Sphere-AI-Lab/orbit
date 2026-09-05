@@ -85,7 +85,7 @@ _FIELDS: dict[str, tuple[bool, object]] = {
 # defaulted coordinate keys on the table entry -- editing a value here re-keys
 # every declaration that relied on it and cold-starts those baselines. Band
 # values are shadow-calibration starting points, deliberately loose. Keys must
-# stay within the capture whitelist (miles.utils.tracking_utils
+# stay within the capture whitelist (orbit.utils.tracking_utils
 # TARGET_METRIC_KEYS; test-enforced, not imported here).
 GATE_DEFAULTS: dict[str, dict] = {
     "train/grad_norm": {

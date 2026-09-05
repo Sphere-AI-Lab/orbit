@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Simple HTTP server that proxies Miles evaluation requests to the `ns eval`
+Simple HTTP server that proxies Orbit evaluation requests to the `ns eval`
 command shipped with NeMo Skills.
 
 Usage:
@@ -10,9 +10,9 @@ Usage:
         --config-dir examples/experimental/eval/nemo_skills/config \
         --cluster local_cluster \
         --max-concurrent-requests 512 \
-        --openai-model-name miles-openai-model
+        --openai-model-name orbit-openai-model
 
-Miles (or Miles-compatible runners) should POST the payload described in
+Orbit (or Orbit-compatible runners) should POST the payload described in
 `EvalRequestPayload` to http://<host>:<port>/evaluate. The server blocks until
 `ns eval` finishes, then returns aggregated metrics along with paths to the
 generated artifacts (logs + raw metrics).
@@ -241,7 +241,7 @@ class SkillsEvaluator:
         if self._config.config_dir:
             base_cmd.extend(["--config_dir", self._config.config_dir])
 
-        openai_model_name = self._config.openai_model_name or "miles-openai-model"
+        openai_model_name = self._config.openai_model_name or "orbit-openai-model"
         hydra_overrides = _hydra_overrides_from_benchmark(
             defaults,
             benchmark_cfg,

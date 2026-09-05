@@ -4,9 +4,9 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
-WANDB_PROJECT = "miles-dev-retool-v2"
+WANDB_PROJECT = "orbit-dev-retool-v2"
 WANDB_GROUP = "sft-multi-turn-batch-32"
 
 
@@ -17,7 +17,7 @@ class ScriptArgs(U.ExecuteTrainConfig):
     hardware: Literal["H100", "GB200", "GB300"] = "H100"
     num_gpus_per_node: int | None = None
     use_sft_model: bool = True
-    save_path: str = "/root/Qwen3-4B_miles/retool_v2_multi_turn"
+    save_path: str = "/root/Qwen3-4B_orbit/retool_v2_multi_turn"
     prompt_data: str = "/root/dapo-math-17k/dapo-math-17k.jsonl"
     generate_max_turns: int = 16
     rollout_num_gpus_per_engine: int = 2
@@ -85,7 +85,7 @@ def execute(args: ScriptArgs):
     )
 
     custom_args = (
-        "--custom-generate-function-path miles.rollout.generate_hub.multi_turn.generate "
+        "--custom-generate-function-path orbit.rollout.generate_hub.multi_turn.generate "
         "--generate-tool-specs-path examples.retool_v2.tool_sandbox.tool_specs "
         "--generate-execute-tool-function-path examples.retool_v2.tool_sandbox.execute_tool "
         "--generate-tool-call-parser qwen25 "
@@ -192,7 +192,7 @@ def execute(args: ScriptArgs):
         num_gpus_per_node=args.num_gpus_per_node,
         megatron_model_type=megatron_model_type,
         extra_env_vars={
-            "PYTHONPATH": "/root/Megatron-LM/:/root/miles",
+            "PYTHONPATH": "/root/Megatron-LM/:/root/orbit",
         },
     )
 

@@ -42,7 +42,7 @@ reward hook in `../openenv_generate.py`, dataset generation in
 
 ## Prerequisites
 
-**Container image.** A miles runtime image with sglang from `sglang-miles`
+**Container image.** A orbit runtime image with sglang from `sglang-miles`
 at 2026-08-04 or later.
 
 **Python packages**, installed in the image or once per node (the recipe
@@ -92,7 +92,7 @@ that id selects the per-episode sandbox image.
 ## Run
 
 ```bash
-export MILES_ROOT=...  CONTAINER_IMAGE=...  CONTAINER_MOUNTS=...
+export ORBIT_ROOT=...  CONTAINER_IMAGE=...  CONTAINER_MOUNTS=...
 export DAYTONA_ENV_FILE=~/.daytona_env
 export OPENENV_TB2_TASKS_DIR=...
 export FABRIC_PREFIX=10.4.          # leading octets of the compute-fabric IP
@@ -115,7 +115,7 @@ per engine restart.
 ## Watching it
 
 Telemetry lands under `$OUTPUT_DIR/<run_id>/dump_details`; serve the dashboard
-with `python -m miles.dashboard.serve --dump-details <dir> --follow`. Useful
+with `python -m orbit.dashboard.serve --dump-details <dir> --follow`. Useful
 driver-log signals:
 
 ```bash

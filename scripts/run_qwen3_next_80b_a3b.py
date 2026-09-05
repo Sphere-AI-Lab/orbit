@@ -37,7 +37,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 _TOPOLOGIES = Literal["4node", "single-node"]
 

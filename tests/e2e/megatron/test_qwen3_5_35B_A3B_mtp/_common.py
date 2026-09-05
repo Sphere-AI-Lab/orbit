@@ -5,7 +5,7 @@ Two cases differ in `enable_mtp_training` and `use_r3`:
 - mtp0: MTP training off + R3 off. Whether the MTP layer is checked is a weight-check
   *selector* concern, not a skip-list one.
 
-miles has no VLM/vision implementation on the training side, so Qwen3.5's `visual.*`
+orbit has no VLM/vision implementation on the training side, so Qwen3.5's `visual.*`
 weights are never synced and must be excluded from the weight-equality check; each case
 passes `check_weight_update_skip_list=("visual",)`.
 
@@ -16,7 +16,7 @@ Spec (EAGLE) and spec-v2 (mamba scheduler) are on for the whole suite; R3 is per
 import os
 from dataclasses import dataclass
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 MODEL_NAME = "Qwen3.5-35B-A3B"
 MODEL_TYPE = "qwen3.5-35B-A3B"
@@ -44,7 +44,7 @@ class CaseConfig:
     # when MTP training is off so the un-synced draft is not checked).
     check_weight_update_selector: str = "all"
     # Rollout weight-name substrings to exclude from the equality check (substring match;
-    # mismatches become non-fatal). Cases pass ("visual",): miles has no VLM/vision
+    # mismatches become non-fatal). Cases pass ("visual",): orbit has no VLM/vision
     # implementation on the training side, so those weights are never synced.
     check_weight_update_skip_list: tuple[str, ...] = ()
     extra_args: str = ""
@@ -63,7 +63,7 @@ def prepare(case: CaseConfig) -> None:
 
 
 def build_train_args(case: CaseConfig, *, wandb_file: str) -> str:
-    enable_eval = os.environ.get("MILES_TEST_ENABLE_EVAL", "0").lower() in ("1", "true", "yes")
+    enable_eval = os.environ.get("ORBIT_TEST_ENABLE_EVAL", "0").lower() in ("1", "true", "yes")
 
     ckpt_args = f"--hf-checkpoint /root/models/{MODEL_NAME} " f"--ref-load /root/{MODEL_NAME}_torch_dist "
 

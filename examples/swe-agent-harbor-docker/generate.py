@@ -2,14 +2,14 @@
 SWE-Agent: reward, metrics, and rollout class.
 
 The generate function is provided by:
-    miles.rollout.generate_hub.agentic_tool_call.generate
+    orbit.rollout.generate_hub.agentic_tool_call.generate
 with --custom-agent-function-path pointing to swe_agent_function.run
 
 Task-type agnostic — reward is pre-computed by the Harbor environment
 and stored in sample.metadata["reward"] regardless of task type.
 
 Dynamic filter uses the general-purpose ``check_no_aborted`` from
-``miles.rollout.filter_hub.dynamic_sampling_filters``.
+``orbit.rollout.filter_hub.dynamic_sampling_filters``.
 
 Components:
   - reward_func: reads pre-computed reward from sample metadata
@@ -19,9 +19,9 @@ Components:
 
 import logging
 
-from miles.rollout.base_types import RolloutFnTrainInput, RolloutFnTrainOutput
-from miles.rollout.inference_rollout.inference_rollout_common import InferenceRolloutFn
-from miles.utils.types import Sample
+from orbit.rollout.base_types import RolloutFnTrainInput, RolloutFnTrainOutput
+from orbit.rollout.inference_rollout.inference_rollout_common import InferenceRolloutFn
+from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)
 

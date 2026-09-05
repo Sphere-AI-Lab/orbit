@@ -1,8 +1,8 @@
 import polars as pl
 
-from miles.dashboard.advisory import compute_advisories
-from miles.dashboard.dump_reader import RolloutIds
-from miles.dashboard.store import EngineSample, Meta, MetricsRecord, MetricStore, PhaseEvent, Stream
+from orbit.dashboard.advisory import compute_advisories
+from orbit.dashboard.dump_reader import RolloutIds
+from orbit.dashboard.store import EngineSample, Meta, MetricsRecord, MetricStore, PhaseEvent, Stream
 
 
 def _store(tmp_path, *, args: dict, engine_samples: list[EngineSample]) -> MetricStore:
@@ -123,11 +123,11 @@ def _imbalanced(tmp_path, args: dict) -> str:
 
 def test_dp_imbalance_names_the_knob_that_applies(tmp_path):
     assert "--router-dp-aware" in _imbalanced(tmp_path / "a", {})
-    assert "--sglang-load-balance-method" in _imbalanced(tmp_path / "b", {"use_miles_router": True})
+    assert "--sglang-load-balance-method" in _imbalanced(tmp_path / "b", {"use_orbit_router": True})
     assert "--router-policy (cache_aware)" in _imbalanced(
         tmp_path / "c", {"router_dp_aware": True, "router_policy": "cache_aware"}
     )
-    # miles overrides router_policy with sglang_router_policy when both are set
+    # orbit overrides router_policy with sglang_router_policy when both are set
     assert "--router-assignment-mode (random)" in _imbalanced(
         tmp_path / "d",
         {

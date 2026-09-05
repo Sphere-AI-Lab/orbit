@@ -1,11 +1,11 @@
-"""OpenEnv Terminal-Bench-2 <-> miles adapter.
+"""OpenEnv Terminal-Bench-2 <-> orbit adapter.
 
-miles selects the policy and calls ``run`` once per episode via
+orbit selects the policy and calls ``run`` once per episode via
 ``--custom-agent-function-path openenv_agent_function.run``. The episode drives
 the OpenEnv tbench2 env through an agentic loop (reset -> {policy -> exec} ->
 evaluate).
 
-The policy is always reached at ``base_url/v1`` through miles' session server,
+The policy is always reached at ``base_url/v1`` through orbit' session server,
 so token ids + logprobs + loss masks are captured natively (no re-tokenization)
 on every turn of the multi-turn episode.
 
@@ -25,7 +25,7 @@ Env vars:
                      terminated and scored reward 0 (bounds long-trajectory
                      stragglers that would otherwise stall the whole rollout batch).
   AGENT_MODEL_NAME   model name sent to the policy (default: "model")
-  MILES_ROUTER_EXTERNAL_HOST  optional host rewrite for off-cluster agents
+  ORBIT_ROUTER_EXTERNAL_HOST  optional host rewrite for off-cluster agents
 
 Server contract: the env server must run tbench2_env at or after the
 huggingface/OpenEnv#1012 merge (04d259ea6; install per the README) —
@@ -126,7 +126,7 @@ def _is_retryable_env_error(e: BaseException) -> bool:
 def _resolve_session_url(base_url: str) -> str:
     """Build the OpenAI-compatible policy URL, rewriting host for off-cluster agents."""
     session_url = f"{base_url}/v1"
-    external_host = os.getenv("MILES_ROUTER_EXTERNAL_HOST")
+    external_host = os.getenv("ORBIT_ROUTER_EXTERNAL_HOST")
     if external_host:
         parsed = urlparse(session_url)
         netloc = f"{external_host}:{parsed.port}" if parsed.port else external_host
@@ -184,7 +184,7 @@ _DEFAULT_ENV_URL = "http://localhost:8003"
 #                       shared server accumulates trial dirs; a per-episode
 #                       sandbox lives only for its episode and needs nothing).
 #
-# Every agent-function module exposes the same two entries: run() for miles
+# Every agent-function module exposes the same two entries: run() for orbit
 # (session-server policy wiring + training failure semantics) and
 # run_episode() for callers that bring their own policy client and own
 # timeout/failure semantics (eval_tbench2_via_api).
@@ -360,7 +360,7 @@ async def multi_turn(
     total_gen_time = sum(gen_times)
     # non_generation_time = everything the rollout spent outside policy generation:
     # per-turn exec latency plus the one-off reset() and evaluate() env steps. Feeds
-    # Sample.non_generation_time so miles' throughput accounting subtracts env time.
+    # Sample.non_generation_time so orbit' throughput accounting subtracts env time.
     total_tool_time = sum(tool_times) + reset_time + eval_time
     return reward, {
         "turns": turns,
@@ -385,7 +385,7 @@ async def run_episode(
 
     The direct-drive entry (see the module docstring): returns the loop's raw
     ``(reward, agent_metrics)``; wall-clock caps and failure semantics are the
-    caller's. miles goes through run() instead.
+    caller's. orbit goes through run() instead.
     """
     return await multi_turn(
         load_tbench2(),
@@ -406,7 +406,7 @@ async def run_for_training(
     metadata: dict[str, Any] | None,
     run_episode_fn: Callable[..., Any],
 ) -> dict[str, Any] | None:
-    """miles-side wrapper around one episode: session-server policy wiring plus
+    """orbit-side wrapper around one episode: session-server policy wiring plus
     training failure semantics (timeout -> reward 0, no verdict -> drop sample).
 
     Shared by every agent-function module: each passes its own run_episode.

@@ -1,6 +1,6 @@
 ---
 name: manage-gh-runners
-description: Add, remove, list, or swap GitHub Actions self-hosted runners on a CI host that uses the env-var-driven `gh-runner` docker image (raw `docker run`, no compose). Triggers, "add gh runner", "remove gh runner", "list ci runners", or similar. Run `setup-ci-host` first if /data/miles_ci is not yet provisioned. Boundary vs the `actions-runner` + docker-compose flow documented in `tests/ci/README.md`, only use this skill when `docker ps` shows the `gh-runner` image. Does NOT prepare the host filesystem layout — that is `setup-ci-host`'s job.
+description: Add, remove, list, or swap GitHub Actions self-hosted runners on a CI host that uses the env-var-driven `gh-runner` docker image (raw `docker run`, no compose). Triggers, "add gh runner", "remove gh runner", "list ci runners", or similar. Run `setup-ci-host` first if /data/orbit_ci is not yet provisioned. Boundary vs the `actions-runner` + docker-compose flow documented in `tests/ci/README.md`, only use this skill when `docker ps` shows the `gh-runner` image. Does NOT prepare the host filesystem layout — that is `setup-ci-host`'s job.
 user_invocable: true
 ---
 
@@ -21,12 +21,12 @@ docker ps --format '{{.Names}}\t{{.Image}}'
 * image starting with `ghcr.io/actions/actions-runner` → use the README's compose flow
 
 Run [Step 0 (`setup-ci-host`)](../setup-ci-host/SKILL.md) before any of the
-operations below if `/data/miles_ci` is not yet provisioned on the host.
+operations below if `/data/orbit_ci` is not yet provisioned on the host.
 
 ## Usage
 
 ```shell
-cd /root/miles/.claude/skills/manage-gh-runners
+cd /root/orbit/.claude/skills/manage-gh-runners
 export REPO_URL=https://github.com/<org>/<repo>
 
 ./manage-runners.sh list
@@ -76,7 +76,7 @@ A few invariants the script encodes that are easy to get wrong by hand:
   runner never wrote to.
 * **Cache mount** `/data/runner-cache/<name>/.cache → /root/.cache` keeps
   pip / HF / torch caches on the big disk instead of the root partition.
-* **No `/data/miles_ci` mount on the runner container itself** — only the
+* **No `/data/orbit_ci` mount on the runner container itself** — only the
   per-job containers it spawns need that path, and that bind is declared
   in [`_run-ci.yml`](../../../../.github/workflows/_run-ci.yml) (resolved
   against the HOST filesystem by the daemon).

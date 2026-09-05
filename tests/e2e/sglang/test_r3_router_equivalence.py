@@ -6,10 +6,10 @@ register_cuda_ci(
     est_time=1100,
     suite="stage-c-4-gpu-h200",
     labels=["sglang"],
-    disabled="Miles Router is deprecated.",
+    disabled="Orbit Router is deprecated.",
 )
 
-"""E2E test: verify sglang router and miles router produce identical rollout
+"""E2E test: verify sglang router and orbit router produce identical rollout
 routing replay results across MoE models.
 
 Design
@@ -18,9 +18,9 @@ For each model in :data:`CONFIGS`, run the same rollout workload twice
 under ``--debug-rollout-only --sglang-enable-deterministic-inference
 --use-rollout-routing-replay``:
 
-1. ``variant=miles``: with ``--use-miles-router`` (Python middleware
+1. ``variant=orbit``: with ``--use-orbit-router`` (Python middleware
    router wrapping the Rust gateway).
-2. ``variant=sgl``: without ``--use-miles-router`` (direct Rust gateway,
+2. ``variant=sgl``: without ``--use-orbit-router`` (direct Rust gateway,
    which is what PR #1015 drops R3 tests onto).
 
 Each run writes a JSONL of per-sample ``(tokens, rollout_log_probs,
@@ -36,7 +36,7 @@ tests) — loading ``scripts/models/{type}.py`` populates
 ``args.num_layers`` / ``args.moe_router_topk`` that the rollout-side
 reshape of ``routed_experts`` depends on.  We do *not* set
 ``--use-kl-loss`` or ``--kl-coef`` > 0, which is what gates the
-``--ref-load`` existence check (``miles/utils/arguments.py``), and
+``--ref-load`` existence check (``orbit/utils/arguments.py``), and
 ``--debug-rollout-only`` makes ``_compute_megatron_num_gpus`` return
 ``0`` so no megatron actor is spawned and the checkpoint is never
 loaded.  This lets us get away with a single H200 and no
@@ -56,7 +56,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 DUMP_ROOT = Path(os.environ.get("ROUTER_EQ_DUMP_ROOT", "/tmp/router-eq"))
 PROMPT_DATA_PATH = "/root/datasets/dapo-math-17k/dapo-math-17k.jsonl"
@@ -67,7 +67,7 @@ NUM_PROMPTS = int(os.environ.get("ROUTER_EQ_NUM_PROMPTS", "8"))
 MAX_RESPONSE_LEN = int(os.environ.get("ROUTER_EQ_MAX_RESPONSE_LEN", "256"))
 
 # Repo root (tests/e2e/sglang/test_*.py → parents[3]).  Used to prepend the
-# miles repo onto the Ray actor PYTHONPATH so the custom generate function is
+# orbit repo onto the Ray actor PYTHONPATH so the custom generate function is
 # importable regardless of where the worktree lives.
 _REPO_ROOT = str(Path(__file__).resolve().parents[3])
 
@@ -156,8 +156,8 @@ def _build_train_args(cfg: ModelConfig, variant: str) -> str:
     generate_args = "--custom-generate-function-path " "tests.e2e.sglang.utils.router_equivalence_generate.generate "
 
     router_args = "--use-rollout-routing-replay "
-    if variant == "miles":
-        router_args += "--use-miles-router "
+    if variant == "orbit":
+        router_args += "--use-orbit-router "
 
     # Minimal megatron perf args — 1 GPU, no parallelism. We don't actually
     # start a megatron actor under --debug-rollout-only, so these are only
@@ -203,7 +203,7 @@ def _run_variant(model_family: str, cfg: ModelConfig, variant: str) -> None:
         megatron_model_type=cfg.megatron_model_type,
         extra_env_vars={
             "PYTHONPATH": "/root/Megatron-LM",
-            "MILES_ROUTER_EQ_DUMP_PATH": str(dump_path),
+            "ORBIT_ROUTER_EQ_DUMP_PATH": str(dump_path),
         },
     )
 
@@ -225,7 +225,7 @@ def _assert_records_equal(left: list[dict], right: list[dict]) -> None:
         for field in ("status", "response_length", "tokens"):
             assert (
                 a[field] == b[field]
-            ), f"index={a['index']} field={field} mismatch:\n  miles: {a[field]}\n  sgl:   {b[field]}"
+            ), f"index={a['index']} field={field} mismatch:\n  orbit: {a[field]}\n  sgl:   {b[field]}"
 
         # Logprobs are f32 from sglang; in deterministic mode they should be
         # bit-identical, but tolerate tiny float noise as a safety margin.
@@ -252,18 +252,18 @@ def _assert_records_equal(left: list[dict], right: list[dict]) -> None:
 
 def execute(model_family: str) -> None:
     cfg = _get_config(model_family)
-    for variant in ("miles", "sgl"):
+    for variant in ("orbit", "sgl"):
         _run_variant(model_family, cfg, variant)
 
-    miles_records = _load_dump(_variant_dump_path(model_family, "miles"))
+    orbit_records = _load_dump(_variant_dump_path(model_family, "orbit"))
     sgl_records = _load_dump(_variant_dump_path(model_family, "sgl"))
 
-    assert miles_records, "miles-router run produced no dump records"
+    assert orbit_records, "orbit-router run produced no dump records"
     assert sgl_records, "sglang-router run produced no dump records"
 
-    _assert_records_equal(miles_records, sgl_records)
+    _assert_records_equal(orbit_records, sgl_records)
 
-    print(f"[router-eq] model_family={model_family} variants miles/sgl " f"match across {len(miles_records)} samples")
+    print(f"[router-eq] model_family={model_family} variants orbit/sgl " f"match across {len(orbit_records)} samples")
 
 
 def _run_all() -> None:

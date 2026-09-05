@@ -26,8 +26,8 @@ import pytest
 import torch
 
 
-_BC_MODULE = "miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast"
-_MX_MODULE = "miles.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin"
+_BC_MODULE = "orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast"
+_MX_MODULE = "orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin"
 
 
 def _make_args(mode: str) -> Namespace:
@@ -52,7 +52,7 @@ def _make_parallel_state(pp_rank: int = 0, tp_rank: int = 0, dp_rank: int = 0) -
 
 
 @contextmanager
-def _noop_timer(_name):  # matches miles.utils.timer.timer's context-manager form
+def _noop_timer(_name):  # matches orbit.utils.timer.timer's context-manager form
     yield
 
 
@@ -63,11 +63,11 @@ class TestLoRASyncModeContract:
     raw+LoRA is now the rejected combination. Behavior of the sync itself is
     covered by upstream's ``test_lora_update_weight.py`` suite."""
 
-    @patch("miles.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin.HfWeightIteratorBase")
+    @patch("orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin.HfWeightIteratorBase")
     @patch(f"{_BC_MODULE}.HfWeightIteratorBase")
-    @patch("miles.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin.build_lora_sync_config")
+    @patch("orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin.build_lora_sync_config")
     def test_bridge_plus_lora_constructs_ok(self, mock_lora_cfg, mock_iter_base, mock_iter_base_mixin):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
+        from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
             UpdateWeightFromDistributed,
         )
 
@@ -85,10 +85,10 @@ class TestLoRASyncModeContract:
         assert mock_iter_base.create.called or mock_iter_base_mixin.create.called
 
     def test_bridge_lora_update_delegates_to_synced_mixin(self):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
+        from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
             UpdateWeightFromDistributed,
         )
-        from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin import (
+        from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin import (
             DistBucketedWeightUpdateMixin,
         )
 
@@ -113,7 +113,7 @@ class TestLoRASyncModeContract:
 
     @patch(f"{_BC_MODULE}.HfWeightIteratorBase")
     def test_raw_plus_lora_rejected(self, mock_iter_base):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
+        from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
             UpdateWeightFromDistributed,
         )
 
@@ -132,7 +132,7 @@ class TestLoRASyncModeContract:
 class TestIsSourceGating:
     @patch(f"{_BC_MODULE}.get_parallel_state")
     def test_bridge_source_requires_pp_zero(self, mock_get_parallel_state):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
+        from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
             UpdateWeightFromDistributed,
         )
 
@@ -154,7 +154,7 @@ class TestIsSourceGating:
 
     @patch(f"{_BC_MODULE}.get_parallel_state")
     def test_raw_source_allows_any_pp_rank(self, mock_get_parallel_state):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
+        from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
             UpdateWeightFromDistributed,
         )
 
@@ -181,7 +181,7 @@ class TestConnectRolloutEnginesEngineGpuCounts:
     @patch(f"{_BC_MODULE}.connect_rollout_engines_from_distributed")
     @patch(f"{_BC_MODULE}.get_parallel_state")
     def test_bridge_passes_engine_gpu_counts_through(self, mock_get_parallel_state, mock_connect, mock_disconnect):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
+        from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
             UpdateWeightFromDistributed,
         )
 
@@ -215,7 +215,7 @@ class TestConnectRolloutEnginesEngineGpuCounts:
         """When the caller doesn't know per-engine counts, ``None`` must
         propagate so the helper applies its own ``rollout_num_gpus_per_engine``
         fallback (rather than silently substituting something else)."""
-        from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
+        from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
             UpdateWeightFromDistributed,
         )
 
@@ -257,7 +257,7 @@ class TestBridgeUpdateWeightsDoesNotCallConvertToHf:
         mock_dist,
         mock_convert_to_hf,
     ):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
+        from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
             UpdateWeightFromDistributed,
         )
 
@@ -286,7 +286,7 @@ class TestBridgeUpdateWeightsDoesNotCallConvertToHf:
         updater._update_weight_implementation = MagicMock(
             side_effect=lambda chunk, pbar=None: broadcast_calls.append(list(chunk))
         )
-        updater._group_name = "miles-bridge"
+        updater._group_name = "orbit-bridge"
 
         updater.update_weights()
 
@@ -317,7 +317,7 @@ class TestBridgeUpdateWeightsDoesNotCallConvertToHf:
     ):
         """Non-source ranks must still drain the iterator (so bridge collectives
         complete) but must not invoke ``_update_weight_implementation``."""
-        from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
+        from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
             UpdateWeightFromDistributed,
         )
 
@@ -355,10 +355,10 @@ class TestRawModeStillUsesLegacyPath:
 
     @patch(f"{_BC_MODULE}.HfWeightIteratorBase")
     def test_raw_mode_update_weights_delegates_to_mixin(self, mock_iter_base):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
+        from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
             UpdateWeightFromDistributed,
         )
-        from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin import (
+        from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin import (
             DistBucketedWeightUpdateMixin,
         )
 

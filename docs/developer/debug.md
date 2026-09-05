@@ -2,7 +2,7 @@
 title: Debugging
 description: Split a misbehaving run into rollout and training halves, then debug the side that is actually wrong.
 ---
-When a Miles run misbehaves, the first question is always: **rollout or training?** The
+When a Orbit run misbehaves, the first question is always: **rollout or training?** The
 flags on this page exist to answer it by cutting the loop into pieces you can run one at a
 time. Once you know which side is wrong, it becomes an ordinary debugging session.
 
@@ -61,17 +61,17 @@ token, so the ratio stays high when the sync is correct.
 ## Make two runs comparable
 
 `--debug-deterministic-collective` runs the training world on the `det_nccl` backend from
-`miles.utils.test_utils.det_process_group`, which folds order-sensitive SUM and AVG
+`orbit.utils.test_utils.det_process_group`, which folds order-sensitive SUM and AVG
 reductions in a fixed tree order. That is what makes two different reduction topologies
 bitwise comparable, and it is how the Megatron-versus-FSDP alignment test can assert
 equality at all. It is slow; never enable it in production.
 
 For end-to-end reproducibility of a whole run, including the sampling path, see the
-[Reproducibility recipe](https://github.com/radixark/miles/tree/main/examples/experimental/reproducibility).
+[Reproducibility recipe](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/reproducibility).
 
 ## The assertion harness CI uses
 
-An e2e test in Miles is mostly a normal training run with `--ci-test` added. That flag
+An e2e test in Orbit is mostly a normal training run with `--ci-test` added. That flag
 turns on a set of in-process assertions, so a violated invariant fails the run where it
 happens instead of showing up as a wrong number hours later. You can use the same flags on
 your own runs, and each checker has an escape hatch for the case where your change makes it
@@ -190,7 +190,7 @@ as `step <n>: {...}`, and the rollout side logs one reduced dict per rollout. Se
 ## When all else fails
 
 * Drop to a tiny model on a known-good recipe (the
-  [Reproducibility](https://github.com/radixark/miles/tree/main/examples/experimental/reproducibility) one) to separate framework from model.
+  [Reproducibility](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/reproducibility) one) to separate framework from model.
 * `git bisect` between a known-good commit and HEAD, with the record-and-replay pattern
   above pinning the inputs and `--debug-deterministic-collective` pinning the reductions.
 * Open a GitHub issue with the launch script, `pip freeze`, the first 200 lines of trainer

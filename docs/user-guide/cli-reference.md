@@ -1,17 +1,17 @@
 ---
 title: CLI Reference
-description: Every command-line flag Miles accepts, grouped by subsystem.
+description: Every command-line flag Orbit accepts, grouped by subsystem.
 ---
-Miles is configured through command-line flags passed to `train.py` or
+Orbit is configured through command-line flags passed to `train.py` or
 `train_async.py`. The Megatron flags (such as `--num-layers`, `--rotary-base`,
-`--recompute-granularity`) are inherited via Megatron's argument parser; Miles adds
+`--recompute-granularity`) are inherited via Megatron's argument parser; Orbit adds
 its own flags through an `extra_args_provider`. Run `python3 train.py --help` against
 your installed Megatron source for the canonical list.
 
 This page has two passes.
 
 1. **Essentials** lists the flags most runs actually touch.
-2. **Complete reference** lists every Miles flag with type and default.
+2. **Complete reference** lists every Orbit flag with type and default.
 
 ---
 
@@ -106,7 +106,7 @@ then push up until you OOM.
 
 ### SGLang passthrough
 
-Any flag accepted by `python -m sglang.launch_server` is accepted by Miles with the
+Any flag accepted by `python -m sglang.launch_server` is accepted by Orbit with the
 `--sglang-` prefix:
 
 ```bash
@@ -159,7 +159,7 @@ Sections mirror the launch-script argument groups.
 | `--save-trigger-sentinel` | path | – | If this file exists at a save point, save a checkpoint now (regardless of `--save-interval`) and remove the file. |
 | `--custom-megatron-post-save-hook-path` | `<module>.<fn>` | – | Rank-0 callback after each checkpoint save. |
 | `--model-name` | str | – | Set in multi-node to avoid `transformers` file-system race. |
-| `--spec` | `<module> <fn>` | – | Plugin spec for custom architectures (e.g. `miles_plugins.models.qwen3_5 get_qwen3_5_spec`). |
+| `--spec` | `<module> <fn>` | – | Plugin spec for custom architectures (e.g. `orbit_plugins.models.qwen3_5 get_qwen3_5_spec`). |
 
 ### Rollout: data and batching
 
@@ -283,7 +283,7 @@ Sections mirror the launch-script argument groups.
 
 | Flag | Type | Default | Notes |
 |---|---|---|---|
-| `--sglang-router-ip` | str | – | External router IP. Miles starts its own router if unset. |
+| `--sglang-router-ip` | str | – | External router IP. Orbit starts its own router if unset. |
 | `--sglang-router-port` | int | – | External router port. |
 | `--sglang-*` | passthrough | | Any flag accepted by `python -m sglang.launch_server` works with this prefix. |
 | `--router-*` | passthrough | | Any flag accepted by the active router works with this prefix. |
@@ -304,13 +304,13 @@ Common `--sglang-*` flags:
 
 ### Agentic sessions
 
-These flags wire an OpenAI-compatible agent loop through Miles' TITO session
+These flags wire an OpenAI-compatible agent loop through Orbit' TITO session
 server. See [Agentic Rollout (TITO)](/user-guide/agentic-rollout) for the request
 contract, session behavior, and model-family selection.
 
 | Flag | Type | Default | Notes |
 |---|---|---|---|
-| `--custom-generate-function-path` | `<module>.<fn>` | – | Set to `miles.rollout.generate_hub.agentic_tool_call.generate` for the built-in agentic wrapper. |
+| `--custom-generate-function-path` | `<module>.<fn>` | – | Set to `orbit.rollout.generate_hub.agentic_tool_call.generate` for the built-in agentic wrapper. |
 | `--custom-agent-function-path` | `<module>.<fn>` | – | Async agent-environment loop. Registered after selecting the built-in agentic wrapper. |
 | `--use-session-server` | optional `v1` / `v2` | off | Bare flag (or `v1`) selects the linear append-only server; `v2` selects tree serving. Requires `--hf-checkpoint`. |
 | `--tito-model` | enum | `default` | TITO model family. Named families load their registered fixed template; `default` is best-effort with a checkpoint-native or custom template. |
@@ -380,4 +380,4 @@ contract, session behavior, and model-family selection.
 ### Customization
 
 See [Customization](/user-guide/customization) for the full catalog of `--*-path` flags
-that replace or extend Miles's behavior.
+that replace or extend Orbit's behavior.

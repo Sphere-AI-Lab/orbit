@@ -45,7 +45,7 @@
 
 ### 9
 "python3"
-"<REPO_ROOT>/miles/utils/external_utils/model_args_utils.py"
+"<REPO_ROOT>/orbit/utils/external_utils/model_args_utils.py"
 "qwen3-4B"
 
 ### 10
@@ -104,9 +104,9 @@
 "--ref-load"
 "/root/Qwen3-4B_torch_dist"
 "--load"
-"/root/Qwen3-4B_miles/"
+"/root/Qwen3-4B_orbit/"
 "--save"
-"/root/Qwen3-4B_miles/"
+"/root/Qwen3-4B_orbit/"
 "--save-interval"
 "20"
 "--prompt-data"
@@ -159,7 +159,7 @@
 "0.28"
 "--use-wandb"
 "--wandb-project"
-"miles-eval"
+"orbit-eval"
 "--wandb-group"
 "qwen3-4b-eval"
 "--wandb-key"

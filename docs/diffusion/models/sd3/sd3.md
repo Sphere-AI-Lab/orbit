@@ -60,7 +60,7 @@ Launch scripts download the matching subset automatically via
 
 ## 4. Family config
 
-Registered in `miles/backends/fsdp_utils/configs/sd3.py`:
+Registered in `orbit/backends/fsdp_utils/configs/sd3.py`:
 
 ```python
 @register_train_pipeline_config("sd3")
@@ -135,7 +135,7 @@ python3 scripts/run_diffusion_nft_sd3_pickscore.py \
 Smoke test (1 rollout, OCR dataset, 2 GPUs):
 
 ```bash
-MILES_SCRIPT_SMOKE=1 python3 scripts/run_diffusion_nft_sd3_pickscore.py
+ORBIT_SCRIPT_SMOKE=1 python3 scripts/run_diffusion_nft_sd3_pickscore.py
 ```
 
 ### Recipe comparison
@@ -177,7 +177,7 @@ per worker — useful only when GPU count is tight.
 | Reference | `--diffusion-kl-beta 0.04` |
 | Reward | `--rm-type ocr` |
 | SDE | Full window (`num_sde_steps=10`, range `0,10`), noise 0.7, CFG 4.5 |
-| Step strategy | `miles.rollout.step_strategy_hub.sde_window` |
+| Step strategy | `orbit.rollout.step_strategy_hub.sde_window` |
 | Weight sync | `--lora-ipc-weight-sync` (colocate IPC merge) |
 | Determinism | `--deterministic-mode` (CI / e2e parity) |
 
@@ -220,7 +220,7 @@ Both SD3 launch scripts use fp16 DiT forward:
 SD3.5 fp16 policy gradients are small enough to underflow without scaling. When
 `--diffusion-forward-dtype fp16`, the FSDP actor automatically enables
 **`ShardedGradScaler`** around backward / optimizer step (no extra flag — see
-`miles/backends/fsdp_utils/actor.py`). bf16/fp32 forward disables the scaler.
+`orbit/backends/fsdp_utils/actor.py`). bf16/fp32 forward disables the scaler.
 
 Flow-GRPO recipes also set **`--diffusion-clip-range`** (e.g. `1e-4` in the OCR
 script) to clip importance ratios during the policy update.

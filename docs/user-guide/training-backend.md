@@ -2,8 +2,8 @@
 title: Training Backends
 description: The contract Megatron-LM and FSDP both implement, which one to pick, and how to configure parallelism, GPU layout, offload, and checkpoints for each.
 ---
-In Miles a training backend is one class: a `TrainRayActor` subclass that owns the model on
-the GPU. `--train-backend` decides which one `miles/ray/train/actor_factory.py` instantiates
+In Orbit a training backend is one class: a `TrainRayActor` subclass that owns the model on
+the GPU. `--train-backend` decides which one `orbit/ray/train/actor_factory.py` instantiates
 on every trainer rank, and there are two choices.
 
 | Value | Class | What it is | Default |
@@ -12,7 +12,7 @@ on every trainer rank, and there are two choices.
 | [`fsdp`](#fsdp) | `FSDPTrainRayActor` | The model's own HuggingFace implementation under PyTorch FSDP2 | |
 
 Whichever you pick, the rest of the job talks to it through the same handful of methods, and
-that short list is the whole contract between a backend and everything else in Miles:
+that short list is the whole contract between a backend and everything else in Orbit:
 
 | Method | What the backend has to do |
 |---|---|
@@ -67,7 +67,7 @@ where the weights come from, and what you want to hook into.
 
 ### 1. Describing the architecture
 
-You do not re-declare Megatron's flags to Miles. Miles imports Megatron's whole argument
+You do not re-declare Megatron's flags to Orbit. Orbit imports Megatron's whole argument
 surface at launch:
 
 ```python
@@ -75,9 +75,9 @@ from megatron.training.arguments import parse_args
 ```
 
 so every Megatron flag your checkpoint needs (`--kv-channels`, `--rotary-base`,
-`--moe-grouped-gemm`, and the rest) already works. Miles then threads its own flags in
-through an `extra_args_provider` (`get_miles_extra_args_provider` in
-`miles/utils/arguments.py`), which is why Miles and Megatron flags share one CLI.
+`--moe-grouped-gemm`, and the rest) already works. Orbit then threads its own flags in
+through an `extra_args_provider` (`get_orbit_extra_args_provider` in
+`orbit/utils/arguments.py`), which is why Orbit and Megatron flags share one CLI.
 
 That import is also why you export the Megatron source before launching:
 
@@ -151,7 +151,7 @@ Three things follow from `--colocate` that are worth knowing before you use it:
 - `--offload-train` and `--offload-rollout` both turn on, which is what makes the taking of
   turns possible. That is the memory story in the next section.
 - The trainer reserves HBM at init before SGLang starts, so `--sglang-mem-fraction-static`
-  has to come down, typically to 0.8 or lower. Miles also defaults
+  has to come down, typically to 0.8 or lower. Orbit also defaults
   `--sglang-cuda-graph-backend-prefill=disabled` here to avoid an NVLS OOM.
 
 The layout also decides how `update_weights` gets the weights across. Colocated, the engine
@@ -216,7 +216,7 @@ again by the time Adam launches. That case is what streaming addresses:
 ```bash
 --offload-train --offload-train-target disk \
 --stream-optimizer-state-to-disk \
---offload-train-disk-dir /scratch/miles_offload
+--offload-train-disk-dir /scratch/orbit_offload
 ```
 
 The fp32 masters and Adam moments live in per-bucket files on NVMe, and the step brings in
@@ -235,7 +235,7 @@ parallelism-agnostic, so you can change TP / PP / EP later without re-converting
 once, up front:
 
 ```bash
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py <family>)" || exit 1
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py <family>)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
    ${MODEL_ARGS[@]} \
@@ -291,23 +291,23 @@ surgically. See [Customization](/user-guide/customization#megatron-hooks).
 ### Going deeper: bringing in a new architecture
 
 Post-training runs on released checkpoints, so this is rarely your problem. When a model does
-need a custom module, Miles embeds the model's official HuggingFace module inside Megatron's
-scheduling rather than patching Megatron: a spec function under `miles_plugins/models/` is
-selected with `--spec <module> <function>`, a bridge under `miles_plugins/mbridge/`
+need a custom module, Orbit embeds the model's official HuggingFace module inside Megatron's
+scheduling rather than patching Megatron: a spec function under `orbit_plugins/models/` is
+selected with `--spec <module> <function>`, a bridge under `orbit_plugins/mbridge/`
 reconciles the parameter layouts, and parameters that must stay fp32 through Megatron's bf16
 cast are tagged with `mark_param_dtype` from
-`miles/backends/megatron_utils/fp32_param_utils.py`. The model configs in `scripts/models/`
+`orbit/backends/megatron_utils/fp32_param_utils.py`. The model configs in `scripts/models/`
 that pass `--spec` are the worked examples.
 
 ---
 
 ## FSDP
 
-The FSDP backend lives at `miles/backends/fsdp_utils/`. One idea explains the whole thing:
+The FSDP backend lives at `orbit/backends/fsdp_utils/`. One idea explains the whole thing:
 **nothing about the model is re-expressed for the trainer.** Architecture comes from the
 HuggingFace `config.json`, weights load through `AutoModelForCausalLM.from_pretrained()`,
 and sharding, the distributed optimizer and mixed precision all come from PyTorch FSDP2
-rather than from Miles.
+rather than from Orbit.
 
 So there is no conversion step, no architecture flag block, and no spec to write for a model that
 `transformers` already implements. The bill comes due on parallelism, which is why large
@@ -326,7 +326,7 @@ read from the HF config, so Megatron's architecture flags (`--num-layers`, `--hi
 
 ### 2. Sharding it
 
-This backend is pure data parallel. `miles/backends/fsdp_utils/parallel.py` builds a single
+This backend is pure data parallel. `orbit/backends/fsdp_utils/parallel.py` builds a single
 device mesh with two dimensions:
 
 | Dimension | How you set it | What it does |
@@ -341,7 +341,7 @@ pipeline, context, expert and expert-tensor parallelism are all fixed at size 1 
 <Note>
 
 Context parallelism is not available here. `--context-parallel-size` above 1 is rejected in
-argument validation (`miles/utils/arguments.py`); the mesh has no CP dimension to build.
+argument validation (`orbit/utils/arguments.py`); the mesh has no CP dimension to build.
 
 </Note>
 
@@ -398,7 +398,7 @@ expert parallelism, use [Megatron-LM](#megatron-lm).
 Any HuggingFace causal LM loads. Some need small corrections around the edges: a weight
 layout SGLang does not expect, a stateful layer that must be reset per document, a class
 that needs patching before construction. Those live in
-`miles/backends/fsdp_utils/adaptations/specs/`, one file per architecture, and an
+`orbit/backends/fsdp_utils/adaptations/specs/`, one file per architecture, and an
 architecture that needs none of them registers nothing.
 
 | Hook | What it fixes |
@@ -423,7 +423,7 @@ adapters.
 ```bash
 export WANDB_API_KEY=<key>
 
-git clone https://github.com/radixark/miles.git && cd miles
+git clone https://github.com/Sphere-AI-Lab/orbit.git && cd orbit
 pip install -e . --no-deps
 
 # downloads model + datasets itself, no conversion step
@@ -445,7 +445,7 @@ For profiling: `--use-pytorch-profiler` with `--profile-step-start` / `--profile
 SGLang is the inference engine no matter which training backend you picked. Three pieces of
 configuration matter.
 
-**HuggingFace pointer.** SGLang boots from `--hf-checkpoint`. Miles syncs the actor's
+**HuggingFace pointer.** SGLang boots from `--hf-checkpoint`. Orbit syncs the actor's
 weights from the trainer before the first training step, so the checkpoint at that path does
 **not** need to be current. The tokenizer and the `config.json`-derived context length are
 all SGLang reads at init.
@@ -459,7 +459,7 @@ fit.
 
 ### Passthrough convention
 
-Any flag `python -m sglang.launch_server` accepts, Miles accepts with a `--sglang-` prefix:
+Any flag `python -m sglang.launch_server` accepts, Orbit accepts with a `--sglang-` prefix:
 
 ```bash
 --sglang-ep-size 8
@@ -469,13 +469,13 @@ Any flag `python -m sglang.launch_server` accepts, Miles accepts with a `--sglan
 --sglang-log-level INFO
 ```
 
-Two flags are **set by Miles** rather than by you:
+Two flags are **set by Orbit** rather than by you:
 
 - `--tp-size` from `--rollout-num-gpus-per-engine`
 - `--model-path` from `--hf-checkpoint`
 
 The integration lives at
-[`miles/backends/sglang_utils/arguments.py`](https://github.com/radixark/miles/blob/main/miles/backends/sglang_utils/arguments.py).
+[`orbit/backends/sglang_utils/arguments.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/orbit/backends/sglang_utils/arguments.py).
 
 ### Router
 
@@ -485,14 +485,14 @@ A router sits in front of the SGLang workers. Router-side flags take a `--router
 --router-balance-abs-threshold 0   # force uniform distribution (lowers prefix-cache hit rate)
 ```
 
-Set `--sglang-router-ip` and `--sglang-router-port` and Miles treats the router as
+Set `--sglang-router-ip` and `--sglang-router-port` and Orbit treats the router as
 **external**, skipping its own. Engines then register via `/add_worker` at startup.
 
 ---
 
 ## Further reading
 
-- [Core concepts](/user-guide/concepts): the four objects that make up any Miles job.
+- [Core concepts](/user-guide/concepts): the four objects that make up any Orbit job.
 - [Launch script](/user-guide/launch-script): the launch script,
   argument group by argument group.
 - [Fully Async RL](/user-guide/fully-async): keep generation running continuously so rollout

@@ -2,19 +2,19 @@ import os
 import sys
 
 
-_MILES_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
-if str(_MILES_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_MILES_REPO_ROOT))
+_ORBIT_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+if str(_ORBIT_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ORBIT_REPO_ROOT))
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
-MODEL_NAME = os.environ.get("MILES_SCRIPT_MODEL_NAME", "Qwen3-0.6B")
+MODEL_NAME = os.environ.get("ORBIT_SCRIPT_MODEL_NAME", "Qwen3-0.6B")
 assert MODEL_NAME in {"Qwen3-0.6B"}
 
-MODE = os.environ.get("MILES_SCRIPT_MODE", "normal")
+MODE = os.environ.get("ORBIT_SCRIPT_MODE", "normal")
 assert MODE in {"normal", "debug_minimal", "debug_one_sample"}
 
-NUM_GPUS = int(os.environ.get("MILES_SCRIPT_NUM_GPUS", "1"))
+NUM_GPUS = int(os.environ.get("ORBIT_SCRIPT_NUM_GPUS", "1"))
 
 
 def prepare():
@@ -40,7 +40,7 @@ def execute():
         "--rollout-temperature 1 "
         # temp remove this to make test easier
         # "--over-sampling-batch-size 64 "
-        # "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
+        # "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
         f"--global-batch-size {1 if MODE == 'debug_one_sample' else 256} "
     )
 

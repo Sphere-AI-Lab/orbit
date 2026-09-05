@@ -81,7 +81,7 @@ HF_CACHE_DIR=/data/shared bash scripts/slurm/submit.sh OPD/math_3nodes/qwen3-8B
 ## Legacy teacher-top-k characterization result
 
 The 00 recipe attempted to measure the starting point for the teacher-top-k
-rebuild. It is not trainer-side Top-K DAgger: current Miles gets teacher
+rebuild. It is not trainer-side Top-K DAgger: current Orbit gets teacher
 top-k targets, unions their IDs across the response, asks student SGLang to
 rescore the union, normalizes `teacher_p` inside the selected support, and
 reduces the candidate dimension to one detached scalar per position.
@@ -102,7 +102,7 @@ invented. Do not rerun 00 as a performance baseline. Retain it only to reproduce
 the upstream SGLang failure; the numbered sequence now measures the replacement
 Top-K DAgger `[T,K]` path on its own gates.
 
-The new branch does not overload legacy `OPD_TOP_K`. It uses independent Miles
+The new branch does not overload legacy `OPD_TOP_K`. It uses independent Orbit
 arguments: `--opd-dagger-top-k`, `--opd-dagger-coef`, and
 `--opd-dagger-loss`. Milestone 01 uses `explicit_cross_entropy`; the complete
 Top-K + Rest objective uses `cross_entropy`. One teacher prefill returns both sampled-token

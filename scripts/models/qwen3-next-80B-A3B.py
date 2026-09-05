@@ -7,7 +7,7 @@ FIRST_K_DENSE_REPLACE = 0
 
 def model_args() -> str:
     return (
-        "--spec miles_plugins.models.qwen3_next get_qwen3_next_spec "
+        "--spec orbit_plugins.models.qwen3_next get_qwen3_next_spec "
         "--disable-bias-linear "
         "--qk-layernorm "
         "--group-query-attention "

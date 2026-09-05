@@ -6,7 +6,7 @@
 #   python test_dumper.py compare --mode <mode> --dump-dir <path>
 #                                                    Re-run comparator on existing dumps
 #
-# After running miles once (the expensive execute step), you can re-run the
+# After running orbit once (the expensive execute step), you can re-run the
 # comparator many times via "compare" to investigate issues without re-running training.
 
 import sys
@@ -14,9 +14,9 @@ import tempfile
 from pathlib import Path
 from typing import Annotated
 
-_MILES_ROOT: Path = Path(__file__).resolve().parents[3]
-if str(_MILES_ROOT) not in sys.path:
-    sys.path.insert(0, str(_MILES_ROOT))
+_ORBIT_ROOT: Path = Path(__file__).resolve().parents[3]
+if str(_ORBIT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ORBIT_ROOT))
 
 import typer
 from tests.ci.ci_register import register_cuda_ci, register_rocm_ci
@@ -29,7 +29,7 @@ from tests.e2e.conftest_dumper import (
     run_and_verify_comparator,
 )
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 register_cuda_ci(est_time=1100, suite="stage-c-8-gpu-h100", labels=["short"])
 register_rocm_ci(est_time=1800, suite="nightly-stage-c-8-gpu-mi350", labels=["short"])
@@ -41,7 +41,7 @@ MODEL_NAME = "Qwen3-30B-A3B"
 MODEL_TYPE = "qwen3-30B-A3B"
 NUM_GPUS = 8
 
-_RUN_DIR: Path = Path(tempfile.mkdtemp(prefix="test_miles_dumper_"))
+_RUN_DIR: Path = Path(tempfile.mkdtemp(prefix="test_orbit_dumper_"))
 MEGATRON_SOURCE_PATCHER_CONFIG_PATH: str = str(_RUN_DIR / "megatron_source_patcher.yaml")
 SGLANG_SOURCE_PATCHER_CONFIG_PATH: str = str(_RUN_DIR / "sglang_source_patcher.yaml")
 

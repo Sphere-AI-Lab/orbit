@@ -11,7 +11,7 @@ from typing import Any
 from examples.model_response_trace_viewer.response_log import RESPONSE_TURNS_KEY
 from tests.fast.ray.rollout.conftest import make_sample as _make_sample
 
-from miles.utils.types import Sample
+from orbit.utils.types import Sample
 
 
 def make_sample(

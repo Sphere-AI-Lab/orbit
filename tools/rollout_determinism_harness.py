@@ -109,7 +109,7 @@ def _post(session, base_url: str, path: str, payload: dict[str, Any], expect_jso
 
 
 def _load_prompt_token_ids(args) -> list[list[int]]:
-    from miles.utils.processing_utils import load_tokenizer
+    from orbit.utils.processing_utils import load_tokenizer
 
     tokenizer = load_tokenizer(args.hf_checkpoint, trust_remote_code=True)
     prompts: list[list[int]] = []

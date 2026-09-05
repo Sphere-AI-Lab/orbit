@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 from tests.fast.ray.rollout.conftest import fake_engine, make_args
 
-from miles.ray.rollout.addr_allocator import (
+from orbit.ray.rollout.addr_allocator import (
     PortCursors,
     allocate_rollout_engine_addr_and_ports_external,
     allocate_rollout_engine_addr_and_ports_normal,

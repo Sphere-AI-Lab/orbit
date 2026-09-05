@@ -1,12 +1,12 @@
 # Rollout pipeline
 
 Covers `rollout.py` (custom multi-turn generate fn) and `env_adapter.py`
-(thin VAGEN ↔ miles bridge).
+(thin VAGEN ↔ orbit bridge).
 
 ## generate() flow
 
-`rollout.generate` wires miles' inference rollout
-(`miles.rollout.inference_rollout`) to VAGEN's `GymImageEnv` async protocol.
+`rollout.generate` wires orbit' inference rollout
+(`orbit.rollout.inference_rollout`) to VAGEN's `GymImageEnv` async protocol.
 Each call:
 
 1. **Build env** from `sample.metadata['vagen']`.
@@ -31,7 +31,7 @@ Each call:
 
 ## Key invariants
 
-- `args.rollout_global_dataset` is True (miles asserts). Our
+- `args.rollout_global_dataset` is True (orbit asserts). Our
   `VagenEnvSpecDataSource` bypasses HF-Dataset construction, so this
   rollout must not touch `state.args.prompt_data` as a parquet path.
 - Image content blocks are `{"type": "image"}` markers with no inline PIL —
@@ -92,7 +92,7 @@ undercounted by `prompt_len`. We keep this for MVP compatibility but set
 The VAGEN helpers we need (`_normalize_images`, `convert_obs_to_content`,
 `extract_success`) all live in `vagen.agent_loop.gym_agent_loop`, which
 imports VERL at the top. VERL is not installed
-in the miles conda env, so we cannot import that module here.
+in the orbit conda env, so we cannot import that module here.
 
 `env_adapter.py` keeps a local copy of these three helpers inside a
 clearly-marked `--- Begin/End local copy ---` block. When VAGEN factors

@@ -11,15 +11,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from miles.rollout.multi_lora.async_rollout import (
+from orbit.rollout.multi_lora.async_rollout import (
     AsyncMultiLoRAWorker,
     GroupBuffer,
     MultiLoRAWorkerMetrics,
     collect_batch,
     group_adapter_name,
 )
-from miles.utils.adapter_config import AdapterRun, AdapterRunConfig
-from miles.utils.types import AdapterRef, Sample
+from orbit.utils.adapter_config import AdapterRun, AdapterRunConfig
+from orbit.utils.types import AdapterRef, Sample
 
 
 def make_args(**overrides) -> SimpleNamespace:

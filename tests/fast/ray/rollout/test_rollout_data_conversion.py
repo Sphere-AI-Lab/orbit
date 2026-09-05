@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from tests.fast.ray.rollout.conftest import make_args, make_sample
 
-from miles.ray.rollout.rollout_data_conversion import (
+from orbit.ray.rollout.rollout_data_conversion import (
     _compute_dynamic_global_batch_size,
     postprocess_rollout_data,
     validate_compact_rollout_ids,

@@ -6,16 +6,16 @@ from pathlib import Path
 
 import ray
 
-from miles.ray.multi_lora.controller import create_multilora_controller, get_multi_lora_controller
-from miles.ray.placement_group import create_placement_groups, create_rollout_manager, create_training_models
-from miles.utils import object_store
-from miles.utils.adapter_config import parse_adapter_run_yaml
-from miles.utils.arguments import parse_args
-from miles.utils.audit_utils.process_identity import MainProcessIdentity
-from miles.utils.data import remove_rollout_data_refs
-from miles.utils.logging_utils import configure_logger
-from miles.utils.multi_lora import EmptyBatchTimeoutError, define_new_adapter_metrics
-from miles.utils.tracking_utils.tracking import init_tracking
+from orbit.ray.multi_lora.controller import create_multilora_controller, get_multi_lora_controller
+from orbit.ray.placement_group import create_placement_groups, create_rollout_manager, create_training_models
+from orbit.utils import object_store
+from orbit.utils.adapter_config import parse_adapter_run_yaml
+from orbit.utils.arguments import parse_args
+from orbit.utils.audit_utils.process_identity import MainProcessIdentity
+from orbit.utils.data import remove_rollout_data_refs
+from orbit.utils.logging_utils import configure_logger
+from orbit.utils.multi_lora import EmptyBatchTimeoutError, define_new_adapter_metrics
+from orbit.utils.tracking_utils.tracking import init_tracking
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ async def main(args):
     configure_logger(args, source=MainProcessIdentity())
 
     # The multi-LoRA rollout fn / data source / global dataset flags are
-    # defaulted by miles_validate_args when --multi-lora-n-adapters > 0.
+    # defaulted by orbit_validate_args when --multi-lora-n-adapters > 0.
     pgs = create_placement_groups(args)
     object_store.init_instance(args, contribute_segment=False)
     init_tracking(args)

@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import torch
 
-from miles.utils import dumper_utils
-from miles.utils.dumper_utils import DumperMegatronUtil, DumperPhase
+from orbit.utils import dumper_utils
+from orbit.utils.dumper_utils import DumperMegatronUtil, DumperPhase
 
 
 class TestWrapForwardStepWithStepping:
@@ -22,14 +22,14 @@ class TestWrapForwardStepWithStepping:
     @pytest.mark.parametrize(("n_calls", "expected_steps"), [(1, 0), (2, 1), (5, 4)])
     def test_step_called_n_minus_1_times(self, setup, n_calls: int, expected_steps: int) -> None:
         _inner, wrapped, mock_dumper = setup
-        with patch("miles.utils.dumper_utils.dumper", mock_dumper):
+        with patch("orbit.utils.dumper_utils.dumper", mock_dumper):
             for _ in range(n_calls):
                 wrapped("iter", "model")
         assert mock_dumper.step.call_count == expected_steps
 
     def test_passes_args_and_returns_result(self, setup) -> None:
         inner, wrapped, mock_dumper = setup
-        with patch("miles.utils.dumper_utils.dumper", mock_dumper):
+        with patch("orbit.utils.dumper_utils.dumper", mock_dumper):
             result = wrapped("my_iter", "my_model", extra=True)
         inner.assert_called_once_with("my_iter", "my_model", extra=True)
         assert result == ("output", "loss_fn")
@@ -80,13 +80,13 @@ class TestDumperMegatronUtilConfigure:
             effective_dp=SimpleNamespace(rank=0),
             indep_dp=SimpleNamespace(rank=0, group=None),
         )
-        with patch("miles.utils.dumper_utils.get_parallel_state", return_value=state):
+        with patch("orbit.utils.dumper_utils.get_parallel_state", return_value=state):
             yield state
 
     def _configure(self, args: SimpleNamespace, *, phase: DumperPhase, rollout_id: int) -> bool:
         with (
-            patch("miles.utils.dumper_utils.dumper") as mock_dumper,
-            patch("miles.utils.dumper_utils.dist") as mock_dist,
+            patch("orbit.utils.dumper_utils.dumper") as mock_dumper,
+            patch("orbit.utils.dumper_utils.dist") as mock_dist,
         ):
             mock_dist.is_initialized.return_value = False
             enabled = DumperMegatronUtil._configure(args, phase=phase, rollout_id=rollout_id)
@@ -181,8 +181,8 @@ def test_finalize_preserves_activations_and_pins_model_dumps_to_step_zero(
     )
 
     with (
-        patch("miles.utils.dumper_utils.get_parallel_state", return_value=state),
-        patch("miles.utils.dumper_utils.dist") as mock_dist,
+        patch("orbit.utils.dumper_utils.get_parallel_state", return_value=state),
+        patch("orbit.utils.dumper_utils.dist") as mock_dist,
     ):
         mock_dist.is_initialized.return_value = False
         util = DumperMegatronUtil(args, [model], DumperPhase.FWD_BWD, rollout_id=3)
@@ -223,8 +223,8 @@ class TestBarrierAfterDumpDirCleanup:
         state = SimpleNamespace(indep_dp=SimpleNamespace(rank=1, size=2, group=group, debug_info={"quorum": 0}))
 
         with (
-            patch("miles.utils.dumper_utils.get_parallel_state", return_value=state),
-            patch("miles.utils.dumper_utils.dist") as mock_dist,
+            patch("orbit.utils.dumper_utils.get_parallel_state", return_value=state),
+            patch("orbit.utils.dumper_utils.dist") as mock_dist,
         ):
             mock_dist.is_initialized.return_value = False
             dumper_utils._barrier_after_dump_dir_cleanup()
@@ -241,7 +241,7 @@ class TestCleanupDumpDir:
         dump_dir.mkdir()
         (dump_dir / "stale.pt").write_text("stale")
 
-        with patch("miles.utils.dumper_utils._get_rank", return_value=0):
+        with patch("orbit.utils.dumper_utils._get_rank", return_value=0):
             dumper_utils._cleanup_dump_dir(dump_dir, indep_dp_rank=0)
 
         assert not dump_dir.exists()
@@ -252,9 +252,9 @@ class TestCleanupDumpDir:
         dump_dir.mkdir()
 
         with (
-            patch("miles.utils.dumper_utils._get_rank", return_value=0),
-            patch("miles.utils.dumper_utils.shutil.rmtree", side_effect=OSError("Directory not empty")),
-            caplog.at_level(logging.WARNING, logger="miles.utils.dumper_utils"),
+            patch("orbit.utils.dumper_utils._get_rank", return_value=0),
+            patch("orbit.utils.dumper_utils.shutil.rmtree", side_effect=OSError("Directory not empty")),
+            caplog.at_level(logging.WARNING, logger="orbit.utils.dumper_utils"),
         ):
             dumper_utils._cleanup_dump_dir(dump_dir, indep_dp_rank=0)
 
@@ -267,8 +267,8 @@ class TestCleanupDumpDir:
         dump_dir.mkdir()
 
         with (
-            patch("miles.utils.dumper_utils._get_rank", return_value=1),
-            patch("miles.utils.dumper_utils.shutil.rmtree") as mock_rmtree,
+            patch("orbit.utils.dumper_utils._get_rank", return_value=1),
+            patch("orbit.utils.dumper_utils.shutil.rmtree") as mock_rmtree,
         ):
             dumper_utils._cleanup_dump_dir(dump_dir, indep_dp_rank=0)
 
@@ -281,8 +281,8 @@ class TestCleanupDumpDir:
         dump_dir.mkdir()
 
         with (
-            patch("miles.utils.dumper_utils._get_rank", return_value=0),
-            patch("miles.utils.dumper_utils.shutil.rmtree") as mock_rmtree,
+            patch("orbit.utils.dumper_utils._get_rank", return_value=0),
+            patch("orbit.utils.dumper_utils.shutil.rmtree") as mock_rmtree,
         ):
             dumper_utils._cleanup_dump_dir(dump_dir, indep_dp_rank=1)
 
@@ -294,8 +294,8 @@ class TestCleanupDumpDir:
         dump_dir = tmp_path / "does_not_exist"
 
         with (
-            patch("miles.utils.dumper_utils._get_rank", return_value=0),
-            patch("miles.utils.dumper_utils.shutil.rmtree") as mock_rmtree,
+            patch("orbit.utils.dumper_utils._get_rank", return_value=0),
+            patch("orbit.utils.dumper_utils.shutil.rmtree") as mock_rmtree,
         ):
             dumper_utils._cleanup_dump_dir(dump_dir, indep_dp_rank=0)
 

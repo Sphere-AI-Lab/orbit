@@ -4,7 +4,7 @@
 # filesystem under /data (WekaFS); a wedged Weka client makes those reads hang in
 # uninterruptible D-state, which stalls engine/weight bring-up with no useful error
 # (GPUs sit idle, "Load weight" never completes). See
-# docs/sync-records/miles-sync-2026-06-30/wekafs-wedge-2026-07-01.md.
+# docs/sync-records/orbit-sync-2026-06-30/wekafs-wedge-2026-07-01.md.
 #
 # Reads real bytes (O_DIRECT, bypassing the page cache) from a large file on the shared
 # FS. On a healthy mount this returns in ~1-2s; on a wedged one the read hangs and the
@@ -15,15 +15,15 @@
 #
 # Env (with defaults):
 #   CONDA_ROOT       [/data/shared/conda/miniconda3]
-#   MILES_ENV_NAME   [miles]
-#   WEKA_PROBE_DIR   dir on the shared FS to probe  [$CONDA_ROOT/envs/$MILES_ENV_NAME/lib]
+#   ORBIT_ENV_NAME   [orbit]
+#   WEKA_PROBE_DIR   dir on the shared FS to probe  [$CONDA_ROOT/envs/$ORBIT_ENV_NAME/lib]
 #   WEKA_PROBE_MB    real bytes to read (MiB)       [64]
 # Exit: 0 = read OK (or nothing to probe -> skip, non-blocking); nonzero/hang = wedged.
 set -uo pipefail
 
 CONDA_ROOT="${CONDA_ROOT:-/data/shared/conda/miniconda3}"
-MILES_ENV_NAME="${MILES_ENV_NAME:-miles}"
-probe_dir="${WEKA_PROBE_DIR:-$CONDA_ROOT/envs/$MILES_ENV_NAME/lib}"
+ORBIT_ENV_NAME="${ORBIT_ENV_NAME:-orbit}"
+probe_dir="${WEKA_PROBE_DIR:-$CONDA_ROOT/envs/$ORBIT_ENV_NAME/lib}"
 mb="${WEKA_PROBE_MB:-64}"
 min_mb=$((mb + 32))   # probe file must exceed the read so O_DIRECT never hits an unaligned EOF tail
 

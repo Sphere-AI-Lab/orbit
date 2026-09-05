@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from miles.utils import train_metric_utils
-from miles.utils.misc import SingletonMeta
-from miles.utils.timer import Timer
-from miles.utils.train_metric_utils import log_perf_data_raw
+from orbit.utils import train_metric_utils
+from orbit.utils.misc import SingletonMeta
+from orbit.utils.timer import Timer
+from orbit.utils.train_metric_utils import log_perf_data_raw
 
 SEQ_LENS = [1024, 2048]
 FWD_TFLOPS = 60.0

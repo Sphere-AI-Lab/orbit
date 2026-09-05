@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from miles.utils import data as data_module
-from miles.utils.data import Sample, filter_long_prompt
+from orbit.utils import data as data_module
+from orbit.utils.data import Sample, filter_long_prompt
 
 
 def _sample(prompt, multimodal_inputs=None) -> Sample:
@@ -37,7 +37,7 @@ def test_filter_reuses_stored_multimodal_inputs_for_templated_prompts(monkeypatc
         seen.append(multimodal_inputs)
         return {"input_ids": [list(range(10 if len(text) < 100 else 100))]}
 
-    monkeypatch.setattr("miles.utils.processing_utils.process_vision_info", _must_not_reextract)
+    monkeypatch.setattr("orbit.utils.processing_utils.process_vision_info", _must_not_reextract)
     monkeypatch.setattr(data_module, "call_processor", _fake_call_processor)
 
     kept = filter_long_prompt(samples, tokenizer=None, processor=object(), max_length=50)
@@ -66,7 +66,7 @@ def test_filter_uses_tokenizer_when_multimodal_inputs_missing(monkeypatch) -> No
             assert prompts == ["kept text prompt", "dropped because long"]
             return {"input_ids": [[1, 2, 3], list(range(100))]}
 
-    monkeypatch.setattr("miles.utils.processing_utils.process_vision_info", _must_not_extract)
+    monkeypatch.setattr("orbit.utils.processing_utils.process_vision_info", _must_not_extract)
     monkeypatch.setattr(data_module, "call_processor", _must_not_call_processor)
 
     kept = filter_long_prompt(samples, tokenizer=_FakeTokenizer(), processor=object(), max_length=8)

@@ -19,7 +19,7 @@ class TestSglangConfigUpdateWeights:
         """Models without explicit update_weights should resolve to True when model_path matches hf_checkpoint."""
         from argparse import Namespace
 
-        from miles.backends.sglang_utils.sglang_config import SglangConfig
+        from orbit.backends.sglang_utils.sglang_config import SglangConfig
 
         path = _write_yaml(
             {
@@ -43,7 +43,7 @@ class TestSglangConfigUpdateWeights:
 
     def test_update_weights_explicit_false(self, tmp_path):
         """Models with update_weights: false should be parsed correctly."""
-        from miles.backends.sglang_utils.sglang_config import SglangConfig
+        from orbit.backends.sglang_utils.sglang_config import SglangConfig
 
         path = _write_yaml(
             {
@@ -73,7 +73,7 @@ class TestSglangConfigUpdateWeights:
 
     def test_multi_model_total_gpus(self, tmp_path):
         """total_num_gpus should sum across all models."""
-        from miles.backends.sglang_utils.sglang_config import SglangConfig
+        from orbit.backends.sglang_utils.sglang_config import SglangConfig
 
         path = _write_yaml(
             {
@@ -100,7 +100,7 @@ class TestGetModelUrl:
         """get_model_url should return the correct URL for a named model."""
         from argparse import Namespace
 
-        from miles.rollout.sglang_rollout import get_model_url
+        from orbit.rollout.sglang_rollout import get_model_url
 
         args = Namespace(
             sglang_router_ip="10.0.0.1",
@@ -118,7 +118,7 @@ class TestGetModelUrl:
         """get_model_url should fall back to default router if model not found."""
         from argparse import Namespace
 
-        from miles.rollout.sglang_rollout import get_model_url
+        from orbit.rollout.sglang_rollout import get_model_url
 
         args = Namespace(
             sglang_router_ip="10.0.0.1",
@@ -131,7 +131,7 @@ class TestGetModelUrl:
         """get_model_url should work when sglang_model_routers is not set."""
         from argparse import Namespace
 
-        from miles.rollout.sglang_rollout import get_model_url
+        from orbit.rollout.sglang_rollout import get_model_url
 
         args = Namespace(
             sglang_router_ip="10.0.0.1",

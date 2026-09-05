@@ -1,10 +1,10 @@
 import pytest
 
-from miles.dashboard import hooks
-from miles.dashboard.hooks import BATCH_MAX_EVENTS, TrajectorySink
-from miles.dashboard.store import Stream, TrajectoryEvent, TrajectoryEventKind
-from miles.utils.lifecycle import TrajectoryLifecycle
-from miles.utils.types import Sample
+from orbit.dashboard import hooks
+from orbit.dashboard.hooks import BATCH_MAX_EVENTS, TrajectorySink
+from orbit.dashboard.store import Stream, TrajectoryEvent, TrajectoryEventKind
+from orbit.utils.lifecycle import TrajectoryLifecycle
+from orbit.utils.types import Sample
 
 
 class FakeRemoteMethod:
@@ -139,7 +139,7 @@ def test_attach_detach_via_lifecycle_seam():
 
 
 def test_trajectory_events_roundtrip_store(tmp_path):
-    from miles.dashboard.store import MetricStore
+    from orbit.dashboard.store import MetricStore
 
     writer = MetricStore(tmp_path)
     for ts in (10.0, 3700.0):

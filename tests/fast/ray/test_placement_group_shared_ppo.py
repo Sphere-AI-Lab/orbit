@@ -2,8 +2,8 @@ from argparse import Namespace
 
 import pytest
 
-from miles.ray import placement_group as placement_group_module
-from miles.ray.placement_group import _actor_needs_reference_weights, _get_placement_group_layout
+from orbit.ray import placement_group as placement_group_module
+from orbit.ray.placement_group import _actor_needs_reference_weights, _get_placement_group_layout
 
 
 def _layout_args(**overrides):

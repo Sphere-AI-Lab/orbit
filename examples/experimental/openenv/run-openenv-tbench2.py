@@ -11,7 +11,7 @@ the binary pytest result (1.0 all tests pass, else 0.0).
 
 Prereqs:
     # 1. Install the env client where the rollout runs (pulls camel-ai; isolate
-    #    from the training env if its deps clash with the miles image).
+    #    from the training env if its deps clash with the orbit image).
     pip install -e <OpenEnv>/envs/tbench2_env
     # 2. Get the TB2 task suite + build prompt-data (task_ids).
     git clone --depth 1 https://github.com/laude-institute/terminal-bench-2.git /workspace/terminal-bench-2
@@ -49,7 +49,7 @@ from typing import Literal
 import openenv_launch_common as C
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -104,17 +104,17 @@ class ScriptArgs(U.ExecuteTrainConfig):
     # Modal's credential is a token pair, so the file here is its config file
     # (~/.modal.toml), forwarded by path exactly like the others' key files.
     modal_config_file: str = os.environ.get("MODAL_CONFIG_PATH", "")
-    # When set, miles dumps full per-episode agent trajectories (tokens, logprobs,
+    # When set, orbit dumps full per-episode agent trajectories (tokens, logprobs,
     # loss masks, reward, multi-turn messages) to <dir>/rollout_data/{rollout_id}.pt
-    # for post-hoc inspection via miles.utils.debug_utils.display_debug_rollout_data.
+    # for post-hoc inspection via orbit.utils.debug_utils.display_debug_rollout_data.
     dump_details: str = os.environ.get("OPENENV_DUMP_DETAILS", "")
     # Optional host rewrite for the policy URL (only needed if the in-process
     # agent cannot reach the session server at its raw base_url host).
-    router_external_host: str = os.environ.get("MILES_ROUTER_EXTERNAL_HOST", "")
-    # Leave empty so miles resolves the numeric LAN IP itself. sgl-router's Rust
+    router_external_host: str = os.environ.get("ORBIT_ROUTER_EXTERNAL_HOST", "")
+    # Leave empty so orbit resolves the numeric LAN IP itself. sgl-router's Rust
     # binder rejects a hostname ("invalid socket address syntax"), and a numeric
     # base_url host keeps the in-process policy client off hostname DNS too.
-    miles_host_ip: str = os.environ.get("MILES_HOST_IP", "")
+    orbit_host_ip: str = os.environ.get("ORBIT_HOST_IP", "")
 
     # W&B settings
     wandb_key: str = os.environ.get("WANDB_KEY", os.environ.get("WANDB_API_KEY", ""))

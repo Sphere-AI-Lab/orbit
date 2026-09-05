@@ -45,7 +45,7 @@
 
 ### 9
 "python3"
-"<REPO_ROOT>/examples/experimental/tau-bench/../../../miles/utils/external_utils/model_args_utils.py"
+"<REPO_ROOT>/examples/experimental/tau-bench/../../../orbit/utils/external_utils/model_args_utils.py"
 "qwen3-4B-Instruct-2507"
 
 ### 10
@@ -108,9 +108,9 @@
 "--ref-load"
 "/root/Qwen3-4B-Instruct-2507_torch_dist/"
 "--load"
-"/root/Qwen3-4B-Instruct-2507_miles/"
+"/root/Qwen3-4B-Instruct-2507_orbit/"
 "--save"
-"/root/Qwen3-4B-Instruct-2507_miles/"
+"/root/Qwen3-4B-Instruct-2507_orbit/"
 "--save-interval"
 "20"
 "--prompt-data"
@@ -131,7 +131,7 @@
 "--global-batch-size"
 "256"
 "--dynamic-sampling-filter-path"
-"miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
+"orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std"
 "--balance-data"
 "--optimizer"
 "adam"

@@ -8,11 +8,11 @@ import requests
 from kimina_client import AsyncKiminaClient, CheckResponse
 from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
-from miles.utils.external_utils.exec_command import exec_command_cpu
-from miles.utils.misc import get_free_port
+from orbit.utils.external_utils.exec_command import exec_command_cpu
+from orbit.utils.misc import get_free_port
 
 # TODO handle docker stop more gracefully later
-_KILL_PREVIOUS_KIMINA_DOCKER = bool(int(os.environ.get("MILES_KILL_PREVIOUS_KIMINA_DOCKER", "1")))
+_KILL_PREVIOUS_KIMINA_DOCKER = bool(int(os.environ.get("ORBIT_KILL_PREVIOUS_KIMINA_DOCKER", "1")))
 
 
 class KiminaServerAndClientCluster:

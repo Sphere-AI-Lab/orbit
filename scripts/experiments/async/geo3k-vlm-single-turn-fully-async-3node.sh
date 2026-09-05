@@ -14,7 +14,7 @@
 # behavior comes from the ROLLOUT FUNCTION, not the driver: train_async.py alone
 # (with the default rollout fn) is only step-overlapped async. Fully async needs
 # BOTH of the following — exactly what examples/fully_async/run-*.sh pairs:
-#   - the async driver train_async.py (set via MILES_TRAIN_ENTRY below) — NOT train.py;
+#   - the async driver train_async.py (set via ORBIT_TRAIN_ENTRY below) — NOT train.py;
 #   - --fully-async;
 #   - disaggregated layout (NO --colocate; train_async.py asserts not colocate);
 #   - --max-weight-staleness 2 (stale groups recycled to the data buffer);
@@ -43,17 +43,17 @@
 #   - cudnn 9.16.0.29 in the env (else conv3d perf regression in torch 2.9).
 #
 # Submit (run id / W&B group come from JOB_NAME; see W&B notes below):
-#   JOB_NAME=geo3k-async-mt-8b TIME=72:00:00 NODES=3 MILES_ENV_NAME=miles \
+#   JOB_NAME=geo3k-async-mt-8b TIME=72:00:00 NODES=3 ORBIT_ENV_NAME=orbit \
 #   bash scripts/slurm/submit.sh async/geo3k-vlm-multi-turn-fully-async-3node
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../../.." && pwd)}
 RECIPE_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
 
-# Opt into the async driver. ray_lifecycle.sh runs `python3 ${MILES_TRAIN_ENTRY:-train.py}`.
-export MILES_TRAIN_ENTRY=train_async.py
+# Opt into the async driver. ray_lifecycle.sh runs `python3 ${ORBIT_TRAIN_ENTRY:-train.py}`.
+export ORBIT_TRAIN_ENTRY=train_async.py
 
 # ---------------------------------------------------------------------------
 # Resource metadata — read by submit.sh for sbatch
@@ -79,7 +79,7 @@ HF_TRAIN_DATA="$HF_CACHE_DIR/data/geo3k_imgurl_processed/train.parquet"
 # ---------------------------------------------------------------------------
 MODEL_ARGS_ROTARY_BASE=5000000
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-8B.sh"
+source "$ORBIT_REPO/scripts/models/qwen3-8B.sh"
 MODEL_ARGS+=( --megatron-to-hf-mode bridge )
 
 RUN_NAME=${SLURM_JOB_NAME:-$RECIPE_NAME}
@@ -89,7 +89,7 @@ CKPT_ARGS=(
    --load           "$HF_MODEL_DIR"
    # No checkpoint saving for this example run (no --save / --save-interval).
    # Add them back to persist checkpoints, e.g.:
-   #   --save "$MILES_REPO/runs/$RUN_NAME/ckpt" --save-interval 50
+   #   --save "$ORBIT_REPO/runs/$RUN_NAME/ckpt" --save-interval 50
 )
 
 MULTIMODAL_ARGS=(
@@ -97,7 +97,7 @@ MULTIMODAL_ARGS=(
 )
 
 # Fully-async rollout driver. SINGLE-TURN: no --custom-generate-function-path, so
-# generate_and_rm_group falls back to the default miles.rollout.sglang_rollout.generate
+# generate_and_rm_group falls back to the default orbit.rollout.sglang_rollout.generate
 # (one SGLang call/sample). This is the ONLY difference vs the multi-turn fully-async
 # recipe. The default generate records weight_version via Sample.update_from_meta_info,
 # so the staleness filter is active (single-turn never had the multi-turn C1 bug).
@@ -196,9 +196,9 @@ WANDB_ARGS=(
    --wandb-project async_envpack
    --wandb-group   "$RUN_NAME"
    --disable-wandb-random-suffix
-   # WANDB_API_KEY comes from the env (exported by submit.sh / launch_miles.sbatch);
+   # WANDB_API_KEY comes from the env (exported by submit.sh / launch_orbit.sbatch);
    # we don't pass it on the CLI because it would leak into run.log and args.json.
-   # launch_miles.sbatch injects --wandb-run-id (= SLURM_JOB_ID) for stable resume.
+   # launch_orbit.sbatch injects --wandb-run-id (= SLURM_JOB_ID) for stable resume.
 )
 
 FT_ARGS=(
@@ -226,7 +226,7 @@ MISC_ARGS=(
    --attention-backend flash
 )
 
-MILES_ARGS=(
+ORBIT_ARGS=(
    "${LAYOUT_ARGS[@]}"
    "${MODEL_ARGS[@]}"
    "${CKPT_ARGS[@]}"

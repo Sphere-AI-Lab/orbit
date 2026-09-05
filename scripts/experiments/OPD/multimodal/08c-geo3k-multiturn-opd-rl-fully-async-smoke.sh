@@ -17,7 +17,7 @@ export WANDB_RUN_NAME=${WANDB_RUN_NAME:-opd-mm-08c-geo3k-mt-opd-rl-async-pf2-smo
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/07a-geo3k-multiturn-hybrid-fully-async-smoke.sh"
 
-MILES_ARGS+=(
+ORBIT_ARGS+=(
    --opd-optimize-task-reward
    --opd-task-reward-coef "$OPD_TASK_REWARD_COEF"
 )

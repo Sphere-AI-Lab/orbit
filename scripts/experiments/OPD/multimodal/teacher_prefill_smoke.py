@@ -25,16 +25,16 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from PIL import Image, ImageOps
 
-from miles.rollout.on_policy_distillation import _teacher_sampled_log_probs, _teacher_topk_targets
-from miles.utils.data import Dataset
-from miles.utils.hf_config import load_hf_config
-from miles.utils.processing_utils import (
+from orbit.rollout.on_policy_distillation import _teacher_sampled_log_probs, _teacher_topk_targets
+from orbit.utils.data import Dataset
+from orbit.utils.hf_config import load_hf_config
+from orbit.utils.processing_utils import (
     call_processor,
     encode_image_for_rollout_engine,
     load_processor,
     load_tokenizer,
 )
-from miles.utils.types import Sample
+from orbit.utils.types import Sample
 
 
 @dataclass(frozen=True)
@@ -343,7 +343,7 @@ def _run_mode(
 def _output_path(args: argparse.Namespace) -> Path | None:
     if args.output_json:
         return Path(args.output_json)
-    run_dir = os.environ.get("MILES_RUN_DIR")
+    run_dir = os.environ.get("ORBIT_RUN_DIR")
     return Path(run_dir) / "teacher_prefill_smoke.json" if run_dir else None
 
 

@@ -1,4 +1,4 @@
-/* Tiny JS helpers for the Miles docs site */
+/* Tiny JS helpers for the Orbit docs site */
 
 document.addEventListener("DOMContentLoaded", () => {
   // Scroll-reveal: add .is-visible to landing cards / strips when they enter the viewport.
@@ -15,17 +15,17 @@ document.addEventListener("DOMContentLoaded", () => {
       { rootMargin: "0px 0px -10% 0px", threshold: 0.05 }
     );
     document
-      .querySelectorAll(".miles-card, .miles-update, .miles-quote, .miles-strip")
+      .querySelectorAll(".orbit-card, .orbit-update, .orbit-quote, .orbit-strip")
       .forEach((el) => io.observe(el));
   } else {
     // Fallback: just show everything.
     document
-      .querySelectorAll(".miles-card, .miles-update, .miles-quote, .miles-strip")
+      .querySelectorAll(".orbit-card, .orbit-update, .orbit-quote, .orbit-strip")
       .forEach((el) => el.classList.add("is-visible"));
   }
 
   // Hover micro-interaction on update timeline rows.
-  document.querySelectorAll(".miles-update").forEach((el) => {
+  document.querySelectorAll(".orbit-update").forEach((el) => {
     el.addEventListener("mouseenter", () => el.classList.add("is-hover"));
     el.addEventListener("mouseleave", () => el.classList.remove("is-hover"));
   });

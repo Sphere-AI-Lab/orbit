@@ -18,13 +18,13 @@ ENTROPY_COEF="${ENTROPY_COEF:-0.0}"
 HF_CHECKPOINT="${HF_CHECKPOINT:-${HOME}/models/Qwen3-30B-A3B}"
 REF_LOAD="${REF_LOAD:-${HOME}/models/Qwen3-30B-A3B_torch_dist}"
 PROMPT_DATA="${PROMPT_DATA:-${HOME}/datasets/gsm8k/train.parquet}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-${PWD}/miles-runs/muon-two-node-sharding-smoke}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-${PWD}/orbit-runs/muon-two-node-sharding-smoke}"
 TOPOLOGY_ID="tp${TP_SIZE}-pp${PP_SIZE}-cp${CP_SIZE}-ep${EP_SIZE}-etp${ETP_SIZE}"
 RUN_ID="${RUN_ID:-qwen3-30b-a3b-gsm8k-2node-${TOPOLOGY_ID}-muon-$(date -u +%Y%m%dT%H%M%SZ)}"
 DRY_RUN="${DRY_RUN:-0}"
 LOG_TO_STDOUT_ONLY="${LOG_TO_STDOUT_ONLY:-0}"
-MILES_CONDA_ENV="${MILES_CONDA_ENV:-miles}"
-MILES_CONDA_SH="${MILES_CONDA_SH:-/data/shared/conda/miniconda3/etc/profile.d/conda.sh}"
+ORBIT_CONDA_ENV="${ORBIT_CONDA_ENV:-orbit}"
+ORBIT_CONDA_SH="${ORBIT_CONDA_SH:-/data/shared/conda/miniconda3/etc/profile.d/conda.sh}"
 RAY_PORT="${RAY_PORT:-6379}"
 RAY_DASHBOARD_PORT="${RAY_DASHBOARD_PORT:-8265}"
 RAY_START_TIMEOUT="${RAY_START_TIMEOUT:-120}"
@@ -188,11 +188,11 @@ done
 
 RUN_DIR="${OUTPUT_ROOT}/${RUN_ID}"
 [[ ! -e "${RUN_DIR}" ]] || die "run directory already exists: ${RUN_DIR}"
-[[ -f "${MILES_CONDA_SH}" ]] || die "MILES_CONDA_SH file does not exist: ${MILES_CONDA_SH}"
-source "${MILES_CONDA_SH}"
-conda activate "${MILES_CONDA_ENV}" || die "failed to activate Conda environment: ${MILES_CONDA_ENV}"
-[[ "${CONDA_DEFAULT_ENV:-}" == "${MILES_CONDA_ENV}" ]] || \
-   die "Conda activated '${CONDA_DEFAULT_ENV:-unknown}', expected '${MILES_CONDA_ENV}'"
+[[ -f "${ORBIT_CONDA_SH}" ]] || die "ORBIT_CONDA_SH file does not exist: ${ORBIT_CONDA_SH}"
+source "${ORBIT_CONDA_SH}"
+conda activate "${ORBIT_CONDA_ENV}" || die "failed to activate Conda environment: ${ORBIT_CONDA_ENV}"
+[[ "${CONDA_DEFAULT_ENV:-}" == "${ORBIT_CONDA_ENV}" ]] || \
+   die "Conda activated '${CONDA_DEFAULT_ENV:-unknown}', expected '${ORBIT_CONDA_ENV}'"
 
 command -v python3 >/dev/null 2>&1 || die "python3 is not available in PATH"
 command -v ray >/dev/null 2>&1 || die "ray is not available in PATH"
@@ -200,7 +200,7 @@ command -v setsid >/dev/null 2>&1 || die "setsid is not available in PATH"
 if ! python3 -c \
    'from emerging_optimizers.orthogonalized_optimizers import OrthogonalizedOptimizer, get_muon_scale_factor; from emerging_optimizers.orthogonalized_optimizers.muon_utils import newton_schulz_tp' \
    >/dev/null 2>&1; then
-   die "Muon requires Emerging Optimizers v0.1.0; install git+https://github.com/NVIDIA-NeMo/Emerging-Optimizers.git@v0.1.0 into ${MILES_CONDA_ENV}"
+   die "Muon requires Emerging Optimizers v0.1.0; install git+https://github.com/NVIDIA-NeMo/Emerging-Optimizers.git@v0.1.0 into ${ORBIT_CONDA_ENV}"
 fi
 
 PY_SITE="$(python3 -c 'import site; print(site.getsitepackages()[0])')"
@@ -283,7 +283,7 @@ setsid srun --jobid="${SLURM_JOB_ID}" --overlap --mem=0 \
       export PYTHONPATH="$4"
       export CUDA_DEVICE_MAX_CONNECTIONS=1
       exec ray start --head --block --node-ip-address "$5" --port "$6" --dashboard-host 0.0.0.0 --dashboard-port "$7" --num-gpus 8 --disable-usage-stats
-   ' bash "${MILES_CONDA_SH}" "${MILES_CONDA_ENV}" "${PY_SITE}" "${RAY_PYTHONPATH}" \
+   ' bash "${ORBIT_CONDA_SH}" "${ORBIT_CONDA_ENV}" "${PY_SITE}" "${RAY_PYTHONPATH}" \
       "${HEAD_IP}" "${RAY_PORT}" "${RAY_DASHBOARD_PORT}" \
    >>"${RAY_HEAD_LOG}" 2>&1 &
 OWNED_STEP_PIDS+=("$!")
@@ -311,7 +311,7 @@ setsid srun --jobid="${SLURM_JOB_ID}" --overlap --mem=0 \
       export PYTHONPATH="$4"
       export CUDA_DEVICE_MAX_CONNECTIONS=1
       exec ray start --block --address "$5:$6" --num-gpus 8 --disable-usage-stats
-   ' bash "${MILES_CONDA_SH}" "${MILES_CONDA_ENV}" "${PY_SITE}" "${RAY_PYTHONPATH}" \
+   ' bash "${ORBIT_CONDA_SH}" "${ORBIT_CONDA_ENV}" "${PY_SITE}" "${RAY_PYTHONPATH}" \
       "${HEAD_IP}" "${RAY_PORT}" \
    >>"${RAY_WORKER_LOG}" 2>&1 &
 OWNED_STEP_PIDS+=("$!")
@@ -329,7 +329,7 @@ for ((attempt = 0; attempt < RAY_START_TIMEOUT; attempt++)); do
          source "$1"
          conda activate "$2"
          timeout 10s python3 -c '\''import ray, sys; ray.init(address=sys.argv[1], logging_level="ERROR"); print(int(ray.cluster_resources().get("GPU", 0))); ray.shutdown()'\'' "$3"
-      ' bash "${MILES_CONDA_SH}" "${MILES_CONDA_ENV}" "${HEAD_IP}:${RAY_PORT}" \
+      ' bash "${ORBIT_CONDA_SH}" "${ORBIT_CONDA_ENV}" "${HEAD_IP}:${RAY_PORT}" \
       2>/dev/null | tail -n1 || true)"
    if [[ "${RAY_GPU_COUNT}" == "$((NUM_NODES * NUM_GPUS_PER_NODE))" ]]; then
       RAY_READY=1

@@ -17,7 +17,7 @@ their torch versions match. There are TWO independently tracked views:
 
   ACTIVE          — what install_env.sh actually installs. Tracks the
                     thirdparty/sglang submodule via
-                    MILES_SGLANG_SOURCE_VERSION, plus the ABI-compatible wheels
+                    ORBIT_SGLANG_SOURCE_VERSION, plus the ABI-compatible wheels
                     selected by MILES_WHEELS_TAG. Only sglang-sync advances
                     either hand-owned pin. Bundle torch/sglang/router metadata
                     is DERIVED from WHEELS_STACK below.
@@ -25,8 +25,8 @@ their torch versions match. There are TWO independently tracked views:
                     WHEELS_TAG). The destination a future sglang-sync advances
                     ACTIVE to. Extracted, recorded, never auto-applied.
 
-`MILES_SGLANG_SOURCE_VERSION` and `MILES_WHEELS_TAG` are therefore NOT extracted
-from the Dockerfile — they are PRESERVED from the existing pins.env. miles-sync
+`ORBIT_SGLANG_SOURCE_VERSION` and `MILES_WHEELS_TAG` are therefore NOT extracted
+from the Dockerfile — they are PRESERVED from the existing pins.env. orbit-sync
 must never auto-bump them; sglang-sync advances the source and selects a
 torch-compatible wheels bundle together.
 
@@ -118,7 +118,7 @@ PIN_GROUPS: list[tuple[str, list[Pin]]] = [
                 "MOONCAKE_VERSION",
                 SGLANG_DOCKER,
                 r"^ARG\s+MOONCAKE_VERSION=(\S+)",
-                "miles imports mooncake.engine.TransferEngine at top level — required.",
+                "orbit imports mooncake.engine.TransferEngine at top level — required.",
             ),
         ],
     ),
@@ -206,8 +206,8 @@ def extract() -> dict[str, str]:
     values["FLASH_ATTN_INTERFACE_COMMIT"] = read_preserved(
         "FLASH_ATTN_INTERFACE_COMMIT", FLASH_ATTN_INTERFACE_COMMIT_DEFAULT
     )
-    values["MILES_SGLANG_SOURCE_VERSION"] = read_preserved(
-        "MILES_SGLANG_SOURCE_VERSION", values["UPSTREAM_SGLANG_IMAGE_TAG"]
+    values["ORBIT_SGLANG_SOURCE_VERSION"] = read_preserved(
+        "ORBIT_SGLANG_SOURCE_VERSION", values["UPSTREAM_SGLANG_IMAGE_TAG"]
     )
 
     # ACTIVE sglang stack: preserve MILES_WHEELS_TAG, derive the rest from the map.
@@ -230,7 +230,7 @@ def extract() -> dict[str, str]:
 HEADER = """\
 # scripts/slurm/setup/pins.env — pinned versions/commits for install_env.sh.
 #
-# AUTO-GENERATED — do not hand-edit, EXCEPT MILES_SGLANG_SOURCE_VERSION and
+# AUTO-GENERATED — do not hand-edit, EXCEPT ORBIT_SGLANG_SOURCE_VERSION and
 # MILES_WHEELS_TAG, which only sglang-sync changes. Regenerate the rest with:
 #   python scripts/slurm/setup/extract_pins.py --write
 #
@@ -251,7 +251,7 @@ SGLANG_STACK_COMMENT = """\
 # prints `[sglang-sync pending]` (exit 0 — deferrable, NOT a sync blocker), and
 # install_env.sh hard-fails on any torch-ABI inconsistency.
 #
-# MILES_SGLANG_SOURCE_VERSION and MILES_WHEELS_TAG are hand-owned by
+# ORBIT_SGLANG_SOURCE_VERSION and MILES_WHEELS_TAG are hand-owned by
 # sglang-sync. Bundle metadata is DERIVED from WHEELS_STACK — do not hand-edit
 # derived fields; run `extract_pins.py --write` after advancing the source and
 # selecting a torch-compatible bundle."""
@@ -269,7 +269,7 @@ def render(values: dict[str, str]) -> str:
     out.append("")
     out.append(SGLANG_STACK_COMMENT)
     out.append(
-        f"MILES_SGLANG_SOURCE_VERSION=${{MILES_SGLANG_SOURCE_VERSION:-{values['MILES_SGLANG_SOURCE_VERSION']}}}"
+        f"ORBIT_SGLANG_SOURCE_VERSION=${{ORBIT_SGLANG_SOURCE_VERSION:-{values['ORBIT_SGLANG_SOURCE_VERSION']}}}"
     )
     out.append(f"MILES_WHEELS_TAG=${{MILES_WHEELS_TAG:-{values['MILES_WHEELS_TAG']}}}")
     out.append(f"MILES_WHEELS_TORCH_VERSION=${{MILES_WHEELS_TORCH_VERSION:-{values['MILES_WHEELS_TORCH_VERSION']}}}")
@@ -321,10 +321,10 @@ def pending_notice(values: dict[str, str]) -> str | None:
     only their CUDA/torch ABI, while an older bundle label may legitimately
     serve newer sglang source when torch matches. Source lag and ABI safety are
     therefore checked independently."""
-    if values["MILES_SGLANG_SOURCE_VERSION"] != values["UPSTREAM_SGLANG_IMAGE_TAG"]:
+    if values["ORBIT_SGLANG_SOURCE_VERSION"] != values["UPSTREAM_SGLANG_IMAGE_TAG"]:
         return (
-            f"[sglang-sync pending] ACTIVE MILES_SGLANG_SOURCE_VERSION="
-            f"{values['MILES_SGLANG_SOURCE_VERSION']} does not match "
+            f"[sglang-sync pending] ACTIVE ORBIT_SGLANG_SOURCE_VERSION="
+            f"{values['ORBIT_SGLANG_SOURCE_VERSION']} does not match "
             f"UPSTREAM_SGLANG_IMAGE_TAG={values['UPSTREAM_SGLANG_IMAGE_TAG']} "
             f"(wheels {values['MILES_WHEELS_TAG']} / torch {values['MILES_WHEELS_TORCH_VERSION']}). "
             "Run sglang-sync when ready to upgrade."
@@ -374,7 +374,7 @@ def tag_for_sglang(base: str) -> int:
 def main() -> int:
     # Exit-code contract (shared by --check and --write):
     #   0 = consistent, OR only `[sglang-sync pending]` (ACTIVE behind UPSTREAM —
-    #       deferrable, must NOT block CI / install / miles-sync).
+    #       deferrable, must NOT block CI / install / orbit-sync).
     #   1 = pins.env missing, OR drift (committed != freshly extracted; run --write).
     #   2 = torch-ABI inconsistency / unknown wheels tag (DANGER — do NOT --write;
     #       bump the submodule / fix the tag first). Distinct from 1 so callers can

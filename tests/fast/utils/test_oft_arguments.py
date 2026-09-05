@@ -3,7 +3,7 @@ from argparse import Namespace
 
 import pytest
 
-from miles.utils.arguments import _normalize_peft_args
+from orbit.utils.arguments import _normalize_peft_args
 
 
 def _write_adapter_config(adapter_dir, **overrides) -> None:

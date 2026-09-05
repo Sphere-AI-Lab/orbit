@@ -14,11 +14,11 @@ from types import SimpleNamespace
 
 import pytest
 
-import miles.utils.http_utils as http_utils
-from miles.rollout.generate_utils.openai_endpoint_utils import OpenAIEndpointTracer
-from miles.rollout.session.samples.codec import COMPUTED_FIELDS, COMPUTED_FIELDS_V2, encode_samples
-from miles.utils.http_utils import post_bytes_no_retry
-from miles.utils.types import Sample
+import orbit.utils.http_utils as http_utils
+from orbit.rollout.generate_utils.openai_endpoint_utils import OpenAIEndpointTracer
+from orbit.rollout.session.samples.codec import COMPUTED_FIELDS, COMPUTED_FIELDS_V2, encode_samples
+from orbit.utils.http_utils import post_bytes_no_retry
+from orbit.utils.types import Sample
 
 
 @pytest.mark.asyncio
@@ -31,7 +31,7 @@ async def test_create_reads_session_server_instance_id_from_args(monkeypatch):
         assert url == "http://127.0.0.1:12345/sessions"
         return {"session_id": "session-123"}
 
-    monkeypatch.setattr("miles.rollout.generate_utils.openai_endpoint_utils.post", fake_post)
+    monkeypatch.setattr("orbit.rollout.generate_utils.openai_endpoint_utils.post", fake_post)
 
     args = SimpleNamespace(
         session_server_ip="127.0.0.1",
@@ -52,7 +52,7 @@ async def test_create_without_instance_id_on_args(monkeypatch):
     async def fake_post(url: str, payload: dict, action: str = "post"):
         return {"session_id": "session-123"}
 
-    monkeypatch.setattr("miles.rollout.generate_utils.openai_endpoint_utils.post", fake_post)
+    monkeypatch.setattr("orbit.rollout.generate_utils.openai_endpoint_utils.post", fake_post)
 
     args = SimpleNamespace(session_server_ip="127.0.0.1", session_server_ports=[12345])
     tracer = await OpenAIEndpointTracer.create(args)
@@ -77,8 +77,8 @@ async def test_create_distributes_sessions_across_port_range(monkeypatch):
         calls.append(("post_bytes", url))
         return encode_samples([], {}, "no_records")
 
-    monkeypatch.setattr("miles.rollout.generate_utils.openai_endpoint_utils.post", fake_post)
-    monkeypatch.setattr("miles.rollout.generate_utils.openai_endpoint_utils.post_bytes_no_retry", fake_post_bytes)
+    monkeypatch.setattr("orbit.rollout.generate_utils.openai_endpoint_utils.post", fake_post)
+    monkeypatch.setattr("orbit.rollout.generate_utils.openai_endpoint_utils.post_bytes_no_retry", fake_post_bytes)
 
     ports = [12345, 12346, 12347, 12348]
     args = SimpleNamespace(session_server_ip="127.0.0.1", session_server_ports=ports)
@@ -142,8 +142,8 @@ class _CollectCalls:
                 raise delete_outcome
             return {}
 
-        monkeypatch.setattr("miles.rollout.generate_utils.openai_endpoint_utils.post_bytes_no_retry", fake_post_bytes)
-        monkeypatch.setattr("miles.rollout.generate_utils.openai_endpoint_utils.post", fake_post)
+        monkeypatch.setattr("orbit.rollout.generate_utils.openai_endpoint_utils.post_bytes_no_retry", fake_post_bytes)
+        monkeypatch.setattr("orbit.rollout.generate_utils.openai_endpoint_utils.post", fake_post)
 
 
 @pytest.mark.asyncio
@@ -243,7 +243,7 @@ async def test_collect_samples_v2_payload_carries_metadata_and_decodes_extras(mo
     """v2 pin: the collect body gains the "metadata" key only when the caller
     passes agent metadata, and the v2 field tuple overlays reward + merged
     metadata; the v1 pin above (`payload == {"max_seq_len": 7}`) stays."""
-    from miles.rollout.session.samples.codec import COMPUTED_FIELDS_V2
+    from orbit.rollout.session.samples.codec import COMPUTED_FIELDS_V2
 
     sample = Sample()
     sample.tokens = [1, 2, 10]
@@ -266,8 +266,8 @@ async def test_collect_samples_v2_payload_carries_metadata_and_decodes_extras(mo
         assert action == "delete"
         return {}
 
-    monkeypatch.setattr("miles.rollout.generate_utils.openai_endpoint_utils.post_bytes_no_retry", fake_post_bytes)
-    monkeypatch.setattr("miles.rollout.generate_utils.openai_endpoint_utils.post", fake_post)
+    monkeypatch.setattr("orbit.rollout.generate_utils.openai_endpoint_utils.post_bytes_no_retry", fake_post_bytes)
+    monkeypatch.setattr("orbit.rollout.generate_utils.openai_endpoint_utils.post", fake_post)
 
     tracer = OpenAIEndpointTracer(
         router_url="http://127.0.0.1:12345", session_id="sid-1", samples_wire_fields=COMPUTED_FIELDS_V2
@@ -287,7 +287,7 @@ async def test_create_selects_wire_fields_by_session_server_version(monkeypatch)
     async def fake_post(url: str, payload: dict, action: str = "post"):
         return {"session_id": "sid-x"}
 
-    monkeypatch.setattr("miles.rollout.generate_utils.openai_endpoint_utils.post", fake_post)
+    monkeypatch.setattr("orbit.rollout.generate_utils.openai_endpoint_utils.post", fake_post)
 
     def args(version):
         return SimpleNamespace(session_server_ip="127.0.0.1", session_server_ports=[7000], use_session_server=version)

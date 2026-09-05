@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from miles.utils.debug_utils.run_megatron.worker.script_args import WORKER_SCRIPT_ARGS_BRIDGE, WorkerScriptArgs
+from orbit.utils.debug_utils.run_megatron.worker.script_args import WORKER_SCRIPT_ARGS_BRIDGE, WorkerScriptArgs
 
 
 class TestWorkerScriptArgs:

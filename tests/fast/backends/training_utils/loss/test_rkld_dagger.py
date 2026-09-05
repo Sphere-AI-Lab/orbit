@@ -9,13 +9,13 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn.functional as F
 
-from miles.backends.training_utils.loss_hub.math_utils import (
+from orbit.backends.training_utils.loss_hub.math_utils import (
     _local_full_logsumexp,
     _mask_padded_vocab_logits,
     compute_log_probs,
     vocab_parallel_topk_rest_cross_entropy,
 )
-from miles.backends.training_utils.loss_hub.rkld_dagger import (
+from orbit.backends.training_utils.loss_hub.rkld_dagger import (
     compute_explicit_dagger_loss,
     compute_topk_rest_dagger_loss,
     explicit_topk_cross_entropy_per_token,

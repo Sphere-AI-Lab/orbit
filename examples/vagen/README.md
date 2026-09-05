@@ -1,7 +1,7 @@
 # VAGEN example
 
 Multi-turn vision-language RL on VAGEN environments (Sokoban, FrozenLake)
-trained with miles' GRPO. Each rollout drives a `vagen.envs.GymImageEnv`
+trained with orbit' GRPO. Each rollout drives a `vagen.envs.GymImageEnv`
 through an SGLang-served VLM for up to N turns; rewards come from the env's
 per-turn `format_reward` + terminal `success_reward`.
 
@@ -22,11 +22,11 @@ examples/vagen/
 │   ├── dataset.md            (row schema, drift detection, heldout)
 │   ├── rollout.md            (multi-turn loop, key invariants)
 │   ├── debug_dump.md         (per-rollout JSONs + mm_audit)
-│   └── launch_recipe.md      (VAGEN→miles knob mapping, eval cadence)
+│   └── launch_recipe.md      (VAGEN→orbit knob mapping, eval cadence)
 ├── build_env_dataset.py      ← offline (env, seed) → samples.jsonl
 ├── data_source.py            ← VagenEnvSpecDataSource (jsonl / yaml loader)
 ├── rollout.py                ← custom multi-turn generate function
-├── env_adapter.py            ← VAGEN ↔ miles bridge (local copy of helpers)
+├── env_adapter.py            ← VAGEN ↔ orbit bridge (local copy of helpers)
 ├── debug_dump.py             ← --rollout-all-samples-process-path hook
 └── tests/env_dynamics_probe.py
 ```
@@ -35,16 +35,16 @@ The experiment launchers live under `scripts/experiments/vagen-*.sh`.
 
 ## Quick start
 
-### 0. Install VAGEN into the miles env
+### 0. Install VAGEN into the orbit env
 
 The example imports `vagen.envs.*` directly. VAGEN ships its own training
 stack (vLLM/sglang/Megatron) but here we only need the Python package
-importable in the miles conda env:
+importable in the orbit conda env:
 
 ```bash
 git clone https://github.com/impossible-inc/VAGEN.git
 cd VAGEN
-conda activate miles
+conda activate orbit
 pip install -e .
 ```
 
@@ -52,9 +52,9 @@ Editable install — pulling new VAGEN code is just `git pull` in that
 checkout. Verify with `python -c "import vagen; print(vagen.__file__)"`.
 
 VAGEN's own `scripts/install_vllm_sglang_mcore.sh` is for VAGEN's training
-entry points — skip it; the miles env already has SGLang.
+entry points — skip it; the orbit env already has SGLang.
 
-> **On a freshly-built env** (e.g. miles' `install_env.sh`, which pulls the
+> **On a freshly-built env** (e.g. orbit' `install_env.sh`, which pulls the
 > latest `setuptools`): also run `pip install "setuptools<81"`. `gym-sokoban`
 > 0.0.6 does `import pkg_resources` at import time, and setuptools ≥81 removed
 > `pkg_resources` — without this the **Sokoban** env silently fails to register
@@ -71,11 +71,11 @@ disjoint from train by default). Run once per environment:
 
 ```bash
 # Sokoban
-env -u LD_LIBRARY_PATH conda run -n miles \
+env -u LD_LIBRARY_PATH conda run -n orbit \
     examples/vagen/scripts/sokoban-main.sh
 
 # FrozenLake
-env -u LD_LIBRARY_PATH conda run -n miles \
+env -u LD_LIBRARY_PATH conda run -n orbit \
     examples/vagen/scripts/frozenlake-main.sh
 ```
 
@@ -127,7 +127,7 @@ The FrozenLake-qwen3vl2b recipe also opts into a `<think>`→`<thinking>`
 tag swap via `VAGEN_THINK_TAG=thinking` (the Qwen3-VL Instruct never saw
 the `<think>` added_tokens during training — see `docs/launch_recipe.md`).
 
-See `docs/launch_recipe.md` for the full VAGEN→miles knob mapping, eval
+See `docs/launch_recipe.md` for the full VAGEN→orbit knob mapping, eval
 cadence, perf-args rationale, and overrides.
 
 ### Common overrides
@@ -138,11 +138,11 @@ VAGEN_EVAL_DATA=/path/to/eval.jsonl \
 bash scripts/slurm/submit.sh <recipe>
 
 # Enable DAPO-style dynamic sampling
-MILES_VAGEN_DAPO=1 bash scripts/slurm/submit.sh <recipe>
+ORBIT_VAGEN_DAPO=1 bash scripts/slurm/submit.sh <recipe>
 
 # Scale knobs
-MILES_SCRIPT_NUM_ROLLOUT=200 \
-MILES_SCRIPT_ROLLOUT_BATCH_SIZE=16 \
+ORBIT_SCRIPT_NUM_ROLLOUT=200 \
+ORBIT_SCRIPT_ROLLOUT_BATCH_SIZE=16 \
 bash scripts/slurm/submit.sh <recipe>
 ```
 
@@ -171,7 +171,7 @@ viewer at <https://github.com/impossible-inc/trace-viewer>. It reads the
 exact `traces/` layout this example produces.
 
 ```bash
-# one-time setup (its own isolated .venv — don't share with miles)
+# one-time setup (its own isolated .venv — don't share with orbit)
 git clone https://github.com/impossible-inc/trace-viewer.git
 cd trace-viewer
 uv venv .venv --python 3.11
@@ -202,7 +202,7 @@ Planned variants (follow-up PRs):
 ## Notes
 
 - The dataset is the single source of truth: same `samples.jsonl` feeds
-  both training and miles' eval pipeline. No parquet, no HF Dataset.
+  both training and orbit' eval pipeline. No parquet, no HF Dataset.
 - VAGEN's `env.reset(seed)` is global-state; the Sokoban patches
   (`_stable_next_seed`, seeding-lock) are required for determinism. The
   baked `env_uuid` is a tripwire — any divergence fails the run.

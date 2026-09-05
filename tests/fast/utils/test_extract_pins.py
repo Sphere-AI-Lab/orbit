@@ -8,7 +8,7 @@ from types import ModuleType
 
 def _load_extract_pins() -> ModuleType:
     path = Path(__file__).parents[3] / "scripts" / "slurm" / "setup" / "extract_pins.py"
-    spec = importlib.util.spec_from_file_location("miles_extract_pins_test", path)
+    spec = importlib.util.spec_from_file_location("orbit_extract_pins_test", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -26,7 +26,7 @@ def _pin_values(
     upstream_wheels_tag: str = "cu130-x86_64",
 ) -> dict[str, str]:
     return {
-        "MILES_SGLANG_SOURCE_VERSION": source_version,
+        "ORBIT_SGLANG_SOURCE_VERSION": source_version,
         "MILES_WHEELS_TAG": "cu129-x86_64",
         "MILES_WHEELS_TORCH_VERSION": "2.11.0",
         "MILES_WHEELS_SGLANG_VERSION": "v0.5.15",
@@ -59,7 +59,7 @@ def test_versionless_upstream_wheels_report_source_lag() -> None:
     notice = extract_pins.pending_notice(_pin_values(source_version="v0.5.14"))
 
     assert notice is not None
-    assert "MILES_SGLANG_SOURCE_VERSION=v0.5.14" in notice
+    assert "ORBIT_SGLANG_SOURCE_VERSION=v0.5.14" in notice
     assert "UPSTREAM_SGLANG_IMAGE_TAG=v0.5.15" in notice
 
 
@@ -75,6 +75,6 @@ def test_versioned_upstream_wheels_still_compare_source_to_image() -> None:
 
 
 def test_render_records_hand_owned_source_version() -> None:
-    assert "MILES_SGLANG_SOURCE_VERSION=${MILES_SGLANG_SOURCE_VERSION:-v0.5.15}" in extract_pins.render(
+    assert "ORBIT_SGLANG_SOURCE_VERSION=${ORBIT_SGLANG_SOURCE_VERSION:-v0.5.15}" in extract_pins.render(
         _render_values()
     )

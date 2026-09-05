@@ -14,12 +14,12 @@ import pytest
 import requests
 from fastapi.responses import JSONResponse
 
-from miles.rollout.session.server import SessionServer
-from miles.utils.chat_template_utils import strict_message_matches
-from miles.utils.http_utils import find_available_port
-from miles.utils.test_utils.mock_sglang_server import MockSGLangServer, ProcessResult, with_mock_server
-from miles.utils.test_utils.openai_stream_client import stream_chat_completions
-from miles.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
+from orbit.rollout.session.server import SessionServer
+from orbit.utils.chat_template_utils import strict_message_matches
+from orbit.utils.http_utils import find_available_port
+from orbit.utils.test_utils.mock_sglang_server import MockSGLangServer, ProcessResult, with_mock_server
+from orbit.utils.test_utils.openai_stream_client import stream_chat_completions
+from orbit.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
 
 
 def _create_session(url: str) -> str:
@@ -64,7 +64,7 @@ def router_env():
     with patch.object(MockSGLangServer, "_compute_chat_completions_response", new=patched_chat_response):
         with with_mock_server(process_fn=process_fn) as backend:
             args = SimpleNamespace(
-                miles_router_timeout=30,
+                orbit_router_timeout=30,
                 hf_checkpoint="Qwen/Qwen3-0.6B",
                 chat_template_path=None,
                 apply_chat_template_kwargs={"enable_thinking": False},
@@ -591,7 +591,7 @@ def _serve_router(extra_args: dict | None = None):
 
     with with_mock_server(process_fn=process_fn) as backend:
         args = SimpleNamespace(
-            miles_router_timeout=30,
+            orbit_router_timeout=30,
             hf_checkpoint="Qwen/Qwen3-0.6B",
             chat_template_path=None,
             apply_chat_template_kwargs={"enable_thinking": False},

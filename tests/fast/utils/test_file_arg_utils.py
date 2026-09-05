@@ -3,7 +3,7 @@ import binascii
 
 import pytest
 
-from miles.utils.file_arg_utils import PSEUDO_FILE_PREFIX, resolve_file_arg
+from orbit.utils.file_arg_utils import PSEUDO_FILE_PREFIX, resolve_file_arg
 
 
 class TestResolveFileArg:

@@ -13,7 +13,7 @@ End-to-end training workflows — the place to start.
 - **[disk_delta_weight_sync](/examples/disk-delta-weight-sync)**: Disk-mediated delta weight sync for trainer→rollout updates without a direct NCCL path.
 - **[geo3k_vlm](/examples/geo3k-vlm)**: Training VLMs with FSDP using GRPO on the GEO3K dataset.
   - **[multi_turn](/examples/geo3k-vlm/multi-turn)**: The same dataset over multiple turns, with the model cropping images through an interactive environment.
-- **[lora](https://github.com/radixark/miles/tree/main/examples/lora)**: LoRA fine-tuning with the Megatron backend.
+- **[lora](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/lora)**: LoRA fine-tuning with the Megatron backend.
 - **[multi_lora](/examples/multi-lora)**: Fully-async multi-adapter LoRA training with a slot-keyed adapter page table.
 - **[muon](/examples/muon)**: Muon optimizer A/B recipes against the Adam production baseline.
 - **[on_policy_distillation](/examples/on-policy-distillation)**: Teacher–student distillation on the student's own rollouts, run inside the on-policy training loop.
@@ -25,7 +25,7 @@ End-to-end training workflows — the place to start.
 
 ## [Infra Features](/examples/infra-features)
 
-Runtime and infrastructure plumbing rather than training recipes — how miles moves
+Runtime and infrastructure plumbing rather than training recipes — how orbit moves
 data and weights around.
 
 - **[fully_async](/examples/infra-features/fully-async)**: Demonstrates fully asynchronous rollout generation for higher efficiency.
@@ -35,21 +35,21 @@ data and weights around.
 - **[train_infer_mismatch_helper](/examples/infra-features/train-infer-mismatch-helper)**: Algorithmic methods for rollout correction (e.g., TIS, MIS).
 - **[true_on_policy](/examples/infra-features/true-on-policy)**: Ensures strictly equal log probabilities between inference (SGLang) and training engines.
 
-## [Experimental](https://github.com/radixark/miles/tree/main/examples/experimental)
+## [Experimental](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental)
 
 Not fully verified — for experimental and development use.
 
-- **[agentenv](https://github.com/radixark/miles/tree/main/examples/experimental/agentenv)**: Rollouts against AgentENV, a self-hosted platform running agent sandboxes on Firecracker microVMs.
-- **[DrGRPO](https://github.com/radixark/miles/tree/main/examples/experimental/DrGRPO)**: Custom reducer for Dr.GRPO algorithm.
-- **[eval](https://github.com/radixark/miles/tree/main/examples/experimental/eval)**: Documentation and setup for evaluation environments using NeMo-Skills.
-- **[eval_multi_task](https://github.com/radixark/miles/tree/main/examples/experimental/eval_multi_task)**: Example for supporting OOD evaluation tasks, e.g., GPQA, IFBench.
-- **[formal_math](https://github.com/radixark/miles/tree/main/examples/experimental/formal_math)**: Examples related to formal math reasoning tasks, including a single round demo.
-- **[multi_agent](https://github.com/radixark/miles/tree/main/examples/experimental/multi_agent)**: Example of running multi-agent RL with `miles`.
-- **[nemo-gym](https://github.com/radixark/miles/tree/main/examples/experimental/nemo-gym)**: SWE-agent training with NVIDIA NeMo Gym as the environment ecosystem.
-- **[openenv](https://github.com/radixark/miles/tree/main/examples/experimental/openenv)**: Rollouts against OpenEnv-hosted environments.
-- **[reproducibility](https://github.com/radixark/miles/tree/main/examples/experimental/reproducibility)**: Guides on achieving bitwise experiment reproduction using deterministic modes.
-- **[search-r1](https://github.com/radixark/miles/tree/main/examples/experimental/search-r1)**: A minimal reproduction of Search-R1, featuring multi-turn conversation and tool-calling.
-- **[strands_sglang](https://github.com/radixark/miles/tree/main/examples/experimental/strands_sglang)**: Integration example with the Strands-Agents scaffolding framework.
-- **[swe-agent-harbor-daytona](https://github.com/radixark/miles/tree/main/examples/experimental/swe-agent-harbor-daytona)**: The `swe-agent-harbor-docker` pipeline with task sandboxes hosted on Daytona instead of local Docker.
-- **[tau-bench](https://github.com/radixark/miles/tree/main/examples/experimental/tau-bench)**: Training in an agentic multi-turn tool use environment (Tau-bench).
-- **[verifiers](https://github.com/radixark/miles/tree/main/examples/experimental/verifiers)**: Training on a Prime Intellect Verifiers environment instead of a Miles prompt dataset.
+- **[agentenv](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/agentenv)**: Rollouts against AgentENV, a self-hosted platform running agent sandboxes on Firecracker microVMs.
+- **[DrGRPO](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/DrGRPO)**: Custom reducer for Dr.GRPO algorithm.
+- **[eval](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/eval)**: Documentation and setup for evaluation environments using NeMo-Skills.
+- **[eval_multi_task](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/eval_multi_task)**: Example for supporting OOD evaluation tasks, e.g., GPQA, IFBench.
+- **[formal_math](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/formal_math)**: Examples related to formal math reasoning tasks, including a single round demo.
+- **[multi_agent](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/multi_agent)**: Example of running multi-agent RL with `orbit`.
+- **[nemo-gym](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/nemo-gym)**: SWE-agent training with NVIDIA NeMo Gym as the environment ecosystem.
+- **[openenv](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/openenv)**: Rollouts against OpenEnv-hosted environments.
+- **[reproducibility](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/reproducibility)**: Guides on achieving bitwise experiment reproduction using deterministic modes.
+- **[search-r1](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/search-r1)**: A minimal reproduction of Search-R1, featuring multi-turn conversation and tool-calling.
+- **[strands_sglang](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/strands_sglang)**: Integration example with the Strands-Agents scaffolding framework.
+- **[swe-agent-harbor-daytona](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/swe-agent-harbor-daytona)**: The `swe-agent-harbor-docker` pipeline with task sandboxes hosted on Daytona instead of local Docker.
+- **[tau-bench](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/tau-bench)**: Training in an agentic multi-turn tool use environment (Tau-bench).
+- **[verifiers](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/verifiers)**: Training on a Prime Intellect Verifiers environment instead of a Orbit prompt dataset.

@@ -30,7 +30,7 @@ docker run --rm \
 Refresh the editable install inside the container:
 
 ```bash
-cd /root/miles_diffusion && git pull && pip install -e . --no-deps
+cd /root/orbit_diffusion && git pull && pip install -e . --no-deps
 ```
 
 Steps 2–4 below run inside the container (or on any machine with the same deps).
@@ -39,7 +39,7 @@ Steps 2–4 below run inside the container (or on any machine with the same deps
 Launch recipes live under `scripts/` as **Python modules** (not bash). Each
 script sets recipe-specific env vars (e.g. `PYTHONPATH` for SD3
 `/rollout/generate`) and submits `train_diffusion.py` through Ray via
-`miles.utils.external_utils.command_utils`.
+`orbit.utils.external_utils.command_utils`.
 </Note>
 
 ## 2. Download model and data
@@ -61,7 +61,7 @@ hf download stabilityai/stable-diffusion-3.5-medium \
 Training prompts come from the **`flowgrpo_ocr`** subset of
 [`rockdu/miles-diffusion-datasets`](https://huggingface.co/datasets/rockdu/miles-diffusion-datasets).
 Each prompt embeds the target string in double quotes (e.g. a logo saying
-`"Miles"`) — OCR reward compares PaddleOCR output against that target.
+`"Orbit"`) — OCR reward compares PaddleOCR output against that target.
 
 The script downloads the dataset automatically if missing. To prefetch:
 
@@ -104,12 +104,12 @@ python3 scripts/run_diffusion_grpo_sd3_ocr_sglang.py \
   --num-rollout 2
 ```
 
-Any `ScriptArgs` field also accepts `MILES_SCRIPT_<FIELD>` (e.g.
-`MILES_SCRIPT_NUM_ROLLOUT=2`). For train/rollout alignment debugging (skips the
+Any `ScriptArgs` field also accepts `ORBIT_SCRIPT_<FIELD>` (e.g.
+`ORBIT_SCRIPT_NUM_ROLLOUT=2`). For train/rollout alignment debugging (skips the
 optimizer step; does not run IPC weight-sync checksums):
 
 ```bash
-MILES_SCRIPT_DEBUG_ALIGNMENT=1 python3 scripts/run_diffusion_grpo_sd3_ocr_sglang.py
+ORBIT_SCRIPT_DEBUG_ALIGNMENT=1 python3 scripts/run_diffusion_grpo_sd3_ocr_sglang.py
 ```
 
 ## 4. What's happening
@@ -136,7 +136,7 @@ LoRA-base KL (`--diffusion-kl-beta 0.04`), noise level 0.7, CFG 4.5, and batch-w
 normalization (`--globalize-reward-std`). `--deterministic-mode` and `--global-batch-size 64` match the CI e2e recipe.
 
 Which denoising steps enter the loss is selected by a **step strategy**
-(`--diffusion-step-strategy-path` in `miles/rollout/step_strategy_hub.py`):
+(`--diffusion-step-strategy-path` in `orbit/rollout/step_strategy_hub.py`):
 
 | Strategy | Behavior | Typical flags |
 |---|---|---|

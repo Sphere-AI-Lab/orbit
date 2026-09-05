@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}
 
 : "${OPD_EVAL_MODEL_NAME:?11a/11b must set OPD_EVAL_MODEL_NAME}"
 : "${OPD_EVAL_MODEL_ARGS_FILE:?11a/11b must set OPD_EVAL_MODEL_ARGS_FILE}"
@@ -23,7 +23,7 @@ HF_TRAIN_DATA="$HF_CACHE_DIR/data/geo3k_imgurl_processed/train.parquet"
 
 MODEL_ARGS_ROTARY_BASE=5000000
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/$OPD_EVAL_MODEL_ARGS_FILE"
+source "$ORBIT_REPO/scripts/models/$OPD_EVAL_MODEL_ARGS_FILE"
 MODEL_ARGS+=(--megatron-to-hf-mode bridge)
 
 OPD_EVAL_NUM_PROMPTS=${OPD_EVAL_NUM_PROMPTS:-30}
@@ -84,7 +84,7 @@ OPTIMIZER_ARGS=(
    --weight-decay 0.1
    --adam-beta1 0.9
    --adam-beta2 0.98
-   # --num-rollout 0 makes miles derive train_iters=0, and Megatron's
+   # --num-rollout 0 makes orbit derive train_iters=0, and Megatron's
    # OptimizerParamScheduler asserts lr_decay_steps > 0 during actor init even
    # though no optimizer step ever runs. Pin a positive, inert horizon.
    --lr-decay-iters 1
@@ -136,7 +136,7 @@ FT_ARGS=(
    --rollout-health-check-first-wait 60
 )
 
-MILES_ARGS=(
+ORBIT_ARGS=(
    "${LAYOUT_ARGS[@]}"
    "${MODEL_ARGS[@]}"
    "${CKPT_ARGS[@]}"

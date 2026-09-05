@@ -38,7 +38,7 @@ class LaunchArgs(Protocol):
     e2b_api_key_file: str
     modal_config_file: str
     router_external_host: str
-    miles_host_ip: str
+    orbit_host_ip: str
 
     wandb_key: str
     wandb_project: str
@@ -143,10 +143,10 @@ def agent_args(tito_model: str, sandbox_backend: str = "") -> str:
     the one shared env server."""
     agent_fn = sandbox_common.AGENT_FUNCTIONS.get(sandbox_backend, "openenv_agent_function.run")
     return (
-        "--custom-generate-function-path miles.rollout.generate_hub.agentic_tool_call.generate "
+        "--custom-generate-function-path orbit.rollout.generate_hub.agentic_tool_call.generate "
         f"--custom-agent-function-path {agent_fn} "
         "--custom-rm-path openenv_generate.reward_func "
-        "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_no_aborted "
+        "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_no_aborted "
         f"--tito-model {tito_model} "
         "--use-session-server "
         "--session-server-port 30000 "
@@ -177,9 +177,9 @@ def prometheus_args(args: LaunchArgs) -> str:
     )
 
 
-def base_env_vars(args: LaunchArgs, script_dir: str, megatron_path: str, miles_root: str) -> dict[str, str]:
+def base_env_vars(args: LaunchArgs, script_dir: str, megatron_path: str, orbit_root: str) -> dict[str, str]:
     return {
-        "PYTHONPATH": f"{megatron_path}:{script_dir}:{miles_root}",
+        "PYTHONPATH": f"{megatron_path}:{script_dir}:{orbit_root}",
         "OPENENV_ENV_URL": args.openenv_env_url,
         "OPENENV_MAX_TURNS": str(args.openenv_max_turns),
         "OPENENV_MAX_ROLLOUT_TIME_SECONDS": str(args.openenv_max_rollout_time_seconds),
@@ -189,10 +189,10 @@ def base_env_vars(args: LaunchArgs, script_dir: str, megatron_path: str, miles_r
 
 def apply_optional_env_vars(env: dict[str, str], args: LaunchArgs) -> None:
     """Add host-rewrite / Daytona-sandbox env vars when the args request them."""
-    if args.miles_host_ip:
-        env["MILES_HOST_IP"] = args.miles_host_ip
+    if args.orbit_host_ip:
+        env["ORBIT_HOST_IP"] = args.orbit_host_ip
     if args.router_external_host:
-        env["MILES_ROUTER_EXTERNAL_HOST"] = args.router_external_host
+        env["ORBIT_ROUTER_EXTERNAL_HOST"] = args.router_external_host
     backend = resolve_sandbox_backend(args)
     if backend:
         spec = _PROVIDER_CREDENTIALS[backend]

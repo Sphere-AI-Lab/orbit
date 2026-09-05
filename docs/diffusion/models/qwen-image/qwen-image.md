@@ -32,7 +32,7 @@ differently-named local directory — the usual case — add `--diffusion-model-
 
 ## 3. Family config
 
-Registered in `miles/backends/fsdp_utils/configs/qwen_image.py`:
+Registered in `orbit/backends/fsdp_utils/configs/qwen_image.py`:
 
 | Property | Value | Why |
 |---|---|---|

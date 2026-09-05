@@ -1,15 +1,15 @@
-"""Build a Miles prompt jsonl from a HUD v6 taskset.
+"""Build a Orbit prompt jsonl from a HUD v6 taskset.
 
 A v6 task is a data row -- an env name, a template id, bound args -- minted by
 calling a template in the env package's ``tasks.py``. This walks that module's
-public ``tasks`` list and writes one Miles row per task (repeated ``--repeat``
+public ``tasks`` list and writes one Orbit row per task (repeated ``--repeat``
 times: GRPO needs groups, and a taskset like the browser starter's 2048 has a
 handful of templates, not thousands of rows).
 
 The ``prompt`` column is one chat message carrying the task slug: with a
 chat-completions harness the model never sees this file -- its actual prompt
 is the template's first yield, delivered inside the environment at run time.
-Miles uses the column only to group samples of the same task (and its VLM data
+Orbit uses the column only to group samples of the same task (and its VLM data
 path requires the chat-message shape, hence not a bare string).
 
     python -m examples.experimental.hud.make_hud_data \

@@ -22,7 +22,7 @@
 ### 4
 "pkill"
 "-9"
-"miles"
+"orbit"
 
 ### 5
 "sleep"
@@ -36,7 +36,7 @@
 ### 7
 "pkill"
 "-9"
-"miles"
+"orbit"
 
 ### 8
 "pkill"
@@ -72,7 +72,7 @@
 
 ### 13
 "python3"
-"<REPO_ROOT>/miles/utils/external_utils/model_args_utils.py"
+"<REPO_ROOT>/orbit/utils/external_utils/model_args_utils.py"
 "qwen3-8B"
 
 ### 14
@@ -133,7 +133,7 @@
 "--load"
 "/root/models/Qwen3-VL-8B-Instruct"
 "--rollout-function-path"
-"miles.rollout.sft_rollout.generate_rollout"
+"orbit.rollout.sft_rollout.generate_rollout"
 "--prompt-data"
 "/root/datasets/geo3k_imgurl/train_formatted.parquet"
 "--input-key"
@@ -169,7 +169,7 @@
 "0.95"
 "--use-wandb"
 "--wandb-project"
-"miles-geo3k-vlm-sft"
+"orbit-geo3k-vlm-sft"
 "--wandb-group"
 "qwen3-vl-8b-instruct-megatron"
 "--wandb-key"

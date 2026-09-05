@@ -4,9 +4,9 @@ when it completed."""
 
 import pytest
 
-import miles.rollout.multi_lora.async_rollout as mod
-from miles.rollout.multi_lora.async_rollout import process_group
-from miles.utils.types import AdapterRef, Sample
+import orbit.rollout.multi_lora.async_rollout as mod
+from orbit.rollout.multi_lora.async_rollout import process_group
+from orbit.utils.types import AdapterRef, Sample
 
 
 class FakeDataSource:

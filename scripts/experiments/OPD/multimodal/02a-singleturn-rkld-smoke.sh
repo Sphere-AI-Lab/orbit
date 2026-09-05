@@ -20,7 +20,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}
 
 EXPERIMENT_NODES=3
 EXPERIMENT_TIME=24:00:00
@@ -43,7 +43,7 @@ OPD_TEACHER_EXTRA_ARGS=${OPD_TEACHER_EXTRA_ARGS:-}
 
 # Reserve every head-node GPU for the fixed teacher. The actor and rollout
 # bundles consume exactly the 16 GPUs exposed by the two Ray worker nodes.
-export MILES_RAY_HEAD_NUM_GPUS=0
+export ORBIT_RAY_HEAD_NUM_GPUS=0
 OPD_TEACHER_HOST=${OPD_TEACHER_HOST:-${HEAD_IP:-$(hostname -I | awk '{print $1}')}}
 OPD_TEACHER_URL=${OPD_TEACHER_URL:-"http://${OPD_TEACHER_HOST}:${OPD_TEACHER_PORT}"}
 
@@ -68,7 +68,7 @@ export ENVPACK_SERVER_WAIT_TIMEOUT=${ENVPACK_SERVER_WAIT_TIMEOUT:-1800}
 # Match the known-good Geo3K Qwen3-VL Megatron Bridge configuration.
 MODEL_ARGS_ROTARY_BASE=5000000
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-8B.sh"
+source "$ORBIT_REPO/scripts/models/qwen3-8B.sh"
 MODEL_ARGS+=(--megatron-to-hf-mode bridge)
 
 OPD_NUM_ROLLOUT=${OPD_NUM_ROLLOUT:-5}
@@ -103,8 +103,8 @@ ROLLOUT_ARGS=(
 )
 
 RM_ARGS=(
-   --custom-rm-path miles.rollout.on_policy_distillation.reward_func
-   --custom-reward-post-process-path miles.rollout.on_policy_distillation.post_process_rewards
+   --custom-rm-path orbit.rollout.on_policy_distillation.reward_func
+   --custom-reward-post-process-path orbit.rollout.on_policy_distillation.post_process_rewards
    --rm-url "$OPD_TEACHER_URL/generate"
    --rm-type math
    --opd-log-task-reward
@@ -119,7 +119,7 @@ GRPO_ARGS=(
    --opd-type sglang
    --opd-kl-coef "$OPD_KL_COEF"
    --opd-log-prob-top-k 0
-   # Miles carries sampled RKLD through its PPO reducer. These explicit values
+   # Orbit carries sampled RKLD through its PPO reducer. These explicit values
    # are the existing symmetric defaults, not an OPD-specific tuning choice.
    --eps-clip 0.2
    --eps-clip-high 0.2
@@ -208,8 +208,8 @@ LAYOUT_ARGS=(
    --rollout-num-gpus 8
 )
 
-build_opd_multimodal_miles_args() {
-   MILES_ARGS=(
+build_opd_multimodal_orbit_args() {
+   ORBIT_ARGS=(
       "${LAYOUT_ARGS[@]}"
       "${MODEL_ARGS[@]}"
       "${CKPT_ARGS[@]}"
@@ -221,10 +221,10 @@ build_opd_multimodal_miles_args() {
    )
 
    if ((OPD_DAGGER_TOP_K > 0)); then
-      MILES_ARGS+=("${DAGGER_ARGS[@]}")
+      ORBIT_ARGS+=("${DAGGER_ARGS[@]}")
    fi
 
-   MILES_ARGS+=(
+   ORBIT_ARGS+=(
       "${MONITOR_ARGS[@]}"
       "${WANDB_ARGS[@]}"
       "${PERF_ARGS[@]}"
@@ -234,4 +234,4 @@ build_opd_multimodal_miles_args() {
    )
 }
 
-build_opd_multimodal_miles_args
+build_opd_multimodal_orbit_args

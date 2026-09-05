@@ -5,7 +5,7 @@
 # This file is pure config. It declares:
 #   - asset metadata     (HF_MODEL_REPO, HF_DATASETS, HF_*_DIR paths)
 #   - resource metadata  (EXPERIMENT_NODES, EXPERIMENT_TIME)
-#   - the `MILES_ARGS` bash array fed to `train.py`
+#   - the `ORBIT_ARGS` bash array fed to `train.py`
 #
 # It performs NO side effects when sourced — no `ray start`, no `sbatch`,
 # no `hf download`. The orchestrator (e.g. `scripts/slurm/submit.sh`) reads
@@ -14,13 +14,13 @@
 # Layout (2 nodes × 8 GPUs):
 #   - node 0: 8 GPUs Megatron training  (--actor-num-nodes 1 --actor-num-gpus-per-node 8)
 #   - node 1: 8 GPUs SGLang rollout     (--rollout-num-gpus 8)
-# PACK + (node_ip, gpu_id) sort in miles/ray/placement_group.py keeps the
+# PACK + (node_ip, gpu_id) sort in orbit/ray/placement_group.py keeps the
 # split on a node boundary.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}
 RECIPE_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
 
 # ---------------------------------------------------------------------------
@@ -48,15 +48,15 @@ HF_EVAL_DATA="$HF_CACHE_DIR/data/aime-2024/aime-2024.jsonl"
 # train.py args
 # ---------------------------------------------------------------------------
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-4B.sh"
+source "$ORBIT_REPO/scripts/models/qwen3-4B.sh"
 
 RUN_NAME=${SLURM_JOB_NAME:-$RECIPE_NAME}
 
 CKPT_ARGS=(
    --hf-checkpoint  "$HF_MODEL_DIR"
    --ref-load       "$HF_TORCHDIST_DIR"
-   --load           "$MILES_REPO/checkpoints/$RUN_NAME"
-   --save           "$MILES_REPO/checkpoints/$RUN_NAME"
+   --load           "$ORBIT_REPO/checkpoints/$RUN_NAME"
+   --save           "$ORBIT_REPO/checkpoints/$RUN_NAME"
    --save-interval  20
 )
 
@@ -132,9 +132,9 @@ MISC_ARGS=(
 
 WANDB_ARGS=(
    --use-wandb
-   --wandb-project miles-imp
+   --wandb-project orbit
    --wandb-group   "$RUN_NAME"
-   # WANDB_API_KEY comes from the env (exported by submit.sh / launch_miles.sbatch);
+   # WANDB_API_KEY comes from the env (exported by submit.sh / launch_orbit.sbatch);
    # we don't pass it on the CLI because it would leak into run.log and args.json.
 )
 
@@ -151,7 +151,7 @@ LAYOUT_ARGS=(
    --rollout-num-gpus       8
 )
 
-MILES_ARGS=(
+ORBIT_ARGS=(
    "${LAYOUT_ARGS[@]}"
    "${MODEL_ARGS[@]}"
    "${CKPT_ARGS[@]}"

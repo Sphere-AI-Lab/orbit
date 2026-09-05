@@ -1,4 +1,4 @@
-"""Mock-based tests for LoRA branch logic in miles.backends.megatron_utils.model.
+"""Mock-based tests for LoRA branch logic in orbit.backends.megatron_utils.model.
 
 Validates that setup_model_and_optimizer, save, and save_hf_model correctly
 route to LoRA-specific code paths depending on configuration — without GPU.
@@ -14,13 +14,13 @@ from unittest.mock import MagicMock, patch
 
 class TestEnsureModelList:
     def test_list_passthrough(self):
-        from miles.backends.megatron_utils.model import _ensure_model_list
+        from orbit.backends.megatron_utils.model import _ensure_model_list
 
         models = [MagicMock(), MagicMock()]
         assert _ensure_model_list(models) is models
 
     def test_non_list_wrapped(self):
-        from miles.backends.megatron_utils.model import _ensure_model_list
+        from orbit.backends.megatron_utils.model import _ensure_model_list
 
         model = MagicMock()
         result = _ensure_model_list(model)
@@ -35,19 +35,19 @@ class TestEnsureModelList:
 
 class TestShouldDisableForwardPreHook:
     def test_both_true(self):
-        from miles.backends.megatron_utils.model import should_disable_forward_pre_hook
+        from orbit.backends.megatron_utils.model import should_disable_forward_pre_hook
 
         args = Namespace(use_distributed_optimizer=True, overlap_param_gather=True)
         assert should_disable_forward_pre_hook(args) is True
 
     def test_optimizer_false(self):
-        from miles.backends.megatron_utils.model import should_disable_forward_pre_hook
+        from orbit.backends.megatron_utils.model import should_disable_forward_pre_hook
 
         args = Namespace(use_distributed_optimizer=False, overlap_param_gather=True)
         assert should_disable_forward_pre_hook(args) is False
 
     def test_overlap_false(self):
-        from miles.backends.megatron_utils.model import should_disable_forward_pre_hook
+        from orbit.backends.megatron_utils.model import should_disable_forward_pre_hook
 
         args = Namespace(use_distributed_optimizer=True, overlap_param_gather=False)
         assert should_disable_forward_pre_hook(args) is False
@@ -57,7 +57,7 @@ class TestShouldDisableForwardPreHook:
 # setup_model_and_optimizer — LoRA branch routing
 # ---------------------------------------------------------------------------
 
-_MODEL_MODULE = "miles.backends.megatron_utils.model"
+_MODEL_MODULE = "orbit.backends.megatron_utils.model"
 
 
 class TestSetupModelAndOptimizerLoraBranch:
@@ -99,7 +99,7 @@ class TestSetupModelAndOptimizerLoraBranch:
     @patch(f"{_MODEL_MODULE}.get_megatron_optimizer")
     @patch(f"{_MODEL_MODULE}._setup_lora_model_via_bridge")
     def test_lora_actor_bridge_routes_to_lora_setup(self, mock_lora_setup, mock_opt, mock_sched):
-        from miles.backends.megatron_utils.model import setup_model_and_optimizer
+        from orbit.backends.megatron_utils.model import setup_model_and_optimizer
 
         mock_lora_setup.return_value = [MagicMock()]
         mock_opt.return_value = MagicMock(param_groups=[])
@@ -116,7 +116,7 @@ class TestSetupModelAndOptimizerLoraBranch:
     @patch(f"{_MODEL_MODULE}.get_model_provider_func")
     @patch(f"{_MODEL_MODULE}._setup_lora_model_via_bridge")
     def test_lora_critic_skips_lora_setup(self, mock_lora_setup, mock_provider, mock_get_model, mock_opt, mock_sched):
-        from miles.backends.megatron_utils.model import setup_model_and_optimizer
+        from orbit.backends.megatron_utils.model import setup_model_and_optimizer
 
         mock_get_model.return_value = [MagicMock()]
         mock_opt.return_value = MagicMock(param_groups=[])
@@ -134,7 +134,7 @@ class TestSetupModelAndOptimizerLoraBranch:
     @patch(f"{_MODEL_MODULE}.get_model_provider_func")
     @patch(f"{_MODEL_MODULE}._setup_lora_model_via_bridge")
     def test_non_lora_skips_lora_setup(self, mock_lora_setup, mock_provider, mock_get_model, mock_opt, mock_sched):
-        from miles.backends.megatron_utils.model import setup_model_and_optimizer
+        from orbit.backends.megatron_utils.model import setup_model_and_optimizer
 
         mock_get_model.return_value = [MagicMock()]
         mock_opt.return_value = MagicMock(param_groups=[])
@@ -151,7 +151,7 @@ class TestSetupModelAndOptimizerLoraBranch:
     @patch(f"{_MODEL_MODULE}.get_model")
     @patch(f"{_MODEL_MODULE}._setup_lora_model_via_bridge")
     def test_lora_raw_mode_skips_bridge(self, mock_lora_setup, mock_get_model, mock_opt, mock_sched):
-        from miles.backends.megatron_utils.model import setup_model_and_optimizer
+        from orbit.backends.megatron_utils.model import setup_model_and_optimizer
 
         mock_get_model.return_value = [MagicMock()]
         mock_opt.return_value = MagicMock(param_groups=[])
@@ -180,7 +180,7 @@ class TestSaveLoRaBranch:
     def test_lora_model_calls_lora_save(
         self, mock_is_lora, mock_save_lora, mock_get_args, mock_should, mock_disable, mock_enable, mock_save_hashes
     ):
-        from miles.backends.megatron_utils.model import save
+        from orbit.backends.megatron_utils.model import save
 
         model = [MagicMock()]
         save(42, model, MagicMock(), MagicMock())
@@ -197,7 +197,7 @@ class TestSaveLoRaBranch:
     def test_non_lora_model_calls_regular_save(
         self, mock_is_lora, mock_save_ckpt, mock_get_args, mock_should, mock_disable, mock_enable, mock_save_hashes
     ):
-        from miles.backends.megatron_utils.model import save
+        from orbit.backends.megatron_utils.model import save
 
         model = [MagicMock()]
         save(42, model, MagicMock(), MagicMock())

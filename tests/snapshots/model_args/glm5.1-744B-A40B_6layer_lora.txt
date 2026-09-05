@@ -1,5 +1,5 @@
 "--spec"
-"miles_plugins.models.glm5.glm5"
+"orbit_plugins.models.glm5.glm5"
 "get_glm5_spec"
 "--moe-layer-freq"
 "[0]*3+[1]*3"

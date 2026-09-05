@@ -8,7 +8,7 @@ import pytest
 import torch
 from tests.fast.utils.debug_utils.run_megatron.conftest import make_script_args
 
-from miles.utils.debug_utils.run_megatron.worker.replay import (
+from orbit.utils.debug_utils.run_megatron.worker.replay import (
     _load_replay,
     _ParallelRanks,
     _sp_slice,
@@ -43,7 +43,7 @@ class TestSpSlice:
 class TestSetupReplayBeforeModel:
     def test_dump_enables_record(self) -> None:
         script = make_script_args(routing_replay_dump_path=Path("/dump"))
-        with patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager") as mock_mgr:
+        with patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager") as mock_mgr:
             mock_mgr.enabled = False
             mock_mgr.stage = "fallthrough"
             setup_replay_before_model(script)
@@ -52,7 +52,7 @@ class TestSetupReplayBeforeModel:
 
     def test_load_enables_replay_forward(self) -> None:
         script = make_script_args(routing_replay_load_path=Path("/load"))
-        with patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager") as mock_mgr:
+        with patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager") as mock_mgr:
             mock_mgr.enabled = False
             mock_mgr.stage = "fallthrough"
             setup_replay_before_model(script)
@@ -61,7 +61,7 @@ class TestSetupReplayBeforeModel:
 
     def test_neither_noop(self) -> None:
         script = make_script_args()
-        with patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager") as mock_mgr:
+        with patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager") as mock_mgr:
             mock_mgr.enabled = False
             mock_mgr.stage = "fallthrough"
             setup_replay_before_model(script)
@@ -70,7 +70,7 @@ class TestSetupReplayBeforeModel:
 
 
 class TestSaveReplayData:
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
     def test_saves_file(self, mock_mgr: MagicMock, tmp_path: Path) -> None:
         mock_mgr.filename = "routing_replay.pt"
         replay = SimpleNamespace(top_indices_list=[torch.tensor([1, 2])])
@@ -83,7 +83,7 @@ class TestSaveReplayData:
         assert len(saved_files) == 1
         assert "rank0" in saved_files[0].name
 
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
     def test_saved_content_roundtrips(self, mock_mgr: MagicMock, tmp_path: Path) -> None:
         mock_mgr.filename = "routing_replay.pt"
         original = [torch.tensor([10, 20]), torch.tensor([30, 40])]
@@ -100,12 +100,12 @@ class TestSaveReplayData:
         assert loaded[0][0].tolist() == [10, 20]
         assert loaded[0][1].tolist() == [30, 40]
 
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
     def test_noop_when_no_path(self, mock_mgr: MagicMock) -> None:
         script = make_script_args()
         save_replay_data(script, rank=0)
 
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
     def test_asserts_rank_zero(self, mock_mgr: MagicMock, tmp_path: Path) -> None:
         mock_mgr.filename = "routing_replay.pt"
         replay = SimpleNamespace(top_indices_list=[torch.tensor([1, 2])])
@@ -115,7 +115,7 @@ class TestSaveReplayData:
         with pytest.raises(AssertionError):
             save_replay_data(script, rank=1)
 
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
     def test_empty_entries_asserts(self, mock_mgr: MagicMock, tmp_path: Path) -> None:
         mock_mgr.filename = "routing_replay.pt"
         replay = SimpleNamespace(top_indices_list=[])
@@ -127,19 +127,19 @@ class TestSaveReplayData:
 
 
 class TestLoadReplayData:
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
     def test_noop_when_no_path(self, mock_mgr: MagicMock) -> None:
         script = make_script_args()
         load_replay_data(script, rank=0)
 
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
     def test_no_file_raises(self, mock_mgr: MagicMock, tmp_path: Path) -> None:
         mock_mgr.filename = "routing_replay.pt"
         script = make_script_args(routing_replay_load_path=tmp_path)
         with pytest.raises(ValueError, match="Expected exactly 1 replay file"):
             load_replay_data(script, rank=0)
 
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
     def test_multiple_files_raises(self, mock_mgr: MagicMock, tmp_path: Path) -> None:
         mock_mgr.filename = "routing_replay.pt"
         (tmp_path / "a_routing_replay.pt").touch()
@@ -149,8 +149,8 @@ class TestLoadReplayData:
         with pytest.raises(ValueError, match="Expected exactly 1 replay file"):
             load_replay_data(script, rank=0)
 
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay._get_parallel_ranks")
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay._get_parallel_ranks")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
     def test_loads_data(
         self,
         mock_mgr: MagicMock,
@@ -179,8 +179,8 @@ class TestLoadReplayData:
 class TestLoadReplaySpSlicing:
     """Test _load_replay with SP (sequence parallel) slicing."""
 
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay._get_parallel_ranks")
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay._get_parallel_ranks")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
     def test_sp_slices_tensors(self, mock_mgr: MagicMock, mock_ranks: MagicMock, tmp_path: Path) -> None:
         mock_ranks.return_value = _ParallelRanks(cp_size=1, cp_rank=0, tp_size=2, tp_rank=0)
         mock_mgr.if_sp_region = True
@@ -198,8 +198,8 @@ class TestLoadReplaySpSlicing:
         assert len(replay_obj.top_indices_list) == 1
         assert replay_obj.top_indices_list[0].tolist() == [0, 1, 2, 3]
 
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay._get_parallel_ranks")
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay._get_parallel_ranks")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
     def test_sp_second_rank(self, mock_mgr: MagicMock, mock_ranks: MagicMock, tmp_path: Path) -> None:
         mock_ranks.return_value = _ParallelRanks(cp_size=1, cp_rank=0, tp_size=2, tp_rank=1)
         mock_mgr.if_sp_region = True
@@ -215,8 +215,8 @@ class TestLoadReplaySpSlicing:
 
         assert replay_obj.top_indices_list[0].tolist() == [4, 5, 6, 7]
 
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay._get_parallel_ranks")
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay._get_parallel_ranks")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
     def test_sp_disabled_no_slice(self, mock_mgr: MagicMock, mock_ranks: MagicMock, tmp_path: Path) -> None:
         mock_ranks.return_value = _ParallelRanks(cp_size=1, cp_rank=0, tp_size=2, tp_rank=0)
         mock_mgr.if_sp_region = True
@@ -237,8 +237,8 @@ class TestLoadReplaySpSlicing:
 class TestLoadReplayCpSlicing:
     """Test _load_replay with CP (context parallel) zigzag slicing."""
 
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay._get_parallel_ranks")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay._get_parallel_ranks")
     def test_cp_calls_zigzag_slice(self, mock_ranks: MagicMock, mock_mgr: MagicMock, tmp_path: Path) -> None:
         mock_ranks.return_value = _ParallelRanks(cp_size=2, cp_rank=0, tp_size=1, tp_rank=0)
         mock_mgr.if_sp_region = False
@@ -254,7 +254,7 @@ class TestLoadReplayCpSlicing:
         mock_zigzag = MagicMock(return_value=torch.tensor([0, 7, 1, 6]))
 
         with patch(
-            "miles.backends.training_utils.cp_utils.natural_to_zigzag_slice",
+            "orbit.backends.training_utils.cp_utils.natural_to_zigzag_slice",
             mock_zigzag,
         ):
             _load_replay(save_path, rank=0, sequence_parallel=False)
@@ -266,8 +266,8 @@ class TestLoadReplayCpSlicing:
         assert call_kwargs["cp_rank"] == 0
         assert replay_obj.top_indices_list[0].tolist() == [0, 7, 1, 6]
 
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay._get_parallel_ranks")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay._get_parallel_ranks")
     def test_cp1_no_zigzag(self, mock_ranks: MagicMock, mock_mgr: MagicMock, tmp_path: Path) -> None:
         mock_ranks.return_value = _ParallelRanks(cp_size=1, cp_rank=0, tp_size=1, tp_rank=0)
         mock_mgr.if_sp_region = False
@@ -284,8 +284,8 @@ class TestLoadReplayCpSlicing:
 
 
 class TestLoadReplayMismatch:
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay._get_parallel_ranks")
-    @patch("miles.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay._get_parallel_ranks")
+    @patch("orbit.utils.debug_utils.run_megatron.worker.replay.routing_replay_manager")
     def test_replay_count_mismatch_raises(self, mock_mgr: MagicMock, mock_ranks: MagicMock, tmp_path: Path) -> None:
         mock_ranks.return_value = _ParallelRanks(cp_size=1, cp_rank=0, tp_size=1, tp_rank=0)
         mock_mgr.if_sp_region = False

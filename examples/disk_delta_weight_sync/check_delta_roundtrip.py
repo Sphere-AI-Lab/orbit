@@ -8,7 +8,7 @@ every rollout host — and verifies the patched checkpoint is byte-identical to 
 intended.
 
 That makes it a genuine cross-implementation check rather than a self-consistency one: the
-publisher here is a transcription of miles' encoder, the applier is sglang's own. It catches two
+publisher here is a transcription of orbit' encoder, the applier is sglang's own. It catches two
 of the things that break a first bring-up — a missing codec/checksum dependency in the runtime
 env, and an encoding the two sides disagree about — without burning a multi-GPU allocation to
 find out. Publisher and receiver run in the same process against a directory on this host, so it
@@ -50,7 +50,7 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from miles.utils.disk_delta import checksum, make_tensor_reader, overwrite_encode  # noqa: E402
+from orbit.utils.disk_delta import checksum, make_tensor_reader, overwrite_encode  # noqa: E402
 
 # The trainer's ~3% density operating point: after one RL step almost every bf16 element is
 # byte-identical to the previous step, which is the entire premise of shipping deltas.
@@ -301,7 +301,7 @@ def main() -> int:
     print("dependencies:")
     check_dependencies(args.checksum)
 
-    # The receiver is sglang's own; without it this script can only test miles against itself,
+    # The receiver is sglang's own; without it this script can only test orbit against itself,
     # which is not the question worth answering.
     try:
         from sglang.srt.weight_sync.local_checkpoint import pull
@@ -309,7 +309,7 @@ def main() -> int:
         raise SystemExit(
             f"\ncannot import sglang's receiver ({e}).\n"
             "Run this in the environment the training job uses — the point of the check is that\n"
-            "miles' publisher and sglang's applier agree on the format."
+            "orbit' publisher and sglang's applier agree on the format."
         ) from e
     print("  ok   sglang.srt.weight_sync.local_checkpoint.pull")
 
@@ -407,7 +407,7 @@ def main() -> int:
             )
 
         print(
-            f"\nPASS — {args.versions} version(s) published by miles' encoder and applied "
+            f"\nPASS — {args.versions} version(s) published by orbit' encoder and applied "
             "byte-exactly by sglang's receiver, including a rerun over the stale local dir."
         )
         return 0

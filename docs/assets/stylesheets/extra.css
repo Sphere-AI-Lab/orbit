@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Miles — Frontier Lab
+   Orbit — Frontier Lab
    Restrained, confident, technical. Bricolage display, Geist body, Geist Mono.
    Single accent gestures, generous whitespace, rigorous grid.
    ========================================================================== */
@@ -12,27 +12,27 @@
    Tokens — restrained palette, more neutral, single accent
    -------------------------------------------------------------------------- */
 :root {
-  --miles-ink:        #0a0e1f;
-  --miles-ink-soft:   #11172e;
+  --orbit-ink:        #0a0e1f;
+  --orbit-ink-soft:   #11172e;
 
-  --miles-accent:     #1f7be0;     /* refined blue, the single accent */
-  --miles-accent-deep:#1565c0;
-  --miles-cyan:       #21d4fd;     /* used sparingly, only in dark gradients */
-  --miles-violet:     #8b5cf6;
-  --miles-green:      #10b981;
-  --miles-amber:      #f59e0b;
-  --miles-rose:       #f43f5e;
+  --orbit-accent:     #1f7be0;     /* refined blue, the single accent */
+  --orbit-accent-deep:#1565c0;
+  --orbit-cyan:       #21d4fd;     /* used sparingly, only in dark gradients */
+  --orbit-violet:     #8b5cf6;
+  --orbit-green:      #10b981;
+  --orbit-amber:      #f59e0b;
+  --orbit-rose:       #f43f5e;
 
-  --miles-fg:         #0f172a;
-  --miles-fg-soft:    #334155;
-  --miles-fg-mute:    #64748b;
-  --miles-fg-faint:   #94a3b8;
+  --orbit-fg:         #0f172a;
+  --orbit-fg-soft:    #334155;
+  --orbit-fg-mute:    #64748b;
+  --orbit-fg-faint:   #94a3b8;
 
-  --miles-bg:         #ffffff;
-  --miles-bg-soft:    #f8fafc;
-  --miles-bg-mute:    #f1f5f9;
-  --miles-line:       rgba(15, 23, 42, 0.08);
-  --miles-line-soft:  rgba(15, 23, 42, 0.04);
+  --orbit-bg:         #ffffff;
+  --orbit-bg-soft:    #f8fafc;
+  --orbit-bg-mute:    #f1f5f9;
+  --orbit-line:       rgba(15, 23, 42, 0.08);
+  --orbit-line-soft:  rgba(15, 23, 42, 0.04);
 
   /* Material overrides */
   --md-text-font: "Geist", system-ui, sans-serif;
@@ -68,8 +68,8 @@
   --md-code-fg-color:            #e2e8f0;
   --md-typeset-mark-color:       rgba(245, 158, 11, 0.4);
 
-  --miles-line:       rgba(255, 255, 255, 0.07);
-  --miles-line-soft:  rgba(255, 255, 255, 0.04);
+  --orbit-line:       rgba(255, 255, 255, 0.07);
+  --orbit-line-soft:  rgba(255, 255, 255, 0.04);
 }
 
 /* --------------------------------------------------------------------------
@@ -115,7 +115,7 @@ body, .md-typeset {
   margin-top: 2.8rem;
   margin-bottom: 0.9rem;
   padding-bottom: 0.4rem;
-  border-bottom: 1px solid var(--miles-line);
+  border-bottom: 1px solid var(--orbit-line);
   font-variation-settings: "opsz" 32;
 }
 
@@ -196,7 +196,7 @@ body, .md-typeset {
 
 [data-md-color-scheme="default"] .md-header {
   background: #ffffff;
-  color: var(--miles-fg);
+  color: var(--orbit-fg);
 }
 
 [data-md-color-scheme="slate"] .md-header {
@@ -215,9 +215,9 @@ body, .md-typeset {
 /* Expose the hamburger only on narrow screens (Material already handles this) */
 
 .md-search__form {
-  background: var(--miles-bg-mute);
+  background: var(--orbit-bg-mute);
   border-radius: 8px;
-  border: 1px solid var(--miles-line);
+  border: 1px solid var(--orbit-line);
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
@@ -268,7 +268,7 @@ body, .md-typeset {
 }
 
 .md-sidebar--primary .md-sidebar__inner::before {
-  content: "Miles";
+  content: "Orbit";
   display: flex;
   align-items: center;
   padding: 0 1.1rem 0.55rem 2.55rem;
@@ -281,8 +281,8 @@ body, .md-typeset {
   letter-spacing: -0.035em;
   color: var(--md-default-fg-color);
 
-  border-bottom: 1px solid var(--miles-line);
-  background-image: url("../images/brand/miles_square.png");
+  border-bottom: 1px solid var(--orbit-line);
+  background-image: url("../images/brand/orbit_square.png");
   background-repeat: no-repeat;
   background-position: 1.05rem top;
   background-size: 22px 22px;
@@ -326,7 +326,7 @@ body, .md-typeset {
 
 [data-md-color-scheme="default"] .md-sidebar--primary {
   background: var(--md-default-bg-color);
-  border-right: 1px solid var(--miles-line);
+  border-right: 1px solid var(--orbit-line);
 }
 
 [data-md-color-scheme="slate"] .md-sidebar--primary {
@@ -350,7 +350,7 @@ body, .md-typeset {
   padding: 0.5rem 0.8rem 0.4rem;
 }
 
-/* The brand sits in the header; suppress the duplicate logo + "Miles"
+/* The brand sits in the header; suppress the duplicate logo + "Orbit"
    that mkdocs-material renders inside the primary nav title. */
 .md-nav--primary > .md-nav__title {
   display: none;
@@ -400,7 +400,7 @@ body, .md-typeset {
   color: var(--md-default-fg-color);
   padding: 1rem 0.7rem 0.4rem;
   margin: 0.5rem 0 0;
-  border-top: 1px solid var(--miles-line);
+  border-top: 1px solid var(--orbit-line);
   border-radius: 0;
   background: transparent !important;
 }
@@ -679,7 +679,7 @@ body, .md-typeset {
    -------------------------------------------------------------------------- */
 .md-typeset .admonition,
 .md-typeset details {
-  border: 1px solid var(--miles-line);
+  border: 1px solid var(--orbit-line);
   border-left-width: 3px;
   border-radius: 8px;
   font-size: 0.82rem;
@@ -689,7 +689,7 @@ body, .md-typeset {
 
 [data-md-color-scheme="default"] .md-typeset .admonition,
 [data-md-color-scheme="default"] .md-typeset details {
-  background: var(--miles-bg-soft);
+  background: var(--orbit-bg-soft);
 }
 
 [data-md-color-scheme="slate"] .md-typeset .admonition,
@@ -709,34 +709,34 @@ body, .md-typeset {
 }
 
 .md-typeset .admonition.tip,
-.md-typeset details.tip { border-left-color: var(--miles-green); }
+.md-typeset details.tip { border-left-color: var(--orbit-green); }
 .md-typeset .admonition.tip > .admonition-title::before,
-.md-typeset details.tip > summary::before { background-color: var(--miles-green); }
+.md-typeset details.tip > summary::before { background-color: var(--orbit-green); }
 
 .md-typeset .admonition.note,
-.md-typeset details.note { border-left-color: var(--miles-accent); }
+.md-typeset details.note { border-left-color: var(--orbit-accent); }
 .md-typeset .admonition.note > .admonition-title::before,
-.md-typeset details.note > summary::before { background-color: var(--miles-accent); }
+.md-typeset details.note > summary::before { background-color: var(--orbit-accent); }
 
 .md-typeset .admonition.warning,
-.md-typeset details.warning { border-left-color: var(--miles-amber); }
+.md-typeset details.warning { border-left-color: var(--orbit-amber); }
 .md-typeset .admonition.warning > .admonition-title::before,
-.md-typeset details.warning > summary::before { background-color: var(--miles-amber); }
+.md-typeset details.warning > summary::before { background-color: var(--orbit-amber); }
 
 .md-typeset .admonition.danger,
-.md-typeset details.danger { border-left-color: var(--miles-rose); }
+.md-typeset details.danger { border-left-color: var(--orbit-rose); }
 
 .md-typeset .admonition.question,
-.md-typeset details.question { border-left-color: var(--miles-violet); }
+.md-typeset details.question { border-left-color: var(--orbit-violet); }
 .md-typeset .admonition.question > .admonition-title::before,
-.md-typeset details.question > summary::before { background-color: var(--miles-violet); }
+.md-typeset details.question > summary::before { background-color: var(--orbit-violet); }
 
 /* --------------------------------------------------------------------------
    Tables — quiet, no gradient
    -------------------------------------------------------------------------- */
 .md-typeset table:not([class]) {
   font-size: 0.78rem;
-  border: 1px solid var(--miles-line);
+  border: 1px solid var(--orbit-line);
   border-radius: 8px;
   overflow: hidden;
   border-collapse: separate;
@@ -746,7 +746,7 @@ body, .md-typeset {
 }
 
 .md-typeset table:not([class]) th {
-  background: var(--miles-bg-mute);
+  background: var(--orbit-bg-mute);
   font-family: "Bricolage Grotesque", sans-serif;
   font-weight: 600;
   font-size: 0.7rem;
@@ -754,7 +754,7 @@ body, .md-typeset {
   text-transform: uppercase;
   color: var(--md-default-fg-color);
   padding: 0.55rem 0.8rem;
-  border-bottom: 1px solid var(--miles-line);
+  border-bottom: 1px solid var(--orbit-line);
 }
 
 [data-md-color-scheme="slate"] .md-typeset table:not([class]) th {
@@ -764,7 +764,7 @@ body, .md-typeset {
 
 .md-typeset table:not([class]) td {
   padding: 0.55rem 0.8rem;
-  border-bottom: 1px solid var(--miles-line-soft);
+  border-bottom: 1px solid var(--orbit-line-soft);
   vertical-align: top;
 }
 
@@ -783,7 +783,7 @@ body, .md-typeset {
   font-size: 0.84rem;
   letter-spacing: -0.005em;
   padding: 0.55em 1.25em;
-  border: 1px solid var(--miles-line);
+  border: 1px solid var(--orbit-line);
   color: var(--md-default-fg-color);
   background: transparent;
   transition: background 0.15s ease, border-color 0.15s ease;
@@ -795,20 +795,20 @@ body, .md-typeset {
 }
 
 .md-typeset .md-button--primary {
-  background: var(--miles-fg);
+  background: var(--orbit-fg);
   color: #ffffff !important;
-  border: 1px solid var(--miles-fg);
+  border: 1px solid var(--orbit-fg);
 }
 
 [data-md-color-scheme="slate"] .md-typeset .md-button--primary {
   background: #ffffff;
-  color: var(--miles-ink) !important;
+  color: var(--orbit-ink) !important;
   border-color: #ffffff;
 }
 
 .md-typeset .md-button--primary:hover {
-  background: var(--miles-accent);
-  border-color: var(--miles-accent);
+  background: var(--orbit-accent);
+  border-color: var(--orbit-accent);
   color: #ffffff !important;
 }
 
@@ -826,7 +826,7 @@ body, .md-typeset {
 .md-typeset .grid.cards > ol > li,
 .md-typeset .grid.cards > ul > li,
 .md-typeset .grid > .card {
-  border: 1px solid var(--miles-line);
+  border: 1px solid var(--orbit-line);
   border-radius: 12px;
   padding: 1.2rem 1.3rem 1.3rem;
   background: var(--md-default-bg-color);
@@ -877,7 +877,7 @@ body, .md-typeset {
 .md-typeset .grid.cards li > hr {
   margin: 0.4rem 0 0.6rem;
   border: 0;
-  border-top: 1px solid var(--miles-line);
+  border-top: 1px solid var(--orbit-line);
 }
 
 .md-typeset .grid.cards a {
@@ -889,15 +889,15 @@ body, .md-typeset {
    Tabs
    -------------------------------------------------------------------------- */
 .md-typeset .tabbed-set {
-  border: 1px solid var(--miles-line);
+  border: 1px solid var(--orbit-line);
   border-radius: 10px;
   overflow: hidden;
   margin: 1.2rem 0;
 }
 
 .md-typeset .tabbed-labels {
-  background: var(--miles-bg-soft);
-  border-bottom: 1px solid var(--miles-line);
+  background: var(--orbit-bg-soft);
+  border-bottom: 1px solid var(--orbit-line);
 }
 
 [data-md-color-scheme="slate"] .md-typeset .tabbed-labels {
@@ -959,7 +959,7 @@ body, .md-typeset {
    -------------------------------------------------------------------------- */
 .md-footer {
   background: var(--md-default-bg-color);
-  border-top: 1px solid var(--miles-line);
+  border-top: 1px solid var(--orbit-line);
   color: var(--md-default-fg-color--light);
 }
 
@@ -991,7 +991,7 @@ body, .md-typeset {
 
 .md-footer-meta {
   background: var(--md-default-bg-color);
-  border-top: 1px solid var(--miles-line);
+  border-top: 1px solid var(--orbit-line);
   font-size: 0.74rem;
   color: var(--md-default-fg-color--lighter);
 }
@@ -1095,15 +1095,15 @@ body, .md-typeset {
 /* --------------------------------------------------------------------------
    Homepage model matrix
    -------------------------------------------------------------------------- */
-.md-typeset .miles-model-matrix {
+.md-typeset .orbit-model-matrix {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
   margin: 1.1rem 0 0.7rem;
 }
 
-.md-typeset .miles-model-panel {
-  border: 1px solid var(--miles-line);
+.md-typeset .orbit-model-panel {
+  border: 1px solid var(--orbit-line);
   border-radius: 8px;
   padding: 0.85rem 0.95rem 0.9rem;
   background:
@@ -1111,25 +1111,25 @@ body, .md-typeset {
     var(--md-default-bg-color);
 }
 
-[data-md-color-scheme="slate"] .md-typeset .miles-model-panel {
+[data-md-color-scheme="slate"] .md-typeset .orbit-model-panel {
   background:
     linear-gradient(180deg, rgba(92, 182, 255, 0.07), transparent 48%),
     rgba(255, 255, 255, 0.018);
 }
 
-.md-typeset .miles-model-panel--moe {
+.md-typeset .orbit-model-panel--moe {
   background:
     linear-gradient(180deg, rgba(16, 185, 129, 0.06), transparent 46%),
     var(--md-default-bg-color);
 }
 
-[data-md-color-scheme="slate"] .md-typeset .miles-model-panel--moe {
+[data-md-color-scheme="slate"] .md-typeset .orbit-model-panel--moe {
   background:
     linear-gradient(180deg, rgba(16, 185, 129, 0.075), transparent 48%),
     rgba(255, 255, 255, 0.018);
 }
 
-.md-typeset .miles-model-kicker {
+.md-typeset .orbit-model-kicker {
   display: block;
   margin-bottom: 0.45rem;
   font-family: "Bricolage Grotesque", sans-serif;
@@ -1140,17 +1140,17 @@ body, .md-typeset {
   color: var(--md-default-fg-color);
 }
 
-.md-typeset .miles-model-panel p {
+.md-typeset .orbit-model-panel p {
   margin: 0;
   color: var(--md-default-fg-color--light);
 }
 
-.md-typeset .miles-model-panel a {
+.md-typeset .orbit-model-panel a {
   font-weight: 500;
 }
 
 @media screen and (max-width: 44rem) {
-  .md-typeset .miles-model-matrix {
+  .md-typeset .orbit-model-matrix {
     grid-template-columns: 1fr;
   }
 }

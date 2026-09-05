@@ -7,8 +7,8 @@ example runs that loop on [HUD](https://hud.ai) v6 environments — any HUD env
 package whose tasks are workable through a screen trains on the same files.
 
 The split: HUD owns the episode — it boots the environment, runs the agent
-loop, and grades the result — while Miles owns training, and the two meet at
-the token ids the policy emitted. Nothing under `miles/` is modified.
+loop, and grades the result — while Orbit owns training, and the two meet at
+the token ids the policy emitted. Nothing under `orbit/` is modified.
 
 The worked example throughout is
 [2048](https://en.wikipedia.org/wiki/2048_%28video_game%29) — the sliding-tile
@@ -20,7 +20,7 @@ not know which taskset it is running.
 
 | seam | file |
 |---|---|
-| `--custom-generate-function-path` | [`rollout.py`](rollout.py) — HUD run → one Miles training sample |
+| `--custom-generate-function-path` | [`rollout.py`](rollout.py) — HUD run → one Orbit training sample |
 | `--custom-rm-path` | [`rollout.py`](rollout.py) `reward_func` — the task template's own grade |
 | `--custom-config-path` | [`hud2048_config.yaml`](hud2048_config.yaml) |
 | the agent | [`agent.py`](agent.py) + [`computer_tool.py`](computer_tool.py) |
@@ -61,9 +61,9 @@ python -m examples.experimental.hud.make_hud_data \
     --args-json '{"target_score": 1024}' --repeat 256 --output /root/hud2048_train.jsonl
 
 mkdir -p ~/.config/daytona && echo dtn_... > ~/.config/daytona/api_key   # sandboxes
-export MILES_SCRIPT_OUTPUT_DIR=/persistent/hud2048    # checkpoints and rollout dumps
+export ORBIT_SCRIPT_OUTPUT_DIR=/persistent/hud2048    # checkpoints and rollout dumps
 python -m pytest tests/fast/examples/experimental/hud -q  # offline: no GPU, no network
-MILES_SCRIPT_MODE=smoke python examples/experimental/hud/run_hud2048.py   # 2 episodes
+ORBIT_SCRIPT_MODE=smoke python examples/experimental/hud/run_hud2048.py   # 2 episodes
 python examples/experimental/hud/run_hud2048.py       # 8 GPUs, single node
 ```
 

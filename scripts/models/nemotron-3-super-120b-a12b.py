@@ -20,7 +20,7 @@ def model_args() -> str:
         "--moe-shared-expert-intermediate-size 5376 "
         # Super-120B bottlenecks expert input/output through a 1024-dim latent.
         # Routed experts run on moe_latent_size, NOT hidden_size, with two extra
-        # fc1/fc2 latent projections per MoE layer. The miles NemotronH bridge
+        # fc1/fc2 latent projections per MoE layer. The orbit NemotronH bridge
         # surfaces this from HF config; the CLI arg keeps Megatron's parser happy.
         "--moe-latent-size 1024 "
         "--moe-router-score-function sigmoid "

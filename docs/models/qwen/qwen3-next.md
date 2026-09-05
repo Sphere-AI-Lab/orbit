@@ -11,7 +11,7 @@ description: Launch recipes for Qwen3-Next-80B-A3B-Thinking on the Megatron back
 - **Hybrid Attention**: combines Gated DeltaNet (linear attention) with Full Attention to handle context lengths up to 262 K tokens efficiently.
 - **Highly Sparse MoE**: 80 B total / 3 B active per token — drastically reduces FLOPs per token without sacrificing model capacity.
 - **Multi-Token Prediction (MTP)**: built-in MTP layer enables EAGLE-style speculative rollout out of the box.
-- **HuggingFace-wrapped Megatron backend**: miles loads the `Qwen/Qwen3-Next-80B-A3B` HF module as a Megatron stage without re-implementing GDN from scratch.
+- **HuggingFace-wrapped Megatron backend**: orbit loads the `Qwen/Qwen3-Next-80B-A3B` HF module as a Megatron stage without re-implementing GDN from scratch.
 
 ## 2. Supported Variants
 
@@ -40,8 +40,8 @@ hf download --repo-type dataset zhuzilin/aime-2024     --local-dir /root/dataset
 ### 3.3 HF → Megatron `torch_dist` conversion
 
 ```bash
-cd /root/miles
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py qwen3-next-80B-A3B)" || exit 1
+cd /root/orbit
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py qwen3-next-80B-A3B)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM torchrun --nproc-per-node 8 \
    tools/convert_hf_to_torch_dist.py \
@@ -55,7 +55,7 @@ PYTHONPATH=/root/Megatron-LM torchrun --nproc-per-node 8 \
 ### 4.1 Quick start
 
 ```bash
-cd /root/miles
+cd /root/orbit
 export MASTER_ADDR=...
 python scripts/run_qwen3_next_80b_a3b.py --topology 4node
 
@@ -116,10 +116,10 @@ Both topologies enable CPU Adam:
 
 ### 5.5 Notable quirks
 
-- Gated DeltaNet (GDN) is loaded via the HuggingFace bridge; miles doesn't re-implement GDN in Megatron native code.
+- Gated DeltaNet (GDN) is loaded via the HuggingFace bridge; orbit doesn't re-implement GDN in Megatron native code.
 
 ## 6. Pairs Well With
 
 - [Backends Beyond Megatron](/advanced/architecture-support)
-- [Rollout Routing Replay (R3)](/advanced/miles-router)
+- [Rollout Routing Replay (R3)](/advanced/orbit-router)
 - [Speculative Decoding](/advanced/speculative-decoding)

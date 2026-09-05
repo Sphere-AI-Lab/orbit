@@ -6,7 +6,7 @@ between two syncs instead of the whole actor.
 After one RL step almost every bf16 element is byte-identical to the previous step, so the trainer
 diffs each gathered HF tensor against a CPU snapshot, publishes the changed bytes to a shared
 directory, and each engine's `/pull_weights` patches a host-local checkpoint in place and reloads
-from it through the ordinary `update_weights_from_disk` path. miles only ever talks to one endpoint
+from it through the ordinary `update_weights_from_disk` path. orbit only ever talks to one endpoint
 per engine — the engine fans the apply out to every host it spans — so multi-node serving and
 external rollout engines need nothing extra.
 
@@ -34,7 +34,7 @@ examples/disk_delta_weight_sync/
 
 `_common.sh` fixes the dataset and the RL hyperparameters; a model block overrides the
 architecture, parallelism, and layout. Within one model, the delta and broadcast arms differ in
-the transport block and nothing else — `diff` the resolved `MILES_ARGS` if you want to confirm it.
+the transport block and nothing else — `diff` the resolved `ORBIT_ARGS` if you want to confirm it.
 
 ## Sharding config
 
@@ -76,7 +76,7 @@ whole HF tensors and each engine re-shards through its ordinary loader on reload
 
 ### Which of these configs has actually run
 
-All seven, on slinky (H200s, InfiniBand), in the `miles_zeju` env.
+All seven, on slinky (H200s, InfiniBand), in the `orbit_zeju` env.
 
 | Recipe | Sharding | Job | Sync time (steady) | Density |
 |---|---|---|---|---|
@@ -185,7 +185,7 @@ falsified checksum is refused rather than applied.
 
 ## Start here: the format check
 
-No GPU, no cluster, no Ray. It transcribes miles' encoder, then hands the published directory to
+No GPU, no cluster, no Ray. It transcribes orbit' encoder, then hands the published directory to
 sglang's *real* receiver (`sglang.srt.weight_sync.local_checkpoint.pull`, the code `/pull_weights`
 runs) and verifies the patched checkpoint byte-for-byte:
 
@@ -235,7 +235,7 @@ recipes by name under `scripts/experiments/`. Add a three-line shim:
 
 ```bash
 # scripts/experiments/dd-01-smoke.sh
-source "$MILES_REPO/examples/disk_delta_weight_sync/01-qwen3-4B-1node-delta-smoke.sh"
+source "$ORBIT_REPO/examples/disk_delta_weight_sync/01-qwen3-4B-1node-delta-smoke.sh"
 ```
 
 ```bash
@@ -307,7 +307,7 @@ Four things to get right:
   weights — with per-job dirs there is no stale state to clamp to. (Fixed receivers reseed
   instead; the format check's rerun leg tells you which you have.) The flip side: finished jobs
   leave their dirs behind — clean `checkpoints/dd-*` and the rollout hosts'
-  `/tmp/miles-delta-local-ckpt/` after a measurement campaign.
+  `/tmp/orbit-delta-local-ckpt/` after a measurement campaign.
 - **The publish dir is wiped at baseline** (the trainer `rmtree`s it — a stale version stream
   would apply against the wrong base) **and then grows for the whole run**: one `weight_v*/` per
   sync, none of which can be pruned mid-run, because a restarted engine host seeds from base and
@@ -316,7 +316,7 @@ Four things to get right:
   3000-rollout default that stream would have been ~390 GB dense / ~1.5 TB MoE. Raise the budget
   only deliberately.
 - **The local dir holds a whole checkpoint per host**, ~8 GB for Qwen3-4B in bf16. `_common.sh`
-  defaults to `/tmp/miles-delta-local-ckpt/$RUN_NAME-$DD_STATE_TAG`; override `DD_LOCAL_CKPT_DIR`
+  defaults to `/tmp/orbit-delta-local-ckpt/$RUN_NAME-$DD_STATE_TAG`; override `DD_LOCAL_CKPT_DIR`
   if `/tmp` is small or is not node-local on your nodes. Putting it on the *shared* filesystem
   defeats the entire mechanism.
 - **Periodic trainer saves are off by default** (`DD_SAVE_INTERVAL` defaults past the bounded
@@ -333,8 +333,8 @@ All read by `_common.sh` from the environment or the wrapper:
 | `DD_ENCODING` | `xor` | `new ^ old`; smallest and fastest, but an involution — it must land exactly once on the right base. `overwrite` stores positions + absolute values: larger, idempotent. |
 | `DD_CHECKSUM` | `xxh3-128` | `blake3` for untrusted storage, `adler32` for interop |
 | `DD_STATE_TAG` | `$SLURM_JOB_ID-r$SLURM_RESTART_COUNT` | keys all mutable state; makes every submission fresh |
-| `DD_DISK_DIR` | `$MILES_REPO/checkpoints/$RUN_NAME-$DD_STATE_TAG/delta-updates` | shared; wiped at baseline |
-| `DD_LOCAL_CKPT_DIR` | `/tmp/miles-delta-local-ckpt/$RUN_NAME-$DD_STATE_TAG` | host-local |
+| `DD_DISK_DIR` | `$ORBIT_REPO/checkpoints/$RUN_NAME-$DD_STATE_TAG/delta-updates` | shared; wiped at baseline |
+| `DD_LOCAL_CKPT_DIR` | `/tmp/orbit-delta-local-ckpt/$RUN_NAME-$DD_STATE_TAG` | host-local |
 | `DD_CHECK_EQUAL` | `0` | `1` adds `--check-weight-update-equal`; on for `01` and `04` |
 | `DD_NUM_ROLLOUT` | `40` | one sync per rollout; the smokes use 5 |
 | `DD_DISK_BUDGET_GB` | `25` | refuses to start if the estimated publish stream exceeds it |
@@ -381,7 +381,7 @@ syncs as measuring almost nothing.
 
 ## Constraints
 
-Asserted at startup in [`miles/utils/arguments.py`](../../miles/utils/arguments.py):
+Asserted at startup in [`orbit/utils/arguments.py`](../../orbit/utils/arguments.py):
 
 - **No `--colocate`.** Colocated weights cross via CUDA IPC — only a handle moves — so snapshot +
   diff + encode would be pure overhead. Every recipe here is disaggregated.
@@ -404,7 +404,7 @@ And one the recipes impose on themselves rather than inherit from the asserts:
 
 If your shared storage has no cross-host read-after-write consistency, the writes are not visible to
 the engines without an explicit refresh. Two hooks, loaded by import path, keep that vendor logic
-out of miles:
+out of orbit:
 
 - `--custom-update-weight-post-write-path` (trainer) — after a version's files are written, before
   the engines are told to read them.
@@ -417,5 +417,5 @@ POSIX shared filesystems (NFS, Lustre, Weka) need neither.
 
 slime's [`docs/en/advanced/delta-weight-sync.md`](https://github.com/THUDM/slime/blob/main/docs/en/advanced/delta-weight-sync.md).
 Flag names differ — slime splits mode and transport (`--update-weight-mode delta`
-`--update-weight-transport disk`) where miles folds both into
+`--update-weight-transport disk`) where orbit folds both into
 `--update-weight-transfer-mode disk-delta` — but the on-disk format and the encodings are the same.

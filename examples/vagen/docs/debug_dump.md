@@ -7,7 +7,7 @@ rollout step, for offline inspection of multi-turn trajectories. Wire via:
 --rollout-all-samples-process-path examples.vagen.debug_dump.dump_samples
 ```
 
-The hook signature is the miles contract `fn(args, all_samples, data_source)`
+The hook signature is the orbit contract `fn(args, all_samples, data_source)`
 (verified in `arguments.py`, `inference_rollout_train.py`, and
 `sglang_rollout.py`). It fires once per rollout step after all
 samples for that step are generated, so we get a clean per-iter snapshot
@@ -135,19 +135,19 @@ avg_n_actions=...   sum(actions_parsed) / N_turns
 Lets you tell apart "reward goes up because of format compliance" from
 "reward goes up because of success" at a glance.
 
-Reward mean is intentionally NOT recomputed here — miles already logs
+Reward mean is intentionally NOT recomputed here — orbit already logs
 `rollout/raw_reward` for that.
 
 ## Wandb mirror
 
 Same aggregates as the stdout `turn_stats` line:
 
-- **Train**: `rollout/vagen/*`, keyed at `rollout/step` (matches miles' train
+- **Train**: `rollout/vagen/*`, keyed at `rollout/step` (matches orbit' train
   rollout axis).
 - **Eval**: `eval/<eval_dataset_name>/vagen/*`, keyed at `eval/step` — the
-  `<eval_dataset_name>/` middle level matches miles' eval metric convention
+  `<eval_dataset_name>/` middle level matches orbit' eval metric convention
   (`eval/<ds>/reward`, `eval/<ds>/response_len/...` in
-  `miles/ray/rollout.py`), so vagen aggregates plot alongside miles'
+  `orbit/ray/rollout.py`), so vagen aggregates plot alongside orbit'
   built-in eval metrics on the same `eval/step` axis.
 
 The matching `step_key` per family is critical: wandb's
@@ -160,7 +160,7 @@ trajectory (1..max_turns) and wandb can't cleanly plot variable-cardinality
 series. The rollup ratios above capture the same signal at fixed cardinality
 per step.
 
-`rollout_id` is forwarded from miles' rollout-hook wrappers. When absent
+`rollout_id` is forwarded from orbit' rollout-hook wrappers. When absent
 (legacy callers, smoke tests) we fall back to a module-local counter; the
 filenames still include `group_index` + `sample_index` so the global
 identity of each trajectory remains unambiguous even if `step` resets.

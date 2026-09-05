@@ -1,6 +1,6 @@
 import pytest
 
-from miles.backends.training_utils.parallel import GroupInfo, ParallelState, _DPMode
+from orbit.backends.training_utils.parallel import GroupInfo, ParallelState, _DPMode
 
 
 def _parallel_state(

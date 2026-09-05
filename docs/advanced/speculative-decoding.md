@@ -21,10 +21,10 @@ SGLANG_ARGS+=(
 )
 ```
 
-These are passthrough flags forwarded to SGLang. Miles auto-enables
+These are passthrough flags forwarded to SGLang. Orbit auto-enables
 `enable_draft_weights_cpu_backup` so SGLang can run training without
 MTP weights resident on GPU
-(`miles/backends/sglang_utils/sglang_engine.py`).
+(`orbit/backends/sglang_utils/sglang_engine.py`).
 
 For an externally trained draft model (for example, trained with
 [SpecForge](https://docs.sglang.ai/SpecForge/)):
@@ -44,7 +44,7 @@ draft. Fewer draft tokens pass verification, and over many steps speculative
 decoding can become a net negative because the wasted draft compute outweighs
 the verified speedup.
 
-Miles supports training the draft alongside the target through online MTP-SFT.
+Orbit supports training the draft alongside the target through online MTP-SFT.
 
 ## Online SFT for MTP-style draft models
 
@@ -73,7 +73,7 @@ layer to train.
 ## External draft model SFT
 
 Training an external (non-MTP) draft model online is not yet supported in
-Miles. The current path is to retrain the external draft offline every N
+Orbit. The current path is to retrain the external draft offline every N
 rollouts and reload it.
 
 ## Pairs with
@@ -81,7 +81,7 @@ rollouts and reload it.
 * [Low Precision RL](/advanced/low-precision). Draft and target both quantized the
   same way.
 * [INT4 QAT](/advanced/int4-qat). A quantized draft is cheaper to verify.
-* [R3](/advanced/miles-router). R3 captures routing for the verified tokens emitted
+* [R3](/advanced/orbit-router). R3 captures routing for the verified tokens emitted
   by the target.
 
 ## When to skip

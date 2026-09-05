@@ -1,8 +1,8 @@
 import os
 from types import SimpleNamespace
 
-from miles.backends.sglang_utils.native_ops import force_native_forward_after_init
-from miles.backends.sglang_utils.sglang_engine import (
+from orbit.backends.sglang_utils.native_ops import force_native_forward_after_init
+from orbit.backends.sglang_utils.sglang_engine import (
     _compute_server_args,
     _configure_peft_cache_kwargs,
     _prepare_child_peft_cache_env,
@@ -145,7 +145,7 @@ def test_compute_server_args_configures_oft_student_path(monkeypatch):
         monkeypatch,
     )
 
-    assert kwargs["peft_paths"] == {"miles_oft": "/student"}
+    assert kwargs["peft_paths"] == {"orbit_oft": "/student"}
     assert "oft_paths" not in kwargs
     assert "lora_paths" not in kwargs
     assert kwargs["max_ofts_per_batch"] == 2
@@ -158,7 +158,7 @@ def test_compute_server_args_reserves_staging_slot_with_double_buffer(monkeypatc
         monkeypatch,
     )
 
-    assert kwargs["peft_paths"] == {"miles_oft": "/student"}
+    assert kwargs["peft_paths"] == {"orbit_oft": "/student"}
     assert kwargs["max_ofts_per_batch"] == 3
     assert kwargs["peft_double_buffer"] is True
 

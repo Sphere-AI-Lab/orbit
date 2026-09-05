@@ -5,18 +5,18 @@ import shlex
 import pytest
 from tests.fast.utils.command_recorder import record_commands
 
-import miles.utils.external_utils.command_utils as command_utils
-from miles.utils.external_utils.model_args_utils import load_model_args
-from miles.utils.file_arg_utils import resolve_file_arg
+import orbit.utils.external_utils.command_utils as command_utils
+from orbit.utils.external_utils.model_args_utils import load_model_args
+from orbit.utils.file_arg_utils import resolve_file_arg
 
 
 @pytest.fixture
 def commands(monkeypatch):
     recorded = record_commands(monkeypatch)
     monkeypatch.setattr(command_utils, "check_has_nvlink", lambda: False)
-    for name in ("MILES_SCRIPT_EXTERNAL_RAY", "RAY_ADDRESS", "NCCL_NVLS_ENABLE", "WANDB_API_KEY"):
+    for name in ("ORBIT_SCRIPT_EXTERNAL_RAY", "RAY_ADDRESS", "NCCL_NVLS_ENABLE", "WANDB_API_KEY"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("MILES_SCRIPT_ENABLE_RAY_SUBMIT", "1")
+    monkeypatch.setenv("ORBIT_SCRIPT_ENABLE_RAY_SUBMIT", "1")
     monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
     return recorded
 
@@ -38,7 +38,7 @@ class TestExecuteTrainConfig:
 
 class TestConvertCheckpoint:
     def test_preserves_source_paths_on_the_pythonpath(self, monkeypatch, tmp_path):
-        """The converter runs out-of-process, so miles and megatron must be on its PYTHONPATH."""
+        """The converter runs out-of-process, so orbit and megatron must be on its PYTHONPATH."""
         commands = []
         monkeypatch.setenv("PYTHONPATH", "/sglang:/existing")
         monkeypatch.setattr(command_utils, "exec_command_gpu", commands.append)
@@ -243,8 +243,8 @@ class TestExecuteTrain:
     def test_exports_unbuffered_python_to_ray(self, monkeypatch):
         """Ray start and job submit must export the correctly spelled PYTHONUNBUFFERED."""
         commands = []
-        monkeypatch.delenv("MILES_SCRIPT_EXTERNAL_RAY", raising=False)
-        monkeypatch.setenv("MILES_SCRIPT_ENABLE_RAY_SUBMIT", "1")
+        monkeypatch.delenv("ORBIT_SCRIPT_EXTERNAL_RAY", raising=False)
+        monkeypatch.setenv("ORBIT_SCRIPT_ENABLE_RAY_SUBMIT", "1")
         monkeypatch.setattr(command_utils, "exec_command_cpu", commands.append)
         monkeypatch.setattr(command_utils, "check_has_nvlink", lambda: False)
 
@@ -262,8 +262,8 @@ class TestExecuteTrain:
     def test_unbuffers_the_ray_workers_too(self, monkeypatch):
         """An export only reaches the submitting client; the ray workers read the runtime environment."""
         commands = []
-        monkeypatch.setenv("MILES_SCRIPT_EXTERNAL_RAY", "1")
-        monkeypatch.setenv("MILES_SCRIPT_ENABLE_RAY_SUBMIT", "1")
+        monkeypatch.setenv("ORBIT_SCRIPT_EXTERNAL_RAY", "1")
+        monkeypatch.setenv("ORBIT_SCRIPT_ENABLE_RAY_SUBMIT", "1")
         monkeypatch.setattr(command_utils, "exec_command_cpu", commands.append)
         monkeypatch.setattr(command_utils, "check_has_nvlink", lambda: False)
 
@@ -273,11 +273,11 @@ class TestExecuteTrain:
         assert json.loads(runtime_env_arg.split("=", 1)[1])["env_vars"]["PYTHONUNBUFFERED"] == "1"
 
     def test_preserves_source_paths_in_the_ray_runtime(self, monkeypatch):
-        """A caller-supplied PYTHONPATH must be prepended to, not replace, the checkouts miles needs."""
+        """A caller-supplied PYTHONPATH must be prepended to, not replace, the checkouts orbit needs."""
         commands = []
         monkeypatch.setenv("PYTHONPATH", "/sglang:/existing")
-        monkeypatch.setenv("MILES_SCRIPT_EXTERNAL_RAY", "1")
-        monkeypatch.setenv("MILES_SCRIPT_ENABLE_RAY_SUBMIT", "1")
+        monkeypatch.setenv("ORBIT_SCRIPT_EXTERNAL_RAY", "1")
+        monkeypatch.setenv("ORBIT_SCRIPT_ENABLE_RAY_SUBMIT", "1")
         monkeypatch.setattr(command_utils, "exec_command_cpu", commands.append)
         monkeypatch.setattr(command_utils, "check_has_nvlink", lambda: False)
 
@@ -309,7 +309,7 @@ class TestExecuteTrain:
             command_utils.execute_train(train_args="", num_gpus_per_node=8, megatron_model_type=None)
 
     def test_starts_a_local_ray_cluster_by_default(self, commands):
-        """Without MILES_SCRIPT_EXTERNAL_RAY the launcher owns the ray cluster lifecycle."""
+        """Without ORBIT_SCRIPT_EXTERNAL_RAY the launcher owns the ray cluster lifecycle."""
         command_utils.execute_train(train_args="", num_gpus_per_node=8, megatron_model_type="qwen3-4B")
 
         assert "ray stop --force; " in commands[0]
@@ -317,7 +317,7 @@ class TestExecuteTrain:
 
     def test_leaves_an_external_ray_cluster_alone(self, commands, monkeypatch):
         """With an external cluster we must neither stop nor start ray."""
-        monkeypatch.setenv("MILES_SCRIPT_EXTERNAL_RAY", "1")
+        monkeypatch.setenv("ORBIT_SCRIPT_EXTERNAL_RAY", "1")
 
         command_utils.execute_train(train_args="", num_gpus_per_node=8, megatron_model_type="qwen3-4B")
 
@@ -339,7 +339,7 @@ class TestExecuteTrain:
 
     def test_can_skip_the_ray_job_submit(self, commands, monkeypatch):
         """Preparation-only runs disable the submit but still clean up and start ray."""
-        monkeypatch.setenv("MILES_SCRIPT_ENABLE_RAY_SUBMIT", "0")
+        monkeypatch.setenv("ORBIT_SCRIPT_ENABLE_RAY_SUBMIT", "0")
 
         command_utils.execute_train(train_args="", num_gpus_per_node=8, megatron_model_type="qwen3-4B")
 
@@ -543,7 +543,7 @@ class TestGetDefaultWandbArgs:
         args = command_utils.get_default_wandb_args("tests/e2e/megatron/test_qwen3_4b.py", run_id="RUNID")
 
         assert "--use-wandb " in args
-        assert "--wandb-project miles-test_qwen3_4b " in args
+        assert "--wandb-project orbit-test_qwen3_4b " in args
         assert "--wandb-group RUNID " in args
         assert "--wandb-key 'secret' " in args
 
@@ -553,7 +553,7 @@ class TestGetDefaultWandbArgs:
 
         args = command_utils.get_default_wandb_args("tests/e2e/megatron/run.py", run_id="RUNID")
 
-        assert "--wandb-project miles-megatron_run " in args
+        assert "--wandb-project orbit-megatron_run " in args
 
     def test_decorates_the_group_with_commit_and_prefix(self, monkeypatch):
         """CI runs need the commit in the group name, and callers may add their own prefix."""
@@ -603,10 +603,10 @@ class TestGetBoolEnvVar:
 class TestGetEnvEnableInfiniteRun:
     def test_defaults_to_off(self, monkeypatch):
         """Infinite runs must be opt-in; a stuck CI job is expensive."""
-        monkeypatch.delenv("MILES_TEST_ENABLE_INFINITE_RUN", raising=False)
+        monkeypatch.delenv("ORBIT_TEST_ENABLE_INFINITE_RUN", raising=False)
         assert command_utils.get_env_enable_infinite_run() is False
 
-        monkeypatch.setenv("MILES_TEST_ENABLE_INFINITE_RUN", "true")
+        monkeypatch.setenv("ORBIT_TEST_ENABLE_INFINITE_RUN", "true")
         assert command_utils.get_env_enable_infinite_run() is True
 
 

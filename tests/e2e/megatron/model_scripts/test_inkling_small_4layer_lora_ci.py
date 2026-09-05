@@ -4,7 +4,7 @@ from scripts.run_inkling import _MODEL_REGISTRY, ScriptArgs, _train
 from tests.ci.ci_register import register_cuda_ci
 from tests.ci.metric_history import register_ci_gate
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 # Smoke test for scripts/run_inkling.py --train-mode lora on the 4-layer slice:
 # shared-outer grouped-expert LoRA served through SGLang's virtual-experts path, one

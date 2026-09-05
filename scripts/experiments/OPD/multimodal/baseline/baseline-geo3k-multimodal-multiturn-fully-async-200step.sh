@@ -23,7 +23,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}
 
 EXPERIMENT_NODES=3
 EXPERIMENT_TIME=24:00:00
@@ -48,7 +48,7 @@ OPD_TEACHER_GPUS=0,1,2,3,4,5,6,7
 OPD_TEACHER_MEM_FRACTION=0.8
 OPD_TEACHER_EXTRA_ARGS=${OPD_TEACHER_EXTRA_ARGS:-}
 
-export MILES_RAY_HEAD_NUM_GPUS=0
+export ORBIT_RAY_HEAD_NUM_GPUS=0
 OPD_TEACHER_HOST=${OPD_TEACHER_HOST:-${HEAD_IP:-$(hostname -I | awk '{print $1}')}}
 OPD_TEACHER_URL=${OPD_TEACHER_URL:-"http://${OPD_TEACHER_HOST}:${OPD_TEACHER_PORT}"}
 
@@ -71,11 +71,11 @@ export ENVPACK_LOCAL_SERVER_HEALTH="$OPD_TEACHER_URL/health_generate"
 export ENVPACK_SERVER_WAIT_TIMEOUT=${ENVPACK_SERVER_WAIT_TIMEOUT:-1800}
 
 # Fully async is a scheduling choice. It does not add an OPD-specific backend.
-export MILES_TRAIN_ENTRY=train_async.py
+export ORBIT_TRAIN_ENTRY=train_async.py
 
 MODEL_ARGS_ROTARY_BASE=5000000
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-8B.sh"
+source "$ORBIT_REPO/scripts/models/qwen3-8B.sh"
 MODEL_ARGS+=(--megatron-to-hf-mode bridge)
 
 CKPT_ARGS=(
@@ -105,8 +105,8 @@ ROLLOUT_ARGS=(
 )
 
 RM_ARGS=(
-   --custom-rm-path miles.rollout.on_policy_distillation.reward_func
-   --custom-reward-post-process-path miles.rollout.on_policy_distillation.post_process_rewards
+   --custom-rm-path orbit.rollout.on_policy_distillation.reward_func
+   --custom-reward-post-process-path orbit.rollout.on_policy_distillation.post_process_rewards
    --rm-url "$OPD_TEACHER_URL/generate"
    --rm-type math
    --opd-log-task-reward
@@ -124,7 +124,7 @@ OPD_ARGS=(
    # q_adv and q_den both use the SGLang behavior-policy snapshot. This skips
    # the separate trainer old-logprob forward; q_theta remains live in training.
    --use-rollout-logprobs
-   # Explicitly preserve Miles' existing symmetric PPO defaults.
+   # Explicitly preserve Orbit' existing symmetric PPO defaults.
    --eps-clip 0.2
    --eps-clip-high 0.2
    --sglang-mm-exact-scoring-suffix
@@ -219,7 +219,7 @@ LAYOUT_ARGS=(
    --rollout-num-gpus 8
 )
 
-MILES_ARGS=(
+ORBIT_ARGS=(
    "${LAYOUT_ARGS[@]}"
    "${MODEL_ARGS[@]}"
    "${CKPT_ARGS[@]}"
@@ -240,7 +240,7 @@ MILES_ARGS=(
 # Freeze the baseline against accidental semantic changes from future shared
 # launch infrastructure. The rollout-logprob selector must appear exactly once.
 rollout_logprob_flags=0
-for arg in "${MILES_ARGS[@]}"; do
+for arg in "${ORBIT_ARGS[@]}"; do
    case "$arg" in
       --use-rollout-logprobs)
          rollout_logprob_flags=$((rollout_logprob_flags + 1))

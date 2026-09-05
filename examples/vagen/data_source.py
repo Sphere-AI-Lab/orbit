@@ -19,8 +19,8 @@ from typing import Any
 
 import torch
 
-from miles.rollout.data_source import RolloutDataSource
-from miles.utils.types import Sample
+from orbit.rollout.data_source import RolloutDataSource
+from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ class VagenEnvSpecDataSource(RolloutDataSource):
         return groups
 
     def add_samples(self, samples):
-        # miles' rollout path calls this unconditionally with aborted_samples
+        # orbit' rollout path calls this unconditionally with aborted_samples
         # (sglang_rollout.py, inference_rollout_common.py). Empty is the
         # no-partial_rollout case; raise on non-empty to catch scope creep.
         if not samples:

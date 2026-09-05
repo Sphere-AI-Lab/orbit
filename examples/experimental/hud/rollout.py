@@ -9,7 +9,7 @@ The division of labour, and why this file is small:
   prompt/output token ids and sampling logprobs of every turn, straight from
   the inference server (see sglang_compat.py for how stock sglang serves
   those).
-- **This file** turns one graded HUD run into one Miles training sample:
+- **This file** turns one graded HUD run into one Orbit training sample:
   stitch the per-turn token ids into a single sequence with a loss mask, and
   rebuild the vision inputs (pixel_values) from the very screenshots the
   policy saw.
@@ -22,7 +22,7 @@ silently, and the turns before the break are still exact.
 
 One scope constraint: every sample this file emits carries at least one image
 (episodes whose kept turns predate the first screenshot are written off, and
-even write-offs carry a dummy one -- see ``_failed`` for why Miles' FSDP
+even write-offs carry a dummy one -- see ``_failed`` for why Orbit' FSDP
 trainer requires it). Text-only HUD tasks are therefore out of scope here.
 
 Wire with:
@@ -44,7 +44,7 @@ from typing import Any
 
 from PIL import Image as PILImage
 
-from miles.utils.types import Sample
+from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)
 
@@ -349,7 +349,7 @@ def _failed(sample: Sample, reason: str, state: Any) -> Sample:
     microbatch, because its layers' weight all-gathers are collectives. A
     text-only sample skips them, and the ranks that did issue them block until
     another phase happens to post a matching call -- a many-minute stall per
-    step, or a watchdog kill under the default NCCL timeout (miles#2406). One
+    step, or a watchdog kill under the default NCCL timeout (orbit#2406). One
     dummy screenshot's worth of image tokens keeps every sample on the same
     collective schedule.
     """
@@ -386,7 +386,7 @@ async def generate(args: Any, sample: Sample, sampling_params) -> Sample:
     # In-function on purpose: sglang_rollout pulls in sglang_router, which only
     # exists on a training node; keeping it out of module scope is what lets
     # the offline tests import everything above.
-    from miles.rollout.sglang_rollout import GenerateState  # noqa: PLC0415
+    from orbit.rollout.sglang_rollout import GenerateState  # noqa: PLC0415
 
     state = GenerateState(args)
     meta = (sample.metadata or {}).get("hud_task")

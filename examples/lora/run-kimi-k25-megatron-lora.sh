@@ -28,7 +28,7 @@ fi
 echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MODEL_ARGS_LINE="$(python3 "${SCRIPT_DIR}/../../miles/utils/external_utils/model_args_utils.py" "kimi-k25")" || exit 1
+MODEL_ARGS_LINE="$(python3 "${SCRIPT_DIR}/../../orbit/utils/external_utils/model_args_utils.py" "kimi-k25")" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 CKPT_ARGS=(
    --hf-checkpoint $BASE_DIR/Kimi-K2.5-int4
@@ -124,7 +124,7 @@ OPTIMIZER_ARGS=(
 
 WANDB_ARGS=(
    --use-wandb
-   --wandb-project miles-kimi-k25
+   --wandb-project orbit-kimi-k25
    --wandb-group kimi-k25-lora
    --disable-wandb-random-suffix
 )

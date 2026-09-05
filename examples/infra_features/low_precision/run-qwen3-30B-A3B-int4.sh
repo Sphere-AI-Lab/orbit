@@ -24,13 +24,13 @@ fi
 echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MODEL_ARGS_LINE="$(python3 "${SCRIPT_DIR}/../../../miles/utils/external_utils/model_args_utils.py" "qwen3-30B-A3B")" || exit 1
+MODEL_ARGS_LINE="$(python3 "${SCRIPT_DIR}/../../../orbit/utils/external_utils/model_args_utils.py" "qwen3-30B-A3B")" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 CKPT_ARGS=(
    --hf-checkpoint /root/Qwen3-30B-A3B-INT4/
    --ref-load /root/Qwen3-30B-A3B_torch_dist/
-   --load /root/Qwen3-30B-A3B_miles/
-   --save /root/Qwen3-30B-A3B_miles/
+   --load /root/Qwen3-30B-A3B_orbit/
+   --save /root/Qwen3-30B-A3B_orbit/
    --save-interval 20
 )
 
@@ -105,7 +105,7 @@ OPTIMIZER_ARGS=(
 
 WANDB_ARGS=(
    # --use-wandb
-   # --wandb-project miles-dev
+   # --wandb-project orbit-dev
    # --wandb-group qwen3-30B-A3B-test
    # --wandb-key ${WANDB_KEY}
 )

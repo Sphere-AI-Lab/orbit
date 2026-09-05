@@ -11,8 +11,8 @@ import torch
 import torch.distributed.checkpoint as dist_cp
 from typing_extensions import override
 
-from miles.backends.megatron_utils.megatron_to_hf import convert_to_hf, remove_padding
-from miles.utils.hf_config import load_hf_config
+from orbit.backends.megatron_utils.megatron_to_hf import convert_to_hf, remove_padding
+from orbit.utils.hf_config import load_hf_config
 
 
 class UnpicklerWrapper(pickle.Unpickler):
@@ -103,7 +103,7 @@ def get_named_params(args, state_dict):
 
 
 def save_tensors(args, model_name, state_dict, output_dir, chunk_size, vocab_size=None):
-    # for miles update_weight compatible
+    # for orbit update_weight compatible
     args.sglang_enable_ep_moe = False
 
     print(f"start saving to {output_dir}")

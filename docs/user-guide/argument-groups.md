@@ -1,8 +1,8 @@
 ---
 title: Argument Groups
-description: The launch-script argument groups used by Miles recipes, with links to the flags that belong in each group.
+description: The launch-script argument groups used by Orbit recipes, with links to the flags that belong in each group.
 ---
-Miles launch scripts are Python (`scripts/run_*.py`). The grouping is deliberately
+Orbit launch scripts are Python (`scripts/run_*.py`). The grouping is deliberately
 boring: each script builds one string per operational concern, concatenates them into
 `train_args`, and hands that to `execute_train`, which submits `train.py` or
 `train_async.py` as a Ray job.
@@ -43,7 +43,7 @@ Common entries:
 | Tokenizer/model dimensions | `--seq-length`, `--max-position-embeddings`, `--vocab-size` |
 | Rotary and attention variants | `--rotary-base`, `--rotary-percent`, `--kv-channels` |
 | MoE architecture | `--num-experts`, `--moe-router-topk`, `--moe-grouped-gemm` |
-| Plugin specs | `--spec miles_plugins.models.qwen3_5 get_qwen3_5_spec` |
+| Plugin specs | `--spec orbit_plugins.models.qwen3_5 get_qwen3_5_spec` |
 
 Keep these values aligned with the checkpoint's `config.json`. If one checkpoint in a
 family changes rotary base, vocab padding, or normalization epsilon, override the
@@ -62,7 +62,7 @@ sourced defaults in the launch script.
 | Actor output directory | `--save` |
 
 `--load` and `--save` usually point to the same directory. If `--load` has no
-`latest_checkpointed_iteration.txt`, Miles warm-starts the actor from `--ref-load`.
+`latest_checkpointed_iteration.txt`, Orbit warm-starts the actor from `--ref-load`.
 
 <a id="rollout-args"></a>
 ## `rollout_args` - sampling and reward
@@ -155,7 +155,7 @@ constant schedule unless the model page says otherwise.
 <a id="sglang-args"></a>
 ## `sglang_args` - rollout engine passthrough
 
-`sglang_args` configures the inference side. Miles owns
+`sglang_args` configures the inference side. Orbit owns
 `--rollout-num-gpus-per-engine`; everything prefixed with `--sglang-` is forwarded to
 `python -m sglang.launch_server` after removing the prefix.
 
@@ -188,7 +188,7 @@ Common entries:
 | Colocation | `--colocate` |
 | Numerics pinned by the recipe | `--attention-dropout 0.0`, `--hidden-dropout 0.0`, `--attention-softmax-in-fp32`, `--accumulate-allreduce-grads-in-fp32` |
 | Attention kernel | `--attention-backend` |
-| Observability | `--use-miles-dashboard`, `--dump-details` |
+| Observability | `--use-orbit-dashboard`, `--dump-details` |
 
 Under `--colocate` the actor and the engines share the same GPUs and take turns, so
 `--rollout-num-gpus` is ignored; see

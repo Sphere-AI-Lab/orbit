@@ -21,7 +21,7 @@ import os
 from tests.ci.ci_register import register_cuda_ci, register_rocm_ci
 from tests.ci.metric_history import register_ci_gate
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 register_cuda_ci(est_time=2400, suite="stage-c-8-gpu-h200", labels=["megatron", "eval", "fully-async"])
 register_rocm_ci(est_time=1500, suite="nightly-stage-c-8-gpu-mi350", labels=["megatron", "eval", "fully-async"])
@@ -32,7 +32,7 @@ register_ci_gate(metric_key="train/train_rollout_logprob_abs_diff")
 register_ci_gate(metric_key="train/train_rollout_kl")
 register_ci_gate(metric_key="rollout/raw_reward")
 
-FEW_GPU = U.get_bool_env_var("MILES_TEST_FEW_GPU", "0")
+FEW_GPU = U.get_bool_env_var("ORBIT_TEST_FEW_GPU", "0")
 
 MODEL_NAME = "Qwen3-4B"
 MODEL_TYPE = "qwen3-4B"
@@ -88,13 +88,13 @@ def execute(eval_mode: str):
     rollout_num_gpus = NUM_GPUS - ACTOR_GPUS
     eval_env = {}
     if eval_mode != "shared":
-        eval_args += "--eval-hf-dir /dev/shm/miles_eval_hf --eval-keep-snapshots 2 "
+        eval_args += "--eval-hf-dir /dev/shm/orbit_eval_hf --eval-keep-snapshots 2 "
         rollout_num_gpus -= 1
     if eval_mode == "fleet":
         eval_args += "--eval-num-gpus 1 --eval-num-gpus-per-engine 1 "
     elif eval_mode == "external":
         eval_args += "--eval-function-path examples.infra_features.fully_async.external_eval_fn.ExternalSglangEvalFn "
-        eval_env = {"MILES_EXTERNAL_EVAL_GPUS": str(NUM_GPUS - 1)}
+        eval_env = {"ORBIT_EXTERNAL_EVAL_GPUS": str(NUM_GPUS - 1)}
 
     perf_args = (
         "--tensor-model-parallel-size 2 "

@@ -8,12 +8,12 @@ import pytest
 import ray
 from tests.fast.ray.train.dummy_actor import DummyTrainActor
 
-from miles.backends.megatron_utils.ft.types import TrainStepOutcome
-from miles.ray.train.group import RayTrainGroup, _paused_health_checkers
-from miles.utils.audit_utils.event_logger.logger import EventLogger, read_events, set_event_logger
-from miles.utils.audit_utils.event_logger.models import CellReconfigureEvent
-from miles.utils.audit_utils.process_identity import MainProcessIdentity
-from miles.utils.audit_utils.witness.allocator import WitnessIdAllocator
+from orbit.backends.megatron_utils.ft.types import TrainStepOutcome
+from orbit.ray.train.group import RayTrainGroup, _paused_health_checkers
+from orbit.utils.audit_utils.event_logger.logger import EventLogger, read_events, set_event_logger
+from orbit.utils.audit_utils.event_logger.models import CellReconfigureEvent
+from orbit.utils.audit_utils.process_identity import MainProcessIdentity
+from orbit.utils.audit_utils.witness.allocator import WitnessIdAllocator
 
 pytestmark = pytest.mark.asyncio
 
@@ -62,7 +62,7 @@ def _patch_actor_alloc():
         actor_count = max(int(gpus_per_cell // num_gpus_per_actor), 1)
         return [DummyTrainActor.remote() for _ in range(actor_count)]
 
-    with patch("miles.ray.train.group.allocate_gpus_for_actor", side_effect=_alloc):
+    with patch("orbit.ray.train.group.allocate_gpus_for_actor", side_effect=_alloc):
         yield
 
 
@@ -951,7 +951,7 @@ class TestAllocateWitnessInfo:
         group = _make_group(num_cells=1)
         group._witness_allocator = WitnessIdAllocator(buffer_size=100)
 
-        with patch("miles.ray.train.group.is_event_logger_initialized", return_value=False):
+        with patch("orbit.ray.train.group.is_event_logger_initialized", return_value=False):
             result = group._allocate_witness_info(rollout_id=0, attempt=0, sample_indices=[10, 20, 30])
 
         assert result is not None
@@ -978,8 +978,8 @@ class TestLogStepEndEvent:
             [TrainStepOutcome.NORMAL],
         ]
 
-        with patch("miles.ray.train.group.is_event_logger_initialized", return_value=True), patch(
-            "miles.ray.train.group.get_event_logger"
+        with patch("orbit.ray.train.group.is_event_logger_initialized", return_value=True), patch(
+            "orbit.ray.train.group.get_event_logger"
         ) as mock_get_logger:
             mock_logger = MagicMock()
             mock_get_logger.return_value = mock_logger
@@ -1021,7 +1021,7 @@ class TestMaybeLogInferenceEngineWeightChecksums:
         rollout_mgr.check_weights = MagicMock()
         group = _make_group(num_cells=1, rollout_manager=rollout_mgr)
 
-        with patch("miles.ray.train.group.is_event_logger_initialized", return_value=False):
+        with patch("orbit.ray.train.group.is_event_logger_initialized", return_value=False):
             await group._maybe_log_inference_engine_weight_checksums(rollout_id=0)
 
         rollout_mgr.check_weights.assert_not_called()
@@ -1032,8 +1032,8 @@ class TestMaybeLogInferenceEngineWeightChecksums:
         rollout_mgr.check_weights.remote = AsyncMock(return_value=_checksum_response([{"w": "e0"}]))
         group = _make_group(num_cells=1, rollout_manager=rollout_mgr)
 
-        with patch("miles.ray.train.group.is_event_logger_initialized", return_value=True), patch(
-            "miles.ray.train.group.get_event_logger"
+        with patch("orbit.ray.train.group.is_event_logger_initialized", return_value=True), patch(
+            "orbit.ray.train.group.get_event_logger"
         ) as mock_get_logger:
             mock_logger = MagicMock()
             mock_get_logger.return_value = mock_logger
@@ -1051,7 +1051,7 @@ class TestMaybeLogInferenceEngineWeightChecksums:
         group = _make_group(num_cells=1, rollout_manager=rollout_mgr)
         group.args.debug_train_only = True
 
-        with patch("miles.ray.train.group.is_event_logger_initialized", return_value=True):
+        with patch("orbit.ray.train.group.is_event_logger_initialized", return_value=True):
             await group._maybe_log_inference_engine_weight_checksums(rollout_id=0)
 
         rollout_mgr.check_weights.assert_not_called()
@@ -1063,7 +1063,7 @@ class TestMaybeLogInferenceEngineWeightChecksums:
         group = _make_group(num_cells=1, rollout_manager=rollout_mgr)
         group.args.debug_rollout_only = True
 
-        with patch("miles.ray.train.group.is_event_logger_initialized", return_value=True):
+        with patch("orbit.ray.train.group.is_event_logger_initialized", return_value=True):
             await group._maybe_log_inference_engine_weight_checksums(rollout_id=0)
 
         rollout_mgr.check_weights.assert_not_called()
@@ -1074,8 +1074,8 @@ class TestMaybeLogInferenceEngineWeightChecksums:
         rollout_mgr.check_weights.remote = AsyncMock(return_value=_checksum_response([{"w": "e0"}, {"w": "e1"}]))
         group = _make_group(num_cells=1, rollout_manager=rollout_mgr)
 
-        with patch("miles.ray.train.group.is_event_logger_initialized", return_value=True), patch(
-            "miles.ray.train.group.get_event_logger"
+        with patch("orbit.ray.train.group.is_event_logger_initialized", return_value=True), patch(
+            "orbit.ray.train.group.get_event_logger"
         ) as mock_get_logger:
             mock_logger = MagicMock()
             mock_get_logger.return_value = mock_logger

@@ -1,6 +1,6 @@
 """Tests for event_analyzer rules/checksum_compare shared primitives."""
 
-from miles.utils.audit_utils.event_analyzer.rules.checksum_compare import compare_flat_dicts, flatten_nested
+from orbit.utils.audit_utils.event_analyzer.rules.checksum_compare import compare_flat_dicts, flatten_nested
 
 
 class TestCompareFlatDicts:

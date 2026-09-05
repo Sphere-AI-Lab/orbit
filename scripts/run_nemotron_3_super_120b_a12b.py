@@ -19,7 +19,7 @@ Args:
   --num-nodes / --num-gpus-per-node: Cluster shape (default: 2 x 8).
   --num-rollout: Rollout steps (default: 10, i.e. the smoke test).
   --model-dir / --data-dir: Checkpoint / dataset directories. On the cluster these are
-      /cluster_public/miles_data/models and /cluster_public/miles_data/datasets.
+      /cluster_public/orbit_data/models and /cluster_public/orbit_data/datasets.
 
 =====================
 
@@ -34,7 +34,7 @@ from dataclasses import dataclass
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 app = typer.Typer()
 
@@ -201,7 +201,7 @@ def train(args: ScriptArgs):
 def worker(args: ScriptArgs):
     """Worker role: join the head's ray cluster and block."""
     # A re-run inherits the previous run's agents, and ray refuses to join with them alive.
-    U.exec_command_cpu("pkill -9 sglang; sleep 3; ray stop --force; pkill -9 ray; pkill -9 miles; sleep 3; true; ")
+    U.exec_command_cpu("pkill -9 sglang; sleep 3; ray stop --force; pkill -9 ray; pkill -9 orbit; sleep 3; true; ")
     _wait_for_head_port(args.head_ip)
     U.exec_command_cpu(
         f"ray start --address={args.head_ip}:6379 "

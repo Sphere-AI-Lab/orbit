@@ -10,7 +10,7 @@ import typer
 from tests.e2e.ft.conftest_ft.app import resolve_dump_dir
 from tests.e2e.ft.conftest_ft.fault_injection import CONTROL_SERVER_PORT, MEAN_INTERVAL_SECONDS, spawn_fault_injector
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 app: typer.Typer = typer.Typer()
 
@@ -61,7 +61,7 @@ def run_ci(
             extra_env_vars={
                 # --ft-components train depends on cell-based indep_dp, which only
                 # the v2 RayTrainGroup supports.
-                "MILES_EXPERIMENTAL_FT_TRAINER": "1",
+                "ORBIT_EXPERIMENTAL_FT_TRAINER": "1",
                 # Same as run_training: a cell respawned after a crash cold-recompiles
                 # its first forward, which is slow and memory-heavy enough to OOM.
                 "TORCHDYNAMO_DISABLE": "1",
@@ -84,7 +84,7 @@ def _prepare_gsm8k() -> None:
         num_gpus_per_node=_TRAIN_GPUS,
         hf_checkpoint=f"/root/models/{_MODEL_NAME}",
         dir_dst="/root/models",
-        megatron_path=os.environ.get("MILES_SCRIPT_MEGATRON_PATH", "/root/Megatron-LM"),
+        megatron_path=os.environ.get("ORBIT_SCRIPT_MEGATRON_PATH", "/root/Megatron-LM"),
     )
     U.hf_download_dataset("zhuzilin/gsm8k")
 
@@ -105,7 +105,7 @@ def _get_gsm8k_train_args(*, seed: int, num_rollout: int, metric_threshold: floa
         "--rollout-max-response-len 1024 "
         "--rollout-temperature 1 "
         "--over-sampling-batch-size 64 "
-        "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
+        "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
         "--global-batch-size 256 "
     )
 

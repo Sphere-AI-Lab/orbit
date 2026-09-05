@@ -1,7 +1,7 @@
-"""Thin bridge between VAGEN `GymImageEnv` and the miles rollout path.
+"""Thin bridge between VAGEN `GymImageEnv` and the orbit rollout path.
 
 `vagen.agent_loop.gym_agent_loop` imports VERL at the top, which is not in
-the miles env, so we keep a local copy of the three helpers we need
+the orbit env, so we keep a local copy of the three helpers we need
 (`_normalize_images`, `convert_obs_to_content`, `extract_success`). See
 `examples/vagen/docs/rollout.md` (env_adapter local copy).
 """

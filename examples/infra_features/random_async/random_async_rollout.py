@@ -37,10 +37,10 @@ import numpy as np
 import pybase64
 from random_async_sglang_metrics import SGLangMetricsReporter, record_agent_request
 
-from miles.rollout.data_source import DataSource
-from miles.utils.async_utils import run
-from miles.utils.http_utils import post as http_post
-from miles.utils.types import Sample
+from orbit.rollout.data_source import DataSource
+from orbit.utils.async_utils import run
+from orbit.utils.http_utils import post as http_post
+from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +267,7 @@ atexit.register(stop_global_worker)
 class AsyncRandomRolloutWorker:
     """Background asyncio loop that fills an output queue with random sample groups.
 
-    Mirrors the worker inside ``miles.rollout.fully_async_rollout.FullyAsyncRolloutFn`` but
+    Mirrors the worker inside ``orbit.rollout.fully_async_rollout.FullyAsyncRolloutFn`` but
     skips the data buffer and reward model entirely.
     """
 

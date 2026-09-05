@@ -6,8 +6,8 @@ import pytest
 import torch
 from tests.fast.dashboard.dummy_dump import dump_dummy_run
 
-from miles.dashboard.dump_reader import DumpReader, DumpStillWriting, TrainRow
-from miles.utils.types import Sample
+from orbit.dashboard.dump_reader import DumpReader, DumpStillWriting, TrainRow
+from orbit.utils.types import Sample
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ def test_load_joined_full_coverage(run):
         assert set(joined.train_rows) == {s.index for s in joined.samples}
         assert all(isinstance(s, Sample) for s in joined.samples)
         assert all(isinstance(r, TrainRow) for r in joined.train_rows.values())
-    # Sample deserialization went through miles' own from_dict: enums restored.
+    # Sample deserialization went through orbit' own from_dict: enums restored.
     statuses = {s.status for s in reader.load_joined(0).samples}
     assert statuses <= {Sample.Status.COMPLETED, Sample.Status.TRUNCATED}
 
@@ -172,11 +172,11 @@ def test_empty_dump_dir(tmp_path):
 
 
 @pytest.mark.skipif(
-    "MILES_DASHBOARD_REALDATA_DIR" not in os.environ,
-    reason="set MILES_DASHBOARD_REALDATA_DIR to a real --dump-details dir",
+    "ORBIT_DASHBOARD_REALDATA_DIR" not in os.environ,
+    reason="set ORBIT_DASHBOARD_REALDATA_DIR to a real --dump-details dir",
 )
 def test_realdata_join():
-    reader = DumpReader(os.environ["MILES_DASHBOARD_REALDATA_DIR"])
+    reader = DumpReader(os.environ["ORBIT_DASHBOARD_REALDATA_DIR"])
     ids = reader.rollout_ids()
     assert ids.train, "no rollout dumps found"
     for rollout_id in ids.train:

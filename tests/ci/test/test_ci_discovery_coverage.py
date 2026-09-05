@@ -31,7 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # decision to defend in review, not a formality.
 _KNOWN_ORPHANS = {
     # TODO(#2557): move it under tests/ and delete this entry.
-    "miles/utils/test_wandb_utils.py",
+    "orbit/utils/test_wandb_utils.py",
 }
 
 

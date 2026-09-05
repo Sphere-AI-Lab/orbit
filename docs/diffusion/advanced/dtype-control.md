@@ -48,7 +48,7 @@ The base class defaults to passthrough on all three, but the model family dtypes
 `TrainPipelineConfig` are aligned with sglang-d by default. LTX-2 is the current example:
 
 ```python
-# miles/backends/fsdp_utils/configs/ltx.py
+# orbit/backends/fsdp_utils/configs/ltx.py
 input_dtype_policy = {"latents": "default", "cond": "default", "timestep": None}
 ```
 
@@ -67,7 +67,7 @@ is per-wrap, not per-parameter, so miles-diffusion adds a targeted patch.
 A model's `FSDPParallelPlan` carries FQN glob patterns, matched against **root-relative** names:
 
 ```python
-# miles/backends/fsdp_utils/models/diffusers/wan2_2/parallel_plan.py
+# orbit/backends/fsdp_utils/models/diffusers/wan2_2/parallel_plan.py
 FSDP_PARALLEL_PLAN = FSDPParallelPlan(
     param_dtype_patterns={
         "*.norm2.*": "fp32",
@@ -87,7 +87,7 @@ is renamed.
 
 ### How it is compiled
 
-`compile_param_dtype_maps` (`miles/backends/fsdp_utils/mixed_precision.py`) does two passes:
+`compile_param_dtype_maps` (`orbit/backends/fsdp_utils/mixed_precision.py`) does two passes:
 
 ```mermaid
 flowchart LR

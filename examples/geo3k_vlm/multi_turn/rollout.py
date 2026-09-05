@@ -11,10 +11,10 @@ from examples.geo3k_vlm.multi_turn.base_env import BaseInteractionEnv
 from examples.model_response_trace_viewer.response_log import RESPONSE_TURNS_KEY
 
 # When executed as a module: python -m examples.geo3k_vlm.multi_turn.rollout
-from miles.rollout.sglang_rollout import GenerateState
-from miles.utils.http_utils import post
-from miles.utils.processing_utils import encode_image_for_rollout_engine
-from miles.utils.types import Sample
+from orbit.rollout.sglang_rollout import GenerateState
+from orbit.utils.http_utils import post
+from orbit.utils.processing_utils import encode_image_for_rollout_engine
+from orbit.utils.types import Sample
 
 DEFAULT_ENV_MODULE = "examples.geo3k_vlm.multi_turn.env_geo3k"
 
@@ -264,7 +264,7 @@ def _record_response_turn(
     """Append a turn to the viewer's record, if any trace output is enabled.
 
     Turns live on ``Sample.metadata`` so this stays a customization-layer
-    feature: nothing in ``miles/`` has to know the viewer exists.
+    feature: nothing in ``orbit/`` has to know the viewer exists.
     """
     if (
         getattr(args, "save_model_response_log", None) is None
@@ -445,14 +445,14 @@ async def generate(args: Any, sample: Sample, sampling_params) -> Sample:
                     "weight_version": meta_info.get("weight_version"),
                 },
             )
-            # Miles' multi-turn logger consumes this top-level field after
+            # Orbit' multi-turn logger consumes this top-level field after
             # rollout conversion. It is telemetry only and does not affect
             # rewards, masks, scoring, or the trainer objective.
             sample.metadata["round_number"] = turn_idx + 1
             # Record this generation call's engine weight version. SGLang issues one call
             # per turn, so we append each one (weight_versions is a list); the min across
             # turns (Sample.oldest_weight_version) is what the fully-async staleness filter
-            # reads (miles/rollout/fully_async_data_buffer.py). Without this the list
+            # reads (orbit/rollout/fully_async_data_buffer.py). Without this the list
             # stays empty -> oldest_weight_version is None -> the staleness filter silently
             # never fires. We intentionally do NOT call the full Sample.update_from_meta_info
             # here: its finish_reason->status mapping (incl. "stop" -> COMPLETED) is

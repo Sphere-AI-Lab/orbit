@@ -1,6 +1,6 @@
 import os
 
-if os.getenv("MILES_HARDWARE_PLATFORM") == "rocm":
+if os.getenv("ORBIT_HARDWARE_PLATFORM") == "rocm":
     from scripts.amd.run_deepseek_v4 import ScriptArgs, _prepare_download, _prepare_single, _prepare_spmd, _train
 else:
     from scripts.run_deepseek_v4 import ScriptArgs, _prepare_download, _prepare_single, _prepare_spmd, _train

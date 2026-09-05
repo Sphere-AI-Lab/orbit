@@ -3,10 +3,10 @@ title: Customization
 description: Plug-points where you can drop in your own Python without forking miles-diffusion.
 ---
 Most of miles-diffusion's behavior can be replaced with user-supplied Python by
-passing a `--*-path` flag (loaded via `miles.utils.misc.load_function` as a
+passing a `--*-path` flag (loaded via `orbit.utils.misc.load_function` as a
 dotted import path). This page lists the diffusion-relevant hooks, the
 signatures they expect, and the defaults they replace — in the same spirit as
-[Miles customization](https://miles.radixark.com/docs/user-guide/customization).
+[Orbit customization](https://spherelab.ai/orbit/user-guide/customization).
 
 ## At a glance
 
@@ -42,7 +42,7 @@ shortcut that auto-fills several of the train-side paths; see § Training.
 ### `--rollout-function-path`
 
 Replace the entire train rollout. Diffusion recipes use
-`miles.rollout.sglang_diffusion_rollout.generate_rollout` (not the LLM default).
+`orbit.rollout.sglang_diffusion_rollout.generate_rollout` (not the LLM default).
 
 ```python
 def generate_rollout(
@@ -51,9 +51,9 @@ def generate_rollout(
     ...
 ```
 
-`miles/ray/rollout.py` passes the data source positionally through `call_rollout_fn`.
+`orbit/ray/rollout.py` passes the data source positionally through `call_rollout_fn`.
 Legacy list/dict returns are still wrapped into the corresponding output dataclass by
-`miles.rollout.base_types.call_rollout_fn`.
+`orbit.rollout.base_types.call_rollout_fn`.
 
 ### `--eval-function-path`
 
@@ -63,7 +63,7 @@ unset.
 ### `--data-source-path`
 
 **Class** (not a function). Default:
-`miles.rollout.data_source.RolloutDataSourceWithBuffer`.
+`orbit.rollout.data_source.RolloutDataSourceWithBuffer`.
 
 ```python
 class CustomDataSource:
@@ -91,7 +91,7 @@ async def custom_generate(
 ### `--diffusion-step-strategy-path`
 
 Select which denoising steps contribute SDE log-probs / train pairs. Stock
-implementations live in `miles/rollout/step_strategy_hub.py`.
+implementations live in `orbit/rollout/step_strategy_hub.py`.
 
 ```python
 def strategy(args, sample, num_steps, seed) -> tuple[list[int] | None, list[int] | None]:
@@ -129,11 +129,11 @@ batched function if needed.
 
 HTTP / remote scoring: implement a batched custom RM and read `args.rm_url` (or
 your own flags). Encode images from `sample.generated_output` (see
-`_sample_to_rgb_hwc_uint8_frames` in `miles/rollout/rm_hub/pickscore.py`):
+`_sample_to_rgb_hwc_uint8_frames` in `orbit/rollout/rm_hub/pickscore.py`):
 
 ```python
 import aiohttp
-from miles.utils.types import Sample
+from orbit.utils.types import Sample
 
 async def api_rm(args, samples: list[Sample], **kwargs) -> list[float]:
     async with aiohttp.ClientSession() as session:
@@ -173,7 +173,7 @@ switches per-group std to batch-wide).
 ### `--dynamic-sampling-filter-path`
 
 Per-group filter after scoring (DAPO-style). Stock:
-`miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std`.
+`orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std`.
 
 ```python
 def filter_function(args, samples: list[Sample], **kwargs):
@@ -184,7 +184,7 @@ def filter_function(args, samples: list[Sample], **kwargs):
 ### `--buffer-filter-path`
 
 Select samples when dequeuing from the rollout buffer. Default is `pop_first`
-in `miles/rollout/data_source.py`.
+in `orbit/rollout/data_source.py`.
 
 ```python
 def buffer_filter(
@@ -229,7 +229,7 @@ def expand_samples_to_train_pairs(args, samples, rewards, raw_rewards) -> dict:
     ...
 ```
 
-Default for Flow-GRPO lives under `miles/ray/data_conversion_hub/flow_grpo.py`.
+Default for Flow-GRPO lives under `orbit/ray/data_conversion_hub/flow_grpo.py`.
 
 ### `--custom-convert-samples-to-train-data-path`
 
@@ -250,7 +250,7 @@ def prepare(ctx, batch, *, pad_to_len=None) -> PreparedBatch:
 ```
 
 Builds DiT inputs from train pairs. Defaults:
-`miles.backends.fsdp_utils.loss_hub.flow_grpo.prepare_flow_grpo_batch` or the NFT
+`orbit.backends.fsdp_utils.loss_hub.flow_grpo.prepare_flow_grpo_batch` or the NFT
 equivalent under `loss_hub.nft`.
 
 ### `--custom-loss-function-path`

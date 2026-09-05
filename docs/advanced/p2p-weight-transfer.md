@@ -3,7 +3,7 @@ title: P2P Weight Transfer
 description: Direct rank-to-rank weight sync from actor to rollout via RDMA writes.
 corresponding author: Jiadong Guo (JD-ETH)
 ---
-miles supports P2P (point-to-point) weight transfer between training and rollout engines. By using `--update-weight-transfer-mode p2p`, miles enables more efficient weight transfer from training ranks to rollout engine ranks. More details on the design and implementation can be found in [this issue](https://github.com/radixark/miles/issues/755).
+orbit supports P2P (point-to-point) weight transfer between training and rollout engines. By using `--update-weight-transfer-mode p2p`, orbit enables more efficient weight transfer from training ranks to rollout engine ranks. More details on the design and implementation can be found in [this issue](https://github.com/radixark/miles/issues/755).
 
 ## Usage
 
@@ -15,7 +15,7 @@ To enable P2P weight transfer, add the following flag to your training command:
 
 ## How It Works
 
-The default weight transfer mode in miles is `broadcast`: after training, updated weights are broadcast via NCCL to all rollout engine ranks. This works but does not fully utilize the available bandwidth, as redundant copies of the same weights are transferred to multiple ranks.
+The default weight transfer mode in orbit is `broadcast`: after training, updated weights are broadcast via NCCL to all rollout engine ranks. This works but does not fully utilize the available bandwidth, as redundant copies of the same weights are transferred to multiple ranks.
 
 P2P mode addresses this by having each training rank transfer only the specific weight shards required by its target rollout engine rank(s), writing them directly to remote memory without redundant copies. The key steps are:
 
@@ -32,7 +32,7 @@ P2P mode addresses this by having each training rank transfer only the specific 
 
 ## Architecture
 
-Both broadcast and P2P modes share the same bucketed weight-update pipeline in `miles/backends/megatron_utils/update_weight/`. The diagram below shows which components are shared and which are P2P-specific.
+Both broadcast and P2P modes share the same bucketed weight-update pipeline in `orbit/backends/megatron_utils/update_weight/`. The diagram below shows which components are shared and which are P2P-specific.
 
 ### Shared components (broadcast & P2P)
 
@@ -40,7 +40,7 @@ Both broadcast and P2P modes share the same bucketed weight-update pipeline in `
 |---|---|
 | **TP/EP all-gather** | Megatron TP shards are all-gathered within each PP stage; EP shards are gathered per-bucket when the accumulated expert data exceeds `buffer_size * ep_size`. Both modes perform this identically via `common.py`. |
 | **Bucketed update** | Weights are not transferred one parameter at a time. Instead, converted tensors are accumulated into a fixed-size buffer (`--update-weight-buffer-size`, default 512 MB). When the buffer is full, the entire bucket is flushed — via NCCL broadcast or RDMA write depending on the mode. This amortizes per-transfer overhead. Non-expert and expert weights use separate buckets. |
-| **PP independence** | Each pipeline-parallel stage updates its own weights independently. In broadcast mode, each PP rank has its own NCCL group (`miles-pp_{pp_rank}`). In P2P mode, each PP rank has its own transfer plan. No cross-PP synchronization is needed during weight transfer, which is key to scaling. |
+| **PP independence** | Each pipeline-parallel stage updates its own weights independently. In broadcast mode, each PP rank has its own NCCL group (`orbit-pp_{pp_rank}`). In P2P mode, each PP rank has its own transfer plan. No cross-PP synchronization is needed during weight transfer, which is key to scaling. |
 | **HF format conversion** | After all-gather, Megatron-format tensors (with custom naming and sharding) are converted to HuggingFace-format names expected by the sglang rollout engine. |
 
 ### P2P-specific components

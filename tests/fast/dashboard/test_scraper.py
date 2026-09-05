@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from miles.dashboard.sglang_scraper import DEFAULT_METRIC_WHITELIST, ScrapeMode, SglangScraper
-from miles.dashboard.store import EngineSample
+from orbit.dashboard.sglang_scraper import DEFAULT_METRIC_WHITELIST, ScrapeMode, SglangScraper
+from orbit.dashboard.store import EngineSample
 
 FIXTURES = Path(__file__).parent / "fixtures"
 ROUTER_TEXT = (FIXTURES / "engine_metrics_router.txt").read_text()

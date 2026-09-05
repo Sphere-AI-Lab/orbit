@@ -7,7 +7,7 @@ from tests.ci.ci_register import register_cpu_ci
 
 register_cpu_ci(est_time=60, suite="stage-a-cpu", labels=[])
 
-from miles.utils.tensor_backper import MainCastContext, TensorBackuper, _TensorBackuperMainCast
+from orbit.utils.tensor_backper import MainCastContext, TensorBackuper, _TensorBackuperMainCast
 
 
 @pytest.fixture(autouse=True)

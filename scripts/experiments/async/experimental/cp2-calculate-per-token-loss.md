@@ -23,9 +23,9 @@ still asserted — that is the real bug below).
 
 Qwen3-VL's Megatron-Bridge model hard-requires `config.calculate_per_token_loss == True`
 whenever `cp.size() > 1` (`model.py:203`). The flag is reaching the *args* but not
-the *model config*, because miles builds the config two different ways:
+the *model config*, because orbit builds the config two different ways:
 
-- **Non-bridge path** (`miles/backends/megatron_utils/model_provider.py:181`):
+- **Non-bridge path** (`orbit/backends/megatron_utils/model_provider.py:181`):
   `config = core_transformer_config_from_args(args)` — copies **all** Megatron
   training-time args (incl. `calculate_per_token_loss`) into the `TransformerConfig`. ✅
 - **Bridge path** (VLM; `model_provider.py:90-93`):
@@ -39,7 +39,7 @@ the *model config*, because miles builds the config two different ways:
   `calculate_per_token_loss`, so that field stays at the dataclass default **`False`**.
 
 So: `args.calculate_per_token_loss == True` (parsed correctly, and used in the loss
-math under `miles/backends/training_utils/...`), but `provider.calculate_per_token_loss
+math under `orbit/backends/training_utils/...`), but `provider.calculate_per_token_loss
 == False` (what the model actually sees) → assert fires under CP>1.
 
 Confirmed on 21105: arg dump shows `calculate_per_token_loss ... True`, yet the

@@ -3,7 +3,7 @@
 Under context parallelism each rank's THD row holds only its zigzag chunks of every packed
 segment. `_reassemble_full_row` de-interleaves the all-gathered per-rank rows back to the
 full natural-order row so per-segment MRoPE positions can be rebuilt and re-sliced. This
-test checks that reconstruction is the exact inverse of `slice_with_cp` (the function miles
+test checks that reconstruction is the exact inverse of `slice_with_cp` (the function orbit
 uses to shard the tokens), and that re-slicing with `_natural_to_zigzag_slice` round-trips.
 """
 
@@ -14,8 +14,8 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from miles_plugins.models import qwen3_vl
-from miles_plugins.models.qwen3_vl import _natural_to_zigzag_slice, _reassemble_full_row
+from orbit_plugins.models import qwen3_vl
+from orbit_plugins.models.qwen3_vl import _natural_to_zigzag_slice, _reassemble_full_row
 
 
 def _slice_with_cp(tokens, cp_size, cp_rank, pad_value=0):
@@ -31,7 +31,7 @@ def _slice_with_cp(tokens, cp_size, cp_rank, pad_value=0):
 
 
 def _build_like_get_batch(sample_lens, cp_size, pad_size=8):
-    """Mimic miles get_batch THD+CP packing: per-sample zigzag slice, concat, pad, cu*cp."""
+    """Mimic orbit get_batch THD+CP packing: per-sample zigzag slice, concat, pad, cu*cp."""
     samples = []
     base = 1
     for L in sample_lens:

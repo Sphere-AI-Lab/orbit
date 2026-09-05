@@ -4,12 +4,12 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from miles_plugins.envpack_adapter.config import EnvpackConfigError, load_envpack_config, validate_runtime_args
-from miles_plugins.envpack_adapter.runtime import (
+from orbit_plugins.envpack_adapter.config import EnvpackConfigError, load_envpack_config, validate_runtime_args
+from orbit_plugins.envpack_adapter.runtime import (
     build_in_process_client,
     build_session_client,
     get_client_bundle,
-    resolve_miles_active_episode_capacity,
+    resolve_orbit_active_episode_capacity,
     resolve_pool_runtime_demand,
 )
 
@@ -146,8 +146,8 @@ class EnvpackConfigTest(unittest.TestCase):
             custom_rm_path=None,
             rollout_external=False,
             use_rollout_routing_replay=False,
-            use_miles_router=True,
-            miles_router_middleware_paths=["miles.router.middleware_hub.radix_tree_middleware.RadixTreeMiddleware"],
+            use_orbit_router=True,
+            orbit_router_middleware_paths=["orbit.router.middleware_hub.radix_tree_middleware.RadixTreeMiddleware"],
         )
         config = load_envpack_config(args)
         with self.assertRaisesRegex(EnvpackConfigError, "RadixTreeMiddleware"):
@@ -164,7 +164,7 @@ class EnvpackConfigTest(unittest.TestCase):
         else:
             self.skipTest("envpack is importable in this environment")
 
-    def test_auto_runtime_demand_uses_miles_generate_slots(self) -> None:
+    def test_auto_runtime_demand_uses_orbit_generate_slots(self) -> None:
         args = SimpleNamespace(
             envpack={"api": "in_process", "env": "sokoban"},
             sglang_server_concurrency=32,
@@ -174,7 +174,7 @@ class EnvpackConfigTest(unittest.TestCase):
         config = load_envpack_config(args)
         pool = config.pool_for_env("sokoban")
 
-        self.assertEqual(resolve_miles_active_episode_capacity(args), 128)
+        self.assertEqual(resolve_orbit_active_episode_capacity(args), 128)
         self.assertEqual(
             resolve_pool_runtime_demand(args, pool),
             {"desired_concurrency": 128},

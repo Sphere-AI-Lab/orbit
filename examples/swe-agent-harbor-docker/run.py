@@ -1,4 +1,4 @@
-"""SWE-Agent launcher (GLM-4.7-Flash): Miles <-> Harbor orchestration.
+"""SWE-Agent launcher (GLM-4.7-Flash): Orbit <-> Harbor orchestration.
 
 Supports any task type (SWE-bench, Terminal-Bench, custom) via Harbor.
 
@@ -18,7 +18,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -55,8 +55,8 @@ class ScriptArgs(U.ExecuteTrainConfig):
     )
     agent_model_name: str = os.environ.get("AGENT_MODEL_NAME", "model")
     harbor_tasks_dir: str = os.environ.get("HARBOR_TASKS_DIR", "/root/harbor_tasks")
-    router_external_host: str = os.environ.get("MILES_ROUTER_EXTERNAL_HOST", socket.gethostname())  # public IP
-    miles_host_ip: str = os.environ.get("MILES_HOST_IP", "")  # optional cluster/pod IP override
+    router_external_host: str = os.environ.get("ORBIT_ROUTER_EXTERNAL_HOST", socket.gethostname())  # public IP
+    orbit_host_ip: str = os.environ.get("ORBIT_HOST_IP", "")  # optional cluster/pod IP override
 
     # W&B settings
     wandb_key: str = os.environ.get("WANDB_KEY", os.environ.get("WANDB_API_KEY", ""))
@@ -166,11 +166,11 @@ def execute(args: ScriptArgs):
     )
 
     agent_args = (
-        "--custom-generate-function-path miles.rollout.generate_hub.agentic_tool_call.generate "
+        "--custom-generate-function-path orbit.rollout.generate_hub.agentic_tool_call.generate "
         "--custom-agent-function-path swe_agent_function.run "
         "--custom-rm-path generate.reward_func "
         "--rollout-function-path generate.RolloutFn "
-        "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_no_aborted "
+        "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_no_aborted "
         "--tito-model glm47 "
         "--use-session-server "
         "--session-server-port 30000 "
@@ -228,17 +228,17 @@ def execute(args: ScriptArgs):
         f"{debug_args}"
     )
 
-    miles_root = U.repo_base_dir
+    orbit_root = U.repo_base_dir
 
     extra_env_vars = {
-        "PYTHONPATH": f"{args.megatron_path}:{SCRIPT_DIR}:{miles_root}",
+        "PYTHONPATH": f"{args.megatron_path}:{SCRIPT_DIR}:{orbit_root}",
         "AGENT_SERVER_URL": args.agent_server_url,
         "AGENT_MODEL_NAME": args.agent_model_name,
-        "MILES_ROUTER_EXTERNAL_HOST": args.router_external_host,
+        "ORBIT_ROUTER_EXTERNAL_HOST": args.router_external_host,
         "HARBOR_TASKS_DIR": args.harbor_tasks_dir,
     }
-    if args.miles_host_ip:
-        extra_env_vars["MILES_HOST_IP"] = args.miles_host_ip
+    if args.orbit_host_ip:
+        extra_env_vars["ORBIT_HOST_IP"] = args.orbit_host_ip
 
     U.execute_train(
         train_args=train_args,

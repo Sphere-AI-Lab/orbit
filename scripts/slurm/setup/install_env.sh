@@ -1,9 +1,9 @@
 #!/bin/bash
 #
-# install_env.sh — from-source conda env build for miles.
+# install_env.sh — from-source conda env build for orbit.
 #
 # Follows docs/getting-started/installation.md Method 2, extended with the
-# transitive deps that miles-imp recipes actually need at runtime — the bare
+# transitive deps that orbit recipes actually need at runtime — the bare
 # `pip install -r requirements.txt && pip install -e . --no-deps` from the
 # docs is NOT sufficient outside the radixark/miles docker base image.
 #
@@ -14,7 +14,7 @@
 #     runtime tree itself (fastapi/uvicorn/orjson/flashinfer/sglang-kernel/...)
 #     against the patched fork's own pyproject.toml.
 #   - mbridge          — tools/convert_hf_to_torch_dist.py imports it
-#   - torch_memory_saver — miles/backends/megatron_utils/actor.py imports it
+#   - torch_memory_saver — orbit/backends/megatron_utils/actor.py imports it
 #   - transformer_engine + source-built torch extension — Megatron training requires it
 #   - flash-attn 2/3   — `--attention-backend flash` and FA3-only Megatron paths
 #
@@ -30,10 +30,10 @@
 #   bash scripts/slurm/setup/install_env.sh
 #
 # Knobs (env vars, all optional):
-#   MILES_ENV_NAME    conda env name                       [miles]
-#   MILES_PY_VERSION  python version                       [3.12]
-#   MILES_REPO        this repo                            [$PWD]
-#   THIRDPARTY_DIR    submodule dir                        [$MILES_REPO/thirdparty]
+#   ORBIT_ENV_NAME    conda env name                       [orbit]
+#   ORBIT_PY_VERSION  python version                       [3.12]
+#   ORBIT_REPO        this repo                            [$PWD]
+#   THIRDPARTY_DIR    submodule dir                        [$ORBIT_REPO/thirdparty]
 #   PULL_REMOTE       `git submodule update --remote`?     [0]  set 1 to bump to branch HEAD
 #   CUDA_HOME         override system CUDA toolkit path    [auto-detected]
 #   CUDNN_CU12_VERSION override torch-declared cuDNN pin   [derived from torch]
@@ -51,10 +51,10 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 # --- Knobs (paths, names, feature toggles) -------------------------------
 
-MILES_ENV_NAME=${MILES_ENV_NAME:-miles}
-MILES_PY_VERSION=${MILES_PY_VERSION:-3.12}
-MILES_REPO=${MILES_REPO:-$PWD}
-THIRDPARTY_DIR=${THIRDPARTY_DIR:-$MILES_REPO/thirdparty}
+ORBIT_ENV_NAME=${ORBIT_ENV_NAME:-orbit}
+ORBIT_PY_VERSION=${ORBIT_PY_VERSION:-3.12}
+ORBIT_REPO=${ORBIT_REPO:-$PWD}
+THIRDPARTY_DIR=${THIRDPARTY_DIR:-$ORBIT_REPO/thirdparty}
 WHEELS_DIR=${WHEELS_DIR:-$THIRDPARTY_DIR/wheels}
 PULL_REMOTE=${PULL_REMOTE:-0}
 CONDA_ROOT=${CONDA_ROOT:-/data/shared/conda/miniconda3}
@@ -79,7 +79,7 @@ source "$SCRIPT_DIR/pins.env"
 # as a static snapshot, but MILES_WHEELS_TAG is independently overridable at runtime
 # (`MILES_WHEELS_TAG=... bash install_env.sh`). Without re-deriving, an override of the
 # tag would leave the torch/sglang fields stale and the ABI guard below would pass while
-# _fetch_miles_wheel pulls a mismatched-ABI wheel set. WHEELS_STACK in extract_pins.py is
+# _fetch_orbit_wheel pulls a mismatched-ABI wheel set. WHEELS_STACK in extract_pins.py is
 # the single source of truth; resolve against it so the tag is always authoritative.
 _resolved=$(python3 "$SCRIPT_DIR/extract_pins.py" --resolve "$MILES_WHEELS_TAG") || {
     echo "FATAL: could not resolve MILES_WHEELS_TAG=$MILES_WHEELS_TAG via extract_pins.py --resolve" >&2
@@ -107,7 +107,7 @@ fi
 # Dockerfile bumped. CI / `--check` makes it hard. Skipped if sources missing
 # (e.g. fresh clone without submodules — install_env.sh inits them later).
 if command -v python3 >/dev/null \
-    && [[ -f "$MILES_REPO/docker/Dockerfile" ]] \
+    && [[ -f "$ORBIT_REPO/docker/Dockerfile" ]] \
     && [[ -f "$THIRDPARTY_DIR/sglang/docker/Dockerfile" ]]; then
     python3 "$SCRIPT_DIR/extract_pins.py" --check >/dev/null 2>&1 \
         || echo "[pins] WARN: pins.env is stale vs upstream sources — regenerate with:
@@ -218,7 +218,7 @@ if [[ -z "${CUDA_HOME:-}" ]] || [[ ! -x "$CUDA_HOME/bin/nvcc" ]]; then
     echo "FATAL: nvcc not found. transformer_engine needs it to compile." >&2
     echo "       Either:" >&2
     echo "         1. Set CUDA_HOME=/path/to/cuda before re-running, or" >&2
-    echo "         2. conda install -n $MILES_ENV_NAME -c nvidia/label/cuda-12.9.0 cuda-nvcc cuda-cudart-dev cuda-libraries-dev" >&2
+    echo "         2. conda install -n $ORBIT_ENV_NAME -c nvidia/label/cuda-12.9.0 cuda-nvcc cuda-cudart-dev cuda-libraries-dev" >&2
     exit 1
 fi
 export PATH="$CUDA_HOME/bin:$PATH"
@@ -234,12 +234,12 @@ mkdir -p "$THIRDPARTY_DIR"
 # submodule's pyproject, must abort before we touch torch. Needs only git +
 # pins.env values; no conda/torch dependency, so it is safe this early.
 echo "[src] initialising submodules under $THIRDPARTY_DIR"
-git -C "$MILES_REPO" submodule update --init --recursive \
+git -C "$ORBIT_REPO" submodule update --init --recursive \
     thirdparty/Megatron-LM thirdparty/sglang thirdparty/Megatron-Bridge
 
 if [[ "$PULL_REMOTE" == "1" ]]; then
     echo "[src] PULL_REMOTE=1 — bumping submodules to branch HEAD"
-    git -C "$MILES_REPO" submodule update --remote --recursive \
+    git -C "$ORBIT_REPO" submodule update --remote --recursive \
         thirdparty/Megatron-LM thirdparty/sglang thirdparty/Megatron-Bridge
 fi
 
@@ -254,9 +254,9 @@ MEGATRON_BRIDGE_SRC="$THIRDPARTY_DIR/Megatron-Bridge"
 # matches; `git describe` is only diagnostic and may be unavailable in a
 # shallow clone.
 sub_sglang_base=$(git -C "$SGLANG_SRC" describe --tags --abbrev=0 2>/dev/null || echo "")
-if [[ -n "${MILES_SGLANG_SOURCE_VERSION:-}" && -n "$sub_sglang_base" \
-      && "$sub_sglang_base" != "$MILES_SGLANG_SOURCE_VERSION" ]]; then
-    echo "[pins] WARN: sglang source is $sub_sglang_base but MILES_SGLANG_SOURCE_VERSION=$MILES_SGLANG_SOURCE_VERSION" >&2
+if [[ -n "${ORBIT_SGLANG_SOURCE_VERSION:-}" && -n "$sub_sglang_base" \
+      && "$sub_sglang_base" != "$ORBIT_SGLANG_SOURCE_VERSION" ]]; then
+    echo "[pins] WARN: sglang source is $sub_sglang_base but ORBIT_SGLANG_SOURCE_VERSION=$ORBIT_SGLANG_SOURCE_VERSION" >&2
     echo "[pins]       Update the hand-owned source pin as part of sglang-sync." >&2
 fi
 # The submodule's own torch pin must equal TORCH_VERSION (catches a hand-set
@@ -274,13 +274,13 @@ source "$CONDA_ROOT/etc/profile.d/conda.sh"
 
 # ---------- conda env ----------------------------------------------------
 
-if ! conda env list | awk '{print $1}' | grep -qx "$MILES_ENV_NAME"; then
-    echo "[env] creating conda env '$MILES_ENV_NAME' (python=$MILES_PY_VERSION)"
-    conda create -y -n "$MILES_ENV_NAME" "python=$MILES_PY_VERSION"
+if ! conda env list | awk '{print $1}' | grep -qx "$ORBIT_ENV_NAME"; then
+    echo "[env] creating conda env '$ORBIT_ENV_NAME' (python=$ORBIT_PY_VERSION)"
+    conda create -y -n "$ORBIT_ENV_NAME" "python=$ORBIT_PY_VERSION"
 else
-    echo "[env] reusing existing conda env '$MILES_ENV_NAME'"
+    echo "[env] reusing existing conda env '$ORBIT_ENV_NAME'"
 fi
-conda activate "$MILES_ENV_NAME"
+conda activate "$ORBIT_ENV_NAME"
 echo "[env] python: $(python --version)  prefix: $CONDA_PREFIX"
 
 UV="uv pip install --python $CONDA_PREFIX/bin/python"
@@ -358,12 +358,12 @@ echo "[src] installing Megatron-LM editable (--no-deps)"
 $UV -e "$MEGATRON_SRC" --no-deps
 
 # Megatron-LM's pyproject only declares `megatron.core*` as packages, so the
-# editable finder does NOT expose `miles_megatron_plugins/` (top-level pkg
+# editable finder does NOT expose `orbit_megatron_plugins/` (top-level pkg
 # inside the same repo, hard-imported from megatron/core/transformer/*.py).
-# Drop a .pth file so `import miles_megatron_plugins` works in any python
+# Drop a .pth file so `import orbit_megatron_plugins` works in any python
 # invocation without needing PYTHONPATH set.
-echo "$MEGATRON_SRC" > "$PY_SITE/miles-megatron-source-root.pth"
-echo "[src] miles-megatron-source-root.pth -> $MEGATRON_SRC"
+echo "$MEGATRON_SRC" > "$PY_SITE/orbit-megatron-source-root.pth"
+echo "[src] orbit-megatron-source-root.pth -> $MEGATRON_SRC"
 
 # sglang's pyproject (post-2026-05) declares a setuptools-rust extension that
 # builds `thirdparty/sglang/rust/sglang-grpc` via cargo + protoc. The
@@ -379,8 +379,8 @@ command -v cargo >/dev/null \
     || { echo "FATAL: cargo still not on PATH after rustup install" >&2; exit 1; }
 
 if ! command -v protoc >/dev/null; then
-    echo "[deps] installing libprotobuf + protobuf into $MILES_ENV_NAME (sglang-grpc build dep)"
-    "$CONDA_ROOT/bin/conda" install -n "$MILES_ENV_NAME" -c conda-forge -y libprotobuf protobuf
+    echo "[deps] installing libprotobuf + protobuf into $ORBIT_ENV_NAME (sglang-grpc build dep)"
+    "$CONDA_ROOT/bin/conda" install -n "$ORBIT_ENV_NAME" -c conda-forge -y libprotobuf protobuf
 fi
 
 # torchcodec (sglang srt dep, torch-2.11-matched) dlopens FFmpeg shared libs at
@@ -389,8 +389,8 @@ fi
 # (libavutil.so.59). Docker gets ffmpeg from the base image; bare-metal installs it
 # into the env, which conda activation puts on the loader path.
 if [[ ! -e "$CONDA_PREFIX/lib/libavutil.so.59" ]]; then
-    echo "[deps] installing ffmpeg 7 into $MILES_ENV_NAME (torchcodec runtime libs)"
-    "$CONDA_ROOT/bin/conda" install -n "$MILES_ENV_NAME" -c conda-forge -y 'ffmpeg=7'
+    echo "[deps] installing ffmpeg 7 into $ORBIT_ENV_NAME (torchcodec runtime libs)"
+    "$CONDA_ROOT/bin/conda" install -n "$ORBIT_ENV_NAME" -c conda-forge -y 'ffmpeg=7'
 fi
 
 # SGLang's pyproject declares the full runtime tree (fastapi/uvicorn/orjson/
@@ -472,7 +472,7 @@ $UV --no-build-isolation "nvidia-modelopt>=0.37.0"
 echo "[src] installing Megatron-Bridge editable from $MEGATRON_BRIDGE_SRC (--no-deps)"
 $UV -e "$MEGATRON_BRIDGE_SRC" --no-deps --no-build-isolation
 
-echo "[deps] torch_memory_saver @ $TMS_COMMIT (for miles/backends/megatron_utils/actor.py)"
+echo "[deps] torch_memory_saver @ $TMS_COMMIT (for orbit/backends/megatron_utils/actor.py)"
 # Newer TMS source builds need TMS_CUDA_MAJOR (upstream #1774); derive from the env's torch.
 TMS_CUDA_MAJOR=$("$CONDA_PREFIX/bin/python" -c "import torch; print(torch.version.cuda.split('.')[0])") \
     $UV --no-cache-dir --force-reinstall "git+https://github.com/fzyzcjy/torch_memory_saver.git@$TMS_COMMIT"
@@ -511,8 +511,8 @@ $UV "onnx>=1.21.0" onnxscript pydantic nvdlfw-inspect
 # prebuilt wheels from $MILES_WHEELS_REPO @ $MILES_WHEELS_TAG; we do the same.
 
 mkdir -p "$WHEELS_DIR/$MILES_WHEELS_TAG"
-_fetch_miles_wheel() {
-    # Usage: _fetch_miles_wheel <basename-prefix>
+_fetch_orbit_wheel() {
+    # Usage: _fetch_orbit_wheel <basename-prefix>
     # Downloads matching asset from the miles-wheels release if not already cached.
     local prefix=$1
     local existing
@@ -548,13 +548,13 @@ for a in json.load(sys.stdin).get('assets', []):
 
 if [[ "$INSTALL_FLASH_ATTN" == "1" ]]; then
     echo "[deps] flash-attn (FA2) — Megatron --attention-backend flash"
-    fa_wheel=$(_fetch_miles_wheel flash_attn-)
+    fa_wheel=$(_fetch_orbit_wheel flash_attn-)
     $UV "$fa_wheel"
 fi
 
 if [[ "$INSTALL_FLASH_ATTN_3" == "1" ]]; then
     echo "[deps] flash-attn-3 (FA3, Hopper) — Megatron attention.py auto-detects HAVE_FA3"
-    fa3_wheel=$(_fetch_miles_wheel flash_attn_3-)
+    fa3_wheel=$(_fetch_orbit_wheel flash_attn_3-)
     $UV "$fa3_wheel"
     # The FA3 wheel ships the .so but NOT the python interface module that
     # Megatron imports from. Drop it in (matches docker/Dockerfile pattern).
@@ -568,18 +568,18 @@ fi
 
 if [[ "$INSTALL_APEX" == "1" ]]; then
     echo "[deps] apex — Megatron FusedAdam / FastLayerNorm / multi_tensor_applier"
-    apex_wheel=$(_fetch_miles_wheel apex-)
+    apex_wheel=$(_fetch_orbit_wheel apex-)
     $UV "$apex_wheel"
 fi
 
 # sglang_router from the SAME miles-wheels release as FA/apex — NOT from PyPI.
 # The release wheel may be a radixark/patched build; a PyPI `sglang-router==X`
 # can share the version number yet diverge from what the upstream Dockerfile
-# installs (it COPYs /tmp/wheels/sglang_router-*.whl from this release). miles
+# installs (it COPYs /tmp/wheels/sglang_router-*.whl from this release). orbit
 # code version-gates on sglang_router.__version__, so provenance matters. Rust/
 # abi3 wheel — NOT torch-ABI-bound — installed here (after the editable sglang
 # above) so it wins over any sglang_router pulled transitively from an index.
-router_wheel=$(_fetch_miles_wheel sglang_router-)
+router_wheel=$(_fetch_orbit_wheel sglang_router-)
 router_wheel_base=$(basename "$router_wheel")
 case "$router_wheel_base" in
     sglang_router-"$SGLANG_ROUTER_VERSION"-*) : ;;
@@ -594,7 +594,7 @@ esac
 # GLIBC guard: the release wheel is manylinux_2_NN (built on the docker base, e.g.
 # Ubuntu 24.04 / GLIBC 2.39). On an older host uv refuses to install it AND the abi3
 # .so would fail to load at runtime. When the host GLIBC is below the wheel's floor,
-# build the patched router from source (radixark/sgl-router-for-miles — the Dockerfile's
+# build the patched router from source (radixark/sgl-router-for-orbit — the Dockerfile's
 # SGL_ROUTER_USE_WHEELS=0 path) so the radixark patches survive on an older-GLIBC host.
 # (Same root cause as the sgl-model-gateway GLIBC skip below; the router is essential so
 # we build rather than skip.)
@@ -602,7 +602,7 @@ wheel_glibc_minor=$(sed -n 's/.*manylinux_2_\([0-9]\{1,\}\)_.*/\1/p' <<<"$router
 host_glibc_minor=$(ldd --version 2>/dev/null | awk 'NR==1{print $NF}' | cut -d. -f2)
 if [[ -n "$wheel_glibc_minor" && -n "$host_glibc_minor" && "$host_glibc_minor" -lt "$wheel_glibc_minor" ]]; then
     echo "[deps] sglang_router: release wheel needs GLIBC 2.$wheel_glibc_minor > host 2.$host_glibc_minor — building from source"
-    SGL_ROUTER_REPO=${SGL_ROUTER_REPO:-https://github.com/radixark/sgl-router-for-miles.git}
+    SGL_ROUTER_REPO=${SGL_ROUTER_REPO:-https://github.com/radixark/sgl-router-for-orbit.git}
     SGL_ROUTER_BRANCH=${SGL_ROUTER_BRANCH:-main}
     command -v cargo >/dev/null \
         || { echo "FATAL: cargo not on PATH — needed to build sglang_router from source" >&2; exit 1; }
@@ -639,7 +639,7 @@ fi
 # ---------- sgl-model-gateway binary -------------------------------------
 # Standalone Rust binary that fronts multiple sglang servers (multi-replica
 # disagg rollout routing). Docker drops it into /usr/local/bin/; bare-metal we
-# install into the conda env's bin/ so `conda activate $MILES_ENV_NAME` picks
+# install into the conda env's bin/ so `conda activate $ORBIT_ENV_NAME` picks
 # it up via PATH.
 #
 # The miles-wheels prebuild is linked against GLIBC 2.38+ (Ubuntu 24.04 base).
@@ -655,7 +655,7 @@ if [[ "$INSTALL_SGL_GATEWAY" == "1" ]]; then
     GLIBC_MINOR=${GLIBC_MINOR%%.*}
     if [[ "$GLIBC_MAJOR" -ge 2 && "$GLIBC_MINOR" -ge 38 ]]; then
         echo "[deps] sgl-model-gateway binary -> \$CONDA_PREFIX/bin/"
-        gateway_tarball=$(_fetch_miles_wheel sgl-model-gateway-linux-)
+        gateway_tarball=$(_fetch_orbit_wheel sgl-model-gateway-linux-)
         tar xzf "$gateway_tarball" -C "$CONDA_PREFIX/bin/"
         chmod +x "$CONDA_PREFIX/bin/sgl-model-gateway"
     else
@@ -668,26 +668,26 @@ if [[ "$INSTALL_SGL_GATEWAY" == "1" ]]; then
     fi
 fi
 
-# ---------- miles itself + its python-only requirements ------------------
+# ---------- orbit itself + its python-only requirements ------------------
 
 echo "[deps] requirements.txt"
 # nvidia-resiliency-ext (upstream FT stack, #1598) ships manylinux_2_39-only
 # wheels; this cluster's glibc is 2.35 and the FT features are flag-gated and
-# unused here (miles references the package only in a docstring). Filter it
+# unused here (orbit references the package only in a docstring). Filter it
 # out below that glibc rather than failing the whole install.
 glibc_minor=$(getconf GNU_LIBC_VERSION | awk '{split($2, v, "."); print v[2]}')
 if [ "${glibc_minor:-0}" -ge 39 ]; then
-    $UV -r "$MILES_REPO/requirements.txt"
+    $UV -r "$ORBIT_REPO/requirements.txt"
 else
     echo "[deps] glibc 2.${glibc_minor} < 2.39 — installing requirements.txt without nvidia-resiliency-ext (FT-only, manylinux_2_39 wheels)"
-    _req_filtered=$(mktemp /tmp/miles-requirements-XXXX.txt)
-    grep -v '^nvidia-resiliency-ext' "$MILES_REPO/requirements.txt" > "$_req_filtered"
+    _req_filtered=$(mktemp /tmp/orbit-requirements-XXXX.txt)
+    grep -v '^nvidia-resiliency-ext' "$ORBIT_REPO/requirements.txt" > "$_req_filtered"
     $UV -r "$_req_filtered"
     rm -f "$_req_filtered"
 fi
 
-echo "[deps] miles editable"
-$UV -e "$MILES_REPO" --no-deps
+echo "[deps] orbit editable"
+$UV -e "$ORBIT_REPO" --no-deps
 
 # numpy: upstream dropped its late `pip install "numpy<2"` at the sglang-v0.5.14
 # bump (#1587) — the current Megatron/sglang line runs on numpy 2.x, so the old
@@ -707,6 +707,6 @@ _prepend_env_cuda_libs
 python3 "$SCRIPT_DIR/verify_env.py"
 
 echo
-echo "[done] miles env ready: $CONDA_PREFIX"
-echo "[done] activate:  source $CONDA_ROOT/etc/profile.d/conda.sh && conda activate $MILES_ENV_NAME"
+echo "[done] orbit env ready: $CONDA_PREFIX"
+echo "[done] activate:  source $CONDA_ROOT/etc/profile.d/conda.sh && conda activate $ORBIT_ENV_NAME"
 echo "[done] PYTHONPATH for train.py: $MEGATRON_SRC"

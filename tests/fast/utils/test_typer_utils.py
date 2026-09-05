@@ -5,7 +5,7 @@ import pytest
 import typer
 from typer.testing import CliRunner
 
-from miles.utils.typer_utils import dataclass_cli
+from orbit.utils.typer_utils import dataclass_cli
 
 runner = CliRunner()
 
@@ -132,7 +132,7 @@ class TestBareDecorator:
         def cmd(args: _SimpleArgs) -> None:
             print(f"{args.name}|{args.count}")
 
-        result = runner.invoke(app, [], env={"MILES_SCRIPT_NAME": "EnvName", "MILES_SCRIPT_COUNT": "10"})
+        result = runner.invoke(app, [], env={"ORBIT_SCRIPT_NAME": "EnvName", "ORBIT_SCRIPT_COUNT": "10"})
         assert result.exit_code == 0
         assert "EnvName|10" in result.stdout
 
@@ -144,7 +144,7 @@ class TestBareDecorator:
         def cmd(args: _SimpleArgs) -> None:
             print(f"{args.name}|{args.count}")
 
-        result = runner.invoke(app, ["--count", "999"], env={"MILES_SCRIPT_NAME": "EnvName"})
+        result = runner.invoke(app, ["--count", "999"], env={"ORBIT_SCRIPT_NAME": "EnvName"})
         assert result.exit_code == 0
         assert "EnvName|999" in result.stdout
 
@@ -201,7 +201,7 @@ class TestParameterizedDecorator:
         result = runner.invoke(
             app,
             [],
-            env={"MILES_SCRIPT_NAME": "ShouldBeIgnored"},
+            env={"ORBIT_SCRIPT_NAME": "ShouldBeIgnored"},
         )
         assert result.exit_code != 0
 
@@ -225,7 +225,7 @@ class TestParameterizedDecorator:
         def cmd(args: _SimpleArgs) -> None:
             print(f"{args.name}|{args.count}")
 
-        result = runner.invoke(app, [], env={"MILES_SCRIPT_NAME": "Wrong"})
+        result = runner.invoke(app, [], env={"ORBIT_SCRIPT_NAME": "Wrong"})
         assert result.exit_code != 0
 
     def test_default_prefix_when_called_with_parens(self) -> None:
@@ -237,7 +237,7 @@ class TestParameterizedDecorator:
         def cmd(args: _SimpleArgs) -> None:
             print(f"{args.name}|{args.count}")
 
-        result = runner.invoke(app, [], env={"MILES_SCRIPT_NAME": "ViaParens", "MILES_SCRIPT_COUNT": "3"})
+        result = runner.invoke(app, [], env={"ORBIT_SCRIPT_NAME": "ViaParens", "ORBIT_SCRIPT_COUNT": "3"})
         assert result.exit_code == 0
         assert "ViaParens|3" in result.stdout
 
@@ -726,7 +726,7 @@ class TestEnvVarNaming:
         def cmd(args: _SnakeArgs) -> None:
             print(f"val={args.my_long_name}")
 
-        result = runner.invoke(app, [], env={"MILES_SCRIPT_MY_LONG_NAME": "from_env"})
+        result = runner.invoke(app, [], env={"ORBIT_SCRIPT_MY_LONG_NAME": "from_env"})
         assert result.exit_code == 0
         assert "val=from_env" in result.stdout
 

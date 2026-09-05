@@ -4,9 +4,9 @@ import time
 import traceback
 from copy import deepcopy
 
-from miles.rollout.rm_hub import batched_async_rm
-from miles.utils.http_utils import post
-from miles.utils.types import Sample
+from orbit.rollout.rm_hub import batched_async_rm
+from orbit.utils.http_utils import post
+from orbit.utils.types import Sample
 
 from .prompts import SOLVER_PROMPT_TEMPLATE, generate_rewriter_template, generate_select_template
 

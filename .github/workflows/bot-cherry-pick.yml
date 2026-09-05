@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   cherry-pick:
-    if: github.repository == 'radixark/miles'
+    if: github.repository == 'Sphere-AI-Lab/orbit'
     runs-on: ubuntu-latest
     steps:
       - name: Validate inputs
@@ -54,8 +54,8 @@ jobs:
           PR_NUMBER: ${{ github.event.inputs.pr_number }}
           COMMIT_SHA: ${{ github.event.inputs.commit_sha }}
         run: |
-          git config user.name "miles-bot"
-          git config user.email "miles-bot@users.noreply.github.com"
+          git config user.name "orbit-bot"
+          git config user.email "orbit-bot@users.noreply.github.com"
 
           if [ -n "$PR_NUMBER" ]; then
             COMMIT_SHA=$(gh pr view "$PR_NUMBER" --json mergeCommit,state -q '.mergeCommit.oid')

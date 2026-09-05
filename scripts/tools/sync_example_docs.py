@@ -34,9 +34,9 @@ DOCS_JSON = DOCS / "docs.json"
 OUT_DIR = DOCS / "examples"
 
 BRANCH = "main"
-GITHUB_TREE = f"https://github.com/radixark/miles/tree/{BRANCH}"
-GITHUB_BLOB = f"https://github.com/radixark/miles/blob/{BRANCH}"
-GITHUB_RAW = f"https://raw.githubusercontent.com/radixark/miles/{BRANCH}"
+GITHUB_TREE = f"https://github.com/Sphere-AI-Lab/orbit/tree/{BRANCH}"
+GITHUB_BLOB = f"https://github.com/Sphere-AI-Lab/orbit/blob/{BRANCH}"
+GITHUB_RAW = f"https://raw.githubusercontent.com/Sphere-AI-Lab/orbit/{BRANCH}"
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"}
 MAX_DESCRIPTION = 160

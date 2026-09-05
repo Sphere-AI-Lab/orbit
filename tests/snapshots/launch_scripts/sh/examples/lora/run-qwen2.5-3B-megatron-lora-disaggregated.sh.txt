@@ -30,7 +30,7 @@
 
 ### 6
 "python3"
-"<REPO_ROOT>/examples/lora/../../miles/utils/external_utils/model_args_utils.py"
+"<REPO_ROOT>/examples/lora/../../orbit/utils/external_utils/model_args_utils.py"
 "qwen2.5-3B"
 
 ### 7
@@ -124,7 +124,7 @@
 "--wandb-host"
 "https://wandb.ai/"
 "--wandb-project"
-"miles-lora-megatron"
+"orbit-lora-megatron"
 "--wandb-group"
 "qwen2.5-3B-lora-disaggregate"
 "--tensor-model-parallel-size"

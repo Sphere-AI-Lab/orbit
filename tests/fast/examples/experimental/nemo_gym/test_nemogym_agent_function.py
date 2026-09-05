@@ -47,7 +47,7 @@ def test_run_body_carries_instance_fields_and_policy_override(monkeypatch):
     captured = {}
     monkeypatch.setattr(naf, "post_json", _capture_post(captured))
     monkeypatch.setenv("NEMO_GYM_URL", "http://gym:12000")
-    monkeypatch.delenv("MILES_ROUTER_EXTERNAL_HOST", raising=False)
+    monkeypatch.delenv("ORBIT_ROUTER_EXTERNAL_HOST", raising=False)
 
     run_async(
         naf.run(
@@ -88,7 +88,7 @@ def test_sampling_params_omitted_when_unset(monkeypatch):
 def test_external_host_rewrites_session_url(monkeypatch):
     captured = {}
     monkeypatch.setattr(naf, "post_json", _capture_post(captured))
-    monkeypatch.setenv("MILES_ROUTER_EXTERNAL_HOST", "100.64.0.7")
+    monkeypatch.setenv("ORBIT_ROUTER_EXTERNAL_HOST", "100.64.0.7")
 
     run_async(naf.run(base_url="http://pod-hostname:30000/sessions/s1", prompt="", metadata={}))
 
@@ -130,13 +130,13 @@ def test_timeout_returns_none(monkeypatch):
 # --- data conversion ------------------------------------------------------
 
 
-def test_convert_to_miles_format(tmp_path):
+def test_convert_to_orbit_format(tmp_path):
     src = tmp_path / "raw.jsonl"
     instance = {"instance_id": "x__y-1", "repo": "x/y", "problem_statement": "fix it", "patch": "diff"}
     src.write_text(json.dumps(instance) + "\n")
-    dst = tmp_path / "miles.jsonl"
+    dst = tmp_path / "orbit.jsonl"
 
-    download_and_process_data.convert_to_miles_format(str(src), str(dst), split="train")
+    download_and_process_data.convert_to_orbit_format(str(src), str(dst), split="train")
 
     row = json.loads(dst.read_text())
     assert row["prompt"] == "fix it"

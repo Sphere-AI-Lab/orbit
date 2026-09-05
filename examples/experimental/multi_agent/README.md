@@ -1,10 +1,10 @@
 # Multi-Agent RL
 
-This directory provides an example of running multi-agent reinforcement learning (RL) with miles.
+This directory provides an example of running multi-agent reinforcement learning (RL) with orbit.
 
 ## Environment Setup
 
-The environment setup is identical to the standard RL setup used in miles.
+The environment setup is identical to the standard RL setup used in orbit.
 
 ## Running the Script
 
@@ -22,7 +22,7 @@ MULTI_AGENT_CONFIGS = {
 To start a run, execute:
 
 ```bash
-cd miles/
+cd orbit/
 bash examples/experimental/multi_agent/run-qwen3-30B-A3B-multi-agent.sh
 ```
 

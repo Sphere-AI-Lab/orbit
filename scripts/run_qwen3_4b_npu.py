@@ -1,13 +1,13 @@
 import os
 
-import miles.utils.external_utils.exec_command as U
-from miles.utils.external_utils.command_utils import execute_train_npu
+import orbit.utils.external_utils.exec_command as U
+from orbit.utils.external_utils.command_utils import execute_train_npu
 
-MODEL_NAME = os.environ.get("MILES_SCRIPT_MODEL_NAME", "Qwen3-4B-Instruct-2507")
+MODEL_NAME = os.environ.get("ORBIT_SCRIPT_MODEL_NAME", "Qwen3-4B-Instruct-2507")
 
-NUM_GPUS = int(os.environ.get("MILES_SCRIPT_NUM_GPUS", "4"))
-EXTERNAL_RAY = int(os.environ.get("MILES_SCRIPT_EXTERNAL_RAY", "0"))
-TRAIN_BACKEND = os.environ.get("MILES_SCRIPT_TRAIN_BACKEND", "fsdp").lower()
+NUM_GPUS = int(os.environ.get("ORBIT_SCRIPT_NUM_GPUS", "4"))
+EXTERNAL_RAY = int(os.environ.get("ORBIT_SCRIPT_EXTERNAL_RAY", "0"))
+TRAIN_BACKEND = os.environ.get("ORBIT_SCRIPT_TRAIN_BACKEND", "fsdp").lower()
 assert TRAIN_BACKEND in {"fsdp", "megatron"}
 
 DATASET_NAME = "zhuzilin/dapo-math-17k"
@@ -38,7 +38,7 @@ def execute():
     ckpt_args = f"--hf-checkpoint /root/models/{MODEL_NAME}/ "
 
     wandb_args = (
-        ("--use-wandb " "--wandb-project miles-dev " "--wandb-group qwen3-4b-npu " f"--wandb-key '{wandb_api_key}' ")
+        ("--use-wandb " "--wandb-project orbit-dev " "--wandb-group qwen3-4b-npu " f"--wandb-key '{wandb_api_key}' ")
         if (wandb_api_key := os.environ.get("WANDB_API_KEY"))
         else ""
     )

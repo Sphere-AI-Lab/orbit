@@ -6,9 +6,9 @@ from unittest.mock import patch
 
 import pytest
 
-from miles.backends.sglang_utils.arguments import add_sglang_arguments, collect_eval_sglang_overrides
-from miles.backends.sglang_utils.arguments import validate_args as validate_sglang_args
-from miles.utils.arguments import (
+from orbit.backends.sglang_utils.arguments import add_sglang_arguments, collect_eval_sglang_overrides
+from orbit.backends.sglang_utils.arguments import validate_args as validate_sglang_args
+from orbit.utils.arguments import (
     _finalize_train_offload_args,
     _maybe_apply_dumper_overrides,
     _resolve_ft_components,
@@ -18,15 +18,15 @@ from miles.utils.arguments import (
     _validate_opd_sglang_scoring_args,
     _validate_opd_task_reward_args,
     _validate_rematerialize_param_from_master_weight,
-    get_miles_extra_args_provider,
+    get_orbit_extra_args_provider,
     hf_validate_args,
-    miles_validate_args,
+    orbit_validate_args,
     resolve_rollout_function_paths,
     resolve_train_offload_mode,
     validate_async_off_policy_correction,
     validate_skip_actor_forward_only,
 )
-from miles.utils.misc import function_registry
+from orbit.utils.misc import function_registry
 
 PATH_ARGS = ["--rollout-function-path", "--custom-generate-function-path"]
 REQUIRED_ARGS = ["--rollout-batch-size", "64"]
@@ -48,7 +48,7 @@ def _train_offload_args(**overrides) -> SimpleNamespace:
     return SimpleNamespace(**defaults)
 
 
-def test_train_offload_auto_preserves_miles_tms_default():
+def test_train_offload_auto_preserves_orbit_tms_default():
     assert resolve_train_offload_mode(_train_offload_args()) == "tms"
 
 
@@ -180,7 +180,7 @@ class TestAddArgumentsSupport:
             sys, "argv", ["test", path_arg, "test:fn", "--my-custom-arg", "100"] + REQUIRED_ARGS
         ):
             parser = argparse.ArgumentParser()
-            get_miles_extra_args_provider()(parser)
+            get_orbit_extra_args_provider()(parser)
             args, _ = parser.parse_known_args()
             assert args.my_custom_arg == 100
 
@@ -190,12 +190,12 @@ class TestAddArgumentsSupport:
             sys, "argv", ["test", path_arg, "test:fn"] + REQUIRED_ARGS
         ):
             parser = argparse.ArgumentParser()
-            get_miles_extra_args_provider()(parser)
+            get_orbit_extra_args_provider()(parser)
 
 
 def test_lora_a_init_cli_matches_bridge_supported_methods():
     parser = argparse.ArgumentParser()
-    get_miles_extra_args_provider()(parser)
+    get_orbit_extra_args_provider()(parser)
 
     args, _ = parser.parse_known_args(["--rollout-batch-size", "1", "--lora-a-init-method", "uniform"])
     assert args.lora_a_init_method == "uniform"
@@ -282,7 +282,7 @@ class TestMaybeApplyDumperOverrides:
 def test_fully_async_eval_resolves_to_the_producer_itself():
     """Only the producer's own instance pauses on eval, and RolloutManager reuses one
     instance only when both paths match."""
-    path = "miles.rollout.fully_async_rollout.FullyAsyncRolloutFn"
+    path = "orbit.rollout.fully_async_rollout.FullyAsyncRolloutFn"
     default = SimpleNamespace(rollout_function_path=None, eval_function_path=None, fully_async=True)
     assert resolve_rollout_function_paths(default) == (path, path)
 
@@ -377,7 +377,7 @@ def test_fully_async_defaults_to_the_fail_closed_data_buffer():
 
 def test_recompute_logprobs_via_prefill_flag_is_parsed():
     parser = argparse.ArgumentParser()
-    get_miles_extra_args_provider()(parser)
+    get_orbit_extra_args_provider()(parser)
 
     args = parser.parse_args(["--recompute-logprobs-via-prefill"] + REQUIRED_ARGS)
 
@@ -386,7 +386,7 @@ def test_recompute_logprobs_via_prefill_flag_is_parsed():
 
 def test_sglang_mm_exact_scoring_suffix_is_opt_in():
     parser = argparse.ArgumentParser()
-    get_miles_extra_args_provider()(parser)
+    get_orbit_extra_args_provider()(parser)
 
     default_args = parser.parse_args(REQUIRED_ARGS)
     enabled_args = parser.parse_args(["--sglang-mm-exact-scoring-suffix"] + REQUIRED_ARGS)
@@ -397,7 +397,7 @@ def test_sglang_mm_exact_scoring_suffix_is_opt_in():
 
 def test_opd_dagger_defaults_are_disabled():
     parser = argparse.ArgumentParser()
-    get_miles_extra_args_provider()(parser)
+    get_orbit_extra_args_provider()(parser)
 
     args = parser.parse_args(REQUIRED_ARGS)
 
@@ -411,7 +411,7 @@ def test_opd_dagger_defaults_are_disabled():
 
 def test_opd_task_reward_logging_argument_is_parsed():
     parser = argparse.ArgumentParser()
-    get_miles_extra_args_provider()(parser)
+    get_orbit_extra_args_provider()(parser)
 
     args = parser.parse_args(["--opd-log-task-reward"] + REQUIRED_ARGS)
 
@@ -426,8 +426,8 @@ def _opd_task_reward_args(**overrides):
         "use_opd": True,
         "opd_type": "sglang",
         "rm_type": "deepscaler",
-        "custom_rm_path": "miles.rollout.on_policy_distillation.reward_func",
-        "custom_reward_post_process_path": "miles.rollout.on_policy_distillation.post_process_rewards",
+        "custom_rm_path": "orbit.rollout.on_policy_distillation.reward_func",
+        "custom_reward_post_process_path": "orbit.rollout.on_policy_distillation.post_process_rewards",
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -435,7 +435,7 @@ def _opd_task_reward_args(**overrides):
 
 def test_opd_task_reward_optimization_arguments_are_parsed():
     parser = argparse.ArgumentParser()
-    get_miles_extra_args_provider()(parser)
+    get_orbit_extra_args_provider()(parser)
 
     args = parser.parse_args(
         ["--opd-log-task-reward", "--opd-optimize-task-reward", "--opd-task-reward-coef", "0.5"] + REQUIRED_ARGS
@@ -489,8 +489,8 @@ def _opd_sglang_scoring_args(**overrides) -> SimpleNamespace:
         "use_opd": True,
         "opd_type": "sglang",
         "rm_url": "http://teacher:30000/generate",
-        "custom_rm_path": "miles.rollout.on_policy_distillation.reward_func",
-        "custom_reward_post_process_path": "miles.rollout.on_policy_distillation.post_process_rewards",
+        "custom_rm_path": "orbit.rollout.on_policy_distillation.reward_func",
+        "custom_reward_post_process_path": "orbit.rollout.on_policy_distillation.post_process_rewards",
         "group_rm": False,
     }
     values.update(overrides)
@@ -546,7 +546,7 @@ def test_opd_sglang_scoring_validation_does_not_change_other_modes(overrides):
 
 def test_opd_dagger_arguments_are_parsed():
     parser = argparse.ArgumentParser()
-    get_miles_extra_args_provider()(parser)
+    get_orbit_extra_args_provider()(parser)
 
     args = parser.parse_args(
         [
@@ -700,7 +700,7 @@ class TestEvalSglangOverrides:
 
 def test_custom_megatron_post_save_hook_path_is_parsed():
     parser = argparse.ArgumentParser()
-    get_miles_extra_args_provider()(parser)
+    get_orbit_extra_args_provider()(parser)
 
     args = parser.parse_args(["--custom-megatron-post-save-hook-path", "pkg.module.hook"] + REQUIRED_ARGS)
 
@@ -709,7 +709,7 @@ def test_custom_megatron_post_save_hook_path_is_parsed():
 
 def test_custom_megatron_post_save_hook_path_requires_save():
     parser = argparse.ArgumentParser()
-    get_miles_extra_args_provider()(parser)
+    get_orbit_extra_args_provider()(parser)
     args = parser.parse_args(
         ["--custom-megatron-post-save-hook-path", "pkg.module.hook", "--num-rollout", "1"] + REQUIRED_ARGS
     )
@@ -718,14 +718,14 @@ def test_custom_megatron_post_save_hook_path_requires_save():
         AssertionError,
         match="'--save' is required when custom_megatron_post_save_hook_path is set.",
     ):
-        miles_validate_args(args)
+        orbit_validate_args(args)
 
 
 class TestBridgeResumeRolloutId:
     @staticmethod
     def _parse(load, extra=None):
         parser = argparse.ArgumentParser()
-        get_miles_extra_args_provider()(parser)
+        get_orbit_extra_args_provider()(parser)
         return parser.parse_args(
             [
                 "--megatron-to-hf-mode",
@@ -760,7 +760,7 @@ class TestBridgeResumeRolloutId:
         if override is not None:
             setattr(args, override, value)
 
-        miles_validate_args(args)
+        orbit_validate_args(args)
 
         assert args.start_rollout_id is None
 
@@ -780,14 +780,14 @@ class TestBridgeResumeRolloutId:
             base_args + ["--lora-adapter-path", str(adapter)],
         )
 
-        miles_validate_args(args)
+        orbit_validate_args(args)
 
         assert args.start_rollout_id is None
 
     def test_release_tracker_starts_at_zero(self, tmp_path):
         args = self._parse(self._checkpoint(tmp_path, "release"))
 
-        miles_validate_args(args)
+        orbit_validate_args(args)
 
         assert args.start_rollout_id == 0
 
@@ -797,7 +797,7 @@ class TestBridgeResumeRolloutId:
             ["--start-rollout-id", "9"],
         )
 
-        miles_validate_args(args)
+        orbit_validate_args(args)
 
         assert args.start_rollout_id == 9
 
@@ -809,7 +809,7 @@ class TestBridgeResumeRolloutId:
             ["--hf-checkpoint", str(hf_checkpoint)],
         )
 
-        miles_validate_args(args)
+        orbit_validate_args(args)
 
         assert args.load == str(hf_checkpoint)
         assert args.start_rollout_id == 0
@@ -817,19 +817,19 @@ class TestBridgeResumeRolloutId:
 
 def test_dynamic_global_batch_size_requires_dynamic_batch_size():
     parser = argparse.ArgumentParser()
-    get_miles_extra_args_provider()(parser)
+    get_orbit_extra_args_provider()(parser)
     args = parser.parse_args(["--use-dynamic-global-batch-size", "--num-rollout", "1"] + REQUIRED_ARGS)
 
     with pytest.raises(AssertionError, match="requires --use-dynamic-batch-size"):
-        miles_validate_args(args)
+        orbit_validate_args(args)
 
 
 class TestCriticSaveDerivation:
     def _validate(self, extra):
         parser = argparse.ArgumentParser()
-        get_miles_extra_args_provider()(parser)
+        get_orbit_extra_args_provider()(parser)
         args = parser.parse_args(extra + ["--num-rollout", "1"] + REQUIRED_ARGS)
-        miles_validate_args(args)
+        orbit_validate_args(args)
         return args
 
     def test_derives_sibling_dir_from_save(self):
@@ -854,7 +854,7 @@ class TestCriticSaveDerivation:
 class TestSessionServerV2Validation:
     def _parse(self, extra):
         parser = argparse.ArgumentParser()
-        get_miles_extra_args_provider()(parser)
+        get_orbit_extra_args_provider()(parser)
         return parser.parse_args(extra + ["--num-rollout", "1"] + REQUIRED_ARGS)
 
     @pytest.mark.parametrize(
@@ -872,7 +872,7 @@ class TestSessionServerV2Validation:
         args = self._parse(["--use-session-server", "v2", *extra])
 
         with pytest.raises(ValueError) as exc_info:
-            miles_validate_args(args)
+            orbit_validate_args(args)
 
         assert str(exc_info.value) == (f"--use-session-server v2 does not support {flag}; v2 returns list[Sample]")
 
@@ -880,7 +880,7 @@ class TestSessionServerV2Validation:
 class TestSessionMessageMatcherArgument:
     def _parse(self, extra):
         parser = argparse.ArgumentParser()
-        get_miles_extra_args_provider()(parser)
+        get_orbit_extra_args_provider()(parser)
         return parser.parse_args(extra + ["--num-rollout", "1"] + REQUIRED_ARGS)
 
     def test_defaults_to_strict(self):
@@ -904,7 +904,7 @@ class TestSessionMessageMatcherArgument:
 class TestSessionServerPauseGenerationMode:
     def _parse(self, extra):
         parser = argparse.ArgumentParser()
-        get_miles_extra_args_provider()(parser)
+        get_orbit_extra_args_provider()(parser)
         return parser.parse_args(extra + ["--num-rollout", "1"] + REQUIRED_ARGS)
 
     def test_session_server_rejects_abort(self):
@@ -913,20 +913,20 @@ class TestSessionServerPauseGenerationMode:
         with pytest.raises(
             AssertionError, match="--use-session-server is incompatible with --pause-generation-mode=abort"
         ):
-            miles_validate_args(args)
+            orbit_validate_args(args)
 
     def test_abort_without_session_server_passes(self):
-        miles_validate_args(self._parse(["--pause-generation-mode", "abort"]))
+        orbit_validate_args(self._parse(["--pause-generation-mode", "abort"]))
 
     @pytest.mark.parametrize("mode", ["retract", "in_place"])
     def test_session_server_accepts_non_abort_modes(self, mode):
-        miles_validate_args(self._parse(["--use-session-server", "--pause-generation-mode", mode]))
+        orbit_validate_args(self._parse(["--use-session-server", "--pause-generation-mode", mode]))
 
 
 class TestTitoFixedTemplateConfiguration:
     def _parse(self, extra):
         parser = argparse.ArgumentParser()
-        get_miles_extra_args_provider()(parser)
+        get_orbit_extra_args_provider()(parser)
         return parser.parse_args(extra + ["--num-rollout", "1"] + REQUIRED_ARGS)
 
     def test_removed_role_flag_is_rejected(self):
@@ -944,8 +944,8 @@ class TestTitoFixedTemplateConfiguration:
     def test_warns_only_for_default_model_session(self, caplog, extra, expect_warning):
         args = self._parse(extra)
 
-        with caplog.at_level(logging.WARNING, logger="miles.utils.arguments"):
-            miles_validate_args(args)
+        with caplog.at_level(logging.WARNING, logger="orbit.utils.arguments"):
+            orbit_validate_args(args)
 
         target_records = [
             record
@@ -957,11 +957,11 @@ class TestTitoFixedTemplateConfiguration:
     def test_named_family_requires_session_server(self):
         args = self._parse(["--tito-model", "qwen3"])
         with pytest.raises(ValueError, match="--tito-model=qwen3 requires --use-session-server"):
-            miles_validate_args(args)
+            orbit_validate_args(args)
 
     def test_named_family_resolves_registered_template_and_kwargs(self):
         args = self._parse(["--use-session-server", "--tito-model", "qwen3"])
-        miles_validate_args(args)
+        orbit_validate_args(args)
         assert args.chat_template_path.endswith("/qwen3_fixed.jinja")
         assert args.apply_chat_template_kwargs == {"clear_thinking": False}
 
@@ -976,7 +976,7 @@ class TestTitoFixedTemplateConfiguration:
             ]
         )
         with pytest.raises(ValueError, match="cannot override the template registered"):
-            miles_validate_args(args)
+            orbit_validate_args(args)
 
     def test_named_family_rejects_conflicting_registered_kwarg(self):
         args = self._parse(
@@ -989,7 +989,7 @@ class TestTitoFixedTemplateConfiguration:
             ]
         )
         with pytest.raises(ValueError, match="clear_thinking=True conflicts"):
-            miles_validate_args(args)
+            orbit_validate_args(args)
 
     def test_named_family_accepts_same_registered_and_additional_kwargs(self):
         args = self._parse(
@@ -1001,7 +1001,7 @@ class TestTitoFixedTemplateConfiguration:
                 '{"clear_thinking": false, "enable_thinking": true}',
             ]
         )
-        miles_validate_args(args)
+        orbit_validate_args(args)
         assert args.apply_chat_template_kwargs == {
             "clear_thinking": False,
             "enable_thinking": True,
@@ -1010,7 +1010,7 @@ class TestTitoFixedTemplateConfiguration:
 
 def test_bridge_mode_rejects_critic(tmp_path):
     parser = argparse.ArgumentParser()
-    get_miles_extra_args_provider()(parser)
+    get_orbit_extra_args_provider()(parser)
     args = parser.parse_args(
         [
             "--advantage-estimator",
@@ -1029,24 +1029,24 @@ def test_bridge_mode_rejects_critic(tmp_path):
         AssertionError,
         match="Critic models are not supported with --megatron-to-hf-mode bridge",
     ):
-        miles_validate_args(args)
+        orbit_validate_args(args)
 
 
 def test_critic_rejects_experimental_ft_trainer(tmp_path, monkeypatch):
-    monkeypatch.setenv("MILES_EXPERIMENTAL_FT_TRAINER", "1")
+    monkeypatch.setenv("ORBIT_EXPERIMENTAL_FT_TRAINER", "1")
     parser = argparse.ArgumentParser()
-    get_miles_extra_args_provider()(parser)
+    get_orbit_extra_args_provider()(parser)
     args = parser.parse_args(
         ["--advantage-estimator", "ppo", "--hf-checkpoint", str(tmp_path), "--num-rollout", "1"] + REQUIRED_ARGS
     )
 
-    with pytest.raises(AssertionError, match="MILES_EXPERIMENTAL_FT_TRAINER"):
-        miles_validate_args(args)
+    with pytest.raises(AssertionError, match="ORBIT_EXPERIMENTAL_FT_TRAINER"):
+        orbit_validate_args(args)
 
 
 def test_critic_rejects_reward_level_kl(tmp_path):
     parser = argparse.ArgumentParser()
-    get_miles_extra_args_provider()(parser)
+    get_orbit_extra_args_provider()(parser)
     args = parser.parse_args(
         [
             "--advantage-estimator",
@@ -1064,13 +1064,13 @@ def test_critic_rejects_reward_level_kl(tmp_path):
     )
 
     with pytest.raises(AssertionError, match="does not support reward-level KL"):
-        miles_validate_args(args)
+        orbit_validate_args(args)
 
 
 class TestMultiLoRAValidation:
     def _parse(self, extra):
         parser = argparse.ArgumentParser()
-        get_miles_extra_args_provider()(parser)
+        get_orbit_extra_args_provider()(parser)
         return parser.parse_args(
             [
                 "--multi-lora-n-adapters",
@@ -1092,22 +1092,22 @@ class TestMultiLoRAValidation:
         args = self._parse(["--sglang-tokenizer-worker-num", "2"])
 
         with pytest.raises(AssertionError, match="sglang-tokenizer-worker-num 1"):
-            miles_validate_args(args)
+            orbit_validate_args(args)
 
     def test_accepts_default_single_tokenizer_worker(self):
         args = self._parse([])
 
-        miles_validate_args(args)
+        orbit_validate_args(args)
 
         assert args.multi_lora is True
 
     def test_defaults_rollout_fn_and_data_source_to_multi_lora(self):
         args = self._parse([])
 
-        miles_validate_args(args)
+        orbit_validate_args(args)
 
-        assert args.rollout_function_path == "miles.rollout.multi_lora.async_rollout.generate_rollout_multi_lora"
-        assert args.data_source_path == "miles.rollout.multi_lora.data_source.MultiLoRAAsyncDataSource"
+        assert args.rollout_function_path == "orbit.rollout.multi_lora.async_rollout.generate_rollout_multi_lora"
+        assert args.data_source_path == "orbit.rollout.multi_lora.data_source.MultiLoRAAsyncDataSource"
         assert args.rollout_global_dataset is True
 
     def test_keeps_user_supplied_rollout_fn_and_data_source(self):
@@ -1115,7 +1115,7 @@ class TestMultiLoRAValidation:
             ["--rollout-function-path", "my.custom.rollout_fn", "--data-source-path", "my.custom.DataSource"]
         )
 
-        miles_validate_args(args)
+        orbit_validate_args(args)
 
         assert args.rollout_function_path == "my.custom.rollout_fn"
         assert args.data_source_path == "my.custom.DataSource"
@@ -1131,41 +1131,41 @@ class TestMultiLoRAValidation:
         args = self._parse([])
         args.optimizer = "muon"
         with pytest.raises(AssertionError, match="does not support Muon"):
-            miles_validate_args(args)
+            orbit_validate_args(args)
 
         args = self._parse([])
         args.optimizer = "sgd"
         with pytest.raises(AssertionError, match="requires --optimizer adam"):
-            miles_validate_args(args)
+            orbit_validate_args(args)
 
     def test_rejects_experimental_ft_trainer(self, monkeypatch):
         # The v2 train group has no reconcile_adapters.
-        monkeypatch.setenv("MILES_EXPERIMENTAL_FT_TRAINER", "1")
+        monkeypatch.setenv("ORBIT_EXPERIMENTAL_FT_TRAINER", "1")
         args = self._parse([])
 
-        with pytest.raises(AssertionError, match="MILES_EXPERIMENTAL_FT_TRAINER"):
-            miles_validate_args(args)
+        with pytest.raises(AssertionError, match="ORBIT_EXPERIMENTAL_FT_TRAINER"):
+            orbit_validate_args(args)
 
     def test_rejects_pipeline_parallelism(self):
         # Adapter routing is not recompute-safe under a pipelined schedule.
         args = self._parse([])
         args.pipeline_model_parallel_size = 2
         with pytest.raises(AssertionError, match="pipeline-model-parallel-size 1"):
-            miles_validate_args(args)
+            orbit_validate_args(args)
 
     def test_rejects_bshd_qkv_format(self):
         # bshd interleaves samples in the sequence-major flattening the spans assume.
         args = self._parse([])
         args.qkv_format = "bshd"
         with pytest.raises(AssertionError, match="qkv-format thd"):
-            miles_validate_args(args)
+            orbit_validate_args(args)
 
     def test_rejects_shared_outer_expert_loras(self):
         # Per-expert layout only; the flag would switch sglang to a layout training never produces.
         args = self._parse([])
         args.experts_shared_outer_loras = True
         with pytest.raises(AssertionError, match="experts-shared-outer-loras"):
-            miles_validate_args(args)
+            orbit_validate_args(args)
 
     def test_accepts_expert_leaf_targets_without_expert_tp_flag(self):
         # --expert-tensor-parallel-size stays None until Megatron's own validate_args;
@@ -1173,7 +1173,7 @@ class TestMultiLoRAValidation:
         args = self._parse(["--target-modules", "gate_proj,up_proj,down_proj"])
         args.expert_tensor_parallel_size = None
 
-        miles_validate_args(args)
+        orbit_validate_args(args)
 
         assert args.multi_lora is True
 
@@ -1182,7 +1182,7 @@ class TestResolveFtComponents:
     def test_disabled_with_no_components_returns_empty_without_warning(self, caplog) -> None:
         """use_fault_tolerance off and no ft_components yields an empty list and no warning."""
         args = SimpleNamespace(use_fault_tolerance=False, ft_components=None)
-        with caplog.at_level(logging.WARNING, logger="miles.utils.arguments"):
+        with caplog.at_level(logging.WARNING, logger="orbit.utils.arguments"):
             result = _resolve_ft_components(args)
 
         assert result == []
@@ -1191,7 +1191,7 @@ class TestResolveFtComponents:
     def test_disabled_with_components_returns_empty_and_warns(self, caplog) -> None:
         """use_fault_tolerance off but ft_components set returns empty list and logs an ignore warning."""
         args = SimpleNamespace(use_fault_tolerance=False, ft_components=["train"])
-        with caplog.at_level(logging.WARNING, logger="miles.utils.arguments"):
+        with caplog.at_level(logging.WARNING, logger="orbit.utils.arguments"):
             result = _resolve_ft_components(args)
 
         assert result == []
@@ -1415,16 +1415,16 @@ class TestValidateRematerializeParamFromMasterWeight:
 )
 def test_skip_actor_forward_only_flag_is_parsed(extra_args, expected):
     parser = argparse.ArgumentParser()
-    get_miles_extra_args_provider()(parser)
+    get_orbit_extra_args_provider()(parser)
 
     args = parser.parse_args(extra_args + REQUIRED_ARGS)
 
     assert args.skip_actor_forward_only is expected
 
 
-def test_skip_actor_forward_only_is_gated_during_miles_validation():
+def test_skip_actor_forward_only_is_gated_during_orbit_validation():
     parser = argparse.ArgumentParser()
-    get_miles_extra_args_provider()(parser)
+    get_orbit_extra_args_provider()(parser)
     args = parser.parse_args(
         ["--skip-actor-forward-only", "--global-batch-size", "32", "--num-rollout", "1"] + REQUIRED_ARGS
     )
@@ -1439,7 +1439,7 @@ def test_skip_actor_forward_only_is_gated_during_miles_validation():
     )
 
     with pytest.raises(AssertionError, match="--skip-actor-forward-only"):
-        miles_validate_args(args)
+        orbit_validate_args(args)
 
 
 def _make_skip_actor_forward_only_args(**overrides) -> SimpleNamespace:

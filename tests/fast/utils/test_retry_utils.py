@@ -1,6 +1,6 @@
 import pytest
 
-from miles.utils.retry_utils import retry
+from orbit.utils.retry_utils import retry
 
 pytestmark = pytest.mark.asyncio
 
@@ -276,7 +276,7 @@ class TestRetryBackoff:
         assert fake_sleep.delays == [0.0, 0.0]
 
     async def test_default_params_are_reasonable(self):
-        from miles.utils.retry_utils import _DEFAULT_BACKOFF_FACTOR, _DEFAULT_INITIAL_DELAY, _DEFAULT_MAX_DELAY
+        from orbit.utils.retry_utils import _DEFAULT_BACKOFF_FACTOR, _DEFAULT_INITIAL_DELAY, _DEFAULT_MAX_DELAY
 
         assert _DEFAULT_INITIAL_DELAY == 1.0
         assert _DEFAULT_MAX_DELAY == 60.0

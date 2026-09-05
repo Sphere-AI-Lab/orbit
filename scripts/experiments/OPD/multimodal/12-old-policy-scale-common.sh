@@ -81,7 +81,7 @@ if [[ "$M12_OLD_POLICY_SOURCE" == "rollout" ]]; then
    OPD_ARGS+=(--use-rollout-logprobs)
 fi
 
-MILES_ARGS=(
+ORBIT_ARGS=(
    "${LAYOUT_ARGS[@]}"
    "${MODEL_ARGS[@]}"
    "${CKPT_ARGS[@]}"
@@ -105,10 +105,10 @@ _m12_assert_flag_value() {
    local matches=0
    local index
 
-   for ((index = 0; index < ${#MILES_ARGS[@]} - 1; index++)); do
-      if [[ "${MILES_ARGS[$index]}" == "$target_flag" ]]; then
-         if [[ "${MILES_ARGS[$((index + 1))]}" != "$expected_value" ]]; then
-            echo "FATAL: $target_flag must be $expected_value, got ${MILES_ARGS[$((index + 1))]}" >&2
+   for ((index = 0; index < ${#ORBIT_ARGS[@]} - 1; index++)); do
+      if [[ "${ORBIT_ARGS[$index]}" == "$target_flag" ]]; then
+         if [[ "${ORBIT_ARGS[$((index + 1))]}" != "$expected_value" ]]; then
+            echo "FATAL: $target_flag must be $expected_value, got ${ORBIT_ARGS[$((index + 1))]}" >&2
             return 1
          fi
          matches=$((matches + 1))
@@ -141,7 +141,7 @@ _m12_assert_flag_value --opd-dagger-coef 0.5
 _m12_assert_flag_value --opd-dagger-loss cross_entropy
 
 rollout_logprob_flags=0
-for arg in "${MILES_ARGS[@]}"; do
+for arg in "${ORBIT_ARGS[@]}"; do
    case "$arg" in
       --use-rollout-logprobs)
          rollout_logprob_flags=$((rollout_logprob_flags + 1))

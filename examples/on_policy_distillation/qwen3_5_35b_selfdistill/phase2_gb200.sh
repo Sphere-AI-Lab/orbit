@@ -34,12 +34,12 @@ MODE=${MODE:-pure}
 # Both nodes must share one NVLink (MNNVL) domain -- launch with MSC_RACK pinned.
 ACTOR_NUM_NODES=${ACTOR_NUM_NODES:-2}
 GPUS_PER_NODE=${GPUS_PER_NODE:-4}
-MODEL_DIR=${MODEL_DIR:-/cluster_public/miles_data/models}
+MODEL_DIR=${MODEL_DIR:-/cluster_public/orbit_data/models}
 DATA_DIR=${DATA_DIR:-/node_public/maocheng-qwen35/data}
 OUTPUT_DIR=${OUTPUT_DIR:-/node_public/maocheng-qwen35/ckpt-opd-${MODE}}
 TEACHER_LOAD=${TEACHER_LOAD:-/node_public/maocheng-qwen35/ckpt-teacher}   # parent dir!
 EXAMPLE_DIR=${EXAMPLE_DIR:-$(cd "$(dirname "$0")" && pwd)}
-MILES_DIR=${MILES_DIR:-"$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." &>/dev/null && pwd)"}
+ORBIT_DIR=${ORBIT_DIR:-"$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." &>/dev/null && pwd)"}
 RAY_ADDRESS=${RAY_ADDRESS:-http://127.0.0.1:8265}
 OPD_KL_COEF=${OPD_KL_COEF:-0.2}
 mkdir -p "${OUTPUT_DIR}"
@@ -54,7 +54,7 @@ else
 fi
 
 MODEL_ARGS=(
-   --spec miles_plugins.models.qwen3_5 get_qwen3_5_spec
+   --spec orbit_plugins.models.qwen3_5 get_qwen3_5_spec
    --disable-bias-linear --qk-layernorm --group-query-attention
    --num-attention-heads 16 --num-query-groups 2 --kv-channels 256
    --num-layers 40 --hidden-size 2048 --ffn-hidden-size 512
@@ -116,22 +116,22 @@ MISC_ARGS=(
    --attention-dropout 0.0 --hidden-dropout 0.0 --accumulate-allreduce-grads-in-fp32
    --attention-softmax-in-fp32 --attention-backend flash
 )
-WANDB_ARGS=( --use-wandb --wandb-project miles-opd --wandb-group qwen3.5-35b-opd-${MODE} )
+WANDB_ARGS=( --use-wandb --wandb-project orbit-opd --wandb-group qwen3.5-35b-opd-${MODE} )
 
 # PROMETHEUS_PORT override: the contractor k8s namespace has a `prometheus`
 # Service, so kube auto-injects PROMETHEUS_PORT=tcp://<ip>:9090 into every pod.
-# miles' add_prometheus_arguments does int(os.environ["PROMETHEUS_PORT"]) and
+# orbit' add_prometheus_arguments does int(os.environ["PROMETHEUS_PORT"]) and
 # crashes on the URL; force the plain port back via the ray runtime env.
 # NCCL_NVLS_ENABLE=0: on multi-node GB200 the NVLS (NVLink SHARP) bind fails
 # during cross-node ncclCommInitRank ("unhandled cuda error" / CUDA 999), which
 # kills the EP8 sglang engine spanning both nodes. MNNVL stays enabled (pod env)
 # for the NVLink fabric itself; only NVLS multicast is disabled.
-RUNTIME_ENV_JSON="{\"env_vars\": {\"PYTHONPATH\": \"${MILES_DIR}:/root/Megatron-LM/\", \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\", \"WANDB_API_KEY\": \"${WANDB_API_KEY}\", \"PROMETHEUS_PORT\": \"9090\", \"NCCL_NVLS_ENABLE\": \"0\"}}"
+RUNTIME_ENV_JSON="{\"env_vars\": {\"PYTHONPATH\": \"${ORBIT_DIR}:/root/Megatron-LM/\", \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\", \"WANDB_API_KEY\": \"${WANDB_API_KEY}\", \"PROMETHEUS_PORT\": \"9090\", \"NCCL_NVLS_ENABLE\": \"0\"}}"
 
-cd "${MILES_DIR}"
+cd "${ORBIT_DIR}"
 ray job submit --address="${RAY_ADDRESS}" --submission-id qwen3.5-opd-${MODE} --no-wait \
    --runtime-env-json="${RUNTIME_ENV_JSON}" \
-   -- python3 "${MILES_DIR}/train.py" \
+   -- python3 "${ORBIT_DIR}/train.py" \
    --actor-num-nodes ${ACTOR_NUM_NODES} --actor-num-gpus-per-node ${GPUS_PER_NODE} --num-gpus-per-node ${GPUS_PER_NODE} --colocate \
    ${MODEL_ARGS[@]} ${CKPT_ARGS[@]} ${OPD_ARGS[@]} ${ROLLOUT_ARGS[@]} ${OPTIMIZER_ARGS[@]} ${GRPO_ARGS[@]} \
    ${WANDB_ARGS[@]} ${PERF_ARGS[@]} ${EVAL_ARGS[@]} ${SGLANG_ARGS[@]} ${MISC_ARGS[@]} ${RM_ARGS[@]}

@@ -16,7 +16,7 @@ GPUS_PER_NODE=$(echo "$CUDA_VISIBLE_DEVICES" | tr ',' '\n' | wc -l)
 
 # Load model architecture config
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MODEL_ARGS_LINE="$(python3 "${SCRIPT_DIR}/../../miles/utils/external_utils/model_args_utils.py" "gpt-oss-20b")" || exit 1
+MODEL_ARGS_LINE="$(python3 "${SCRIPT_DIR}/../../orbit/utils/external_utils/model_args_utils.py" "gpt-oss-20b")" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 CKPT_ARGS=(
    --hf-checkpoint /root/models/gpt-oss-20b
@@ -116,7 +116,7 @@ SGLANG_ARGS=(
 
 WANDB_ARGS=(
    --use-wandb
-   --wandb-project miles-gpt-oss
+   --wandb-project orbit-gpt-oss
    --wandb-group "gpt-oss-20b-moe-lora"
 )
 

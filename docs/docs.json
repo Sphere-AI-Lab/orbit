@@ -1,18 +1,18 @@
 {
  "$schema": "https://mintlify.com/docs.json",
- "name": "Miles",
- "description": "Miles is an open-source reinforcement learning framework for large-scale LLM post-training, pairing SGLang rollout with Megatron-LM training at trillion-parameter scale.",
+ "name": "Orbit",
+ "description": "Orbit is an open-source reinforcement learning framework for large-scale LLM post-training, pairing SGLang rollout with Megatron-LM training at trillion-parameter scale.",
  "theme": "mint",
  "logo": {
-  "light": "/assets/images/brand/miles_logo_light.png",
-  "dark": "/assets/images/brand/miles_logo_dark.png",
+  "light": "/assets/images/brand/orbit_logo_light.png",
+  "dark": "/assets/images/brand/orbit_logo_dark.png",
   "href": "/",
   "width": 130
  },
- "favicon": "/assets/images/brand/miles_square.png",
+ "favicon": "/assets/images/brand/orbit_square.png",
  "seo": {
   "metatags": {
-   "og:site_name": "Miles Documentation"
+   "og:site_name": "Orbit Documentation"
   },
   "organization": {
    "name": "RadixArk",
@@ -31,7 +31,7 @@
   "links": [
    {
     "type": "github",
-    "href": "https://github.com/radixark/miles"
+    "href": "https://github.com/Sphere-AI-Lab/orbit"
    }
   ]
  },
@@ -227,7 +227,7 @@
      {
       "group": "MoE & Routing",
       "pages": [
-       "advanced/miles-router"
+       "advanced/orbit-router"
       ]
      }
     ]
@@ -431,7 +431,7 @@
  },
  "footer": {
   "socials": {
-   "github": "https://github.com/radixark/miles"
+   "github": "https://github.com/Sphere-AI-Lab/orbit"
   },
   "links": [
    {
@@ -443,7 +443,7 @@
      },
      {
       "label": "Source on GitHub",
-      "href": "https://github.com/radixark/miles"
+      "href": "https://github.com/Sphere-AI-Lab/orbit"
      }
     ]
    }

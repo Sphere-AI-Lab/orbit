@@ -4,8 +4,8 @@ import json
 import pytest
 import torch
 
-from miles.ray.rollout.debug_data import save_debug_rollout_data, trajectory_rows
-from miles.utils.types import Sample
+from orbit.ray.rollout.debug_data import save_debug_rollout_data, trajectory_rows
+from orbit.utils.types import Sample
 
 
 def make_sample(**kwargs):

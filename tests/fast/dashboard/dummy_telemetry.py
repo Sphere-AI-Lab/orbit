@@ -1,4 +1,4 @@
-"""Generate DUMMY live-collection telemetry through miles' REAL store write path.
+"""Generate DUMMY live-collection telemetry through orbit' REAL store write path.
 
 Companion of ``dummy_dump.py`` (which fabricates the ``.pt`` dump side): only
 the *content* here is fake — every record goes through the actual
@@ -29,7 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from miles.dashboard.store import (
+from orbit.dashboard.store import (
     EngineInfo,
     EngineSample,
     GpuSample,

@@ -138,7 +138,7 @@ def test_bypass_fastfail_does_not_make_a_docs_change_affect_gpu_stages():
 def test_unknown_source_path_affects_every_runnable_gpu_stage():
     assert (
         _select(
-            (ChangedFile("M", ("miles/trainer.py",)),),
+            (ChangedFile("M", ("orbit/trainer.py",)),),
             _all_runnable_registrations(),
         )
         == ()
@@ -146,7 +146,7 @@ def test_unknown_source_path_affects_every_runnable_gpu_stage():
 
 
 def test_rename_from_unknown_source_path_affects_every_runnable_stage():
-    changed_files = (ChangedFile("R100", ("miles/old.py", "docs/old-api.md")),)
+    changed_files = (ChangedFile("R100", ("orbit/old.py", "docs/old-api.md")),)
 
     assert _select(changed_files, _all_runnable_registrations()) == ()
 

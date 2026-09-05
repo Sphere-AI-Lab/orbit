@@ -194,7 +194,7 @@ the `--custom-tis-function-path` wiring shown above.
 All names below are logged under the `train/` namespace, and every key `mis.py` produces
 carries a `mis_` prefix that its wrapper adds on the way out — so `training_log_ppl`
 reaches wandb as `train/mis_training_log_ppl`. The two exceptions, marked in the tables,
-come from miles itself and are not prefixed.
+come from orbit itself and are not prefixed.
 
 ### Mismatch Monitoring Metrics
 
@@ -214,7 +214,7 @@ is actually applied.
 | `mis_log_ppl_abs_diff` | Absolute log perplexity difference |
 | `mis_ppl_ratio` | Perplexity ratio |
 | `mis_chi2_token`, `mis_chi2_seq` | Token- and sequence-level $\chi^2$ divergence between the two policies |
-| `train_rollout_logprob_abs_diff` (miles, unprefixed) | Token-level absolute log probability difference |
+| `train_rollout_logprob_abs_diff` (orbit, unprefixed) | Token-level absolute log probability difference |
 
 **Usage**: These metrics help you monitor policy drift. Large values indicate a significant mismatch between the training and rollout engines.
 
@@ -226,7 +226,7 @@ When using `--custom-tis-function-path` pointing to MIS implementation (e.g., `m
 
 | Metric Name | Description | Emitted when |
 |------------|-------------|--------------|
-| `ois` (miles, unprefixed) | On-policy importance sampling ratio: $\exp(\log \pi_{\text{train}} - \log \pi_{\text{old}})$ | `--use-tis` (Algorithm 2 only) |
+| `ois` (orbit, unprefixed) | On-policy importance sampling ratio: $\exp(\log \pi_{\text{train}} - \log \pi_{\text{old}})$ | `--use-tis` (Algorithm 2 only) |
 | `mis_tis_weight_before_bound` | Raw IS weights before any bounding: $\exp(\text{log-ratio})$ | `use_tis` |
 | `mis_tis_weight_after_bound` | IS weights after the `tis_mode` bounding | `use_tis` |
 | `mis_tis_truncate_fraction` | Fraction of weights truncated | `tis_mode: truncate` |

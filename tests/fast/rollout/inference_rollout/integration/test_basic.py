@@ -7,19 +7,19 @@ from tests.fast.rollout.inference_rollout.integration.utils import (
     load_and_call_train,
 )
 
-from miles.rollout.base_types import RolloutFnConstructorInput, RolloutFnEvalInput
-from miles.rollout.inference_rollout.compatibility import call_rollout_function, load_rollout_function
+from orbit.rollout.base_types import RolloutFnConstructorInput, RolloutFnEvalInput
+from orbit.rollout.inference_rollout.compatibility import call_rollout_function, load_rollout_function
 
 _VARIANTS = [
     pytest.param(
         RolloutEnvConfig(
             extra_argv=[
                 "--rollout-function-path",
-                "miles.rollout.sglang_rollout.generate_rollout",
+                "orbit.rollout.sglang_rollout.generate_rollout",
                 "--eval-function-path",
-                "miles.rollout.sglang_rollout.generate_rollout",
+                "orbit.rollout.sglang_rollout.generate_rollout",
                 "--custom-generate-function-path",
-                "miles.rollout.sglang_rollout.generate",
+                "orbit.rollout.sglang_rollout.generate",
             ]
         ),
         id="old_rollout_old_generate",
@@ -28,9 +28,9 @@ _VARIANTS = [
         RolloutEnvConfig(
             extra_argv=[
                 "--rollout-function-path",
-                "miles.rollout.inference_rollout.inference_rollout_common.InferenceRolloutFn",
+                "orbit.rollout.inference_rollout.inference_rollout_common.InferenceRolloutFn",
                 "--custom-generate-function-path",
-                "miles.rollout.sglang_rollout.generate",
+                "orbit.rollout.sglang_rollout.generate",
             ]
         ),
         id="new_rollout_old_generate",

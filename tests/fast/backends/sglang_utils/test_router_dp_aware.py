@@ -4,8 +4,8 @@ register_cpu_ci(est_time=20, suite="stage-a-cpu", labels=[])
 
 import argparse
 
-from miles.backends.sglang_utils.arguments import add_sglang_arguments, validate_args
-from miles.utils.http_utils import router_worker_base_urls
+from orbit.backends.sglang_utils.arguments import add_sglang_arguments, validate_args
+from orbit.utils.http_utils import router_worker_base_urls
 
 
 def _args(argv):

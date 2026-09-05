@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import typer
 
-from miles.utils.debug_utils.run_megatron.cli.path_utils import resolve_megatron_path, resolve_model_script
+from orbit.utils.debug_utils.run_megatron.cli.path_utils import resolve_megatron_path, resolve_model_script
 
 
 class TestResolveMegatronPath:
@@ -33,7 +33,7 @@ class TestResolveModelScript:
         script_file.touch()
 
         monkeypatch.setattr(
-            "miles.utils.debug_utils.run_megatron.cli.path_utils._resolve_repo_base",
+            "orbit.utils.debug_utils.run_megatron.cli.path_utils._resolve_repo_base",
             lambda: tmp_path,
         )
         result = resolve_model_script("deepseek_v3")
@@ -44,7 +44,7 @@ class TestResolveModelScript:
         scripts_dir.mkdir(parents=True)
 
         monkeypatch.setattr(
-            "miles.utils.debug_utils.run_megatron.cli.path_utils._resolve_repo_base",
+            "orbit.utils.debug_utils.run_megatron.cli.path_utils._resolve_repo_base",
             lambda: tmp_path,
         )
         with pytest.raises(typer.BadParameter, match="Model script not found"):

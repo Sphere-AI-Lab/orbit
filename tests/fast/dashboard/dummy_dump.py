@@ -1,4 +1,4 @@
-"""Generate a DUMMY ``--dump-details`` directory through miles'
+"""Generate a DUMMY ``--dump-details`` directory through orbit'
 REAL dumping pipeline.
 
 Only the *content* is fake (tiny random rollouts); every file on disk is
@@ -36,14 +36,14 @@ from pathlib import Path
 
 import torch
 
-from miles.ray.rollout.debug_data import save_debug_rollout_data
-from miles.ray.rollout.train_data_conversion import (
+from orbit.ray.rollout.debug_data import save_debug_rollout_data
+from orbit.ray.rollout.train_data_conversion import (
     convert_samples_to_train_data,
     process_rollout_data_shard,
     split_train_data_by_dp_raw,
 )
-from miles.utils.train_dump_utils import save_debug_train_data_for_rank
-from miles.utils.types import Sample
+from orbit.utils.train_dump_utils import save_debug_train_data_for_rank
+from orbit.utils.types import Sample
 
 
 @dataclass

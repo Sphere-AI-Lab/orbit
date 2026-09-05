@@ -16,7 +16,7 @@ much better the actual outcome was than the critic's prediction. The trade-off: 
 second model (more memory, more code paths), but its baseline is per-token rather than
 per-group, and it does not need a large `--n-samples-per-prompt` to be well-behaved.
 
-In miles the critic is **colocated on the actor's train GPUs**, so PPO needs no extra GPUs over
+In orbit the critic is **colocated on the actor's train GPUs**, so PPO needs no extra GPUs over
 the GRPO equivalent. It pays for that in memory, which is why `--offload-train` is turned on for
 you — see [Constraints](#constraints-worth-knowing-before-you-debug).
 
@@ -27,7 +27,7 @@ you — see [Constraints](#constraints-worth-knowing-before-you-debug).
 ## Quick Start
 
 ```bash
-cd miles
+cd orbit
 python examples/ppo/run_qwen3_4b_ppo.py
 ```
 
@@ -74,7 +74,7 @@ These are enforced at argument validation, so you get an error rather than a sil
 * **`--kl-coef` must be 0.** Reward-level KL is rejected because the critic trains *before* the
   actor and never sees ref log probs, so its value targets would silently exclude the KL penalty
   applied to the actor's rewards. Use loss-level `--use-kl-loss` / `--kl-loss-coef` instead.
-* **Not compatible with `MILES_EXPERIMENTAL_FT_TRAINER=1`.** The v2 fault-tolerant train group
+* **Not compatible with `ORBIT_EXPERIMENTAL_FT_TRAINER=1`.** The v2 fault-tolerant train group
   cannot route critic values yet.
 
 ## Which numbers here are verified

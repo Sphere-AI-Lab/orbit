@@ -11,7 +11,7 @@ description: Launch recipes for GLM-4.7-Flash — compact MLA + MoE with R3 enab
 - **Compact MoE architecture**: 30 B total / 3 B active, sparse activation for efficient inference.
 - **MLA attention**: Multi-head Latent Attention with q-LoRA rank 768 and kv-LoRA rank 512.
 - **MTP head + EAGLE speculative**: built-in `--mtp-num-layers 1` and EAGLE rollout enabled by default.
-- **R3 on by default**: the miles launcher enables `--use-rollout-routing-replay` out of the box.
+- **R3 on by default**: the orbit launcher enables `--use-rollout-routing-replay` out of the box.
 
 ## 2. Supported Variants
 
@@ -34,8 +34,8 @@ The launcher does all three downloads itself into `--model-dir` (default `/root/
 ### 3.2 HF → Megatron `torch_dist` conversion
 
 ```bash
-cd /root/miles
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py glm4.7-flash)" || exit 1
+cd /root/orbit
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py glm4.7-flash)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM torchrun --nproc-per-node 8 \
    tools/convert_hf_to_torch_dist.py \
@@ -51,7 +51,7 @@ The launcher does the conversion automatically.
 ### 4.1 Quick start
 
 ```bash
-cd /root/miles
+cd /root/orbit
 python scripts/run_glm47_flash.py --rollout-num-gpus-per-engine 4
 
 # pass --hardware B200 on B200
@@ -106,5 +106,5 @@ CPU Adam on:
 
 ## 6. Pairs Well With
 
-- [Rollout Routing Replay (R3)](/advanced/miles-router) — already on by default.
+- [Rollout Routing Replay (R3)](/advanced/orbit-router) — already on by default.
 - [Low Precision RL](/advanced/low-precision)

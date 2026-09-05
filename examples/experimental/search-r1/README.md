@@ -1,6 +1,6 @@
 # Search-R1 lite
 
-This is a minimal reproduction of [Search-R1](https://github.com/PeterGriffinJin/Search-R1) and an example of using multi-turn conversation and tool-calling in miles.
+This is a minimal reproduction of [Search-R1](https://github.com/PeterGriffinJin/Search-R1) and an example of using multi-turn conversation and tool-calling in orbit.
 
 ## Environment Setup
 
@@ -8,7 +8,7 @@ Use the `radixark/miles:latest` image and initialize the environment required fo
 
 ```bash
 cd /root/
-git clone https://github.com/radixark/miles.git
+git clone https://github.com/Sphere-AI-Lab/orbit.git
 pip install -e . --no-deps
 # for Search R1
 pip install chardet
@@ -50,8 +50,8 @@ Initialize the Qwen2.5-3B model:
 hf download Qwen/Qwen2.5-3B --local-dir /root/Qwen2.5-3B
 
 # mcore checkpoint
-cd /root/miles
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py qwen2.5-3B)" || exit 1
+cd /root/orbit
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py qwen2.5-3B)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
     ${MODEL_ARGS[@]} \
@@ -155,13 +155,13 @@ CUSTOM_ARGS=(
 ## Running the Script
 
 ```bash
-cd miles/
+cd orbit/
 bash examples/experimental/search-r1/run_qwen2.5_3B.sh
 ```
 
 ## Code Structure
 
-To implement multi-turn conversation + tool-calling in miles, you only need to implement a custom data generation function and a reward model for the task. These correspond to the following 2 configuration items in the startup script:
+To implement multi-turn conversation + tool-calling in orbit, you only need to implement a custom data generation function and a reward model for the task. These correspond to the following 2 configuration items in the startup script:
 
 ```bash
 CUSTOM_ARGS=(
@@ -224,7 +224,7 @@ pip install uvicorn fastapi
 save_path=/root/Index
 
 # Download the index and corpus files
-python /root/miles/examples/experimental/search-r1/local_dense_retriever/download.py --save_path $save_path
+python /root/orbit/examples/experimental/search-r1/local_dense_retriever/download.py --save_path $save_path
 
 # Combine split index files
 cat $save_path/part_* > $save_path/e5_Flat.index
@@ -252,7 +252,7 @@ retriever_name=e5
 retriever_path=intfloat/e5-base-v2
 
 # Start the retrieval server
-python /root/miles/examples/experimental/search-r1/local_dense_retriever/retrieval_server.py \
+python /root/orbit/examples/experimental/search-r1/local_dense_retriever/retrieval_server.py \
     --index_path $index_file \
     --corpus_path $corpus_file \
     --topk 3 \
@@ -273,7 +273,7 @@ python /root/miles/examples/experimental/search-r1/local_dense_retriever/retriev
 Make sure you're **NOT** in the retriever conda environment. If you are, run `conda deactivate`.
 
 ```bash
-cd /root/miles
+cd /root/orbit
 
 # Set your wandb key (optional)
 export WANDB_KEY="your_wandb_key_here"
@@ -283,7 +283,7 @@ export WANDB_KEY="your_wandb_key_here"
 # rm -rf /root/.*
 
 # Run the training script
-bash /root/miles/examples/experimental/search-r1/run_qwen2.5_3B.sh
+bash /root/orbit/examples/experimental/search-r1/run_qwen2.5_3B.sh
 ```
 
 ### Troubleshooting

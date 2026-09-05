@@ -66,12 +66,12 @@ _SHIM_STDOUT = {
 }
 
 _PYTHON_SHIM_BODY = """case "${1:-}" in
-*/model_args_utils.py) "$MILES_SH_HARNESS_REAL_PYTHON" "$@" ;;
+*/model_args_utils.py) "$ORBIT_SH_HARNESS_REAL_PYTHON" "$@" ;;
 -c)
     case "$2" in
     *cluster_resources*) printf '%s\\n' 'REPLACE_GPU_COUNT' ;;
     *import*) ;;
-    *) "$MILES_SH_HARNESS_REAL_PYTHON" "$@" ;;
+    *) "$ORBIT_SH_HARNESS_REAL_PYTHON" "$@" ;;
     esac
     ;;
 esac
@@ -85,11 +85,11 @@ _SHIM_BODY = {
 }
 
 _SHIM_TEMPLATE = """#!/bin/bash
-record="$$${{MILES_SH_HARNESS_ARG_SEP}}{name}"
+record="$$${{ORBIT_SH_HARNESS_ARG_SEP}}{name}"
 for arg in "$@"; do
-    record="$record$MILES_SH_HARNESS_ARG_SEP$arg"
+    record="$record$ORBIT_SH_HARNESS_ARG_SEP$arg"
 done
-printf '%s%s' "$record" "$MILES_SH_HARNESS_RECORD_SEP" >>"$MILES_SH_HARNESS_CAPTURE"
+printf '%s%s' "$record" "$ORBIT_SH_HARNESS_RECORD_SEP" >>"$ORBIT_SH_HARNESS_CAPTURE"
 {stdout_statement}exit 0
 """
 
@@ -135,10 +135,10 @@ def run_launch_script(
     frozen = {
         **_FROZEN_ENV,
         "PATH": f"{fake_bin}:{_SYSTEM_PATH}",
-        "MILES_SH_HARNESS_CAPTURE": str(capture),
-        "MILES_SH_HARNESS_ARG_SEP": _ARG_SEPARATOR,
-        "MILES_SH_HARNESS_RECORD_SEP": _RECORD_SEPARATOR,
-        "MILES_SH_HARNESS_REAL_PYTHON": sys.executable,
+        "ORBIT_SH_HARNESS_CAPTURE": str(capture),
+        "ORBIT_SH_HARNESS_ARG_SEP": _ARG_SEPARATOR,
+        "ORBIT_SH_HARNESS_RECORD_SEP": _RECORD_SEPARATOR,
+        "ORBIT_SH_HARNESS_REAL_PYTHON": sys.executable,
     }
     _reject_unfreezing(extra_env or {}, frozen=frozen)
 
@@ -170,7 +170,7 @@ def run_launch_script(
     )
 
 
-SNAPSHOT_UPDATE_ENV_VAR = "MILES_UPDATE_LAUNCH_SCRIPT_SNAPSHOTS"
+SNAPSHOT_UPDATE_ENV_VAR = "ORBIT_UPDATE_LAUNCH_SCRIPT_SNAPSHOTS"
 
 
 def assert_matches_snapshot(snapshot: Path, actual: str, subject: str) -> None:

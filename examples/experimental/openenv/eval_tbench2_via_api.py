@@ -1,10 +1,10 @@
 """Standalone Terminal-Bench-2 eval: an OpenAI-compatible *API* as the policy,
-per-episode sandboxes as the env. No GPU, no miles training pipeline.
+per-episode sandboxes as the env. No GPU, no orbit training pipeline.
 
-This reuses the exact agent-env loop miles runs during training
+This reuses the exact agent-env loop orbit runs during training
 (``openenv_agent_function.multi_turn``: reset -> {policy emits a shell command
 -> exec -> feed output back} -> canonical tests/test.sh -> binary reward) but
-swaps miles' session-server policy for a plain API client. The machine running
+swaps orbit' session-server policy for a plain API client. The machine running
 this only orchestrates; the policy runs in the cloud (e.g. DeepSeek) and each
 episode runs in its own per-provider sandbox (the task's OFFICIAL image +
 env server layer — recipe in the sibling ``tb2_sandbox_recipe`` module,
@@ -12,7 +12,7 @@ materialized per provider), created
 before the episode and deleted after.
 
 Why a separate script and not ``run-openenv-tbench2.py``: those launchers always
-bring up Megatron+sglang via Ray (the policy must be miles' own engine so the
+bring up Megatron+sglang via Ray (the policy must be orbit' own engine so the
 session server can record on-policy tokens for the backward pass). Pure eval
 needs none of that. The ``run()`` entry also hardcodes ``api_key="EMPTY"``
 (self-hosted engines don't check it), so we call each module's ``run_episode``

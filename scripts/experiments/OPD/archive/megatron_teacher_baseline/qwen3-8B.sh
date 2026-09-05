@@ -29,7 +29,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}
 RECIPE_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
 
 # ---------------------------------------------------------------------------
@@ -57,7 +57,7 @@ OPD_TEACHER_LOAD=${OPD_TEACHER_LOAD:-"$HF_TORCHDIST_DIR"}
 # train.py args
 # ---------------------------------------------------------------------------
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-8B.sh"
+source "$ORBIT_REPO/scripts/models/qwen3-8B.sh"
 
 # Official-baseline naming: baseline-opd-<student>-<teacher mode>-t<teacher size>.
 # Default teacher is the 8B itself (self-distillation); override together with
@@ -145,7 +145,7 @@ WANDB_ARGS=(
    --wandb-project OPD
    --wandb-group   "$RUN_NAME"
    --disable-wandb-random-suffix
-   # WANDB_API_KEY comes from the env (exported by submit.sh / launch_miles.sbatch);
+   # WANDB_API_KEY comes from the env (exported by submit.sh / launch_orbit.sbatch);
    # we don't pass it on the CLI because it would leak into run.log and args.json.
 )
 
@@ -162,7 +162,7 @@ LAYOUT_ARGS=(
    --rollout-num-gpus       4
 )
 
-MILES_ARGS=(
+ORBIT_ARGS=(
    "${LAYOUT_ARGS[@]}"
    "${MODEL_ARGS[@]}"
    "${CKPT_ARGS[@]}"

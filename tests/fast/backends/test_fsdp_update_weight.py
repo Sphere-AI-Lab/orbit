@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import torch
 
-from miles.backends.fsdp_utils import update_weight_utils
+from orbit.backends.fsdp_utils import update_weight_utils
 
 
 class _RemoteMethod:

@@ -5,9 +5,9 @@ from strands import Agent, tool
 from strands_sglang import SGLangClient, SGLangModel
 from strands_sglang.tool_limiter import ToolIterationLimiter
 
-from miles.rollout.rm_hub.math_dapo_utils import compute_score as math_dapo_compute_score
-from miles.rollout.sglang_rollout import GenerateState
-from miles.utils.types import Sample
+from orbit.rollout.rm_hub.math_dapo_utils import compute_score as math_dapo_compute_score
+from orbit.rollout.sglang_rollout import GenerateState
+from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +26,10 @@ _client_cache: dict[str, SGLangClient] = {}
 
 
 def get_client(args) -> SGLangClient:
-    """Get shared client for connection pooling (like MILES)."""
+    """Get shared client for connection pooling (like ORBIT)."""
     base_url = f"http://{args.sglang_router_ip}:{args.sglang_router_port}"
     if base_url not in _client_cache:
-        _client_cache[base_url] = SGLangClient.from_miles_args(args)
+        _client_cache[base_url] = SGLangClient.from_orbit_args(args)
     return _client_cache[base_url]
 
 
@@ -74,7 +74,7 @@ async def generate(args, sample: Sample, sampling_params) -> Sample:
         await agent.invoke_async(prompt)
         sample.status = Sample.Status.COMPLETED
     except Exception as e:
-        # Always use TRUNCATED instead of ABORTED because Miles doesn't properly
+        # Always use TRUNCATED instead of ABORTED because Orbit doesn't properly
         # handle ABORTED samples in reward processing. See: https://github.com/THUDM/slime/issues/200
         sample.status = Sample.Status.TRUNCATED
         logger.warning(f"TRUNCATED: {type(e).__name__}: {e}")

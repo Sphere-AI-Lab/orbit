@@ -1,7 +1,7 @@
 """Mock-based tests for the rollout-engine lock lifecycle in
 update_weight_from_distributed/broadcast.py.
 
-Lock.acquire (miles/ray/utils.py) is polled until it returns True, so a
+Lock.acquire (orbit/ray/utils.py) is polled until it returns True, so a
 broadcast failure that skips the release makes every later weight sync spin
 forever. These tests pin lock contention, argument forwarding, and release on
 the success path and both failure paths (broadcast setup and engine-side
@@ -13,15 +13,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 import torch
 
-from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
+from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
     UpdateWeightFromDistributed,
 )
 
-_MODULE = "miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast"
+_MODULE = "orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast"
 
 
 class _LockState:
-    """In-process stand-in for the miles.ray.utils.Lock actor."""
+    """In-process stand-in for the orbit.ray.utils.Lock actor."""
 
     def __init__(self):
         self.locked = False
@@ -46,7 +46,7 @@ def _make_updater(lock_state: _LockState) -> UpdateWeightFromDistributed:
     lock_handle.acquire.remote.side_effect = lock_state.acquire
     lock_handle.release.remote.side_effect = lock_state.release
     updater.rollout_engine_lock = lock_handle
-    updater._group_name = "miles-pp_0"
+    updater._group_name = "orbit-pp_0"
     updater._model_update_groups = MagicMock()
     updater.weight_version = 0
     updater.rollout_engines = [MagicMock()]

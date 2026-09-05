@@ -1,6 +1,6 @@
 ---
 title: Disaggregated RL Rollout
-description: Scale rollout independently across clusters and regions while miles preserves policy publication and version attribution.
+description: Scale rollout independently across clusters and regions while orbit preserves policy publication and version attribution.
 ---
 
 Policy training and rollout inference have different resource and scaling
@@ -15,7 +15,7 @@ inference an independent service. The trainer remains on its stable cluster,
 while rollout replicas can scale with the live queue and draw on compute across
 the globe without joining the trainer's Ray placement group or NCCL fabric.
 
-For miles, this boundary brings:
+For orbit, this boundary brings:
 
 - **Independent scaling.** Add or remove rollout capacity without resizing or
   restarting the trainer.
@@ -29,7 +29,7 @@ For miles, this boundary brings:
   by version, and record which version generated every returned trajectory.
 
 The last property is what turns remote inference capacity into an RL rollout
-service rather than an ordinary model-serving endpoint. miles must update the
+service rather than an ordinary model-serving endpoint. orbit must update the
 policy without owning every engine and must preserve the behavior-policy
 identity required for staleness control and off-policy training.
 
@@ -39,22 +39,22 @@ the prefill and decode phases inside an SGLang deployment.
 
 ## Topologies
 
-| Topology | Engine lifecycle | What miles talks to | Policy updates |
+| Topology | Engine lifecycle | What orbit talks to | Policy updates |
 |---|---|---|---|
-| miles-managed rollout | Part of the miles job | A miles-managed router and engine handles | miles converts, transfers, pauses, updates, and resumes the engines |
-| Attached SGLang engines | Owned by the deployment | Fixed engine addresses supplied with `--rollout-external-engine-addrs` | miles still addresses and controls each engine through its engine handle |
-| External rollout service | Independent and dynamically scaled | One stable rollout endpoint | miles publishes versions; the rollout service materializes and activates them across its replicas |
+| orbit-managed rollout | Part of the orbit job | A orbit-managed router and engine handles | orbit converts, transfers, pauses, updates, and resumes the engines |
+| Attached SGLang engines | Owned by the deployment | Fixed engine addresses supplied with `--rollout-external-engine-addrs` | orbit still addresses and controls each engine through its engine handle |
+| External rollout service | Independent and dynamically scaled | One stable rollout endpoint | orbit publishes versions; the rollout service materializes and activates them across its replicas |
 
-miles supports the first two topologies today. The single-endpoint external
+orbit supports the first two topologies today. The single-endpoint external
 rollout service is coming soon and extends that separation from GPU placement
 to independent scaling, routing, and lifecycle.
 
-`--rollout-external` is the second row, not the third. It prevents miles from
-launching SGLang, but miles still knows the individual engine addresses, checks
+`--rollout-external` is the second row, not the third. It prevents orbit from
+launching SGLang, but orbit still knows the individual engine addresses, checks
 their configuration, registers them with its router, and calls their
 weight-update lifecycle.
 
-An external rollout service is a narrower interface. miles sends rollout
+An external rollout service is a narrower interface. orbit sends rollout
 requests to one endpoint and publishes new policy versions without needing an
 engine handle for every replica. The service behind that endpoint can be
 implemented by any deployment or control-plane package that satisfies the
@@ -62,7 +62,7 @@ request and policy-version contracts below.
 
 ## Separate trainer and rollout GPUs
 
-Disaggregated placement is the miles default. Give the trainer and rollout
+Disaggregated placement is the orbit default. Give the trainer and rollout
 engines separate GPU counts and do not pass `--colocate`:
 
 ```bash
@@ -78,7 +78,7 @@ GPUs and take turns; fully async rollout therefore requires the disaggregated
 layout. See [Training Backends: Choosing the GPU layout](/user-guide/training-backend#3-choosing-the-gpu-layout)
 for placement and offload behavior.
 
-To attach SGLang engines launched outside the miles Ray job, provide their
+To attach SGLang engines launched outside the orbit Ray job, provide their
 addresses explicitly:
 
 ```bash
@@ -86,25 +86,25 @@ addresses explicitly:
 --rollout-external-engine-addrs 10.0.1.10:30000 10.0.1.11:30000
 ```
 
-The engines must be reachable from the miles job and must have server settings
-compatible with the rollout configuration. Because miles retains individual
+The engines must be reachable from the orbit job and must have server settings
+compatible with the rollout configuration. Because orbit retains individual
 engine handles, `--rollout-external` does not hand off weight-update ownership:
-miles still runs the selected weight-update lifecycle.
+orbit still runs the selected weight-update lifecycle.
 
 ## Weight synchronization
 
 Once training and rollout use different GPUs, updated weights have to cross the
 boundary between them. `--update-weight-transfer-mode` selects the current
-miles-managed path:
+orbit-managed path:
 
 | Mode | Data path | Use when |
 |---|---|---|
 | `broadcast` | Gather and convert trainer weights, then broadcast them to the SGLang ranks over NCCL | Trainer and rollout ranks have NCCL connectivity; this is the default |
-| `p2p` | Convert and re-shard weights, then write them directly to rollout-rank memory over RDMA | miles-managed, in-cluster jobs with direct rank-to-rank connectivity; see [P2P Weight Transfer](/advanced/p2p-weight-transfer) |
+| `p2p` | Convert and re-shard weights, then write them directly to rollout-rank memory over RDMA | orbit-managed, in-cluster jobs with direct rank-to-rank connectivity; see [P2P Weight Transfer](/advanced/p2p-weight-transfer) |
 | `disk-delta` | Publish changed canonical checkpoint bytes to shared storage, let rollout hosts materialize them locally, then reload | Trainer and rollout cannot share an NCCL fabric, or model-sized full-weight transfer dominates the update |
 
 These are weight synchronization choices, not different rollout APIs. In the
-first two modes, miles transfers tensors into known engine ranks directly.
+first two modes, orbit transfers tensors into known engine ranks directly.
 P2P RDMA is an in-cluster transfer optimization; it is not the external rollout
 service mechanism described later in this page. Disk-delta instead establishes
 a versioned publication boundary that can also be consumed by an external
@@ -118,25 +118,25 @@ directory for each rollout host:
 
 ```bash
 --update-weight-transfer-mode disk-delta \
---update-weight-disk-dir /shared/miles/weight-updates \
---update-weight-local-checkpoint-dir /local-nvme/miles-rollout-checkpoint
+--update-weight-disk-dir /shared/orbit/weight-updates \
+--update-weight-local-checkpoint-dir /local-nvme/orbit-rollout-checkpoint
 ```
 
 The current lifecycle is:
 
-1. On the first `update_weights()` call, miles captures a CPU snapshot from
+1. On the first `update_weights()` call, orbit captures a CPU snapshot from
    `--hf-checkpoint`. No delta version is published. Each rollout host also
    materializes the same base checkpoint in its local directory.
 2. At the next update boundary, source trainer ranks gather Megatron tensors
    under their canonical Hugging Face names and compare their bytes with the
    previous snapshot.
-3. miles publishes `weight_vNNNNNN/` with compressed changed bytes and an index
+3. orbit publishes `weight_vNNNNNN/` with compressed changed bytes and an index
    containing the version, base version, delta encoding, and final-state
    checksums. Files are written atomically before the version is consumed.
 4. Each rollout host pulls the version and patches its host-local checkpoint.
    Delta application verifies the checksum of the resulting tensor, not only
    the transferred delta.
-5. miles pauses generation, reloads the materialized checkpoint into SGLang,
+5. orbit pauses generation, reloads the materialized checkpoint into SGLang,
    advances the engine weight version, and resumes generation.
 
 Pull and local materialization happen before the engine pause and can overlap
@@ -156,12 +156,12 @@ updated policy.
 
 On a POSIX shared filesystem, the published version becomes visible through
 the normal filesystem contract. Object-store-backed mounts can use
-`--custom-update-weight-post-write-path` on the miles side and
+`--custom-update-weight-post-write-path` on the orbit side and
 `--sglang-custom-pull-weights-pre-read-hook` on the SGLang side to make writes
 visible before a rollout host reads them.
 
 The maintained end-to-end coverage is
-[`tests/e2e/megatron/test_qwen3_4B_disk_delta.py`](https://github.com/radixark/miles/blob/main/tests/e2e/megatron/test_qwen3_4B_disk_delta.py).
+[`tests/e2e/megatron/test_qwen3_4B_disk_delta.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/tests/e2e/megatron/test_qwen3_4B_disk_delta.py).
 It exercises a Qwen3-4B Megatron trainer and two SGLang rollout engines on a
 single 8-GPU node. The same storage contract supports separate hosts, but the
 registered test does not reproduce a cross-cluster deployment.
@@ -174,26 +174,26 @@ general FSDP weight-update path.
 ## External rollout service contract
 
 The coming single-endpoint integration builds on the current disk-delta
-publication path and removes the need for miles to hold one handle per rollout
-engine. The commands above cover miles-managed and attached-engine deployments;
+publication path and removes the need for orbit to hold one handle per rollout
+engine. The commands above cover orbit-managed and attached-engine deployments;
 this section defines the external-service boundary.
 
 The intended boundary has two independent data paths:
 
 ```mermaid
 flowchart LR
-    T[miles trainer] -->|publish policy version| S[(Version store)]
-    W[miles rollout worker] -->|version-constrained request| G[External rollout endpoint]
+    T[orbit trainer] -->|publish policy version| S[(Version store)]
+    W[orbit rollout worker] -->|version-constrained request| G[External rollout endpoint]
     S -->|materialize and verify| E[Rollout replicas]
     G --> E
     E -->|trajectory and served version| W
 ```
 
-miles does not need to know how many replicas are behind the endpoint, where
+orbit does not need to know how many replicas are behind the endpoint, where
 they run, or how the service replaces them. The integration is defined by
 ownership:
 
-| miles owns | The external rollout service owns |
+| orbit owns | The external rollout service owns |
 |---|---|
 | Training state and optimizer steps | Replica placement, scaling, and health |
 | Conversion to canonical rollout-visible tensors | Materializing published versions on rollout hosts |
@@ -203,15 +203,15 @@ ownership:
 
 The rollout endpoint and the version store are separate interfaces. The
 request path should not have to carry model-sized weights, and publishing a new
-version should not require miles to enumerate the current replicas.
+version should not require orbit to enumerate the current replicas.
 
 One open-source package implementing the rollout-service side is
-[Stitch](https://github.com/modal-projects/stitch). It connects miles policy
+[Stitch](https://github.com/modal-projects/stitch). It connects orbit policy
 publication and version-constrained requests to an independently managed
-rollout fleet. The miles contract remains package-agnostic.
+rollout fleet. The orbit contract remains package-agnostic.
 
-Stitch pins the miles revision it integrates against;
-[Miles fork](https://github.com/modal-projects/stitch/blob/main/cookbook/miles_disagg/MILES_FORK.md)
+Stitch pins the orbit revision it integrates against;
+[Orbit fork](https://github.com/modal-projects/stitch/blob/main/cookbook/orbit_disagg/ORBIT_FORK.md)
 records the trainer-side commits that pin depends on, how the same ownership
 split lands in code, and how to move the pin forward.
 
@@ -228,13 +228,13 @@ able to express the policy version the caller can accept:
 If no compatible replica is ready, the service returns a retryable response
 instead of silently serving an older policy. Retrying a stateful generation is
 safe only when the rollout integration defines an idempotency and session
-contract; the generic miles request path should not assume that every failed
+contract; the generic orbit request path should not assume that every failed
 generation can be replayed.
 
 The response reports which version served the request. For long or agentic
 trajectories, recording both the version at generation start and at generation
 end also exposes whether an activation occurred while the request was in
-flight. miles can then attach the observed version to the sample rather than
+flight. orbit can then attach the observed version to the sample rather than
 inferring it from the trainer's latest published version.
 
 ### Publication and replica convergence
@@ -254,7 +254,7 @@ final-state checksums. For an external consumer, the publication hook and
 version store must also expose the completed version as one commit boundary.
 Replica catch-up, admission, and activation belong to the external rollout
 system. Other publication formats can implement the same boundary without
-using disk-delta, as long as miles and the rollout system agree on version
+using disk-delta, as long as orbit and the rollout system agree on version
 identity and rollout-visible weights.
 
 ## Fully async rollout
@@ -266,7 +266,7 @@ Disaggregation and fully async rollout answer different questions:
 - [Fully Async RL](/user-guide/fully-async) decides how generation, buffering,
   and optimizer steps overlap.
 
-With miles-managed engines, fully async rollout keeps generation in flight
+With orbit-managed engines, fully async rollout keeps generation in flight
 while the trainer consumes completed groups and takes optimizer steps. At each
 configured update boundary, the current schedule still synchronizes the active
 generation call before invoking the weight updater. Disk-delta host
@@ -280,7 +280,7 @@ engine-local pause. Different replicas may converge at different times, so
 request constraints and served-version attribution become part of the RL data
 contract rather than optional serving metadata.
 
-miles already uses weight versions to measure fully async sample staleness. A
+orbit already uses weight versions to measure fully async sample staleness. A
 service integration must preserve that information so
 `--max-weight-staleness` and custom data-buffer policies make decisions from
 the policy that generated each sample.
@@ -299,7 +299,7 @@ mixes phases with different effects on rollout availability:
 | Version convergence | Time from completed publication until the required rollout capacity advertises the version |
 | Request version lag | Difference between the requested, served, and newest published policy versions |
 
-For current disk-delta runs, miles records
+For current disk-delta runs, orbit records
 `perf/update_weights_density` and `perf/update_weights_wire_bytes` in addition
 to the normal weight-update timing.
 

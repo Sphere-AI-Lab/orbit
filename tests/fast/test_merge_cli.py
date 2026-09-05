@@ -9,7 +9,7 @@ import tools.merge_oft_adapters as cli
 import torch
 from safetensors.torch import load_file, save_file
 
-from miles.merge.oft_merge import magnitude_corrected_merge, orthomerge_original_merge
+from orbit.merge.oft_merge import magnitude_corrected_merge, orthomerge_original_merge
 
 
 def _write_adapter(
@@ -138,7 +138,7 @@ def test_main_rejects_dsv4_native_merge_for_oft_original(tmp_path):
         )
 
 
-def test_script_uses_worktree_miles_package_for_oft_original(tmp_path):
+def test_script_uses_worktree_orbit_package_for_oft_original(tmp_path):
     k = "decoder.layers.0.self_attention.linear_qkv.adapter.oft_r"
     inputs = []
     adapters = []
@@ -148,10 +148,10 @@ def test_script_uses_worktree_miles_package_for_oft_original(tmp_path):
         adapters.append(_write_adapter(tmp_path / name, state_dict={k: tensor}))
 
     stale_site = tmp_path / "stale_site"
-    (stale_site / "miles" / "merge").mkdir(parents=True)
-    (stale_site / "miles" / "utils").mkdir()
-    (stale_site / "miles" / "__init__.py").write_text("")
-    (stale_site / "miles" / "merge" / "__init__.py").write_text(
+    (stale_site / "orbit" / "merge").mkdir(parents=True)
+    (stale_site / "orbit" / "utils").mkdir()
+    (stale_site / "orbit" / "__init__.py").write_text("")
+    (stale_site / "orbit" / "merge" / "__init__.py").write_text(
         """
 class _Strategy:
     def merge(self, state_dicts, weights=None):
@@ -165,8 +165,8 @@ def get_strategy(method):
     )
 """
     )
-    (stale_site / "miles" / "utils" / "__init__.py").write_text("")
-    (stale_site / "miles" / "utils" / "logging_utils.py").write_text(
+    (stale_site / "orbit" / "utils" / "__init__.py").write_text("")
+    (stale_site / "orbit" / "utils" / "logging_utils.py").write_text(
         "def configure_logger(*args, **kwargs):\n    return None\n"
     )
 

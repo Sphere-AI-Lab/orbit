@@ -9,7 +9,7 @@ from llmcompressor import oneshot
 from llmcompressor.modifiers.quantization.gptq import GPTQModifier
 from transformers import AutoModelForCausalLM
 
-from miles.utils.processing_utils import load_tokenizer
+from orbit.utils.processing_utils import load_tokenizer
 
 
 def parse_args():

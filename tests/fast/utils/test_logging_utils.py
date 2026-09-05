@@ -8,7 +8,7 @@ import warnings
 
 import pytest
 
-from miles.utils.logging_utils import configure_strict_async_warnings
+from orbit.utils.logging_utils import configure_strict_async_warnings
 
 
 async def _dummy_coroutine():
@@ -39,7 +39,7 @@ class TestUnawaitedCoroutineCrashesProcess:
         result = _run_snippet(
             """
             import gc
-            from miles.utils.logging_utils import configure_strict_async_warnings
+            from orbit.utils.logging_utils import configure_strict_async_warnings
             configure_strict_async_warnings()
 
             async def foo(): pass
@@ -56,7 +56,7 @@ class TestUnawaitedCoroutineCrashesProcess:
         result = _run_snippet(
             """
             import gc
-            from miles.utils.logging_utils import configure_strict_async_warnings
+            from orbit.utils.logging_utils import configure_strict_async_warnings
             configure_strict_async_warnings()
 
             async def foo(): pass
@@ -74,7 +74,7 @@ class TestUnawaitedCoroutineCrashesProcess:
         result = _run_snippet(
             """
             import asyncio
-            from miles.utils.logging_utils import configure_strict_async_warnings
+            from orbit.utils.logging_utils import configure_strict_async_warnings
             configure_strict_async_warnings()
 
             async def foo(): return 42
@@ -108,7 +108,7 @@ class TestCorrectUsageNoError:
 
     @pytest.mark.asyncio
     async def test_eager_create_task(self):
-        from miles.utils.async_utils import eager_create_task
+        from orbit.utils.async_utils import eager_create_task
 
         task = await eager_create_task(_dummy_coroutine())
         result = await task

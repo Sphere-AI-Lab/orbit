@@ -6,7 +6,7 @@ name: Release Docker Images
 # Builds and publishes:
 #   - radixark/miles:v{version}        (cu13, amd64+arm64)
 #   - radixark/miles:v{version}-cu12   (cu12.9, amd64)
-# SGLANG_COMMIT and MEGATRON_COMMIT come from release-lock.json; MILES_COMMIT
+# SGLANG_COMMIT and MEGATRON_COMMIT come from release-lock.json; ORBIT_COMMIT
 # is the checked-out SHA. Wheel release tags remain rolling inputs whose
 # lockfile fingerprints are audit records, not restored build inputs.
 
@@ -32,7 +32,7 @@ permissions:
 
 jobs:
   build-and-publish:
-    if: github.repository == 'radixark/miles'
+    if: github.repository == 'Sphere-AI-Lab/orbit'
     runs-on: ["docker-build"]
     timeout-minutes: 240
     steps:
@@ -72,7 +72,7 @@ jobs:
           echo "megatron_commit=$(python3 -c "import json; print(json.load(open('release-lock.json'))['megatron_commit'])")" >> "$GITHUB_OUTPUT"
           # github.sha is the default-branch HEAD on workflow_dispatch; the
           # image must bake the checked-out release commit.
-          echo "miles_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "orbit_commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -107,7 +107,7 @@ jobs:
             --custom-tag "v${{ steps.resolve.outputs.version }}" \
             --build-arg "SGLANG_COMMIT=${{ steps.lock.outputs.sglang_commit }}" \
             --build-arg "MEGATRON_COMMIT=${{ steps.lock.outputs.megatron_commit }}" \
-            --build-arg "MILES_COMMIT=${{ steps.lock.outputs.miles_commit }}" \
+            --build-arg "ORBIT_COMMIT=${{ steps.lock.outputs.orbit_commit }}" \
             --push
 
       - name: Build and push cu12-x86 (v${{ steps.resolve.outputs.version }}-cu12)
@@ -117,7 +117,7 @@ jobs:
             --custom-tag "v${{ steps.resolve.outputs.version }}" \
             --build-arg "SGLANG_COMMIT=${{ steps.lock.outputs.sglang_commit }}" \
             --build-arg "MEGATRON_COMMIT=${{ steps.lock.outputs.megatron_commit }}" \
-            --build-arg "MILES_COMMIT=${{ steps.lock.outputs.miles_commit }}" \
+            --build-arg "ORBIT_COMMIT=${{ steps.lock.outputs.orbit_commit }}" \
             --push
 
       - name: Summary
@@ -129,5 +129,5 @@ jobs:
             echo "- \`radixark/miles:v${{ steps.resolve.outputs.version }}-cu12\` (cu12.9, amd64)"
             echo "- sglang: \`${{ steps.lock.outputs.sglang_commit }}\`"
             echo "- Megatron-LM: \`${{ steps.lock.outputs.megatron_commit }}\`"
-            echo "- miles: \`${{ steps.lock.outputs.miles_commit }}\`"
+            echo "- orbit: \`${{ steps.lock.outputs.orbit_commit }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

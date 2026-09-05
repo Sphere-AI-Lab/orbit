@@ -9,7 +9,7 @@ therefore requires the filter to be fail-closed: when a staleness bound is
 configured, staleness must be observable for every trained group.
 """
 
-from miles.rollout.fully_async_data_buffer import DataBufferInput, DefaultDataBuffer, iter_samples
+from orbit.rollout.fully_async_data_buffer import DataBufferInput, DefaultDataBuffer, iter_samples
 
 
 class FailClosedDataBuffer(DefaultDataBuffer):

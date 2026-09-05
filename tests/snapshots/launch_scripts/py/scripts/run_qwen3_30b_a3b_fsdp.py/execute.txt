@@ -1,6 +1,6 @@
 ### 0
 pkill -9 sglang; sleep 3; ray stop
-  --force; pkill -9 ray; pkill -9 miles; sleep 3; pkill -9 ray; pkill -9 miles; pkill -9 redis; true; 
+  --force; pkill -9 ray; pkill -9 orbit; sleep 3; pkill -9 ray; pkill -9 orbit; pkill -9 redis; true; 
 
 ### 1
 export PYTHONUNBUFFERED=1 && ray start
@@ -52,7 +52,7 @@ export no_proxy=127.0.0.1 && export PYTHONUNBUFFERED=1 && ray job submit
   --adam-beta1 0.9
   --adam-beta2 0.98 
   --use-wandb
-  --wandb-project miles-fsdp-curve
+  --wandb-project orbit-fsdp-curve
   --wandb-group qwen3-30B-A3B-fsdp-dapo4k 
   --rollout-num-gpus-per-engine 1
   --sglang-decode-log-interval 1000

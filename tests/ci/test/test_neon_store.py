@@ -7,7 +7,7 @@ Two layers:
   SQL and params plus commit/rollback calls, then assert the store issues the
   right statements within a single transaction.
 * A live-Postgres smoke test, guarded by `@pytest.mark.skipif` on the
-  `MILES_TEST_POSTGRES_DSN` env var. It provisions the two tables and round-trips
+  `ORBIT_TEST_POSTGRES_DSN` env var. It provisions the two tables and round-trips
   write_run -> recent_trusted_values -> mark_untrusted against a real server. It
   skips cleanly offline (no network, no import of an absent driver, no failure).
 """
@@ -363,7 +363,7 @@ def test_mark_untrusted_rolls_back_on_error(store, fake_conn):
 # Live-Postgres smoke test. Skips cleanly when no DSN env var is set.
 # --------------------------------------------------------------------------- #
 
-_LIVE_DSN_ENV = "MILES_TEST_POSTGRES_DSN"
+_LIVE_DSN_ENV = "ORBIT_TEST_POSTGRES_DSN"
 
 
 # Test-local provisioning DDL, mirroring the out-of-band schema (docs/ci/03:

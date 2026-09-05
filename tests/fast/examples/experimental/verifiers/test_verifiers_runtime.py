@@ -10,7 +10,7 @@ if sys.version_info < (3, 11):
 pytest.importorskip("verifiers", minversion="0.2.0")
 pytest.importorskip("renderers", minversion="0.1.8")
 
-from examples.experimental.verifiers.verifiers_rollout import MilesSGLangTransport
+from examples.experimental.verifiers.verifiers_rollout import OrbitSGLangTransport
 from verifiers.v1.clients.train import TrainClient
 from verifiers.v1.dialects import ChatDialect, ResponsesDialect
 from verifiers.v1.env import EnvConfig, Environment
@@ -78,7 +78,7 @@ class _Renderer:
 
 
 @pytest.mark.asyncio
-async def test_published_train_client_runs_through_miles_transport(monkeypatch):
+async def test_published_train_client_runs_through_orbit_transport(monkeypatch):
     async def fake_post(_url, _payload, headers=None):
         assert headers is None
         return {
@@ -90,8 +90,8 @@ async def test_published_train_client_runs_through_miles_transport(monkeypatch):
             },
         }
 
-    monkeypatch.setattr("miles.utils.http_utils.post", fake_post)
-    client = TrainClient(MilesSGLangTransport(_args()), renderer_model_name="test/model")
+    monkeypatch.setattr("orbit.utils.http_utils.post", fake_post)
+    client = TrainClient(OrbitSGLangTransport(_args()), renderer_model_name="test/model")
     client._pool = _Renderer()
 
     response = await client.get_response(
@@ -111,7 +111,7 @@ async def test_published_train_client_runs_through_miles_transport(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_published_train_client_rejects_non_chat_dialects():
-    client = TrainClient(MilesSGLangTransport(_args()), renderer_model_name="test/model")
+    client = TrainClient(OrbitSGLangTransport(_args()), renderer_model_name="test/model")
 
     with pytest.raises(NotImplementedError, match="chat-completions dialect"):
         await client.get_response(

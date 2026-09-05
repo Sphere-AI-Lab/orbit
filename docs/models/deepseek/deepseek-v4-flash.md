@@ -33,7 +33,7 @@ One command runs the full pipeline — dataset download, FP8 → BF16 cast, dist
 docker pull radixark/miles:latest
 
 # 8-node Flash run (colocated), inside the container
-cd /root/miles
+cd /root/orbit
 python scripts/run_deepseek_v4.py full-train \
    --model-name DeepSeek-V4-Flash-FP8 \
    --num-nodes 8 --num-gpus-per-node 8
@@ -57,7 +57,7 @@ The Python launcher (`scripts/run_deepseek_v4.py`) takes its path arguments from
 | `--model-local-dir` | unset → same as `--model-dir` | local NVMe path on each node; `prepare-cp` rsyncs the HF checkpoint and `_torch_dist` here so the trainer reads from local disk instead of shared storage (only worth setting when `--model-dir` is on shared/remote storage) |
 | `--save-dir` | `/root/models` | training checkpoints under `{save-dir}/{run-id}/checkpoints/` |
 
-You can override these via the CLI flags above or equivalently via env vars — every launcher option binds to `MILES_SCRIPT_<FIELD_NAME_UPPER>` (e.g. `MILES_SCRIPT_MODEL_DIR`), with precedence CLI flag > env var > built-in default; run `train --help` to see each option's `[env var: …]` name.
+You can override these via the CLI flags above or equivalently via env vars — every launcher option binds to `ORBIT_SCRIPT_<FIELD_NAME_UPPER>` (e.g. `ORBIT_SCRIPT_MODEL_DIR`), with precedence CLI flag > env var > built-in default; run `train --help` to see each option's `[env var: …]` name.
 
 ### 3.3 Colocated vs. disaggregated rollout
 
@@ -83,12 +83,12 @@ The Python launcher's `prepare-download` subcommand does the dataset fetch autom
 The conversion happens in two stages — a single-rank FP8 → BF16 cast, followed by a distributed `torch_dist` shard:
 
 ```bash
-cd /root/miles
+cd /root/orbit
 python tools/fp8_cast_bf16.py \
    --input-fp8-hf-path /root/models/DeepSeek-V4-Flash-FP8 \
    --output-bf16-hf-path /root/models/DeepSeek-V4-Flash-FP8-bf16/
 
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py deepseek-v4-flash)" || exit 1
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py deepseek-v4-flash)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM torchrun \
    --nproc-per-node 4 --nnodes 8 \
@@ -117,7 +117,7 @@ ray start --head --num-gpus 8 --disable-usage-stats
 ray start --address=${HEAD_IP}:6379 --num-gpus 8 --disable-usage-stats
 ```
 
-Alternatively, you can set `MILES_SCRIPT_EXTERNAL_RAY=1` and `RAY_ADDRESS=…` to point the launcher at an existing Ray cluster (for example, one that an orchestration layer has already brought up). When `RAY_ADDRESS` is unset, the launcher boots a local Ray head.
+Alternatively, you can set `ORBIT_SCRIPT_EXTERNAL_RAY=1` and `RAY_ADDRESS=…` to point the launcher at an existing Ray cluster (for example, one that an orchestration layer has already brought up). When `RAY_ADDRESS` is unset, the launcher boots a local Ray head.
 
 ### 4.4 Notable quirks
 
@@ -191,4 +191,4 @@ The `--low-memory-resume` flag (off by default) puts optimizer states on CPU dur
 ## 6. Pairs Well With
 
 - [Low Precision RL](/advanced/low-precision)
-- [Architecture Support](/advanced/architecture-support) — the V4 plugin lives under `miles_plugins/models/deepseek_v4/`.
+- [Architecture Support](/advanced/architecture-support) — the V4 plugin lives under `orbit_plugins/models/deepseek_v4/`.

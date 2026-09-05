@@ -14,7 +14,7 @@ from typing import Any
 from examples.model_response_trace_viewer.response_log import model_response_row
 from PIL import Image
 
-from miles.utils.types import Sample
+from orbit.utils.types import Sample
 
 _MESSAGE_ATTRIBUTES = (
     "name",
@@ -145,7 +145,7 @@ def model_response_trace_record(
             "messages": messages,
         },
         "media": media,
-        "metadata": {"producer": "miles"},
+        "metadata": {"producer": "orbit"},
     }
 
 

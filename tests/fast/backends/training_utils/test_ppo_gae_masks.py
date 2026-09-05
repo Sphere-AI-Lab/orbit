@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-from miles.backends.training_utils.loss_hub.math_utils import get_advantages_and_returns_batch, vanilla_gae
-from miles.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
+from orbit.backends.training_utils.loss_hub.math_utils import get_advantages_and_returns_batch, vanilla_gae
+from orbit.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
 
 
 @pytest.fixture(autouse=True)

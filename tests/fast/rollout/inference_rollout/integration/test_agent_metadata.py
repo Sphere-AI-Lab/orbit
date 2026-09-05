@@ -3,8 +3,8 @@ from tests.fast.fixtures.generation_fixtures import extra_argv_for_variant
 from tests.fast.fixtures.rollout_fixtures import RolloutEnvConfig
 from tests.fast.rollout.inference_rollout.integration.utils import MODULAR_ROLLOUT_BASE_ARGV, load_and_call_rollout
 
-from miles.utils.test_utils.mock_tools import TwoTurnStub
-from miles.utils.types import Sample
+from orbit.utils.test_utils.mock_tools import TwoTurnStub
+from orbit.utils.types import Sample
 
 
 TWO_TURN_DATA_ROWS = [{"input": [{"role": "user", "content": TwoTurnStub.USER_QUESTION}], "label": "2008"}]
@@ -37,7 +37,7 @@ def _metadata_config_for_variant(variant: str) -> RolloutEnvConfig:
 )
 def test_agent_metadata_reaches_reward_model(rollout_env, variant):
     """Verify that agent metadata is available to --custom-rm-path during reward computation."""
-    from miles.utils.test_utils import mock_tools
+    from orbit.utils.test_utils import mock_tools
 
     mock_tools.AGENTIC_RETURN_METADATA = {"agent_reward": 42.0}
     try:

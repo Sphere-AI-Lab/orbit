@@ -19,7 +19,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 
 @dataclass
@@ -60,7 +60,7 @@ def execute(args: ScriptArgs):
     )
 
     rollout_args = (
-        "--rollout-function-path miles.rollout.fully_async_rollout.FullyAsyncRolloutFn "
+        "--rollout-function-path orbit.rollout.fully_async_rollout.FullyAsyncRolloutFn "
         f"--prompt-data {args.data_dir}/dapo-math-17k/dapo-math-17k.jsonl "
         "--input-key prompt "
         "--label-key label "
@@ -87,7 +87,7 @@ def execute(args: ScriptArgs):
         "--n-samples-per-eval-prompt 8 "
         "--eval-max-response-len 16384 "
         "--eval-top-p 1 "
-        "--eval-hf-dir /dev/shm/miles_eval_hf "
+        "--eval-hf-dir /dev/shm/orbit_eval_hf "
         "--eval-keep-snapshots 2 "
     )
     # 4 actor + N-5 rollout + 1 eval (a Ray fleet engine, or the external server's GPU).
@@ -98,7 +98,7 @@ def execute(args: ScriptArgs):
     else:
         eval_args += "--eval-function-path examples.infra_features.fully_async.external_eval_fn.ExternalSglangEvalFn "
         # The fn launches its own sglang server on the last GPU, outside the Ray split.
-        eval_env = {"MILES_EXTERNAL_EVAL_GPUS": str(args.num_gpus_per_node - 1)}
+        eval_env = {"ORBIT_EXTERNAL_EVAL_GPUS": str(args.num_gpus_per_node - 1)}
 
     perf_args = (
         "--tensor-model-parallel-size 2 "

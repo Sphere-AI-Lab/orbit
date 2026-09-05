@@ -3,7 +3,7 @@
 import pytest
 import torch
 
-from miles.backends.training_utils.cp_utils import assemble_log_prob_from_cp, get_logits_and_tokens_offset_with_cp
+from orbit.backends.training_utils.cp_utils import assemble_log_prob_from_cp, get_logits_and_tokens_offset_with_cp
 
 
 def _split(

@@ -1,8 +1,8 @@
 ---
 title: Customization
-description: The plug-points where you can drop in your own Python without forking Miles.
+description: The plug-points where you can drop in your own Python without forking Orbit.
 ---
-Most of Miles's behavior can be replaced with user-supplied Python by passing a
+Most of Orbit's behavior can be replaced with user-supplied Python by passing a
 `--*-path` flag. This page lists every such hook, the function signature it expects,
 and the default it replaces.
 
@@ -50,9 +50,9 @@ def generate_rollout(args, rollout_id, data_source, evaluation=False) \
     ...
 ```
 
-**Default:** `miles.rollout.inference_rollout.inference_rollout_common.InferenceRolloutFn`; use `miles.rollout.sglang_rollout.generate_rollout` under `MILES_USE_LEGACY_ROLLOUT_V1=1`.
+**Default:** `orbit.rollout.inference_rollout.inference_rollout_common.InferenceRolloutFn`; use `orbit.rollout.sglang_rollout.generate_rollout` under `ORBIT_USE_LEGACY_ROLLOUT_V1=1`.
 
-**Reference:** [`examples/experimental/multi_agent/rollout_with_multi_agents.py`](https://github.com/radixark/miles/blob/main/examples/experimental/multi_agent/rollout_with_multi_agents.py).
+**Reference:** [`examples/experimental/multi_agent/rollout_with_multi_agents.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/experimental/multi_agent/rollout_with_multi_agents.py).
 
 ### `--custom-generate-function-path`
 
@@ -68,14 +68,14 @@ The hook also accepts the `GenerateFnInput -> GenerateFnOutput` form; both
 signatures load through the same adapter. See
 [Generate Endpoint](/user-guide/generate-endpoint) for the full contract.
 
-**Reference:** [`examples/experimental/search-r1/generate_with_search.py`](https://github.com/radixark/miles/blob/main/examples/experimental/search-r1/generate_with_search.py).
+**Reference:** [`examples/experimental/search-r1/generate_with_search.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/experimental/search-r1/generate_with_search.py).
 
 
 ### `--custom-agent-function-path`
 
-Enabled when you set `--custom-generate-function-path miles.rollout.generate_hub.agentic_tool_call.generate`.
+Enabled when you set `--custom-generate-function-path orbit.rollout.generate_hub.agentic_tool_call.generate`.
 Use `--custom-agent-function-path` to specify the async agent or environment loop
-that sends OpenAI-compatible chat requests through Miles' TITO session server.
+that sends OpenAI-compatible chat requests through Orbit' TITO session server.
 
 
 ```python
@@ -103,7 +103,7 @@ class CustomDataSource(DataSource):
     def load(self, rollout_id=None) -> None: ...
 ```
 
-**Default:** `miles.rollout.data_source.RolloutDataSourceWithBuffer`.
+**Default:** `orbit.rollout.data_source.RolloutDataSourceWithBuffer`.
 
 ### `--eval-function-path`
 
@@ -162,12 +162,12 @@ def filter_function(args, samples: list[Sample], **kwargs) -> DynamicFilterOutpu
     return DynamicFilterOutput(keep=True, reason=None)
 ```
 
-**Stock implementation:** `miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std`.
+**Stock implementation:** `orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std`.
 
 ### `--buffer-filter-path`
 
 Pops samples from the rollout buffer at dequeue time. The default is
-`pop_first` in `miles/rollout/data_source.py`.
+`pop_first` in `orbit/rollout/data_source.py`.
 
 ```python
 def buffer_filter(
@@ -220,7 +220,7 @@ objectives or multi-objective work.
 Importance sampling correction for off-policy training when train and inference
 diverge.
 
-**Reference:** [`examples/infra_features/train_infer_mismatch_helper/mis.py`](https://github.com/radixark/miles/blob/main/examples/infra_features/train_infer_mismatch_helper/mis.py).
+**Reference:** [`examples/infra_features/train_infer_mismatch_helper/mis.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/infra_features/train_infer_mismatch_helper/mis.py).
 
 ### `--custom-pg-loss-reducer-function-path`
 
@@ -235,7 +235,7 @@ def get_pg_loss_reducer(
 ```
 
 Use case: Dr.GRPO divides by a constant instead of effective token count.
-**Reference:** [`examples/experimental/DrGRPO/custom_reducer.py`](https://github.com/radixark/miles/blob/main/examples/experimental/DrGRPO/custom_reducer.py).
+**Reference:** [`examples/experimental/DrGRPO/custom_reducer.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/experimental/DrGRPO/custom_reducer.py).
 
 ### `--custom-convert-samples-to-train-data-path`
 
@@ -289,7 +289,7 @@ def log_eval_rollout_data(rollout_id, args, data, extra_metrics) -> bool:
     ...
 ```
 
-Return `True` to suppress Miles's default logging, `False` to layer on top.
+Return `True` to suppress Orbit's default logging, `False` to layer on top.
 
 ---
 
@@ -323,6 +323,6 @@ ROLLOUT_ARGS+=(
 )
 ```
 
-That is the entire delta from the stock GRPO recipe, with no source changes to Miles.
+That is the entire delta from the stock GRPO recipe, with no source changes to Orbit.
 
 → Next: [Server arguments reference](/user-guide/cli-reference)

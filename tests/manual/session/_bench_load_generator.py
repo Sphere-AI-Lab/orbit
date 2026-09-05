@@ -218,7 +218,7 @@ def load_generator_entry(base_urls, request_bodies, num_sessions, get_records, t
     try:
         import setproctitle
 
-        setproctitle.setproctitle("miles-bench-loadgen")
+        setproctitle.setproctitle("orbit-bench-loadgen")
     except Exception:
         pass
     samples, agg = asyncio.run(lg_drive_all(base_urls, request_bodies, num_sessions, get_records, tool_interval))

@@ -1,7 +1,7 @@
-"""Unit tests for LoRA-related argument parsing in miles.utils.arguments.
+"""Unit tests for LoRA-related argument parsing in orbit.utils.arguments.
 
 Covers the target-module expansion and exclude-module filtering logic
-inside miles_validate_args (lines 1634-1653 of arguments.py).
+inside orbit_validate_args (lines 1634-1653 of arguments.py).
 We isolate the LoRA parsing logic to avoid triggering unrelated validations.
 """
 
@@ -13,7 +13,7 @@ import pytest
 
 def _apply_lora_arg_parsing(args: Namespace) -> Namespace:
     """Extract and apply only the LoRA target-module parsing logic from
-    miles_validate_args, avoiding unrelated assertions."""
+    orbit_validate_args, avoiding unrelated assertions."""
     args = deepcopy(args)
     if args.lora_rank > 0:
         assert args.target_modules is not None, "'--target-modules' is required when LoRA is enabled."

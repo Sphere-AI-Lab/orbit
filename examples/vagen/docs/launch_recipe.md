@@ -3,15 +3,15 @@
 Covers the shape of vagen experiment launchers under
 `scripts/experiments/vagen-*.sh`. They all share the same skeleton: build
 arg arrays (CKPT / ROLLOUT / GRPO / PERF / SGLANG / EVAL / FT / LAYOUT),
-concatenate into `MILES_ARGS`, and hand off to the slurm launcher. This
+concatenate into `ORBIT_ARGS`, and hand off to the slurm launcher. This
 doc captures the WHY behind each choice.
 
-## VAGEN → miles knob mapping
+## VAGEN → orbit knob mapping
 
 VAGEN's `train_grpo_qwen25vl3b.sh` + `train_sokoban_vision.yaml` rewritten
-as miles CLI flags. Same values verbatim:
+as orbit CLI flags. Same values verbatim:
 
-| VAGEN | miles |
+| VAGEN | orbit |
 |---|---|
 | `data.train_batch_size=32` | `--rollout-batch-size 32` |
 | `actor_rollout_ref.rollout.n=8` | `--n-samples-per-prompt 8` |
@@ -39,7 +39,7 @@ the rows) and does NOT affect prompt shuffle / eval sampling (those use
 1. **`--save-interval 1000000`** (sokoban only): debug_dump JSONs land but
    no Megatron checkpoint hits disk in 400 rollouts. (frozenlake recipes
    use `--save-interval 100`.)
-2. **Filter / dynamic-sampling (Stage 2 WIP)**: only when `MILES_VAGEN_DAPO=1`.
+2. **Filter / dynamic-sampling (Stage 2 WIP)**: only when `ORBIT_VAGEN_DAPO=1`.
    Adds `--eps-clip-high 0.28` + dynamic-sampling filter +
    `--over-sampling-batch-size` (defaults to `2 × rollout_batch_size`).
 3. **Layout**: 8 GPUs colocated (TP=4) vs VAGEN-main's 4-GPU FSDP. Per-update
@@ -54,7 +54,7 @@ Mirrors VAGEN's `trainer.val_before_train=True` + `test_freq=20`:
 - `--eval-interval 20` → eval every 20 rollouts.
 - `--n-samples-per-eval-prompt 1` matches VAGEN's per-prompt single-sample
   eval (`val_*_vision.yaml` has no `rollout.n` override on the val path).
-- miles' default fires eval at `rollout_id=0` unless `--skip-eval-before-train`.
+- orbit' default fires eval at `rollout_id=0` unless `--skip-eval-before-train`.
 
 Eval consumes a precomputed jsonl via `--eval-prompt-data`. Same
 `generate()` function as train; only the env seed range differs (val seeds
@@ -76,7 +76,7 @@ bash scripts/slurm/submit.sh <recipe-name>
 Default `eval/samples.jsonl` is the heldout (map-disjoint-from-train) split
 built by `examples/vagen/scripts/<dataset>-main.sh`.
 
-**Why no `--eval-max-prompt-len`** (sokoban specifically): miles'
+**Why no `--eval-max-prompt-len`** (sokoban specifically): orbit'
 `filter_long_prompt` (in `data.py`) skips filtering and returns the samples
 unchanged when `max_length=None` or when the sample prompt is a messages list.
 The latter applies when `--apply-chat-template` is off and
@@ -86,9 +86,9 @@ meaningless.
 
 ## Wandb
 
-- `--use-wandb --wandb-project miles-imp --wandb-group "$RUN_NAME"`.
+- `--use-wandb --wandb-project orbit --wandb-group "$RUN_NAME"`.
 - `--disable-wandb-random-suffix` keeps the wandb UI name = `$RUN_NAME`
-  exactly. Without it, miles adds a random 6-char suffix and a `-RANK_0`
+  exactly. Without it, orbit adds a random 6-char suffix and a `-RANK_0`
   suffix (`wandb_utils.py`), which breaks grouping/diffing across re-runs.
 
 ## Performance args
@@ -126,7 +126,7 @@ read by every VAGEN env's prompt/parser module (see
 `vagen/envs/frozenlake/utils/prompt.py:_think_tag`). Qwen2.5-VL recipes
 don't set it, keeping the default `<think>` form.
 
-`launch_miles.sbatch`'s `--export=ALL` propagates the var to all ranks.
+`launch_orbit.sbatch`'s `--export=ALL` propagates the var to all ranks.
 
 ## Qwen3-VL rotary_base
 
@@ -152,12 +152,12 @@ Watchdog probes the SGLang router every 30s after a 60s startup grace;
 
 | Var | Default |
 |---|---|
-| `MILES_SCRIPT_NUM_ROLLOUT` | 400 |
-| `MILES_SCRIPT_ROLLOUT_BATCH_SIZE` | 32 |
-| `MILES_SCRIPT_N_SAMPLES_PER_PROMPT` | 8 |
-| `MILES_SCRIPT_GLOBAL_BATCH_SIZE` | rollout_batch × n_samples (= 256) |
-| `MILES_SCRIPT_OVER_SAMPLING_BATCH_SIZE` | rollout_batch × 2 (DAPO only) |
-| `MILES_VAGEN_DAPO` | 0 (set to 1 for filter recipe) |
+| `ORBIT_SCRIPT_NUM_ROLLOUT` | 400 |
+| `ORBIT_SCRIPT_ROLLOUT_BATCH_SIZE` | 32 |
+| `ORBIT_SCRIPT_N_SAMPLES_PER_PROMPT` | 8 |
+| `ORBIT_SCRIPT_GLOBAL_BATCH_SIZE` | rollout_batch × n_samples (= 256) |
+| `ORBIT_SCRIPT_OVER_SAMPLING_BATCH_SIZE` | rollout_batch × 2 (DAPO only) |
+| `ORBIT_VAGEN_DAPO` | 0 (set to 1 for filter recipe) |
 
 The `vagen-sokoban-main-*-global_bsz32.sh` overlay sets
-`MILES_SCRIPT_GLOBAL_BATCH_SIZE=32` (8 PPO updates per rollout vs 1).
+`ORBIT_SCRIPT_GLOBAL_BATCH_SIZE=32` (8 PPO updates per rollout vs 1).

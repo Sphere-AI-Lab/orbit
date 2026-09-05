@@ -11,10 +11,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from miles.rollout.session.errors import MessageValidationError, SessionNotFoundError, TokenizationError
-from miles.rollout.session.linear_trajectory import SessionRegistry
-from miles.rollout.session.types import SessionRecord
-from miles.utils.chat_template_utils.tito_tokenizer import ALL_APPEND_ROLES, FixedTemplate, TITOTokenizer
+from orbit.rollout.session.errors import MessageValidationError, SessionNotFoundError, TokenizationError
+from orbit.rollout.session.linear_trajectory import SessionRegistry
+from orbit.rollout.session.types import SessionRecord
+from orbit.utils.chat_template_utils.tito_tokenizer import ALL_APPEND_ROLES, FixedTemplate, TITOTokenizer
 
 _MOCK_FIRST_TURN_TOKENS = [0]
 

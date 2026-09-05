@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Merge N miles OFT adapters into one (OrthoMerge magnitude-corrected Lie-algebra merge)."""
+"""Merge N orbit OFT adapters into one (OrthoMerge magnitude-corrected Lie-algebra merge)."""
 from __future__ import annotations
 
 import argparse
@@ -16,8 +16,8 @@ sys.path.insert(0, _repo_root)
 import torch
 from safetensors.torch import load_file, save_file
 
-from miles.merge import get_strategy  # light: pulls only torch
-from miles.utils.logging_utils import configure_logger_raw
+from orbit.merge import get_strategy  # light: pulls only torch
+from orbit.utils.logging_utils import configure_logger_raw
 
 _COMPAT_KEYS = ("oft_type", "oft_block_size", "target_modules", "base_model_name_or_path")
 
@@ -25,7 +25,7 @@ _COMPAT_KEYS = ("oft_type", "oft_block_size", "target_modules", "base_model_name
 def read_oft_config(adapter_dir: str) -> dict:
     """Read adapter_config.json and assert it is an OFT adapter; return the config.
 
-    Reimplemented locally (NOT miles.backends.megatron_utils) to keep this tool
+    Reimplemented locally (NOT orbit.backends.megatron_utils) to keep this tool
     CPU-only: that module's import chain pulls deep_ep, which requires CUDA.
     """
     cfg_path = Path(adapter_dir) / "adapter_config.json"
@@ -76,7 +76,7 @@ def write_merged_adapter(merged: dict[str, torch.Tensor], src_config_dir: str, o
 
 def main(argv: list[str] | None = None) -> int:
     configure_logger_raw("merge_oft_adapters")
-    p = argparse.ArgumentParser(description="Merge N miles OFT adapters (OrthoMerge).")
+    p = argparse.ArgumentParser(description="Merge N orbit OFT adapters (OrthoMerge).")
     p.add_argument("--adapters", nargs="+", required=True, help="paths to OFT adapter dirs (>=2)")
     p.add_argument("--output", required=True, help="output dir; writes <output>/merged_adapter/")
     p.add_argument("--method", default="oft", help="merge strategy (default: oft)")
@@ -107,14 +107,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[merge] {len(args.adapters)} adapters -> {merged_dir} ({len(merged)} tensors)")
 
     if args.save_megatron:
-        from miles.merge.megatron_io import merge_megatron_adapters, write_megatron_adapter
+        from orbit.merge.megatron_io import merge_megatron_adapters, write_megatron_adapter
 
         merged_meg = merge_megatron_adapters(args.adapters, args.weights, args.method)
         meg_dir = write_megatron_adapter(merged_meg, args.adapters[0], str(Path(args.output) / "merged_megatron"))
         print(f"[merge] Megatron-native adapter -> {meg_dir} ({len(merged_meg)} shard(s))")
 
     if args.save_hf:
-        from miles.merge.bake_hf import bake_hf_model
+        from orbit.merge.bake_hf import bake_hf_model
 
         base = args.base or cfg.get("base_model_name_or_path")
         if not base:

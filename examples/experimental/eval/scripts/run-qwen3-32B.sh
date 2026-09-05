@@ -15,7 +15,7 @@ pkill -9 python
 
 set -ex
 
-SKILLS_OPENAI_MODEL_NAME=${SKILLS_OPENAI_MODEL_NAME:-"miles-openai-model"}
+SKILLS_OPENAI_MODEL_NAME=${SKILLS_OPENAI_MODEL_NAME:-"orbit-openai-model"}
 
 
 export PYTHONUNBUFFERED=1
@@ -30,7 +30,7 @@ echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../../../.." &>/dev/null && pwd)"
-MODEL_ARGS_LINE="$(python3 "${REPO_ROOT}/miles/utils/external_utils/model_args_utils.py" "qwen3-32B")" || exit 1
+MODEL_ARGS_LINE="$(python3 "${REPO_ROOT}/orbit/utils/external_utils/model_args_utils.py" "qwen3-32B")" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 
 # Store eval/delegate settings in a YAML config similar to examples/experimental/eval_multi_task.
@@ -39,8 +39,8 @@ EVAL_CONFIG_PATH=${SKILLS_EVAL_CONFIG_PATH:-"${REPO_ROOT}/examples/experimental/
 CKPT_ARGS=(
    --hf-checkpoint /root/shared/Qwen3-32B
    --ref-load /root/shared/Qwen3-32B_torch_dist
-   --load /root/shared/Qwen3-32B_miles/
-   --save /root/shared/Qwen3-32B_miles/
+   --load /root/shared/Qwen3-32B_orbit/
+   --save /root/shared/Qwen3-32B_orbit/
    --save-interval 20
 )
 
@@ -108,7 +108,7 @@ OPTIMIZER_ARGS=(
 
 WANDB_ARGS=(
    --use-wandb
-   --wandb-project miles-eval
+   --wandb-project orbit-eval
    --wandb-group qwen3-32b-eval
    --wandb-key ${WANDB_KEY}
 )

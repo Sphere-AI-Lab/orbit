@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """CLI: run the multi-role TITO session-server verifier against a real model.
 
-Boots the miles rollout pipeline (sglang + miles-router) under
+Boots the orbit rollout pipeline (sglang + orbit-router) under
 ``--debug-rollout-only`` and drives the schedule registered for the selected
 family's ``FixedTemplate.allowed_append_roles`` capability (see
-``miles.utils.test_utils.session_verify_agent``).  PASS iff every sample
+``orbit.utils.test_utils.session_verify_agent``).  PASS iff every sample
 completes without HTTP error from the server-side prefix check and the
 custom-generate coverage assertion is satisfied.
 
-This script is a thin entrypoint over miles' canonical ``parse_args``: all
-flags are miles' canonical flags (``--rollout-num-gpus-per-engine`` instead of
+This script is a thin entrypoint over orbit' canonical ``parse_args``: all
+flags are orbit' canonical flags (``--rollout-num-gpus-per-engine`` instead of
 the old ``--tp-size``, ``--actor-num-gpus-per-node`` instead of ``--num-gpus``,
 ``--n-samples-per-prompt`` instead of ``--n-samples``, ``--sglang-reasoning-parser``
 instead of ``--reasoning-parser``, etc.).  The only wrapper-only knob is
@@ -34,9 +34,9 @@ Usage examples::
         --rollout-num-gpus-per-engine 1
 
     # Multi-node example: ray cluster must already be up across N nodes
-    # (e.g. via rcli / slurm) and MILES_SCRIPT_EXTERNAL_RAY=1 set so
+    # (e.g. via rcli / slurm) and ORBIT_SCRIPT_EXTERNAL_RAY=1 set so
     # execute_train skips its head-only ray start.
-    MILES_SCRIPT_EXTERNAL_RAY=1 \\
+    ORBIT_SCRIPT_EXTERNAL_RAY=1 \\
     python scripts/tools/verify_session_tito_tokenizer.py \\
         --hf-checkpoint zai-org/GLM-4.7-Flash \\
         --tito-model glm47 \\
@@ -51,9 +51,9 @@ from __future__ import annotations
 import logging
 import sys
 
-from miles.utils.arguments import parse_args
-from miles.utils.test_utils.session_verify_agent import fixed_template_append_roles, select_schedule
-from miles.utils.test_utils.session_verify_runner import run_session_verify, session_verify_extras
+from orbit.utils.arguments import parse_args
+from orbit.utils.test_utils.session_verify_agent import fixed_template_append_roles, select_schedule
+from orbit.utils.test_utils.session_verify_runner import run_session_verify, session_verify_extras
 
 
 def _print_action_table(allowed_roles: list[str]) -> None:

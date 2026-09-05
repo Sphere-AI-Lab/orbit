@@ -4,7 +4,7 @@
 #
 # Submit:
 #   JOB_NAME=rv2-8b-vitoff-1box WANDB_RUN_PREFIX= TIME=72:00:00 \
-#   WANDB_INIT_TIMEOUT=300 NODES=2 ENVPACK_SERVER_NODE_COUNT=1 MILES_ENV_NAME=miles_imp \
+#   WANDB_INIT_TIMEOUT=300 NODES=2 ENVPACK_SERVER_NODE_COUNT=1 ORBIT_ENV_NAME=orbit \
 #   bash scripts/slurm/submit.sh \
 #     server_train/sokoban_1box/envpack-sokoban-1box-qwen3vl8b-frozenvit-remote-2node
 
@@ -21,4 +21,4 @@ export ENVPACK_SERVER_LOCAL=0
 source "$SCRIPT_DIR/../_qwen3vl8b_common.sh"
 
 MODEL_ARGS+=( --freeze-vision-model )
-MILES_ARGS+=( --freeze-vision-model )
+ORBIT_ARGS+=( --freeze-vision-model )

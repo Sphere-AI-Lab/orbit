@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-from miles.utils.ft_utils.control_server.models import (
+from orbit.utils.ft_utils.control_server.models import (
     Cell,
     CellCondition,
     CellMetadata,
@@ -17,7 +17,7 @@ from miles.utils.ft_utils.control_server.models import (
     CellStatus,
     TriState,
 )
-from miles.utils.ft_utils.mini_ft_controller import (
+from orbit.utils.ft_utils.mini_ft_controller import (
     CellHealthStatus,
     _CellSnapshot,
     _compute_cell_snapshot,
@@ -97,11 +97,11 @@ def _build_cell_json(
     healthy_reason: str | None = None,
 ) -> dict[str, Any]:
     return {
-        "apiVersion": "miles.io/v1",
+        "apiVersion": "orbit.io/v1",
         "kind": "Cell",
         "metadata": {
             "name": name,
-            "labels": {"miles.io/cell-type": "actor", "miles.io/cell-index": "0"},
+            "labels": {"orbit.io/cell-type": "actor", "orbit.io/cell-index": "0"},
         },
         "spec": {"suspend": False},
         "status": {
@@ -115,7 +115,7 @@ def _build_cell_json(
 
 
 def _build_cell_list_json(cells: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"apiVersion": "miles.io/v1", "kind": "CellList", "items": cells}
+    return {"apiVersion": "orbit.io/v1", "kind": "CellList", "items": cells}
 
 
 def _create_runner() -> _MiniFTControllerRunner:
@@ -657,7 +657,7 @@ class TestRunnerPatchCell:
 class TestArgumentValidation:
     def test_requires_control_server_port(self) -> None:
         """mini_ft_controller_enable=True + control_server_port=0 → error."""
-        from miles.utils.arguments import miles_validate_args
+        from orbit.utils.arguments import orbit_validate_args
 
         args = argparse.Namespace(
             mini_ft_controller_enable=True,
@@ -668,8 +668,8 @@ class TestArgumentValidation:
             eval_data=None,
             eval_config=None,
             eval_prompt_data=None,
-            use_miles_dashboard=False,
+            use_orbit_dashboard=False,
         )
 
         with pytest.raises(ValueError, match="--mini-ft-controller-enable requires --control-server-port"):
-            miles_validate_args(args)
+            orbit_validate_args(args)

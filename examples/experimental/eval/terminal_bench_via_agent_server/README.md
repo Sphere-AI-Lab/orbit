@@ -1,8 +1,8 @@
-# Terminal-Bench via miles_agent_server
+# Terminal-Bench via orbit_agent_server
 
 Evaluate a DeepSeek-V4-Pro (or any OpenAI-compatible) endpoint on the full
 89-task **Terminal-Bench 2.0** benchmark by driving an already-running
-`miles_agent_server` over its `/run` HTTP endpoint.
+`orbit_agent_server` over its `/run` HTTP endpoint.
 
 This example is purely client-side — no training, no Ray, no Megatron. It
 just submits `POST /run` requests concurrently and reads back rewards. The
@@ -15,8 +15,8 @@ training-loop rollouts interact with the same backend.
 
 ## Prerequisites
 
-1. **A running `miles_agent_server`** from the
-   [`harbor-miles-v0.20.0` branch of `harbor-framework/harbor`][branch], with
+1. **A running `orbit_agent_server`** from the
+   [`harbor-orbit-v0.20.0` branch of `harbor-framework/harbor`][branch], with
    the server's `$HARBOR_TASKS_DIR` populated with the 89 Terminal-Bench 2.0
    tasks. The server's README explains setup; the short version is:
 
@@ -26,7 +26,7 @@ training-loop rollouts interact with the same backend.
    export OPENAI_API_KEY=dummy
    export OPENAI_API_BASE=dummy
    HARBOR_TASKS_DIR=$PWD/harbor_tasks \
-   python miles_agent_server.py \
+   python orbit_agent_server.py \
        --port 8080 --dashboard-port 8081 \
        --max-concurrent 32 \
        --trials-dir ./trials/$(date +%Y%m%d_%H%M%S)
@@ -116,4 +116,4 @@ print(df.group_by("instance_id").agg(
 ).sort("n_pass", descending=True))
 ```
 
-[branch]: https://github.com/harbor-framework/harbor/tree/harbor-miles-v0.20.0
+[branch]: https://github.com/harbor-framework/harbor/tree/harbor-orbit-v0.20.0

@@ -12,8 +12,8 @@ except ModuleNotFoundError:
     torch = None
 
 if torch is not None:
-    from miles_plugins.envpack_adapter.config import EnvpackConfigError
-    from miles_plugins.envpack_adapter.data_source import EnvpackDataSource
+    from orbit_plugins.envpack_adapter.config import EnvpackConfigError
+    from orbit_plugins.envpack_adapter.data_source import EnvpackDataSource
 
 
 class EnvpackDataSourceTest(unittest.TestCase):
@@ -47,7 +47,7 @@ class EnvpackDataSourceTest(unittest.TestCase):
 
     def test_envspec_yaml_materializes_envpack_metadata_and_groups(self) -> None:
         if torch is None:
-            self.skipTest("requires torch because EnvpackDataSource creates Miles Sample objects")
+            self.skipTest("requires torch because EnvpackDataSource creates Orbit Sample objects")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sokoban.yaml"
             path.write_text(
@@ -83,7 +83,7 @@ class EnvpackDataSourceTest(unittest.TestCase):
 
     def test_envspec_yaml_rejects_structural_pool_env_config_without_baked_uuid(self) -> None:
         if torch is None:
-            self.skipTest("requires torch because EnvpackDataSource creates Miles Sample objects")
+            self.skipTest("requires torch because EnvpackDataSource creates Orbit Sample objects")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sokoban.yaml"
             path.write_text(
@@ -108,7 +108,7 @@ class EnvpackDataSourceTest(unittest.TestCase):
 
     def test_envspec_yaml_rejects_render_mode_pool_env_config_without_baked_uuid(self) -> None:
         if torch is None:
-            self.skipTest("requires torch because EnvpackDataSource creates Miles Sample objects")
+            self.skipTest("requires torch because EnvpackDataSource creates Orbit Sample objects")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "sokoban.yaml"
             path.write_text(
@@ -133,7 +133,7 @@ class EnvpackDataSourceTest(unittest.TestCase):
 
     def test_runtime_guard_runs_during_data_source_init(self) -> None:
         if torch is None:
-            self.skipTest("requires torch because EnvpackDataSource creates Miles Sample objects")
+            self.skipTest("requires torch because EnvpackDataSource creates Orbit Sample objects")
         args = self.make_args("/tmp/does-not-need-to-exist.jsonl")
         args.use_rollout_routing_replay = True
         with self.assertRaisesRegex(EnvpackConfigError, "R3"):
@@ -141,7 +141,7 @@ class EnvpackDataSourceTest(unittest.TestCase):
 
     def test_load_reapplies_shuffle_for_restored_epoch(self) -> None:
         if torch is None:
-            self.skipTest("requires torch because EnvpackDataSource creates Miles Sample objects")
+            self.skipTest("requires torch because EnvpackDataSource creates Orbit Sample objects")
         with tempfile.TemporaryDirectory() as tmp:
             data_path = Path(tmp) / "samples.jsonl"
             rows = [
@@ -189,7 +189,7 @@ class EnvpackDataSourceTest(unittest.TestCase):
 
     def test_curriculum_selects_samples_by_solve_step_stage(self) -> None:
         if torch is None:
-            self.skipTest("requires torch because EnvpackDataSource creates Miles Sample objects")
+            self.skipTest("requires torch because EnvpackDataSource creates Orbit Sample objects")
         with tempfile.TemporaryDirectory() as tmp:
             data_path = Path(tmp) / "samples.jsonl"
             rows = [
@@ -229,7 +229,7 @@ class EnvpackDataSourceTest(unittest.TestCase):
 
     def test_curriculum_does_not_advance_on_dapo_refill_draws(self) -> None:
         if torch is None:
-            self.skipTest("requires torch because EnvpackDataSource creates Miles Sample objects")
+            self.skipTest("requires torch because EnvpackDataSource creates Orbit Sample objects")
         with tempfile.TemporaryDirectory() as tmp:
             data_path = Path(tmp) / "samples.jsonl"
             rows = [

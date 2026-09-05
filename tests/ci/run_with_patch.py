@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a miles test with aiter shuffle_scale monkey-patch for older containers."""
+"""Run a orbit test with aiter shuffle_scale monkey-patch for older containers."""
 
 import sys
 

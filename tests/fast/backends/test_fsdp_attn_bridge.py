@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import torch
 
-from miles.backends.fsdp_utils.actor import FSDPTrainRayActor
+from orbit.backends.fsdp_utils.actor import FSDPTrainRayActor
 
 
 class _StubModel(torch.nn.Module):

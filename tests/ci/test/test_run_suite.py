@@ -494,7 +494,7 @@ class TestRocmWorkflowScopeSeam:
         assert "checkout_ref:" not in reusable
         assert "persist-credentials: false" in reusable
         assert "allow-unsafe-pr-checkout" not in reusable
-        assert "MILES_HARDWARE_PLATFORM: rocm" in reusable
+        assert "ORBIT_HARDWARE_PLATFORM: rocm" in reusable
 
 
 # --- CLI seam: local nightly alias and invalid-suite exit behavior -----------

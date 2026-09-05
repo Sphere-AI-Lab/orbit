@@ -3,8 +3,8 @@ title: Agentic Rollout (TITO)
 description: Configure an OpenAI-compatible agent loop with Token-In-Token-Out trajectory assembly.
 ---
 
-Multi-turn agentic rollout in Miles runs through the Token-In-Token-Out (TITO)
-session server. Your agent exchanges OpenAI-compatible chat messages, while Miles
+Multi-turn agentic rollout in Orbit runs through the Token-In-Token-Out (TITO)
+session server. Your agent exchanges OpenAI-compatible chat messages, while Orbit
 preserves the exact token IDs, logprobs, and routed experts produced during
 inference and assembles them into training samples. For the design rationale, see
 [No Token Left Behind](https://lmsys.org/blog/2026-05-13-no-token-left-behind/).
@@ -29,7 +29,7 @@ session for each rollout, invokes your agent, and collects the resulting samples
 
 ```bash
 AGENTIC_ARGS=(
-   --custom-generate-function-path miles.rollout.generate_hub.agentic_tool_call.generate
+   --custom-generate-function-path orbit.rollout.generate_hub.agentic_tool_call.generate
    --custom-agent-function-path    my_agent.run
    --use-session-server
    --hf-checkpoint                 Qwen/Qwen3-4B
@@ -64,7 +64,7 @@ async def run_agent(
 Send OpenAI-compatible chat requests to the session-scoped endpoint:
 
 ```python
-from miles.utils.http_utils import post
+from orbit.utils.http_utils import post
 
 
 async def run_agent(base_url, prompt, request_kwargs, metadata, **kwargs):
@@ -76,7 +76,7 @@ async def run_agent(base_url, prompt, request_kwargs, metadata, **kwargs):
 - `base_url` already includes `/sessions/<id>`; do not append the session path.
 - `prompt` is the input sample's OpenAI `messages` list.
 - `request_kwargs` contains the rollout sampling settings in
-  `ChatCompletionRequest`-compatible form. For example, Miles maps
+  `ChatCompletionRequest`-compatible form. For example, Orbit maps
   `max_new_tokens` to `max_tokens`.
 - `metadata` contains the sample metadata, session identifiers, and configured
   `max_seq_len`. Forward only the fields your environment needs.
@@ -97,17 +97,17 @@ async def abort(args) -> None:
     ...  # cancel this agent's in-flight external work
 ```
 
-Miles calls this hook during oversampling abort after it stops in-flight SGLang
+Orbit calls this hook during oversampling abort after it stops in-flight SGLang
 generation. Use it when the agent drives an external sandbox or agent server that
 would otherwise keep issuing completion requests until its own length limit or
 timeout. The hook is optional; modules without it continue to work.
 
-See [`swe_agent_function.abort`](https://github.com/radixark/miles/blob/main/examples/swe-agent-harbor-docker/swe_agent_function.py)
+See [`swe_agent_function.abort`](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/swe-agent-harbor-docker/swe_agent_function.py)
 for an implementation that flushes the Harbor agent server.
 
 ## TITO
 
-### Leave token ownership to Miles
+### Leave token ownership to Orbit
 
 Send the full `messages` history on every turn. On the first request, the
 session server renders the selected template into `input_ids`. After a
@@ -116,7 +116,7 @@ token IDs and logprobs returned by SGLang.
 
 On later requests, the server reuses the deepest applicable checkpoint,
 tokenizes only the appended suffix, and sends the joined `input_ids` to SGLang.
-During collection, Miles aligns the turn outputs against the accumulated TITO
+During collection, Orbit aligns the turn outputs against the accumulated TITO
 sequence, trims model-specific boundary tokens, and builds the training sample.
 
 <Warning>
@@ -149,7 +149,7 @@ The v1 wrapper returns one `Sample`. The v2 wrapper returns a `list[Sample]`, on
 for each selected tree leaf. Both versions reject `--pause-generation-mode=abort`
 and `--partial-rollout`, and use in-place weight update as instead to avoid harness pause.
 
-Set `--max-seq-len` to cap the context length. Miles also includes this value in the
+Set `--max-seq-len` to cap the context length. Orbit also includes this value in the
 metadata passed to your agent so an external environment can stop early.
 
 ### Pick your `--tito-model`
@@ -183,7 +183,7 @@ More model families and verification history live in
 ### Verify a new model TITO
 
 To add a named family, register its `TITOTokenizer` and `FIXED_TEMPLATE` in
-[`tito_tokenizer.py`](https://github.com/radixark/miles/blob/main/miles/utils/chat_template_utils/tito_tokenizer.py),
+[`tito_tokenizer.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/orbit/utils/chat_template_utils/tito_tokenizer.py),
 then run both checks. Either failure blocks support.
 
 ```bash
@@ -216,10 +216,10 @@ The matcher only decides whether the message a client replays and the message st
 - On a mismatch, the existing paths apply: v1 rolls back (or rejects), v2 branches.
 - On a match, the stored messages and token snapshot stay authoritative inside the reusable prefix; only the suffix beyond it is tokenized anew from the client input.
 
-Miles does not reconcile tool-call IDs across that boundary: deployments choosing `role_content_only` must themselves keep a stored call ID `A` followed by a replayed tool result referencing `B` protocol-compatible.
+Orbit does not reconcile tool-call IDs across that boundary: deployments choosing `role_content_only` must themselves keep a stored call ID `A` followed by a replayed tool result referencing `B` protocol-compatible.
 
 ## Example
 
-[`examples/swe-agent-harbor-docker`](https://github.com/radixark/miles/tree/main/examples/swe-agent-harbor-docker)
+[`examples/swe-agent-harbor-docker`](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/swe-agent-harbor-docker)
 wires a multi-turn SWE agent, TITO session server, model-family registration,
 reward, length limit, and environment teardown into production launchers.

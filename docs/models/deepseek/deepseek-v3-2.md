@@ -13,7 +13,7 @@ description: Launch recipe for DeepSeek-V3.2 (671 B total / 37 B active) — BF1
 - **YaRN RoPE**: rotary base 10000 with scaling factor 40, giving 163,840 max positions.
 - **Block-wise FP8 checkpoint**: the published weights are 128×128 FP8 blocks with `ue8m0` scales.
 
-In miles, V3.2 shares its DSA attention implementation with the GLM-5 family — both select it through `--spec miles_plugins.models.glm5.glm5 get_glm5_spec`. Weight import and export run through `DeepseekV32Bridge` (`miles_plugins/mbridge/deepseek_v32.py`), which adds the indexer tensors on top of the V3 bridge. Training is BF16, so the FP8 checkpoint is cast up before conversion.
+In orbit, V3.2 shares its DSA attention implementation with the GLM-5 family — both select it through `--spec orbit_plugins.models.glm5.glm5 get_glm5_spec`. Weight import and export run through `DeepseekV32Bridge` (`orbit_plugins/mbridge/deepseek_v32.py`), which adds the indexer tensors on top of the V3 bridge. Training is BF16, so the FP8 checkpoint is cast up before conversion.
 
 ## 2. Supported Variants
 
@@ -25,7 +25,7 @@ A 5-layer pruned Megatron config also ships as `deepseek-v32-5layer`. You can se
 
 ## 3. Environment Setup
 
-Run everything inside the `radixark/miles:latest` container at `/root/miles`. The whole recipe is driven by one Typer launcher, `scripts/run_deepseek_v32.py`.
+Run everything inside the `radixark/miles:latest` container at `/root/orbit`. The whole recipe is driven by one Typer launcher, `scripts/run_deepseek_v32.py`.
 
 ### 3.1 Launcher defaults
 
@@ -39,7 +39,7 @@ Run everything inside the `radixark/miles:latest` container at `/root/miles`. Th
 | `--output-dir` | `/root/shared_data` | Training checkpoints land under `{output-dir}/{run-id}/checkpoints`. |
 | `--hardware` | `B200` | One of `B200`, `B300`, `GB200`, `GB300`, `H100`, `H200`. |
 
-Every option also binds to an env var named `MILES_SCRIPT_<FIELD_NAME_UPPER>` (for example `MILES_SCRIPT_MODEL_DIR`), with precedence CLI flag > env var > built-in default. Run `python scripts/run_deepseek_v32.py train --help` to see each option's env var name.
+Every option also binds to an env var named `ORBIT_SCRIPT_<FIELD_NAME_UPPER>` (for example `ORBIT_SCRIPT_MODEL_DIR`), with precedence CLI flag > env var > built-in default. Run `python scripts/run_deepseek_v32.py train --help` to see each option's env var name.
 
 The launcher does not pass `--colocate`, so training and rollout occupy disjoint GPUs. The flags `--actor-num-nodes` and `--rollout-num-gpus` have no defaults, and every multi-node invocation has to supply them.
 
@@ -77,18 +77,18 @@ ray start --head --num-gpus 8 --disable-usage-stats
 # on every worker
 ray start --address=${HEAD_IP}:6379 --num-gpus 8 --disable-usage-stats
 
-export MILES_SCRIPT_EXTERNAL_RAY=1
+export ORBIT_SCRIPT_EXTERNAL_RAY=1
 export RAY_ADDRESS=http://${HEAD_IP}:8265
 ```
 
-Without `MILES_SCRIPT_EXTERNAL_RAY=1`, the training stage runs `ray stop --force` and starts a fresh local head, tearing down the cluster that the conversion just used. When `RAY_ADDRESS` is unset the launcher submits to `http://127.0.0.1:8265`.
+Without `ORBIT_SCRIPT_EXTERNAL_RAY=1`, the training stage runs `ray stop --force` and starts a fresh local head, tearing down the cluster that the conversion just used. When `RAY_ADDRESS` is unset the launcher submits to `http://127.0.0.1:8265`.
 
 ## 4. Launch
 
 ### 4.1 Quick start
 
 ```bash
-cd /root/miles
+cd /root/orbit
 python scripts/run_deepseek_v32.py full-train \
    --actor-num-nodes 8 --rollout-num-gpus 8
 ```

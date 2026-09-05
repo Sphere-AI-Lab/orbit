@@ -80,7 +80,7 @@ python examples/infra_features/p2p_weight_transfer/run.py list
 | `CKPT_SAVE_DIR` | `/root/multinode` | Override checkpoint save directory |
 | `SKIP_VALIDATION` | `0` | Set to `1` to skip `--check-weight-update-equal` |
 | `BUCKET_SIZE_GB` | `1` | Transfer bucket size in GB |
-| `MILES_LOG_DIR` | — | Directory for training logs |
+| `ORBIT_LOG_DIR` | — | Directory for training logs |
 
 ## Notes
 

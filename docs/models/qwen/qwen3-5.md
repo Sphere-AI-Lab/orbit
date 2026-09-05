@@ -11,7 +11,7 @@ description: Launch recipes for Qwen3.5-4B / 9B / 27B with attention-output-gate
 - **Attention-output gate**: a learned gate on the attention output, trained alongside attention weights for stronger long-context behavior.
 - **Extended rotary base**: `--rotary-base 10000000`, `--rotary-percent 0.25` — wider effective context than the original Qwen3.
 - **Larger vocabulary**: 248320 tokens.
-- **FP32 `A_log` preservation**: a parameter that must stay in FP32 through Megatron's mixed-precision pipeline; miles handles this via the bridge.
+- **FP32 `A_log` preservation**: a parameter that must stay in FP32 through Megatron's mixed-precision pipeline; orbit handles this via the bridge.
 
 ## 2. Supported Variants
 
@@ -33,8 +33,8 @@ hf download --repo-type dataset zhuzilin/aime-2024     --local-dir /root/dataset
 ### 3.2 HF → Megatron `torch_dist` conversion
 
 ```bash
-cd /root/miles
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py qwen3.5-4B)" || exit 1   # or qwen3.5-9B / qwen3.5-27B
+cd /root/orbit
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py qwen3.5-4B)" || exit 1   # or qwen3.5-9B / qwen3.5-27B
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
    ${MODEL_ARGS[@]} \
@@ -47,7 +47,7 @@ PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
 ### 4.1 Quick start
 
 ```bash
-cd /root/miles
+cd /root/orbit
 python scripts/run_qwen3_dense.py --model-name Qwen3.5-4B        # or Qwen3.5-9B / Qwen3.5-27B
 ```
 
@@ -93,13 +93,13 @@ Only the 27 B recipe enables CPU Adam (`--optimizer-cpu-offload --overlap-cpu-op
 
 From `scripts/models/qwen3.5-4B.py` (and analogous configs for 9 B / 27 B):
 
-- `--spec miles_plugins.models.qwen3_5 get_qwen3_5_spec` — attention-output gate, `A_log` parameter handling.
+- `--spec orbit_plugins.models.qwen3_5 get_qwen3_5_spec` — attention-output gate, `A_log` parameter handling.
 - `--rotary-base 10000000`, `--rotary-percent 0.25`.
 - `--vocab-size 248320`.
 - `--apply-layernorm-1p`, `--qk-layernorm`, `--group-query-attention`.
 - `--attention-output-gate`.
 
-See [Backends Beyond Megatron](/advanced/architecture-support) for how miles preserves FP32 parameters like `A_log` through Megatron's mixed-precision pipeline.
+See [Backends Beyond Megatron](/advanced/architecture-support) for how orbit preserves FP32 parameters like `A_log` through Megatron's mixed-precision pipeline.
 
 ## 6. Pairs Well With
 

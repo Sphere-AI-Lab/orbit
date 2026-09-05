@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 from tests.fast.examples.model_response_trace_viewer.conftest import make_sample
 
-from miles.ray.rollout.debug_data import save_debug_rollout_data
-from miles.ray.rollout.metrics import log_rollout_data
+from orbit.ray.rollout.debug_data import save_debug_rollout_data
+from orbit.ray.rollout.metrics import log_rollout_data
 
 HOOK_PATH = "examples.model_response_trace_viewer.hook.log_rollout_data"
 
@@ -35,12 +35,12 @@ def _run(args, samples, rollout_id=3):
         default_logged["ran"] = True
         return {}
 
-    with patch("miles.ray.rollout.metrics._compute_metrics_from_samples", mark), patch(
-        "miles.ray.rollout.metrics._compute_perf_metrics_from_samples", lambda *a, **k: {}
-    ), patch("miles.ray.rollout.metrics._compute_distillation_rpc_metrics", lambda *a, **k: {}), patch(
-        "miles.ray.rollout.metrics.compute_rollout_step", lambda *a, **k: 0
+    with patch("orbit.ray.rollout.metrics._compute_metrics_from_samples", mark), patch(
+        "orbit.ray.rollout.metrics._compute_perf_metrics_from_samples", lambda *a, **k: {}
+    ), patch("orbit.ray.rollout.metrics._compute_distillation_rpc_metrics", lambda *a, **k: {}), patch(
+        "orbit.ray.rollout.metrics.compute_rollout_step", lambda *a, **k: 0
     ), patch(
-        "miles.ray.rollout.metrics.tracking"
+        "orbit.ray.rollout.metrics.tracking"
     ):
         log_rollout_data(rollout_id, args, samples, {}, 1.0)
     return default_logged["ran"]
@@ -112,7 +112,7 @@ def test_debug_dump_preserves_messages_for_the_following_hook(tmp_path):
 
 
 def test_hook_layers_on_top_of_default_metrics_logging(tmp_path):
-    """Returning False must not suppress Miles' own rollout metrics."""
+    """Returning False must not suppress Orbit' own rollout metrics."""
     ran = _run(_args(save_model_response_trace_dir=str(tmp_path / "traces")), [make_sample()])
 
     assert ran

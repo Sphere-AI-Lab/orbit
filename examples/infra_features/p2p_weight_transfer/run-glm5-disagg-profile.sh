@@ -115,8 +115,8 @@ esac
 
 NUM_TRAIN_NODES=$((NUM_TRAIN_GPUS / GPUS_PER_NODE))
 
-MILES_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." &>/dev/null && pwd)"
-MODEL_ARGS_LINE="$(python3 "${MILES_ROOT}/miles/utils/external_utils/model_args_utils.py" "${MODEL_TYPE}")" || exit 1
+ORBIT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." &>/dev/null && pwd)"
+MODEL_ARGS_LINE="$(python3 "${ORBIT_ROOT}/orbit/utils/external_utils/model_args_utils.py" "${MODEL_TYPE}")" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 echo ""
 echo "============================================================"
@@ -303,7 +303,7 @@ run_mode() {
     \"NCCL_NVLS_ENABLE\": \"${NCCL_NVLS_VAL}\",
     \"INDEXER_ROPE_NEOX_STYLE\": \"0\",
     \"NVSHMEM_DISABLE_NCCL\": \"1\",
-    \"MILES_LOG_DIR\": \"${MILES_LOG_DIR:-}\"
+    \"ORBIT_LOG_DIR\": \"${ORBIT_LOG_DIR:-}\"
   }
 }"
 
@@ -325,7 +325,7 @@ run_mode() {
     # --- Signal file for worker synchronization (container env) ---
     # In container environments, worker nodes must stay alive while the
     # head node runs the Ray job. We use a signal file on shared storage.
-    SIGNAL_DIR="${MILES_LOG_DIR:-/data/ray/signals}"
+    SIGNAL_DIR="${ORBIT_LOG_DIR:-/data/ray/signals}"
     mkdir -p "${SIGNAL_DIR}"
     DONE_FILE="${SIGNAL_DIR}/job_done_${mode}"
 

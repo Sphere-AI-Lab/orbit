@@ -3,7 +3,7 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-import miles.backends.megatron_utils.low_precision_bootstrap as low_precision_bootstrap
+import orbit.backends.megatron_utils.low_precision_bootstrap as low_precision_bootstrap
 
 
 class _FakeDistCheckpointing:

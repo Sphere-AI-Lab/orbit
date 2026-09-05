@@ -20,7 +20,7 @@ import torch
 import torch.distributed as dist
 from tests.fast.backends.training_utils.loss.rkld_dagger_test_utils import dense_topk_rest_oracle
 
-from miles.backends.training_utils.loss_hub.math_utils import vocab_parallel_topk_rest_cross_entropy
+from orbit.backends.training_utils.loss_hub.math_utils import vocab_parallel_topk_rest_cross_entropy
 
 
 def parse_args() -> argparse.Namespace:

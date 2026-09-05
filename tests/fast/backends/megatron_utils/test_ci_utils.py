@@ -4,7 +4,7 @@ pytest.importorskip("megatron.core.distributed")
 
 import torch
 
-from miles.backends.megatron_utils.ci_utils import _hash_tensor_bytes
+from orbit.backends.megatron_utils.ci_utils import _hash_tensor_bytes
 
 
 def test_hash_tensor_bytes_contiguous_float32_returns_raw_buffer_bytes() -> None:

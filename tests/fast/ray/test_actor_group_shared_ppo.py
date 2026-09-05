@@ -33,7 +33,7 @@ class _RemoteCall:
 
 
 async def test_train_routes_each_critic_payload_to_matching_actor_rank():
-    from miles.ray.actor_group import RayTrainGroup
+    from orbit.ray.actor_group import RayTrainGroup
 
     calls = []
     group = object.__new__(RayTrainGroup)
@@ -50,7 +50,7 @@ async def test_train_routes_each_critic_payload_to_matching_actor_rank():
 
 
 async def test_train_broadcasts_without_lifecycle_options():
-    from miles.ray.actor_group import RayTrainGroup
+    from orbit.ray.actor_group import RayTrainGroup
 
     calls = []
     group = object.__new__(RayTrainGroup)
@@ -67,7 +67,7 @@ async def test_train_broadcasts_without_lifecycle_options():
 async def test_train_rejects_wrong_number_of_rank_payloads():
     import pytest
 
-    from miles.ray.actor_group import RayTrainGroup
+    from orbit.ray.actor_group import RayTrainGroup
 
     group = object.__new__(RayTrainGroup)
     group._actor_handles = [_Handle(0, []), _Handle(1, [])]
@@ -80,7 +80,7 @@ async def test_train_only_ft_does_not_recover_rollout_engines():
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
-    from miles.ray.actor_group import RayTrainGroup
+    from orbit.ray.actor_group import RayTrainGroup
 
     calls = []
     group = object.__new__(RayTrainGroup)

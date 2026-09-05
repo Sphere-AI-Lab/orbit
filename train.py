@@ -4,24 +4,24 @@ import os
 
 from sglang.srt.constants import GPU_MEMORY_TYPE_CUDA_GRAPH, GPU_MEMORY_TYPE_KV_CACHE, GPU_MEMORY_TYPE_WEIGHTS
 
-from miles.ray.placement_group import (
+from orbit.ray.placement_group import (
     check_weight_update_equal_after_initial_sync,
     create_placement_groups,
     create_rollout_manager,
     create_training_models,
 )
-from miles.utils import object_store
-from miles.utils.arguments import parse_args
-from miles.utils.audit_utils.process_identity import MainProcessIdentity
-from miles.utils.data import remove_rollout_data_refs
-from miles.utils.debug_utils.periodic_py_spy import maybe_start_periodic_pyspy_dump
-from miles.utils.ft_utils.control_server.server import start_control_server
-from miles.utils.ft_utils.mini_ft_controller import maybe_start_mini_ft_controller
-from miles.utils.logging_utils import configure_logger
-from miles.utils.misc import should_run_periodic_action
-from miles.utils.tracking_utils.tracking import finish_tracking, init_tracking
-from miles.utils.train_status import set_progress, start_heartbeat
-from miles.utils.train_status import write_train_status as _write_train_status
+from orbit.utils import object_store
+from orbit.utils.arguments import parse_args
+from orbit.utils.audit_utils.process_identity import MainProcessIdentity
+from orbit.utils.data import remove_rollout_data_refs
+from orbit.utils.debug_utils.periodic_py_spy import maybe_start_periodic_pyspy_dump
+from orbit.utils.ft_utils.control_server.server import start_control_server
+from orbit.utils.ft_utils.mini_ft_controller import maybe_start_mini_ft_controller
+from orbit.utils.logging_utils import configure_logger
+from orbit.utils.misc import should_run_periodic_action
+from orbit.utils.tracking_utils.tracking import finish_tracking, init_tracking
+from orbit.utils.train_status import set_progress, start_heartbeat
+from orbit.utils.train_status import write_train_status as _write_train_status
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ async def train(args):
     for rollout_id in range(args.start_rollout_id, args.num_rollout):
         # Progress signal: record the step + refresh the sentinel each iteration. The
         # background heartbeat (start_heartbeat) covers process-liveness incl. warmup;
-        # this bump proves steps are advancing (see miles/utils/train_status.py).
+        # this bump proves steps are advancing (see orbit/utils/train_status.py).
         set_progress(rollout_id)
         _write_train_status("running")
         if args.eval_interval is not None and rollout_id == args.start_rollout_id and not args.skip_eval_before_train:

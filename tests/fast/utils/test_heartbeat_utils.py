@@ -1,5 +1,5 @@
-import miles.utils.ft_utils.heartbeat_utils as heartbeat_utils
-from miles.utils.ft_utils.heartbeat_utils import HeartbeatStatus, SimpleHeartbeat
+import orbit.utils.ft_utils.heartbeat_utils as heartbeat_utils
+from orbit.utils.ft_utils.heartbeat_utils import HeartbeatStatus, SimpleHeartbeat
 
 
 class TestSimpleHeartbeatBumpCount:

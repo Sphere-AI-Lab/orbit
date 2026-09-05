@@ -45,13 +45,13 @@ fi
 echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MODEL_ARGS_LINE="$(python3 "${SCRIPT_DIR}/../../miles/utils/external_utils/model_args_utils.py" "qwen3-8B")" || exit 1
+MODEL_ARGS_LINE="$(python3 "${SCRIPT_DIR}/../../orbit/utils/external_utils/model_args_utils.py" "qwen3-8B")" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 CKPT_ARGS=(
    --hf-checkpoint /root/Qwen3-8B
    --ref-load /root/Qwen3-8B_torch_dist
-   --load /root/Qwen3-8B_miles/
-   --save /root/Qwen3-8B_miles/
+   --load /root/Qwen3-8B_orbit/
+   --save /root/Qwen3-8B_orbit/
    --save-interval 20
 )
 
@@ -71,8 +71,8 @@ ROLLOUT_ARGS=(
 )
 
 RM_ARGS=(
-   --custom-rm-path miles.rollout.on_policy_distillation.reward_func
-   --custom-reward-post-process-path miles.rollout.on_policy_distillation.post_process_rewards
+   --custom-rm-path orbit.rollout.on_policy_distillation.reward_func
+   --custom-reward-post-process-path orbit.rollout.on_policy_distillation.post_process_rewards
    --rm-url http://$TEACHER_IP:$TEACHER_PORT/generate
 )
 
@@ -126,7 +126,7 @@ OPTIMIZER_ARGS=(
 
 WANDB_ARGS=(
    #--use-wandb
-   # --wandb-project miles-dev
+   # --wandb-project orbit-dev
    # --wandb-group qwen3-8B-test
    # --wandb-key ${WANDB_KEY}
 )
@@ -158,7 +158,7 @@ ray job submit --address="http://127.0.0.1:8265" \
      "env_vars": {
         "PYTHONPATH": "/root/Megatron-LM/",
         "CUDA_DEVICE_MAX_CONNECTIONS": "1",
-        "MILES_USE_LEGACY_ROLLOUT_V1": "1"
+        "ORBIT_USE_LEGACY_ROLLOUT_V1": "1"
      }
    }' \
    -- python3 train.py \

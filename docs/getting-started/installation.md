@@ -1,8 +1,8 @@
 ---
 title: Installation
-description: Install Miles on NVIDIA or AMD GPUs. Docker is the recommended path.
+description: Install Orbit on NVIDIA or AMD GPUs. Docker is the recommended path.
 ---
-There are three ways to install Miles. Docker is recommended because Miles pins patched
+There are three ways to install Orbit. Docker is recommended because Orbit pins patched
 versions of SGLang, Megatron-LM, and a few CUDA kernels.
 
 ## Method 1: Docker (recommended)
@@ -25,14 +25,14 @@ versions of SGLang, Megatron-LM, and a few CUDA kernels.
   <Tab title="AMD MI300X / MI350X">
 
     ```bash
-    docker pull rlsys/miles:MI350-355-latest    # or MI300-latest
+    docker pull rlsys/orbit:MI350-355-latest    # or MI300-latest
 
     docker run --rm \
       --device /dev/dri --device /dev/kfd \
       --group-add video --ipc=host --shm-size=32g \
       --cap-add SYS_PTRACE --security-opt seccomp=unconfined \
       --privileged \
-      -it rlsys/miles:MI350-355-latest /bin/bash
+      -it rlsys/orbit:MI350-355-latest /bin/bash
     ```
 
   </Tab>
@@ -43,7 +43,7 @@ The image ships with:
 
 - PyTorch (matching the container's CUDA / ROCm version)
 - Megatron-LM, SGLang, FlashAttention-3, DeepGEMM, Apex
-- Ray, uv, and Miles installed editable at `/root/miles`
+- Ray, uv, and Orbit installed editable at `/root/orbit`
 
 See [Hardware requirements](#hardware-requirements) for per-GPU status.
 
@@ -52,25 +52,25 @@ See [Hardware requirements](#hardware-requirements) for per-GPU status.
 Clone and install in an existing environment.
 
 ```bash
-git clone https://github.com/radixark/miles.git
-cd miles
+git clone https://github.com/Sphere-AI-Lab/orbit.git
+cd orbit
 pip install -r requirements.txt
 pip install -e . --no-deps
 ```
 
 <Warning>
 
-**Patched dependencies.** Miles pins patched versions of SGLang and Megatron-LM. Installing them yourself at
+**Patched dependencies.** Orbit pins patched versions of SGLang and Megatron-LM. Installing them yourself at
 the wrong commit is the most common source of bug reports — use Docker if you can.
 
 </Warning>
 
 ## Method 3: Update an existing container
 
-If you already run a Miles image and want the latest code:
+If you already run a Orbit image and want the latest code:
 
 ```bash
-cd /root/miles
+cd /root/orbit
 git pull --rebase
 pip install -e . --no-deps
 ray stop && ray start --head --port=6379
@@ -78,10 +78,10 @@ ray stop && ray start --head --port=6379
 
 ## Verify
 
-Confirm Miles imports and the GPUs are visible:
+Confirm Orbit imports and the GPUs are visible:
 
 ```bash
-python -c "import miles; print('Miles import OK')"
+python -c "import orbit; print('Orbit import OK')"
 nvidia-smi
 ```
 
@@ -102,5 +102,5 @@ or Slingshot — and 200+ GB/s per node. Single-node jobs run fine over NVLink o
 ## Next steps
 
 - [Quick Start](/getting-started/quick-start) — run your first training job.
-- [Core concepts](/user-guide/concepts) — the mental model behind Miles.
+- [Core concepts](/user-guide/concepts) — the mental model behind Orbit.
 - [Training backends](/user-guide/training-backend) — Megatron vs FSDP.

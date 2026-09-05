@@ -2,7 +2,7 @@
 title: Monitoring & Logging
 description: wandb, structured logs, profiling, and what to look at when something looks off.
 ---
-Miles emits per-rollout metrics to stdout and (optionally) Weights & Biases. SGLang and
+Orbit emits per-rollout metrics to stdout and (optionally) Weights & Biases. SGLang and
 Ray write their own logs to their default directories.
 
 
@@ -18,7 +18,7 @@ fields depend on backend and config):
 ```
 
 When `--use-wandb` is set, metrics also go to wandb under the `train/`, `rollout/`,
-and `perf/` namespaces (see `miles/utils/tracking_utils/wandb_utils.py`).
+and `perf/` namespaces (see `orbit/utils/tracking_utils/wandb_utils.py`).
 
 ## Enabling wandb
 
@@ -26,7 +26,7 @@ and `perf/` namespaces (see `miles/utils/tracking_utils/wandb_utils.py`).
 ray job submit --address=auto -- \
   python3 train.py ... \
     --use-wandb \
-    --wandb-project miles \
+    --wandb-project orbit \
     --wandb-group qwen3-30b-grpo
 ```
 
@@ -46,7 +46,7 @@ should be supplied via Ray's `env_vars` rather than baked into the launch script
 | `rollout_time` / `train_time` | Roughly balanced | One ≫ other → resource imbalance |
 | `train/pg_clipfrac` | < 0.2 | > 0.5 means policy is moving fast → drop LR |
 
-Panel names follow what `loss.py` and the rollout logger emit; Miles's wandb metrics
+Panel names follow what `loss.py` and the rollout logger emit; Orbit's wandb metrics
 live under `train/`, `rollout/`, `perf/`, `interaction/`, `passrate/` namespaces.
 
 ## Custom loggers
@@ -55,7 +55,7 @@ Replace the default rollout logger with your own to push to internal systems:
 
 ```python
 def my_log(rollout_id, args, samples, extra, rollout_time) -> bool:
-    statsd.gauge("miles.reward", mean([s.reward for s in samples]))
+    statsd.gauge("orbit.reward", mean([s.reward for s in samples]))
     return False   # also keep default logging
 ```
 
@@ -74,7 +74,7 @@ def my_log(rollout_id, args, samples, extra, rollout_time) -> bool:
 
 ### Built-in PyTorch profiler
 
-The PyTorch profiler is wired into Miles via `miles/utils/profile_utils.py`. Flags
+The PyTorch profiler is wired into Orbit via `orbit/utils/profile_utils.py`. Flags
 differ by backend:
 
 **Megatron** — choose which sub-loop to profile:
@@ -106,7 +106,7 @@ Open the trace in `chrome://tracing` or [Perfetto](https://ui.perfetto.dev/).
 
 ## Router endpoints
 
-The router exposes a small FastAPI surface used internally by Miles:
+The router exposes a small FastAPI surface used internally by Orbit:
 
 | Endpoint | Method | What |
 |---|---|---|

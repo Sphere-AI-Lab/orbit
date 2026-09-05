@@ -2,7 +2,7 @@ import dataclasses
 
 import pytest
 
-from miles.utils.debug_utils.run_megatron.cli.parallel_utils import ParallelConfig, parse_parallel_args
+from orbit.utils.debug_utils.run_megatron.cli.parallel_utils import ParallelConfig, parse_parallel_args
 
 # ---------------------------------------------------------------------------
 # Construction & defaults
@@ -98,7 +98,7 @@ class TestFromParsedArgs:
 
 class TestFromRunArgs:
     def test_from_run_args(self) -> None:
-        from miles.utils.debug_utils.run_megatron.cli.commands.args import RunArgs
+        from orbit.utils.debug_utils.run_megatron.cli.commands.args import RunArgs
 
         args = RunArgs(
             model_type="test",
@@ -113,7 +113,7 @@ class TestFromRunArgs:
         assert config == ParallelConfig(tp=2, pp=4, cp=1, ep=2, etp=1)
 
     def test_from_run_args_defaults(self) -> None:
-        from miles.utils.debug_utils.run_megatron.cli.commands.args import RunArgs
+        from orbit.utils.debug_utils.run_megatron.cli.commands.args import RunArgs
 
         args = RunArgs(
             model_type="test",

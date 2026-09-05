@@ -8,9 +8,9 @@
 #
 # Defaults are full-training sized. For smoke/debug runs, override the rollout
 # sizing from the launcher environment:
-#   MILES_SCRIPT_NUM_ROLLOUT=1
-#   MILES_SCRIPT_ROLLOUT_BATCH_SIZE=8
-#   MILES_SCRIPT_N_SAMPLES_PER_PROMPT=2
+#   ORBIT_SCRIPT_NUM_ROLLOUT=1
+#   ORBIT_SCRIPT_ROLLOUT_BATCH_SIZE=8
+#   ORBIT_SCRIPT_N_SAMPLES_PER_PROMPT=2
 #
 # VLM-specific:
 #   - MODEL_ARGS_ROTARY_BASE=5000000 before sourcing qwen3-1.7B.sh.
@@ -22,7 +22,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}
 RECIPE_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
 
 # ---------------------------------------------------------------------------
@@ -49,15 +49,15 @@ HF_TRAIN_DATA="$HF_CACHE_DIR/data/geo3k_imgurl_processed/train.parquet"
 # ---------------------------------------------------------------------------
 MODEL_ARGS_ROTARY_BASE=5000000
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-1.7B.sh"
+source "$ORBIT_REPO/scripts/models/qwen3-1.7B.sh"
 MODEL_ARGS+=( --megatron-to-hf-mode bridge )
 
 RUN_NAME=${SLURM_JOB_NAME:-$RECIPE_NAME}
 
-NUM_ROLLOUT=${MILES_SCRIPT_NUM_ROLLOUT:-3000}
-ROLLOUT_BATCH_SIZE=${MILES_SCRIPT_ROLLOUT_BATCH_SIZE:-64}
-N_SAMPLES_PER_PROMPT=${MILES_SCRIPT_N_SAMPLES_PER_PROMPT:-8}
-GLOBAL_BATCH_SIZE=${MILES_SCRIPT_GLOBAL_BATCH_SIZE:-$((ROLLOUT_BATCH_SIZE * N_SAMPLES_PER_PROMPT))}
+NUM_ROLLOUT=${ORBIT_SCRIPT_NUM_ROLLOUT:-3000}
+ROLLOUT_BATCH_SIZE=${ORBIT_SCRIPT_ROLLOUT_BATCH_SIZE:-64}
+N_SAMPLES_PER_PROMPT=${ORBIT_SCRIPT_N_SAMPLES_PER_PROMPT:-8}
+GLOBAL_BATCH_SIZE=${ORBIT_SCRIPT_GLOBAL_BATCH_SIZE:-$((ROLLOUT_BATCH_SIZE * N_SAMPLES_PER_PROMPT))}
 
 CKPT_ARGS=(
    --hf-checkpoint  "$HF_MODEL_DIR"
@@ -134,7 +134,7 @@ MISC_ARGS=(
 
 WANDB_ARGS=(
    --use-wandb
-   --wandb-project miles-imp
+   --wandb-project orbit
    --wandb-group   "$RUN_NAME"
 )
 
@@ -151,7 +151,7 @@ LAYOUT_ARGS=(
    --rollout-num-gpus       8
 )
 
-MILES_ARGS=(
+ORBIT_ARGS=(
    "${LAYOUT_ARGS[@]}"
    "${MODEL_ARGS[@]}"
    "${CKPT_ARGS[@]}"

@@ -6,7 +6,7 @@ import pytest
 import torch
 from tests.fast.ray.rollout.conftest import make_args, make_sample, make_samples_grouped
 
-from miles.ray.rollout.debug_data import RolloutDataInjectionUtil, load_debug_rollout_data, save_debug_rollout_data
+from orbit.ray.rollout.debug_data import RolloutDataInjectionUtil, load_debug_rollout_data, save_debug_rollout_data
 
 # ----------------------------- save / load round-trip -----------------------------
 

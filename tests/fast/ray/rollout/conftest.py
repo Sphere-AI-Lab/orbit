@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 import pytest
 import ray
 
-from miles.utils import object_store
-from miles.utils.types import Sample
+from orbit.utils import object_store
+from orbit.utils.types import Sample
 
 
 def fake_actor_handle() -> MagicMock:
@@ -25,7 +25,7 @@ def fake_actor_handle() -> MagicMock:
 
 
 def make_args(**overrides: Any) -> Namespace:
-    """Args namespace covering every field touched by ``miles/ray/rollout/``.
+    """Args namespace covering every field touched by ``orbit/ray/rollout/``.
     Adding a new field is fine; deleting one likely breaks tests."""
     defaults: dict[str, Any] = dict(
         # rollout core
@@ -82,7 +82,7 @@ def make_args(**overrides: Any) -> Namespace:
         sglang_model_routers=None,
         prefill_num_servers=None,
         # routers / session server
-        use_miles_router=False,
+        use_orbit_router=False,
         use_session_server=False,
         session_server_ip=None,
         session_server_port=None,
@@ -96,9 +96,9 @@ def make_args(**overrides: Any) -> Namespace:
         rollout_health_check_timeout=30.0,
         # checkpoint / data source
         hf_checkpoint="/fake/model",
-        rollout_function_path="miles.rollout.sglang_rollout.generate_rollout",
-        eval_function_path="miles.rollout.sglang_rollout.eval_generate_rollout",
-        data_source_path="miles.data.dummy.DummyDataSource",
+        rollout_function_path="orbit.rollout.sglang_rollout.generate_rollout",
+        eval_function_path="orbit.rollout.sglang_rollout.eval_generate_rollout",
+        data_source_path="orbit.data.dummy.DummyDataSource",
         custom_reward_post_process_path=None,
         custom_convert_samples_to_train_data_path=None,
         custom_rollout_log_function_path=None,
@@ -263,8 +263,8 @@ def make_dataclass_group(
 ):
     """Build a ``ServerGroup`` with ``pg=None`` (no actor scheduling). Each
     engine starts unallocated."""
-    from miles.ray.rollout.server_engine import ServerEngine
-    from miles.ray.rollout.server_group import ServerGroup
+    from orbit.ray.rollout.server_engine import ServerEngine
+    from orbit.ray.rollout.server_group import ServerGroup
 
     args = make_args(num_gpus_per_node=8)
     engines = [ServerEngine() for _ in range(num_engines)]
@@ -301,6 +301,6 @@ def fake_engine(host: str = "10.0.0.1", port_seed: int = 30000) -> MagicMock:
 def patch_ray_get(monkeypatch):
     """Make ``ray.get(remote_call(...))`` return the MagicMock's value directly,
     so allocator tests don't need a real Ray cluster."""
-    import miles.ray.rollout.addr_allocator as mod
+    import orbit.ray.rollout.addr_allocator as mod
 
     monkeypatch.setattr(mod.ray, "get", lambda x: x)

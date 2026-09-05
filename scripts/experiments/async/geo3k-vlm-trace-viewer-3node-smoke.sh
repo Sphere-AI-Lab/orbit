@@ -18,7 +18,7 @@
 #   - default rollout metrics still logging (hook returns False)
 #
 # Submit:
-#   JOB_NAME=geo3k-trace-smoke TIME=01:00:00 NODES=3 MILES_ENV_NAME=miles_zeju \
+#   JOB_NAME=geo3k-trace-smoke TIME=01:00:00 NODES=3 ORBIT_ENV_NAME=orbit_zeju \
 #   bash scripts/slurm/submit.sh async/geo3k-vlm-trace-viewer-3node-smoke
 #
 # Then verify (on the login node, against the printed run dir):
@@ -33,14 +33,14 @@ source "$VARIANT_DIR/geo3k-vlm-multi-turn-fully-async-prefetch2-3node.sh"
 # Smoke, not a 72h production run.
 EXPERIMENT_TIME=01:00:00
 
-# RUN_DIR is exported by submit.sh and set before launch_miles.sbatch sources
+# RUN_DIR is exported by submit.sh and set before launch_orbit.sbatch sources
 # this recipe, so traces land beside run.log rather than in a stale directory.
-TRACE_DIR="${RUN_DIR:-$MILES_REPO/runs/$RUN_NAME}/traces"
+TRACE_DIR="${RUN_DIR:-$ORBIT_REPO/runs/$RUN_NAME}/traces"
 
-MILES_ARGS+=(
+ORBIT_ARGS+=(
    # --- the thing under test -------------------------------------------------
    # The viewer attaches here and nowhere else: no call site in rollout_manager,
-   # no writer module in miles/. The hook returns False so Miles still emits its
+   # no writer module in orbit/. The hook returns False so Orbit still emits its
    # own rollout metrics on top.
    --custom-rollout-log-function-path examples.model_response_trace_viewer.hook.log_rollout_data
    --save-model-response-trace-dir    "$TRACE_DIR"

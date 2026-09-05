@@ -9,7 +9,7 @@ from collections.abc import Callable
 
 import requests
 
-from miles.utils.test_utils.fault_injector import FailureMode
+from orbit.utils.test_utils.fault_injector import FailureMode
 
 logger = logging.getLogger(__name__)
 

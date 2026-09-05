@@ -6,7 +6,7 @@
 /* --------------------------------------------------------------------------
    Hero
    -------------------------------------------------------------------------- */
-.miles-hero {
+.orbit-hero {
   position: relative;
   margin: -1.6rem -1.2rem 3rem;
   padding: 6rem 1.6rem 5rem;
@@ -18,7 +18,7 @@
 }
 
 /* subtle radial glow */
-.miles-hero::before {
+.orbit-hero::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -29,7 +29,7 @@
 }
 
 /* fine grid lines */
-.miles-hero::after {
+.orbit-hero::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -42,14 +42,14 @@
   pointer-events: none;
 }
 
-.miles-hero__inner {
+.orbit-hero__inner {
   position: relative;
   z-index: 1;
   max-width: 880px;
   margin: 0 auto;
 }
 
-.miles-hero__eyebrow {
+.orbit-hero__eyebrow {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
@@ -65,14 +65,14 @@
   text-transform: uppercase;
 }
 
-.miles-hero__eyebrow .dot {
+.orbit-hero__eyebrow .dot {
   width: 6px; height: 6px;
   border-radius: 50%;
   background: #10b981;
   box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
 }
 
-.miles-hero__title {
+.orbit-hero__title {
   font-family: "Bricolage Grotesque", "Geist", sans-serif !important;
   font-variation-settings: "opsz" 96, "wght" 700;
   font-size: clamp(2.6rem, 6.5vw, 4.6rem);
@@ -83,7 +83,7 @@
   color: #f1f5f9;
 }
 
-.miles-hero__title em {
+.orbit-hero__title em {
   font-style: normal;
   background: linear-gradient(120deg, #5cb6ff 20%, #b78cff 80%);
   -webkit-background-clip: text;
@@ -92,7 +92,7 @@
   -webkit-text-fill-color: transparent;
 }
 
-.miles-hero__subtitle {
+.orbit-hero__subtitle {
   margin: 0 auto 2.2rem;
   max-width: 640px;
   font-size: 1.04rem;
@@ -101,7 +101,7 @@
   font-family: "Geist", sans-serif;
 }
 
-.miles-hero__cta {
+.orbit-hero__cta {
   display: flex;
   flex-wrap: wrap;
   gap: 0.7rem;
@@ -109,7 +109,7 @@
   margin-bottom: 2.6rem;
 }
 
-.miles-hero__cta a {
+.orbit-hero__cta a {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
@@ -124,32 +124,32 @@
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.18s ease;
 }
 
-.miles-hero__cta .primary {
+.orbit-hero__cta .primary {
   background: #ffffff;
   color: #06070d !important;
   border-color: #ffffff;
 }
 
-.miles-hero__cta .primary:hover {
+.orbit-hero__cta .primary:hover {
   background: #5cb6ff;
   border-color: #5cb6ff;
   transform: translateY(-1px);
 }
 
-.miles-hero__cta .ghost {
+.orbit-hero__cta .ghost {
   background: transparent;
   color: #f1f5f9 !important;
   border-color: rgba(255, 255, 255, 0.18);
 }
 
-.miles-hero__cta .ghost:hover {
+.orbit-hero__cta .ghost:hover {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.32);
   transform: translateY(-1px);
 }
 
 /* Stat strip ------------------------------------------------------------- */
-.miles-hero__stats {
+.orbit-hero__stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 1.4rem;
@@ -159,9 +159,9 @@
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.miles-hero__stat { text-align: center; }
+.orbit-hero__stat { text-align: center; }
 
-.miles-hero__stat .num {
+.orbit-hero__stat .num {
   display: block;
   font-family: "Bricolage Grotesque", sans-serif;
   font-size: 1.7rem;
@@ -170,7 +170,7 @@
   color: #f1f5f9;
 }
 
-.miles-hero__stat .lbl {
+.orbit-hero__stat .lbl {
   display: block;
   margin-top: 0.35rem;
   font-family: "Geist Mono", monospace;
@@ -183,17 +183,17 @@
 /* --------------------------------------------------------------------------
    Sections — restrained, no underline accents, just space
    -------------------------------------------------------------------------- */
-.miles-section {
+.orbit-section {
   margin: 4rem auto;
   max-width: 1080px;
 }
 
-.miles-section__head {
+.orbit-section__head {
   text-align: center;
   margin-bottom: 2.4rem;
 }
 
-.miles-section__eyebrow {
+.orbit-section__eyebrow {
   display: inline-block;
   font-family: "Geist Mono", monospace;
   font-size: 0.7rem;
@@ -204,7 +204,7 @@
   margin-bottom: 0.6rem;
 }
 
-.miles-section__title {
+.orbit-section__title {
   font-family: "Bricolage Grotesque", sans-serif !important;
   font-variation-settings: "opsz" 48, "wght" 600;
   margin: 0 0 0.8rem !important;
@@ -218,7 +218,7 @@
   -webkit-text-fill-color: var(--md-default-fg-color) !important;
 }
 
-.miles-section__lede {
+.orbit-section__lede {
   margin: 0 auto;
   max-width: 660px;
   color: var(--md-default-fg-color--light);
@@ -229,19 +229,19 @@
 /* --------------------------------------------------------------------------
    Feature cards
    -------------------------------------------------------------------------- */
-.miles-grid {
+.orbit-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 1rem;
 }
 
-.miles-card {
+.orbit-card {
   position: relative;
   display: flex;
   flex-direction: column;
   padding: 1.4rem 1.4rem 1.5rem;
   border-radius: 12px;
-  border: 1px solid var(--miles-line);
+  border: 1px solid var(--orbit-line);
   background: var(--md-default-bg-color);
   text-decoration: none !important;
   color: inherit;
@@ -249,20 +249,20 @@
   overflow: hidden;
 }
 
-[data-md-color-scheme="default"] .miles-card {
+[data-md-color-scheme="default"] .orbit-card {
   background: #ffffff;
 }
 
-[data-md-color-scheme="slate"] .miles-card {
+[data-md-color-scheme="slate"] .orbit-card {
   background: rgba(255, 255, 255, 0.018);
 }
 
-.miles-card:hover {
+.orbit-card:hover {
   transform: translateY(-1px);
   border-color: var(--md-accent-fg-color);
 }
 
-.miles-card__icon {
+.orbit-card__icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -275,7 +275,7 @@
   margin-bottom: 0.95rem;
 }
 
-.miles-card__title {
+.orbit-card__title {
   font-family: "Bricolage Grotesque", sans-serif;
   margin: 0 0 0.4rem;
   font-size: 1.0rem;
@@ -284,7 +284,7 @@
   color: var(--md-default-fg-color);
 }
 
-.miles-card__desc {
+.orbit-card__desc {
   margin: 0 0 0.95rem;
   color: var(--md-default-fg-color--light);
   font-size: 0.84rem;
@@ -292,11 +292,11 @@
   flex-grow: 1;
 }
 
-.miles-card__chip {
+.orbit-card__chip {
   display: inline-block;
   padding: 0.16em 0.55em;
   border-radius: 4px;
-  background: var(--miles-bg-mute);
+  background: var(--orbit-bg-mute);
   color: var(--md-default-fg-color--lighter);
   font-family: "Geist Mono", monospace;
   font-size: 0.66rem;
@@ -305,7 +305,7 @@
   text-transform: uppercase;
 }
 
-[data-md-color-scheme="slate"] .miles-card__chip {
+[data-md-color-scheme="slate"] .orbit-card__chip {
   background: rgba(255, 255, 255, 0.05);
   color: rgba(241, 245, 249, 0.6);
 }
@@ -313,31 +313,31 @@
 /* --------------------------------------------------------------------------
    Architecture strip
    -------------------------------------------------------------------------- */
-.miles-strip {
+.orbit-strip {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 0;
-  border: 1px solid var(--miles-line);
+  border: 1px solid var(--orbit-line);
   border-radius: 12px;
   background: var(--md-default-bg-color);
   overflow: hidden;
 }
 
-[data-md-color-scheme="default"] .miles-strip { background: #ffffff; }
+[data-md-color-scheme="default"] .orbit-strip { background: #ffffff; }
 
-.miles-strip__cell {
+.orbit-strip__cell {
   padding: 1.3rem 1.3rem;
-  border-right: 1px solid var(--miles-line);
-  border-bottom: 1px solid var(--miles-line);
+  border-right: 1px solid var(--orbit-line);
+  border-bottom: 1px solid var(--orbit-line);
 }
 
-.miles-strip__cell:last-child { border-right: none; }
+.orbit-strip__cell:last-child { border-right: none; }
 
 @media (max-width: 720px) {
-  .miles-strip__cell { border-right: none; }
+  .orbit-strip__cell { border-right: none; }
 }
 
-.miles-strip__cell .label {
+.orbit-strip__cell .label {
   display: block;
   font-family: "Geist Mono", monospace;
   font-size: 0.66rem;
@@ -347,7 +347,7 @@
   margin-bottom: 0.45rem;
 }
 
-.miles-strip__cell .value {
+.orbit-strip__cell .value {
   display: block;
   font-family: "Bricolage Grotesque", sans-serif;
   font-size: 0.96rem;
@@ -359,38 +359,38 @@
 /* --------------------------------------------------------------------------
    Update timeline
    -------------------------------------------------------------------------- */
-.miles-updates {
+.orbit-updates {
   display: flex;
   flex-direction: column;
   gap: 0;
-  border: 1px solid var(--miles-line);
+  border: 1px solid var(--orbit-line);
   border-radius: 12px;
   overflow: hidden;
   background: var(--md-default-bg-color);
 }
 
-[data-md-color-scheme="default"] .miles-updates { background: #ffffff; }
+[data-md-color-scheme="default"] .orbit-updates { background: #ffffff; }
 
-.miles-update {
+.orbit-update {
   display: grid;
   grid-template-columns: 130px 1fr;
   gap: 1.4rem;
   padding: 1.1rem 1.4rem;
-  border-bottom: 1px solid var(--miles-line);
+  border-bottom: 1px solid var(--orbit-line);
   transition: background-color 0.15s ease;
 }
 
-.miles-update:last-child { border-bottom: none; }
+.orbit-update:last-child { border-bottom: none; }
 
-.miles-update:hover {
-  background: var(--miles-bg-soft);
+.orbit-update:hover {
+  background: var(--orbit-bg-soft);
 }
 
-[data-md-color-scheme="slate"] .miles-update:hover {
+[data-md-color-scheme="slate"] .orbit-update:hover {
   background: rgba(255, 255, 255, 0.025);
 }
 
-.miles-update__date {
+.orbit-update__date {
   font-family: "Geist Mono", monospace;
   font-weight: 500;
   font-size: 0.74rem;
@@ -400,20 +400,20 @@
   padding-top: 0.1rem;
 }
 
-.miles-update__body {
+.orbit-update__body {
   font-size: 0.86rem;
   line-height: 1.6;
   color: var(--md-default-fg-color--light);
 }
 
-.miles-update__body strong {
+.orbit-update__body strong {
   font-family: "Bricolage Grotesque", sans-serif;
   font-weight: 600;
   color: var(--md-default-fg-color);
   margin-right: 0.4rem;
 }
 
-.miles-update__body a {
+.orbit-update__body a {
   color: var(--md-accent-fg-color);
   text-decoration: none;
   border-bottom: 1px solid currentColor;
@@ -421,14 +421,14 @@
   transition: border-color 0.15s ease;
 }
 
-.miles-update__body a:hover {
+.orbit-update__body a:hover {
   border-bottom-color: currentColor;
 }
 
 /* --------------------------------------------------------------------------
    Quote
    -------------------------------------------------------------------------- */
-.miles-quote {
+.orbit-quote {
   margin: 3.5rem auto;
   max-width: 720px;
   padding: 0;
@@ -444,7 +444,7 @@
   border: none;
 }
 
-.miles-quote::before {
+.orbit-quote::before {
   content: """;
   display: block;
   font-family: "Bricolage Grotesque", serif;
@@ -454,7 +454,7 @@
   color: var(--md-accent-fg-color);
 }
 
-.miles-quote cite {
+.orbit-quote cite {
   display: block;
   margin-top: 1.2rem;
   font-family: "Geist Mono", monospace;
@@ -469,18 +469,18 @@
    Mobile
    -------------------------------------------------------------------------- */
 @media (max-width: 600px) {
-  .miles-hero {
+  .orbit-hero {
     margin: -1rem -0.6rem 1.5rem;
     padding: 4rem 1rem 3rem;
   }
-  .miles-hero__title {
+  .orbit-hero__title {
     font-size: clamp(2.2rem, 9vw, 3rem);
   }
-  .miles-update {
+  .orbit-update {
     grid-template-columns: 1fr;
     gap: 0.4rem;
   }
-  .miles-quote {
+  .orbit-quote {
     font-size: 1.08rem;
   }
 }

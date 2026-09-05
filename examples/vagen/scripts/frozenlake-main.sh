@@ -3,7 +3,7 @@
 # Build the offline frozenlake-main dataset for
 # vagen-frozenlake-main-colocate-1node (and reusable by the filter variant).
 #
-# Produces two splits under $MILES_REPO/data/frozenlake-main/:
+# Produces two splits under $ORBIT_REPO/data/frozenlake-main/:
 #   train/samples.jsonl  — 10k seeds [1,10000], from frozenlake_train_env.yaml
 #   eval/samples.jsonl   — 256 map-disjoint-from-train seeds, drawn from
 #                          frozenlake_val_env.yaml (4096 candidates) via
@@ -25,29 +25,29 @@
 # + target_kept + dedup_within into dataset_meta.json. FORCE=1 to rebuild.
 #
 # Usage:
-#   env -u LD_LIBRARY_PATH conda run -n miles \
+#   env -u LD_LIBRARY_PATH conda run -n orbit \
 #       examples/vagen/scripts/frozenlake-main.sh
 #
 # --base-seed 0 matches VAGEN's default (config.get("base_seed", 0)) and the
-# launcher passes --seed 0 to miles for VAGEN-main alignment.
+# launcher passes --seed 0 to orbit for VAGEN-main alignment.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../../.." && pwd)}
 
 DATASET_NAME=${VAGEN_DATASET_NAME:-frozenlake-main}
-DATA_ROOT="$MILES_REPO/data/$DATASET_NAME"
+DATA_ROOT="$ORBIT_REPO/data/$DATASET_NAME"
 
-TRAIN_YAML="$MILES_REPO/examples/vagen/configs/frozenlake_train_env.yaml"
-EVAL_YAML="$MILES_REPO/examples/vagen/configs/frozenlake_val_env.yaml"
+TRAIN_YAML="$ORBIT_REPO/examples/vagen/configs/frozenlake_train_env.yaml"
+EVAL_YAML="$ORBIT_REPO/examples/vagen/configs/frozenlake_val_env.yaml"
 
 FORCE_FLAG=()
 if [[ "${FORCE:-0}" == "1" ]]; then
     FORCE_FLAG=(--force)
 fi
 
-cd "$MILES_REPO"
+cd "$ORBIT_REPO"
 
 echo "[build_data] train -> $DATA_ROOT/train"
 python3 -m examples.vagen.build_env_dataset \

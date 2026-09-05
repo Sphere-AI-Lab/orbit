@@ -2,9 +2,9 @@ import pytest
 from tests.fast.fixtures.rollout_fixtures import DEFAULT_DATA_ROWS, RolloutEnvConfig
 from tests.fast.rollout.inference_rollout.integration.utils import MODULAR_ROLLOUT_BASE_ARGV, load_and_call_train
 
-from miles.rollout.base_types import GenerateFnInput, GenerateFnOutput
-from miles.utils.misc import function_registry
-from miles.utils.types import Sample
+from orbit.rollout.base_types import GenerateFnInput, GenerateFnOutput
+from orbit.utils.misc import function_registry
+from orbit.utils.types import Sample
 
 
 async def _multi_sample_generate(input: GenerateFnInput) -> GenerateFnOutput:

@@ -1,14 +1,14 @@
 # Fully Asynchronous Rollout Example
 
 <!-- docs:exclude:start -->
-> **Read the docs:** [Fully Async RL](https://miles.radixark.com/docs/user-guide/fully-async)
+> **Read the docs:** [Fully Async RL](https://spherelab.ai/orbit/user-guide/fully-async)
 > covers the schedule, the data buffer, the three evaluation modes, and every `--fully-async`
 > argument.
 <!-- docs:exclude:end -->
 
 This example shows a simple way to make rollout generation **fully asynchronous**: a single global worker is created once and then keeps running in the background, continuously pulling prompts and launching generation tasks. Training only needs to fetch already finished results. This removes the per‑step wait that happens in the normal synchronous style.
 
-The implementation lives in the core library at `miles/rollout/fully_async_rollout.py` (`FullyAsyncRolloutFn`, a class-based rollout function that owns a persistent background worker).
+The implementation lives in the core library at `orbit/rollout/fully_async_rollout.py` (`FullyAsyncRolloutFn`, a class-based rollout function that owns a persistent background worker).
 
 ## Files
 * `run_qwen3_5_4b_fully_async_eval.py`: Qwen3.5‑4B with async checkpoint eval — `--eval-backend fleet` (dedicated eval fleet) or `--eval-backend external` (fn-launched sglang server, `examples.infra_features.fully_async.external_eval_fn.ExternalSglangEvalFn`).

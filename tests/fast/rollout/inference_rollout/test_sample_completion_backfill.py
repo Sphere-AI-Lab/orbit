@@ -7,13 +7,13 @@ from argparse import Namespace
 
 import pytest
 
-import miles.rollout.inference_rollout.inference_rollout_train as train
-from miles.rollout.submission_scheduler import (
+import orbit.rollout.inference_rollout.inference_rollout_train as train
+from orbit.rollout.submission_scheduler import (
     GroupLevelSubmission,
     SampleBackfillSubmission,
     make_submission_scheduler,
 )
-from miles.utils.types import Sample
+from orbit.utils.types import Sample
 
 GROUP_SIZE = 4
 
@@ -183,7 +183,7 @@ async def test_backfill_does_not_oversubmit_below_one_group(monkeypatch):
 
 async def test_failed_sample_cancels_siblings_and_conserves_credits(monkeypatch):
     """One sample raising must not leave siblings running or credits unreturned."""
-    from miles.rollout.inference_rollout import inference_rollout_common as common
+    from orbit.rollout.inference_rollout import inference_rollout_common as common
 
     async def fake_generate_and_rm(state, sample, sampling_params, evaluation=False):
         if sample.index == 10:  # first sample of make_group(1)

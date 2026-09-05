@@ -1,6 +1,6 @@
 import os
 
-if os.getenv("MILES_HARDWARE_PLATFORM") == "rocm":
+if os.getenv("ORBIT_HARDWARE_PLATFORM") == "rocm":
     from scripts.amd.run_inkling import _MODEL_REGISTRY, ScriptArgs, _train
 else:
     from scripts.run_inkling import _MODEL_REGISTRY, ScriptArgs, _train
@@ -8,7 +8,7 @@ else:
 from tests.ci.ci_register import register_cuda_ci, register_rocm_ci
 from tests.ci.metric_history import register_ci_gate
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 
 register_cuda_ci(

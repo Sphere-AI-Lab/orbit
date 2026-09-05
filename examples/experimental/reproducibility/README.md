@@ -1,6 +1,6 @@
 # Reproducibility
 
-Reproducibility is a bedrock of scientific progress. By combining the [deterministic inference](https://lmsys.org/blog/2025-09-22-sglang-deterministic/) of SGLang and the deterministic mode of Megatron-LM, miles supports bitwise experiment reproduction.
+Reproducibility is a bedrock of scientific progress. By combining the [deterministic inference](https://lmsys.org/blog/2025-09-22-sglang-deterministic/) of SGLang and the deterministic mode of Megatron-LM, orbit supports bitwise experiment reproduction.
 
 To enable deterministic training, you need to first uninstall the flash attention 3 in the docker with `pip uninstall flash_attn_3 -y` and set:
 ```bash
@@ -33,8 +33,8 @@ hf download --repo-type dataset zhuzilin/gsm8k --local-dir /root/gsm8k
 hf download Qwen/Qwen2.5-0.5B-Instruct --local-dir /root/Qwen2.5-0.5B-Instruct
 
 # convert ckpt
-cd miles/
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py qwen2.5-0.5B)" || exit 1
+cd orbit/
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py qwen2.5-0.5B)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM/ python \
    tools/convert_hf_to_torch_dist.py \

@@ -52,10 +52,10 @@ export WANDB_API_KEY=your_wandb_api_key
 ./examples/geo3k_vlm/run_geo3k_vlm.sh
 
 # FSDP backend
-MILES_SCRIPT_TRAIN_BACKEND=fsdp ./examples/geo3k_vlm/run_geo3k_vlm.sh
+ORBIT_SCRIPT_TRAIN_BACKEND=fsdp ./examples/geo3k_vlm/run_geo3k_vlm.sh
 
 # With different model
-MILES_SCRIPT_MODEL_NAME=Qwen3-VL-4B-Instruct ./examples/geo3k_vlm/run_geo3k_vlm.sh
+ORBIT_SCRIPT_MODEL_NAME=Qwen3-VL-4B-Instruct ./examples/geo3k_vlm/run_geo3k_vlm.sh
 
 # SFT
 ./examples/geo_3k_vlm/run_geo3k_vlm_sft.sh
@@ -65,11 +65,11 @@ MILES_SCRIPT_MODEL_NAME=Qwen3-VL-4B-Instruct ./examples/geo3k_vlm/run_geo3k_vlm.
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
-| `MILES_SCRIPT_TRAIN_BACKEND` | `megatron` | Training backend (`megatron` or `fsdp`) |
-| `MILES_SCRIPT_MODEL_NAME` | `Qwen3-VL-8B-Instruct` | Model name |
-| `MILES_SCRIPT_DATASET_NAME` | `chenhegu/geo3k_imgurl` | HuggingFace dataset name |
-| `MILES_SCRIPT_NUM_GPUS` | `8` | Number of GPUs |
-| `MILES_SCRIPT_EXTERNAL_RAY` | `0` | Use external Ray cluster (`1` to enable) |
+| `ORBIT_SCRIPT_TRAIN_BACKEND` | `megatron` | Training backend (`megatron` or `fsdp`) |
+| `ORBIT_SCRIPT_MODEL_NAME` | `Qwen3-VL-8B-Instruct` | Model name |
+| `ORBIT_SCRIPT_DATASET_NAME` | `chenhegu/geo3k_imgurl` | HuggingFace dataset name |
+| `ORBIT_SCRIPT_NUM_GPUS` | `8` | Number of GPUs |
+| `ORBIT_SCRIPT_EXTERNAL_RAY` | `0` | Use external Ray cluster (`1` to enable) |
 
 ### Supported Models
 
@@ -99,7 +99,7 @@ All three performed similarly, so we use the default math RM for simplicity.
 
 Our initial geo3k-specific verifier produced "format scores" (**0 and 0.9**) instead of clean binary rewards. Under **fp32**, fractional values like 0.9 can't be exactly represented, so when all samples in a group have the same reward, `reward - mean` doesn't equal zero—creating spurious gradient signal.
 
-We fixed this by switching to the default math RM with clean **binary 0/1 rewards**. If you encounter similar precision issues with non-binary rewards, you can change the reward tensor dtype from `torch.float` to `torch.float16` in `miles/ray/rollout/train_data_conversion.py` (`_post_process_rewards`) to truncate precision artifacts.
+We fixed this by switching to the default math RM with clean **binary 0/1 rewards**. If you encounter similar precision issues with non-binary rewards, you can change the reward tensor dtype from `torch.float` to `torch.float16` in `orbit/ray/rollout/train_data_conversion.py` (`_post_process_rewards`) to truncate precision artifacts.
 
 ## B200
 Blackwell currently does not support fa3, we need to use  `--sglang-mm-attention-backend sdpa` and `--attn-implementation flash_attention_2`

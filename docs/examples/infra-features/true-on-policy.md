@@ -37,15 +37,15 @@ After running the training, you can see in wandb that the metric `train/train_ro
 We fine-tune Qwen3-4B-Base on dapo-math-17k dataset with max_new_tokens = 2048, and evaluate on aime-2024 dataset with max_new_tokens = 8192.
 Global batch size is 64 × 16. Results are summarized below.
 
-![diff](https://raw.githubusercontent.com/radixark/miles/main/examples/infra_features/true_on_policy/src/train_rollout_abs_diff.png)
+![diff](https://raw.githubusercontent.com/Sphere-AI-Lab/orbit/main/examples/infra_features/true_on_policy/src/train_rollout_abs_diff.png)
 
-![step_time](https://raw.githubusercontent.com/radixark/miles/main/examples/infra_features/true_on_policy/src/step_time.png)
+![step_time](https://raw.githubusercontent.com/Sphere-AI-Lab/orbit/main/examples/infra_features/true_on_policy/src/step_time.png)
 
-![rollout_time](https://raw.githubusercontent.com/radixark/miles/main/examples/infra_features/true_on_policy/src/rollout_time.png)
+![rollout_time](https://raw.githubusercontent.com/Sphere-AI-Lab/orbit/main/examples/infra_features/true_on_policy/src/rollout_time.png)
 
-![raw_rewards](https://raw.githubusercontent.com/radixark/miles/main/examples/infra_features/true_on_policy/src/raw_reward.png)
+![raw_rewards](https://raw.githubusercontent.com/Sphere-AI-Lab/orbit/main/examples/infra_features/true_on_policy/src/raw_reward.png)
 
-![eval](https://raw.githubusercontent.com/radixark/miles/main/examples/infra_features/true_on_policy/src/aime.png)
+![eval](https://raw.githubusercontent.com/Sphere-AI-Lab/orbit/main/examples/infra_features/true_on_policy/src/aime.png)
 
 ### Observations
 

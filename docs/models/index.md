@@ -3,7 +3,7 @@ title: Supported Models
 sidebarTitle: Overview
 description: Per-family recipes covering weight conversion, launch flags, and parallelism choices.
 ---
-Miles ships ready-to-run recipes for every model family listed below. Each page covers
+Orbit ships ready-to-run recipes for every model family listed below. Each page covers
 weight conversion, parallelism, and the launch script in the order you'd actually run
 them.
 
@@ -20,7 +20,7 @@ Each model name links to its recipe page.
 | **Kimi** | [Kimi-K3](/models/kimi/kimi-k3)<br/>[Kimi-K2.6](/models/kimi/kimi-k2.5)<br/>[Kimi-K2.5](/models/kimi/kimi-k2.5)<br/>[Kimi-K2-Instruct / Thinking](/models/kimi/kimi-k2) |
 | **Nemotron** | [Nemotron-3-Ultra-550B-A55B](/models/nemotron/nemotron-3-ultra)<br/>[Nemotron-3-Super-120B-A12B-FP8](/models/nemotron/nemotron-3-super)<br/>[Nemotron-3-Nano MoE](/models/nemotron/nemotron-3-nano-moe)<br/>[Nemotron-3-Nano](/models/nemotron/nemotron-3-nano) |
 | **Gemma** | [Gemma-4 26B-A4B](/models/gemma/gemma-4)<br/>[Gemma-4 31B](/models/gemma/gemma-4) |
-| **JoyAI** | [JoyAI-LLM-Flash](https://github.com/radixark/miles/blob/main/scripts/run_joy_ai_llm_flash.py) |
+| **JoyAI** | [JoyAI-LLM-Flash](https://github.com/Sphere-AI-Lab/orbit/blob/main/scripts/run_joy_ai_llm_flash.py) |
 | **GPT-OSS** | [gpt-oss-20b](/models/gpt-oss/gpt-oss) |
 
 ## Diffusion
@@ -38,7 +38,7 @@ Each model name links to its recipe page.
 
 Every recipe page follows the same six sections:
 
-1. **Model Introduction** — what the model is and why miles supports it.
+1. **Model Introduction** — what the model is and why orbit supports it.
 2. **Supported Variants** — model sizes + HF links.
 3. **Environment Setup** — env vars, downloads, and HF → Megatron conversion.
 4. **Launch** — the `scripts/run_<family>.py` invocation.
@@ -47,6 +47,6 @@ Every recipe page follows the same six sections:
 
 ## Adding a new model
 
-Miles's plugin architecture lets you wrap a HuggingFace implementation as a Megatron
+Orbit's plugin architecture lets you wrap a HuggingFace implementation as a Megatron
 module without patching Megatron core. See
 [Backends Beyond Megatron](/advanced/architecture-support) for the workflow.

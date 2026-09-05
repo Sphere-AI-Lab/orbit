@@ -1,4 +1,4 @@
-"""Unit tests for LoRA-related helpers in miles.backends.megatron_utils.checkpoint.
+"""Unit tests for LoRA-related helpers in orbit.backends.megatron_utils.checkpoint.
 
 Covers pure path-detection functions and the LoRA branch routing in
 save_checkpoint_with_lora / load_checkpoint — the latter using mocks to avoid
@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from miles.backends.megatron_utils.checkpoint import _is_megatron_checkpoint, save_checkpoint_with_lora
+from orbit.backends.megatron_utils.checkpoint import _is_megatron_checkpoint, save_checkpoint_with_lora
 
 # ---------------------------------------------------------------------------
 # _is_megatron_checkpoint
@@ -69,9 +69,9 @@ class TestIsMegatronCheckpoint:
 
 
 class TestSaveCheckpointWithLoRA:
-    @patch("miles.backends.megatron_utils.checkpoint.get_args")
-    @patch("miles.backends.megatron_utils.checkpoint.save_lora_checkpoint")
-    @patch("miles.backends.megatron_utils.checkpoint.is_lora_model", return_value=True)
+    @patch("orbit.backends.megatron_utils.checkpoint.get_args")
+    @patch("orbit.backends.megatron_utils.checkpoint.save_lora_checkpoint")
+    @patch("orbit.backends.megatron_utils.checkpoint.is_lora_model", return_value=True)
     def test_lora_model_saves_adapter(self, mock_is_lora, mock_save_lora, mock_get_args, tmp_path):
         mock_get_args.return_value = Namespace(save=str(tmp_path))
         model = [MagicMock()]
@@ -82,9 +82,9 @@ class TestSaveCheckpointWithLoRA:
         call_args = mock_save_lora.call_args
         assert "adapter" in call_args[1].get("save_dir", call_args[0][2] if len(call_args[0]) > 2 else "")
 
-    @patch("miles.backends.megatron_utils.checkpoint.get_args")
-    @patch("miles.backends.megatron_utils.checkpoint.save_checkpoint")
-    @patch("miles.backends.megatron_utils.checkpoint.is_lora_model", return_value=False)
+    @patch("orbit.backends.megatron_utils.checkpoint.get_args")
+    @patch("orbit.backends.megatron_utils.checkpoint.save_checkpoint")
+    @patch("orbit.backends.megatron_utils.checkpoint.is_lora_model", return_value=False)
     def test_non_lora_model_saves_regular(self, mock_is_lora, mock_save_ckpt, mock_get_args, tmp_path):
         mock_get_args.return_value = Namespace(save=str(tmp_path))
         model = [MagicMock()]

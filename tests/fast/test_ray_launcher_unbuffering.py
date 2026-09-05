@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-LAUNCHER_DIRS = ("examples", "scripts", "tools", "miles/utils/external_utils")
+LAUNCHER_DIRS = ("examples", "scripts", "tools", "orbit/utils/external_utils")
 RAY_RUNTIME_ENV_MARKERS = ("runtime-env-json", "runtime_env=", "runtime_env_json")
 
 

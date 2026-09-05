@@ -8,8 +8,8 @@ from tests.session_parity_utils import (
     run_agentic_retry_trajectories,
 )
 
-from miles.utils.test_utils.mock_sglang_server import ProcessResult, ProcessResultMetaInfo, with_mock_server
-from miles.utils.test_utils.session_verify_agent import (
+from orbit.utils.test_utils.mock_sglang_server import ProcessResult, ProcessResultMetaInfo, with_mock_server
+from orbit.utils.test_utils.session_verify_agent import (
     ASSISTANT_INPUT_FOLLOWUP_TEXT,
     FORCE_FINAL_TEXT,
     MOCK_TOOL_RESULTS,
@@ -17,7 +17,7 @@ from miles.utils.test_utils.session_verify_agent import (
     USER_FOLLOWUP_TEXT,
     build_initial_messages,
 )
-from miles.utils.types import Sample
+from orbit.utils.types import Sample
 
 _MODEL = "Qwen/Qwen3-0.6B"
 _BATCH_SIZE = 16

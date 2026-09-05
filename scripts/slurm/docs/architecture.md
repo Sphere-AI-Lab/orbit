@@ -12,7 +12,7 @@ operator                login node            slurm                 compute node
    │                       │ hf download (model + dataset, idempotent)     │
    │                       │ mkdir run dir (runs/<exp>/<YYMMDD_HHMMSS>/)   │
    │                       │ read_recent_manifests → warn on prior fails   │
-   │                       │ sbatch launch_miles.sbatch                    │
+   │                       │ sbatch launch_orbit.sbatch                    │
    │                       │ ─────────────────► │                          │
    │                       │                    │ allocate N nodes         │
    │                       │                    │ exec launcher on head    │
@@ -70,7 +70,7 @@ operator                login node            slurm                 compute node
 ```
 scripts/slurm/
 ├── submit.sh              # login-node entry; only file you run by hand
-├── launch_miles.sbatch    # sbatch entry, runs on the slurm-allocated head node
+├── launch_orbit.sbatch    # sbatch entry, runs on the slurm-allocated head node
 ├── check_run.sh           # snapshot script (called by rl-monitor-loop skill)
 ├── lib/
 │   ├── manifest.sh        # MANIFEST.json read/write
@@ -101,7 +101,7 @@ package the launcher and monitor for Claude Code.
   knob and grep in the launcher).
 - [`../setup/README.md`](../setup/README.md) — one-time conda env install +
   knob table.
-- [`../submit.sh`](../submit.sh) + [`../launch_miles.sbatch`](../launch_miles.sbatch)
+- [`../submit.sh`](../submit.sh) + [`../launch_orbit.sbatch`](../launch_orbit.sbatch)
   — the two scripts diagrammed above.
 - [`slurm-launch` SKILL.md](../../../.claude/skills/slurm-launch/SKILL.md) —
   operator-facing launch guide (filesystem layout, recipe pattern).

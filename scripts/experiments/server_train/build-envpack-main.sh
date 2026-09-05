@@ -8,13 +8,13 @@
 #   scripts/experiments/server_train/build-envpack-main.sh sokoban_easy14
 #   scripts/experiments/server_train/build-envpack-main.sh sokoban_mix12
 #
-# Requires thirdparty/envpack to be installed in the active Miles environment.
+# Requires thirdparty/envpack to be installed in the active Orbit environment.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../.." && pwd)}
-ENVPACK_REPO=${ENVPACK_REPO:-"$MILES_REPO/thirdparty/envpack"}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../../.." && pwd)}
+ENVPACK_REPO=${ENVPACK_REPO:-"$ORBIT_REPO/thirdparty/envpack"}
 if [[ ! -f "$ENVPACK_REPO/pyproject.toml" ]]; then
     echo "error: envpack repo not found at $ENVPACK_REPO" >&2
     echo "       initialize thirdparty/envpack or set ENVPACK_REPO explicitly" >&2
@@ -51,17 +51,17 @@ case "$ENV_NAME" in
         ;;
 esac
 
-DATA_ROOT=${ENVPACK_DATA_ROOT:-"$MILES_REPO/data/$DATASET_NAME"}
+DATA_ROOT=${ENVPACK_DATA_ROOT:-"$ORBIT_REPO/data/$DATASET_NAME"}
 
 FORCE_FLAG=()
 if [[ "${FORCE:-0}" == "1" ]]; then
     FORCE_FLAG=(--force)
 fi
 
-cd "$MILES_REPO"
+cd "$ORBIT_REPO"
 
 echo "[envpack_data] balanced $ENV_NAME -> $DATA_ROOT/{train,eval}"
-python3 -m miles_plugins.envpack_adapter.build_env_dataset \
+python3 -m orbit_plugins.envpack_adapter.build_env_dataset \
     --yaml            "$TRAIN_YAML" \
     --output-dir      "$DATA_ROOT/train" \
     --eval-output-dir "$DATA_ROOT/eval" \

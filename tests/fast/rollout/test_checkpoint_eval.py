@@ -8,9 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import miles.ray.rollout.rollout_manager as rollout_manager_mod
-from miles.rollout.base_types import RolloutFnEvalInput, RolloutFnEvalOutput
-from miles.rollout.checkpoint_eval import CheckpointEvalFn, EvalSkip, retarget_args
+import orbit.ray.rollout.rollout_manager as rollout_manager_mod
+from orbit.rollout.base_types import RolloutFnEvalInput, RolloutFnEvalOutput
+from orbit.rollout.checkpoint_eval import CheckpointEvalFn, EvalSkip, retarget_args
 
 
 def make_args(**overrides) -> Namespace:
@@ -248,7 +248,7 @@ class FakeActorModel:
 
 @pytest.fixture
 def dispatcher_env(monkeypatch):
-    import miles.ray.rollout.eval_dispatch as eval_dispatch
+    import orbit.ray.rollout.eval_dispatch as eval_dispatch
 
     # ray.wait/ray.get over asyncio futures: done iff the future is resolved.
     monkeypatch.setattr(
@@ -502,15 +502,15 @@ def external_fn_env(monkeypatch):
     monkeypatch.setattr(mod, "GenerateState", lambda args: SimpleNamespace(args=args))
     monkeypatch.setattr(mod, "wait_http_ok", fake_wait_ok)
     for var in ("URL", "GPUS", "PORT", "SERVER_ARGS"):
-        monkeypatch.delenv(f"MILES_EXTERNAL_EVAL_{var}", raising=False)
+        monkeypatch.delenv(f"ORBIT_EXTERNAL_EVAL_{var}", raising=False)
     return SimpleNamespace(mod=mod, calls=calls, server=server, monkeypatch=monkeypatch)
 
 
 def make_external_fn(external_fn_env, **env):
-    from miles.rollout.base_types import RolloutFnConstructorInput
+    from orbit.rollout.base_types import RolloutFnConstructorInput
 
     for var, value in env.items():
-        external_fn_env.monkeypatch.setenv(f"MILES_EXTERNAL_EVAL_{var}", value)
+        external_fn_env.monkeypatch.setenv(f"ORBIT_EXTERNAL_EVAL_{var}", value)
     args = make_args(hf_checkpoint="/base")
     return external_fn_env.mod.ExternalSglangEvalFn(RolloutFnConstructorInput(args=args, data_source=None))
 

@@ -1,9 +1,9 @@
 ---
 title: Release a Version
-description: Cut a versioned Miles release branch, run release CI, tag an exact release, and publish the official Docker images.
+description: Cut a versioned Orbit release branch, run release CI, tag an exact release, and publish the official Docker images.
 ---
 
-This runbook is for maintainers publishing an official Miles version from `radixark/miles`. It covers the supported path from a base-version bump through the two published Docker tags. The version vocabulary and pin ownership live in [Versions and Images](/developer/versions); CI selection details live in [Stage](/ci/00-stage) and [Labels](/ci/01-label).
+This runbook is for maintainers publishing an official Orbit version from `radixark/miles`. It covers the supported path from a base-version bump through the two published Docker tags. The version vocabulary and pin ownership live in [Versions and Images](/developer/versions); CI selection details live in [Stage](/ci/00-stage) and [Labels](/ci/01-label).
 
 ## Before you start
 
@@ -27,7 +27,7 @@ For a release candidate, keep `BASE_VERSION=X.Y.Z` and set `EXACT_VERSION=X.Y.Zr
 Run the helper workflow, or open an equivalent pull request that changes the single `version="..."` assignment in `setup.py`:
 
 ```bash
-gh workflow run bot-bump-miles-version.yml -f new_version="${BASE_VERSION}"
+gh workflow run bot-bump-orbit-version.yml -f new_version="${BASE_VERSION}"
 ```
 
 Pass only `X.Y.Z` here. `setup.py` and the release branch carry the base version; prerelease and post-release suffixes belong only in `EXACT_VERSION` at tag time.
@@ -57,9 +57,9 @@ While this run is active, do not push or cherry-pick anything onto the release b
 After the run is green, resolve the branch tip and copy the first column as `RELEASE_SHA`:
 
 ```bash
-git ls-remote https://github.com/radixark/miles.git "refs/heads/${RELEASE_BRANCH}"
+git ls-remote https://github.com/Sphere-AI-Lab/orbit.git "refs/heads/${RELEASE_BRANCH}"
 RELEASE_SHA=FULL_RELEASE_SHA
-gh api "repos/radixark/miles/commits/${RELEASE_SHA}/status" --jq '[.statuses[] | select(.context == "release-ci")][0].state'
+gh api "repos/Sphere-AI-Lab/orbit/commits/${RELEASE_SHA}/status" --jq '[.statuses[] | select(.context == "release-ci")][0].state'
 ```
 
 The final command must print `success`. Keep using this immutable SHA for the tag step.
@@ -83,7 +83,7 @@ After every successful cherry-pick, repeat step 2, keep the branch frozen during
 Re-read the remote branch tip immediately before dispatch and require it to equal the verified SHA, then dispatch the tag workflow with that immutable SHA:
 
 ```bash
-REMOTE_RELEASE_SHA=$(git ls-remote https://github.com/radixark/miles.git "refs/heads/${RELEASE_BRANCH}" | cut -f1)
+REMOTE_RELEASE_SHA=$(git ls-remote https://github.com/Sphere-AI-Lab/orbit.git "refs/heads/${RELEASE_BRANCH}" | cut -f1)
 if [ "${REMOTE_RELEASE_SHA}" != "${RELEASE_SHA}" ]; then
   echo "release branch moved; rerun release CI on the new tip" >&2
   exit 1

@@ -22,8 +22,8 @@ from tests.ci.metric_history import (
 from tests.ci.metric_history.gate import evaluate_gate
 
 # Env var the training process reads to find the per-attempt record directory; kept
-# in sync with miles.utils.tracking_utils.ci_history.RECORD_DIR_ENV.
-CI_GATE_RECORD_DIR_ENV = "MILES_CI_GATE_RECORD_DIR"
+# in sync with orbit.utils.tracking_utils.ci_history.RECORD_DIR_ENV.
+CI_GATE_RECORD_DIR_ENV = "ORBIT_CI_GATE_RECORD_DIR"
 
 
 def _sanitize_for_path(name: str) -> str:

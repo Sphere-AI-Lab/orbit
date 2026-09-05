@@ -10,11 +10,11 @@
 #   - actor:   2 GPUs Megatron (--actor-num-nodes 1 --actor-num-gpus-per-node 2)
 #   - rollout: 4 GPUs SGLang student engines (--rollout-num-gpus 4)
 #   - teacher: GPU 7, standalone SGLang server (GPU 6 stays idle)
-#   MILES_RAY_HEAD_NUM_GPUS=6 registers only GPUs 0-5 with Ray, fencing GPU 7
+#   ORBIT_RAY_HEAD_NUM_GPUS=6 registers only GPUs 0-5 with Ray, fencing GPU 7
 #   from actor/rollout placement. GPU 6 is also outside Ray and stays idle.
 #
 # The teacher server rides the launcher's local-server hook
-# (ENVPACK_LOCAL_SERVER_CMD): launch_miles.sbatch starts it on the head node
+# (ENVPACK_LOCAL_SERVER_CMD): launch_orbit.sbatch starts it on the head node
 # AFTER the stale-process cleanup, gates t0 on /health_generate, arms the
 # health watchdog, and tears it down with the job. 127.0.0.1 works because
 # this is a 1-node recipe — rollout actors are colocated with the server.
@@ -32,7 +32,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)}
 RECIPE_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
 
 # ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ EXPERIMENT_NODES=1
 EXPERIMENT_TIME=24:00:00
 # The actor and rollout require exactly six GPUs. Keep the teacher-owned GPU 7
 # and idle GPU 6 outside Ray's resource inventory.
-export MILES_RAY_HEAD_NUM_GPUS=6
+export ORBIT_RAY_HEAD_NUM_GPUS=6
 
 # ---------------------------------------------------------------------------
 # Asset metadata — read by orchestrator wrappers for `hf download` step
@@ -74,9 +74,9 @@ if [[ ! -f "$OPD_TEACHER_MODEL_DIR/config.json" ]]; then
     return 1 2>/dev/null || exit 1
 fi
 
-# Launcher local-server hook (see launch_miles.sbatch "envpack session
+# Launcher local-server hook (see launch_orbit.sbatch "envpack session
 # server" — generic enough to host any HTTP sidecar on the head node).
-# TRITON_CACHE_DIR pinned per-user: the sidecar bypasses miles' engine env
+# TRITON_CACHE_DIR pinned per-user: the sidecar bypasses orbit' engine env
 # plumbing, and a shared /tmp/triton is owned by whichever user touched the
 # node first (killed job 23835's TP=8 teacher; cheap insurance here too).
 export ENVPACK_LOCAL_SERVER_CMD="TRITON_CACHE_DIR=/tmp/triton_${USER:-unknown}/opd_teacher \
@@ -96,7 +96,7 @@ export ENVPACK_SERVER_WAIT_TIMEOUT=${ENVPACK_SERVER_WAIT_TIMEOUT:-1800}
 # train.py args
 # ---------------------------------------------------------------------------
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-8B.sh"
+source "$ORBIT_REPO/scripts/models/qwen3-8B.sh"
 
 # Official-baseline naming: baseline-opd-<student>-<teacher mode>-t<teacher size>.
 RUN_NAME=${WANDB_RUN_NAME:-baseline-opd-qwen3-8B-sglang-t32B}
@@ -123,8 +123,8 @@ ROLLOUT_ARGS=(
 # The OPD reward fn queries the teacher for token log-probs per sample; the
 # post-process hook turns them into the per-token reverse-KL penalty.
 RM_ARGS=(
-   --custom-rm-path miles.rollout.on_policy_distillation.reward_func
-   --custom-reward-post-process-path miles.rollout.on_policy_distillation.post_process_rewards
+   --custom-rm-path orbit.rollout.on_policy_distillation.reward_func
+   --custom-reward-post-process-path orbit.rollout.on_policy_distillation.post_process_rewards
    --rm-url "$OPD_TEACHER_URL/generate"
 )
 
@@ -196,7 +196,7 @@ WANDB_ARGS=(
    --wandb-project OPD
    --wandb-group   "$RUN_NAME"
    --disable-wandb-random-suffix
-   # WANDB_API_KEY comes from the env (exported by submit.sh / launch_miles.sbatch);
+   # WANDB_API_KEY comes from the env (exported by submit.sh / launch_orbit.sbatch);
    # we don't pass it on the CLI because it would leak into run.log and args.json.
 )
 
@@ -213,7 +213,7 @@ LAYOUT_ARGS=(
    --rollout-num-gpus       4
 )
 
-MILES_ARGS=(
+ORBIT_ARGS=(
    "${LAYOUT_ARGS[@]}"
    "${MODEL_ARGS[@]}"
    "${CKPT_ARGS[@]}"

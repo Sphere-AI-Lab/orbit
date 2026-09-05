@@ -4,10 +4,10 @@ from argparse import Namespace
 import pytest
 import requests
 
-from miles.router.router import MilesRouter
-from miles.utils.http_utils import find_available_port
-from miles.utils.test_utils.mock_sglang_server import MockSGLangServer, default_process_fn
-from miles.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
+from orbit.router.router import OrbitRouter
+from orbit.utils.http_utils import find_available_port
+from orbit.utils.test_utils.mock_sglang_server import MockSGLangServer, default_process_fn
+from orbit.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
 
 
 def make_router_args(router_port: int, **overrides) -> Namespace:
@@ -15,9 +15,9 @@ def make_router_args(router_port: int, **overrides) -> Namespace:
         sglang_router_ip="127.0.0.1",
         sglang_router_port=router_port,
         rollout_health_check_interval=1.0,
-        miles_router_health_check_failure_threshold=3,
-        miles_router_max_connections=100,
-        miles_router_timeout=None,
+        orbit_router_health_check_failure_threshold=3,
+        orbit_router_max_connections=100,
+        orbit_router_timeout=None,
     )
     defaults.update(overrides)
     return Namespace(**defaults)
@@ -35,7 +35,7 @@ def create_mock_worker(start_port: int = 30000) -> MockSGLangServer:
 
 
 class RouterEnv:
-    def __init__(self, router: MilesRouter, server: UvicornThreadServer):
+    def __init__(self, router: OrbitRouter, server: UvicornThreadServer):
         self.router = router
         self.server = server
 
@@ -47,7 +47,7 @@ class RouterEnv:
 @pytest.fixture
 def router_env():
     args = make_router_args(find_available_port(20000))
-    router = MilesRouter(args, verbose=False)
+    router = OrbitRouter(args, verbose=False)
     server = UvicornThreadServer(router.app, host=args.sglang_router_ip, port=args.sglang_router_port)
     server.start()
     yield RouterEnv(router, server)
@@ -80,9 +80,9 @@ def mock_worker_factory():
 
 @pytest.fixture
 def router_factory():
-    def _create(**overrides) -> MilesRouter:
+    def _create(**overrides) -> OrbitRouter:
         args = make_router_args(find_available_port(20000), **overrides)
-        return MilesRouter(args, verbose=False)
+        return OrbitRouter(args, verbose=False)
 
     return _create
 

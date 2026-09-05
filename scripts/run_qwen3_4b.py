@@ -3,8 +3,8 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
-from miles.true_on_policy import (
+import orbit.utils.external_utils.command_utils as U
+from orbit.true_on_policy import (
     apply_true_on_policy_script_defaults,
     build_true_on_policy_launch_plan,
     get_megatron_model_type,
@@ -138,7 +138,7 @@ def execute(args: ScriptArgs):
     if args.dynamic_sampling and not is_debug_mode:
         rollout_args += (
             "--over-sampling-batch-size 64 "
-            "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
+            "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
         )
 
     # sometimes disable eval to speed up debugging

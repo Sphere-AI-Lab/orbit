@@ -9,16 +9,16 @@ import pytest
 import torch
 from tests.ci.ci_register import register_cuda_ci
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 register_cuda_ci(est_time=900, suite="stage-c-2-gpu-h200", labels=["short"])
 
 MODEL_NAME = "Qwen3-0.6B"
 MODEL_TYPE = "qwen3-0.6B"
 NUM_GPUS = 2
-MODEL_DIR = Path(os.environ.get("MILES_E2E_MODEL_DIR", "/root/models"))
-MEGATRON_PATH = Path(os.environ.get("MILES_E2E_MEGATRON_PATH", "/root/Megatron-LM"))
-RUN_DIR = Path(os.environ.get("MILES_E2E_RUN_DIR", "/tmp/miles-verifiers-e2e"))
+MODEL_DIR = Path(os.environ.get("ORBIT_E2E_MODEL_DIR", "/root/models"))
+MEGATRON_PATH = Path(os.environ.get("ORBIT_E2E_MEGATRON_PATH", "/root/Megatron-LM"))
+RUN_DIR = Path(os.environ.get("ORBIT_E2E_RUN_DIR", "/tmp/orbit-verifiers-e2e"))
 VERIFIERS_DIR = Path("/tmp/verifiers-v0.2.0")
 ADAPTER_DIR = Path(U.repo_base_dir) / "examples" / "experimental" / "verifiers"
 VERIFIERS_VENV = RUN_DIR / "verifiers-venv"
@@ -112,7 +112,7 @@ def execute():
         num_gpus_per_node=NUM_GPUS,
         megatron_model_type=MODEL_TYPE,
         extra_env_vars={
-            "MILES_USE_LEGACY_ROLLOUT_V1": "1",
+            "ORBIT_USE_LEGACY_ROLLOUT_V1": "1",
             "PYTHONPATH": (
                 f"{VERIFIERS_SITE_PACKAGES}:{CODE_GOLF_DIR}:{MEGATRON_PATH}:{ADAPTER_DIR}:{U.repo_base_dir}"
             ),

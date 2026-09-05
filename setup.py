@@ -38,12 +38,12 @@ class bdist_wheel(_bdist_wheel):
 
 # Setup configuration
 setup(
-    author="miles Team",
-    name="miles",
+    author="orbit Team",
+    name="orbit",
     version="0.1.0",
-    packages=find_packages(include=["miles*", "miles_plugins*"]),
+    packages=find_packages(include=["orbit*", "orbit_plugins*"]),
     include_package_data=True,
-    package_data={"miles.dashboard": ["static/*"]},
+    package_data={"orbit.dashboard": ["static/*"]},
     install_requires=_fetch_requirements("requirements.txt"),
     extras_require={
         "fsdp": [

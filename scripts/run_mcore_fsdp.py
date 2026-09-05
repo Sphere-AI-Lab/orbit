@@ -3,7 +3,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 
 @dataclass
@@ -94,7 +94,7 @@ def execute(args: ScriptArgs):
     if args.dynamic_sampling and (args.mode != "debug_minimal"):
         rollout_args += (
             "--over-sampling-batch-size 128 "
-            "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
+            "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
         )
 
     eval_args = ""
@@ -231,7 +231,7 @@ eval:
     colocate_name = "" if args.colocate else "-dist"
     wandb_group = f"qwen3-4B-{backend_name}-{ref_name}{colocate_name}"
 
-    wandb_args = f"--use-wandb " f"--wandb-project miles-dev-megatron-fsdp " f"--wandb-group {wandb_group} "
+    wandb_args = f"--use-wandb " f"--wandb-project orbit-dev-megatron-fsdp " f"--wandb-group {wandb_group} "
 
     train_args = (
         f"{ckpt_args} "

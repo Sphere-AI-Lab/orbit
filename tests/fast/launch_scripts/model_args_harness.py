@@ -1,6 +1,6 @@
 from tests.fast.launch_scripts.sh_harness import REPO_ROOT
 
-from miles.utils.external_utils.model_args_utils import load_model_args
+from orbit.utils.external_utils.model_args_utils import load_model_args
 
 MODEL_SCRIPT_DIR = REPO_ROOT / "scripts" / "models"
 

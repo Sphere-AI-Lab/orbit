@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from miles.utils.async_utils import AsyncioGatherUtils, eager_create_task
+from orbit.utils.async_utils import AsyncioGatherUtils, eager_create_task
 
 
 @pytest.mark.asyncio

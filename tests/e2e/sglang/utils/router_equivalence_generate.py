@@ -1,7 +1,7 @@
 """Custom generate function for router-equivalence e2e test.
 
 Wraps the stock ``single_turn.generate`` and, after each rollout, appends a
-JSON record to ``$MILES_ROUTER_EQ_DUMP_PATH`` capturing the fields that
+JSON record to ``$ORBIT_ROUTER_EQ_DUMP_PATH`` capturing the fields that
 must match byte-for-byte between two runs using different routers:
 
 - ``tokens`` (the full input + output token ids)
@@ -9,7 +9,7 @@ must match byte-for-byte between two runs using different routers:
 - ``rollout_routed_experts`` (shape + base64-encoded int32 bytes)
 
 The dump is later loaded by ``test_r3_router_equivalence`` and diffed
-between a ``--use-miles-router`` run and a sglang-router run.
+between a ``--use-orbit-router`` run and a sglang-router run.
 """
 
 import base64
@@ -20,13 +20,13 @@ from pathlib import Path
 
 import numpy as np
 
-from miles.rollout.base_types import GenerateFnInput, GenerateFnOutput
-from miles.rollout.generate_hub.single_turn import generate as _base_generate
-from miles.utils.types import Sample
+from orbit.rollout.base_types import GenerateFnInput, GenerateFnOutput
+from orbit.rollout.generate_hub.single_turn import generate as _base_generate
+from orbit.utils.types import Sample
 
 logger = logging.getLogger(__name__)
 
-_DUMP_PATH_ENV = "MILES_ROUTER_EQ_DUMP_PATH"
+_DUMP_PATH_ENV = "ORBIT_ROUTER_EQ_DUMP_PATH"
 
 
 def _dump_sample(sample: Sample) -> dict:

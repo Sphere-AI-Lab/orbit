@@ -20,12 +20,12 @@ import safetensors.numpy
 from fastapi.responses import JSONResponse
 from tests.fast.router.test_sessions import _create_session, _post_chat
 
-from miles.rollout.session.server import SessionServer
-from miles.utils.http_utils import find_available_port
-from miles.utils.lora import LORA_ADAPTER_NAME
-from miles.utils.misc import function_registry
-from miles.utils.test_utils.mock_sglang_server import MockSGLangServer, ProcessResult, with_mock_server
-from miles.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
+from orbit.rollout.session.server import SessionServer
+from orbit.utils.http_utils import find_available_port
+from orbit.utils.lora import LORA_ADAPTER_NAME
+from orbit.utils.misc import function_registry
+from orbit.utils.test_utils.mock_sglang_server import MockSGLangServer, ProcessResult, with_mock_server
+from orbit.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
 
 
 @contextmanager
@@ -37,7 +37,7 @@ def _serve_router(extra_args: dict | None = None):
 
     with with_mock_server(process_fn=process_fn) as backend:
         args = SimpleNamespace(
-            miles_router_timeout=30,
+            orbit_router_timeout=30,
             hf_checkpoint="Qwen/Qwen3-0.6B",
             chat_template_path=None,
             apply_chat_template_kwargs={"enable_thinking": False},
@@ -46,8 +46,8 @@ def _serve_router(extra_args: dict | None = None):
             use_session_server="v2",
             session_server_instance_id=uuid.uuid4().hex,
             save_debug_trajectory_data=None,
-            session_sample_picker_path="miles.rollout.session.v2.picker_hub.drop_retries",
-            session_sample_postprocessor_path="miles.rollout.session.v2.postprocessor_hub.default_postprocess",
+            session_sample_picker_path="orbit.rollout.session.v2.picker_hub.drop_retries",
+            session_sample_postprocessor_path="orbit.rollout.session.v2.postprocessor_hub.default_postprocess",
             **(extra_args or {}),
         )
         server_obj = SessionServer(args, backend_url=backend.url)
@@ -130,7 +130,7 @@ def _keep_all_picker(leaf_samples, _session_metadata):
 
 def test_concurrent_requests_from_same_parent_commit_siblings():
     """Successful concurrent generations from one parent are both collected."""
-    picker_path = "miles.rollout.session.v2.picker_hub.drop_retries"
+    picker_path = "orbit.rollout.session.v2.picker_hub.drop_retries"
     with function_registry.temporary(picker_path, _keep_all_picker):
         with _serve_router() as env:
             session_id = _create_session(env.url)
@@ -327,8 +327,8 @@ class TestRollbackPins:
         assert len(self._get(router_env.url, session_id)["records"]) == 1
 
     def test_collect_samples_after_rollback_single_sample(self, router_env):
-        from miles.rollout.session.samples.codec import decode_samples_and_merge_input_sample
-        from miles.utils.types import Sample
+        from orbit.rollout.session.samples.codec import decode_samples_and_merge_input_sample
+        from orbit.utils.types import Sample
 
         # The class fixture plants fake R3 replay payloads that only the
         # records path tolerates; assembly would try to decode them. This pin

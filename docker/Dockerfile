@@ -52,7 +52,7 @@ RUN git clone https://github.com/NVIDIA/nccl-tests.git /tmp/nccl-tests && \
     rm -rf /tmp/nccl-tests
 
 # ====================================== Collect pre-built wheels ============================================
-# Optional: drop pre-built wheels into <miles>/wheels/ to skip the release download below.
+# Optional: drop pre-built wheels into <orbit>/wheels/ to skip the release download below.
 # `wheel[s]/` is a glob — silently no-ops when wheels/ is absent (CI's path).
 COPY wheel[s]/ /tmp/wheels/
 
@@ -216,7 +216,7 @@ RUN cd /sgl-workspace/sglang && \
 
 # =========================== Mooncake structured object store wheel ===========================
 
-# Miles' Mooncake backend requires the structured object store API. Install the selected
+# Orbit' Mooncake backend requires the structured object store API. Install the selected
 # CUDA 13 wheel as one coherent Python/native package; CUDA 12 keeps its base Mooncake.
 RUN if [ "${ENABLE_CUDA_13}" = "1" ]; then \
       set -- /tmp/wheels/mooncake_transfer_engine*-*.whl; \
@@ -234,10 +234,10 @@ RUN bash /tmp/install-kube-tools.sh "${TARGETARCH}" && rm -f /tmp/install-kube-t
 
 # ====================================== Install main package ============================================
 
-ARG MILES_COMMIT=main
-RUN git clone https://github.com/radixark/miles.git /root/miles && \
-    cd /root/miles && \
-    git checkout ${MILES_COMMIT} && \
+ARG ORBIT_COMMIT=main
+RUN git clone https://github.com/Sphere-AI-Lab/orbit.git /root/orbit && \
+    cd /root/orbit && \
+    git checkout ${ORBIT_COMMIT} && \
     pip install -e . --no-deps
 
 # int4_qat
@@ -245,12 +245,12 @@ RUN pip install /tmp/wheels/fake_int4_quant_cuda-*.whl
 
 # ====================================== Install sgl-model-gateway ============================================
 #   SGL_ROUTER_USE_WHEELS=0:
-#     Build from source  https://github.com/radixark/sgl-router-for-miles
+#     Build from source  https://github.com/radixark/sgl-router-for-orbit
 #   SGL_ROUTER_USE_WHEELS=1 (default):
 #     Install the pre-built sgl-model-gateway wheel
 
 ARG SGL_ROUTER_USE_WHEELS=1
-ARG SGL_ROUTER_REPO=https://github.com/radixark/sgl-router-for-miles.git
+ARG SGL_ROUTER_REPO=https://github.com/radixark/sgl-router-for-orbit.git
 ARG SGL_ROUTER_BRANCH=main
 
 RUN --mount=type=cache,target=/root/.cache/pip \

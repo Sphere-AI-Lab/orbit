@@ -9,7 +9,7 @@ from tests.ci.ci_policy import RunPolicy, registration_matches_selection, strip_
 from tests.ci.ci_register import CIRegistry
 from tests.ci.labels import KNOWN_LABELS
 
-# Only stages with jobs in the Miles PR workflows belong here; the external
+# Only stages with jobs in the Orbit PR workflows belong here; the external
 # MI350 nightly suites are not local runner-allocation targets.
 PR_GPU_STAGES = frozenset(
     {

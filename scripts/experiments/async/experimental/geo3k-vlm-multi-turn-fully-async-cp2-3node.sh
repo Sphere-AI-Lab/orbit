@@ -22,18 +22,18 @@
 #     (the base recipe died CLUSTER_DEAD from a single 30s false-positive timeout).
 #
 # Submit:
-#   JOB_NAME=geo3k-async-mt-8b-cp2 TIME=72:00:00 NODES=3 MILES_ENV_NAME=miles_imp \
+#   JOB_NAME=geo3k-async-mt-8b-cp2 TIME=72:00:00 NODES=3 ORBIT_ENV_NAME=orbit \
 #   SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK=true \
 #   bash scripts/slurm/submit.sh async/experimental/geo3k-vlm-multi-turn-fully-async-cp2-3node
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}
 RECIPE_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
 
-# Opt into the async driver. ray_lifecycle.sh runs `python3 ${MILES_TRAIN_ENTRY:-train.py}`.
-export MILES_TRAIN_ENTRY=train_async.py
+# Opt into the async driver. ray_lifecycle.sh runs `python3 ${ORBIT_TRAIN_ENTRY:-train.py}`.
+export ORBIT_TRAIN_ENTRY=train_async.py
 
 EXPERIMENT_NODES=3
 EXPERIMENT_TIME=72:00:00
@@ -52,7 +52,7 @@ HF_TRAIN_DATA="$HF_CACHE_DIR/data/geo3k_imgurl_processed/train.parquet"
 # ---------------------------------------------------------------------------
 MODEL_ARGS_ROTARY_BASE=5000000
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-8B.sh"
+source "$ORBIT_REPO/scripts/models/qwen3-8B.sh"
 MODEL_ARGS+=( --megatron-to-hf-mode bridge )
 
 RUN_NAME=${SLURM_JOB_NAME:-$RECIPE_NAME}
@@ -179,7 +179,7 @@ MISC_ARGS=(
    --attention-backend flash
 )
 
-MILES_ARGS=(
+ORBIT_ARGS=(
    "${LAYOUT_ARGS[@]}"
    "${MODEL_ARGS[@]}"
    "${CKPT_ARGS[@]}"

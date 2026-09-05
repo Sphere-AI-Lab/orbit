@@ -14,7 +14,7 @@ import pytest
 from tests.ci.ci_register import register_cpu_ci
 from tests.ci.ci_utils import TestFile, _attempt_record_dir, _merge_attempt_records, run_unittest_files
 
-from miles.utils.tracking_utils.ci_history import RECORD_DIR_ENV, TARGET_METRIC_KEYS, CiHistoryBackend
+from orbit.utils.tracking_utils.ci_history import RECORD_DIR_ENV, TARGET_METRIC_KEYS, CiHistoryBackend
 
 register_cpu_ci(est_time=1, suite="stage-a-cpu", labels=[])
 
@@ -24,9 +24,9 @@ def test_all_backends_registered():
     # not base.py (base must not back-import a backend -> circular). Guard
     # against the silent-drop failure mode: if a registry entry is removed or an
     # import is pruned, the backend vanishes with no error. Assert the full set.
-    from miles.utils.tracking_utils.tracking import BACKEND_REGISTRY
+    from orbit.utils.tracking_utils.tracking import BACKEND_REGISTRY
 
-    assert set(BACKEND_REGISTRY) == {"wandb", "tensorboard", "mlflow", "prometheus", "ci_history", "miles_dashboard"}
+    assert set(BACKEND_REGISTRY) == {"wandb", "tensorboard", "mlflow", "prometheus", "ci_history", "orbit_dashboard"}
     cls, flag = BACKEND_REGISTRY["ci_history"]
     assert cls is CiHistoryBackend
     assert flag == "ci_enable_metrics_capture"
@@ -119,7 +119,7 @@ def test_non_numeric_target_metric_errors_without_partial_capture(tmp_path, monk
     backend = CiHistoryBackend()
     backend.init(object(), primary=False)
 
-    with caplog.at_level(logging.ERROR, logger="miles.utils.tracking_utils.ci_history"):
+    with caplog.at_level(logging.ERROR, logger="orbit.utils.tracking_utils.ci_history"):
         with pytest.raises(TypeError, match="train/ppo_kl"):
             backend.log({"train/grad_norm": 1.0, "train/ppo_kl": [0.1], "train/step": 0}, step=0)
 

@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from miles.rollout.inference_rollout.live_diagnostics import (
+from orbit.rollout.inference_rollout.live_diagnostics import (
     initial_live_log_at,
     maybe_log_all_samples_live_diagnostics,
 )
@@ -31,7 +31,7 @@ class LiveDiagnosticsTest(unittest.TestCase):
         )
         all_samples = [["group-1"], ["group-2"]]
 
-        with patch("miles.rollout.inference_rollout.live_diagnostics.tracking.log") as log:
+        with patch("orbit.rollout.inference_rollout.live_diagnostics.tracking.log") as log:
             next_log_at = initial_live_log_at(args, target_groups=2)
             next_log_at = maybe_log_all_samples_live_diagnostics(
                 args,

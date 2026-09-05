@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from miles.rollout.generate_utils import prefill_logprobs
-from miles.utils.types import AdapterRef, Sample
+from orbit.rollout.generate_utils import prefill_logprobs
+from orbit.utils.types import AdapterRef, Sample
 
 
 @pytest.mark.asyncio
@@ -231,7 +231,7 @@ async def test_recompute_uses_per_sample_adapter_lora_path(monkeypatch):
         sampling_params={},
     )
 
-    assert seen["payload"]["lora_path"] == "__miles_slot_3"
+    assert seen["payload"]["lora_path"] == "__orbit_slot_3"
     assert sample.rollout_log_probs == [-0.5]
 
 
@@ -287,8 +287,8 @@ async def test_recompute_samples_batches_group_by_adapter(monkeypatch):
     assert [sample.rollout_log_probs for sample in samples] == [[-20.0], [-21.0], [-22.0]]
     by_lora_path = {payload["lora_path"]: payload["input_ids"] for payload in generate_payloads}
     assert by_lora_path == {
-        "__miles_slot_0": [[10, 11, 20], [10, 11, 22]],
-        "__miles_slot_1": [[10, 11, 21]],
+        "__orbit_slot_0": [[10, 11, 20], [10, 11, 22]],
+        "__orbit_slot_1": [[10, 11, 21]],
     }
 
 
@@ -304,13 +304,13 @@ def test_batch_payload_rejects_mixed_lora_paths():
 
 
 def test_batch_payload_preserves_oft_adapter_selector(monkeypatch):
-    monkeypatch.delenv("MILES_DSV4_DISABLE_OFT_REQUEST", raising=False)
+    monkeypatch.delenv("ORBIT_DSV4_DISABLE_OFT_REQUEST", raising=False)
     samples = [Sample(tokens=[10, 11, 20], response_length=1)]
     args = SimpleNamespace(peft_method="oft", lora_rank=0)
 
     payload = prefill_logprobs._build_batch_prefill_scoring_payload(args, samples, {})
 
-    assert payload["adapter_path"] == "miles_oft"
+    assert payload["adapter_path"] == "orbit_oft"
 
 
 @pytest.mark.asyncio

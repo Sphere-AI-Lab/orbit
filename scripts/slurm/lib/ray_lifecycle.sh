@@ -2,7 +2,7 @@
 #
 # lib/ray_lifecycle.sh — submit train.py to ray + poll for terminal state.
 #
-# Sourced by launch_miles.sbatch after the ray cluster is up. Provides two
+# Sourced by launch_orbit.sbatch after the ray cluster is up. Provides two
 # functions; both write their outputs to caller-visible env vars (bash has
 # no clean return-multi-value).
 #
@@ -12,8 +12,8 @@
 #
 # Inputs (env, all required):
 #   JOBID, HEAD_NODE, HEAD_IP, RAY_DASHBOARD_PORT,
-#   RUN_DIR, MILES_REPO, MEGATRON_SRC, NODE_PREAMBLE,
-#   MILES_ARGS (bash array)
+#   RUN_DIR, ORBIT_REPO, MEGATRON_SRC, NODE_PREAMBLE,
+#   ORBIT_ARGS (bash array)
 #
 # Inputs (env, optional with defaults):
 #   RAY_STATUS_POLL_INTERVAL   seconds between probes      [15]
@@ -37,7 +37,7 @@
 # synchronously touch the shared run dir. May leave the ray cluster running
 # on terminal exit (teardown trap in caller).
 read_train_status_sentinel() {
-    local path="${MILES_TRAIN_STATUS_FILE:-$RUN_DIR/train_status.json}"
+    local path="${ORBIT_TRAIN_STATUS_FILE:-$RUN_DIR/train_status.json}"
     [[ -f "$path" ]] || return 1
     python3 - "$path" <<'PY'
 import json
@@ -128,8 +128,8 @@ ray_submit_and_wait() {
     RAY_ADDRESS="http://${HEAD_IP}:${RAY_DASHBOARD_PORT}"
     # Entry script is overridable so recipes can opt into the async driver
     # (train_async.py) instead of the default synchronous train.py. Set via
-    # `export MILES_TRAIN_ENTRY=train_async.py` in the recipe.
-    local TRAIN_ENTRY="${MILES_TRAIN_ENTRY:-train.py}"
+    # `export ORBIT_TRAIN_ENTRY=train_async.py` in the recipe.
+    local TRAIN_ENTRY="${ORBIT_TRAIN_ENTRY:-train.py}"
     echo "[submit] $(date -Is)  ray job submit --no-wait -> $TRAIN_ENTRY"
     # Liveness/terminal sentinel on NODE-LOCAL disk (not the shared run dir). The
     # training driver (Ray head) and this watchdog (controller shell) are the same
@@ -137,22 +137,22 @@ ray_submit_and_wait() {
     # node-local path is shared writer<->reader and is immune to shared-FS stalls.
     # If they ever differ, the file is simply absent and the watchdog behaves as
     # before (no fresh heartbeat -> falls through to its prior logic).
-    export MILES_TRAIN_STATUS_FILE="${TMPDIR:-/tmp}/miles-${JOBID}.train_status.json"
-    rm -f "$MILES_TRAIN_STATUS_FILE" "$MILES_TRAIN_STATUS_FILE".tmp.* 2>/dev/null || true
+    export ORBIT_TRAIN_STATUS_FILE="${TMPDIR:-/tmp}/orbit-${JOBID}.train_status.json"
+    rm -f "$ORBIT_TRAIN_STATUS_FILE" "$ORBIT_TRAIN_STATUS_FILE".tmp.* 2>/dev/null || true
     rm -f "$RUN_DIR/train_status.json" "$RUN_DIR"/train_status.json.tmp.* 2>/dev/null || true
     local submit_out submit_rc
     # srun's --export NAME=VALUE list splits on commas with no escape syntax,
     # so any serialized arg value containing a comma (e.g. the MoE
-    # --moe-layer-freq "[1,1,...]" list) silently truncates MILES_ARGS_STR at
+    # --moe-layer-freq "[1,1,...]" list) silently truncates ORBIT_ARGS_STR at
     # its first comma — job 27805 lost everything from --rollout-batch-size on.
     # Ship it through the process environment instead; --export=ALL carries it
     # verbatim.
-    export MILES_ARGS_STR
-    MILES_ARGS_STR="$(printf '%q ' "${MILES_ARGS[@]}")"
+    export ORBIT_ARGS_STR
+    ORBIT_ARGS_STR="$(printf '%q ' "${ORBIT_ARGS[@]}")"
     submit_out=$(srun --jobid="$JOBID" --overlap --mem=0 -N1 -n1 -w "$HEAD_NODE" \
-         --export=ALL,RAY_ADDRESS="$RAY_ADDRESS",MILES_TRAIN_ENTRY="$TRAIN_ENTRY",MILES_TRAIN_STATUS_FILE="$MILES_TRAIN_STATUS_FILE" \
+         --export=ALL,RAY_ADDRESS="$RAY_ADDRESS",ORBIT_TRAIN_ENTRY="$TRAIN_ENTRY",ORBIT_TRAIN_STATUS_FILE="$ORBIT_TRAIN_STATUS_FILE" \
          bash -c "$NODE_PREAMBLE"'
-            cd '"$MILES_REPO"'
+            cd '"$ORBIT_REPO"'
             RUNTIME_ENV_JSON=$(python - <<EOF
 import json, os
 print(json.dumps({"env_vars": {
@@ -165,17 +165,17 @@ print(json.dumps({"env_vars": {
     "HF_HOME": os.environ["HF_HOME"],
     "HF_TOKEN": os.environ.get("HF_TOKEN", ""),
     "WANDB_API_KEY": os.environ.get("WANDB_API_KEY", ""),
-    "MILES_RUN_DIR": os.environ.get("RUN_DIR", ""),
-    "MILES_TRAIN_STATUS_FILE": os.environ.get("MILES_TRAIN_STATUS_FILE", ""),
+    "ORBIT_RUN_DIR": os.environ.get("RUN_DIR", ""),
+    "ORBIT_TRAIN_STATUS_FILE": os.environ.get("ORBIT_TRAIN_STATUS_FILE", ""),
 }}))
 EOF
 )
-            eval "set -- $MILES_ARGS_STR"
+            eval "set -- $ORBIT_ARGS_STR"
             ray job submit \
                 --no-wait \
                 --address "$RAY_ADDRESS" \
                 --runtime-env-json "$RUNTIME_ENV_JSON" \
-                -- python3 "${MILES_TRAIN_ENTRY:-train.py}" "$@"
+                -- python3 "${ORBIT_TRAIN_ENTRY:-train.py}" "$@"
          ' 2>&1)
     submit_rc=$?
     echo "$submit_out"
@@ -198,7 +198,7 @@ EOF
     local poll_interval=${RAY_STATUS_POLL_INTERVAL:-15}
     local probe_timeout=${RAY_STATUS_PROBE_TIMEOUT:-10}
     local fail_grace=${RAY_STATUS_FAIL_GRACE:-24}
-    local probe_dir="${TMPDIR:-/tmp}/miles-${JOBID}-${job_id}"
+    local probe_dir="${TMPDIR:-/tmp}/orbit-${JOBID}-${job_id}"
     mkdir -p "$probe_dir"
     local probe_log="$probe_dir/probe.log"
     local probe_err="$probe_dir/probe.err"
@@ -377,11 +377,11 @@ EOF
     if [[ -s "$probe_log" ]]; then
         cp -f "$probe_log" "$RUN_DIR/probe.log" 2>/dev/null || true
     fi
-    if [[ -f "$MILES_TRAIN_STATUS_FILE" ]]; then
-        cp -f "$MILES_TRAIN_STATUS_FILE" "$RUN_DIR/train_status.final.json" 2>/dev/null || true
+    if [[ -f "$ORBIT_TRAIN_STATUS_FILE" ]]; then
+        cp -f "$ORBIT_TRAIN_STATUS_FILE" "$RUN_DIR/train_status.final.json" 2>/dev/null || true
     fi
 
-    echo "[submit] $(date -Is)  ${MILES_TRAIN_ENTRY:-train.py} terminal state: $STATE  job_rc=$JOB_RC"
+    echo "[submit] $(date -Is)  ${ORBIT_TRAIN_ENTRY:-train.py} terminal state: $STATE  job_rc=$JOB_RC"
 }
 
 # crash_debug_check

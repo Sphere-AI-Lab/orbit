@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from miles.utils.flops_utils import calculate_fwd_flops, flops_args_from_hf_config
+from orbit.utils.flops_utils import calculate_fwd_flops, flops_args_from_hf_config
 
 SEQLENS = [1024, 3072]
 

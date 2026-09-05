@@ -15,10 +15,10 @@ from tools.convert_hf_to_mxfp8 import should_quantize as tool_should_quantize_mx
 from transformer_engine.pytorch import MXFP8Quantizer
 from transformer_engine.pytorch.constants import TE_DType
 
-from miles.backends.megatron_utils.megatron_to_hf.processors.quantizer_mxfp8 import (
+from orbit.backends.megatron_utils.megatron_to_hf.processors.quantizer_mxfp8 import (
     _quantize_param as processor_quantize_mxfp8_param,
 )
-from miles.backends.megatron_utils.megatron_to_hf.processors.quantizer_mxfp8 import (
+from orbit.backends.megatron_utils.megatron_to_hf.processors.quantizer_mxfp8 import (
     quantize_params_mxfp8,
 )
 

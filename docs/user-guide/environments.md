@@ -1,10 +1,10 @@
 ---
 title: Agentic Environments
 sidebarTitle: Overview
-description: How Miles trains on RL environments — datasets with rewards, self-wired environments, and optional external ecosystems.
+description: How Orbit trains on RL environments — datasets with rewards, self-wired environments, and optional external ecosystems.
 ---
 
-Miles owns the training side of environment RL — batch orchestration, lossless
+Orbit owns the training side of environment RL — batch orchestration, lossless
 token-in/token-out recording, reward hooks, filtering — and is agnostic about
 where the environment itself comes from:
 
@@ -21,22 +21,22 @@ where the environment itself comes from:
 | Integration | Plugs in at | Guide |
 |---|---|---|
 | [Harbor](https://github.com/harbor-framework/harbor) | agent function | [guide](/user-guide/harbor) |
-| [HUD](https://hud.ai) | generate function³ | [example](https://github.com/radixark/miles/tree/main/examples/experimental/hud) |
+| [HUD](https://hud.ai) | generate function³ | [example](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/hud) |
 | [NeMo Gym](https://github.com/NVIDIA-NeMo/Gym) | agent function | [guide](/user-guide/nemo-gym) |
 | [OpenEnv](https://github.com/huggingface/openenv) | agent function | [guide](/user-guide/openenv) |
-| [Strands Agents](https://strandsagents.com/) | generate function | [example](https://github.com/radixark/miles/tree/main/examples/experimental/strands_sglang) |
+| [Strands Agents](https://strandsagents.com/) | generate function | [example](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/strands_sglang) |
 | [Verifiers (Prime Intellect)](https://github.com/PrimeIntellect-ai/verifiers) | rollout function | [guide](/user-guide/verifiers) |
-| [τ-bench](https://github.com/sierra-research/tau-bench) | generate function | [example](https://github.com/radixark/miles/tree/main/examples/experimental/tau-bench) |
+| [τ-bench](https://github.com/sierra-research/tau-bench) | generate function | [example](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/tau-bench) |
 
 Sandbox providers are a different axis: they provision the task containers
 *inside* a connector rather than occupying a rollout layer.
 
 | Sandbox provider | Used within | Guide |
 |---|---|---|
-| [AgentENV](https://github.com/kvcache-ai/AgentENV) | OpenEnv | [example](https://github.com/radixark/miles/tree/main/examples/experimental/agentenv) |
-| [Daytona](https://www.daytona.io/) | Harbor, HUD, NeMo Gym, OpenEnv | [example](https://github.com/radixark/miles/tree/main/examples/experimental/openenv) |
-| [E2B](https://e2b.dev/) | OpenEnv | [example](https://github.com/radixark/miles/tree/main/examples/experimental/openenv) |
-| [Modal](https://modal.com/) | OpenEnv | [example](https://github.com/radixark/miles/tree/main/examples/experimental/openenv) |
+| [AgentENV](https://github.com/kvcache-ai/AgentENV) | OpenEnv | [example](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/agentenv) |
+| [Daytona](https://www.daytona.io/) | Harbor, HUD, NeMo Gym, OpenEnv | [example](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/openenv) |
+| [E2B](https://e2b.dev/) | OpenEnv | [example](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/openenv) |
+| [Modal](https://modal.com/) | OpenEnv | [example](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/experimental/openenv) |
 
 Everything above is experimental, and listed alphabetically.
 
@@ -47,7 +47,7 @@ The rollout stack is three nested plug-in layers (see
 wraps the one to its left, so replacing an outer layer also takes over
 everything an inner one would. A connector replaces exactly one layer.
 
-✓ = the external framework takes it over; ○ = stays in Miles.
+✓ = the external framework takes it over; ○ = stays in Orbit.
 
 | | Agent function (innermost) | Generate function | Rollout function (outermost) |
 |---|:---:|:---:|:---:|
@@ -60,14 +60,14 @@ everything an inner one would. A connector replaces exactly one layer.
 | Model, engines & weight updates, advantages, optimizer | ○ | ○ | ○ |
 
 ¹ Typically by speaking SGLang's native `/generate` (token IDs in and out)
-rather than the session-server chat endpoint Miles' own recording uses.
+rather than the session-server chat endpoint Orbit' own recording uses.
 
 ² The environment may grade an episode itself (Harbor and τ-bench do); the
-score still enters training through Miles' `Sample.reward` / RM hooks, and
-group-level reward handling stays in Miles.
+score still enters training through Orbit' `Sample.reward` / RM hooks, and
+group-level reward handling stays in Orbit.
 
 ³ HUD's harness records per-turn token ids and sampling logprobs itself when
 the inference server returns them, so the connector's job is stitching those
 into one training sequence rather than recording. Computer-use observations
-are screenshots, which Miles' session-server recording does not carry yet —
+are screenshots, which Orbit' session-server recording does not carry yet —
 once it does, this connector can also sit in the agent function.

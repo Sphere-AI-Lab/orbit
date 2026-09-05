@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 
-from miles.utils.seqlen_balancing import first_fit_decreasing_pack, first_fit_pack
+from orbit.utils.seqlen_balancing import first_fit_decreasing_pack, first_fit_pack
 
 
 def _check_valid(bins, lengths, cap):

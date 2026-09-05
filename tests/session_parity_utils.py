@@ -18,23 +18,23 @@ from unittest.mock import patch
 import httpx
 import numpy as np
 
-from miles.rollout.base_types import GenerateFnInput
-from miles.rollout.generate_hub import agentic_tool_call
-from miles.rollout.generate_utils.openai_endpoint_utils import OpenAIEndpointTracer
-from miles.rollout.session.samples.codec import SamplesReply
-from miles.rollout.session.server import SessionServer
-from miles.utils import http_utils
-from miles.utils.http_utils import find_available_port
-from miles.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
-from miles.utils.types import Sample
+from orbit.rollout.base_types import GenerateFnInput
+from orbit.rollout.generate_hub import agentic_tool_call
+from orbit.rollout.generate_utils.openai_endpoint_utils import OpenAIEndpointTracer
+from orbit.rollout.session.samples.codec import SamplesReply
+from orbit.rollout.session.server import SessionServer
+from orbit.utils import http_utils
+from orbit.utils.http_utils import find_available_port
+from orbit.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
+from orbit.utils.types import Sample
 
 V1 = "v1"
 V2 = "v2"
 SESSION_PARITY_SEED = 20260803
 
 _CHAT_TIMEOUT_SECS = 120.0
-_PICKER_PATH = "miles.rollout.session.v2.picker_hub.drop_retries"
-_POSTPROCESSOR_PATH = "miles.rollout.session.v2.postprocessor_hub.default_postprocess"
+_PICKER_PATH = "orbit.rollout.session.v2.picker_hub.drop_retries"
+_POSTPROCESSOR_PATH = "orbit.rollout.session.v2.postprocessor_hub.default_postprocess"
 _RUNTIME_LIFECYCLE_KEYS = frozenset({"t0", "t1", "req_ts", "prev_t1"})
 _EXPECTED_AGENT_METADATA = {
     "driver_events": [
@@ -231,7 +231,7 @@ def _serve_session(*, backend_url: str, hf_checkpoint: str, version: str) -> Ite
     port = find_available_port(31000)
     instance_id = f"session-parity-{version}"
     args = SimpleNamespace(
-        miles_router_timeout=_CHAT_TIMEOUT_SECS,
+        orbit_router_timeout=_CHAT_TIMEOUT_SECS,
         hf_checkpoint=hf_checkpoint,
         chat_template_path=None,
         apply_chat_template_kwargs={"enable_thinking": False},
@@ -245,7 +245,7 @@ def _serve_session(*, backend_url: str, hf_checkpoint: str, version: str) -> Ite
         session_server_ports=[port],
         session_server_instance_ids={port: instance_id},
         save_debug_trajectory_data=None,
-        custom_agent_function_path="miles.utils.test_utils.session_verify_agent.run_agent",
+        custom_agent_function_path="orbit.utils.test_utils.session_verify_agent.run_agent",
         max_seq_len=None,
         session_verify_cycles=1,
         tool_call_failure_mode="rollback",

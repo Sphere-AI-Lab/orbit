@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # doc-dev: docs/ci/02-docker-build.md
-"""Build and push Miles Docker images.
+"""Build and push Orbit Docker images.
 
 Usage:
     python docker/build.py --variant cu13 --image-tag dev --push          # multi-arch (amd64+arm64)
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import typer
 
-CACHE_DIR = "/tmp/miles-docker-cache"
+CACHE_DIR = "/tmp/orbit-docker-cache"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 VARIANTS = {
@@ -52,7 +52,7 @@ VARIANTS = {
     "rocm700-mi35x": {
         "image": "rocm/sgl-dev",
         "tag_postfix": "-rocm700-mi35x",
-        "tag_prefix": "miles",
+        "tag_prefix": "orbit",
         "dockerfile": "docker/Dockerfile.rocm",
         "build_args": {
             "GPU_ARCH": "gfx950",
@@ -64,7 +64,7 @@ VARIANTS = {
     "rocm700-mi30x": {
         "image": "rocm/sgl-dev",
         "tag_postfix": "-rocm700-mi30x",
-        "tag_prefix": "miles",
+        "tag_prefix": "orbit",
         "dockerfile": "docker/Dockerfile.rocm",
         "build_args": {
             "GPU_ARCH": "gfx942",
@@ -75,7 +75,7 @@ VARIANTS = {
     "rocm720-mi35x": {
         "image": "rocm/sgl-dev",
         "tag_postfix": "-rocm720-mi35x",
-        "tag_prefix": "miles",
+        "tag_prefix": "orbit",
         "dockerfile": "docker/Dockerfile.rocm",
         "build_args": {
             "GPU_ARCH": "gfx950",
@@ -151,7 +151,7 @@ def build_and_push(
     for key, value in config.get("build_args", {}).items():
         cmd += ["--build-arg", f"{key}={value}"]
 
-    # Caller overrides (e.g. release builds pinning SGLANG_COMMIT / MILES_COMMIT
+    # Caller overrides (e.g. release builds pinning SGLANG_COMMIT / ORBIT_COMMIT
     # from release-lock.json) come last so they win over variant defaults.
     for spec in extra_build_args:
         assert "=" in spec, f"--build-arg expects KEY=VALUE, got {spec!r}"

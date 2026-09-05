@@ -2,7 +2,7 @@
 #
 # lib/manifest.sh — per-run MANIFEST.json read/write helpers.
 #
-# Sourced by launch_miles.sbatch (write side) and submit.sh (read side).
+# Sourced by launch_orbit.sbatch (write side) and submit.sh (read side).
 # All JSON I/O goes through python3 heredocs because bash JSON is fragile.
 # See docs/launcher.md "MANIFEST.json schema" for the field list.
 

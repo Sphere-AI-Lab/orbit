@@ -2,9 +2,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from miles.rollout.rm_hub import async_rm, batched_async_rm
-from miles.utils.async_utils import run
-from miles.utils.types import Sample
+from orbit.rollout.rm_hub import async_rm, batched_async_rm
+from orbit.utils.async_utils import run
+from orbit.utils.types import Sample
 
 
 @pytest.fixture

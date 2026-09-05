@@ -13,7 +13,7 @@ import requests
 from fastapi.responses import JSONResponse
 from tests.fast.router.test_sessions import _create_session, _post_chat
 
-from miles.utils.test_utils.mock_sglang_server import MockSGLangServer
+from orbit.utils.test_utils.mock_sglang_server import MockSGLangServer
 
 
 class TestRollbackPins:
@@ -142,8 +142,8 @@ class TestRollbackPins:
         assert len(self._get(router_env.url, session_id)["records"]) == 1
 
     def test_collect_samples_after_rollback_single_sample(self, router_env):
-        from miles.rollout.session.samples.codec import decode_samples_and_merge_input_sample
-        from miles.utils.types import Sample
+        from orbit.rollout.session.samples.codec import decode_samples_and_merge_input_sample
+        from orbit.utils.types import Sample
 
         # The class fixture plants fake R3 replay payloads that only the
         # records path tolerates; assembly would try to decode them. This pin

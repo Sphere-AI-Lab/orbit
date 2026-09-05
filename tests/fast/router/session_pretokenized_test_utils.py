@@ -8,11 +8,11 @@ import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from miles.rollout.session.server import SessionServer
-from miles.utils.chat_template_utils import MismatchType, apply_chat_template, get_tito_tokenizer
-from miles.utils.http_utils import find_available_port
-from miles.utils.processing_utils import load_tokenizer
-from miles.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
+from orbit.rollout.session.server import SessionServer
+from orbit.utils.chat_template_utils import MismatchType, apply_chat_template, get_tito_tokenizer
+from orbit.utils.http_utils import find_available_port
+from orbit.utils.processing_utils import load_tokenizer
+from orbit.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
 
 FORBIDDEN_MISMATCH_TYPES: frozenset[str] = frozenset(
     {
@@ -45,15 +45,15 @@ def make_router_env(
     tito_model: str,
 ):
     args = SimpleNamespace(
-        miles_router_timeout=30,
+        orbit_router_timeout=30,
         hf_checkpoint=hf_checkpoint,
         chat_template_path=chat_template_path,
         tito_model=tito_model,
         use_session_server="v2",
         use_rollout_routing_replay=False,
         sglang_speculative_algorithm=None,
-        session_sample_picker_path="miles.rollout.session.v2.picker_hub.drop_retries",
-        session_sample_postprocessor_path="miles.rollout.session.v2.postprocessor_hub.default_postprocess",
+        session_sample_picker_path="orbit.rollout.session.v2.picker_hub.drop_retries",
+        session_sample_postprocessor_path="orbit.rollout.session.v2.postprocessor_hub.default_postprocess",
     )
     session_server = SessionServer(args, backend_url=backend.url)
 

@@ -20,8 +20,8 @@ import pytest
 import ray
 from tests.fast.ray.rollout.conftest import make_args, make_samples_grouped
 
-from miles.ray.rollout.rollout_manager import RolloutManager
-from miles.rollout.base_types import RolloutFnEvalInput, RolloutFnEvalOutput, RolloutFnTrainInput, RolloutFnTrainOutput
+from orbit.ray.rollout.rollout_manager import RolloutManager
+from orbit.rollout.base_types import RolloutFnEvalInput, RolloutFnEvalOutput, RolloutFnTrainInput, RolloutFnTrainOutput
 
 
 @pytest.fixture
@@ -32,11 +32,11 @@ def patch_low_level(monkeypatch):
     - ``init_tracking`` / ``init_http_client`` / ``start_session_server`` /
       ``load_function`` / ``load_rollout_function`` → no-ops (the production
       defaults touch wandb / network / not-importable default function paths)."""
-    import miles.ray.rollout.rollout_manager as rmgr
-    import miles.ray.rollout.rollout_server as rsrv
-    import miles.ray.rollout.server_group as sg
-    from miles.ray.rollout.addr_allocator import PortCursors
-    from miles.utils.test_utils.mock_sglang_engine import MockSGLangEngine
+    import orbit.ray.rollout.rollout_manager as rmgr
+    import orbit.ray.rollout.rollout_server as rsrv
+    import orbit.ray.rollout.server_group as sg
+    from orbit.ray.rollout.addr_allocator import PortCursors
+    from orbit.utils.test_utils.mock_sglang_engine import MockSGLangEngine
 
     monkeypatch.setattr(sg, "SGLangEngine", MockSGLangEngine.__ray_actor_class__)
     # multi-model tests would otherwise spawn a real router subprocess for
@@ -157,7 +157,7 @@ class TestRolloutManagerInit:
         expected_monitor_count,
         expected_injection_pending,
     ):
-        import miles.ray.rollout.rollout_manager as rmgr
+        import orbit.ray.rollout.rollout_manager as rmgr
 
         started_monitors = []
 
@@ -192,13 +192,13 @@ class TestRolloutManagerInit:
         patch_low_level,
         monkeypatch,
     ):
-        import miles.ray.rollout.rollout_manager as rmgr
+        import orbit.ray.rollout.rollout_manager as rmgr
 
         args = _make_test_args(tmp_path, models=[("actor", True)])
         args.debug_train_only = True
         args.load_debug_rollout_data = str(tmp_path / "rollout-{rollout_id}.pt")
         args.rollout_num_gpus = None
-        monkeypatch.delenv("MILES_USE_LEGACY_ROLLOUT_V1", raising=False)
+        monkeypatch.delenv("ORBIT_USE_LEGACY_ROLLOUT_V1", raising=False)
 
         def fail_if_loaded(*args, **kwargs):
             pytest.fail("debug rollout replay must not construct rollout functions")
@@ -217,11 +217,11 @@ class TestRolloutManagerInit:
         patch_low_level,
         monkeypatch,
     ):
-        import miles.ray.rollout.rollout_manager as rmgr
+        import orbit.ray.rollout.rollout_manager as rmgr
 
         args = _make_test_args(tmp_path, models=[("actor", True)])
         args.debug_train_only = True
-        monkeypatch.delenv("MILES_USE_LEGACY_ROLLOUT_V1", raising=False)
+        monkeypatch.delenv("ORBIT_USE_LEGACY_ROLLOUT_V1", raising=False)
         loaded_paths: list[str] = []
 
         def record_load(input, path):
@@ -259,7 +259,7 @@ class TestRolloutManagerInit:
 
 class TestRolloutManagerDispose:
     def test_dispose_calls_rollout_owned_cleanup(self, monkeypatch):
-        import miles.ray.rollout.rollout_manager as rmgr
+        import orbit.ray.rollout.rollout_manager as rmgr
 
         manager = object.__new__(RolloutManager.__ray_actor_class__)
         manager.args = SimpleNamespace(use_opd=False)

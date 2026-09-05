@@ -37,23 +37,23 @@ def update_mod(monkeypatch):
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
 
-    sglang = ModuleType("miles.backends.megatron_utils.sglang")
+    sglang = ModuleType("orbit.backends.megatron_utils.sglang")
     sglang.FlattenedTensorBucket = object
     sglang.MultiprocessingSerializer = object
     monkeypatch.setitem(sys.modules, sglang.__name__, sglang)
 
-    broadcast = ModuleType("miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast")
+    broadcast = ModuleType("orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast")
     broadcast.connect_rollout_engines_from_distributed = lambda *_args, **_kwargs: None
     broadcast.disconnect_rollout_engines_from_distributed = lambda *_args, **_kwargs: None
     broadcast.update_weights_from_distributed = lambda *_args, **_kwargs: []
     monkeypatch.setitem(sys.modules, broadcast.__name__, broadcast)
 
-    module_name = "miles.backends.megatron_utils.update_weight.update_weight_from_tensor"
+    module_name = "orbit.backends.megatron_utils.update_weight.update_weight_from_tensor"
     monkeypatch.delitem(sys.modules, module_name, raising=False)
     module = importlib.import_module(module_name)
     yield module
     for name in set(sys.modules) - existing_modules:
-        if name.startswith("miles.backends.megatron_utils"):
+        if name.startswith("orbit.backends.megatron_utils"):
             sys.modules.pop(name, None)
 
 
@@ -94,7 +94,7 @@ def _make_updater(update_mod, transport):
     updater.peft_method = "oft"
     updater._peft_sync_spec = _SyncSpec(
         method="oft",
-        adapter_name="miles_oft",
+        adapter_name="orbit_oft",
         adapter_config={"peft_type": "OFT"},
         sync_transport="oft_adapter",
     )

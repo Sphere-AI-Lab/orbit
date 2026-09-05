@@ -21,7 +21,7 @@ pytest tests/manual/launch_scripts
 Regenerate after an intentional change:
 
 ```bash
-MILES_UPDATE_LAUNCH_SCRIPT_SNAPSHOTS=1 pytest tests/manual/launch_scripts
+ORBIT_UPDATE_LAUNCH_SCRIPT_SNAPSHOTS=1 pytest tests/manual/launch_scripts
 ```
 
 The recordings are reproducible on any machine: the launchers run under a

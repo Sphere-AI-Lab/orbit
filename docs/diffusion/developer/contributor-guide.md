@@ -2,16 +2,16 @@
 title: Contributing
 description: Repository layout, the test suites, CI labels, and PR conventions for miles-diffusion.
 ---
-miles-diffusion is the diffusion-model sibling of [miles](https://github.com/radixark/miles). It
-shares miles' conventions — conventional commits, `pre-commit`, English-only PRs — but has its own
+miles-diffusion is the diffusion-model sibling of [orbit](https://github.com/Sphere-AI-Lab/orbit). It
+shares orbit' conventions — conventional commits, `pre-commit`, English-only PRs — but has its own
 test topology, because almost everything meaningful needs GPUs.
 
 ## Repository layout
 
 ```text
-miles_diffusion/
+orbit_diffusion/
 ├── train_diffusion.py             # the entry point — the whole train loop, ~90 lines
-├── miles/
+├── orbit/
 │   ├── backends/
 │   │   ├── fsdp_utils/            # the training half
 │   │   │   ├── actor.py           # FSDPTrainRayActor: wrap, forward, loss, step
@@ -26,7 +26,7 @@ miles_diffusion/
 │   ├── ray/                       # RolloutManager, train actor group, placement groups
 │   │   └── data_conversion_hub/   # samples → train pairs
 │   ├── rollout/                   # rollout fn, data source, rm_hub, filters, step strategies
-│   ├── router/                    # miles router
+│   ├── router/                    # orbit router
 │   ├── dashboard/                 # offline telemetry
 │   └── utils/                     # arguments.py, types, metrics, debug tooling
 ├── scripts/                       # run_*.py launchers — Typer CLIs, also the e2e entry points
@@ -36,16 +36,16 @@ miles_diffusion/
 ```
 
 If you are adding a **model family**, you will touch:
-`miles/backends/fsdp_utils/configs/<family>.py` (register with
+`orbit/backends/fsdp_utils/configs/<family>.py` (register with
 `@register_train_pipeline_config`), optionally
-`miles/backends/fsdp_utils/models/...` for a native package or FSDP plan, a launcher in
+`orbit/backends/fsdp_utils/models/...` for a native package or FSDP plan, a launcher in
 `scripts/`, and a page under `docs/models/`.
 
 ## Local dev loop
 
 ```bash
-cd /root/miles_diffusion
-git remote add me git@github.com:<your_user>/miles_diffusion.git
+cd /root/orbit_diffusion
+git remote add me git@github.com:<your_user>/orbit_diffusion.git
 git checkout -b feat/awesome
 
 pip install -e . --no-deps          # editable install picks up changes

@@ -1,6 +1,6 @@
 ---
 title: Launch Script
-description: What a Miles launch script does when you run it, how it is structured, and the three ways to override a recipe.
+description: What a Orbit launch script does when you run it, how it is structured, and the three ways to override a recipe.
 ---
 Every supported model ships as a python launch script under `scripts/`, and starting a
 training run is one command:
@@ -23,7 +23,7 @@ as a Ray job. The pieces involved:
 |---|---|---|
 | Launch script | `scripts/run_*.py` | Holds the recipe: per-model values and the flag blocks |
 | Model definition | `scripts/models/<type>.py` | Provides the Megatron architecture flags |
-| Command utilities | `miles/utils/external_utils/command_utils.py` | Starts Ray and submits the job |
+| Command utilities | `orbit/utils/external_utils/command_utils.py` | Starts Ray and submits the job |
 | Training entrypoint | `train.py` / `train_async.py` | The actual training process, run inside the Ray job |
 
 {/* FIGURE PLACEHOLDER — horizontal flow diagram:
@@ -69,7 +69,7 @@ _RECIPES: dict[str, _Recipe] = {
 Single-recipe launchers skip the table and write their values directly in the flag
 blocks.
 
-### ScriptArgs — script options as CLI flags and `MILES_SCRIPT_*` env vars
+### ScriptArgs — script options as CLI flags and `ORBIT_SCRIPT_*` env vars
 
 The script's own options are the fields of a `ScriptArgs` dataclass:
 
@@ -88,8 +88,8 @@ class ScriptArgs(U.ExecuteTrainConfig):
 ```
 
 The `@U.dataclass_cli` decorator exposes each field twice: as a `--kebab-case` command
-line option (`--model-dir`) and as an environment variable with the `MILES_SCRIPT_`
-prefix (`MILES_SCRIPT_MODEL_DIR`). A value given on the command line beats the
+line option (`--model-dir`) and as an environment variable with the `ORBIT_SCRIPT_`
+prefix (`ORBIT_SCRIPT_MODEL_DIR`). A value given on the command line beats the
 environment variable, which beats the field default. The env form is how launch
 wrappers and cluster tooling inject machine-specific values without editing the script.
 
@@ -161,10 +161,10 @@ From lightest to heaviest:
    ```
 
 2. **Set a script option, as a flag or an env var.** Anything on `ScriptArgs` can come
-   from the command line or from `MILES_SCRIPT_*`:
+   from the command line or from `ORBIT_SCRIPT_*`:
 
    ```bash
-   MILES_SCRIPT_MODEL_DIR=/mnt/models python scripts/run_qwen3_dense.py --model-name Qwen3-4B
+   ORBIT_SCRIPT_MODEL_DIR=/mnt/models python scripts/run_qwen3_dense.py --model-name Qwen3-4B
    ```
 
 3. **Edit the script.** The launcher is the canonical home of a recipe's
@@ -176,7 +176,7 @@ From lightest to heaviest:
 The launcher hands the assembled flags to `U.execute_train`, which issues the `EXEC:`
 commands you see in the log, in order:
 
-1. Kills leftover `sglang`, `miles`, and `redis` processes and stops any previous Ray
+1. Kills leftover `sglang`, `orbit`, and `redis` processes and stops any previous Ray
    cluster.
 2. Starts a fresh cluster with `ray start --head`, using `--num-gpus-per-node` GPUs.
 3. Runs the launcher's `before_ray_job_submit` hook, if it has one (used for the ssh
@@ -193,8 +193,8 @@ Two environment variables skip parts of this sequence:
 
 | Env var | Effect |
 |---|---|
-| `MILES_SCRIPT_EXTERNAL_RAY=1` | The Ray cluster is already running: skip the Ray teardown and `ray start`, only submit |
-| `MILES_SCRIPT_ENABLE_RAY_SUBMIT=0` | Run everything except the submission — shows what a launcher would do |
+| `ORBIT_SCRIPT_EXTERNAL_RAY=1` | The Ray cluster is already running: skip the Ray teardown and `ray start`, only submit |
+| `ORBIT_SCRIPT_ENABLE_RAY_SUBMIT=0` | Run everything except the submission — shows what a launcher would do |
 
 The head-node address defaults to `127.0.0.1` and is taken from `MASTER_ADDR`; export
 it on multi-node runs so Ray and torch distributed bind to the right interface.
@@ -266,7 +266,7 @@ first run, and override any drifted value by appending it, e.g.
 
 - [Argument Groups](/user-guide/argument-groups) — which training flags belong to
   which block, and what they mean.
-- [CLI Reference](/user-guide/cli-reference) — every flag Miles accepts.
+- [CLI Reference](/user-guide/cli-reference) — every flag Orbit accepts.
 - [Quick Start](/getting-started/quick-start) — downloading and converting a
   checkpoint, the step before any launcher.
 - [Customization](/user-guide/customization) — the `--*-path` plug points for custom

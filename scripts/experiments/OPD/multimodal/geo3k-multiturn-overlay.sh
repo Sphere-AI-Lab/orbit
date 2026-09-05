@@ -2,10 +2,10 @@
 # Shared Geo3K multi-turn data/rollout overlay for the 04-06 objectives.
 #
 # The caller must source 02a first so the named argument arrays and
-# build_opd_multimodal_miles_args() exist. This file owns no objective,
+# build_opd_multimodal_orbit_args() exist. This file owns no objective,
 # optimizer, model, scoring, or parallel-layout values.
 
-if ! declare -F build_opd_multimodal_miles_args >/dev/null; then
+if ! declare -F build_opd_multimodal_orbit_args >/dev/null; then
    echo "FATAL: source 02a-singleturn-rkld-smoke.sh before the Geo3K multi-turn overlay" >&2
    return 1 2>/dev/null || exit 1
 fi
@@ -34,5 +34,5 @@ ROLLOUT_ARGS=(
 
 MONITOR_ARGS+=(--log-multi-turn)
 
-# 02a assembled MILES_ARGS before this overlay replaced the rollout array.
-build_opd_multimodal_miles_args
+# 02a assembled ORBIT_ARGS before this overlay replaced the rollout array.
+build_opd_multimodal_orbit_args

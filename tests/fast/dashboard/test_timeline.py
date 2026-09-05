@@ -11,9 +11,9 @@ from tests.fast.dashboard.dummy_telemetry import (
     dump_dummy_telemetry,
 )
 
-from miles.dashboard.dump_reader import DumpReader
-from miles.dashboard.server import make_app
-from miles.dashboard.store import MetricStore, Role
+from orbit.dashboard.dump_reader import DumpReader
+from orbit.dashboard.server import make_app
+from orbit.dashboard.store import MetricStore, Role
 
 
 @pytest.fixture
@@ -193,7 +193,7 @@ def test_timeline_endpoints(tmp_path):
 
 
 def test_open_interval_clips_to_data_edge_and_closed_twin_wins(tmp_path):
-    from miles.dashboard.store import GpuSample, Meta, PhaseEvent, Role
+    from orbit.dashboard.store import GpuSample, Meta, PhaseEvent, Role
 
     writer = MetricStore(tmp_path)
     writer.write_meta(Meta(run_name="open", start_ts=0.0, args={}))

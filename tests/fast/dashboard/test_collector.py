@@ -4,9 +4,9 @@ from pathlib import Path
 
 from tests.fast.dashboard.dummy_telemetry import BASE_TS, dump_dummy_telemetry
 
-from miles.dashboard.collector import CollectorConfig, DashboardCollector
-from miles.dashboard.sglang_scraper import ScrapeMode
-from miles.dashboard.store import (
+from orbit.dashboard.collector import CollectorConfig, DashboardCollector
+from orbit.dashboard.sglang_scraper import ScrapeMode
+from orbit.dashboard.store import (
     DataBufferSample,
     EngineInfo,
     GpuProcessSample,
@@ -233,7 +233,7 @@ def test_forwarding_disabled_by_default(tmp_path):
 
 
 def test_sampler_reconcile_spawns_late_nodes_and_skips_nvml_less(tmp_path, monkeypatch):
-    from miles.dashboard import collector as collector_mod
+    from orbit.dashboard import collector as collector_mod
 
     nodes = [("id-a", "10.0.0.1")]
     spawned, killed = [], []
@@ -271,9 +271,9 @@ def test_sampler_reconcile_spawns_late_nodes_and_skips_nvml_less(tmp_path, monke
 
 
 def test_external_engines_synthesized_from_scrapes(tmp_path):
-    """Pure sglang engines (no miles actor) never reach register_engines;
+    """Pure sglang engines (no orbit actor) never reach register_engines;
     the scrape itself is the topology source (disagg report 2026-07-14)."""
-    from miles.dashboard.store import EngineSample, Stream, TopologySnapshot
+    from orbit.dashboard.store import EngineSample, Stream, TopologySnapshot
 
     collector = make_collector(tmp_path)
     collector.push_metrics(MetricsRecord(ts=1.0, step_key="rollout/step", step=0, metrics={}))
@@ -291,7 +291,7 @@ def test_external_engines_synthesized_from_scrapes(tmp_path):
     ]
 
     # a real actor registration keeps the synthetic externals merged in
-    from miles.dashboard.store import EngineInfo
+    from orbit.dashboard.store import EngineInfo
 
     real = TopologySnapshot(
         ts=3.0,

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from miles.backends.megatron_utils.rematerialize_utils import (
+from orbit.backends.megatron_utils.rematerialize_utils import (
     _build_cast_main_to_params_fn,
     _replay_hybrid_device_copy_back,
 )

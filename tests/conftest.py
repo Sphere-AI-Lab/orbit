@@ -11,7 +11,7 @@ _ = rollout_env, generation_env
 @pytest.fixture(autouse=True)
 def clear_legacy_rollout_gate(monkeypatch):
     # an ambient value changes which arguments the parser registers
-    monkeypatch.delenv("MILES_USE_LEGACY_ROLLOUT_V1", raising=False)
+    monkeypatch.delenv("ORBIT_USE_LEGACY_ROLLOUT_V1", raising=False)
 
 
 @pytest.fixture(scope="session")

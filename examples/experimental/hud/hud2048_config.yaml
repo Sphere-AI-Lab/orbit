@@ -16,7 +16,7 @@
 # click the page); a small one cannot, and with every episode then scoring zero
 # there is no reward spread for RL to learn the escape from either.
 hud_env_dir: /root/v6browser
-hud_snapshot_name: miles-hud-v6browser
+hud_snapshot_name: orbit-hud-v6browser
 
 # Turns are the expensive axis -- every turn re-prefills the whole screenshot
 # history through the vision encoder -- while keys within one press() call are

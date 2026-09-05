@@ -19,7 +19,7 @@ Usage examples::
 
     # Verify through TITO while testing a local template override
     python scripts/tools/verify_chat_template.py --model Qwen/Qwen3-0.6B \\
-        --tito-model qwen3 --template miles/utils/chat_template_utils/templates/qwen3_fixed.jinja
+        --tito-model qwen3 --template orbit/utils/chat_template_utils/templates/qwen3_fixed.jinja
 
     # Run thinking cases: off (default) / on / both
     python scripts/tools/verify_chat_template.py --model Qwen/Qwen3.5-0.8B --thinking both
@@ -31,7 +31,7 @@ import argparse
 import json
 import sys
 
-from miles.utils.chat_template_utils.tito_tokenizer import VALID_APPEND_ROLES, TITOTokenizerType
+from orbit.utils.chat_template_utils.tito_tokenizer import VALID_APPEND_ROLES, TITOTokenizerType
 
 
 def _load_template_from_file(path: str) -> str:
@@ -43,7 +43,7 @@ def _load_template_from_model(
     model_id: str,
 ) -> tuple[str, str]:
     """Load the raw HuggingFace chat template for a model."""
-    from miles.utils.chat_template_utils.template import load_hf_chat_template
+    from orbit.utils.chat_template_utils.template import load_hf_chat_template
 
     return load_hf_chat_template(model_id), f"HuggingFace: {model_id}"
 
@@ -122,8 +122,8 @@ def main() -> int:
 
     # ── Load template/tokenizer ────────────────────────────────────────
     if use_tito_instance:
-        from miles.utils.chat_template_utils import resolve_fixed_chat_template
-        from miles.utils.processing_utils import load_tokenizer
+        from orbit.utils.chat_template_utils import resolve_fixed_chat_template
+        from orbit.utils.processing_utils import load_tokenizer
 
         fixed_path, resolved_kwargs = resolve_fixed_chat_template(args.tito_model)
         for key, value in resolved_kwargs.items():
@@ -148,7 +148,7 @@ def main() -> int:
     else:
         chat_template, source_desc = _load_template_from_model(args.model)
 
-    from miles.utils.test_utils.chat_template_verify import (
+    from orbit.utils.test_utils.chat_template_verify import (
         ALL_CASES,
         check_coverage,
         run_all_checks,

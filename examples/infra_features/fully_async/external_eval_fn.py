@@ -2,17 +2,17 @@
 
 ``__init__`` prepares the backend: launch our own sglang server on spare GPUs, or
 attach to one already running anywhere. Each eval then pins the server to the
-snapshot in ``checkpoint_dir`` and runs the standard miles eval datasets. Because
+snapshot in ``checkpoint_dir`` and runs the standard orbit eval datasets. Because
 the fn runs inside the training job, all eval config (datasets, sampling, rm,
 lora, ...) comes from the real training args — nothing is hand-copied.
 
 Config (env vars, set them in the run launcher):
 
-    MILES_EXTERNAL_EVAL_URL          attach to a running server, e.g. http://host:31000
-    MILES_EXTERNAL_EVAL_GPUS         launch our own, e.g. "6,7" (tp = #gpus); the
+    ORBIT_EXTERNAL_EVAL_URL          attach to a running server, e.g. http://host:31000
+    ORBIT_EXTERNAL_EVAL_GPUS         launch our own, e.g. "6,7" (tp = #gpus); the
                                      server runs on this node; ignored when URL is set
-    MILES_EXTERNAL_EVAL_PORT         launch-mode port (default 31000)
-    MILES_EXTERNAL_EVAL_SERVER_ARGS  extra raw sglang flags for launch mode, e.g.
+    ORBIT_EXTERNAL_EVAL_PORT         launch-mode port (default 31000)
+    ORBIT_EXTERNAL_EVAL_SERVER_ARGS  extra raw sglang flags for launch mode, e.g.
                                      "--attention-backend fa3 --mem-fraction-static 0.9"
 
 See ``run_qwen3_5_4b_fully_async_eval.py`` for a full launcher. A non-sglang black
@@ -27,11 +27,11 @@ import shlex
 import subprocess
 import sys
 
-from miles.rollout.base_types import RolloutFnConstructorInput, RolloutFnEvalInput, RolloutFnEvalOutput
-from miles.rollout.checkpoint_eval import CheckpointEvalFn, retarget_args
-from miles.rollout.inference_rollout.inference_rollout_common import GenerateState
-from miles.rollout.inference_rollout.inference_rollout_eval import run_eval_datasets
-from miles.utils.http_utils import get, post, wait_http_ok
+from orbit.rollout.base_types import RolloutFnConstructorInput, RolloutFnEvalInput, RolloutFnEvalOutput
+from orbit.rollout.checkpoint_eval import CheckpointEvalFn, retarget_args
+from orbit.rollout.inference_rollout.inference_rollout_common import GenerateState
+from orbit.rollout.inference_rollout.inference_rollout_eval import run_eval_datasets
+from orbit.utils.http_utils import get, post, wait_http_ok
 
 
 class ExternalSglangEvalFn(CheckpointEvalFn):
@@ -39,17 +39,17 @@ class ExternalSglangEvalFn(CheckpointEvalFn):
 
     def __init__(self, input: RolloutFnConstructorInput):
         args = input.args
-        url = os.environ.get("MILES_EXTERNAL_EVAL_URL")
-        gpus = os.environ.get("MILES_EXTERNAL_EVAL_GPUS")
+        url = os.environ.get("ORBIT_EXTERNAL_EVAL_URL")
+        gpus = os.environ.get("ORBIT_EXTERNAL_EVAL_GPUS")
         self._proc: subprocess.Popen | None = None
         num_gpus = 1
         if url is None:
             if gpus is None:
                 raise ValueError(
-                    "ExternalSglangEvalFn needs a backend: set MILES_EXTERNAL_EVAL_URL (attach) "
-                    "or MILES_EXTERNAL_EVAL_GPUS (launch our own, e.g. '6,7')"
+                    "ExternalSglangEvalFn needs a backend: set ORBIT_EXTERNAL_EVAL_URL (attach) "
+                    "or ORBIT_EXTERNAL_EVAL_GPUS (launch our own, e.g. '6,7')"
                 )
-            port = int(os.environ.get("MILES_EXTERNAL_EVAL_PORT", "31000"))
+            port = int(os.environ.get("ORBIT_EXTERNAL_EVAL_PORT", "31000"))
             num_gpus = len(gpus.split(","))
             cmd = [
                 sys.executable,
@@ -66,7 +66,7 @@ class ExternalSglangEvalFn(CheckpointEvalFn):
                 "--mem-fraction-static",
                 "0.8",
                 "--trust-remote-code",
-                *shlex.split(os.environ.get("MILES_EXTERNAL_EVAL_SERVER_ARGS", "")),
+                *shlex.split(os.environ.get("ORBIT_EXTERNAL_EVAL_SERVER_ARGS", "")),
             ]
             # Explicit GPU pinning: under Ray the manager process has no visible GPUs.
             self._proc = subprocess.Popen(cmd, env={**os.environ, "CUDA_VISIBLE_DEVICES": gpus})

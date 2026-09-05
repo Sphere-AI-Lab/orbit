@@ -15,7 +15,7 @@ register_cuda_ci(est_time=60, suite="stage-b-2-gpu-h200", labels=["precision"])
 import pytest
 import torch
 
-from miles.backends.megatron_utils.megatron_to_hf.processors.quantizer_compressed_tensors import (
+from orbit.backends.megatron_utils.megatron_to_hf.processors.quantizer_compressed_tensors import (
     quantize_params_compressed_tensors,
 )
 

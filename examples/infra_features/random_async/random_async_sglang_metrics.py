@@ -1,6 +1,6 @@
 """Example-local SGLang metrics scraper for random_async.
 
-Miles can forward raw SGLang OpenMetrics to W&B, but this helper logs a small
+Orbit can forward raw SGLang OpenMetrics to W&B, but this helper logs a small
 set of stable aggregate keys under ``random_async_sglang/`` for the stress test.
 """
 

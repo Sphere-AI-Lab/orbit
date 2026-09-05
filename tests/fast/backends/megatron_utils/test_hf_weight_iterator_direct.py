@@ -10,7 +10,7 @@ register_cpu_ci(est_time=60, suite="stage-a-cpu", labels=[])
 import pytest
 import torch
 
-from miles.utils.types import ParamInfo
+from orbit.utils.types import ParamInfo
 
 
 def _install_import_stubs(monkeypatch):
@@ -67,14 +67,14 @@ def _install_import_stubs(monkeypatch):
 @pytest.fixture
 def direct_module(monkeypatch):
     module_names = [
-        "miles.backends.megatron_utils.sglang",
-        "miles.backends.megatron_utils.megatron_to_hf",
-        "miles.backends.megatron_utils.megatron_to_hf.processors",
-        "miles.backends.megatron_utils.megatron_to_hf.processors.quantizer_fp8",
-        "miles.backends.megatron_utils.megatron_to_hf.processors.quantizer_mxfp8",
-        "miles.backends.megatron_utils.update_weight.common",
-        "miles.backends.megatron_utils.update_weight.hf_weight_iterator_direct",
-        "miles.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin",
+        "orbit.backends.megatron_utils.sglang",
+        "orbit.backends.megatron_utils.megatron_to_hf",
+        "orbit.backends.megatron_utils.megatron_to_hf.processors",
+        "orbit.backends.megatron_utils.megatron_to_hf.processors.quantizer_fp8",
+        "orbit.backends.megatron_utils.megatron_to_hf.processors.quantizer_mxfp8",
+        "orbit.backends.megatron_utils.update_weight.common",
+        "orbit.backends.megatron_utils.update_weight.hf_weight_iterator_direct",
+        "orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin",
     ]
     saved_modules = {name: sys.modules.get(name) for name in module_names}
     for name in module_names:
@@ -82,7 +82,7 @@ def direct_module(monkeypatch):
 
     _install_import_stubs(monkeypatch)
 
-    from miles.backends.megatron_utils.update_weight import hf_weight_iterator_direct
+    from orbit.backends.megatron_utils.update_weight import hf_weight_iterator_direct
 
     yield hf_weight_iterator_direct
 
@@ -105,7 +105,7 @@ def _param(name: str, size: int) -> ParamInfo:
 
 
 def test_atomic_group_is_single_update_unit_and_packed_together(direct_module, monkeypatch):
-    from miles.backends.megatron_utils.update_weight.common import AtomicUpdateGroup
+    from orbit.backends.megatron_utils.update_weight.common import AtomicUpdateGroup
 
     params = [_param("layer.a", 4), _param("layer.b", 4), _param("layer.c", 4)]
     monkeypatch.setattr(direct_module, "_get_param_full_size", lambda info: info.size)
@@ -120,7 +120,7 @@ def test_atomic_group_is_single_update_unit_and_packed_together(direct_module, m
 
 
 def test_deepseekv4_atomic_groups_use_named_update_units(direct_module):
-    from miles.backends.megatron_utils.update_weight.common import get_atomic_update_groups
+    from orbit.backends.megatron_utils.update_weight.common import get_atomic_update_groups
 
     param_names = [
         "module.module.decoder.layers.0.input_layernorm.weight",
@@ -154,7 +154,7 @@ def test_deepseekv4_atomic_groups_use_named_update_units(direct_module):
 
 
 def test_atomic_group_specs_raise_explicit_errors(direct_module, monkeypatch):
-    from miles.backends.megatron_utils.update_weight.common import AtomicUpdateGroup
+    from orbit.backends.megatron_utils.update_weight.common import AtomicUpdateGroup
 
     params = [_param("layer.a", 4), _param("layer.b", 4)]
 
@@ -191,8 +191,8 @@ def _distributed_updater(mixin_module):
 
 
 def test_distributed_non_expert_update_units_are_packed_together(direct_module, monkeypatch):
-    from miles.backends.megatron_utils.update_weight.common import AtomicUpdateGroup
-    from miles.backends.megatron_utils.update_weight.update_weight_from_distributed import mixin
+    from orbit.backends.megatron_utils.update_weight.common import AtomicUpdateGroup
+    from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed import mixin
 
     updater = _distributed_updater(mixin)
     named_tensors = [("a", _tensor(4)), ("b", _tensor(4)), ("c", _tensor(4))]
@@ -215,8 +215,8 @@ def test_distributed_non_expert_update_units_are_packed_together(direct_module, 
 
 
 def test_distributed_expert_update_units_are_packed_together(direct_module, monkeypatch):
-    from miles.backends.megatron_utils.update_weight.common import AtomicUpdateGroup
-    from miles.backends.megatron_utils.update_weight.update_weight_from_distributed import mixin
+    from orbit.backends.megatron_utils.update_weight.common import AtomicUpdateGroup
+    from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed import mixin
 
     updater = _distributed_updater(mixin)
     named_tensors = [
@@ -247,8 +247,8 @@ def test_distributed_expert_update_units_are_packed_together(direct_module, monk
 
 
 def test_distributed_atomic_group_cannot_span_expert_and_non_expert(direct_module, monkeypatch):
-    from miles.backends.megatron_utils.update_weight.common import AtomicUpdateGroup
-    from miles.backends.megatron_utils.update_weight.update_weight_from_distributed import mixin
+    from orbit.backends.megatron_utils.update_weight.common import AtomicUpdateGroup
+    from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed import mixin
 
     updater = _distributed_updater(mixin)
     named_tensors = [("module.a", _tensor(4)), ("module.experts.b", _tensor(4))]

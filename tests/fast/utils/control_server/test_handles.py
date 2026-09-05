@@ -4,9 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from miles.ray.train.group import RayTrainGroup
-from miles.utils.ft_utils.control_server.handles import _ActorCellHandle, _CellHandle, _RolloutCellHandle
-from miles.utils.test_utils.fault_injector import FailureMode
+from orbit.ray.train.group import RayTrainGroup
+from orbit.utils.ft_utils.control_server.handles import _ActorCellHandle, _CellHandle, _RolloutCellHandle
+from orbit.utils.test_utils.fault_injector import FailureMode
 
 from .conftest import MockRayTrainCell, MockRolloutManager, make_mock_group
 
@@ -25,13 +25,13 @@ class TestActorCellHandle:
         cell = await handle.get_cell()
 
         assert cell.model_dump() == {
-            "apiVersion": "miles.io/v1",
+            "apiVersion": "orbit.io/v1",
             "kind": "Cell",
             "metadata": {
                 "name": "actor-0",
                 "labels": {
-                    "miles.io/cell-type": "actor",
-                    "miles.io/cell-index": "0",
+                    "orbit.io/cell-type": "actor",
+                    "orbit.io/cell-index": "0",
                 },
             },
             "spec": {"suspend": False},
@@ -95,7 +95,7 @@ class TestRolloutCellHandle:
         cell = await handle.get_cell()
 
         assert cell.metadata.name == "rollout-0"
-        assert cell.metadata.labels["miles.io/cell-type"] == "rollout"
+        assert cell.metadata.labels["orbit.io/cell-type"] == "rollout"
         assert cell.status.phase == "Running"
         assert cell.spec.suspend is False
 

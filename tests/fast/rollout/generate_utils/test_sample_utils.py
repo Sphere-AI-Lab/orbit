@@ -3,8 +3,8 @@ from unittest.mock import MagicMock
 import numpy
 import pytest
 
-from miles.rollout.generate_utils.sample_utils import _merge_sample_pair, merge_samples
-from miles.utils.types import Sample
+from orbit.rollout.generate_utils.sample_utils import _merge_sample_pair, merge_samples
+from orbit.utils.types import Sample
 
 
 @pytest.fixture

@@ -7,9 +7,9 @@ import sys
 
 import pytest
 
-from miles.rollout.session.types import SessionRecord
-from miles.rollout.session.v2 import tree_trajectory
-from miles.rollout.session.v2.tree_trajectory import SessionTree
+from orbit.rollout.session.types import SessionRecord
+from orbit.rollout.session.v2 import tree_trajectory
+from orbit.rollout.session.v2.tree_trajectory import SessionTree
 
 SYS = {"role": "system", "content": "sys"}
 U1 = {"role": "user", "content": "q1"}

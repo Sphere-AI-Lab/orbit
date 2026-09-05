@@ -5,7 +5,7 @@ description: Scan and supervise the slinky slurm cluster's health — GPU (drive
 
 # cluster-health — standalone slinky cluster health scanning
 
-The launcher (`launch_miles.sbatch`) healthchecks nodes **before a run** and rides
+The launcher (`launch_orbit.sbatch`) healthchecks nodes **before a run** and rides
 the requeue machinery. This skill is the **decoupled** version: scan and supervise
 the cluster at any time — *without* launching training. It does **not** reimplement
 the probes; it drives the launcher's shared `scripts/slurm/lib/*` probes plus three skill-local ones and adds the
@@ -44,7 +44,7 @@ a new slurm job and can preempt).
    carries the SAFE flags so a raced/mis-targeted srun **skips instead of preempting**.
 
 ```bash
-cd "${MILES_REPO:-$HOME/miles-imp}"   # your miles-imp checkout (repo root); override MILES_REPO if elsewhere
+cd "${ORBIT_REPO:-$HOME/orbit}"   # your orbit checkout (repo root); override ORBIT_REPO if elsewhere
 SKILL_DIR=.claude/skills/cluster-health   # skill-local probes (occ, fs, deep) live here; shared ones in scripts/slurm/lib
 
 # Node state is authoritative from `sinfo` (NOT `squeue -t RUNNING -o %N`, which
@@ -70,7 +70,7 @@ echo "idle=$IDLE"; echo "mix=$MIX"; echo "alloc=$ALLOC"; echo "down/drain=$DOWN"
 
 ```bash
 PREAMBLE='
-  source /data/shared/conda/miniconda3/etc/profile.d/conda.sh && conda activate "${MILES_ENV_NAME:-miles}"
+  source /data/shared/conda/miniconda3/etc/profile.d/conda.sh && conda activate "${ORBIT_ENV_NAME:-orbit}"
   ulimit -Sl "$(ulimit -Hl)" 2>/dev/null || true   # RDMA memlock, as in NODE_PREAMBLE
   export LD_LIBRARY_PATH="$(python -c "import site;print(site.getsitepackages()[0])")/nvidia/cudnn/lib:${LD_LIBRARY_PATH:-}"
 '

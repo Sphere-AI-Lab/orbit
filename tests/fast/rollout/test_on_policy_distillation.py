@@ -10,15 +10,15 @@ import torch
 from examples.geo3k_vlm.multi_turn import rollout as geo3k_rollout
 from tests.ci.ci_register import register_cpu_ci
 
-from miles.rollout import on_policy_distillation as opd
-from miles.rollout.on_policy_distillation import (
+from orbit.rollout import on_policy_distillation as opd
+from orbit.rollout.on_policy_distillation import (
     _compute_topk_reverse_kl,
     _per_position_ids,
     _score_payload,
     _teacher_url_for_sample,
     parse_teacher_urls,
 )
-from miles.utils.types import Sample
+from orbit.utils.types import Sample
 
 register_cpu_ci(est_time=60, suite="stage-a-cpu")
 
@@ -439,7 +439,7 @@ def test_dispose_rollout_function_closes_scoring_transport_when_opd_loaded(monke
     worker: RolloutManager.dispose() must close the loop-local persistent
     scoring session on the shared rollout loop even though the class-based
     rollout fn defines no dispose of its own."""
-    from miles.rollout.inference_rollout import compatibility
+    from orbit.rollout.inference_rollout import compatibility
 
     closed = []
 
@@ -461,7 +461,7 @@ def _versioned_sample(version):
 
 def _fail_closed_buffer(max_weight_staleness=2):
     from examples.fully_async.fail_closed_data_buffer import FailClosedDataBuffer
-    from miles.rollout.fully_async_data_buffer import DataBufferConstructorInput
+    from orbit.rollout.fully_async_data_buffer import DataBufferConstructorInput
 
     args = Namespace(
         max_weight_staleness=max_weight_staleness,
@@ -476,7 +476,7 @@ def test_fail_closed_buffer_raises_when_any_sample_missing_weight_version():
     """Fork staleness contract (ported from the legacy collector): a group of
     unobservable staleness is an error, not a fail-open admit (upstream
     DefaultDataBuffer) nor an indefinite pend (the pre-sync collector)."""
-    from miles.rollout.fully_async_data_buffer import DataBufferInput
+    from orbit.rollout.fully_async_data_buffer import DataBufferInput
 
     buffer = _fail_closed_buffer()
     group = [_versioned_sample(3), _versioned_sample(None)]
@@ -497,7 +497,7 @@ def test_fail_closed_buffer_requires_a_trainer_weight_version():
 
 
 def test_fail_closed_buffer_admits_fully_versioned_groups():
-    from miles.rollout.fully_async_data_buffer import DataBufferInput
+    from orbit.rollout.fully_async_data_buffer import DataBufferInput
 
     buffer = _fail_closed_buffer()
     group = [_versioned_sample(3), _versioned_sample(4)]
@@ -513,7 +513,7 @@ def test_fail_closed_buffer_admits_fully_versioned_groups():
 async def test_observed_task_reward_uses_builtin_rm_without_mutating_training_args(monkeypatch):
     training_args = Namespace(
         opd_log_task_reward=True,
-        custom_rm_path="miles.rollout.on_policy_distillation.reward_func",
+        custom_rm_path="orbit.rollout.on_policy_distillation.reward_func",
         rm_type="deepscaler",
     )
     sample = Sample(response="answer", label="42", metadata={"dataset": "math", "rm_type": "remote_rm"})
@@ -523,7 +523,7 @@ async def test_observed_task_reward_uses_builtin_rm_without_mutating_training_ar
         call.update(args=args, sample=received_sample)
         return 1
 
-    monkeypatch.setattr("miles.rollout.rm_hub.async_rm", fake_async_rm)
+    monkeypatch.setattr("orbit.rollout.rm_hub.async_rm", fake_async_rm)
 
     await opd._record_observed_task_reward(training_args, sample)
 
@@ -532,7 +532,7 @@ async def test_observed_task_reward_uses_builtin_rm_without_mutating_training_ar
     assert call["args"].rm_type == "deepscaler"
     assert call["sample"] is not sample
     assert call["sample"].metadata == {"dataset": "math"}
-    assert training_args.custom_rm_path == "miles.rollout.on_policy_distillation.reward_func"
+    assert training_args.custom_rm_path == "orbit.rollout.on_policy_distillation.reward_func"
     assert sample.metadata == {
         "dataset": "math",
         "rm_type": "remote_rm",

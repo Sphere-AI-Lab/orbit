@@ -5,12 +5,12 @@ import pytest
 import torch
 import torch.multiprocessing as torch_mp
 
-from miles.backends.megatron_utils.peft_transport.backends import ipc as ipc_backend
-from miles.backends.megatron_utils.peft_transport.backends.ipc import IpcBackend
-from miles.backends.megatron_utils.peft_transport.registry import PeftMethodSpec
-from miles.backends.megatron_utils.peft_utils import PeftSyncSpec
-from miles.backends.sglang_utils import sglang_engine as engine_module
-from miles.backends.sglang_utils.sglang_engine import SGLangEngine
+from orbit.backends.megatron_utils.peft_transport.backends import ipc as ipc_backend
+from orbit.backends.megatron_utils.peft_transport.backends.ipc import IpcBackend
+from orbit.backends.megatron_utils.peft_transport.registry import PeftMethodSpec
+from orbit.backends.megatron_utils.peft_utils import PeftSyncSpec
+from orbit.backends.sglang_utils import sglang_engine as engine_module
+from orbit.backends.sglang_utils.sglang_engine import SGLangEngine
 
 
 class _RemoteMethod:
@@ -86,7 +86,7 @@ def test_ipc_oft_gathers_cpu_rank_tensors_before_calling_engine(monkeypatch):
     def all_gather_object(objects, obj, **_kwargs):
         objects[:] = [obj, None]
 
-    monkeypatch.setenv("MILES_PEFT_ADAPTER_TRANSPORT", "cpu_gather")
+    monkeypatch.setenv("ORBIT_PEFT_ADAPTER_TRANSPORT", "cpu_gather")
     monkeypatch.setattr(ipc_backend.dist, "get_rank", lambda: 0)
     monkeypatch.setattr(ipc_backend.dist, "get_world_size", lambda _group: 2)
     monkeypatch.setattr(ipc_backend.dist, "gather_object", gather_object)
@@ -106,7 +106,7 @@ def test_ipc_oft_gathers_cpu_rank_tensors_before_calling_engine(monkeypatch):
         method_spec=_method_spec(),
         sync_spec=PeftSyncSpec(
             method="oft",
-            adapter_name="miles_oft",
+            adapter_name="orbit_oft",
             adapter_config={"peft_type": "OFT"},
             sync_transport="oft_adapter",
         ),
@@ -132,7 +132,7 @@ def test_ipc_oft_gathers_cpu_rank_tensors_before_calling_engine(monkeypatch):
             "payload_tag": "flattened_oft_payload",
             "load_format": "oft_adapter",
             "adapter_config": {"peft_type": "OFT"},
-            "adapter_name": "miles_oft",
+            "adapter_name": "orbit_oft",
         }
     ]
     assert engine.update_weight_version.calls == [{"weight_version": "3"}]
@@ -170,7 +170,7 @@ def test_engine_serializes_each_oft_rank_tensor_under_file_system(monkeypatch):
         payload_tag="flattened_oft_payload",
         load_format="oft_adapter",
         adapter_config={"peft_type": "OFT"},
-        adapter_name="miles_oft",
+        adapter_name="orbit_oft",
     )
 
     assert result == {"success": True}
@@ -178,7 +178,7 @@ def test_engine_serializes_each_oft_rank_tensor_under_file_system(monkeypatch):
         "serialized_named_tensors": ["serialized-2", "serialized-4"],
         "load_format": "oft_adapter",
         "adapter_config": {"peft_type": "OFT"},
-        "adapter_name": "miles_oft",
+        "adapter_name": "orbit_oft",
     }
     assert [call[2] for call in calls] == ["file_system"] * 4
     assert torch_mp.get_sharing_strategy() == old_strategy
@@ -225,7 +225,7 @@ def test_engine_serializes_ray_adapter_for_every_tp_rank_under_file_system(monke
         payload_tag="flattened_oft_payload",
         load_format="oft_adapter",
         adapter_config={"peft_type": "OFT"},
-        adapter_name="miles_oft",
+        adapter_name="orbit_oft",
     )
 
     assert result == {"success": True}
@@ -233,7 +233,7 @@ def test_engine_serializes_ray_adapter_for_every_tp_rank_under_file_system(monke
         "serialized_named_tensors": ["serialized-2", "serialized-4"],
         "load_format": "oft_adapter",
         "adapter_config": {"peft_type": "OFT"},
-        "adapter_name": "miles_oft",
+        "adapter_name": "orbit_oft",
     }
     assert [call[2] for call in calls] == ["file_system"] * 4
     assert torch_mp.get_sharing_strategy() == old_strategy
@@ -311,7 +311,7 @@ def test_engine_rejects_multi_node_oft_rank_tensor_serialization(monkeypatch):
             payload_tag="flattened_oft_payload",
             load_format="oft_adapter",
             adapter_config={"peft_type": "OFT"},
-            adapter_name="miles_oft",
+            adapter_name="orbit_oft",
         )
 
 
@@ -341,7 +341,7 @@ def test_engine_rejects_multi_node_ray_tensor_serialization(monkeypatch):
             payload_tag="flattened_oft_payload",
             load_format="oft_adapter",
             adapter_config={"peft_type": "OFT"},
-            adapter_name="miles_oft",
+            adapter_name="orbit_oft",
         )
 
 
@@ -385,7 +385,7 @@ def test_ipc_oft_propagates_source_load_failure_across_engine_groups(monkeypatch
             raise RuntimeError("weight version ray get failed")
         return value
 
-    monkeypatch.setenv("MILES_PEFT_ADAPTER_TRANSPORT", "cpu_gather")
+    monkeypatch.setenv("ORBIT_PEFT_ADAPTER_TRANSPORT", "cpu_gather")
     monkeypatch.setattr(ipc_backend.dist, "get_rank", lambda: rank["value"])
     monkeypatch.setattr(ipc_backend.dist, "get_world_size", get_world_size)
     monkeypatch.setattr(ipc_backend.dist, "gather_object", gather_object)
@@ -415,7 +415,7 @@ def test_ipc_oft_propagates_source_load_failure_across_engine_groups(monkeypatch
         method_spec=_method_spec(),
         sync_spec=PeftSyncSpec(
             method="oft",
-            adapter_name="miles_oft",
+            adapter_name="orbit_oft",
             adapter_config={"peft_type": "OFT"},
             sync_transport="oft_adapter",
         ),
@@ -434,7 +434,7 @@ def test_ipc_oft_propagates_source_load_failure_across_engine_groups(monkeypatch
         method_spec=_method_spec(),
         sync_spec=PeftSyncSpec(
             method="oft",
-            adapter_name="miles_oft",
+            adapter_name="orbit_oft",
             adapter_config={"peft_type": "OFT"},
             sync_transport="oft_adapter",
         ),
@@ -478,7 +478,7 @@ def test_cuda_ipc_propagates_source_load_failure_to_peer_rank(monkeypatch):
         def serialize(_value, output_str=False):
             return "serialized" if output_str else b"serialized"
 
-    monkeypatch.setenv("MILES_PEFT_ADAPTER_TRANSPORT", "cuda_ipc")
+    monkeypatch.setenv("ORBIT_PEFT_ADAPTER_TRANSPORT", "cuda_ipc")
     monkeypatch.setattr(ipc_backend, "MultiprocessingSerializer", _Serializer)
     monkeypatch.setattr(ipc_backend.dist, "get_rank", lambda: rank["value"])
     monkeypatch.setattr(ipc_backend.dist, "get_world_size", get_world_size)
@@ -500,7 +500,7 @@ def test_cuda_ipc_propagates_source_load_failure_to_peer_rank(monkeypatch):
         method_spec=_method_spec(),
         sync_spec=PeftSyncSpec(
             method="oft",
-            adapter_name="miles_oft",
+            adapter_name="orbit_oft",
             adapter_config={"peft_type": "OFT"},
             sync_transport="oft_adapter",
         ),
@@ -519,7 +519,7 @@ def test_cuda_ipc_propagates_source_load_failure_to_peer_rank(monkeypatch):
         method_spec=_method_spec(),
         sync_spec=PeftSyncSpec(
             method="oft",
-            adapter_name="miles_oft",
+            adapter_name="orbit_oft",
             adapter_config={"peft_type": "OFT"},
             sync_transport="oft_adapter",
         ),
@@ -562,7 +562,7 @@ def test_ipc_oft_propagates_failed_engine_result_to_peer_rank(monkeypatch):
             source_record["value"] = obj
         objects[:] = [source_record["value"], None, second_source_record, None]
 
-    monkeypatch.setenv("MILES_PEFT_ADAPTER_TRANSPORT", "cpu_gather")
+    monkeypatch.setenv("ORBIT_PEFT_ADAPTER_TRANSPORT", "cpu_gather")
     monkeypatch.setattr(ipc_backend.dist, "get_rank", lambda: rank["value"])
     monkeypatch.setattr(ipc_backend.dist, "get_world_size", get_world_size)
     monkeypatch.setattr(ipc_backend.dist, "gather_object", gather_object)
@@ -583,7 +583,7 @@ def test_ipc_oft_propagates_failed_engine_result_to_peer_rank(monkeypatch):
         method_spec=_method_spec(),
         sync_spec=PeftSyncSpec(
             method="oft",
-            adapter_name="miles_oft",
+            adapter_name="orbit_oft",
             adapter_config={"peft_type": "OFT"},
             sync_transport="oft_adapter",
         ),
@@ -602,7 +602,7 @@ def test_ipc_oft_propagates_failed_engine_result_to_peer_rank(monkeypatch):
         method_spec=_method_spec(),
         sync_spec=PeftSyncSpec(
             method="oft",
-            adapter_name="miles_oft",
+            adapter_name="orbit_oft",
             adapter_config={"peft_type": "OFT"},
             sync_transport="oft_adapter",
         ),

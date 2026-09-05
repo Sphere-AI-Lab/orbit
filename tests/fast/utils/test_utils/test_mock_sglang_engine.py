@@ -9,11 +9,11 @@ import ray
 from sglang.srt.constants import GPU_MEMORY_TYPE_WEIGHTS
 from tests.fast.ray.rollout.conftest import make_args
 
-from miles.backends.sglang_utils.sglang_engine import SGLangEngine
-from miles.utils.test_utils.mock_sglang_engine import MockSGLangEngine
+from orbit.backends.sglang_utils.sglang_engine import SGLangEngine
+from orbit.utils.test_utils.mock_sglang_engine import MockSGLangEngine
 
 # tests/fast/utils/test_utils/test_mock_sglang_engine.py → 4 levels up → repo root
-ROLLOUT_DIR = Path(__file__).resolve().parents[4] / "miles" / "ray" / "rollout"
+ROLLOUT_DIR = Path(__file__).resolve().parents[4] / "orbit" / "ray" / "rollout"
 
 
 def _grep_engine_method_calls(directory: Path) -> set[str]:
@@ -59,7 +59,7 @@ class TestApiContractMatchesRealEngine:
         missing_on_mock = must_have - mock_methods
         assert not missing_on_mock, (
             f"MockSGLangEngine is missing real-API methods that are called in "
-            f"miles/ray/rollout/: {sorted(missing_on_mock)}. "
+            f"orbit/ray/rollout/: {sorted(missing_on_mock)}. "
             f"Add stub implementations to mock_sglang_engine.py before adding the dependent test."
         )
 

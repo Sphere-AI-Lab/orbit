@@ -3,8 +3,8 @@ from unittest.mock import patch
 
 from tests.fast.utils.debug_utils.run_megatron.conftest import make_script_args
 
-from miles.utils.debug_utils.run_megatron.cli.parallel_utils import ParallelConfig
-from miles.utils.debug_utils.run_megatron.cli.worker_executor import (
+from orbit.utils.debug_utils.run_megatron.cli.parallel_utils import ParallelConfig
+from orbit.utils.debug_utils.run_megatron.cli.worker_executor import (
     _build_megatron_flags,
     build_dumper_env,
     build_torchrun_cmd,
@@ -182,7 +182,7 @@ class TestBuildWorkerArgs:
 
 
 class TestBuildTorchrunCmd:
-    @patch("miles.utils.debug_utils.run_megatron.cli.worker_executor.load_model_args")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.worker_executor.load_model_args")
     def test_basic_structure(self, mock_load: object) -> None:
         mock_load.return_value = "--num-layers 61"  # type: ignore[union-attr]
         cmd = build_torchrun_cmd(
@@ -195,7 +195,7 @@ class TestBuildTorchrunCmd:
         assert "--num-layers 61" in cmd
         assert "PYTHONPATH" in cmd
 
-    @patch("miles.utils.debug_utils.run_megatron.cli.worker_executor.load_model_args")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.worker_executor.load_model_args")
     def test_nproc(self, mock_load: object) -> None:
         mock_load.return_value = "--num-layers 61"  # type: ignore[union-attr]
         cmd = build_torchrun_cmd(
@@ -206,7 +206,7 @@ class TestBuildTorchrunCmd:
         )
         assert "--nproc-per-node 8" in cmd
 
-    @patch("miles.utils.debug_utils.run_megatron.cli.worker_executor.load_model_args")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.worker_executor.load_model_args")
     def test_worker_args_in_cmd(self, mock_load: object) -> None:
         mock_load.return_value = "--num-layers 61"  # type: ignore[union-attr]
         cmd = build_torchrun_cmd(
@@ -217,7 +217,7 @@ class TestBuildTorchrunCmd:
         )
         assert "--my-flag 42" in cmd
 
-    @patch("miles.utils.debug_utils.run_megatron.cli.worker_executor.load_model_args")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.worker_executor.load_model_args")
     def test_megatron_in_pythonpath(self, mock_load: object) -> None:
         mock_load.return_value = "--num-layers 61"  # type: ignore[union-attr]
         cmd = build_torchrun_cmd(

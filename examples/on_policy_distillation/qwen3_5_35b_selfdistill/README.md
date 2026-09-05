@@ -35,7 +35,7 @@ we keep the same dims and only halve DP:
 | PP  | 1 | |
 | CP  | 2 | shards the long (~17k) sequence so 24k context fits |
 | EP  | 8 | `num_experts 256 % 8 = 0` ; expert `ETP*EP*PP = 8` → expert_dp = 1 |
-| ETP | 1 | expert_dp(1) ≠ dp(4) is allowed (miles rank order ends in `pp`) |
+| ETP | 1 | expert_dp(1) ≠ dp(4) is allowed (orbit rank order ends in `pp`) |
 
 `--colocate` time-shares the train and rollout phases (each fits 143 GB separately,
 not summed); `--optimizer-cpu-offload` puts Adam state on host RAM; the model is a
@@ -97,15 +97,15 @@ is the GB200 variant of `phase2_opd_selfdistill.sh`; the deltas (all validated o
 - **NCCL** — `NCCL_NVLS_ENABLE=0` (multi-node Blackwell NVLS bind fails
   `ncclCommInitRank`); keep `NCCL_MNNVL_ENABLE=1`.
 - **k8s** — if a `prometheus` Service exists in the namespace, set
-  `PROMETHEUS_PORT=9090` (kube injects a `tcp://…:9090` URL that breaks miles'
+  `PROMETHEUS_PORT=9090` (kube injects a `tcp://…:9090` URL that breaks orbit'
   `int(PROMETHEUS_PORT)`).
 
 `phase2_gb200.sh` already sets the sglang/MoE backends and folds
 `NCCL_NVLS_ENABLE=0` + `PROMETHEUS_PORT=9090` into the Ray runtime env. Run it on the
-Ray head in the CUDA-13 ARM64 miles image, with `MILES_DIR` pointing at the repo:
+Ray head in the CUDA-13 ARM64 orbit image, with `ORBIT_DIR` pointing at the repo:
 
 ```bash
-ACTOR_NUM_NODES=2 GPUS_PER_NODE=4 MILES_DIR=/workspace/miles \
+ACTOR_NUM_NODES=2 GPUS_PER_NODE=4 ORBIT_DIR=/workspace/orbit \
 MODEL_DIR=... DATA_DIR=... TEACHER_LOAD=/persistent/ckpt-teacher OUTPUT_DIR=/persistent/ckpt-opd-pure \
   bash phase2_gb200.sh          # MODE=pure (default) | MODE=grounded
 ```
@@ -135,7 +135,7 @@ TEACHER_LOAD=/persistent/ckpt-teacher MODEL_DIR=... DATA_DIR=... \
 > **Teacher expert layout.** The public `Qwen/Qwen3.5-35B-A3B` ships *fused* experts
 > (`mlp.experts.gate_up_proj`); a teacher round-tripped through
 > `convert_torch_dist_to_hf` may ship *unfused* per-expert weights
-> (`mlp.experts.{i}.gate_proj.weight`). `miles_plugins/mbridge/qwen3_5.py` now
+> (`mlp.experts.{i}.gate_proj.weight`). `orbit_plugins/mbridge/qwen3_5.py` now
 > autodetects both for the main layers (mirroring the existing MTP-expert
 > autodetect), so either layout converts without manual re-fusing.
 

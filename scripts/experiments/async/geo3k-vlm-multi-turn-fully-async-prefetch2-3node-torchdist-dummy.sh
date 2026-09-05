@@ -31,7 +31,7 @@
 # out of routing until their first sync lands is future work.
 #
 # Submit (artifact must exist — see -torchdist header for the one-off convert):
-#   JOB_NAME=geo3k-async-mt-pf2-8b-td-dummy TIME=24:00:00 NODES=3 MILES_ENV_NAME=miles_0809 \
+#   JOB_NAME=geo3k-async-mt-pf2-8b-td-dummy TIME=24:00:00 NODES=3 ORBIT_ENV_NAME=orbit_0809 \
 #   WANDB_PROJECT=baseline bash scripts/slurm/submit.sh async/geo3k-vlm-multi-turn-fully-async-prefetch2-3node-torchdist-dummy
 
 set -euo pipefail
@@ -43,7 +43,7 @@ source "$VARIANT_DIR/geo3k-vlm-multi-turn-fully-async-prefetch2-3node-torchdist.
 # Engines skip the 16x HF disk read (the pre-rollout broadcast is their load);
 # the inherited --check-weight-update-equal anchors on the first broadcast
 # instead of the (random) boot weights — see header.
-MILES_ARGS+=(
+ORBIT_ARGS+=(
    --sglang-load-format dummy
    --check-weight-update-equal-mode after-update
 )

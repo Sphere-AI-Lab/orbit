@@ -1,6 +1,6 @@
 import os
 
-if os.getenv("MILES_HARDWARE_PLATFORM") == "rocm":
+if os.getenv("ORBIT_HARDWARE_PLATFORM") == "rocm":
     from scripts.amd.run_glm5_2_744b_a40b import (
         ScriptArgs,
         _convert_to_fp8,
@@ -22,7 +22,7 @@ else:
 from tests.ci.ci_register import register_cuda_ci, register_rocm_ci
 from tests.ci.metric_history import register_ci_gate
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 # Smoke test for the GLM-5.2 (glm_moe_dsa) training script. Exercises the DSA
 # cross-layer index-sharing path (5 layers = 3 dense + 2 MoE, computing layers

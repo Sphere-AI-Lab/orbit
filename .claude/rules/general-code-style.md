@@ -1,6 +1,6 @@
 ---
 paths:
-  - "miles/**/*.py"
+  - "orbit/**/*.py"
   - "scripts/**/*.py"
   - "tools/**/*.py"
   - "train.py"
@@ -9,7 +9,7 @@ paths:
 
 # General Code Style
 
-Default conventions for new and substantially modified Python code in Miles core
+Default conventions for new and substantially modified Python code in Orbit core
 modules and scripts. Prefer these unless there is a concrete reason not to.
 Preserve established framework contracts and avoid unrelated refactors; call out
 deviations in review.
@@ -36,7 +36,7 @@ deviations in review.
 - **Prefer composition without fighting established abstractions.** For new
   behavior, prefer explicit composition or plain functions. Use inheritance or a
   mixin when required by a framework contract, consistent with an established
-  Miles architecture, or when it represents cohesive behavior shared by
+  Orbit architecture, or when it represents cohesive behavior shared by
   multiple implementations.
 - **Keep public APIs intentional.** Default implementation details to protected
   names, but preserve established public, plugin, and framework interfaces. Do

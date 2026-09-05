@@ -5,7 +5,7 @@
 # Source this through a numbered wrapper; the wrapper sets only the axis it
 # varies (transfer mode, layout, encoding) and leaves everything else alone.
 # The wrappers satisfy the scripts/slurm/submit.sh recipe contract
-# (MILES_ARGS + HF_MODEL_REPO + EXPERIMENT_NODES), so they can be submitted
+# (ORBIT_ARGS + HF_MODEL_REPO + EXPERIMENT_NODES), so they can be submitted
 # through a thin shim under scripts/experiments/ — see README.md.
 #
 # Workload is Qwen3-4B on dapo-math-17k, deliberately identical across every
@@ -19,7 +19,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 fi
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}
 
 if [[ -z "${DD_RUN_NAME:-}" ]]; then
    echo "FATAL: wrapper must set DD_RUN_NAME" >&2
@@ -75,7 +75,7 @@ HF_TORCHDIST_DIR=${DD_HF_TORCHDIST_DIR:-$HF_CACHE_DIR/models/Qwen3-4B_torch_dist
 HF_TRAIN_DATA="$HF_CACHE_DIR/data/dapo-math-17k/dapo-math-17k.jsonl"
 
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/$DD_MODEL_CONFIG.sh"
+source "$ORBIT_REPO/scripts/models/$DD_MODEL_CONFIG.sh"
 
 # ----------------------------------------------------------- delta dirs ---
 
@@ -92,10 +92,10 @@ source "$MILES_REPO/scripts/models/$DD_MODEL_CONFIG.sh"
 #     (check_delta_roundtrip.py's rerun leg tells you which receiver you have).
 #     With per-job dirs there is no stale state to clamp to.
 # The cost is leftovers: finished jobs leave their dirs behind. Clean
-# checkpoints/dd-* on the shared side and /tmp/miles-delta-local-ckpt/ on the
+# checkpoints/dd-* on the shared side and /tmp/orbit-delta-local-ckpt/ on the
 # rollout hosts when done with a measurement campaign.
 DD_STATE_TAG=${DD_STATE_TAG:-${SLURM_JOB_ID:-nojob}-r${SLURM_RESTART_COUNT:-0}}
-DD_RUN_STATE_DIR=${DD_RUN_STATE_DIR:-$MILES_REPO/checkpoints/$RUN_NAME-$DD_STATE_TAG}
+DD_RUN_STATE_DIR=${DD_RUN_STATE_DIR:-$ORBIT_REPO/checkpoints/$RUN_NAME-$DD_STATE_TAG}
 
 # Published deltas: must be visible to the trainer and to every rollout host.
 # WARNING: the trainer rmtree()s this directory when it captures the baseline —
@@ -107,7 +107,7 @@ DD_DISK_DIR=${DD_DISK_DIR:-$DD_RUN_STATE_DIR/delta-updates}
 # Local disk on purpose (NVMe if you have it) — the whole point is that only
 # the changed bytes cross the shared filesystem. Sized for a full checkpoint:
 # Qwen3-4B bf16 is ~8 GB per rollout host, so /tmp needs the room.
-DD_LOCAL_CKPT_DIR=${DD_LOCAL_CKPT_DIR:-/tmp/miles-delta-local-ckpt/$RUN_NAME-$DD_STATE_TAG}
+DD_LOCAL_CKPT_DIR=${DD_LOCAL_CKPT_DIR:-/tmp/orbit-delta-local-ckpt/$RUN_NAME-$DD_STATE_TAG}
 
 # The publish dir grows for the whole run: one weight_vNNNNNN/ per sync, about
 # DD_DELTA_MB_HINT MB each, and no version can be pruned while the run lives —
@@ -237,7 +237,7 @@ fi
 
 WANDB_ARGS=(
    --use-wandb
-   --wandb-project miles-imp
+   --wandb-project orbit
    --wandb-group   "$RUN_NAME"
 )
 
@@ -256,7 +256,7 @@ MISC_ARGS=(
    --attention-backend flash
 )
 
-MILES_ARGS=(
+ORBIT_ARGS=(
    "${LAYOUT_ARGS[@]}"
    "${MODEL_ARGS[@]}"
    "${CKPT_ARGS[@]}"

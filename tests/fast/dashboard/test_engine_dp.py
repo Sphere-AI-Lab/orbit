@@ -4,7 +4,7 @@ by default (sum, or mean for intensive metrics) and stay apart under
 
 from pathlib import Path
 
-from miles.dashboard.store import EngineSample, Meta, MetricStore
+from orbit.dashboard.store import EngineSample, Meta, MetricStore
 
 ADDR = "http://e:1"
 

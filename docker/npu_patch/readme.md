@@ -1,12 +1,12 @@
-# Miles NPU Patch Installation Guide
+# Orbit NPU Patch Installation Guide
 
-This guide provides instructions for installing Miles with NPU support, including all required dependencies and patches.
+This guide provides instructions for installing Orbit with NPU support, including all required dependencies and patches.
 
 ## Component Version Mapping
 
 | Component       | Version/Commit                           | Source                                                                                                              |
 | --------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Miles          | 551d15914c89b1229b76fe806ca5f5aa5a826309 | [GitHub](https://github.com/radixark/miles/tree/main)                                             |
+| Orbit          | 551d15914c89b1229b76fe806ca5f5aa5a826309 | [GitHub](https://github.com/Sphere-AI-Lab/orbit/tree/main)                                             |
 | SGLang          | sglang-miles | [GitHub](https://github.com/sgl-project/sglang/)                                             |
 | SGL Kernel NPU  | 2026.05.01                               | [GitHub](https://github.com/sgl-project/sgl-kernel-npu/releases/tag/2026.05.01)                                     |
 | Megatron-Bridge | bridge | [GitHub](https://github.com/radixark/Megatron-Bridge)                                                                |
@@ -22,8 +22,8 @@ This guide provides instructions for installing Miles with NPU support, includin
 Only `python==3.11` is supported currently.
 
 ```shell
-conda create -n miles_release python=3.11
-conda activate miles_release
+conda create -n orbit_release python=3.11
+conda activate orbit_release
 ```
 
 ### Working Directory Setup
@@ -34,7 +34,7 @@ mkdir <WORKSPACE> && cd <WORKSPACE>
 
 ### CANN Environment
 
-Prior to start work with miles on Ascend you need to install CANN Toolkit, Kernels operator package and NNAL version 8.5.0, check the [installation guide](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/83RC1/softwareinst/instg/instg_0008.html?Mode=PmIns\&InstallType=local\&OS=openEuler\&Software=cannToolKit)
+Prior to start work with orbit on Ascend you need to install CANN Toolkit, Kernels operator package and NNAL version 8.5.0, check the [installation guide](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/83RC1/softwareinst/instg/instg_0008.html?Mode=PmIns\&InstallType=local\&OS=openEuler\&Software=cannToolKit)
 
 ```shell
 source <CANN_PATH>/ascend-toolkit/set_env.sh
@@ -100,11 +100,11 @@ git clone https://gitcode.com/Ascend/MindSpeed.git && \
   pip install -e .
 ```
 
-### Miles
+### Orbit
 
 ```shell
 cd <WORKSPACE>
-git clone https://github.com/radixark/miles.git && cd miles
+git clone https://github.com/Sphere-AI-Lab/orbit.git && cd orbit
 cp -r docker/npu_patch ../npu_patch
 pip install -e .
 ```
@@ -112,8 +112,8 @@ pip install -e .
 ## Applying Patches
 
 ```shell
-cd <WORKSPACE>/miles
-git apply ../npu_patch/miles.patch
+cd <WORKSPACE>/orbit
+git apply ../npu_patch/orbit.patch
 
 cd <WORKSPACE>/sglang
 git apply ../npu_patch/sglang.patch
@@ -132,7 +132,7 @@ git apply ../npu_patch/mindspeed.patch
 ## Additional Dependencies
 
 ```shell
-cd <WORKSPACE>/miles
+cd <WORKSPACE>/orbit
 pip install triton-ascend
 pip install torch-npu==2.8.0
 pip install torchvision==0.23.0

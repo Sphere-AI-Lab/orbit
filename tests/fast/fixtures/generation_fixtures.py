@@ -11,16 +11,16 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from miles.rollout.base_types import GenerateFnInput
-from miles.rollout.inference_rollout.compatibility import load_generate_function
-from miles.rollout.inference_rollout.inference_rollout_common import GenerateState
-from miles.rollout.session.server import SessionServer
-from miles.utils.async_utils import run
-from miles.utils.http_utils import find_available_port, init_http_client
-from miles.utils.misc import SingletonMeta
-from miles.utils.test_utils.mock_sglang_server import ProcessResult, ProcessResultMetaInfo, with_mock_server
-from miles.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
-from miles.utils.types import Sample
+from orbit.rollout.base_types import GenerateFnInput
+from orbit.rollout.inference_rollout.compatibility import load_generate_function
+from orbit.rollout.inference_rollout.inference_rollout_common import GenerateState
+from orbit.rollout.session.server import SessionServer
+from orbit.utils.async_utils import run
+from orbit.utils.http_utils import find_available_port, init_http_client
+from orbit.utils.misc import SingletonMeta
+from orbit.utils.test_utils.mock_sglang_server import ProcessResult, ProcessResultMetaInfo, with_mock_server
+from orbit.utils.test_utils.uvicorn_thread_server import UvicornThreadServer
+from orbit.utils.types import Sample
 
 MODEL_NAME = "Qwen/Qwen3-0.6B"
 RESPONSE_TEXT = "\\boxed{8}"
@@ -29,10 +29,10 @@ RESPONSE_TEXT = "\\boxed{8}"
 DEFAULT_SAMPLING_PARAMS = {"max_new_tokens": 64, "temperature": 0.7}
 
 VARIANT_TO_GENERATE_FN_PATH = {
-    "old_sglang_rollout": "miles.rollout.sglang_rollout.generate",
-    "single_turn": "miles.rollout.generate_hub.single_turn.generate",
-    "multi_turn": "miles.rollout.generate_hub.multi_turn.generate",
-    "agentic_tool_call": "miles.rollout.generate_hub.agentic_tool_call.generate",
+    "old_sglang_rollout": "orbit.rollout.sglang_rollout.generate",
+    "single_turn": "orbit.rollout.generate_hub.single_turn.generate",
+    "multi_turn": "orbit.rollout.generate_hub.multi_turn.generate",
+    "agentic_tool_call": "orbit.rollout.generate_hub.agentic_tool_call.generate",
 }
 
 
@@ -41,10 +41,10 @@ def extra_argv_for_variant(
     *,
     custom_generate_function_path: str | None = None,
     generate_max_turns: int = 16,
-    generate_tool_specs_path: str = "miles.utils.test_utils.mock_tools.SAMPLE_TOOLS",
+    generate_tool_specs_path: str = "orbit.utils.test_utils.mock_tools.SAMPLE_TOOLS",
     generate_tool_call_parser: str = "qwen25",
-    generate_execute_tool_function_path: str = "miles.utils.test_utils.mock_tools.execute_tool_call",
-    custom_agent_function_path: str = "miles.utils.test_utils.mock_tools.run_agentic_tool_call",
+    generate_execute_tool_function_path: str = "orbit.utils.test_utils.mock_tools.execute_tool_call",
+    custom_agent_function_path: str = "orbit.utils.test_utils.mock_tools.run_agentic_tool_call",
 ) -> list[str]:
     argv = [
         "--custom-generate-function-path",
@@ -146,9 +146,9 @@ def make_args(
     extra_argv: list[str] | None = None,
     custom_generate_function_path: str | None = None,
     generate_max_turns: int = 16,
-    generate_tool_specs_path: str = "miles.utils.test_utils.mock_tools.SAMPLE_TOOLS",
+    generate_tool_specs_path: str = "orbit.utils.test_utils.mock_tools.SAMPLE_TOOLS",
     generate_tool_call_parser: str = "qwen25",
-    generate_execute_tool_function_path: str = "miles.utils.test_utils.mock_tools.execute_tool_call",
+    generate_execute_tool_function_path: str = "orbit.utils.test_utils.mock_tools.execute_tool_call",
     rollout_max_context_len: int | None = None,
     chat_template_path: str | None = None,
     num_layers: int | None = None,
@@ -203,7 +203,7 @@ def make_args(
     if extra_argv:
         argv.extend(extra_argv)
 
-    from miles.utils.arguments import parse_args
+    from orbit.utils.arguments import parse_args
 
     with patch("sys.argv", argv):
         args = parse_args()
@@ -238,7 +238,7 @@ def with_session_server(
     instance_id = uuid.uuid4().hex
     args.session_server_instance_ids = {port: instance_id}
     server_args = copy.deepcopy(args)
-    server_args.miles_router_timeout = 30
+    server_args.orbit_router_timeout = 30
     server_args.session_server_instance_id = instance_id
     session_server = SessionServer(server_args, backend_url=backend_url)
 
@@ -254,7 +254,7 @@ def with_session_server(
 @pytest.fixture
 def generation_env(request, variant):
     # tests/conftest.py imports this fixture for every test; load the tokenizer-backed helper only when it is used.
-    from miles.utils.test_utils import mock_tools
+    from orbit.utils.test_utils import mock_tools
 
     SingletonMeta.clear_all_instances()
     params = getattr(request, "param", {})

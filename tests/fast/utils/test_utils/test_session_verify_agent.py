@@ -3,9 +3,9 @@ from copy import deepcopy
 
 from tests.e2e.sglang.test_session_server_multi_role._common import ModelConfig
 
-from miles.utils.chat_template_utils.tito_tokenizer import VALID_APPEND_ROLES
-from miles.utils.test_utils import session_verify_agent
-from miles.utils.test_utils.session_verify_agent import (
+from orbit.utils.chat_template_utils.tito_tokenizer import VALID_APPEND_ROLES
+from orbit.utils.test_utils import session_verify_agent
+from orbit.utils.test_utils.session_verify_agent import (
     ASSISTANT_INPUT_FOLLOWUP_TEXT,
     ASSISTANT_INPUT_TEXTS,
     DriverAction,

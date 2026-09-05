@@ -6,7 +6,7 @@ import pytest
 import ray
 from tests.fast.ray.train.conftest import make_alive_cell, make_cell, make_indep_dp_info
 
-from miles.ray.train import cell as cell_module
+from orbit.ray.train import cell as cell_module
 
 pytestmark = pytest.mark.asyncio
 
@@ -476,7 +476,7 @@ class TestConfirmActorDead:
 
         handle, ready = _make_fake_handle([_raise_factory(asyncio.TimeoutError())])
 
-        with caplog.at_level(logging.ERROR, logger="miles.ray.train.cell"):
+        with caplog.at_level(logging.ERROR, logger="orbit.ray.train.cell"):
             await cell_module._confirm_actor_dead(handle)
 
         assert ready.call_count == 1

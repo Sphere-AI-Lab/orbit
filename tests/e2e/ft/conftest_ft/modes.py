@@ -7,7 +7,7 @@ import typer
 MODEL_NAME: str = "Qwen3-30B-A3B-5layer"
 MODEL_HF_REPO: str = f"fzyzcjy/{MODEL_NAME}"
 MODEL_TYPE: str = "qwen3-30B-A3B-5layer"
-DEBUG_ROLLOUT_DATA_HF_REPO: str = "fzyzcjy/miles-test-rollout-Qwen3-30B-A3B-5layer"
+DEBUG_ROLLOUT_DATA_HF_REPO: str = "fzyzcjy/orbit-test-rollout-Qwen3-30B-A3B-5layer"
 
 FULL_MODEL_NAME: str = "Qwen3-30B-A3B"
 FULL_MODEL_HF_REPO: str = f"Qwen/{FULL_MODEL_NAME}"

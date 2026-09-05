@@ -10,7 +10,7 @@ outputs as a batch. Engine-side expansion is opt-in per model family in sglang-d
 ## 1. Microgroups
 
 `--rollout-microgroup-size M` splits each prompt group of `n_samples_per_prompt` samples into requests of at most M
-(`generate_and_rm_group` in `miles/rollout/sglang_diffusion_rollout.py`). Each request carries
+(`generate_and_rm_group` in `orbit/rollout/sglang_diffusion_rollout.py`). Each request carries
 `num_outputs_per_prompt = M`:
 
 ```

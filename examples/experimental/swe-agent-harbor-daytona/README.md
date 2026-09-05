@@ -2,7 +2,7 @@
 
 This example trains GLM-4.7-Flash on agentic terminal and coding tasks, with
 task sandboxes hosted on [Daytona](https://www.daytona.io/) instead of local
-Docker. Miles runs synchronous GRPO and serves the policy through its session
+Docker. Orbit runs synchronous GRPO and serves the policy through its session
 server; a Harbor agent server drives the agent and returns verifier rewards.
 It is meant to run on a single node of 8 H200 GPUs.
 
@@ -42,19 +42,19 @@ Daytona accounts have a total-disk quota, so keep concurrent sandboxes times
 
 ## 2. Start the Harbor agent server
 
-Use the `harbor-miles-v0.20.0` branch of `harbor-framework/harbor`, which
-carries the Miles integration:
+Use the `harbor-orbit-v0.20.0` branch of `harbor-framework/harbor`, which
+carries the Orbit integration:
 
 ```bash
 git clone https://github.com/harbor-framework/harbor.git
 cd harbor
-git checkout harbor-miles-v0.20.0
+git checkout harbor-orbit-v0.20.0
 uv sync
 
 export DAYTONA_API_KEY=<your-daytona-api-key>
 export HARBOR_TASKS_DIR=/path/to/harbor_tasks
 export TRIALS_DIR=/path/to/trials
-bash /path/to/miles/examples/experimental/swe-agent-harbor-daytona/launch_agent_server.sh
+bash /path/to/orbit/examples/experimental/swe-agent-harbor-daytona/launch_agent_server.sh
 ```
 
 `HARBOR_TASKS_DIR` must contain one Harbor task directory for every
@@ -69,12 +69,12 @@ multiplexer on its own host, not in a foreground shell over SSH: if that shell
 dies it takes the agent server and every live sandbox with it, and the trainer
 then starves without an obvious error.
 
-Verify `http://<agent-server>:11000/health` before launching Miles.
+Verify `http://<agent-server>:11000/health` before launching Orbit.
 
 ## 3. Prepare data
 
 `examples/swe-agent-harbor-docker/download_and_process_data.py` converts a local JSONL into
-Miles format. For terminus-2, set the agent name accordingly:
+Orbit format. For terminus-2, set the agent name accordingly:
 
 ```bash
 python examples/swe-agent-harbor-docker/download_and_process_data.py \
@@ -115,11 +115,11 @@ python examples/swe-agent-harbor-docker/run.py \
 
 For a smoke test, set `--num-rollout 1`.
 
-`--router-external-host` is the address the agent server uses to reach the Miles
+`--router-external-host` is the address the agent server uses to reach the Orbit
 session server, substituted into the base URL handed to the agent. It only has
 to resolve from the agent-server host, so a hostname is fine — use one when the
 agent server reaches the trainer over a tailnet or other overlay. Do not confuse
-it with `--miles-host-ip`, which is bound locally on the trainer and must be an
+it with `--orbit-host-ip`, which is bound locally on the trainer and must be an
 address that already exists on one of its interfaces. Ports 30000 and 31000 must
 be reachable from the agent-server host.
 
@@ -180,5 +180,5 @@ are written by the trainer itself and are authoritative.
 | `EnvironmentStartTimeoutError` in bursts | Sandbox creation is slow because the account is near its disk quota. |
 | `SingleTurnMaxSeqLenExceededError` | Per-turn output cap too low; see the sizing section. |
 | `ContextLengthExceededError` | `AGENT_MAX_INPUT_TOKENS` below the observed context length. |
-| sgl-router fails to bind | `--miles-host-ip` is not an address the trainer host can bind; leave it unset to auto-detect. |
+| sgl-router fails to bind | `--orbit-host-ip` is not an address the trainer host can bind; leave it unset to auto-detect. |
 | Every trial scores 0 | `metadata.instance_id` values have no matching directory under `HARBOR_TASKS_DIR`. |

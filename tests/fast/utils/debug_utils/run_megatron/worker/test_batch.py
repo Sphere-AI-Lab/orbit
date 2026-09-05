@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from miles.backends.training_utils.cp_utils import slice_with_cp
-from miles.utils.debug_utils.run_megatron.worker.batch import _build_labels, loss_func, prepare_batch
+from orbit.backends.training_utils.cp_utils import slice_with_cp
+from orbit.utils.debug_utils.run_megatron.worker.batch import _build_labels, loss_func, prepare_batch
 
 
 def _zigzag_slice(tokens: torch.Tensor, *, cp_rank: int, cp_size: int) -> torch.Tensor:

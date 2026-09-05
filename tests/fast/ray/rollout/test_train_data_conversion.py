@@ -9,7 +9,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.fast.ray.rollout.conftest import make_args, make_sample, make_samples_grouped
 
-from miles.ray.rollout.train_data_conversion import (
+from orbit.ray.rollout.train_data_conversion import (
     _post_process_rewards,
     can_schedule_on_rollout_side,
     convert_samples_to_train_data,
@@ -17,8 +17,8 @@ from miles.ray.rollout.train_data_conversion import (
     split_train_data_by_dp_raw,
     split_train_data_by_dp_scheduled_raw,
 )
-from miles.utils import object_store
-from miles.utils.types import Sample
+from orbit.utils import object_store
+from orbit.utils.types import Sample
 
 
 @pytest.fixture(scope="module", autouse=True)

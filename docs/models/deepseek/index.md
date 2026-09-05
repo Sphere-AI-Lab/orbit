@@ -1,9 +1,9 @@
 ---
 title: DeepSeek
 sidebarTitle: Overview
-description: Miles recipes for the DeepSeek family — V4 Flash, V4 Pro, and V3.2.
+description: Orbit recipes for the DeepSeek family — V4 Flash, V4 Pro, and V3.2.
 ---
-Miles ships recipes for the DeepSeek family across two generations. **DeepSeek-V4** pairs sparse multi-head latent attention with a learned indexer, KV compressors, and hyper-connection routing. **DeepSeek-V3.2** keeps the V3 MoE and MLA shapes and adds DeepSeek Sparse Attention (DSA), the same attention implementation the GLM-5 recipes use. **DeepSeek-V3** itself remains available through `scripts/run_deepseek.py`.
+Orbit ships recipes for the DeepSeek family across two generations. **DeepSeek-V4** pairs sparse multi-head latent attention with a learned indexer, KV compressors, and hyper-connection routing. **DeepSeek-V3.2** keeps the V3 MoE and MLA shapes and adds DeepSeek Sparse Attention (DSA), the same attention implementation the GLM-5 recipes use. **DeepSeek-V3** itself remains available through `scripts/run_deepseek.py`.
 
 ## Variants
 
@@ -21,7 +21,7 @@ A validated DeepSeek-V4-Pro recipe is not yet available — see [`radixark/miles
 DeepSeek-V4-Flash needs 8 nodes of 8× H200 and the `radixark/miles:latest` image:
 
 ```bash
-cd /root/miles
+cd /root/orbit
 python scripts/run_deepseek_v4.py full-train \
    --model-name DeepSeek-V4-Flash-FP8 \
    --num-nodes 8 --num-gpus-per-node 8
@@ -30,7 +30,7 @@ python scripts/run_deepseek_v4.py full-train \
 DeepSeek-V3.2 needs 8 training nodes of 8 GPUs plus separate rollout GPUs:
 
 ```bash
-cd /root/miles
+cd /root/orbit
 python scripts/run_deepseek_v32.py full-train \
    --actor-num-nodes 8 --rollout-num-gpus 8
 ```

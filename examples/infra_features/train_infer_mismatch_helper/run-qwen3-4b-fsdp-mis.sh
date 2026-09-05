@@ -78,7 +78,7 @@ OPTIMIZER_ARGS=(
 
 WANDB_ARGS=(
    --use-wandb
-   --wandb-project miles-dev-mcore-fsdp
+   --wandb-project orbit-dev-mcore-fsdp
    --wandb-group qwen3-4B-fsdp-1130-ref
    --wandb-key ${WANDB_API_KEY}
 )

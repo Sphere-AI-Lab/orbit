@@ -1,6 +1,6 @@
 ### 0
 pkill -9 sglang; sleep 3; ray stop
-  --force; pkill -9 ray; pkill -9 miles; sleep 3; pkill -9 ray; pkill -9 miles; pkill -9 redis; true; 
+  --force; pkill -9 ray; pkill -9 orbit; sleep 3; pkill -9 ray; pkill -9 orbit; pkill -9 redis; true; 
 
 ### 1
 export PYTHONUNBUFFERED=1 && ray start
@@ -15,7 +15,7 @@ nvidia-smi topo -m 2>/dev/null | grep -o 'NV[0-9][0-9]*' | wc -l
 ### 3
 export no_proxy=127.0.0.1 && export PYTHONUNBUFFERED=1 && ray job submit
   --address="http://127.0.0.1:8265"
-  --runtime-env-json='{"env_vars": {"PYTHONUNBUFFERED": "1", "CUDA_DEVICE_MAX_CONNECTIONS": "1", "NCCL_NVLS_ENABLE": "0", "no_proxy": "127.0.0.1,127.0.0.1", "MASTER_ADDR": "127.0.0.1", "SGLANG_ENABLE_UNIFIED_RADIX_TREE": "1", "SGLANG_OPT_USE_INKLING_FUSED_AR_SCONV_NORM": "false", "SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK": "1", "MILES_SGLANG_DUMMY_LOAD": "0", "SGLANG_SERVER_ENGINE_ROLLOUT_RETURN_LOGPROB": "1", "RAY_memory_monitor_refresh_ms": "0", "NCCL_MNNVL_ENABLE": "1", "NCCL_RAS_ENABLE": "0", "PYTHONPATH": "<REPO_ROOT>:/root/Megatron-LM:/frozen/pythonpath"}}'
+  --runtime-env-json='{"env_vars": {"PYTHONUNBUFFERED": "1", "CUDA_DEVICE_MAX_CONNECTIONS": "1", "NCCL_NVLS_ENABLE": "0", "no_proxy": "127.0.0.1,127.0.0.1", "MASTER_ADDR": "127.0.0.1", "SGLANG_ENABLE_UNIFIED_RADIX_TREE": "1", "SGLANG_OPT_USE_INKLING_FUSED_AR_SCONV_NORM": "false", "SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK": "1", "ORBIT_SGLANG_DUMMY_LOAD": "0", "SGLANG_SERVER_ENGINE_ROLLOUT_RETURN_LOGPROB": "1", "RAY_memory_monitor_refresh_ms": "0", "NCCL_MNNVL_ENABLE": "1", "NCCL_RAS_ENABLE": "0", "PYTHONPATH": "<REPO_ROOT>:/root/Megatron-LM:/frozen/pythonpath"}}'
   -- python3 <REPO_ROOT>/train.py
   --disable-bias-linear
   --num-layers 4
@@ -49,7 +49,7 @@ export no_proxy=127.0.0.1 && export PYTHONUNBUFFERED=1 && ray job submit
   --moe-aux-loss-coeff 0
   --moe-grouped-gemm
   --qk-layernorm
-  --custom-model-provider-path miles_plugins.models.inkling.model.inkling_model_provider
+  --custom-model-provider-path orbit_plugins.models.inkling.model.inkling_model_provider
   --hf-checkpoint /root/models/Inkling-4layer
   --load /root/models/Inkling-4layer_torch_dist
   --model-name inkling
@@ -119,7 +119,7 @@ export no_proxy=127.0.0.1 && export PYTHONUNBUFFERED=1 && ray job submit
   --num-gpus-per-node 4
   --colocate 
   --use-wandb
-  --wandb-project miles-run_inkling
+  --wandb-project orbit-run_inkling
   --wandb-group 260101-000000-000
   --wandb-key 'frozen-wandb-api-key'
   --disable-wandb-random-suffix   

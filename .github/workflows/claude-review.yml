@@ -83,9 +83,9 @@ jobs:
             - Resource leaks: GPU memory, file handles, subprocess teardown (especially around ray / sglang lifecycles).
             - Hardcoded secrets / credentials / tokens, or hardcoded absolute paths under `/root/`, `/home/`, etc.
             - PR description claims that don't match the diff (e.g. "fixes X under `set -e`" when the script doesn't have `set -e`).
-            - **`mpu.get_*` ban**: direct calls to `mpu.get_*` are banned by pre-commit. Use the `ParallelState` wrapper. Exempt: `backends/megatron_utils/parallel.py`, `tools/convert_to_hf.py`, `miles_plugins/`, `examples/`.
-            - **Slurm launcher invariants** (`scripts/slurm/`): if the PR touches `launch_miles.sbatch`, `submit.sh`, or `lib/*.sh`, cross-check `scripts/slurm/docs/launcher.md` (step memory cap, two-phase cleanup, healthcheck). Don't accept changes that break these without explicit justification.
-            - **Tests & docs — only when genuinely necessary.** The bar is high: flag only if the PR introduces non-trivial new behavior in `miles/` that is reasonably testable and has no test, or makes a user-visible change that contradicts existing `docs/` or `README.md`. Do NOT ask for tests on: bug fixes, one-line changes, refactors with no behavior change, scripts under `scripts/`, infra/launcher changes, doc-only PRs. Do NOT ask for doc updates unless the existing doc is now wrong. When in doubt, skip it.
+            - **`mpu.get_*` ban**: direct calls to `mpu.get_*` are banned by pre-commit. Use the `ParallelState` wrapper. Exempt: `backends/megatron_utils/parallel.py`, `tools/convert_to_hf.py`, `orbit_plugins/`, `examples/`.
+            - **Slurm launcher invariants** (`scripts/slurm/`): if the PR touches `launch_orbit.sbatch`, `submit.sh`, or `lib/*.sh`, cross-check `scripts/slurm/docs/launcher.md` (step memory cap, two-phase cleanup, healthcheck). Don't accept changes that break these without explicit justification.
+            - **Tests & docs — only when genuinely necessary.** The bar is high: flag only if the PR introduces non-trivial new behavior in `orbit/` that is reasonably testable and has no test, or makes a user-visible change that contradicts existing `docs/` or `README.md`. Do NOT ask for tests on: bug fixes, one-line changes, refactors with no behavior change, scripts under `scripts/`, infra/launcher changes, doc-only PRs. Do NOT ask for doc updates unless the existing doc is now wrong. When in doubt, skip it.
 
             **Do not flag:**
             - Missing error handlers for impossible internal states.

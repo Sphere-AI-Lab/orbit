@@ -1,12 +1,12 @@
 #!/bin/bash
 # Shared fixed Geo3K evaluation overlay for Milestone 11.
 #
-# Source this only after a synchronous recipe has assembled MILES_ARGS. It does
+# Source this only after a synchronous recipe has assembled ORBIT_ARGS. It does
 # not change the model, OPD objective, optimizer, or parallel layout. It owns
 # the Milestone 11 trajectory budget shared by training and fixed evaluation.
 
-if [[ -z "${MILES_ARGS+x}" ]]; then
-   echo "FATAL: Milestone 11 fixed-eval overlay requires an assembled MILES_ARGS array" >&2
+if [[ -z "${ORBIT_ARGS+x}" ]]; then
+   echo "FATAL: Milestone 11 fixed-eval overlay requires an assembled ORBIT_ARGS array" >&2
    return 1 2>/dev/null || exit 1
 fi
 
@@ -47,17 +47,17 @@ fi
 MILESTONE_11_NUM_ROLLOUT=""
 MILESTONE_11_RESPONSE_LIMIT_FOUND=0
 MILESTONE_11_CONTEXT_LIMIT_FOUND=0
-for i in "${!MILES_ARGS[@]}"; do
-   case "${MILES_ARGS[$i]}" in
+for i in "${!ORBIT_ARGS[@]}"; do
+   case "${ORBIT_ARGS[$i]}" in
       --num-rollout)
-         MILESTONE_11_NUM_ROLLOUT=${MILES_ARGS[$((i + 1))]}
+         MILESTONE_11_NUM_ROLLOUT=${ORBIT_ARGS[$((i + 1))]}
          ;;
       --rollout-max-response-len)
-         MILES_ARGS[$((i + 1))]=$OPD_EVAL_MAX_CONTEXT_LEN
+         ORBIT_ARGS[$((i + 1))]=$OPD_EVAL_MAX_CONTEXT_LEN
          MILESTONE_11_RESPONSE_LIMIT_FOUND=1
          ;;
       --rollout-max-context-len)
-         MILES_ARGS[$((i + 1))]=$OPD_EVAL_MAX_CONTEXT_LEN
+         ORBIT_ARGS[$((i + 1))]=$OPD_EVAL_MAX_CONTEXT_LEN
          MILESTONE_11_CONTEXT_LIMIT_FOUND=1
          ;;
    esac
@@ -67,7 +67,7 @@ if ((MILESTONE_11_RESPONSE_LIMIT_FOUND == 0)); then
    return 1 2>/dev/null || exit 1
 fi
 if ((MILESTONE_11_CONTEXT_LIMIT_FOUND == 0)); then
-   MILES_ARGS+=(--rollout-max-context-len "$OPD_EVAL_MAX_CONTEXT_LEN")
+   ORBIT_ARGS+=(--rollout-max-context-len "$OPD_EVAL_MAX_CONTEXT_LEN")
 fi
 if ((OPD_EVAL_INTERVAL == 1)) && [[ "$MILESTONE_11_NUM_ROLLOUT" != "0" ]]; then
    echo "FATAL: Milestone 11 student training requires OPD_EVAL_INTERVAL >= 2;" >&2
@@ -93,7 +93,7 @@ if [[ -f "$OPD_EVAL_SOURCE_TRAIN" && -f "$OPD_EVAL_SOURCE_TEST" ]]; then
          fi
       done
    fi
-   python3 "$MILES_REPO/examples/geo3k_vlm/multi_turn/fixed_eval.py" prepare \
+   python3 "$ORBIT_REPO/examples/geo3k_vlm/multi_turn/fixed_eval.py" prepare \
       --train "$OPD_EVAL_SOURCE_TRAIN" \
       --test "$OPD_EVAL_SOURCE_TEST" \
       --output "$OPD_FIXED_EVAL_MANIFEST" \
@@ -114,7 +114,7 @@ fi
 
 # The normal training callback stays untouched. The generated per-dataset eval
 # config selects a wrapper that assigns the rule-based Geo3K task reward before
-# Miles can invoke the OPD custom reward function, so eval never issues teacher-
+# Orbit can invoke the OPD custom reward function, so eval never issues teacher-
 # scoring requests.
 FOUND_GENERATE_FLAG=0
 if [[ -n "${ROLLOUT_ARGS+x}" ]]; then
@@ -138,16 +138,16 @@ MILESTONE_11_EVAL_ARGS=(
    --custom-eval-rollout-log-function-path examples.geo3k_vlm.multi_turn.fixed_eval.log_eval_rollout_data
    --rollout-all-samples-process-path examples.geo3k_vlm.multi_turn.fixed_eval.dump_samples
 )
-MILES_ARGS+=("${MILESTONE_11_EVAL_ARGS[@]}")
+ORBIT_ARGS+=("${MILESTONE_11_EVAL_ARGS[@]}")
 
 # Student training arms consume the augmented prompt file (train plus the
 # non-evaluated, non-eval-image test records). The eval-only teacher references
 # keep the manifest itself as their inert --prompt-data.
 if [[ "$MILESTONE_11_NUM_ROLLOUT" != "0" ]]; then
    MILESTONE_11_PROMPT_REWRITTEN=0
-   for i in "${!MILES_ARGS[@]}"; do
-      if [[ "${MILES_ARGS[$i]}" == "--prompt-data" ]]; then
-         MILES_ARGS[$((i + 1))]=$OPD_AUGMENTED_TRAIN_DATA
+   for i in "${!ORBIT_ARGS[@]}"; do
+      if [[ "${ORBIT_ARGS[$i]}" == "--prompt-data" ]]; then
+         ORBIT_ARGS[$((i + 1))]=$OPD_AUGMENTED_TRAIN_DATA
          MILESTONE_11_PROMPT_REWRITTEN=1
          break
       fi
@@ -161,11 +161,11 @@ fi
 # Milestone 11 is an online synchronous quality study. Fail before allocation if
 # a caller accidentally mixes in the fully-async driver, reward optimization,
 # rollout q_old ablation, or checkpoint saving.
-if [[ "${MILES_TRAIN_ENTRY:-train.py}" != "train.py" ]]; then
-   echo "FATAL: Milestone 11 requires synchronous train.py, got '${MILES_TRAIN_ENTRY:-}'" >&2
+if [[ "${ORBIT_TRAIN_ENTRY:-train.py}" != "train.py" ]]; then
+   echo "FATAL: Milestone 11 requires synchronous train.py, got '${ORBIT_TRAIN_ENTRY:-}'" >&2
    return 1 2>/dev/null || exit 1
 fi
-for arg in "${MILES_ARGS[@]}"; do
+for arg in "${ORBIT_ARGS[@]}"; do
    case "$arg" in
       examples.fully_async.* | --fully-async-* | --opd-optimize-task-reward | --use-rollout-logprobs)
          echo "FATAL: Milestone 11 forbids scheduling/objective ablation flag '$arg'" >&2

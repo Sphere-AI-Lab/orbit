@@ -9,7 +9,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 
 @dataclass
@@ -78,7 +78,7 @@ def execute(args: ScriptArgs):
     ref_load_path = f"{args.model_dir}/{args.model_name}_torch_dist"
 
     # Smoke runs: no checkpoint save (Megatron's final save is forced on the
-    # last rollout whenever --save-interval is set — miles/utils/misc.py:192 —
+    # last rollout whenever --save-interval is set — orbit/utils/misc.py:192 —
     # so we omit both --save and --save-interval to keep ~464G per-config off
     # disk). The ref-load is still required to initialise model weights.
     ckpt_args = f"--hf-checkpoint {args.model_dir}/{args.model_name} " f"--ref-load {ref_load_path} "

@@ -40,10 +40,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-# No miles imports at module level, deliberately: multiprocessing "spawn"
+# No orbit imports at module level, deliberately: multiprocessing "spawn"
 # children (the load generators and the mock backend) re-import this script as
-# __mp_main__, and the miles chain drags in transformers (~10s per child). All
-# miles imports live inside the driver-side functions that use them.
+# __mp_main__, and the orbit chain drags in transformers (~10s per child). All
+# orbit imports live inside the driver-side functions that use them.
 
 DEFAULT_HF_CHECKPOINT = "Qwen/Qwen3-0.6B"
 DEFAULT_TITO_MODEL = "qwen3"
@@ -326,7 +326,7 @@ def _build_server_args(
     port: int,
     instance_idx: int,
 ) -> SimpleNamespace:
-    """A Miles-args namespace carrying exactly what one session-server instance reads.
+    """A Orbit-args namespace carrying exactly what one session-server instance reads.
 
     `use_rollout_routing_replay=True` makes the server inject
     `return_routed_experts=True` upstream and exercise the R3-strip path, i.e.
@@ -343,7 +343,7 @@ def _build_server_args(
         use_rollout_routing_replay=True,
         use_rollout_indexer_replay=False,
         pause_generation_mode="in_place" if bench_args.incremental_r3 else "retract",
-        miles_router_timeout=600.0,
+        orbit_router_timeout=600.0,
         session_server_ip=ip,
         session_server_port=port,
         session_server_instance_id=f"bench-i{instance_idx}",
@@ -367,7 +367,7 @@ def _start_backend(
     # in both parent and child without a tests/manual/session package.
     from _mock_r3_backend import run_mock_r3_backend
 
-    from miles.utils.http_utils import find_available_port, wait_for_server_ready
+    from orbit.utils.http_utils import find_available_port, wait_for_server_ready
 
     ctx = multiprocessing.get_context("spawn")
     port = find_available_port(28000)
@@ -532,9 +532,9 @@ def _drive_workload(
 
 
 def run_http_bench(args) -> dict[str, Any]:
-    from miles.utils.chat_template_utils import get_tito_tokenizer, resolve_fixed_chat_template
-    from miles.utils.http_utils import find_available_port, is_port_available, wait_for_server_ready
-    from miles.utils.processing_utils import load_tokenizer
+    from orbit.utils.chat_template_utils import get_tito_tokenizer, resolve_fixed_chat_template
+    from orbit.utils.http_utils import find_available_port, is_port_available, wait_for_server_ready
+    from orbit.utils.processing_utils import load_tokenizer
 
     if args.chat_template_path is not None:
         chat_template_path = args.chat_template_path
@@ -572,7 +572,7 @@ def run_http_bench(args) -> dict[str, Any]:
 
     server_procs: list[multiprocessing.process.BaseProcess] = []
     try:
-        from miles.rollout.session.server import run_session_server
+        from orbit.rollout.session.server import run_session_server
 
         # Consecutive ports from one free base, mirroring the production
         # `--session-server-port start end` range deployment.

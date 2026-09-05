@@ -27,7 +27,7 @@ python <REPO_ROOT>/tools/fp8_cast_bf16.py
   --master-port 23456
   --nnodes={{nnodes}}
   --node-rank {{node_rank}} <REPO_ROOT>/tools/convert_hf_to_torch_dist.py
-  --spec miles_plugins.models.glm5.glm5 get_glm5_spec
+  --spec orbit_plugins.models.glm5.glm5 get_glm5_spec
   --disable-bias-linear
   --num-layers 61
   --hidden-size 7168

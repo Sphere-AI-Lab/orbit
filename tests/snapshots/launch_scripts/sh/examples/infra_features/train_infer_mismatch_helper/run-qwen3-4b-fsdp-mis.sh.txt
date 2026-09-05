@@ -123,7 +123,7 @@
 "--use-tis"
 "--use-wandb"
 "--wandb-project"
-"miles-dev-mcore-fsdp"
+"orbit-dev-mcore-fsdp"
 "--wandb-group"
 "qwen3-4B-fsdp-1130-ref"
 "--wandb-key"

@@ -24,14 +24,14 @@ fi
 echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MODEL_ARGS_LINE="$(python3 "${SCRIPT_DIR}/../../../miles/utils/external_utils/model_args_utils.py" "qwen3-4B-Instruct-2507")" || exit 1
+MODEL_ARGS_LINE="$(python3 "${SCRIPT_DIR}/../../../orbit/utils/external_utils/model_args_utils.py" "qwen3-4B-Instruct-2507")" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 
 CKPT_ARGS=(
    --hf-checkpoint /root/Qwen3-4B-Instruct-2507/
    --ref-load /root/Qwen3-4B-Instruct-2507_torch_dist/
-   --load /root/Qwen3-4B-Instruct-2507_miles/
-   --save /root/Qwen3-4B-Instruct-2507_miles/
+   --load /root/Qwen3-4B-Instruct-2507_orbit/
+   --save /root/Qwen3-4B-Instruct-2507_orbit/
    --save-interval 20
 )
 
@@ -45,7 +45,7 @@ ROLLOUT_ARGS=(
    --rollout-max-response-len 1024
    --rollout-temperature 1
    --global-batch-size 256
-   --dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
+   --dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
    --balance-data
 )
 
@@ -92,7 +92,7 @@ OPTIMIZER_ARGS=(
 
 WANDB_ARGS=(
    # --use-wandb
-   # --wandb-project miles-tau-bench
+   # --wandb-project orbit-tau-bench
    # --wandb-group qwen3-4B
    # --wandb-key ${WANDB_KEY}
 )

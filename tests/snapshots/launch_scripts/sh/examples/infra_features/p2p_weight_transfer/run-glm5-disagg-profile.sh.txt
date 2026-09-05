@@ -45,7 +45,7 @@
 
 ### 9
 "python3"
-"<REPO_ROOT>/miles/utils/external_utils/model_args_utils.py"
+"<REPO_ROOT>/orbit/utils/external_utils/model_args_utils.py"
 "glm5-744B-A40B"
 
 ### 10
@@ -80,12 +80,12 @@
 "job"
 "submit"
 "--address=http://127.0.0.1:8265"
-"--runtime-env-json={\n  \"env_vars\": {\n    \"MC_TRANSFER_TIMEOUT\": \"600\",\n    \"RAY_DEBUG\": \"1\",\n    \"PYTHONPATH\": \"/root/Megatron-LM/\",\n    \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",\n    \"NCCL_NVLS_ENABLE\": \"1\",\n    \"INDEXER_ROPE_NEOX_STYLE\": \"0\",\n    \"NVSHMEM_DISABLE_NCCL\": \"1\",\n    \"MILES_LOG_DIR\": \"<SANDBOX>/workdir\"\n  }\n}"
+"--runtime-env-json={\n  \"env_vars\": {\n    \"MC_TRANSFER_TIMEOUT\": \"600\",\n    \"RAY_DEBUG\": \"1\",\n    \"PYTHONPATH\": \"/root/Megatron-LM/\",\n    \"CUDA_DEVICE_MAX_CONNECTIONS\": \"1\",\n    \"NCCL_NVLS_ENABLE\": \"1\",\n    \"INDEXER_ROPE_NEOX_STYLE\": \"0\",\n    \"NVSHMEM_DISABLE_NCCL\": \"1\",\n    \"ORBIT_LOG_DIR\": \"<SANDBOX>/workdir\"\n  }\n}"
 "--"
 "python3"
 "train.py"
 "--spec"
-"miles_plugins.models.glm5.glm5"
+"orbit_plugins.models.glm5.glm5"
 "get_glm5_spec"
 "--moe-layer-freq"
 "[0]*3+[1]*75"

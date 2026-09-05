@@ -5,7 +5,7 @@ description: Launch recipe for OpenAI's GPT-OSS 20B — Megatron BF16 on a singl
 ---
 ## 1. Model Introduction
 
-[GPT-OSS](https://huggingface.co/openai/gpt-oss-20b) is OpenAI's open-weight language model, designed for reasoning, agentic tasks, and developer use cases. miles supports the 20 B variant.
+[GPT-OSS](https://huggingface.co/openai/gpt-oss-20b) is OpenAI's open-weight language model, designed for reasoning, agentic tasks, and developer use cases. orbit supports the 20 B variant.
 
 **Key highlights:**
 
@@ -39,7 +39,7 @@ The launcher needs no `convert_hf_to_torch_dist.py` step: it loads the HF checkp
 
 ```bash
 # Megatron BF16 (1 node × 8 GPU)
-cd /root/miles
+cd /root/orbit
 python scripts/run_gpt_oss_20b.py
 ```
 

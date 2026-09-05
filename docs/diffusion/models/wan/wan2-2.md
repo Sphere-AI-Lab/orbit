@@ -29,7 +29,7 @@ temporal compression).
 
 ## 3. Family config
 
-Registered in `miles/backends/fsdp_utils/configs/wan2_2.py`:
+Registered in `orbit/backends/fsdp_utils/configs/wan2_2.py`:
 
 | Property | Value | Notes |
 |---|---|---|
@@ -62,7 +62,7 @@ Recipe: `scripts/run_diffusion_grpo_wan22_pickscore_17gpu_multinode.py`
 **Status:** [🧩 PG — Proxy gated](/diffusion/user-guide/recipe-verification#pg)
 
 ```bash
-MILES_SCRIPT_EXTERNAL_RAY=1 python3 scripts/run_diffusion_grpo_wan22_pickscore_17gpu_multinode.py
+ORBIT_SCRIPT_EXTERNAL_RAY=1 python3 scripts/run_diffusion_grpo_wan22_pickscore_17gpu_multinode.py
 ```
 
 `--four-gpu-ci` scales the recipe to one 4-GPU node for e2e CI.
@@ -74,7 +74,7 @@ Recipe: `scripts/run_diffusion_sft_wan22.py`
 **Status:** [○ NV — Not verified](/diffusion/user-guide/recipe-verification#nv)
 
 ```bash
-MILES_SCRIPT_DATA_JSONL=/abs/data.jsonl python3 scripts/run_diffusion_sft_wan22.py
+ORBIT_SCRIPT_DATA_JSONL=/abs/data.jsonl python3 scripts/run_diffusion_sft_wan22.py
 ```
 
 ## 5. Reference results

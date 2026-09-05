@@ -2,7 +2,7 @@
 
 Covers `build_env_dataset.py` (offline builder) and `data_source.py` (in-memory
 loader). The dataset is the single source of truth — same `samples.jsonl`
-feeds both training and miles eval.
+feeds both training and orbit eval.
 
 ## Row schema
 
@@ -30,7 +30,7 @@ feeds both training and miles eval.
 }
 ```
 
-`input` and `images` satisfy miles' default eval `Dataset` loader keys
+`input` and `images` satisfy orbit' default eval `Dataset` loader keys
 (`--input-key=input`, `--multimodal-keys=images`); both are overridden inside
 `rollout.generate` after `env.reset`, so their stored values are placeholders.
 
@@ -40,7 +40,7 @@ feeds both training and miles eval.
   row's `metadata.vagen` straight onto a `Sample`. `n_samples_per_prompt`
   deepcopies form a GRPO group sharing the same `(env, seed)`, so the group
   baseline measures rollout variance, not env-difficulty variance.
-- **Eval**: miles eval loads the jsonl via `--eval-prompt-data`. Same
+- **Eval**: orbit eval loads the jsonl via `--eval-prompt-data`. Same
   `rollout.generate`.
 
 Both paths use the LIVE `env.reset` render as the turn-0 input; the saved
@@ -58,7 +58,7 @@ PNG is only used for drift detection (see below).
 
 The data source bypasses `RolloutDataSource.__init__` because `prompt_data`
 here is jsonl/yaml, not the parquet prompt table the base class expects.
-`args.rollout_global_dataset` must stay `True` — multiple miles paths assert
+`args.rollout_global_dataset` must stay `True` — multiple orbit paths assert
 it (`inference_rollout_train.py`, `sglang_rollout.py`, `ray/rollout.py`,
 `ray/placement_group.py`).
 
@@ -132,12 +132,12 @@ VAGEN's Sokoban env uses a global-RNG `set_seed` context. For stable output:
   PYTHONHASHSEED-dependent retry-orbit fallback.
 
 `--base-seed 0` matches VAGEN's default (`config.get("base_seed", 0)`); the
-recipe must pass `--seed 0` to miles so train's seed expansion matches.
+recipe must pass `--seed 0` to orbit so train's seed expansion matches.
 
 ## CLI
 
 ```
-env -u LD_LIBRARY_PATH conda run -n miles \
+env -u LD_LIBRARY_PATH conda run -n orbit \
     python -m examples.vagen.build_env_dataset \
         --yaml       examples/vagen/configs/sokoban_train_env.yaml \
         --output-dir data/sokoban-main/train \

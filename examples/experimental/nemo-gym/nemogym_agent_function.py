@@ -1,17 +1,17 @@
-"""NeMo Gym <-> miles adapter (agent function).
+"""NeMo Gym <-> orbit adapter (agent function).
 
 Targets upstream NVIDIA-NeMo/Gym's sandbox-backed ``mini_swe_agent_2`` agent,
 which requires the per-request policy endpoint override (upstream ``main``,
 >= ``fcca3a8``).
 
-miles calls ``run`` once per sample via
+orbit calls ``run`` once per sample via
 ``--custom-agent-function-path nemogym_agent_function.run`` (with
-``--custom-generate-function-path miles.rollout.generate_hub.agentic_tool_call.generate``).
+``--custom-generate-function-path orbit.rollout.generate_hub.agentic_tool_call.generate``).
 Each call POSTs the task to the NeMo Gym agent server's ``/run`` endpoint,
 handing over the session's OpenAI-compatible URL as ``policy_base_url``.
 NeMo Gym runs mini-swe-agent v2 in a ``nemo_gym.sandbox`` container (docker /
 daytona / apptainer / ecs_fargate / opensandbox providers) against that URL,
-so every model call goes through miles' session server and is recorded
+so every model call goes through orbit' session server and is recorded
 losslessly (token ids + logprobs + loss masks) — no re-tokenization.
 
 The NeMo Gym environment grades the episode itself (SWE-bench harness); the
@@ -25,7 +25,7 @@ Env vars:
   NEMO_GYM_RUN_TIMEOUT  hard wall-clock cap in seconds for one /run call
                  (default: 3600). SWE episodes pull per-task docker images on
                  first use, which can dominate early rollouts.
-  MILES_ROUTER_EXTERNAL_HOST  optional host rewrite for the session URL when
+  ORBIT_ROUTER_EXTERNAL_HOST  optional host rewrite for the session URL when
                  the NeMo Gym server cannot resolve the trainer's hostname
                  (e.g. it runs outside the trainer's docker network).
 """
@@ -41,7 +41,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# Deliberately no miles imports: importing miles pulls in torch, and this
+# Deliberately no orbit imports: importing orbit pulls in torch, and this
 # adapter (plus its offline tests and the eval_nemogym_via_api scan) must load
 # on CPU-only machines too.
 
@@ -70,7 +70,7 @@ async def post_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
 def _resolve_session_url(base_url: str) -> str:
     """Build the OpenAI-compatible policy URL, rewriting host for off-cluster agents."""
     session_url = f"{base_url}/v1"
-    external_host = os.getenv("MILES_ROUTER_EXTERNAL_HOST")
+    external_host = os.getenv("ORBIT_ROUTER_EXTERNAL_HOST")
     if external_host:
         parsed = urlparse(session_url)
         netloc = f"{external_host}:{parsed.port}" if parsed.port else external_host
@@ -79,7 +79,7 @@ def _resolve_session_url(base_url: str) -> str:
 
 
 def build_responses_create_params(request_kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Map miles' chat-completions sampling kwargs onto NeMo Gym's Responses-API params.
+    """Map orbit' chat-completions sampling kwargs onto NeMo Gym's Responses-API params.
 
     mini_swe_agent_2 reads sampling settings exclusively from
     ``responses_create_params`` (temperature / top_p / max_output_tokens, see

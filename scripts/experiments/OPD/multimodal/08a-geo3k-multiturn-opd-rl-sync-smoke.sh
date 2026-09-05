@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 
 # Pin the synchronous control even if the submit environment previously set an
 # async entry point.
-export MILES_TRAIN_ENTRY=train.py
+export ORBIT_TRAIN_ENTRY=train.py
 export OPD_NUM_ROLLOUT=${OPD_NUM_ROLLOUT:-5}
 export OPD_TASK_REWARD_COEF=1
 export WANDB_RUN_NAME=${WANDB_RUN_NAME:-opd-mm-08a-geo3k-mt-opd-rl-sync-smoke}
@@ -20,7 +20,7 @@ export WANDB_RUN_NAME=${WANDB_RUN_NAME:-opd-mm-08a-geo3k-mt-opd-rl-sync-smoke}
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/06a-geo3k-multiturn-hybrid-smoke.sh"
 
-MILES_ARGS+=(
+ORBIT_ARGS+=(
    --opd-optimize-task-reward
    --opd-task-reward-coef "$OPD_TASK_REWARD_COEF"
 )

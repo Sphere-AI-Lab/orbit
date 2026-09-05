@@ -13,7 +13,7 @@ from examples.model_response_trace_viewer.response_trace import (
 from PIL import Image
 from tests.fast.examples.model_response_trace_viewer.conftest import make_sample
 
-from miles.utils.types import Sample
+from orbit.utils.types import Sample
 
 
 def _trace_args(path: Path | None, cap: int | None = 8) -> SimpleNamespace:
@@ -119,7 +119,7 @@ def test_model_response_trace_record_maps_compact_geo3k_row_exactly():
                 "content_index": None,
             }
         ],
-        "metadata": {"producer": "miles"},
+        "metadata": {"producer": "orbit"},
     }
 
 

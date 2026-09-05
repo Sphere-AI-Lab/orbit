@@ -16,20 +16,20 @@ from unittest.mock import MagicMock, patch
 import pytest
 import torch
 
-from miles.backends.megatron_utils.lora_utils import is_lora_weight_name
-from miles.backends.megatron_utils.update_weight.common import _check_weight_sync_results
-from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
+from orbit.backends.megatron_utils.lora_utils import is_lora_weight_name
+from orbit.backends.megatron_utils.update_weight.common import _check_weight_sync_results
+from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast import (
     UpdateWeightFromDistributed,
 )
-from miles.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin import (
+from orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin import (
     DistBucketedWeightUpdateMixin,
 )
-from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
-from miles.utils.lora import LORA_ADAPTER_NAME
+from orbit.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
+from orbit.utils.lora import LORA_ADAPTER_NAME
 
-_UW_MODULE = "miles.backends.megatron_utils.update_weight.update_weight_from_tensor"
-_MIXIN_MODULE = "miles.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin"
-_BROADCAST_MODULE = "miles.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast"
+_UW_MODULE = "orbit.backends.megatron_utils.update_weight.update_weight_from_tensor"
+_MIXIN_MODULE = "orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.mixin"
+_BROADCAST_MODULE = "orbit.backends.megatron_utils.update_weight.update_weight_from_distributed.broadcast"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -179,13 +179,13 @@ class TestSendHfParamsEmptyLoraDetection:
 class TestUpdateWeightsZeroChunks:
     """When the weight iterator yields nothing for LoRA, raise instead of silently succeeding."""
 
-    @patch("miles.backends.megatron_utils.update_weight.common.ray")
+    @patch("orbit.backends.megatron_utils.update_weight.common.ray")
     @patch(f"{_UW_MODULE}.get_gloo_group", return_value=MagicMock())
     @patch(f"{_UW_MODULE}.ray")
     @patch(f"{_UW_MODULE}.dist")
     @patch(f"{_UW_MODULE}.HfWeightIteratorBase")
     def test_raises_on_zero_lora_chunks(self, mock_iter_base, mock_dist, mock_ray, mock_gloo, mock_common_ray):
-        from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
+        from orbit.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
 
         mock_dist.get_world_size.return_value = 1
         mock_dist.get_rank.return_value = 0
@@ -210,7 +210,7 @@ class TestUpdateWeightsZeroChunks:
         with pytest.raises(RuntimeError, match="zero chunks"):
             updater.update_weights()
 
-    @patch("miles.backends.megatron_utils.update_weight.common.ray")
+    @patch("orbit.backends.megatron_utils.update_weight.common.ray")
     @patch(f"{_UW_MODULE}.get_gloo_group", return_value=MagicMock())
     @patch(f"{_UW_MODULE}.ray")
     @patch(f"{_UW_MODULE}.dist")
@@ -283,13 +283,13 @@ class TestFlattenedTensorBucketRoundTrip:
         not align across heterogeneous element sizes.
 
         This is a latent production landmine: ``_send_to_colocated_engine`` in
-        ``miles/backends/megatron_utils/update_weight/update_weight_from_tensor.py``
+        ``orbit/backends/megatron_utils/update_weight/update_weight_from_tensor.py``
         reads the flag and packs mixed dtypes into a single bucket. In practice
         LoRA weights are uniform dtype, but FP8 / INT4 mixed-precision base
         weight sync would crash on sglang's receiver.
 
         Fix path (either side):
-          - miles side: stop trusting ``supports_multi_dtypes`` in
+          - orbit side: stop trusting ``supports_multi_dtypes`` in
             ``_send_to_colocated_engine`` and always group by dtype (matches
             the FSDP path's existing implementation in
             ``fsdp_utils/update_weight_utils.py``).
@@ -466,7 +466,7 @@ class TestBroadcastLoraImplementation:
         return SimpleNamespace(
             rollout_engines=engines,
             _lora_config={"peft_type": "LORA", "r": 32, "lora_alpha": 32},
-            _group_name="miles-pp_0",
+            _group_name="orbit-pp_0",
             _model_update_groups=MagicMock(name="base_nccl_group"),
         )
 
@@ -490,7 +490,7 @@ class TestBroadcastLoraImplementation:
         kwargs = engines[0].load_lora_adapter_from_distributed.calls[0]
         assert kwargs["lora_name"] == LORA_ADAPTER_NAME
         assert kwargs["config_dict"] == fake_self._lora_config
-        assert kwargs["group_name"] == "miles-pp_0"
+        assert kwargs["group_name"] == "orbit-pp_0"
         # Metadata describes every adapter tensor, no IPC payload.
         assert kwargs["names"] == [n for n, _ in SAMPLE_LORA_WEIGHTS]
         assert kwargs["dtypes"] == [t.dtype for _, t in SAMPLE_LORA_WEIGHTS]

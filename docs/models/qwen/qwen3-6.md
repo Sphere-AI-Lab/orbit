@@ -12,9 +12,9 @@ native hybrid reasoning (thinking by default), built-in tool calling, and
 multimodal text / image / video input. Context windows reach 262 K and
 extend past 1 M. Weights are Apache 2.0, available in BF16 and FP8.
 
-The dense **Qwen3.6-27B** is the single-GPU-friendly variant. In miles it
+The dense **Qwen3.6-27B** is the single-GPU-friendly variant. In orbit it
 reuses the Qwen3.5 Megatron spec
-(`miles_plugins.models.qwen3_5.get_qwen3_5_spec`); architecturally it's a
+(`orbit_plugins.models.qwen3_5.get_qwen3_5_spec`); architecturally it's a
 wider, deeper Qwen3.5 with the gated-attention design preserved.
 
 **Key highlights:**
@@ -44,8 +44,8 @@ hf download --repo-type dataset zhuzilin/aime-2024     --local-dir /root/dataset
 ### 3.2 HF → Megatron `torch_dist` conversion
 
 ```bash
-cd /root/miles
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py qwen3.6-27B)" || exit 1
+cd /root/orbit
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py qwen3.6-27B)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
    ${MODEL_ARGS[@]} \
@@ -58,7 +58,7 @@ PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
 ### 4.1 Quick start
 
 ```bash
-cd /root/miles
+cd /root/orbit
 python scripts/run_qwen3_dense.py --model-name Qwen3.6-27B
 ```
 
@@ -111,13 +111,13 @@ CPU Adam is enabled (`--optimizer-cpu-offload --overlap-cpu-optimizer-d2h-h2d --
 
 From `scripts/models/qwen3.6-27B.py`:
 
-- `--spec miles_plugins.models.qwen3_5 get_qwen3_5_spec` — Qwen3.6 reuses the Qwen3.5 spec (gated attention, FP32 `A_log`).
+- `--spec orbit_plugins.models.qwen3_5 get_qwen3_5_spec` — Qwen3.6 reuses the Qwen3.5 spec (gated attention, FP32 `A_log`).
 - `--rotary-base 10000000`, `--rotary-percent 0.25`.
 - `--vocab-size 248320`.
 - `--apply-layernorm-1p`, `--qk-layernorm`, `--group-query-attention`.
 - `--attention-output-gate`.
 
-See [Backends Beyond Megatron](/advanced/architecture-support) for how miles
+See [Backends Beyond Megatron](/advanced/architecture-support) for how orbit
 preserves FP32 parameters like `A_log` through Megatron's mixed-precision pipeline.
 
 ## 6. Pairs Well With

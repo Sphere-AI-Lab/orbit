@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from miles.ray.train import actor_factory
+from orbit.ray.train import actor_factory
 
 
 def test_megatron_offload_uses_torch_memory_saver_preload_resolver(monkeypatch):
@@ -21,11 +21,11 @@ def test_megatron_offload_uses_torch_memory_saver_preload_resolver(monkeypatch):
     torch_memory_saver_module.__path__ = []
     torch_memory_saver_utils_module = ModuleType("torch_memory_saver.utils")
     torch_memory_saver_utils_module.get_binary_path_from_package = get_binary_path
-    megatron_actor_module = ModuleType("miles.backends.megatron_utils.actor")
+    megatron_actor_module = ModuleType("orbit.backends.megatron_utils.actor")
     megatron_actor_module.MegatronTrainRayActor = FakeMegatronTrainRayActor
     monkeypatch.setitem(sys.modules, "torch_memory_saver", torch_memory_saver_module)
     monkeypatch.setitem(sys.modules, "torch_memory_saver.utils", torch_memory_saver_utils_module)
-    monkeypatch.setitem(sys.modules, "miles.backends.megatron_utils.actor", megatron_actor_module)
+    monkeypatch.setitem(sys.modules, "orbit.backends.megatron_utils.actor", megatron_actor_module)
     monkeypatch.setattr(actor_factory, "default_fp8_block_scaling_fp32_scales", lambda: "1")
 
     def fake_remote(**kwargs):

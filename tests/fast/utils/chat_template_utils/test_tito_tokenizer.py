@@ -50,14 +50,14 @@ from unittest.mock import MagicMock
 import pytest
 from transformers import AutoTokenizer
 
-from miles.utils.chat_template_utils import (
+from orbit.utils.chat_template_utils import (
     TEMPLATE_DIR,
     MismatchType,
     apply_chat_template,
     apply_chat_template_from_str,
     resolve_fixed_chat_template,
 )
-from miles.utils.chat_template_utils.tito_tokenizer import (
+from orbit.utils.chat_template_utils.tito_tokenizer import (
     ALL_APPEND_ROLES,
     DeepSeekV4TITOTokenizer,
     DeepSeekV32TITOTokenizer,
@@ -72,8 +72,8 @@ from miles.utils.chat_template_utils.tito_tokenizer import (
     _build_dummy_assistant,
     get_tito_tokenizer,
 )
-from miles.utils.processing_utils import load_tokenizer
-from miles.utils.test_utils.mock_trajectories import (
+from orbit.utils.processing_utils import load_tokenizer
+from orbit.utils.test_utils.mock_trajectories import (
     IntermediateSystemTrajectory,
     LongChainTrajectory,
     MultiToolSingleTurnTrajectory,
@@ -237,12 +237,12 @@ class TestConfig:
         "chat_template_kwargs, expected",
         [
             pytest.param({}, True, id="default-thinking"),
-            pytest.param({"enable_thinking": False}, False, id="disable-via-miles-kwarg"),
+            pytest.param({"enable_thinking": False}, False, id="disable-via-orbit-kwarg"),
             pytest.param({"thinking": False}, False, id="disable-via-sglang-kwarg"),
             pytest.param(
                 {"enable_thinking": False, "thinking": True},
                 False,
-                id="miles-kwarg-precedes-sglang-kwarg",
+                id="orbit-kwarg-precedes-sglang-kwarg",
             ),
             pytest.param(
                 {"thinking_mode": "thinking", "thinking": False},
@@ -742,7 +742,7 @@ class TestParserBinding:
         assert cls.tool_call_parser == expected_tool_call
 
     def test_resolve_returns_binding_when_user_omits(self):
-        from miles.utils.chat_template_utils import resolve_reasoning_and_tool_call_parser
+        from orbit.utils.chat_template_utils import resolve_reasoning_and_tool_call_parser
 
         assert resolve_reasoning_and_tool_call_parser(TITOTokenizerType.QWEN3) == ("qwen3", "qwen25")
         assert resolve_reasoning_and_tool_call_parser(TITOTokenizerType.QWEN35) == ("qwen3", "qwen3_coder")
@@ -752,7 +752,7 @@ class TestParserBinding:
         assert resolve_reasoning_and_tool_call_parser(TITOTokenizerType.DEFAULT) == (None, None)
 
     def test_resolve_accepts_matching_user_value(self):
-        from miles.utils.chat_template_utils import resolve_reasoning_and_tool_call_parser
+        from orbit.utils.chat_template_utils import resolve_reasoning_and_tool_call_parser
 
         assert resolve_reasoning_and_tool_call_parser("qwen3", "qwen3", "qwen25") == ("qwen3", "qwen25")
         assert resolve_reasoning_and_tool_call_parser(TITOTokenizerType.QWEN35, "qwen3", "qwen3_coder") == (
@@ -761,13 +761,13 @@ class TestParserBinding:
         )
 
     def test_resolve_raises_on_reasoning_mismatch(self):
-        from miles.utils.chat_template_utils import resolve_reasoning_and_tool_call_parser
+        from orbit.utils.chat_template_utils import resolve_reasoning_and_tool_call_parser
 
         with pytest.raises(ValueError, match="--reasoning-parser='glm45' disagrees"):
             resolve_reasoning_and_tool_call_parser(TITOTokenizerType.QWEN3, user_reasoning_parser="glm45")
 
     def test_resolve_raises_on_tool_call_mismatch(self):
-        from miles.utils.chat_template_utils import resolve_reasoning_and_tool_call_parser
+        from orbit.utils.chat_template_utils import resolve_reasoning_and_tool_call_parser
 
         with pytest.raises(ValueError, match="--tool-call-parser='glm47' disagrees"):
             resolve_reasoning_and_tool_call_parser(TITOTokenizerType.QWEN3, user_tool_call_parser="glm47")
@@ -775,7 +775,7 @@ class TestParserBinding:
     def test_resolve_accepts_user_value_when_family_unbound(self):
         # DEFAULT family has no binding for either parser; user-provided wins
         # (for families that haven't been wired up to a sglang parser yet).
-        from miles.utils.chat_template_utils import resolve_reasoning_and_tool_call_parser
+        from orbit.utils.chat_template_utils import resolve_reasoning_and_tool_call_parser
 
         assert resolve_reasoning_and_tool_call_parser(
             TITOTokenizerType.DEFAULT, "custom_reasoning", "custom_tool_call"
@@ -784,7 +784,7 @@ class TestParserBinding:
     def test_resolve_partial_user_input(self):
         # User can pass only one of the two; the other auto-resolves from
         # the family binding independently.
-        from miles.utils.chat_template_utils import resolve_reasoning_and_tool_call_parser
+        from orbit.utils.chat_template_utils import resolve_reasoning_and_tool_call_parser
 
         # User passes reasoning only — tool_call comes from binding.
         assert resolve_reasoning_and_tool_call_parser(TITOTokenizerType.QWEN3, user_reasoning_parser="qwen3") == (

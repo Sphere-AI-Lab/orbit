@@ -5,9 +5,9 @@ import pytest
 import ray
 from tests.fast.ray.train.dummy_actor import DummyTrainActor
 
-from miles.ray.train.cell import RayTrainCell
-from miles.utils.ft_utils.health_checker import NoopHealthChecker
-from miles.utils.ft_utils.indep_dp import IndepDPInfo
+from orbit.ray.train.cell import RayTrainCell
+from orbit.utils.ft_utils.health_checker import NoopHealthChecker
+from orbit.utils.ft_utils.indep_dp import IndepDPInfo
 
 
 @pytest.fixture(scope="module", autouse=True)

@@ -1,10 +1,10 @@
 ---
-title: Miles-Diffusion Documentation
+title: Orbit-Diffusion Documentation
 ---
 [Miles-diffusion](https://github.com/radixark/miles_diffusion) is currently a standalone repository built on
-[Miles](https://github.com/radixark/miles)' design philosophy, focused on RL post-training for image and video diffusion
+[Orbit](https://github.com/Sphere-AI-Lab/orbit)' design philosophy, focused on RL post-training for image and video diffusion
 models. [sglang-diffusion](https://github.com/sgl-project/sglang/tree/main/python/sglang/multimodal_gen) serves the
-rollout, and the DiT trains under **FSDP2** on a backend that co-evolves with Miles' own. Models load from a diffusers
+rollout, and the DiT trains under **FSDP2** on a backend that co-evolves with Orbit' own. Models load from a diffusers
 pipeline, or from a native package when a family brings its own modeling. Shipped recipes carry explicit
 [verification levels](/diffusion/user-guide/recipe-verification). Custom rewards, losses, and rollout functions plug in through flags.
 
@@ -35,7 +35,7 @@ pipeline, or from a native package when a family brings its own modeling. Shippe
 
 Each model links to its recipe page; see
 [verification levels](/diffusion/user-guide/recipe-verification). Validated models also
-appear in the [Miles model list](/#supported-models).
+appear in the [Orbit model list](/#supported-models).
 
 
 | Model                                                   | Task      | Canonical recipes                         |
@@ -84,5 +84,5 @@ appear in the [Miles model list](/#supported-models).
 ## Contribute
 
 - GitHub: [github.com/radixark/miles_diffusion](https://github.com/radixark/miles_diffusion)
-- Miles (LLM RL): [github.com/radixark/miles](https://github.com/radixark/miles)
+- Orbit (LLM RL): [github.com/radixark/miles](https://github.com/Sphere-AI-Lab/orbit)
 

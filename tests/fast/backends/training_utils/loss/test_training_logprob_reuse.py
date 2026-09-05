@@ -6,13 +6,13 @@ import pytest
 import torch
 import torch.distributed as dist
 
-from miles.backends.training_utils import loss as loss_module
-from miles.backends.training_utils.cp_utils import get_sum_of_sample_mean
-from miles.backends.training_utils.loss import compute_advantages_and_returns
-from miles.backends.training_utils.loss_hub import losses as losses_module
-from miles.backends.training_utils.loss_hub.logit_processors import get_log_probs_and_entropy
-from miles.backends.training_utils.loss_hub.losses import policy_loss_function
-from miles.utils.ft_utils.process_group_utils import GroupInfo
+from orbit.backends.training_utils import loss as loss_module
+from orbit.backends.training_utils.cp_utils import get_sum_of_sample_mean
+from orbit.backends.training_utils.loss import compute_advantages_and_returns
+from orbit.backends.training_utils.loss_hub import losses as losses_module
+from orbit.backends.training_utils.loss_hub.logit_processors import get_log_probs_and_entropy
+from orbit.backends.training_utils.loss_hub.losses import policy_loss_function
+from orbit.utils.ft_utils.process_group_utils import GroupInfo
 
 from .loss_test_utils import deep_clone, make_args, make_batch, make_inputs, make_parallel_state, make_rollout_data
 

@@ -1,8 +1,8 @@
 ---
 title: Versions and Images
-description: How the Miles, SGLang, and Megatron-LM trees fit together, which artifact owns each release identity, and what the Docker images pin.
+description: How the Orbit, SGLang, and Megatron-LM trees fit together, which artifact owns each release identity, and what the Docker images pin.
 ---
-A Miles run is three Python source trees on one `PYTHONPATH`. Understanding which tree owns
+A Orbit run is three Python source trees on one `PYTHONPATH`. Understanding which tree owns
 a given behavior, and which file pins its version, is most of what you need to debug a
 version problem or land a bump.
 
@@ -10,26 +10,26 @@ version problem or land a bump.
 
 | Tree | Comes from | Installed as | Lives at |
 |---|---|---|---|
-| Miles | this repository | `pip install -e . --no-deps` | `/root/miles` |
+| Orbit | this repository | `pip install -e . --no-deps` | `/root/orbit` |
 | SGLang | the `sglang-miles` branch of [`sgl-project/sglang`](https://github.com/sgl-project/sglang), on top of the `lmsysorg/sglang:<tag>` base image | `pip install -e "python[all]" --no-deps` | `/sgl-workspace/sglang` |
 | Megatron-LM | the `miles-main` branch of [`radixark/Megatron-LM`](https://github.com/radixark/Megatron-LM) | `pip install -e .` | `/root/Megatron-LM` |
 
 Two things follow from that table.
 
-**The dependency branches are moving development sources.** Both carry patches Miles needs before they land upstream, which is why installing stock `sglang` or upstream Megatron-LM next to Miles does not work. Ordinary `dev` images follow those branches; a versioned release records their exact commits in `release-lock.json`.
+**The dependency branches are moving development sources.** Both carry patches Orbit needs before they land upstream, which is why installing stock `sglang` or upstream Megatron-LM next to Orbit does not work. Ordinary `dev` images follow those branches; a versioned release records their exact commits in `release-lock.json`.
 
 **All three are editable installs.** Nothing is copied into `site-packages`, so changing a
 file in any of the three trees changes the next run. That is also what lets CI move the
 SGLang and Megatron-LM checkouts to a different ref without reinstalling anything.
 
-The `version` in `setup.py` owns the base Miles release version `X.Y.Z`. Release candidates and post releases keep that base in `setup.py` and add `rcN` or `.postN` only to the exact Git and Docker tags.
+The `version` in `setup.py` owns the base Orbit release version `X.Y.Z`. Release candidates and post releases keep that base in `setup.py` and add `rcN` or `.postN` only to the exact Git and Docker tags.
 
 ## Where each pin is written
 
 ```text
 docker/Dockerfile     the image recipe and its default build-args
 docker/build.py       the variant table: which build-args each variant overrides
-requirements.txt      Miles' own Python dependencies
+requirements.txt      Orbit' own Python dependencies
 release-lock.json     generated on a release branch: dependency commits, CI image tag, and audit fingerprints
 ```
 
@@ -41,7 +41,7 @@ The default build-args are the version surface:
 | `SGLANG_BRANCH` | `sglang-miles` | The branch fetched into the base image's SGLang checkout |
 | `SGLANG_COMMIT` | empty | Empty means the branch HEAD at build time; set it to freeze one commit |
 | `MEGATRON_REPO` / `MEGATRON_BRANCH` / `MEGATRON_COMMIT` | `radixark/Megatron-LM` / `miles-main` / empty | The Megatron-LM checkout; an empty commit follows branch HEAD, while a release build supplies the locked commit |
-| `MILES_COMMIT` | `main` | The Miles checkout baked into the image |
+| `ORBIT_COMMIT` | `main` | The Orbit checkout baked into the image |
 | `ENABLE_CUDA_13` | `1` | CUDA 13 plus the Mooncake structured-object-store wheel; `0` selects the CUDA 12.9 path |
 | `WHEELS_REPO` | `yueming-yuan/miles-wheels` | The prebuilt-wheels repository |
 | `WHEELS_TAG_X86` / `WHEELS_TAG_ARM64` | `cu130-x86_64` / `cu130-aarch64` | Two complete wheels releases, selected by `TARGETARCH` and installed verbatim |
@@ -58,7 +58,7 @@ asserts the installed triplet is `2.17.0`, and the patches under `docker/patch/c
 applied to it with a build failure if any patch does not apply cleanly, so an image can
 never ship silently unpatched TE.
 
-`requirements.txt` is Miles' own dependency list, and the convention there is that **a pin
+`requirements.txt` is Orbit' own dependency list, and the convention there is that **a pin
 carries its reason inline**: `transformers==5.12.1` names the HF-native weight conversion and
 an SGLang collision, `blake3` / `xxhash` / `zstandard` name the disk-delta weight sync,
 `onnxscript` records that TE 2.17 imports it at import time. Follow that when you add one.
@@ -69,13 +69,13 @@ Release values represent different facts. Each row below names the source used b
 
 | Fact | Authoritative source | Derived or consumed values |
 |---|---|---|
-| Base Miles version | `setup.py` | Release branch `release/vX.Y.Z`; base-version check before tagging |
+| Base Orbit version | `setup.py` | Release branch `release/vX.Y.Z`; base-version check before tagging |
 | Exact published version | `version` input to `release-tag.yml`, persisted as annotated Git tag `v<exact-version>` | CUDA image tags `v<exact-version>` and `v<exact-version>-cu12` |
 | Frozen dependency selection | `release-lock.json` committed on the release branch | SGLang commit, Megatron-LM commit, and the CUDA image tag used by release CI |
 
 For example, base version `0.3.0` owns branch `release/v0.3.0`; that branch can produce exact tags `v0.3.0rc0`, `v0.3.0`, and `v0.3.0.post1` without changing `setup.py` between tags.
 
-`release-lock.json` freezes the two dependency source commits and names the prune-exempt CUDA image used by release CI. Miles itself is frozen by the release commit and final Git tag. Wheels asset fingerprints are audit records, not content-addressed inputs.
+`release-lock.json` freezes the two dependency source commits and names the prune-exempt CUDA image used by release CI. Orbit itself is frozen by the release commit and final Git tag. Wheels asset fingerprints are audit records, not content-addressed inputs.
 
 Use [Release a Version](/ci/04-release) for the maintainer procedure. That runbook owns workflow order, inputs, success signals, and recovery; this page owns the identity and pinning model.
 
@@ -92,7 +92,7 @@ fleet's image is.
 | `cu13` | `radixark/miles:dev` | `linux/amd64` + `linux/arm64`, one manifest. This is the daily image |
 | `cu13-x86` / `cu13-aarch64` | `radixark/miles:dev` | Single-arch rebuilds of the same image |
 | `cu12-x86` | `radixark/miles:dev-cu12` | `linux/amd64`, CUDA 12.9 legacy |
-| `rocm700-mi30x` / `rocm700-mi35x` / `rocm720-mi35x` | `rocm/sgl-dev:miles-rocm7xx-mi3xx` | Native |
+| `rocm700-mi30x` / `rocm700-mi35x` / `rocm720-mi35x` | `rocm/sgl-dev:orbit-rocm7xx-mi3xx` | Native |
 
 `--image-tag dev` also publishes a timestamped sibling. Scheduled retention and manual tag behavior are documented in [Docker build](/ci/02-docker-build).
 
@@ -117,7 +117,7 @@ from `radixark/miles:<tag>` and then:
    plain resolve drags it back down, and the symptom is a fused-attention backward failing
    with `CUDNN_STATUS_BAD_PARAM`.
 2. Resets both dependency checkouts and fetches the selected refs. Explicit dispatch or PR-body overrides win first, `release-lock.json` commits win when no override exists, and the moving `sglang-miles` / `miles-main` heads are the final defaults.
-3. Sets `PYTHONPATH` to the Miles workspace plus both source roots.
+3. Sets `PYTHONPATH` to the Orbit workspace plus both source roots.
 
 It never reinstalls the three source trees, because they are editable installs. So:
 
@@ -126,9 +126,9 @@ It never reinstalls the three source trees, because they are editable installs. 
 | `requirements.txt` | No. The next CI run installs it. |
 | A Dockerfile layer: a pinned wheel, an inline commit, a TE patch, the base image | Yes |
 | SGLang or Megatron-LM code | No. Point CI at a ref instead |
-| Miles code | No |
+| Orbit code | No |
 
-The ROCm stage is the exception: it takes SGLang and Megatron-LM from `rocm/sgl-dev` and exposes no dependency-ref inputs, so the only way to move them there is a new ROCm image. A release call can select the Miles ref, but its baked dependencies still make the run a smoke signal rather than a lock-accurate check.
+The ROCm stage is the exception: it takes SGLang and Megatron-LM from `rocm/sgl-dev` and exposes no dependency-ref inputs, so the only way to move them there is a new ROCm image. A release call can select the Orbit ref, but its baked dependencies still make the run a smoke signal rather than a lock-accurate check.
 
 ## Bumping principle
 
@@ -162,9 +162,9 @@ directives.
 
 **Expect `dev` to move on its own, within a bound.** The scheduled build (00:00 and 12:00
 UTC) polls the SGLang and Megatron-LM branch heads plus a fingerprint of the wheels release,
-and rebuilds when any of them moved. It deliberately does not poll Miles, which would
+and rebuilds when any of them moved. It deliberately does not poll Orbit, which would
 rebuild constantly, and instead forces a build once the last one is 24 hours old. So `dev`
-follows its dependencies immediately and trails Miles `main` by at most a day. When you need
+follows its dependencies immediately and trails Orbit `main` by at most a day. When you need
 that to stop moving underneath you, pin `ci-image-tag:` to a timestamped tag.
 
 **Bump the ROCm images by hand.** They have no automatic path, so a ROCm bump is a

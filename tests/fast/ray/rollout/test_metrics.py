@@ -3,15 +3,15 @@ from __future__ import annotations
 import pytest
 from tests.fast.ray.rollout.conftest import make_args, make_samples_grouped
 
-from miles.ray.rollout import metrics as rollout_metrics
-from miles.ray.rollout.metrics import (
+from orbit.ray.rollout import metrics as rollout_metrics
+from orbit.ray.rollout.metrics import (
     _compute_distillation_rpc_metrics,
     _compute_metrics_from_samples,
     _compute_passrate_from_samples,
     _compute_zero_std_metrics,
     log_rollout_data,
 )
-from miles.utils.types import Sample
+from orbit.utils.types import Sample
 
 
 class TestDistillationRpcMetrics:
@@ -297,7 +297,7 @@ class TestTitoMismatchMetrics:
             sample.metadata = {"tito_session_mismatch": []}
         logged = {}
         monkeypatch.setattr(
-            "miles.ray.rollout.metrics.tracking.log",
+            "orbit.ray.rollout.metrics.tracking.log",
             lambda _args, metrics, **_kwargs: logged.update(metrics),
         )
 

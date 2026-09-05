@@ -4,7 +4,7 @@ This example demonstrates how to use a custom reducer function for Dr.GRPO algor
 
 ## Overview
 
-By default, miles divides the policy gradient loss by the number of effective tokens in each sample. This custom implementation allows you to divide by a constant value (default: 1000) instead.
+By default, orbit divides the policy gradient loss by the number of effective tokens in each sample. This custom implementation allows you to divide by a constant value (default: 1000) instead.
 
 ## Usage
 

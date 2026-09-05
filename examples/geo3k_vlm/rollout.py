@@ -2,8 +2,8 @@
 
 import torch
 
-from miles.rollout.sglang_rollout import generate as _generate
-from miles.utils.types import Sample
+from orbit.rollout.sglang_rollout import generate as _generate
+from orbit.utils.types import Sample
 
 
 async def generate(args, sample: Sample, sampling_params: dict) -> Sample:

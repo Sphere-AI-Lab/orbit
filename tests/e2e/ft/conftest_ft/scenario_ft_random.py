@@ -17,7 +17,7 @@ from tests.e2e.ft.conftest_ft.execution import (
 from tests.e2e.ft.conftest_ft.fault_injection import CONTROL_SERVER_PORT, MEAN_INTERVAL_SECONDS, spawn_fault_injector
 from tests.e2e.ft.conftest_ft.modes import FTTestMode, resolve_mode
 
-from miles.utils.test_utils.reconfigure_assertions import assert_soak_reconfigure_events
+from orbit.utils.test_utils.reconfigure_assertions import assert_soak_reconfigure_events
 
 app: typer.Typer = typer.Typer()
 

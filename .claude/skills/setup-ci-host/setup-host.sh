@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 #
-# setup-host.sh — prepare a new miles CI host so /data/miles_ci is canonical.
+# setup-host.sh — prepare a new orbit CI host so /data/orbit_ci is canonical.
 # See SKILL.md (next to this script) for the full operator-facing docs.
 #
 # Behavior summary:
 #   1. df probes mounted filesystems; picks the mount point with most total bytes
 #      among non-system fs types.
-#   2. If the chosen mount is /data: ensure /data/miles_ci exists as a real dir.
-#   3. Else: ensure <chosen>/miles_ci exists, atomically symlink /data/miles_ci.
-#   4. mkdir -p /data/miles_ci/{models,datasets,hf_cache}.
+#   2. If the chosen mount is /data: ensure /data/orbit_ci exists as a real dir.
+#   3. Else: ensure <chosen>/orbit_ci exists, atomically symlink /data/orbit_ci.
+#   4. mkdir -p /data/orbit_ci/{models,datasets,hf_cache}.
 #   5. Print summary.
 #
 # Idempotent. Re-running on a properly-prepared host is a no-op except for the
-# summary line. When /data/miles_ci already exists pointing somewhere
+# summary line. When /data/orbit_ci already exists pointing somewhere
 # unexpected, prompts the operator interactively (migrate / wipe / abort);
 # non-interactive runs (cron, CI) exit non-zero instead of choosing silently.
 
@@ -46,17 +46,17 @@ fi
 
 # --- Decide canonical target -------------------------------------------------
 
-# canonical: /data/miles_ci on every host. real_target is the path on the
+# canonical: /data/orbit_ci on every host. real_target is the path on the
 # biggest disk where the data actually lives.
-canonical=/data/miles_ci
+canonical=/data/orbit_ci
 
 if [[ "${biggest_mount}" == "/data" ]]; then
-  real_target=/data/miles_ci
+  real_target=/data/orbit_ci
 else
-  real_target="${biggest_mount}/miles_ci"
+  real_target="${biggest_mount}/orbit_ci"
 fi
 
-# --- Establish /data/miles_ci ------------------------------------------------
+# --- Establish /data/orbit_ci ------------------------------------------------
 
 # Make sure the real target directory exists on the big disk.
 mkdir -p "${real_target}"
@@ -76,7 +76,7 @@ place_symlink() {
 interactive() { [ -t 0 ] && [ -t 1 ]; }
 
 if [[ "${real_target}" == "${canonical}" ]]; then
-  # /data IS the big disk; /data/miles_ci is the real path; nothing to symlink.
+  # /data IS the big disk; /data/orbit_ci is the real path; nothing to symlink.
   :
 elif [[ -L "${canonical}" ]]; then
   current_target=$(readlink "${canonical}")
@@ -137,7 +137,7 @@ EOF
   esac
   place_symlink
 else
-  # /data/miles_ci does not exist (or is an empty dir we can remove).
+  # /data/orbit_ci does not exist (or is an empty dir we can remove).
   [[ -d "${canonical}" ]] && rmdir "${canonical}" 2>/dev/null || true
   place_symlink
 fi
@@ -154,9 +154,9 @@ mkdir -p \
 echo "biggest mount  : ${biggest_mount}"
 echo "real target    : ${real_target}"
 if [[ -L "${canonical}" ]]; then
-  echo "/data/miles_ci : symlink -> $(readlink "${canonical}")"
+  echo "/data/orbit_ci : symlink -> $(readlink "${canonical}")"
 else
-  echo "/data/miles_ci : real directory"
+  echo "/data/orbit_ci : real directory"
 fi
 df -h --output=target,size,used,avail "${biggest_mount}" | tail -1 \
   | awk '{printf "disk usage     : %s used / %s total (%s available)\n", $3, $2, $4}'

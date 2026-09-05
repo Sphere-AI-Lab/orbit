@@ -6,7 +6,7 @@ from types import ModuleType
 
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-_MULTI_LORA_UTILS_PATH = _REPO_ROOT / "miles" / "backends" / "megatron_utils" / "multi_lora_utils.py"
+_MULTI_LORA_UTILS_PATH = _REPO_ROOT / "orbit" / "backends" / "megatron_utils" / "multi_lora_utils.py"
 
 
 class _RecordingMultiLoRA:
@@ -22,11 +22,11 @@ class _LoRA:
 
 def _load_multi_lora_utils(monkeypatch):
     stubs = {
-        "miles.backends.training_utils.parallel": {"get_parallel_state": lambda: None},
-        "miles.ray.multi_lora.controller": {"get_multi_lora_controller": lambda: None},
-        "miles.utils.adapter_config": {"AdapterRun": object},
-        "miles.utils.distributed_utils": {"get_gloo_group": lambda: None},
-        "miles.backends.megatron_utils.lora_utils": {
+        "orbit.backends.training_utils.parallel": {"get_parallel_state": lambda: None},
+        "orbit.ray.multi_lora.controller": {"get_multi_lora_controller": lambda: None},
+        "orbit.utils.adapter_config": {"AdapterRun": object},
+        "orbit.utils.distributed_utils": {"get_gloo_group": lambda: None},
+        "orbit.backends.megatron_utils.lora_utils": {
             "convert_target_modules_to_megatron": lambda modules, lora_type=None: list(modules)
         },
         "megatron.bridge.peft.multi_lora": {"MultiLoRA": _RecordingMultiLoRA},
@@ -39,7 +39,7 @@ def _load_multi_lora_utils(monkeypatch):
         monkeypatch.setitem(sys.modules, name, module)
 
     spec = importlib.util.spec_from_file_location(
-        "miles.backends.megatron_utils.multi_lora_utils",
+        "orbit.backends.megatron_utils.multi_lora_utils",
         _MULTI_LORA_UTILS_PATH,
     )
     module = importlib.util.module_from_spec(spec)

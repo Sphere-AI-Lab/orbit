@@ -14,7 +14,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MILES_REPO=${MILES_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}
+ORBIT_REPO=${ORBIT_REPO:-$(cd "$SCRIPT_DIR/../.." && pwd)}
 RECIPE_NAME=$(basename "${BASH_SOURCE[0]}" .sh)
 
 EXPERIMENT_NODES=1
@@ -33,15 +33,15 @@ HF_TRAIN_DATA="$HF_CACHE_DIR/data/dapo-math-17k/dapo-math-17k.jsonl"
 HF_EVAL_DATA="$HF_CACHE_DIR/data/aime-2024/aime-2024.jsonl"
 
 # shellcheck disable=SC1090
-source "$MILES_REPO/scripts/models/qwen3-4B.sh"
+source "$ORBIT_REPO/scripts/models/qwen3-4B.sh"
 
 RUN_NAME=${SLURM_JOB_NAME:-$RECIPE_NAME}
 
 CKPT_ARGS=(
    --hf-checkpoint  "$HF_MODEL_DIR"
    --ref-load       "$HF_TORCHDIST_DIR"
-   --load           "$MILES_REPO/checkpoints/$RUN_NAME"
-   --save           "$MILES_REPO/checkpoints/$RUN_NAME"
+   --load           "$ORBIT_REPO/checkpoints/$RUN_NAME"
+   --save           "$ORBIT_REPO/checkpoints/$RUN_NAME"
    --save-interval  20
 )
 
@@ -117,9 +117,9 @@ MISC_ARGS=(
 
 WANDB_ARGS=(
    --use-wandb
-   --wandb-project miles-imp
+   --wandb-project orbit
    --wandb-group   "$RUN_NAME"
-   # WANDB_API_KEY comes from the env (exported by submit.sh / launch_miles.sbatch);
+   # WANDB_API_KEY comes from the env (exported by submit.sh / launch_orbit.sbatch);
    # we don't pass it on the CLI because it would leak into run.log and args.json.
 )
 
@@ -136,7 +136,7 @@ LAYOUT_ARGS=(
    --rollout-num-gpus       4
 )
 
-MILES_ARGS=(
+ORBIT_ARGS=(
    "${LAYOUT_ARGS[@]}"
    "${MODEL_ARGS[@]}"
    "${CKPT_ARGS[@]}"

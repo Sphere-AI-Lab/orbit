@@ -2,7 +2,7 @@
 title: Kimi K2.5 / K2.6
 description: Launch recipe for Kimi-K2.5, running full-parameter GRPO on 32 × 8 H200 with an INT4 actor and a BF16 reference.
 ---
-The reference launcher is [`scripts/run_kimi_k25.py`](https://github.com/radixark/miles/blob/main/scripts/run_kimi_k25.py), which loads the K2.5 model definition from `scripts/models/kimi-k25.py`.
+The reference launcher is [`scripts/run_kimi_k25.py`](https://github.com/Sphere-AI-Lab/orbit/blob/main/scripts/run_kimi_k25.py), which loads the K2.5 model definition from `scripts/models/kimi-k25.py`.
 
 ## 1. Model Introduction
 
@@ -58,10 +58,10 @@ The `$BASE_DIR` directory must already hold the two K2.5 checkpoints from §2 al
 
 ### 3.2 One-line launch
 
-The launcher runs a `pkill` / `ray stop` cleanup pass first so a failed run can be re-launched cleanly, then starts the ray head and submits with `ray job submit --address http://127.0.0.1:8265`. Export `MILES_SCRIPT_EXTERNAL_RAY=1` to skip the `ray start` and submit to an **already-running Ray cluster** instead.
+The launcher runs a `pkill` / `ray stop` cleanup pass first so a failed run can be re-launched cleanly, then starts the ray head and submits with `ray job submit --address http://127.0.0.1:8265`. Export `ORBIT_SCRIPT_EXTERNAL_RAY=1` to skip the `ray start` and submit to an **already-running Ray cluster** instead.
 
 ```bash
-cd /root/miles
+cd /root/orbit
 export MASTER_ADDR=...
 python scripts/run_kimi_k25.py train
 ```

@@ -16,7 +16,7 @@ set -ex
 export PYTHONUNBUFFERED=1
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-MODEL_ARGS_LINE="$(python3 "${SCRIPT_DIR}/../../../miles/utils/external_utils/model_args_utils.py" "qwen2.5-0.5B")" || exit 1
+MODEL_ARGS_LINE="$(python3 "${SCRIPT_DIR}/../../../orbit/utils/external_utils/model_args_utils.py" "qwen2.5-0.5B")" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 
 CKPT_ARGS=(
@@ -84,7 +84,7 @@ WANDB_ARGS=(
    --use-wandb
    --wandb-host https://wandb.ai/
    --wandb-team glm-zero
-   --wandb-project miles-dev
+   --wandb-project orbit-dev
    --wandb-group qwen2.5-0.5B-gsm8k-deterministic
 )
 

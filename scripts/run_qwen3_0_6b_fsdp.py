@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 HF_REPO = "Qwen/Qwen3-0.6B"
 MODEL_NAME = "Qwen3-0.6B"
@@ -24,7 +24,7 @@ class ScriptArgs(U.ExecuteTrainConfig):
     num_rollout: int = 100
     data_dir: str = "/root"
     model_dir: str = "/root/models"
-    wandb_project: str = "miles-fsdp-curve"
+    wandb_project: str = "orbit-fsdp-curve"
     extra_args: str = ""
 
 

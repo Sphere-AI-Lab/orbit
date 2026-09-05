@@ -3,7 +3,7 @@ import os
 from scripts.run_qwen3_5_35b_a3b_lora import ScriptArgs, _prepare_download, _train
 from tests.ci.ci_register import register_cuda_ci
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 # Smoke test for scripts/run_qwen3_5_35b_a3b_lora.py on the full Qwen3.5-35B-A3B
 # checkpoint, like the other Qwen3.5 e2e tests (full rollout -> train -> save loop;

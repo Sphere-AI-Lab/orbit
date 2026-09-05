@@ -4,7 +4,7 @@
 for running agent environments at scale on Firecracker microVMs, built by the
 Kimi K3 team: snapshot-backed sandboxes boot or resume in well under a second,
 per-task OCI images load on demand, and its native API **is** the E2B API — so
-Miles drives it through the standard `e2b` SDK with no AgentENV-specific code.
+Orbit drives it through the standard `e2b` SDK with no AgentENV-specific code.
 
 AgentENV plugs in wherever E2B does. This page covers what is specific to
 AgentENV — deploying a server and pointing the SDK at it — then trains

@@ -484,7 +484,7 @@ RUN_CONFIGS: dict[str, RunConfig] = {
 # Helpers
 # ---------------------------------------------------------------------------
 
-MILES_ROOT = Path(__file__).resolve().parents[3]
+ORBIT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def run_cmd(cmd: str, check: bool = True) -> int:
@@ -638,7 +638,7 @@ def cmd_prepare(model_name: str, download_only: bool = False, ckpt_dir: str | No
     for ds in cfg.datasets:
         run_cmd(
             f'python3 -c "'
-            f"from miles.utils.external_utils.command_utils import hf_download_dataset; "
+            f"from orbit.utils.external_utils.command_utils import hf_download_dataset; "
             f"hf_download_dataset('{ds}')"
             f'"'
         )
@@ -657,7 +657,7 @@ def cmd_prepare(model_name: str, download_only: bool = False, ckpt_dir: str | No
 
         run_cmd(
             f'python3 -c "'
-            f"from miles.utils.external_utils.command_utils import convert_checkpoint; "
+            f"from orbit.utils.external_utils.command_utils import convert_checkpoint; "
             f"convert_checkpoint("
             f"model_name='{model_name}', "
             f"megatron_model_type='{cfg.model_type}', "
@@ -798,7 +798,7 @@ def cmd_run(
         "PYTHONPATH": "/root/Megatron-LM/",
         "CUDA_DEVICE_MAX_CONNECTIONS": "1",
         "NCCL_NVLS_ENABLE": nccl_nvls_val,
-        "MILES_LOG_DIR": os.environ.get("MILES_LOG_DIR", ""),
+        "ORBIT_LOG_DIR": os.environ.get("ORBIT_LOG_DIR", ""),
     }
     if not is_single_node:
         env_vars["MC_TRANSFER_TIMEOUT"] = str(cfg.mc_transfer_timeout)
@@ -1035,7 +1035,7 @@ def cmd_run(
             f"{model_args_source} && "
             f"ray job submit --address='http://127.0.0.1:8265' "
             f"--runtime-env-json='{runtime_env_json}' "
-            f'-- python3 "{MILES_ROOT}/train.py" '
+            f'-- python3 "{ORBIT_ROOT}/train.py" '
             f"${{MODEL_ARGS[@]}} "
             f"{args_str}",
             check=False,
@@ -1043,14 +1043,14 @@ def cmd_run(
 
         # Signal workers
         if not is_single_node:
-            signal_dir = os.environ.get("MILES_LOG_DIR", "/data/ray/signals")
+            signal_dir = os.environ.get("ORBIT_LOG_DIR", "/data/ray/signals")
             os.makedirs(signal_dir, exist_ok=True)
             done_file = os.path.join(signal_dir, f"job_done_{mode}")
             with open(done_file, "w") as f:
                 f.write("0")
     else:
         # Worker: wait for head to finish
-        signal_dir = os.environ.get("MILES_LOG_DIR", "/data/ray/signals")
+        signal_dir = os.environ.get("ORBIT_LOG_DIR", "/data/ray/signals")
         done_file = os.path.join(signal_dir, f"job_done_{mode}")
         print(f"Worker node {node_rank}: Ray joined, waiting for head to finish...")
         while not os.path.exists(done_file):
@@ -1064,7 +1064,7 @@ def build_model_args_command(cfg: RunConfig) -> str:
     """A shell snippet leaving MODEL_ARGS set; the knobs must reach it, not only ray's runtime env."""
     prefix = "".join(f"{name}={shlex.quote(value)} " for name, value in build_model_args_env(cfg).items())
     return (
-        f'MODEL_ARGS_LINE="$({prefix}python3 "{MILES_ROOT}/miles/utils/external_utils/model_args_utils.py"'
+        f'MODEL_ARGS_LINE="$({prefix}python3 "{ORBIT_ROOT}/orbit/utils/external_utils/model_args_utils.py"'
         f' {cfg.model_type})" || exit 1; '
         'read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"'
     )

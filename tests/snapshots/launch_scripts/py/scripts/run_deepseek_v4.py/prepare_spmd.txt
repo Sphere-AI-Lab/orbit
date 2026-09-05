@@ -53,7 +53,7 @@ PYTHONPATH=<REPO_ROOT>:/root/Megatron-LM:/frozen/pythonpath torchrun
   --dsa-indexer-n-heads 64
   --dsa-indexer-head-dim 128
   --dsa-indexer-topk 512
-  --spec miles_plugins.models.deepseek_v4.deepseek_v4 get_dsv4_spec
+  --spec orbit_plugins.models.deepseek_v4.deepseek_v4 get_dsv4_spec
   --activation-func-clamp-value 10
   --no-bias-swiglu-fusion
   --no-activation-func-clamp-shared-expert

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from miles.utils.debug_utils.run_megatron.logprob_comparator import (
+from orbit.utils.debug_utils.run_megatron.logprob_comparator import (
     _compute_comparison,
     _load_and_merge,
     _PositionLogprob,

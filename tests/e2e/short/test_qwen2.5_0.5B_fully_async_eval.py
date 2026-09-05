@@ -2,12 +2,12 @@ import os
 
 from tests.ci.ci_register import register_cuda_ci, register_rocm_ci
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 register_cuda_ci(est_time=400, suite="stage-c-8-gpu-h100", labels=["short", "eval", "fully-async"])
 register_rocm_ci(est_time=400, suite="nightly-stage-c-8-gpu-mi350", labels=["short", "eval", "fully-async"])
 
-FEW_GPU = U.get_bool_env_var("MILES_TEST_FEW_GPU", "0")
+FEW_GPU = U.get_bool_env_var("ORBIT_TEST_FEW_GPU", "0")
 
 MODEL_NAME = "Qwen2.5-0.5B-Instruct"
 MODEL_TYPE = "qwen2.5-0.5B"
@@ -52,7 +52,7 @@ def execute():
         "--eval-top-k 1 "
         "--eval-num-gpus 1 "
         "--eval-num-gpus-per-engine 1 "
-        "--eval-hf-dir /dev/shm/miles_e2e_eval_hf "
+        "--eval-hf-dir /dev/shm/orbit_e2e_eval_hf "
         "--eval-keep-snapshots 2 "
     )
 

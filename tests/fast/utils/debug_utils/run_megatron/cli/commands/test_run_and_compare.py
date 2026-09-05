@@ -4,12 +4,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from miles.utils.debug_utils.run_megatron.cli.commands.args import CommonRunArgs
-from miles.utils.debug_utils.run_megatron.cli.commands.run_and_compare import (
+from orbit.utils.debug_utils.run_megatron.cli.commands.args import CommonRunArgs
+from orbit.utils.debug_utils.run_megatron.cli.commands.run_and_compare import (
     _append_extra_args,
     _run_baseline_and_target,
 )
-from miles.utils.debug_utils.run_megatron.cli.parallel_utils import ParallelConfig
+from orbit.utils.debug_utils.run_megatron.cli.parallel_utils import ParallelConfig
 
 
 def _make_common_fields(**overrides: object) -> dict[str, object]:
@@ -23,7 +23,7 @@ def _make_common_fields(**overrides: object) -> dict[str, object]:
 
 
 class TestRunAndCompare:
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.run_and_compare.run_impl")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.run_and_compare.run_impl")
     def test_calls_run_twice(self, mock_run: MagicMock) -> None:
         _run_baseline_and_target(
             baseline_config=ParallelConfig(tp=1),
@@ -39,7 +39,7 @@ class TestRunAndCompare:
         )
         assert mock_run.call_count == 2
 
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.run_and_compare.run_impl")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.run_and_compare.run_impl")
     def test_output_dir_uses_dir_name(self, mock_run: MagicMock) -> None:
         baseline_config = ParallelConfig(tp=1)
         target_config = ParallelConfig(tp=2)
@@ -63,7 +63,7 @@ class TestRunAndCompare:
         assert baseline_config.dir_name() in str(baseline_args.output_dir)
         assert target_config.dir_name() in str(target_args.output_dir)
 
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.run_and_compare.run_impl")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.run_and_compare.run_impl")
     def test_replay_baseline_nproc1_required(self, mock_run: MagicMock) -> None:
         with pytest.raises(ValueError, match="single-rank baseline"):
             _run_baseline_and_target(
@@ -79,7 +79,7 @@ class TestRunAndCompare:
                 target_logprob_dir=None,
             )
 
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.run_and_compare.run_impl")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.run_and_compare.run_impl")
     def test_replay_paths_passed_correctly(self, mock_run: MagicMock) -> None:
         _run_baseline_and_target(
             baseline_config=ParallelConfig(tp=1),
@@ -102,7 +102,7 @@ class TestRunAndCompare:
         assert target_args.routing_replay_dump_path is None
         assert target_args.routing_replay_load_path is not None
 
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.run_and_compare.run_impl")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.run_and_compare.run_impl")
     def test_logprob_dirs_wired_when_provided(self, mock_run: MagicMock) -> None:
         _run_baseline_and_target(
             baseline_config=ParallelConfig(tp=1),
@@ -123,7 +123,7 @@ class TestRunAndCompare:
         assert baseline_args.logprob_output == Path("/tmp/baseline/logprobs")
         assert target_args.logprob_output == Path("/tmp/target/logprobs")
 
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.run_and_compare.run_impl")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.run_and_compare.run_impl")
     def test_extra_args_appended_to_baseline_and_target(self, mock_run: MagicMock) -> None:
         _run_baseline_and_target(
             baseline_config=ParallelConfig(tp=1),

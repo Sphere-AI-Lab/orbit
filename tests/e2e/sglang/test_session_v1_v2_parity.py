@@ -7,8 +7,8 @@ from tests.ci.ci_register import register_cuda_ci
 from tests.e2e.sglang.utils.sglang_server import start_sglang_server
 from tests.session_parity_utils import V1, V2, assert_agentic_retry_trajectory_parity, run_agentic_retry_trajectories
 
-from miles.utils.test_utils.session_verify_agent import build_initial_messages
-from miles.utils.types import Sample
+from orbit.utils.test_utils.session_verify_agent import build_initial_messages
+from orbit.utils.types import Sample
 
 register_cuda_ci(est_time=190, suite="stage-c-2-gpu-h200", labels=["sglang"])
 

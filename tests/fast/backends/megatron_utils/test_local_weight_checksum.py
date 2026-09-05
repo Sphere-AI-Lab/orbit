@@ -7,14 +7,14 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
-from miles.backends.megatron_utils.local_weight_checksum import (
+from orbit.backends.megatron_utils.local_weight_checksum import (
     _compute_weight_checksum_state,
     _transform_tensor_to_hash,
     dump_local_weight_checksums,
 )
-from miles.utils.audit_utils.event_logger.logger import EventLogger, read_events, set_event_logger
-from miles.utils.audit_utils.event_logger.models import TrainEngineLocalWeightChecksumEvent
-from miles.utils.audit_utils.process_identity import TrainProcessIdentity
+from orbit.utils.audit_utils.event_logger.logger import EventLogger, read_events, set_event_logger
+from orbit.utils.audit_utils.event_logger.models import TrainEngineLocalWeightChecksumEvent
+from orbit.utils.audit_utils.process_identity import TrainProcessIdentity
 
 
 def _make_mock_model_chunk(
@@ -176,7 +176,7 @@ class TestTransformTensorToHash:
 
 class TestFailFastAssertions:
     def test_assert_event_logger_initialized_when_enabled(self) -> None:
-        import miles.utils.audit_utils.event_logger.logger as mod
+        import orbit.utils.audit_utils.event_logger.logger as mod
 
         original = mod._event_logger
         mod._event_logger = None
@@ -207,7 +207,7 @@ class TestFailFastAssertions:
             _compute_weight_checksum_state(model=model, optimizer=optimizer)
 
     def test_assert_param_without_main_param_fails(self) -> None:
-        from miles.backends.megatron_utils.local_weight_checksum import _build_name_by_tensor_id
+        from orbit.backends.megatron_utils.local_weight_checksum import _build_name_by_tensor_id
 
         chunk = MagicMock()
         param = torch.randn(2, 2)
@@ -217,7 +217,7 @@ class TestFailFastAssertions:
             _build_name_by_tensor_id([chunk])
 
     def test_assert_unmapped_fp32_param_fails(self) -> None:
-        from miles.backends.megatron_utils.local_weight_checksum import _build_param_names_for_optimizer
+        from orbit.backends.megatron_utils.local_weight_checksum import _build_param_names_for_optimizer
 
         unmapped_param = torch.randn(2, 2)
         inner = MagicMock(spec=torch.optim.Adam)

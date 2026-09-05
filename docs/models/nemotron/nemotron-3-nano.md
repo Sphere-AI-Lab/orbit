@@ -6,7 +6,7 @@ description: Launch recipe for the dense NVIDIA Nemotron-3-Nano-4B (Mamba+Attent
 
 [NVIDIA Nemotron-3-Nano-4B-BF16](https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-BF16)
 is a dense `nemotron_h` hybrid model — interleaved Mamba and attention blocks
-with squared-relu FFNs, no RoPE, and a 262 144 max position. miles wires it via
+with squared-relu FFNs, no RoPE, and a 262 144 max position. orbit wires it via
 the `megatron.bridge` AutoBridge path, so there is **no `torch_dist` conversion
 step**: the AutoBridge constructs the full Megatron provider from the HF
 `config.json` at load time, including all Mamba-specific fields
@@ -54,7 +54,7 @@ turns on the bridge code path:
 ### 4.1 Quick start
 
 ```bash
-cd /root/miles
+cd /root/orbit
 python scripts/run_nemotron_3_nano.py --model-name NVIDIA-Nemotron-3-Nano-4B-BF16
 ```
 
@@ -116,7 +116,7 @@ From `scripts/models/nemotron-3-nano-4b.py` and `scripts/run_nemotron_3_nano.py`
 - `--position-embedding-type none` (no RoPE).
 - `--vocab-size 131072 --make-vocab-size-divisible-by 128`.
 - `--attention-backend auto` (the Mamba layers select their own kernel; flash-only is not safe here).
-- Bridge load is required for hybrid `nemotron_h`: the AutoBridge wires `mamba_num_heads`, `mamba_state_dim`, `hybrid_override_pattern`. PP additionally needs miles' PP-unwrap shim (already on the `feat/nemotron-gemma4-rl` branch).
+- Bridge load is required for hybrid `nemotron_h`: the AutoBridge wires `mamba_num_heads`, `mamba_state_dim`, `hybrid_override_pattern`. PP additionally needs orbit' PP-unwrap shim (already on the `feat/nemotron-gemma4-rl` branch).
 
 See [Backends Beyond Megatron](/advanced/architecture-support) for the AutoBridge wiring.
 

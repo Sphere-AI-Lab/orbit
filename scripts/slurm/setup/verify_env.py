@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the miles conda env matches install_env.sh's declared state.
+"""Verify the orbit conda env matches install_env.sh's declared state.
 
 Combines (a) the smoke-test imports install_env.sh used to run at the end of
 its pass and (b) a version/commit cross-check against scripts/slurm/setup/
@@ -125,11 +125,11 @@ def check_imports() -> list[tuple[str, bool]]:
         "megatron.bridge",
         "transformer_engine",
         "ray",
-        "miles",
+        "orbit",
         "mbridge",
         "torch_memory_saver",
         "mooncake.engine",
-        "miles_megatron_plugins",
+        "orbit_megatron_plugins",
         "onnx",
         "onnxscript",
     ]
@@ -264,7 +264,7 @@ def check_pins(pins: dict[str, str]) -> list[tuple[str, bool]]:
     editable_targets = [
         ("megatron-core", REPO_ROOT / "thirdparty/Megatron-LM"),
         ("sglang", sglang_src / "python"),
-        ("miles", REPO_ROOT),
+        ("orbit", REPO_ROOT),
         ("megatron-bridge", REPO_ROOT / "thirdparty/Megatron-Bridge"),
     ]
     for pkg, path in editable_targets:
@@ -274,10 +274,10 @@ def check_pins(pins: dict[str, str]) -> list[tuple[str, bool]]:
             rel = path
         out.append((f"{pkg} editable @ {rel}/", editable_at(pkg, path)))
 
-    pth = SITE_DIR / "miles-megatron-source-root.pth"
+    pth = SITE_DIR / "orbit-megatron-source-root.pth"
     expected = REPO_ROOT / "thirdparty/Megatron-LM"
     pth_ok = pth.exists() and _realpath(pth.read_text().strip()) == _realpath(expected)
-    out.append((f"miles-megatron-source-root.pth -> {expected.relative_to(REPO_ROOT)}/", pth_ok))
+    out.append((f"orbit-megatron-source-root.pth -> {expected.relative_to(REPO_ROOT)}/", pth_ok))
     return out
 
 

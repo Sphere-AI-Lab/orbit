@@ -63,8 +63,8 @@ if [[ -z "$READ_FILE" ]]; then
     # hung mount fails THIS probe, never the caller. This also doubles as the
     # metadata check on /data/shared itself — (1) above targets $DIR (default $HOME),
     # which is the same Weka mount today but would diverge if the mounts ever split.
-    READ_FILE=$(timeout "$T" env ENVN="${MILES_ENV_NAME:-miles}" bash -c '
-        for envn in "$ENVN" miles miles_imp; do
+    READ_FILE=$(timeout "$T" env ENVN="${ORBIT_ENV_NAME:-orbit}" bash -c '
+        for envn in "$ENVN" orbit orbit; do
             for f in /data/shared/conda/miniconda3/envs/$envn/lib/python*/site-packages/torch/lib/libtorch_cuda.so; do
                 [[ -f "$f" ]] && { echo "$f"; exit 0; }
             done

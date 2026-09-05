@@ -1,6 +1,6 @@
 def model_args() -> str:
     return (
-        "--spec miles_plugins.models.glm4 get_glm_spec "
+        "--spec orbit_plugins.models.glm4 get_glm_spec "
         "--swiglu "
         "--num-layers 64 "
         "--hidden-size 6144 "

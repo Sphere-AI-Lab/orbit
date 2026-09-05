@@ -12,10 +12,10 @@ import pybase64
 import pytest
 import torch
 
-from miles.rollout.generate_utils.sample_utils import merge_samples
-from miles.rollout.session.samples.merge import compute_samples_from_openai_records, merge_samples_with_addition_r3
-from miles.rollout.session.types import SessionRecord
-from miles.utils.types import Sample
+from orbit.rollout.generate_utils.sample_utils import merge_samples
+from orbit.rollout.session.samples.merge import compute_samples_from_openai_records, merge_samples_with_addition_r3
+from orbit.rollout.session.types import SessionRecord
+from orbit.utils.types import Sample
 
 # ── helpers ──────────────────────────────────────────────────────────
 

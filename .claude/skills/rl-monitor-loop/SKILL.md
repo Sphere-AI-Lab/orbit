@@ -1,13 +1,13 @@
 ---
 name: rl-monitor-loop
-description: Self-paced low-context monitor for a miles slurm training run — stays close during startup, reports every ~30 min in steady state, instant alert on failure. Use whenever the user wants to monitor a launched run without flooding the main session with event notifications. Built on `/loop` + `ScheduleWakeup` + `scripts/slurm/check_run.sh`. Replaces the older `rl-monitor` skill (deleted).
+description: Self-paced low-context monitor for a orbit slurm training run — stays close during startup, reports every ~30 min in steady state, instant alert on failure. Use whenever the user wants to monitor a launched run without flooding the main session with event notifications. Built on `/loop` + `ScheduleWakeup` + `scripts/slurm/check_run.sh`. Replaces the older `rl-monitor` skill (deleted).
 ---
 
 # rl-monitor-loop — adaptive-cadence monitoring
 
 ## When to use this skill
 
-The user has launched a miles training run (typically via the `slurm-launch`
+The user has launched a orbit training run (typically via the `slurm-launch`
 skill or `bash scripts/slurm/submit.sh`) and wants ongoing visibility
 **without** the per-event noise of streaming Monitor (~50KB/hr → ~2.4MB/48h).
 

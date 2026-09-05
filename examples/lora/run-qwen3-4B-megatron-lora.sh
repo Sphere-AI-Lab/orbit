@@ -15,7 +15,7 @@ pkill -9 python
 
 set -ex
 
-SKILLS_OPENAI_MODEL_NAME=${SKILLS_OPENAI_MODEL_NAME:-"miles-openai-model"}
+SKILLS_OPENAI_MODEL_NAME=${SKILLS_OPENAI_MODEL_NAME:-"orbit-openai-model"}
 
 export GPUS_PER_NODE=4
 export PYTHONUNBUFFERED=1
@@ -30,7 +30,7 @@ echo "HAS_NVLINK: $HAS_NVLINK (detected $NVLINK_COUNT NVLink references)"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." &>/dev/null && pwd)"
-MODEL_ARGS_LINE="$(python3 "${REPO_ROOT}/miles/utils/external_utils/model_args_utils.py" "qwen3-4B")" || exit 1
+MODEL_ARGS_LINE="$(python3 "${REPO_ROOT}/orbit/utils/external_utils/model_args_utils.py" "qwen3-4B")" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 
 # Store eval/delegate settings in a YAML config similar to examples/experimental/eval_multi_task.
@@ -72,7 +72,7 @@ ROLLOUT_ARGS=(
    --rollout-temperature 1
    --over-sampling-batch-size 64
 
-   --dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
+   --dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std
    # --global-batch-size 256
    --global-batch-size 128
    --balance-data
@@ -131,8 +131,8 @@ OPTIMIZER_ARGS=(
 WANDB_ARGS=(
    --use-wandb
    --wandb-host https://wandb.ai/
-   --wandb-team miles-lora
-   --wandb-project miles-lora-megatron
+   --wandb-team orbit-lora
+   --wandb-project orbit-lora-megatron
    --wandb-group qwen3-4B-test
 )
 

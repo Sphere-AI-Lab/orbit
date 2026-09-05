@@ -6,7 +6,7 @@ from types import ModuleType, SimpleNamespace
 import pytest
 import torch
 
-import miles.backends.megatron_utils.peft_utils as peft_utils
+import orbit.backends.megatron_utils.peft_utils as peft_utils
 
 
 def _parallel_state(
@@ -131,7 +131,7 @@ def _patch_lora_bridge(monkeypatch):
     bridge_module.AutoBridge = _Bridge
     monkeypatch.setitem(sys.modules, "megatron.bridge", bridge_module)
 
-    from miles.utils import megatron_bridge_utils
+    from orbit.utils import megatron_bridge_utils
 
     monkeypatch.setattr(megatron_bridge_utils, "patch_megatron_model", lambda _model: nullcontext())
 

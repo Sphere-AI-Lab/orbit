@@ -15,7 +15,7 @@ import pytest
     ],
 )
 def test_cp_comm_type_was_explicit_prefers_serialized_marker(args, argv, expected):
-    from miles.backends.megatron_utils.cp_contract import cp_comm_type_was_explicit
+    from orbit.backends.megatron_utils.cp_contract import cp_comm_type_was_explicit
 
     assert cp_comm_type_was_explicit(args, argv=argv) is expected
 
@@ -57,7 +57,7 @@ def _bridge_args(cp_comm_type_canonical: str, *, explicit: bool = False) -> Name
 
 @pytest.mark.parametrize("transport", ["p2p", "a2a", "all_gather", "a2a+p2p"])
 def test_apply_bridge_runtime_config_propagates_explicit_cp_transport(transport):
-    from miles.backends.megatron_utils.model_provider import _apply_bridge_runtime_config
+    from orbit.backends.megatron_utils.model_provider import _apply_bridge_runtime_config
 
     provider = SimpleNamespace(cp_comm_type=None)
 
@@ -68,7 +68,7 @@ def test_apply_bridge_runtime_config_propagates_explicit_cp_transport(transport)
 
 
 def test_apply_bridge_runtime_config_preserves_provider_transport_over_parser_default():
-    from miles.backends.megatron_utils.model_provider import _apply_bridge_runtime_config
+    from orbit.backends.megatron_utils.model_provider import _apply_bridge_runtime_config
 
     provider = SimpleNamespace(cp_comm_type="a2a")
     args = _bridge_args("p2p")
@@ -81,7 +81,7 @@ def test_apply_bridge_runtime_config_preserves_provider_transport_over_parser_de
 
 
 def test_apply_bridge_runtime_config_rejects_explicit_provider_transport_conflict():
-    from miles.backends.megatron_utils.model_provider import _apply_bridge_runtime_config
+    from orbit.backends.megatron_utils.model_provider import _apply_bridge_runtime_config
 
     provider = SimpleNamespace(cp_comm_type="a2a")
 
@@ -90,7 +90,7 @@ def test_apply_bridge_runtime_config_rejects_explicit_provider_transport_conflic
 
 
 def test_apply_bridge_runtime_config_accepts_explicit_provider_transport_match():
-    from miles.backends.megatron_utils.model_provider import _apply_bridge_runtime_config
+    from orbit.backends.megatron_utils.model_provider import _apply_bridge_runtime_config
 
     provider = SimpleNamespace(cp_comm_type="a2a")
     args = _bridge_args("a2a", explicit=True)
@@ -103,7 +103,7 @@ def test_apply_bridge_runtime_config_accepts_explicit_provider_transport_match()
 
 
 def test_apply_bridge_runtime_config_syncs_initialized_parallel_state(monkeypatch):
-    from miles.backends.megatron_utils import model_provider
+    from orbit.backends.megatron_utils import model_provider
 
     state = SimpleNamespace(cp_comm_type="p2p")
     monkeypatch.setattr(model_provider, "is_parallel_state_initialized", lambda: True, raising=False)

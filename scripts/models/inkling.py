@@ -39,5 +39,5 @@ def model_args(nlayers: int | None = None) -> str:
         "--moe-grouped-gemm "
         "--qk-layernorm "
         # Inkling model provider
-        "--custom-model-provider-path miles_plugins.models.inkling.model.inkling_model_provider "
+        "--custom-model-provider-path orbit_plugins.models.inkling.model.inkling_model_provider "
     )

@@ -3,8 +3,8 @@ import time
 
 import pytest
 
-from miles.dashboard.gpu_sampler import GpuSampler
-from miles.dashboard.store import GpuProcessSample, GpuSample
+from orbit.dashboard.gpu_sampler import GpuSampler
+from orbit.dashboard.store import GpuProcessSample, GpuSample
 
 
 class FakeNvml:

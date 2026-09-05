@@ -5,9 +5,9 @@ import pytest
 from fastapi.testclient import TestClient
 from tests.fast.dashboard.dummy_telemetry import DRAIN_A, DRAIN_B, ENGINE_B_NEW, GPU_NODE, dump_dummy_telemetry
 
-from miles.dashboard.dump_reader import DumpReader
-from miles.dashboard.server import make_app
-from miles.dashboard.store import GpuSample, Meta, MetricStore
+from orbit.dashboard.dump_reader import DumpReader
+from orbit.dashboard.server import make_app
+from orbit.dashboard.store import GpuSample, Meta, MetricStore
 
 
 @pytest.fixture

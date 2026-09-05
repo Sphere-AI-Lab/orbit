@@ -4,10 +4,10 @@ from unittest.mock import MagicMock
 
 from tests.fast.ray.rollout.conftest import fake_actor_handle, make_args
 
-from miles.ray.rollout.rollout_server import RolloutServer
-from miles.ray.rollout.server_cell import get_cell_indexer_of_id_map
-from miles.ray.rollout.server_engine import ServerEngine
-from miles.ray.rollout.server_group import ServerGroup
+from orbit.ray.rollout.rollout_server import RolloutServer
+from orbit.ray.rollout.server_cell import get_cell_indexer_of_id_map
+from orbit.ray.rollout.server_engine import ServerEngine
+from orbit.ray.rollout.server_group import ServerGroup
 
 
 def _build_servers(

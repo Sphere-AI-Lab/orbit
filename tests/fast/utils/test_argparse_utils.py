@@ -7,7 +7,7 @@ import dataclasses
 
 import pytest
 
-from miles.utils.argparse_utils import DataclassArgparseBridge, inplace_modify_args
+from orbit.utils.argparse_utils import DataclassArgparseBridge, inplace_modify_args
 
 
 @dataclasses.dataclass(frozen=True)

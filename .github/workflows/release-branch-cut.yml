@@ -9,7 +9,7 @@ run-name: Release Branch Cut ${{ inputs.branch_name }}
 # cadence CI suites against it. Re-dispatching on an existing branch skips
 # creation and just re-runs the tests (e.g. after a cherry-pick).
 #
-# A Miles version freezes the repository commit plus the SGLang and Megatron-LM
+# A Orbit version freezes the repository commit plus the SGLang and Megatron-LM
 # commits; see docs/developer/versions.md. The lockfile also names the CUDA CI
 # image, while wheel fingerprints are audit records and ROCm remains smoke-only.
 
@@ -33,7 +33,7 @@ permissions:
 
 jobs:
   cut-release-branch:
-    if: github.repository == 'radixark/miles'
+    if: github.repository == 'Sphere-AI-Lab/orbit'
     runs-on: ubuntu-latest
     outputs:
       branch_name: ${{ github.event.inputs.branch_name }}
@@ -93,8 +93,8 @@ jobs:
             exit 0
           fi
 
-          git config user.name "miles-bot"
-          git config user.email "miles-bot@users.noreply.github.com"
+          git config user.name "orbit-bot"
+          git config user.email "orbit-bot@users.noreply.github.com"
           git checkout -b "$BRANCH_NAME" "${{ steps.validate.outputs.commit_sha }}"
 
           SGLANG_SHA=$(git ls-remote https://github.com/sgl-project/sglang refs/heads/sglang-miles | cut -f1)

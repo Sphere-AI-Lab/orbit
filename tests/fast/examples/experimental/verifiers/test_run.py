@@ -5,9 +5,9 @@ import pytest
 from examples.experimental.verifiers import run
 from tests.fast.utils.command_recorder import record_commands
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
-LEGACY_ROLLOUT_ENV = "MILES_USE_LEGACY_ROLLOUT_V1"
+LEGACY_ROLLOUT_ENV = "ORBIT_USE_LEGACY_ROLLOUT_V1"
 
 
 def _rollout_config(submit_command: str) -> tuple[str, dict[str, str]]:
@@ -37,8 +37,8 @@ def test_adapter_and_ray_runtime_use_the_same_legacy_flag(
 ):
     commands = record_commands(monkeypatch)
     monkeypatch.setattr(U, "check_has_nvlink", lambda: False)
-    monkeypatch.setenv("MILES_SCRIPT_EXTERNAL_RAY", "1")
-    monkeypatch.setenv("MILES_SCRIPT_ENABLE_RAY_SUBMIT", "1")
+    monkeypatch.setenv("ORBIT_SCRIPT_EXTERNAL_RAY", "1")
+    monkeypatch.setenv("ORBIT_SCRIPT_ENABLE_RAY_SUBMIT", "1")
     monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
     monkeypatch.delenv("RAY_ADDRESS", raising=False)
     monkeypatch.delenv("NCCL_NVLS_ENABLE", raising=False)

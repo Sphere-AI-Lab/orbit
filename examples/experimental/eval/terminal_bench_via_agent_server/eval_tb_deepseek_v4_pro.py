@@ -1,11 +1,11 @@
-"""Evaluate DeepSeek-V4-Pro on Terminal-Bench 2.0 via a running ``miles_agent_server``.
+"""Evaluate DeepSeek-V4-Pro on Terminal-Bench 2.0 via a running ``orbit_agent_server``.
 
 This is a pure client: no training, no Ray, no Megatron. It just POSTs
 ``/run`` requests concurrently to an already-running agent server and
 aggregates the per-trial results.
 
 The agent server is expected to be the one shipped in harbor's
-``harbor-miles-v0.20.0`` branch (see that repo's README for setup), running
+``harbor-orbit-v0.20.0`` branch (see that repo's README for setup), running
 with ``$HARBOR_TASKS_DIR`` populated with the 89 Terminal-Bench 2.0 tasks.
 The server is dataset-agnostic; this script just resolves the 89 task names
 from ``registry.json`` and dispatches one ``/run`` request per
@@ -41,13 +41,13 @@ import polars as pl
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Evaluate DeepSeek-V4-Pro on Terminal-Bench 2.0 via miles_agent_server.",
+        description="Evaluate DeepSeek-V4-Pro on Terminal-Bench 2.0 via orbit_agent_server.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "--server-url",
         default="http://localhost:8080",
-        help="Base URL of a running miles_agent_server.",
+        help="Base URL of a running orbit_agent_server.",
     )
     parser.add_argument(
         "--registry-path",

@@ -1,4 +1,4 @@
-"""Unit tests for miles.backends.megatron_utils.lora_utils.
+"""Unit tests for orbit.backends.megatron_utils.lora_utils.
 
 Tests cover module name conversion, LoRA detection helpers, parameter identification,
 exclude-module parsing, and LoRA sync config building — all without GPU.
@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from miles.backends.megatron_utils.lora_utils import (
+from orbit.backends.megatron_utils.lora_utils import (
     _get_lora_class_name,
     _is_adapter_param_name,
     build_lora_sync_config,
@@ -19,7 +19,7 @@ from miles.backends.megatron_utils.lora_utils import (
     is_lora_weight_name,
     parse_exclude_modules,
 )
-from miles.utils.lora import LORA_ADAPTER_NAME
+from orbit.utils.lora import LORA_ADAPTER_NAME
 
 # ---------------------------------------------------------------------------
 # _get_lora_class_name
@@ -354,4 +354,4 @@ class TestBuildLoraSyncConfig:
 
 
 def test_lora_adapter_name_constant():
-    assert LORA_ADAPTER_NAME == "miles_lora"
+    assert LORA_ADAPTER_NAME == "orbit_lora"

@@ -12,13 +12,13 @@
 # convert_checkpoint.sh default — would build a text-only model with no vision
 # tower):
 #   srun --gres=gpu:1 --cpus-per-task=16 --mem=128G --time=75 \
-#     env MILES_ENV_NAME=miles_0809 MODEL_FAMILY=qwen3-8B \
+#     env ORBIT_ENV_NAME=orbit_0809 MODEL_FAMILY=qwen3-8B \
 #         MODEL_ARGS_ROTARY_BASE=5000000 \
 #         HF_DIR=/data/shared/hf_cache/models/Qwen3-VL-8B-Instruct \
 #         SAVE_DIR=/data/shared/hf_cache/models/Qwen3-VL-8B-Instruct_torch_dist \
 #         CONVERT_EXTRA_ARGS="--megatron-to-hf-mode bridge" \
 #     bash scripts/slurm/setup/convert_checkpoint.sh
-# If the artifact is missing at job start, launch_miles.sbatch auto-converts on
+# If the artifact is missing at job start, launch_orbit.sbatch auto-converts on
 # the head node — flag-correct for this recipe (it serializes MODEL_ARGS, which
 # include --megatron-to-hf-mode bridge) — but the other 23 GPUs idle meanwhile,
 # so pre-converting is preferred.
@@ -33,7 +33,7 @@
 # only, not artifact content.
 #
 # Submit:
-#   JOB_NAME=geo3k-async-mt-pf2-8b-td TIME=24:00:00 NODES=3 MILES_ENV_NAME=miles_0809 \
+#   JOB_NAME=geo3k-async-mt-pf2-8b-td TIME=24:00:00 NODES=3 ORBIT_ENV_NAME=orbit_0809 \
 #   WANDB_PROJECT=baseline bash scripts/slurm/submit.sh async/geo3k-vlm-multi-turn-fully-async-prefetch2-3node-torchdist
 
 set -euo pipefail
@@ -50,4 +50,4 @@ HF_TORCHDIST_DIR="$HF_CACHE_DIR/models/Qwen3-VL-8B-Instruct_torch_dist"
 # tracker makes Megatron load iteration 0 and skip optimizer/RNG on its own;
 # the base --hf-checkpoint stays (engines, tokenizer/processor, bridge provider,
 # HF export — config-only reads, no weight tensors).
-MILES_ARGS+=( --load "$HF_TORCHDIST_DIR" )
+ORBIT_ARGS+=( --load "$HF_TORCHDIST_DIR" )

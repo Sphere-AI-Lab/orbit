@@ -17,14 +17,14 @@ Flow-GRPO (`--loss-type policy_loss`, the default) calls
 mirrors sglang-diffusion's rollout stepping so train-side log-probs match
 rollout-side values.
 
-| Objective | Miles flag | Uses `SdeStepBackend`? | Paper |
+| Objective | Orbit flag | Uses `SdeStepBackend`? | Paper |
 |---|---|---|---|
 | Flow-GRPO | `--loss-type policy_loss` | **Yes** | [Flow-GRPO](https://arxiv.org/abs/2505.05470) |
 | DiffusionNFT | `--loss-type nft` | **No** | [DiffusionNFT](https://arxiv.org/abs/2509.16117) |
 
 Canonical Flow-GRPO recipe: `scripts/run_diffusion_grpo_sd3_ocr_sglang.py`.
 
-Implementation: `miles/backends/fsdp_utils/sde_step_backend.py`. Override with
+Implementation: `orbit/backends/fsdp_utils/sde_step_backend.py`. Override with
 `--sde-step-backend-path` if you need a custom kernel.
 
 ## 2. Dynamics types
@@ -56,13 +56,13 @@ consistent with the train-side backend:
 Example (SD3 Flow-GRPO OCR — full-window SDE):
 
 ```bash
---diffusion-step-strategy-path miles.rollout.step_strategy_hub.sde_window \
+--diffusion-step-strategy-path orbit.rollout.step_strategy_hub.sde_window \
 --diffusion-num-sde-steps 10 \
 --diffusion-sde-window-range 0,10 \
 --diffusion-noise-level 0.7
 ```
 
-Step strategies live in `miles/rollout/step_strategy_hub.py`. `sde_window` picks a
+Step strategies live in `orbit/rollout/step_strategy_hub.py`. `sde_window` picks a
 contiguous window; `epoch_global_random_choice` picks a per-epoch subset via
 `--diffusion-sde-candidate-steps`. Partial windows follow the MixGRPO /
 TempFlow-GRPO idea ([MixGRPO](https://arxiv.org/abs/2507.21802),

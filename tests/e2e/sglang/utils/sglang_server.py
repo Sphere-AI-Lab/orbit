@@ -11,7 +11,7 @@ from typing import IO
 import requests
 import torch
 
-from miles.utils.http_utils import find_available_port
+from orbit.utils.http_utils import find_available_port
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_BASE_PORT = 34000

@@ -32,13 +32,13 @@ _SCRIPTS_REFUSING_TO_RUN_WITHOUT_EXPLICIT_INPUTS: dict[str, LaunchScriptCase] = 
         env={"OUTPUT_DIR": "{workdir}"}
     ),
     "examples/infra_features/p2p_weight_transfer/run-glm4.5-air-8node-profile.sh": LaunchScriptCase(
-        args=("p2p", "0", _HEAD_NODE_IP), env={"MILES_LOG_DIR": "{workdir}"}
+        args=("p2p", "0", _HEAD_NODE_IP), env={"ORBIT_LOG_DIR": "{workdir}"}
     ),
     "examples/infra_features/p2p_weight_transfer/run-glm4.7-flash-2node-profile.sh": LaunchScriptCase(
         args=("p2p", "0", _HEAD_NODE_IP)
     ),
     "examples/infra_features/p2p_weight_transfer/run-glm5-disagg-profile.sh": LaunchScriptCase(
-        args=("GLM-5", "p2p", "0", _HEAD_NODE_IP), env={"MILES_LOG_DIR": "{workdir}"}
+        args=("GLM-5", "p2p", "0", _HEAD_NODE_IP), env={"ORBIT_LOG_DIR": "{workdir}"}
     ),
     "examples/infra_features/p2p_weight_transfer/run-kimi-k2-64node-profile.sh": LaunchScriptCase(
         args=("p2p", "0", _HEAD_NODE_IP)

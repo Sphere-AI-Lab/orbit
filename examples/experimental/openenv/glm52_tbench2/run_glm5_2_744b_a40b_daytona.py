@@ -25,7 +25,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 app = typer.Typer()
 
@@ -77,7 +77,7 @@ class ScriptArgs(U.ExecuteTrainConfig):
     openenv_daytona_create_concurrency: int = int(os.environ.get("OPENENV_DAYTONA_CREATE_CONCURRENCY", "8"))
     # jittered-backoff attempts (~30s cap)
     openenv_daytona_create_max_retries: int = int(os.environ.get("OPENENV_DAYTONA_CREATE_MAX_RETRIES", "8"))
-    openenv_launcher: str = os.environ.get("OPENENV_LAUNCHER", os.environ.get("USER", "miles"))
+    openenv_launcher: str = os.environ.get("OPENENV_LAUNCHER", os.environ.get("USER", "orbit"))
     openenv_run_id: str = os.environ.get("OPENENV_RUN_ID", "")
 
     # Eval over a held-out tbench2 split on the shared rollout engines (the
@@ -166,10 +166,10 @@ def _execute_train(args: ScriptArgs):
         )
 
     agent_args = (
-        "--custom-generate-function-path miles.rollout.generate_hub.agentic_tool_call.generate "
+        "--custom-generate-function-path orbit.rollout.generate_hub.agentic_tool_call.generate "
         "--custom-agent-function-path openenv_daytona_agent_function.run "
         "--custom-rm-path openenv_generate.reward_func "
-        "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_no_aborted "
+        "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_no_aborted "
         "--tito-model glm47 "
         "--use-session-server "
         "--session-server-port 30000 "
@@ -258,7 +258,7 @@ def _execute_train(args: ScriptArgs):
 
     dashboard_args = (
         f"--dump-details {args.output_dir}/{args.run_id}/dump_details "
-        "--use-miles-dashboard "
+        "--use-orbit-dashboard "
         "--dashboard-sglang-scrape-mode direct "
     )
 

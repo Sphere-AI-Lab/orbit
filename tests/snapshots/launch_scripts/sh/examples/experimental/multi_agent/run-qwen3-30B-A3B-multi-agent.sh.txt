@@ -45,7 +45,7 @@
 
 ### 9
 "python3"
-"<REPO_ROOT>/examples/experimental/multi_agent/../../../miles/utils/external_utils/model_args_utils.py"
+"<REPO_ROOT>/examples/experimental/multi_agent/../../../orbit/utils/external_utils/model_args_utils.py"
 "qwen3-30B-A3B"
 
 ### 10
@@ -128,9 +128,9 @@
 "--ref-load"
 "/root/Qwen3-30B-A3B_torch_dist"
 "--load"
-"/root/Qwen3-4B_miles/"
+"/root/Qwen3-4B_orbit/"
 "--save"
-"/root/Qwen3-4B_miles/"
+"/root/Qwen3-4B_orbit/"
 "--save-interval"
 "20"
 "--custom-generate-function-path"

@@ -2,7 +2,7 @@
 title: On-Policy Distillation
 description: Train a student on its own rollouts with a teacher's token-level probabilities as a reverse-KL signal, composable with GRPO, PPO, and other estimators.
 ---
-On-policy distillation (OPD) trains a student model on its own rollouts while using a teacher model's token-level probabilities as the distillation signal. In Miles, the teacher signal is converted into a per-token reverse-KL penalty and applied after the selected RL advantage estimator has produced token advantages. This lets the same OPD recipe compose with GRPO, PPO, REINFORCE++, GSPO, and other estimators.
+On-policy distillation (OPD) trains a student model on its own rollouts while using a teacher model's token-level probabilities as the distillation signal. In Orbit, the teacher signal is converted into a per-token reverse-KL penalty and applied after the selected RL advantage estimator has produced token advantages. This lets the same OPD recipe compose with GRPO, PPO, REINFORCE++, GSPO, and other estimators.
 
 ## Key Arguments
 
@@ -57,7 +57,7 @@ The teacher runs on an external SGLang server. Teacher log-probs are obtained du
 
 **How it works**:
 1. An external SGLang server runs the teacher model.
-2. During rollout, the custom reward function (`miles.rollout.on_policy_distillation.reward_func`) sends each sample to the teacher server to obtain token-level log-probs.
+2. During rollout, the custom reward function (`orbit.rollout.on_policy_distillation.reward_func`) sends each sample to the teacher server to obtain token-level log-probs.
 3. With `--opd-log-prob-top-k=0`, the custom post-processing function trims sampled-token teacher log-probs to the response span and stores them in `sample.teacher_log_probs`.
 4. With `--opd-log-prob-top-k>0`, it computes the Rethinking OPD weighted top-k reverse-KL estimate and stores it in `sample.opd_reverse_kl`.
 5. During training, the stored OPD penalty is subtracted from the selected estimator's advantages.
@@ -70,8 +70,8 @@ The teacher runs on an external SGLang server. Teacher log-probs are obtained du
 --opd-log-prob-top-k 16
 --opd-top-k-strategy only-student
 --opd-reward-weight-mode student_p
---custom-rm-path miles.rollout.on_policy_distillation.reward_func
---custom-reward-post-process-path miles.rollout.on_policy_distillation.post_process_rewards
+--custom-rm-path orbit.rollout.on_policy_distillation.reward_func
+--custom-reward-post-process-path orbit.rollout.on_policy_distillation.post_process_rewards
 --rm-url http://<TEACHER_IP>:<TEACHER_PORT>/generate
 ```
 
@@ -145,8 +145,8 @@ hf download Qwen/Qwen3-8B --local-dir /root/Qwen3-8B
 hf download --repo-type dataset zhuzilin/dapo-math-17k --local-dir /root/dapo-math-17k
 
 # 2. Convert student model
-cd /root/miles
-MODEL_ARGS_LINE="$(python3 miles/utils/external_utils/model_args_utils.py qwen3-8B)" || exit 1
+cd /root/orbit
+MODEL_ARGS_LINE="$(python3 orbit/utils/external_utils/model_args_utils.py qwen3-8B)" || exit 1
 read -ra MODEL_ARGS <<< "${MODEL_ARGS_LINE}"
 PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
     ${MODEL_ARGS[@]} \

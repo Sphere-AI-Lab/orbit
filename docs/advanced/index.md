@@ -3,7 +3,7 @@ title: Advanced Features
 sidebarTitle: Overview
 description: Systems-level features for large-scale and long-running RL.
 ---
-This section covers the Miles features that the Core-features section of the
+This section covers the Orbit features that the Core-features section of the
 homepage points at: low-precision training (FP8 / MXFP8 / NVFP4 / INT4 QAT),
 Rollout Routing Replay for MoE, fast weight updates over P2P RDMA,
 disaggregated RL rollout through an external service, fault tolerance,
@@ -25,7 +25,7 @@ speculative decoding, and LoRA training and serving.
 
   </Card>
 
-  <Card title="Rollout Routing Replay (R3)" icon="network-wired" href="/advanced/miles-router">
+  <Card title="Rollout Routing Replay (R3)" icon="network-wired" href="/advanced/orbit-router">
 
     Capture expert routing during inference and replay during training. The
     mechanism that keeps MoE RL stable.

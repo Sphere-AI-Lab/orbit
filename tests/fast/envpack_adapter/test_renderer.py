@@ -7,7 +7,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from miles_plugins.envpack_adapter.renderer import observation_to_chat_message
+from orbit_plugins.envpack_adapter.renderer import observation_to_chat_message
 
 
 _PNG_1X1 = base64.b64decode(

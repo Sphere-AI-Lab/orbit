@@ -1,6 +1,6 @@
 from argparse import Namespace
 
-from miles.rollout.generate_utils.generate_endpoint_utils import attach_peft_request_payload, compute_request_payload
+from orbit.rollout.generate_utils.generate_endpoint_utils import attach_peft_request_payload, compute_request_payload
 
 
 def _args(peft_method: str) -> Namespace:
@@ -45,13 +45,13 @@ def test_compute_request_payload_attaches_oft_adapter():
     assert payload is not None
     # OFT runs multi-slot (base slot 0 + adapter slot 1) and selects its trained
     # slot via adapter_path -- the v0.5.16 rename of oft_path.
-    assert payload["adapter_path"] == "miles_oft"
+    assert payload["adapter_path"] == "orbit_oft"
     assert "oft_path" not in payload
     assert "lora_path" not in payload
 
 
 def test_attach_peft_request_payload_keeps_oft_disable_override(monkeypatch):
-    monkeypatch.setenv("MILES_DSV4_DISABLE_OFT_REQUEST", "1")
+    monkeypatch.setenv("ORBIT_DSV4_DISABLE_OFT_REQUEST", "1")
 
     payload = attach_peft_request_payload(_args("oft"), {})
 

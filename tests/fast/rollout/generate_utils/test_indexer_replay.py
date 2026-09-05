@@ -8,8 +8,8 @@ import numpy as np
 import pybase64
 import pytest
 
-from miles.rollout.generate_utils.generate_endpoint_utils import get_indexer_topk_from_response
-from miles.utils.types import Sample
+from orbit.rollout.generate_utils.generate_endpoint_utils import get_indexer_topk_from_response
+from orbit.utils.types import Sample
 
 
 def _encode_int32(values: np.ndarray) -> str:

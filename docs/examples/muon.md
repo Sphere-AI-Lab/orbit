@@ -16,21 +16,21 @@ muon`. The Qwen3 wrappers select Megatron's `dist_muon` optimizer.
 
 The run requires:
 
-- a Conda environment named `miles` by default (or an override via `MILES_CONDA_ENV`);
+- a Conda environment named `orbit` by default (or an override via `ORBIT_CONDA_ENV`);
 - NVIDIA NeMo Emerging Optimizers v0.1.0 in that environment for the Muon arm;
 - one Slurm node with at least two visible GPUs;
 - the downloaded Hugging Face Qwen2.5-0.5B-Instruct checkpoint;
-- GSM8K `train.parquet` in Miles' `messages`/`label` format;
+- GSM8K `train.parquet` in Orbit' `messages`/`label` format;
 - a converted Megatron distributed checkpoint; and
 - initialized `Megatron-LM` and `sglang` submodules in this worktree.
 
 Install Megatron's pinned Muon dependency once in the selected environment:
 
 ```bash
-git clone https://github.com/impossible-inc/miles-imp.git miles-imp
-cd miles-imp
+git clone https://github.com/Sphere-AI-Lab/orbit.git orbit
+cd orbit
 source /data/shared/conda/miniconda3/etc/profile.d/conda.sh
-conda activate "${MILES_CONDA_ENV:-miles}"
+conda activate "${ORBIT_CONDA_ENV:-orbit}"
 python -m pip install \
   "git+https://github.com/NVIDIA-NeMo/Emerging-Optimizers.git@v0.1.0"
 ```
@@ -47,10 +47,10 @@ The runner defaults are:
 | `PROMPT_DATA` | `${HOME}/datasets/gsm8k/train.parquet` |
 | `NUM_GPUS` | `2` |
 | `NUM_ROLLOUT` | `3` |
-| `OUTPUT_ROOT` | `${PWD}/miles-runs/muon-smoke` |
+| `OUTPUT_ROOT` | `${PWD}/orbit-runs/muon-smoke` |
 | `RUN_ID` | `qwen2.5-0.5b-gsm8k-muon-<UTC timestamp>` |
-| `MILES_CONDA_ENV` | `miles` |
-| `MILES_CONDA_SH` | `/data/shared/conda/miniconda3/etc/profile.d/conda.sh` |
+| `ORBIT_CONDA_ENV` | `orbit` |
+| `ORBIT_CONDA_SH` | `/data/shared/conda/miniconda3/etc/profile.d/conda.sh` |
 
 Override any of them in the environment. A run refuses to overwrite an
 existing `${OUTPUT_ROOT}/${RUN_ID}` directory.
@@ -60,10 +60,10 @@ existing `${OUTPUT_ROOT}/${RUN_ID}` directory.
 Skip this section when `REF_LOAD` already exists and is nonempty.
 
 ```bash
-git clone https://github.com/impossible-inc/miles-imp.git miles-imp
-cd miles-imp
+git clone https://github.com/Sphere-AI-Lab/orbit.git orbit
+cd orbit
 source /data/shared/conda/miniconda3/etc/profile.d/conda.sh
-conda activate "${MILES_CONDA_ENV:-miles}"
+conda activate "${ORBIT_CONDA_ENV:-orbit}"
 PY_SITE="$(python -c 'import site; print(site.getsitepackages()[0])')"
 export LD_LIBRARY_PATH="${PY_SITE}/nvidia/cudnn/lib:${LD_LIBRARY_PATH:-}"
 source scripts/models/qwen2.5-0.5B.sh
@@ -94,7 +94,7 @@ From an allocation exposing two GPUs, run:
 srun -N1 -n1 bash -lc 'cd "$(pwd)" && bash examples/muon/run_qwen2_5_0_5b_gsm8k_muon.sh'
 ```
 
-The runner activates `MILES_CONDA_ENV` itself, starts a node-local Ray runtime,
+The runner activates `ORBIT_CONDA_ENV` itself, starts a node-local Ray runtime,
 submits the training command, and stops only that Ray runtime on exit. The Ray
 job's nonzero status is propagated.
 
@@ -146,10 +146,10 @@ GPUs and the full converted Megatron checkpoint.
 | `PROMPT_DATA` | `${HOME}/datasets/gsm8k/train.parquet` |
 | `NUM_GPUS` | `8` (fixed by this matrix) |
 | `NUM_ROLLOUT` | `2` |
-| `OUTPUT_ROOT` | `${PWD}/miles-runs/muon-sharding-smoke` |
+| `OUTPUT_ROOT` | `${PWD}/orbit-runs/muon-sharding-smoke` |
 | `RUN_ID` | `qwen3-30b-a3b-gsm8k-<topology>-muon-<UTC timestamp>` |
-| `MILES_CONDA_ENV` | `miles` |
-| `MILES_CONDA_SH` | `/data/shared/conda/miniconda3/etc/profile.d/conda.sh` |
+| `ORBIT_CONDA_ENV` | `orbit` |
+| `ORBIT_CONDA_SH` | `/data/shared/conda/miniconda3/etc/profile.d/conda.sh` |
 
 `NUM_GPUS` must remain 8. Other paths and run-control values can be overridden
 through the environment. Existing run directories are never overwritten.
@@ -160,10 +160,10 @@ Skip this step if `REF_LOAD` already exists and is nonempty. Run the conversion
 inside one Slurm allocation exposing eight GPUs:
 
 ```bash
-git clone https://github.com/impossible-inc/miles-imp.git miles-imp
-cd miles-imp
+git clone https://github.com/Sphere-AI-Lab/orbit.git orbit
+cd orbit
 source /data/shared/conda/miniconda3/etc/profile.d/conda.sh
-conda activate "${MILES_CONDA_ENV:-miles}"
+conda activate "${ORBIT_CONDA_ENV:-orbit}"
 MODEL_ARGS_NUM_LAYERS=48
 source scripts/models/qwen3-30B-A3B.sh
 mkdir -p "${HOME}/models"
@@ -243,7 +243,7 @@ to a Ray head already using its configured address, and cleans up only those
 two owned groups. It never uses node-wide `pkill`, `ray stop`, or `scancel`.
 Each run writes `train.log`, `ray-head.log`, `ray-worker.log`, and `cleanup.log`
 under `${OUTPUT_ROOT}/${RUN_ID}`; the two-node `OUTPUT_ROOT` default is
-`${PWD}/miles-runs/muon-two-node-sharding-smoke`.
+`${PWD}/orbit-runs/muon-two-node-sharding-smoke`.
 
 A row passes only when the resolved command selects `dist_muon` and its named
 topology, Ray registers all 16 GPUs, optimizer steps 0 and 1 complete, the job

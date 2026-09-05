@@ -2,12 +2,12 @@ import os
 
 from tests.ci.ci_register import register_cuda_ci, register_rocm_ci
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 register_cuda_ci(est_time=1400, suite="stage-c-8-gpu-h100", labels=["ckpt"])
 register_rocm_ci(est_time=1200, suite="nightly-stage-c-8-gpu-mi350", labels=["ckpt"])
 
-ENABLE_EVAL = bool(int(os.environ.get("MILES_TEST_ENABLE_EVAL", "1")))
+ENABLE_EVAL = bool(int(os.environ.get("ORBIT_TEST_ENABLE_EVAL", "1")))
 
 MODEL_NAME = "Qwen3-4B"
 MODEL_TYPE = "qwen3-4B"
@@ -15,7 +15,7 @@ NUM_GPUS = 8
 
 
 def _get_latest_checkpointed_iteration() -> int:
-    latest_path = f"/root/models/{MODEL_NAME}_miles/latest_checkpointed_iteration.txt"
+    latest_path = f"/root/models/{MODEL_NAME}_orbit/latest_checkpointed_iteration.txt"
     with open(latest_path, encoding="utf-8") as f:
         latest_text = f.read().strip()
     if not latest_text.isdigit():
@@ -26,7 +26,7 @@ def _get_latest_checkpointed_iteration() -> int:
 def prepare():
     U.exec_command_cpu("mkdir -p /root/models /root/datasets")
     U.exec_command_cpu(f"hf download Qwen/{MODEL_NAME} --local-dir /root/models/{MODEL_NAME}")
-    U.exec_command_cpu(f"rm -rf /root/models/{MODEL_NAME}_miles")
+    U.exec_command_cpu(f"rm -rf /root/models/{MODEL_NAME}_orbit")
     U.hf_download_dataset("zhuzilin/dapo-math-17k")
     U.hf_download_dataset("zhuzilin/aime-2024")
 
@@ -38,15 +38,15 @@ def prepare():
 def execute(mode: str = "", ckpt_step: int | None = None):
     ckpt_args = f"--hf-checkpoint /root/models/{MODEL_NAME}/ " f"--ref-load /root/models/{MODEL_NAME}_torch_dist "
     if mode == "save":
-        ckpt_args += f"--save /root/models/{MODEL_NAME}_miles "
+        ckpt_args += f"--save /root/models/{MODEL_NAME}_orbit "
         ckpt_args += "--save-interval 2 "
     elif mode == "async_save":
-        ckpt_args += f"--save /root/models/{MODEL_NAME}_miles "
+        ckpt_args += f"--save /root/models/{MODEL_NAME}_orbit "
         ckpt_args += "--save-interval 2 "
         ckpt_args += "--async-save "
         ckpt_args += "--use-persistent-ckpt-worker "
     elif mode == "load":
-        ckpt_args += f"--load /root/models/{MODEL_NAME}_miles "
+        ckpt_args += f"--load /root/models/{MODEL_NAME}_orbit "
         ckpt_args += f"--ckpt-step {ckpt_step} "
         ckpt_args += "--low-memory-resume "
 

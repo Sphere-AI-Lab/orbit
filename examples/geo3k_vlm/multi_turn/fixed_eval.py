@@ -518,7 +518,7 @@ def wilson_interval(successes: int, total: int, z: float = 1.959963984540054) ->
 
 
 def evaluation_model_step(args: Any, rollout_id: int) -> int:
-    """Translate Miles' eval callback ID to the number of completed optimizer steps."""
+    """Translate Orbit' eval callback ID to the number of completed optimizer steps."""
     if int(getattr(args, "num_rollout", 0) or 0) == 0:
         return 0
     if rollout_id == 0 and not bool(getattr(args, "skip_eval_before_train", False)):
@@ -559,7 +559,7 @@ def _manifest_contract(samples: Sequence[Any]) -> tuple[str, int]:
 
 def log_eval_rollout_data(rollout_id: int, args: Any, data: dict[str, Any], extra_metrics: dict[str, Any]) -> bool:
     """Log task-quality metrics against exact model-update steps for Milestone 11."""
-    from miles.utils.tracking_utils import tracking
+    from orbit.utils.tracking_utils import tracking
 
     model_step = evaluation_model_step(args, rollout_id)
     log_dict = dict(extra_metrics or {})
@@ -641,9 +641,9 @@ def dump_samples(
 
     fingerprint, _expected_size = _manifest_contract(samples)
     model_step = evaluation_model_step(args, rollout_id)
-    run_dir = os.environ.get("MILES_RUN_DIR")
+    run_dir = os.environ.get("ORBIT_RUN_DIR")
     if not run_dir:
-        logger.warning("MILES_RUN_DIR is unset; skipping compact fixed-eval JSONL dump.")
+        logger.warning("ORBIT_RUN_DIR is unset; skipping compact fixed-eval JSONL dump.")
         return
 
     dataset_name = eval_dataset_name or "eval"
@@ -684,7 +684,7 @@ async def generate(args: Any, sample: Any, sampling_params: dict[str, Any], eval
 
     sample = await generate_geo3k(args, sample, sampling_params)
     if evaluation:
-        from miles.rollout.rm_hub import async_rm
+        from orbit.rollout.rm_hub import async_rm
 
         task_rm_args = copy.copy(args)
         task_rm_args.custom_rm_path = None

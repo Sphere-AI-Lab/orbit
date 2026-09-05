@@ -9,7 +9,7 @@ in a single `Trial.run()` call, and a task is fully described by four files
 (`instruction.md`, `Dockerfile`, `test.sh`, `task.toml`), so mixed task suites —
 SWE-bench, Terminal-Bench, custom tasks — train through one endpoint.
 
-Miles integrates Harbor as an
+Orbit integrates Harbor as an
 [agent-function integration](/user-guide/environments): the agent function
 hands each session's OpenAI-compatible URL to a Harbor server, which runs the
 per-task container, installs and runs the agent against that URL, and grades
@@ -19,7 +19,7 @@ hook.
 ## Try it
 
 The maintained recipe lives in
-[`examples/swe-agent-harbor-docker`](https://github.com/radixark/miles/tree/main/examples/swe-agent-harbor-docker),
+[`examples/swe-agent-harbor-docker`](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/swe-agent-harbor-docker),
 with synchronous and fully-async launchers. Follow the
-[recipe README](https://github.com/radixark/miles/blob/main/examples/swe-agent-harbor-docker/README.md)
+[recipe README](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/swe-agent-harbor-docker/README.md)
 for the architecture, Harbor server setup, task format, and launch scripts.

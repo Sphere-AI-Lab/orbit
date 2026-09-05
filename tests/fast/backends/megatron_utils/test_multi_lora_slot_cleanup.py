@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from miles.backends.megatron_utils.multi_lora_utils import zero_optimizer_state_for_adapter
+from orbit.backends.megatron_utils.multi_lora_utils import zero_optimizer_state_for_adapter
 
 MLL_MODULE = "megatron.bridge.peft.multi_lora_layers"
 
@@ -47,8 +47,8 @@ def make_optimizer(groups, state):
 def test_group_level_fused_adam_clock_resets_only_for_the_retired_slot(rig):
     inner, optimizer = make_optimizer(
         groups=[
-            {"params": [rig.p0], "miles_multi_lora_slot": 0, "step": 50},
-            {"params": [rig.p1], "miles_multi_lora_slot": 1, "step": 50},
+            {"params": [rig.p0], "orbit_multi_lora_slot": 0, "step": 50},
+            {"params": [rig.p1], "orbit_multi_lora_slot": 1, "step": 50},
         ],
         state={
             rig.p0: {"exp_avg": torch.ones(4), "exp_avg_sq": torch.ones(4)},
@@ -68,7 +68,7 @@ def test_group_level_fused_adam_clock_resets_only_for_the_retired_slot(rig):
 def test_tensor_valued_group_clock_resets_in_place(rig):
     step = torch.tensor(50)
     inner, optimizer = make_optimizer(
-        groups=[{"params": [rig.p0], "miles_multi_lora_slot": 0, "step": step}],
+        groups=[{"params": [rig.p0], "orbit_multi_lora_slot": 0, "step": step}],
         state={rig.p0: {"exp_avg": torch.ones(4), "exp_avg_sq": torch.ones(4)}},
     )
 
@@ -80,7 +80,7 @@ def test_tensor_valued_group_clock_resets_in_place(rig):
 def test_per_param_adamw_fallback_clock_resets(rig):
     # torch.optim.AdamW keeps the clock per param; groups carry no "step".
     inner, optimizer = make_optimizer(
-        groups=[{"params": [rig.p0], "miles_multi_lora_slot": 0}],
+        groups=[{"params": [rig.p0], "orbit_multi_lora_slot": 0}],
         state={
             rig.p0: {"exp_avg": torch.ones(4), "exp_avg_sq": torch.ones(4), "step": torch.tensor(50.0)},
         },

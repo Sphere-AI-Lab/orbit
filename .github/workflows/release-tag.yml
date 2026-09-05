@@ -33,7 +33,7 @@ permissions:
 
 jobs:
   create-tag:
-    if: github.repository == 'radixark/miles'
+    if: github.repository == 'Sphere-AI-Lab/orbit'
     runs-on: ubuntu-latest
     steps:
       - name: Validate version format
@@ -101,8 +101,8 @@ jobs:
             echo "::error::Tag $TAG already exists"
             exit 1
           fi
-          git config user.name "miles-bot"
-          git config user.email "miles-bot@users.noreply.github.com"
+          git config user.name "orbit-bot"
+          git config user.email "orbit-bot@users.noreply.github.com"
           echo "Tagging $TAG at $(git rev-parse HEAD) (ref $REF)"
           git tag -a "$TAG" -m "Release $TAG"
           git push origin "$TAG"

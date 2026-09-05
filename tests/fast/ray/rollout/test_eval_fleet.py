@@ -8,9 +8,9 @@ from types import SimpleNamespace
 import pytest
 from tests.fast.ray.rollout.conftest import make_args as _make_args
 
-import miles.ray.rollout.eval_fleet as eval_fleet_mod
-from miles.ray.rollout.eval_fleet import EvalFleet
-from miles.rollout.checkpoint_eval import EvalSkip
+import orbit.ray.rollout.eval_fleet as eval_fleet_mod
+from orbit.ray.rollout.eval_fleet import EvalFleet
+from orbit.rollout.checkpoint_eval import EvalSkip
 
 
 def make_args(**overrides):

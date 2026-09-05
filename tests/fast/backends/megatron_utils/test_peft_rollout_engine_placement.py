@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 
-_MODULE = "miles.backends.megatron_utils.update_weight.update_weight_from_tensor"
+_MODULE = "orbit.backends.megatron_utils.update_weight.update_weight_from_tensor"
 
 
 class _ExistingTransport:
@@ -24,7 +24,7 @@ class _ExistingTransport:
 @patch(f"{_MODULE}.get_parallel_state")
 def test_non_colocated_peft_engine_is_always_distributed(mock_parallel_state, _mock_rank):
     """Offset zero is relative to the rollout placement group when not colocated."""
-    from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
+    from orbit.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
 
     mock_parallel_state.return_value = SimpleNamespace(
         intra_dp_cp=SimpleNamespace(rank=0),
@@ -71,7 +71,7 @@ def test_ray_peft_does_not_create_legacy_nccl_group(
     mock_connect_distributed,
 ):
     """Ray transport must not initialize the legacy trainer-to-engine NCCL group."""
-    from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
+    from orbit.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
 
     mock_parallel_state.return_value = SimpleNamespace(
         intra_dp_cp=SimpleNamespace(rank=0),
@@ -99,7 +99,7 @@ def test_ray_peft_does_not_create_legacy_nccl_group(
 
     rollout_engine_lock = MagicMock()
     with patch(
-        "miles.backends.megatron_utils.peft_transport.build_peft_transport",
+        "orbit.backends.megatron_utils.peft_transport.build_peft_transport",
         return_value=transport,
     ):
         updater.connect_rollout_engines(
@@ -122,7 +122,7 @@ def test_distributed_peft_connects_one_source_per_pipeline_stage(
     mock_connect_distributed,
 ):
     """A nonzero PP stage owns different adapter tensors and must create its PEFT transport."""
-    from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
+    from orbit.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
 
     mock_parallel_state.return_value = SimpleNamespace(
         intra_dp_cp=SimpleNamespace(rank=0),
@@ -150,7 +150,7 @@ def test_distributed_peft_connects_one_source_per_pipeline_stage(
 
     rollout_engine_lock = MagicMock()
     with patch(
-        "miles.backends.megatron_utils.peft_transport.build_peft_transport",
+        "orbit.backends.megatron_utils.peft_transport.build_peft_transport",
         return_value=transport,
     ):
         updater.connect_rollout_engines(
@@ -172,7 +172,7 @@ def test_colocated_peft_rebuilds_ipc_groups_for_heterogeneous_engine_layout(
     mock_new_group,
 ):
     """Every rank must rebuild all IPC groups when the actual engine layout changes."""
-    from miles.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
+    from orbit.backends.megatron_utils.update_weight.update_weight_from_tensor import UpdateWeightFromTensor
 
     first_group = object()
     second_group = object()

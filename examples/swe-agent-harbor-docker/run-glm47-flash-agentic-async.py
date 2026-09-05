@@ -2,7 +2,7 @@
 
 Disaggregated fully-async variant for agentic tasks: training and rollout run
 on separate nodes concurrently. Uses train_async.py and the
-miles.rollout.fully_async_rollout module so that weight updates do not block generation. Agent tasks are dispatched
+orbit.rollout.fully_async_rollout module so that weight updates do not block generation. Agent tasks are dispatched
 to a Harbor-based agent server.
 
 GLM-4.7-Flash architecture: 47 layers, 20 attention heads, 64 routed experts,
@@ -32,7 +32,7 @@ from typing import Literal
 
 import typer
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -78,8 +78,8 @@ class ScriptArgs(U.ExecuteTrainConfig):
     agent_server_url: str = os.environ.get("AGENT_SERVER_URL", "http://localhost:8080")
     agent_model_name: str = os.environ.get("AGENT_MODEL_NAME", "model")
     harbor_tasks_dir: str = os.environ.get("HARBOR_TASKS_DIR", "/root/harbor_tasks")
-    router_external_host: str = os.environ.get("MILES_ROUTER_EXTERNAL_HOST", "")
-    miles_host_ip: str = os.environ.get("MILES_HOST_IP", "")
+    router_external_host: str = os.environ.get("ORBIT_ROUTER_EXTERNAL_HOST", "")
+    orbit_host_ip: str = os.environ.get("ORBIT_HOST_IP", "")
 
     # Disaggregated fully-async settings
     train_num_nodes: int = 1
@@ -166,7 +166,7 @@ def execute(args: ScriptArgs):
         f"--rollout-max-response-len {args.rollout_max_response_len} "
         f"--max-seq-len {args.max_seq_len} "
         f"--over-sampling-batch-size {args.over_sampling_batch_size} "
-        "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_no_aborted "
+        "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_no_aborted "
         f"--global-batch-size {args.global_batch_size} "
         "--balance-data "
         f"--pause-generation-mode {args.pause_generation_mode} "
@@ -274,7 +274,7 @@ def execute(args: ScriptArgs):
     sglang_extra_env_vars: dict[str, str] = {}
 
     agent_args = (
-        "--custom-generate-function-path miles.rollout.generate_hub.agentic_tool_call.generate "
+        "--custom-generate-function-path orbit.rollout.generate_hub.agentic_tool_call.generate "
         "--custom-agent-function-path swe_agent_function.run "
         "--custom-rm-path generate.reward_func "
         "--tito-model glm47 "
@@ -342,10 +342,10 @@ def execute(args: ScriptArgs):
         f"{debug_args}"
     )
 
-    miles_root = U.repo_base_dir
+    orbit_root = U.repo_base_dir
 
     extra_env_vars = {
-        "PYTHONPATH": f"{args.megatron_path}:{SCRIPT_DIR}:{miles_root}",
+        "PYTHONPATH": f"{args.megatron_path}:{SCRIPT_DIR}:{orbit_root}",
         "NCCL_NVLS_ENABLE": os.environ.get("HAS_NVLINK", "0"),
         "SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK": "true",
         "AGENT_SERVER_URL": args.agent_server_url,
@@ -354,9 +354,9 @@ def execute(args: ScriptArgs):
         **sglang_extra_env_vars,
     }
     if args.router_external_host:
-        extra_env_vars["MILES_ROUTER_EXTERNAL_HOST"] = args.router_external_host
-    if args.miles_host_ip:
-        extra_env_vars["MILES_HOST_IP"] = args.miles_host_ip
+        extra_env_vars["ORBIT_ROUTER_EXTERNAL_HOST"] = args.router_external_host
+    if args.orbit_host_ip:
+        extra_env_vars["ORBIT_HOST_IP"] = args.orbit_host_ip
 
     U.execute_train(
         train_args=train_args,

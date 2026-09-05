@@ -3,7 +3,7 @@ import logging
 
 import pytest
 
-from miles.utils.tracking_utils.structured_log import (
+from orbit.utils.tracking_utils.structured_log import (
     _format_value,
     _to_logfmt,
     log_structured,

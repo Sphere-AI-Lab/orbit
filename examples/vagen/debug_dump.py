@@ -3,7 +3,7 @@ inspection of multi-turn rollouts. Wire via:
 
     --rollout-all-samples-process-path examples.vagen.debug_dump.dump_samples
 
-Fires once per rollout step (miles hook contract). Writes
+Fires once per rollout step (orbit hook contract). Writes
 `<save>/{train,eval}/step<NNNN>/prompt<P>_rollout<R>/record.json` plus per-
 turn obs PNGs.
 
@@ -451,7 +451,7 @@ def _log_wandb_turn_stats(args, *, prefix: str, step_key: str, step: int, **stat
     if not getattr(args, "use_wandb", False):
         return
     try:
-        from miles.utils.tracking_utils import tracking
+        from orbit.utils.tracking_utils import tracking
     except Exception as exc:
         logger.warning("dump_samples: tracking import failed (%s); skipping wandb mirror", exc)
         return
@@ -475,7 +475,7 @@ def _log_wandb_bucket_solve_rates(
     if not bucket_counts or not getattr(args, "use_wandb", False):
         return
     try:
-        from miles.utils.tracking_utils import tracking
+        from orbit.utils.tracking_utils import tracking
     except Exception as exc:
         logger.warning("dump_samples: tracking import failed (%s); skipping bucket wandb mirror", exc)
         return

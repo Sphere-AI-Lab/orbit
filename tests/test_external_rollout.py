@@ -1,7 +1,7 @@
 import multiprocessing
 import time
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 MODEL_NAME = "Qwen2.5-0.5B-Instruct"
 MODEL_TYPE = "qwen2.5-0.5B"
@@ -35,7 +35,7 @@ def execute():
         "--rollout-max-response-len 1024 "
         "--rollout-temperature 1 "
         "--over-sampling-batch-size 64 "
-        "--dynamic-sampling-filter-path miles.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
+        "--dynamic-sampling-filter-path orbit.rollout.filter_hub.dynamic_sampling_filters.check_reward_nonzero_std "
         "--global-batch-size 256 "
     )
 
@@ -130,7 +130,7 @@ def execute():
 
 
 def _launch_background():
-    # Here we use infra in miles, but real users will use their own infra
+    # Here we use infra in orbit, but real users will use their own infra
     _launch_sglang_router()
     _launch_sglang_engine()
 
@@ -138,7 +138,7 @@ def _launch_background():
 def _launch_sglang_router():
     from sglang_router.launch_router import RouterArgs
 
-    from miles.utils.http_utils import run_router
+    from orbit.utils.http_utils import run_router
 
     print("launch_sglang_router", flush=True)
     router_args = RouterArgs(
@@ -161,7 +161,7 @@ def _launch_sglang_engine():
     import requests
     from sglang.srt.server_args import ServerArgs
 
-    from miles.backends.sglang_utils.sglang_engine import launch_server_process
+    from orbit.backends.sglang_utils.sglang_engine import launch_server_process
 
     print("launch_sglang_engine", flush=True)
     launch_server_process(

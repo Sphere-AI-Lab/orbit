@@ -1,12 +1,12 @@
 import os
 from dataclasses import dataclass, field
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 MODEL_NAME = "Qwen3-30B-A3B"
 MODEL_TYPE = "qwen3-30B-A3B"
 
-TIGHT_HOST_MEMORY = bool(int(os.environ.get("MILES_TEST_TIGHT_HOST_MEMORY", "1")))
+TIGHT_HOST_MEMORY = bool(int(os.environ.get("ORBIT_TEST_TIGHT_HOST_MEMORY", "1")))
 
 
 @dataclass
@@ -90,7 +90,7 @@ def build_train_args(case: CaseConfig, *, wandb_file: str) -> str:
     if case.use_int4_rollout and case.use_fp8_rollout:
         raise ValueError("use_int4_rollout and use_fp8_rollout are mutually exclusive")
 
-    enable_eval = bool(int(os.environ.get("MILES_TEST_ENABLE_EVAL", "0")))
+    enable_eval = bool(int(os.environ.get("ORBIT_TEST_ENABLE_EVAL", "0")))
 
     ref_load = f"/root/models/{MODEL_NAME}" if case.use_bridge else f"/root/{MODEL_NAME}_torch_dist"
     if case.use_int4_rollout:

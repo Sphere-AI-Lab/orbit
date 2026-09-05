@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from miles.utils.debug_utils.run_megatron.cli.commands.args import CompareArgs
-from miles.utils.debug_utils.run_megatron.cli.commands.compare import compare_impl
+from orbit.utils.debug_utils.run_megatron.cli.commands.args import CompareArgs
+from orbit.utils.debug_utils.run_megatron.cli.commands.compare import compare_impl
 
 
 def _make_compare_args(**overrides: object) -> CompareArgs:
@@ -20,14 +20,14 @@ def _make_compare_args(**overrides: object) -> CompareArgs:
 
 
 class TestActivationComparison:
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
     def test_calls_comparator(self, mock_exec: MagicMock) -> None:
         compare_impl(_make_compare_args())
         mock_exec.assert_called_once()
         cmd = mock_exec.call_args[0][0]
         assert "sglang.srt.debug_utils.comparator" in cmd
 
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
     def test_required_args_in_command(self, mock_exec: MagicMock) -> None:
         compare_impl(_make_compare_args())
         cmd = mock_exec.call_args[0][0]
@@ -36,7 +36,7 @@ class TestActivationComparison:
         assert "/baseline" in cmd
         assert "/target" in cmd
 
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
     def test_optional_args_included(self, mock_exec: MagicMock) -> None:
         compare_impl(
             _make_compare_args(
@@ -52,7 +52,7 @@ class TestActivationComparison:
         assert "--patch-config" in cmd
         assert "--diff-threshold" in cmd
 
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
     def test_optional_args_excluded(self, mock_exec: MagicMock) -> None:
         compare_impl(_make_compare_args())
         cmd = mock_exec.call_args[0][0]
@@ -63,7 +63,7 @@ class TestActivationComparison:
 
 
 class TestActivationFailure:
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
     def test_activation_failure_exits(self, mock_exec: MagicMock) -> None:
         mock_exec.side_effect = subprocess.CalledProcessError(returncode=1, cmd="test")
         with pytest.raises(SystemExit) as exc_info:
@@ -72,8 +72,8 @@ class TestActivationFailure:
 
 
 class TestLogprobBranch:
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.compare_logprobs")
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.compare_logprobs")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
     def test_logprob_called_when_dirs_provided(self, mock_exec: MagicMock, mock_logprob: MagicMock) -> None:
         mock_logprob.return_value = True
         compare_impl(
@@ -89,14 +89,14 @@ class TestLogprobBranch:
             threshold=0.005,
         )
 
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.compare_logprobs")
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.compare_logprobs")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
     def test_logprob_not_called_when_dirs_missing(self, mock_exec: MagicMock, mock_logprob: MagicMock) -> None:
         compare_impl(_make_compare_args())
         mock_logprob.assert_not_called()
 
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.compare_logprobs")
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.compare_logprobs")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
     def test_logprob_default_threshold(self, mock_exec: MagicMock, mock_logprob: MagicMock) -> None:
         mock_logprob.return_value = True
         compare_impl(
@@ -109,8 +109,8 @@ class TestLogprobBranch:
         call_kwargs = mock_logprob.call_args[1]
         assert call_kwargs["threshold"] == 1e-3
 
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.compare_logprobs")
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.compare_logprobs")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
     def test_logprob_failure_exits(self, mock_exec: MagicMock, mock_logprob: MagicMock) -> None:
         mock_logprob.return_value = False
         with pytest.raises(SystemExit) as exc_info:
@@ -122,8 +122,8 @@ class TestLogprobBranch:
             )
         assert exc_info.value.code == 1
 
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.compare_logprobs")
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.compare_logprobs")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
     def test_activation_pass_logprob_fail(self, mock_exec: MagicMock, mock_logprob: MagicMock) -> None:
         mock_logprob.return_value = False
         with pytest.raises(SystemExit):
@@ -134,8 +134,8 @@ class TestLogprobBranch:
                 )
             )
 
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.compare_logprobs")
-    @patch("miles.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.compare_logprobs")
+    @patch("orbit.utils.debug_utils.run_megatron.cli.commands.compare.exec_command_cpu")
     def test_activation_fail_logprob_pass(self, mock_exec: MagicMock, mock_logprob: MagicMock) -> None:
         mock_exec.side_effect = subprocess.CalledProcessError(returncode=1, cmd="test")
         mock_logprob.return_value = True

@@ -2,7 +2,7 @@ import os
 
 from tests.ci.ci_register import register_cuda_ci
 
-import miles.utils.external_utils.command_utils as U
+import orbit.utils.external_utils.command_utils as U
 
 # FIXME: fix this
 register_cuda_ci(
@@ -12,7 +12,7 @@ register_cuda_ci(
     disabled="Disabled due to bugs.",
 )
 
-ENABLE_EVAL = bool(int(os.environ.get("MILES_TEST_ENABLE_EVAL", "0")))
+ENABLE_EVAL = bool(int(os.environ.get("ORBIT_TEST_ENABLE_EVAL", "0")))
 
 MODEL_NAME = "Qwen3-0.6B"
 MODEL_TYPE = "qwen3-0.6B"

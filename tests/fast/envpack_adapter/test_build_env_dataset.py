@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from miles_plugins.envpack_adapter.build_env_dataset import (
+from orbit_plugins.envpack_adapter.build_env_dataset import (
     _merge_sokoban_capacity_reports,
     _parse_spec,
     _validate_no_env_uuid_overlap,

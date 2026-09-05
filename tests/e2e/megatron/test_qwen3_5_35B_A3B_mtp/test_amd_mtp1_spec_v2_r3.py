@@ -47,7 +47,7 @@ CASE = CaseConfig(
     enable_mtp_training=True,
     use_r3=True,
     extra_args=("--moe-token-dispatcher-type alltoall " "--sglang-disable-shared-experts-fusion "),
-    # miles has no VLM/vision implementation on the training side, so vision weights are
+    # orbit has no VLM/vision implementation on the training side, so vision weights are
     # never synced; exclude them from the weight-equality check.
     check_weight_update_skip_list=("visual",),
 )

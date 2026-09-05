@@ -1,10 +1,10 @@
-"""Tests for miles.utils.audit_utils.witness.allocator: WitnessIdAllocator, _compute_stale_ids."""
+"""Tests for orbit.utils.audit_utils.witness.allocator: WitnessIdAllocator, _compute_stale_ids."""
 
 import json
 
 import pytest
 
-from miles.utils.audit_utils.witness.allocator import (
+from orbit.utils.audit_utils.witness.allocator import (
     WitnessIdAllocator,
     WitnessInfo,
     _compute_stale_ids,

@@ -44,7 +44,7 @@ def build_gdn_module(device, dtype=torch.bfloat16):
 
     FakeConfig.dtype = dtype
 
-    from miles_plugins.models.qwen3_5 import Qwen3_5GatedDeltaNet
+    from orbit_plugins.models.qwen3_5 import Qwen3_5GatedDeltaNet
 
     return Qwen3_5GatedDeltaNet(FakeConfig, layer_idx=0).to(device=device, dtype=dtype)
 

@@ -1,15 +1,15 @@
 from tests.fast.fixtures.generation_fixtures import extra_argv_for_variant
 from tests.fast.fixtures.rollout_fixtures import RolloutEnvConfig
 
-from miles.rollout.base_types import (
+from orbit.rollout.base_types import (
     RolloutFnConstructorInput,
     RolloutFnEvalInput,
     RolloutFnOutput,
     RolloutFnTrainInput,
 )
-from miles.rollout.filter_hub.base_types import DynamicFilterOutput
-from miles.rollout.inference_rollout.compatibility import call_rollout_function, load_rollout_function
-from miles.utils.types import Sample
+from orbit.rollout.filter_hub.base_types import DynamicFilterOutput
+from orbit.rollout.inference_rollout.compatibility import call_rollout_function, load_rollout_function
+from orbit.utils.types import Sample
 
 
 def expected_sample(*, group_index: int | None) -> Sample:
@@ -42,7 +42,7 @@ def expected_sample(*, group_index: int | None) -> Sample:
 
 MODULAR_ROLLOUT_BASE_ARGV = [
     "--rollout-function-path",
-    "miles.rollout.inference_rollout.inference_rollout_common.InferenceRolloutFn",
+    "orbit.rollout.inference_rollout.inference_rollout_common.InferenceRolloutFn",
 ]
 
 MIXED_DATA_ROWS = [

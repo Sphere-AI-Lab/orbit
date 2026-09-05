@@ -12,11 +12,11 @@ import pytest
 from tests.ci.ci_register import register_cpu_ci
 from tests.fast.fixtures.generation_fixtures import GenerateEnv, generation_env, listify, make_sample, run_generate
 
-from miles.utils.chat_template_utils import TITOTokenizerType, get_tito_tokenizer
-from miles.utils.processing_utils import load_tokenizer
-from miles.utils.test_utils.mock_sglang_server import ProcessResult, ProcessResultMetaInfo
-from miles.utils.test_utils.mock_tools import SAMPLE_TOOLS, ThreeTurnStub, TwoTurnStub
-from miles.utils.types import Sample
+from orbit.utils.chat_template_utils import TITOTokenizerType, get_tito_tokenizer
+from orbit.utils.processing_utils import load_tokenizer
+from orbit.utils.test_utils.mock_sglang_server import ProcessResult, ProcessResultMetaInfo
+from orbit.utils.test_utils.mock_tools import SAMPLE_TOOLS, ThreeTurnStub, TwoTurnStub
+from orbit.utils.types import Sample
 
 register_cpu_ci(est_time=130, suite="stage-b-cpu", labels=[])
 
@@ -650,7 +650,7 @@ class TestAgentMetadata:
             assert "reward" not in s.metadata
 
     def test_session_server_identity_forwarded_to_agent_metadata(self, variant, generation_env):
-        from miles.utils.test_utils import mock_tools
+        from orbit.utils.test_utils import mock_tools
 
         generation_env.mock_server.process_fn = TwoTurnStub.process_fn
 
@@ -696,7 +696,7 @@ class TestAgentCollectionFailure:
             raise collect_error
 
         monkeypatch.setattr(
-            "miles.rollout.generate_utils.openai_endpoint_utils.OpenAIEndpointTracer.collect_samples",
+            "orbit.rollout.generate_utils.openai_endpoint_utils.OpenAIEndpointTracer.collect_samples",
             fail_collect,
         )
         input_sample = make_sample(prompt=TwoTurnStub.PROMPT)
@@ -724,9 +724,9 @@ class TestAgentNoRecords:
             make_args,
             with_session_server,
         )
-        from miles.utils.http_utils import find_available_port
-        from miles.utils.misc import SingletonMeta
-        from miles.utils.test_utils.mock_sglang_server import with_mock_server
+        from orbit.utils.http_utils import find_available_port
+        from orbit.utils.misc import SingletonMeta
+        from orbit.utils.test_utils.mock_sglang_server import with_mock_server
 
         SingletonMeta.clear_all_instances()
 
@@ -737,7 +737,7 @@ class TestAgentNoRecords:
             session_port = find_available_port(31000)
             noop_argv = extra_argv_for_variant(
                 agentic_variant,
-                custom_agent_function_path="miles.utils.test_utils.mock_tools.run_agentic_noop",
+                custom_agent_function_path="orbit.utils.test_utils.mock_tools.run_agentic_noop",
             )
             args = make_args(
                 variant=agentic_variant,

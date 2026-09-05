@@ -29,8 +29,8 @@ source "${SCRIPT_DIR}/models/qwen3-4B.sh"
 CKPT_ARGS=(
    --hf-checkpoint /root/Qwen3-4B
    --ref-load /root/Qwen3-4B_torch_dist
-   --load /root/Qwen3-4B_miles/
-   --save /root/Qwen3-4B_miles/
+   --load /root/Qwen3-4B_orbit/
+   --save /root/Qwen3-4B_orbit/
    --save-interval 20
 )
 
@@ -96,7 +96,7 @@ OPTIMIZER_ARGS=(
 
 WANDB_ARGS=(
    # --use-wandb
-   # --wandb-project miles-dev
+   # --wandb-project orbit-dev
    # --wandb-group qwen3-4B-disagg
    # --wandb-key ${WANDB_KEY}
 )

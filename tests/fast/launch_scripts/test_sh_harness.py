@@ -130,8 +130,8 @@ class TestRunLaunchScriptEnvironmentFreeze:
 
     def test_extra_env_may_not_shadow_the_capture_channel(self, tmp_path):
         """Redirecting the capture path would make every shim record vanish silently."""
-        with pytest.raises(AssertionError, match="MILES_SH_HARNESS_CAPTURE"):
-            run_launch_script(_SCRIPT, sandbox=tmp_path, extra_env={"MILES_SH_HARNESS_CAPTURE": "/dev/null"})
+        with pytest.raises(AssertionError, match="ORBIT_SH_HARNESS_CAPTURE"):
+            run_launch_script(_SCRIPT, sandbox=tmp_path, extra_env={"ORBIT_SH_HARNESS_CAPTURE": "/dev/null"})
 
     def test_extra_env_may_still_supply_a_variable_the_harness_does_not_own(self, tmp_path):
         """The freeze must not block the per-script inputs the snapshot suite has to pass in."""

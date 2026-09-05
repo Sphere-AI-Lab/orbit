@@ -5,9 +5,9 @@ import asyncio
 import httpx
 import pytest
 
-from miles.utils.ft_utils.control_server.models import Cell, CellCondition, CellMetadata, CellSpec, CellStatus
-from miles.utils.ft_utils.control_server.registry import _CellRegistry
-from miles.utils.ft_utils.control_server.server import _create_control_app
+from orbit.utils.ft_utils.control_server.models import Cell, CellCondition, CellMetadata, CellSpec, CellStatus
+from orbit.utils.ft_utils.control_server.registry import _CellRegistry
+from orbit.utils.ft_utils.control_server.server import _create_control_app
 
 
 class MockHandle:
@@ -45,8 +45,8 @@ class MockHandle:
             metadata=CellMetadata(
                 name=self.cell_id,
                 labels={
-                    "miles.io/cell-type": self.cell_type,
-                    "miles.io/cell-index": str(self._cell_index),
+                    "orbit.io/cell-type": self.cell_type,
+                    "orbit.io/cell-index": str(self._cell_index),
                 },
             ),
             spec=CellSpec(suspend=self._is_suspended),
@@ -139,7 +139,7 @@ class MockRayTrainCell:
         return self._is_stopped
 
     def cell_status(self) -> CellStatus:
-        from miles.utils.ft_utils.control_server.models import CellCondition, CellStatus
+        from orbit.utils.ft_utils.control_server.models import CellCondition, CellStatus
 
         return CellStatus(
             phase=self._phase,
@@ -148,7 +148,7 @@ class MockRayTrainCell:
 
 
 def make_mock_group(cells: list[MockRayTrainCell]) -> object:
-    from miles.ray.train.group import RayTrainGroup
+    from orbit.ray.train.group import RayTrainGroup
 
     group = object.__new__(RayTrainGroup)
     group._cells = cells

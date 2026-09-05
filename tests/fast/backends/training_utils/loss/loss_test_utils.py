@@ -28,10 +28,10 @@ from pathlib import Path
 
 import torch
 
-from miles.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
+from orbit.backends.training_utils.parallel import GroupInfo, ParallelState, set_parallel_state
 
-ARTIFACTS_REPO = "https://github.com/yueming-yuan/miles-artifacts.git"
-ARTIFACTS_CACHE = Path.home() / ".cache" / "miles-test-artifacts"
+ARTIFACTS_REPO = "https://github.com/yueming-yuan/orbit-artifacts.git"
+ARTIFACTS_CACHE = Path.home() / ".cache" / "orbit-test-artifacts"
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +303,7 @@ def ensure_snapshot_dir(snapshot_dir: Path) -> Path:
     """Return a directory containing .pt snapshots.
 
     If *snapshot_dir* already has .pt files, return it as-is.
-    Otherwise, shallow-clone yueming-yuan/miles-artifacts into a cache
+    Otherwise, shallow-clone yueming-yuan/orbit-artifacts into a cache
     directory and return the path to loss_snapshots/ inside the clone.
     """
     if snapshot_dir.exists() and any(snapshot_dir.glob("*.pt")):

@@ -11,8 +11,8 @@ import pytest
 import safetensors.numpy
 from safetensors import SafetensorError
 
-from miles.rollout.session.samples.codec import decode_samples_and_merge_input_sample, encode_samples
-from miles.utils.types import Sample
+from orbit.rollout.session.samples.codec import decode_samples_and_merge_input_sample, encode_samples
+from orbit.utils.types import Sample
 
 
 def _computed_sample(**overrides) -> Sample:
@@ -139,7 +139,7 @@ class TestSamplesWireCodec:
         sample = _computed_sample(rollout_routed_experts=routed, rollout_indexer_topk=indexer)
 
         payload = encode_samples([sample], {}, None)
-        # the reply is a plain safetensors buffer: no Miles framing needed to open it
+        # the reply is a plain safetensors buffer: no Orbit framing needed to open it
         tensors = safetensors.numpy.load(payload)
         assert set(tensors) == {
             "_samples_meta",

@@ -1,24 +1,24 @@
 ---
 title: LoRA Training and Serving
-description: Train LoRA adapters with miles, synchronize them to SGLang, and run dense, MoE, quantized-rollout, multi-LoRA, and agentic recipes.
+description: Train LoRA adapters with orbit, synchronize them to SGLang, and run dense, MoE, quantized-rollout, multi-LoRA, and agentic recipes.
 ---
 
-miles trains the adapter matrices in Megatron and serves the same live adapter
+orbit trains the adapter matrices in Megatron and serves the same live adapter
 from SGLang. The base model stays frozen; at each configured weight-update
-boundary, miles exports and synchronizes the updated LoRA weights. The default
+boundary, orbit exports and synchronizes the updated LoRA weights. The default
 boundary is once per rollout/train iteration. No merge-to-base or checkpoint
 conversion is required inside the training-rollout loop.
 
 ## Training and rollout lifecycle
 
-For a single adapter, miles exports the updated LoRA tensors at each configured
+For a single adapter, orbit exports the updated LoRA tensors at each configured
 publish boundary. Colocated jobs load them through the local tensor/IPC path;
 disaggregated Bridge jobs broadcast them to remote SGLang engines over NCCL.
 Rollout requests then select the live named adapter with `lora_path`.
 
 Multi-LoRA currently supports disaggregated rollout only and rejects
 `--colocate` at launch. Each SGLang engine keeps the base checkpoint resident;
-miles selectively exports and NCCL-broadcasts newly loaded or optimizer-stepped
+orbit selectively exports and NCCL-broadcasts newly loaded or optimizer-stepped
 adapters into their corresponding SGLang slots. New or restarted engines receive
 every loaded adapter, while unchanged adapters are not resent.
 
@@ -27,7 +27,7 @@ allowlist:
 
 1. Megatron-Bridge (or a model-specific provider) must build and wrap the
    training model.
-2. miles must map and export the selected module names correctly.
+2. orbit must map and export the selected module names correctly.
 3. SGLang must be able to allocate and apply the same adapter modules.
 
 A model can support attention-only LoRA while still having caveats for expert,
@@ -43,7 +43,7 @@ separate from SGLang's serving-side `--sglang-lora-backend` choice.
 | Implementation | How the adapter is built | Model coverage on current `main` | Status |
 |---|---|---|---|
 | **Megatron-Bridge PEFT** | `AutoBridge` builds the provider, applies Bridge LoRA before DDP, and exports HF-named adapter tensors. Select it with `--megatron-to-hf-mode bridge`. | Qwen2.5, Qwen3, GPT-OSS, Kimi K2.5, GLM-5/5.1/5.2, and Qwen3.5/3.6, subject to the evidence and module caveats below. | General production path. Current multi-LoRA also requires this path. |
-| **Native / raw-mode LoRA** | Under `--megatron-to-hf-mode raw`, miles builds the model with its own Megatron provider and attaches model-aware adapter modules directly before DDP. | Inkling and Inkling-Small. The current implementation is an Inkling-specific integration, including custom attention, MLP, routed/shared experts, LM head, adapter import, and export. | Specialized path on current `main`; use the Inkling launcher rather than assuming `raw` works for another model. |
+| **Native / raw-mode LoRA** | Under `--megatron-to-hf-mode raw`, orbit builds the model with its own Megatron provider and attaches model-aware adapter modules directly before DDP. | Inkling and Inkling-Small. The current implementation is an Inkling-specific integration, including custom attention, MLP, routed/shared experts, LM head, adapter import, and export. | Specialized path on current `main`; use the Inkling launcher rather than assuming `raw` works for another model. |
 
 <Note>
 The planned maintenance direction is native-first: after the generalized native plugin
@@ -67,13 +67,13 @@ full-scale experiment evidence. It is not an exhaustive model whitelist.
 
 | Implementation | Model family | Architecture exercised | Evidence | Notes |
 |---|---|---|---|---|
-| Bridge | Qwen2.5 0.5B / 3B | Dense | [0.5B CUDA and ROCm E2E](https://github.com/radixark/miles/blob/main/tests/e2e/lora/test_lora_qwen2.5_0.5B.py), [3B disaggregated recipe](https://github.com/radixark/miles/blob/main/examples/lora/run-qwen2.5-3B-megatron-lora-disaggregated.sh) | The simplest starting point; `all-linear` works. |
-| Bridge | Qwen3 4B | Dense | [Single-LoRA recipe](https://github.com/radixark/miles/blob/main/examples/lora/run-qwen3-4B-megatron-lora.sh), [multi-LoRA recipe](https://github.com/radixark/miles/tree/main/examples/multi_lora) | Used by the current multi-adapter example. |
-| Bridge | GPT-OSS 20B | MoE | [Recipe](https://github.com/radixark/miles/blob/main/examples/lora/run-gpt-oss-20B-megatron-moe-lora.sh), [MoE LoRA E2E](https://github.com/radixark/miles/blob/main/tests/e2e/megatron/model_scripts/test_gpt_oss_20b_moe_lora_ci.py) | Uses the SGLang `triton` LoRA backend. |
-| Bridge | Kimi K2.5 | Multimodal MoE + MLA | [16-node recipe](https://github.com/radixark/miles/blob/main/examples/lora/run-kimi-k25-megatron-lora.sh) | Demonstrates shared-outer expert LoRA and an INT4 rollout / fake-QAT setup. |
-| Bridge | GLM-5 / 5.1 / 5.2 744B-A40B | MoE + MLA + DSA | [GLM-5.1 launcher](https://github.com/radixark/miles/blob/main/scripts/run_glm5_1_744b_a40b_lora.py), [GLM-5.2 launcher](https://github.com/radixark/miles/blob/main/scripts/run_glm5_2_744b_a40b_lora.py) | CI covers reduced 6-layer / 5-layer checkpoints; historical full-744B results are described below. |
-| Bridge | Qwen3.5 / Qwen3.6 35B-A3B | Hybrid GDN + MoE | [Launcher](https://github.com/radixark/miles/blob/main/scripts/run_qwen3_5_35b_a3b_lora.py), [Qwen3.5 E2E](https://github.com/radixark/miles/blob/main/tests/e2e/megatron/test_qwen3_5_35b_a3b_lora_ci.py) | Uses explicit wildcard targets to exclude MTP and vision modules. |
-| Native / raw | Inkling / Inkling-Small | Native multimodal MoE | [Launcher](https://github.com/radixark/miles/blob/main/scripts/run_inkling.py), [Inkling-Small 4-layer E2E](https://github.com/radixark/miles/blob/main/tests/e2e/megatron/model_scripts/test_inkling_small_4layer_lora_ci.py) | Current `main` model-specific native path; larger profiles are launcher/experiment evidence rather than LoRA CI. |
+| Bridge | Qwen2.5 0.5B / 3B | Dense | [0.5B CUDA and ROCm E2E](https://github.com/Sphere-AI-Lab/orbit/blob/main/tests/e2e/lora/test_lora_qwen2.5_0.5B.py), [3B disaggregated recipe](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/lora/run-qwen2.5-3B-megatron-lora-disaggregated.sh) | The simplest starting point; `all-linear` works. |
+| Bridge | Qwen3 4B | Dense | [Single-LoRA recipe](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/lora/run-qwen3-4B-megatron-lora.sh), [multi-LoRA recipe](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/multi_lora) | Used by the current multi-adapter example. |
+| Bridge | GPT-OSS 20B | MoE | [Recipe](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/lora/run-gpt-oss-20B-megatron-moe-lora.sh), [MoE LoRA E2E](https://github.com/Sphere-AI-Lab/orbit/blob/main/tests/e2e/megatron/model_scripts/test_gpt_oss_20b_moe_lora_ci.py) | Uses the SGLang `triton` LoRA backend. |
+| Bridge | Kimi K2.5 | Multimodal MoE + MLA | [16-node recipe](https://github.com/Sphere-AI-Lab/orbit/blob/main/examples/lora/run-kimi-k25-megatron-lora.sh) | Demonstrates shared-outer expert LoRA and an INT4 rollout / fake-QAT setup. |
+| Bridge | GLM-5 / 5.1 / 5.2 744B-A40B | MoE + MLA + DSA | [GLM-5.1 launcher](https://github.com/Sphere-AI-Lab/orbit/blob/main/scripts/run_glm5_1_744b_a40b_lora.py), [GLM-5.2 launcher](https://github.com/Sphere-AI-Lab/orbit/blob/main/scripts/run_glm5_2_744b_a40b_lora.py) | CI covers reduced 6-layer / 5-layer checkpoints; historical full-744B results are described below. |
+| Bridge | Qwen3.5 / Qwen3.6 35B-A3B | Hybrid GDN + MoE | [Launcher](https://github.com/Sphere-AI-Lab/orbit/blob/main/scripts/run_qwen3_5_35b_a3b_lora.py), [Qwen3.5 E2E](https://github.com/Sphere-AI-Lab/orbit/blob/main/tests/e2e/megatron/test_qwen3_5_35b_a3b_lora_ci.py) | Uses explicit wildcard targets to exclude MTP and vision modules. |
+| Native / raw | Inkling / Inkling-Small | Native multimodal MoE | [Launcher](https://github.com/Sphere-AI-Lab/orbit/blob/main/scripts/run_inkling.py), [Inkling-Small 4-layer E2E](https://github.com/Sphere-AI-Lab/orbit/blob/main/tests/e2e/megatron/model_scripts/test_inkling_small_4layer_lora_ci.py) | Current `main` model-specific native path; larger profiles are launcher/experiment evidence rather than LoRA CI. |
 
 ## Quick start
 
@@ -118,7 +118,7 @@ vision towers unadapted. Use the model launcher as the source of truth.
 | `--lora-type` | `lora` | `lora` uses fused Megatron projections; `canonical_lora` uses split Q/K/V and gate/up projections. The canonical path is implemented and covered by fast name-mapping tests, but has no maintained recipe or E2E validation. |
 | `--target-modules` | none | Required with a positive rank. Accepts `all-linear`, HF leaf names, Megatron names, or model-specific wildcard paths. |
 | `--exclude-modules` | none | Comma-separated exact entries removed from the resolved targets. |
-| `--lora-adapter-path` | none | Warm-start/resume path. Also provide the matching positive rank, alpha, and target modules. Bridge training resume currently requires miles' per-rank adapter shards and the same parallel topology; an HF PEFT-only adapter cannot yet be loaded directly into the Bridge model. Inkling native has its own HF adapter loader. |
+| `--lora-adapter-path` | none | Warm-start/resume path. Also provide the matching positive rank, alpha, and target modules. Bridge training resume currently requires orbit' per-rank adapter shards and the same parallel topology; an HF PEFT-only adapter cannot yet be loaded directly into the Bridge model. Inkling native has its own HF adapter loader. |
 | `--lora-base-cpu-backup` | off | Colocated mode only: keep a CPU mirror of the frozen SGLang base and avoid re-sending base weights. This trades host RAM for faster and more reliable pause/resume. |
 | `--lora-train-only` | off | Train the adapter while keeping ordinary rollout engines on the frozen base policy. |
 | `--experts-shared-outer-loras` | off | Use shared outer factors for grouped MoE experts. This layout is not checkpoint-compatible with per-expert LoRA. |
@@ -167,7 +167,7 @@ LORA_ARGS=(
 
 The SGLang `triton` backend is required by the maintained MoE recipes; the
 default backend can skip MoE layers. Per-expert adapters are the default.
-`--experts-shared-outer-loras` selects the shared-outer layout, and miles enables
+`--experts-shared-outer-loras` selects the shared-outer layout, and orbit enables
 SGLang virtual-expert serving for expert adapters by default. Use
 `--no-sglang-lora-use-virtual-experts` only when intentionally selecting the
 alternative aligned-expert path.
@@ -180,7 +180,7 @@ alternative aligned-expert path.
   does not yet have a dedicated LoRA-SFT E2E test. Shared actor/critic PPO is not
   supported by the general Bridge LoRA path because the critic path rejects
   Bridge mode.
-- **Checkpoints.** miles saves native per-rank adapter shards and
+- **Checkpoints.** orbit saves native per-rank adapter shards and
   optimizer/scheduler state. Exact resume expects the same TP/PP topology. It
   also attempts a best-effort HF PEFT `adapter_model.bin` plus
   `adapter_config.json` export for external serving and warns if that export
@@ -264,7 +264,7 @@ full-744B launcher work is tracked in
 
 Agentic rollout has one extra correctness requirement: every turn sent through
 the session server must select the newly synchronized adapter. The session
-server therefore attaches `lora_path=miles_lora` to its requests; otherwise the
+server therefore attaches `lora_path=orbit_lora` to its requests; otherwise the
 trainer could update LoRA while the agent continues collecting trajectories
 from the frozen base policy. The current session integration selects the fixed
 single-adapter name; it is not multi-LoRA slot routing, and it should not be
@@ -292,7 +292,7 @@ stability evidence rather than a released benchmark.
 ### Current dataset-driven backend
 
 The implementation on `main` trains multiple adapters against one shared base
-model through the [fully async example](https://github.com/radixark/miles/tree/main/examples/multi_lora).
+model through the [fully async example](https://github.com/Sphere-AI-Lab/orbit/tree/main/examples/multi_lora).
 Each registered adapter supplies its own dataset, reward, rollout batch shape,
 rank/alpha, and checkpoint directory, with most fields inheriting process-wide
 defaults. LR/WD hyperparameters come from the global CLI; each fixed slot has
@@ -375,7 +375,7 @@ dataset-driven driver.
 - **Remote transport:** NCCL broadcast only, with PP1. P2P/RDMA and disk-delta
   reject LoRA.
 - **PPO:** shared actor/critic PPO is incompatible with general Bridge LoRA.
-- **Resume:** miles adapter shards are resumable with the matching parallel
+- **Resume:** orbit adapter shards are resumable with the matching parallel
   topology. Direct HF PEFT import into the Bridge model is not yet implemented;
   native Inkling has a custom importer.
 - **Memory optimizations:** `--rematerialize-param-from-master-weight` and
@@ -386,23 +386,23 @@ dataset-driven driver.
   train offload, shared-outer experts, and FP8/FP4 MoE expert adapters are not
   supported by the current multi-adapter path.
 - **Agentic sessions:** the current session integration selects the fixed
-  `miles_lora` adapter, not a multi-LoRA slot; `--lora-train-only` is also not a
+  `orbit_lora` adapter, not a multi-LoRA slot; `--lora-train-only` is also not a
   supported combination for this path.
 
 ## Internals
 
-- `miles/backends/megatron_utils/bridge_lora_helpers.py` builds and wraps the
+- `orbit/backends/megatron_utils/bridge_lora_helpers.py` builds and wraps the
   general Bridge LoRA model.
-- `miles/backends/megatron_utils/lora_utils.py` resolves module names, creates
+- `orbit/backends/megatron_utils/lora_utils.py` resolves module names, creates
   standard/canonical adapters, and implements adapter checkpoint helpers.
-- `miles_plugins/models/inkling/lora.py` implements the native/raw LoRA path
+- `orbit_plugins/models/inkling/lora.py` implements the native/raw LoRA path
   available on current `main`.
-- `miles/backends/megatron_utils/update_weight/update_weight_from_tensor.py`
+- `orbit/backends/megatron_utils/update_weight/update_weight_from_tensor.py`
   handles colocated adapter export and IPC loading.
-- `miles/backends/megatron_utils/update_weight/update_weight_from_distributed/`
+- `orbit/backends/megatron_utils/update_weight/update_weight_from_distributed/`
   gathers and broadcasts adapters to remote SGLang engines.
-- `miles/rollout/session/core.py` attaches the single adapter to agentic session
+- `orbit/rollout/session/core.py` attaches the single adapter to agentic session
   requests.
-- `miles/ray/multi_lora/`, `miles/rollout/multi_lora/`, and
-  `miles/backends/megatron_utils/multi_lora_*.py` implement the multi-adapter
+- `orbit/ray/multi_lora/`, `orbit/rollout/multi_lora/`, and
+  `orbit/backends/megatron_utils/multi_lora_*.py` implement the multi-adapter
   controller, routing, scheduling, optimization, and checkpoint path.

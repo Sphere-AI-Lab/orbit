@@ -9,8 +9,8 @@ is a hybrid Mamba + attention + MoE model. It pairs the `nemotron_h` block
 pattern from the dense 4B with a 128-expert sparse layer (top-6 routing,
 1 shared expert, DSv3-style sigmoid routing with `routed_scaling_factor=2.5`).
 
-miles loads it through the `megatron.bridge` AutoBridge with a custom
-**NemotronH MoE bridge shim** (`miles_plugins/megatron_bridge/nemotron_h.py`) that
+orbit loads it through the `megatron.bridge` AutoBridge with a custom
+**NemotronH MoE bridge shim** (`orbit_plugins/megatron_bridge/nemotron_h.py`) that
 wires `routed_scaling_factor`, `n_group`, and `topk_group` onto the Megatron
 provider. Without the shim the routed output is silently scaled 1.0× → ~0.28
 logprob drift between train and rollout.
@@ -58,7 +58,7 @@ AutoBridge + the NemotronH MoE shim load the HF checkpoint directly. Both
 ### 4.1 Quick start
 
 ```bash
-cd /root/miles
+cd /root/orbit
 python scripts/run_nemotron_3_nano.py --model-name NVIDIA-Nemotron-3-Nano-30B-A3B-BF16
 ```
 

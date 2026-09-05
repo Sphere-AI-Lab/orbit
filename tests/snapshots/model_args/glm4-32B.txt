@@ -1,5 +1,5 @@
 "--spec"
-"miles_plugins.models.glm4"
+"orbit_plugins.models.glm4"
 "get_glm_spec"
 "--swiglu"
 "--num-layers"
