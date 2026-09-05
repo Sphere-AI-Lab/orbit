@@ -1103,6 +1103,8 @@ def _compute_server_args(
     sglang_overrides: dict | None = None,
     num_gpus_per_engine: int | None = None,
 ):
+    server_args_fields = dataclasses.fields(ServerArgs)
+    unified_peft_args = any(field.name == "peft_method" for field in server_args_fields)
     _gpus_per_engine = num_gpus_per_engine or args.rollout_num_gpus_per_engine
     nnodes = max(1, _gpus_per_engine // args.num_gpus_per_node)
     node_rank = rank % nnodes
@@ -1216,9 +1218,14 @@ def _compute_server_args(
     elif peft_method == "oft":
         # Same BP-7 decline as above; mirror args.offload_rollout until the
         # merge gate is verified for the OFT recovery / offload path too.
-        kwargs["peft_method"] = "oft"
+        # Submission SGLang exposes the classic OFT fields. Preserve the
+        # unified API for builds that support it instead of silently dropping
+        # the adapter enable/target/buffering options in the filter below.
+        kwargs["peft_method" if unified_peft_args else "enable_oft"] = "oft" if unified_peft_args else True
         kwargs["max_oft_block_size"] = args.oft_block_size
-        kwargs["peft_target_modules"] = convert_target_modules_to_hf(args.target_modules)
+        kwargs["peft_target_modules" if unified_peft_args else "oft_target_modules"] = convert_target_modules_to_hf(
+            args.target_modules
+        )
         kwargs["oft_dtype"] = _training_adapter_dtype_arg(args)
         kwargs["oft_type"] = args.oft_type
         # max_ofts_per_batch includes the base-only request -- sglang's
@@ -1233,7 +1240,9 @@ def _compute_server_args(
             kwargs["max_ofts_per_batch"] = max(kwargs["max_ofts_per_batch"], 3)
         # Enable the fork's stage/activate double-buffer path (staging slot =
         # max_ofts_per_batch-1); paired with the max_ofts_per_batch=3 bump above.
-        kwargs["peft_double_buffer"] = bool(getattr(args, "adapter_double_buffer", False))
+        kwargs["peft_double_buffer" if unified_peft_args else "oft_double_buffer"] = bool(
+            getattr(args, "adapter_double_buffer", False)
+        )
         kwargs["oft_backend"] = getattr(args, "sglang_oft_backend", "triton")
         oft_adapter_path = getattr(args, "oft_adapter_path", None)
         if oft_adapter_path is not None:
@@ -1251,7 +1260,7 @@ def _compute_server_args(
     external_engine_need_check_fields = [k for k in kwargs.keys() if k not in _EXTERNAL_ENGINE_SKIP_CHECK_FIELDS]
 
     unused_keys = set(kwargs.keys())
-    for attr in dataclasses.fields(ServerArgs):
+    for attr in server_args_fields:
         if worker_type == "decode" and attr.name == "enable_hierarchical_cache":
             continue
         if hasattr(args, f"sglang_{attr.name}") and attr.name not in kwargs:

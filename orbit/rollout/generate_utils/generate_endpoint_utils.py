@@ -8,12 +8,15 @@ from typing import Any
 
 import numpy as np
 import pybase64
+from sglang.srt.managers.io_struct import GenerateReqInput
 
 from orbit.backends.megatron_utils.oft_utils import OFT_ADAPTER_NAME
 from orbit.backends.megatron_utils.peft_utils import get_peft_method
 from orbit.utils.lora import LORA_ADAPTER_NAME, lora_rollout_enabled
 from orbit.utils.processing_utils import encode_image_for_rollout_engine, extract_multimodal_train_inputs
 from orbit.utils.types import Sample
+
+_OFT_REQUEST_PATH_KEY = "oft_path" if "oft_path" in GenerateReqInput.__dataclass_fields__ else "adapter_path"
 
 
 # Make this an isolated function because users may want to compute their own
@@ -89,10 +92,10 @@ def attach_peft_request_payload(args, payload: dict[str, Any]) -> dict[str, Any]
     # single-active path applies the index-0 adapter unconditionally, so the
     # generate request must NOT name an adapter (sending lora_path 400s in
     # upstream's _validate_and_resolve_lora when enable_lora is unset).
-    # OFT runs multi-slot (base slot 0 + adapter slot 1) and selects its trained
-    # slot via the fork's adapter_* wire key (v0.5.16 rename of oft_path).
+    # OFT runs multi-slot (base slot 0 + adapter slot 1). Submission SGLang
+    # uses oft_path; other builds expose the unified adapter_path wire key.
     if peft_method == "oft" and not os.environ.get("ORBIT_DSV4_DISABLE_OFT_REQUEST"):
-        payload["adapter_path"] = OFT_ADAPTER_NAME
+        payload[_OFT_REQUEST_PATH_KEY] = OFT_ADAPTER_NAME
     return payload
 
 
