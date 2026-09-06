@@ -19,6 +19,8 @@ from orbit.utils import distributed_utils, megatron_bridge_utils
 
 from .lora_utils import is_lora_enabled, is_lora_model, load_lora_adapter, save_lora_checkpoint
 from .low_precision_bootstrap import (
+    _dist_checkpoint_already_loaded,
+    _unwrap_parallel_model,
     is_distributed_checkpoint,
     is_legacy_megatron_checkpoint,
     load_dist_checkpoint,
@@ -1214,7 +1216,34 @@ def load_checkpoint(ddp_model, optimizer, opt_param_scheduler, checkpointing_con
         and (not is_megatron_checkpoint or _is_release_checkpoint(load_path))
     )
 
-    if has_local_checkpoint_manager or is_megatron_checkpoint:
+    # Bridge preloads the base before adding adapters. Only a fresh finetune
+    # without an adapter checkpoint and with every preload marker may skip reload.
+    preloaded_dist_dir = (
+        resolve_distributed_checkpoint_dir(load_path)
+        if (
+            not has_local_checkpoint_manager
+            and getattr(args, "finetune", False)
+            and getattr(args, "ckpt_step", None) is None
+            and is_peft_enabled(args)
+            and not any(
+                getattr(args, name, None) is not None
+                for name in ("lora_adapter_path", "oft_adapter_path", "peft_adapter_path")
+            )
+        )
+        else None
+    )
+    if preloaded_dist_dir is not None and _dist_checkpoint_already_loaded(
+        _unwrap_parallel_model(ddp_model), preloaded_dist_dir
+    ):
+        result = _load_checkpoint_dist(
+            ddp_model=ddp_model,
+            optimizer=optimizer,
+            args=args,
+            load_path=str(preloaded_dist_dir),
+        )
+        if getattr(args, "start_rollout_id", None) is None:
+            args.start_rollout_id = 0
+    elif has_local_checkpoint_manager or is_megatron_checkpoint:
         result = _load_checkpoint_megatron(
             ddp_model=ddp_model,
             optimizer=optimizer,
