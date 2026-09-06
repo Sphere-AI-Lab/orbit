@@ -181,6 +181,10 @@ class UpdateWeightFromTensor:
         self.rollout_engines: Sequence[ActorHandle] | None = None
         self._connection_stale: bool = False
 
+    def pop_metrics(self) -> dict[str, float]:
+        """Return and clear recorded update metrics, or an empty dict if none were recorded."""
+        return self.__dict__.pop("update_weight_metrics", {})
+
     # TODO: avoid dup code during yueming's refactor (temp write this to avoid introducing potentially conflicting base class)
     def is_rollout_engines_fresh(self) -> bool:
         return self.rollout_engines is not None and not self._connection_stale
