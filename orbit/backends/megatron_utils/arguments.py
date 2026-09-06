@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 
 
 def set_default_megatron_args(args):
+    # Core renamed this parser field; Orbit's process-group/optimizer consumers
+    # still use the legacy name. Preserve an explicitly provided legacy value.
+    if not hasattr(args, "enable_gloo_process_groups"):
+        args.enable_gloo_process_groups = args.use_gloo_process_groups
+
     # Muon currently owns its sharding path, and Megatron's distributed optimizer
     # only supports Adam-family optimizers.
     args.use_distributed_optimizer = (args.optimizer is None or args.optimizer.lower() == "adam") and not getattr(
