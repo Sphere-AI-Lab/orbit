@@ -97,7 +97,19 @@ def _apply_bridge_runtime_config(provider, args: argparse.Namespace) -> None:
     provider.fp8_recipe = args.fp8_recipe
 
     # attention kernel selection
-    provider.attention_backend = args.attention_backend
+    if getattr(args, "attention_backend", None) is not None:
+        provider.attention_backend = args.attention_backend
+
+    # Explicit training-kernel and graph settings must match the PEFT provider path.
+    if getattr(args, "gradient_accumulation_fusion", None) is not None:
+        provider.gradient_accumulation_fusion = args.gradient_accumulation_fusion
+    if getattr(args, "cuda_graph_impl", None) is not None:
+        provider.cuda_graph_impl = args.cuda_graph_impl
+    cuda_graph_scope = getattr(args, "cuda_graph_scope", None)
+    if cuda_graph_scope:  # argparse default [] leaves the provider's scope unchanged.
+        provider.cuda_graph_scope = cuda_graph_scope
+    if getattr(args, "te_rng_tracker", None) is not None:
+        provider.use_te_rng_tracker = args.te_rng_tracker
 
     # MoE token dispatcher (same-name, always present)
     provider.moe_token_dispatcher_type = args.moe_token_dispatcher_type

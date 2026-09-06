@@ -112,3 +112,123 @@ def test_apply_bridge_runtime_config_syncs_initialized_parallel_state(monkeypatc
     model_provider._apply_bridge_runtime_config(SimpleNamespace(cp_comm_type="a2a"), _bridge_args("p2p"))
 
     assert state.cp_comm_type == "a2a"
+
+
+@pytest.fixture(params=["fullft", "peft"])
+def apply_runtime_config(request):
+    from orbit.backends.megatron_utils.bridge_provider_overrides import apply_bridge_provider_overrides
+    from orbit.backends.megatron_utils.model_provider import _apply_bridge_runtime_config
+
+    return _apply_bridge_runtime_config if request.param == "fullft" else apply_bridge_provider_overrides
+
+
+@pytest.fixture
+def qwen3_provider():
+    import torch
+    from megatron.bridge import AutoBridge
+    from transformers import Qwen3Config
+
+    config = Qwen3Config(
+        architectures=["Qwen3ForCausalLM"],
+        num_hidden_layers=36,
+        hidden_size=2560,
+        intermediate_size=9728,
+        num_attention_heads=32,
+        num_key_value_heads=8,
+        head_dim=128,
+        vocab_size=151936,
+        dtype=torch.bfloat16,
+    )
+    return AutoBridge.from_hf_config(config).to_megatron_provider(load_weights=False)
+
+
+RUNTIME_ARG_FIELDS = {
+    "attention_backend": "attention_backend",
+    "gradient_accumulation_fusion": "gradient_accumulation_fusion",
+    "cuda_graph_impl": "cuda_graph_impl",
+    "cuda_graph_scope": "cuda_graph_scope",
+    "use_te_rng_tracker": "te_rng_tracker",
+}
+
+
+def test_bridge_runtime_settings_honor_explicit_recipe(apply_runtime_config, qwen3_provider):
+    import torch
+    from megatron.core.transformer.enums import AttnBackend, CudaGraphScope
+
+    args = _bridge_args("p2p")
+    args.tensor_model_parallel_size = 1
+    args.context_parallel_size = 1
+    args.sequence_parallel = False
+    requested = {
+        "attention_backend": AttnBackend.flash,
+        "gradient_accumulation_fusion": False,
+        "cuda_graph_impl": "local",
+        "cuda_graph_scope": [CudaGraphScope.full_iteration],
+        "use_te_rng_tracker": True,
+    }
+    for field, value in requested.items():
+        setattr(args, RUNTIME_ARG_FIELDS[field], value)
+    model_fields = (
+        "num_layers",
+        "hidden_size",
+        "ffn_hidden_size",
+        "num_attention_heads",
+        "num_query_groups",
+        "kv_channels",
+        "vocab_size",
+        "bf16",
+        "params_dtype",
+        "attention_dropout",
+        "hidden_dropout",
+    )
+    model_config = {field: getattr(qwen3_provider, field) for field in model_fields}
+    # Parser model defaults must not override the architecture and dtype from HF.
+    args.num_layers = 1
+    args.hidden_size = 128
+    args.bf16 = False
+    args.params_dtype = torch.float32
+
+    apply_runtime_config(qwen3_provider, args)
+
+    assert {field: getattr(qwen3_provider, field) for field in requested} == requested
+    assert {field: getattr(qwen3_provider, field) for field in model_fields} == model_config
+    assert qwen3_provider.params_dtype is torch.bfloat16
+    assert qwen3_provider.sequence_parallel is False
+
+
+@pytest.mark.parametrize("unset", ["absent", "none", "empty_scope"])
+def test_bridge_runtime_settings_preserve_unset_provider_values(apply_runtime_config, qwen3_provider, unset):
+    from megatron.core.transformer.enums import AttnBackend, CudaGraphScope
+
+    args = _bridge_args("p2p")
+    del args.attention_backend
+    expected = {
+        "attention_backend": AttnBackend.fused,
+        "gradient_accumulation_fusion": False,
+        "cuda_graph_impl": "local",
+        "cuda_graph_scope": [CudaGraphScope.attn],
+        "use_te_rng_tracker": True,
+    }
+    for field, value in expected.items():
+        setattr(qwen3_provider, field, value)
+        if unset != "absent":
+            setattr(args, RUNTIME_ARG_FIELDS[field], None)
+    if unset == "empty_scope":
+        args.cuda_graph_scope = []  # Native argparse default means no scope override.
+
+    apply_runtime_config(qwen3_provider, args)
+
+    assert {field: getattr(qwen3_provider, field) for field in expected} == expected
+
+
+def test_bridge_runtime_settings_honor_explicit_false_rng(apply_runtime_config, qwen3_provider):
+    args = _bridge_args("p2p")
+    args.te_rng_tracker = False
+    args.gradient_accumulation_fusion = True
+    qwen3_provider.use_te_rng_tracker = True
+    qwen3_provider.gradient_accumulation_fusion = False
+
+    apply_runtime_config(qwen3_provider, args)
+
+    assert qwen3_provider.use_te_rng_tracker is False
+    assert qwen3_provider.gradient_accumulation_fusion is True

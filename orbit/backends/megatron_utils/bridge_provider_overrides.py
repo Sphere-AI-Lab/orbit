@@ -30,6 +30,7 @@ def apply_bridge_provider_overrides(
         getattr(args, "virtual_pipeline_model_parallel_size", None),
     )
     _maybe_set_provider_attr(provider, "attention_softmax_in_fp32", getattr(args, "attention_softmax_in_fp32", None))
+    _maybe_set_provider_attr(provider, "attention_backend", getattr(args, "attention_backend", None))
     _maybe_set_provider_attr(provider, "calculate_per_token_loss", getattr(args, "calculate_per_token_loss", None))
     # Propagate --[no-]gradient-accumulation-fusion to the provider: the bridge
     # GPTProvider defaults it via can_enable_gradient_accumulation_fusion()
