@@ -46,11 +46,21 @@ class HfWeightIteratorBridge(HfWeightIteratorBase):
                     show_progress=False,
                 )
             elif weight_type == "oft":
-                named_weights = self._bridge.export_oft_adapter_weights(
-                    self.model,
-                    cpu=False,
-                    show_progress=False,
-                )
+                bound_exporter = getattr(self._bridge, "export_oft_adapter_weights", None)
+                if bound_exporter is not None:
+                    named_weights = bound_exporter(self.model, cpu=False, show_progress=False)
+                else:
+                    # The submission's optional OFT API is a free function;
+                    # defer its import so older bound-method bridges still work.
+                    from megatron.bridge.orbit.conversion.oft_export import OFTExportFormat, export_oft_adapter_weights
+
+                    named_weights = export_oft_adapter_weights(
+                        self._bridge,
+                        self.model,
+                        cpu=False,
+                        show_progress=False,
+                        export_format=OFTExportFormat.SGLANG,
+                    )
             elif weight_type == "base":
                 conversion_tasks = self._bridge.get_conversion_tasks(self.model)
                 # Colocate offloads the actor's GPU weights during rollout, so the
@@ -80,6 +90,10 @@ class HfWeightIteratorBridge(HfWeightIteratorBase):
                 named_weights = ((h, w, m) for h, w, m in named_weights if not is_lora_weight_name(h))
             elif weight_type == "lora":
                 named_weights = ((h, w, m) for h, w, m in named_weights if is_lora_weight_name(h))
+            elif weight_type == "oft":
+                # Native OFT tuples omit the Megatron name. Such tensors cannot
+                # match a Megatron atomic-group suffix; coalescing keeps siblings together.
+                named_weights = ((h, w, "" if m is None else m) for h, w, m in named_weights)
 
             groups = get_atomic_update_groups(self.args, self.model_name)
             units = _stream_atomic_units(named_weights, groups)
