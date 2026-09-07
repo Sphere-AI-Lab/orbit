@@ -420,7 +420,13 @@ class UpdateWeightFromTensor:
         if rank == 0:
             mode = self.args.pause_generation_mode
             ray.get([engine.pause_generation.remote(mode=mode) for engine in lifecycle_engines])
-            ray.get([engine.flush_cache.remote() for engine in lifecycle_engines])
+            # "in_place" freezes in-flight requests on their existing KV cache
+            # specifically to avoid a retract-and-reprefill; flush_cache waits
+            # for #running-req==0, which frozen requests never reach, so it
+            # would just deadlock until its 60s timeout. Only "retract" (whose
+            # requeued requests need fresh KV) and "abort" need the flush.
+            if mode != "in_place":
+                ray.get([engine.flush_cache.remote() for engine in lifecycle_engines])
         dist.barrier(group=get_gloo_group())
 
         weight_chunks = self._hf_weight_iterator.get_hf_weight_chunks(self.weights_getter())
