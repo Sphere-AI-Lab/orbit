@@ -63,9 +63,14 @@ PINS_FILE = REPO_ROOT / "scripts" / "slurm" / "setup" / "pins.env"
 # sglang_router version) validated by the upstream image or our bare-metal
 # smoke. Upstream now publishes rolling CUDA/architecture tags, so update the
 # existing row during sglang-sync when that release's binary set changes.
+# CUDA-13 bundles only: install_env.sh mirrors the Dockerfile's ENABLE_CUDA_13=1 path and
+# refuses cu12 tags (no torch-2.13 bundle exists for CUDA 12). NB `cu130-x86_64` is the
+# torch-2.11 bundle — its transformer_engine_torch does not import on torch 2.13.
 # ---------------------------------------------------------------------------
 WHEELS_STACK: dict[str, dict[str, str]] = {
-    "cu129-x86_64": {"sglang": "v0.5.16", "torch": "2.11.0", "router": "0.3.2"},
+    # miles-wheels 2026-08-23: "built against torch 2.13, as shipped by lmsysorg/sglang:v0.5.18".
+    # Ships the prebuilt transformer_engine triplet; install_env.sh installs TE from it.
+    "cu130-torch213-x86_64": {"sglang": "v0.5.18", "torch": "2.13.0", "router": "0.3.2"},
 }
 
 
@@ -109,6 +114,12 @@ PIN_GROUPS: list[tuple[str, list[Pin]]] = [
                 "Re-pinned by upstream #1575 after the unpinned #1773/#1774 era.",
             ),
             Pin("MILES_WHEELS_REPO", DOCKERFILE, r"^ARG\s+WHEELS_REPO=(\S+)"),
+            Pin(
+                "CUDNN_CU13_VERSION",
+                DOCKERFILE,
+                r"nvidia-cudnn-cu13==([0-9][0-9.]*)",
+                "The Dockerfile pins nvidia-cudnn-cu13 explicitly, ahead of the version torch itself declares.",
+            ),
         ],
     ),
     (
@@ -181,8 +192,7 @@ def read_preserved(key: str, default: str) -> str:
 
 def derive_index_urls(wheels_tag: str) -> dict[str, str]:
     """Derive wheel-index URLs from the ACTIVE wheels-tag cu prefix. SGL_WHL_INDEX_URL
-    carries sgl-project's +cuNNN local-version builds of sglang-kernel/sgl-deep-gemm —
-    the PyPI default wheels of those are cu13-linked, unloadable on a CUDA-12 driver."""
+    carries sgl-project's +cu130 local-version builds of sglang-kernel/sgl-deep-gemm."""
     match = re.search(r"cu(\d{3})", wheels_tag)
     if not match:
         raise SystemExit(f"FATAL: cannot derive cu tag from MILES_WHEELS_TAG={wheels_tag!r}")

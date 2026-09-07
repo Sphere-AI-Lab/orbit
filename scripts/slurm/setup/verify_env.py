@@ -57,22 +57,29 @@ def ver(pkg: str) -> str | None:
         return None
 
 
-def torch_declared_cudnn_cu12_version() -> str:
-    """Return torch's exact nvidia-cudnn-cu12 requirement from installed metadata."""
+def torch_declared_cudnn() -> tuple[str, str]:
+    """Return (package, version) of the nvidia-cudnn-cuNN pin torch declares."""
     for req_text in md.requires("torch") or []:
         req = Requirement(req_text)
-        if req.name != "nvidia-cudnn-cu12":
+        if not req.name.startswith("nvidia-cudnn-cu"):
             continue
         versions = [spec.version for spec in req.specifier if spec.operator == "=="]
         if len(versions) == 1:
-            return versions[0]
+            return req.name, versions[0]
         raise RuntimeError(f"torch requirement {req_text!r} does not contain exactly one == pin")
-    raise RuntimeError("torch metadata does not declare nvidia-cudnn-cu12")
+    raise RuntimeError("torch metadata does not declare an nvidia-cudnn-cuNN package")
 
 
-def effective_cudnn_cu12_version() -> str:
-    """Expected cuDNN package version: env override, else torch's declared pin."""
-    return os.environ.get("CUDNN_CU12_VERSION") or torch_declared_cudnn_cu12_version()
+def effective_cudnn(pins: dict[str, str]) -> tuple[str, str]:
+    """(package, expected version) with install_env.sh's precedence: CUDNN_VERSION override,
+    else pins.env CUDNN_CU13_VERSION (the Dockerfile's explicit pin), else torch's declared pin."""
+    pkg, declared = torch_declared_cudnn()
+    override = os.environ.get("CUDNN_VERSION")
+    if override:
+        return pkg, override
+    if pkg.endswith("cu13") and pins.get("CUDNN_CU13_VERSION"):
+        return pkg, pins["CUDNN_CU13_VERSION"]
+    return pkg, declared
 
 
 def cudnn_int_to_triplet(v: int) -> tuple[int, int, int]:
@@ -129,10 +136,14 @@ def check_imports() -> list[tuple[str, bool]]:
         "mbridge",
         "torch_memory_saver",
         "mooncake.engine",
-        "orbit_megatron_plugins",
         "onnx",
         "onnxscript",
     ]
+    # The fork-era Megatron-LM shipped a top-level *_megatron_plugins package (exposed via the
+    # .pth file); radixark/Megatron-LM@miles-main does not. Only demand it when it exists.
+    for plugins in ("orbit_megatron_plugins", "miles_megatron_plugins"):
+        if (REPO_ROOT / "thirdparty/Megatron-LM" / plugins).is_dir():
+            mods.append(plugins)
     if os.environ.get("INSTALL_FLASH_ATTN", "1") == "1":
         mods.append("flash_attn")
     if os.environ.get("INSTALL_FLASH_ATTN_3", "1") == "1":
@@ -150,7 +161,7 @@ def check_imports() -> list[tuple[str, bool]]:
     return out
 
 
-def check_runtime() -> list[tuple[str, bool]]:
+def check_runtime(pins: dict[str, str]) -> list[tuple[str, bool]]:
     """Importable != linkable. Probe FA3 symbols, apex C extensions, CUDA visibility."""
     out: list[tuple[str, bool]] = []
     try:
@@ -206,7 +217,7 @@ def check_runtime() -> list[tuple[str, bool]]:
     try:
         import torch
 
-        expected = effective_cudnn_cu12_version()
+        _, expected = effective_cudnn(pins)
         got = torch.backends.cudnn.version()
         ok = got is not None and cudnn_int_to_triplet(got) == version_triplet(expected)
         out.append((f"torch runtime cuDNN == {'.'.join(expected.split('.')[:3])} (got {got})", ok))
@@ -222,8 +233,9 @@ def check_pins(pins: dict[str, str]) -> list[tuple[str, bool]]:
     out.append((f"torch == {pins['TORCH_VERSION']}", bool(t and t.split("+")[0] == pins["TORCH_VERSION"])))
 
     # torch's CUDA build (+cuNNN local tag) must match the wheels-tag cu build. Catches
-    # PyPI swapping the +cu129 wheel for its default CUDA-13 build during the sglang dep
-    # resolution — a silent CUDA-major mismatch that breaks torchvision/sglang import.
+    # PyPI swapping the +cu130 index wheel for its untagged default build during the sglang
+    # dep resolution (same CUDA build, but the local tag is the evidence the env came from the
+    # pinned index).
     m_tag = re.search(r"cu(\d+)", pins.get("MILES_WHEELS_TAG", "") or pins.get("TORCH_INDEX_URL", ""))
     if m_tag:
         cu_want = m_tag.group(1)
@@ -237,11 +249,11 @@ def check_pins(pins: dict[str, str]) -> list[tuple[str, bool]]:
         out.append((f"{pkg} == {pins[key]}", ver(pkg) == pins[key]))
 
     try:
-        expected_cudnn = effective_cudnn_cu12_version()
-        got_cudnn = ver("nvidia-cudnn-cu12")
-        out.append((f"nvidia-cudnn-cu12 == {expected_cudnn}", got_cudnn == expected_cudnn))
+        cudnn_pkg, expected_cudnn = effective_cudnn(pins)
+        got_cudnn = ver(cudnn_pkg)
+        out.append((f"{cudnn_pkg} == {expected_cudnn}", got_cudnn == expected_cudnn))
     except Exception as e:
-        out.append((f"nvidia-cudnn-cu12 expected version ({type(e).__name__}: {e})", False))
+        out.append((f"nvidia-cudnn-cuNN expected version ({type(e).__name__}: {e})", False))
 
     kernels_spec = os.environ.get("KERNELS_SPEC", "kernels>=0.12,<0.15")
     try:
@@ -308,13 +320,13 @@ def main() -> int:
     args = ap.parse_args()
 
     checks: list[tuple[str, bool]] = []
+    pins = load_pins()
     print("[verify] imports", file=sys.stderr)
     checks += check_imports()
     print("[verify] runtime symbols / CUDA", file=sys.stderr)
-    checks += check_runtime()
+    checks += check_runtime(pins)
 
     if not args.imports_only:
-        pins = load_pins()
         print("[verify] pinned versions / commits / editables", file=sys.stderr)
         checks += check_pins(pins)
         if args.net:

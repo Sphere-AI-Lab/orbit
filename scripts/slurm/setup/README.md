@@ -11,10 +11,12 @@ If you are starting from a login node, use an interactive 1-GPU `salloc`.
 ## Build
 
 ```bash
-# Optional when already on a GPU-visible compute node:
-salloc --gres=gpu:1 --cpus-per-task=16 --mem=128G --time=2:00:00 --pty bash
+# Optional when already on a GPU-visible compute node (`--pty` is an srun option, not salloc's):
+salloc --gres=gpu:1 --cpus-per-task=16 --mem=128G --time=4:00:00
+srun --pty bash
 cd /data/home/$USER/workspace/orbit
-bash scripts/slurm/setup/install_env.sh
+# CONDA_ENVS_DIRS (a conda setting) places the env somewhere other than $CONDA_ROOT/envs:
+CONDA_ENVS_DIRS=/data/home/$USER/workspace/envs bash scripts/slurm/setup/install_env.sh
 ```
 
 Safe to re-run; `uv` / pip reuse installed artifacts where they can.
@@ -31,16 +33,16 @@ this README intentionally does **not** duplicate the install list.
 | `ORBIT_REPO` | `$PWD` | this repo |
 | `THIRDPARTY_DIR` | `$ORBIT_REPO/thirdparty` | submodule dir |
 | `PULL_REMOTE` | `0` | set to `1` to `git submodule update --remote` after init |
-| `CUDA_HOME` | auto (`/usr/local/cuda-12.{8,9}` / `/usr/local/cuda`) | override the CUDA toolkit path used for source builds |
-| `TORCH_VERSION` | `2.11.0` | matches `thirdparty/sglang`'s pin |
-| `TORCH_INDEX_URL` | `https://download.pytorch.org/whl/cu129` | pytorch wheel index |
-| `TE_VERSION` | `2.10.0` | Dockerfile pin |
+| `CUDA_HOME` | auto (`/usr/local/cuda-13.0` / `/usr/local/cuda-13` / `/usr/local/cuda`) | CUDA-13 toolkit for torch_memory_saver's extension build and flashinfer JIT |
+| `TORCH_VERSION` | `pins.env` (extracted from `thirdparty/sglang`) | must equal the submodule's `torch==` pin |
+| `TORCH_INDEX_URL` | derived from `MILES_WHEELS_TAG` (`cu130` → `.../whl/cu130`) | pytorch wheel index |
+| `TE_VERSION` | `pins.env` (Dockerfile pin, `2.17.0`) | TE version; the whole triplet comes prebuilt from the wheels bundle |
 | `MBRIDGE_COMMIT` / `TMS_COMMIT` | (Dockerfile pins) | git commits |
-| `FLASHINFER_INDEX_URL` | `https://flashinfer.ai/whl/cu129` | extra index for flashinfer |
+| `FLASHINFER_INDEX_URL` | derived from `MILES_WHEELS_TAG` (`https://flashinfer.ai/whl/cu130`) | extra index for flashinfer |
 | `INSTALL_FLASH_ATTN` / `INSTALL_FLASH_ATTN_3` / `INSTALL_APEX` | `1` | toggle each prebuilt wheel |
-| `MILES_WHEELS_REPO` / `MILES_WHEELS_TAG` | `yueming-yuan/miles-wheels` / `cu129-x86_64` | prebuilt-wheel source |
+| `MILES_WHEELS_REPO` / `MILES_WHEELS_TAG` | `yueming-yuan/miles-wheels` / `cu130-torch213-x86_64` | prebuilt-wheel source; must be a CUDA-13 (`cu130*`) bundle built for the submodule's torch |
 | `WHEELS_DIR` | `$THIRDPARTY_DIR/wheels` | local wheel cache (gitignored) |
-| `CUDNN_CU12_VERSION` | `9.16.0.29` | cudnn pin (pytorch/pytorch#168167 workaround) |
+| `CUDNN_VERSION` | `pins.env` `CUDNN_CU13_VERSION` (Dockerfile pin) | `nvidia-cudnn-cu13` wheel version |
 | `ALLOW_CUDA_MINOR_FORWARD_COMPAT` | `1` | set to `0` to hard-fail if the driver's CUDA minor < wheel CUDA minor |
 
 ## Convert HF → Megatron `torch_dist` (optional)
@@ -70,8 +72,9 @@ Idempotent (checks `latest_checkpointed_iteration.txt`).
 - [`docs/getting-started/installation.md`](../../../docs/getting-started/installation.md)
   + [`docker/Dockerfile`](../../../docker/Dockerfile) in the repo root — the
   upstream orbit install reference. `install_env.sh` mirrors the Dockerfile's
-  CUDA-12 / H100 path and intentionally rejects the CUDA-13 / Blackwell
-  variant (cu13, TE 2.12, cudnn-cu13) — use the Dockerfile directly for that.
+  `ENABLE_CUDA_13=1` path only (`cu130*` wheels tag: prebuilt TE triplet +
+  `docker/patch/cu13`, `nvidia-cudnn-cu13`); the CUDA-12 path was retired when
+  `thirdparty/sglang` moved to torch 2.13.
 - [`../docs/launcher.md`](../docs/launcher.md) — design notes for the slurm
   launcher itself (separate from the install).
 - [`verify_env.py`](verify_env.py) — re-runs the install smoke test against
