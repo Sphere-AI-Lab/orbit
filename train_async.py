@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 
+from orbit.backends.megatron_utils.peft_transport.runtime import overlap_oft_sync
 from orbit.ray.placement_group import (
     check_weight_update_equal_after_initial_sync,
     create_placement_groups,
@@ -114,9 +115,12 @@ async def train(args):
                 os.remove(args.save_trigger_sentinel)
 
         if (rollout_id + 1) % args.update_weights_interval == 0:
-            # sync generate before update weights to prevent update weight in the middle of generation
-            rollout_data_curr_ref = (await x) if (x := rollout_data_next_future) is not None else None
-            rollout_data_next_future = None
+            if not overlap_oft_sync(args):
+                # Single-slot/full-weight paths retain their batch boundary.
+                rollout_data_curr_ref = (await x) if (x := rollout_data_next_future) is not None else None
+                rollout_data_next_future = None
+            # Fully-async OFT stages while the producer runs. Keep the pending
+            # batch future for the next iteration; do not await it before push.
             await actor_model.update_weights(rollout_id=rollout_id)
 
         if should_run_periodic_action(rollout_id, args.eval_interval, num_rollout_per_epoch, args.num_rollout):

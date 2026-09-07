@@ -17,6 +17,7 @@ from orbit.backends.megatron_utils.lora_utils import (
     is_lora_weight_name,
     lora_base_cpu_backup_enabled,
 )
+from orbit.backends.megatron_utils.peft_transport.runtime import overlap_oft_sync
 from orbit.backends.megatron_utils.peft_utils import build_peft_sync_spec
 from orbit.backends.training_utils.parallel import get_parallel_state
 from orbit.utils.distributed_utils import get_gloo_group
@@ -416,8 +417,9 @@ class UpdateWeightFromTensor:
         """Send only the active LoRA/OFT adapter through the selected PEFT transport."""
         rank = dist.get_rank()
         lifecycle_engines = self._all_rollout_engines or list(self.rollout_engines)
+        activation_only_pause = self.use_distribute and overlap_oft_sync(self.args)
 
-        if rank == 0:
+        if rank == 0 and not activation_only_pause:
             mode = self.args.pause_generation_mode
             ray.get([engine.pause_generation.remote(mode=mode) for engine in lifecycle_engines])
             # "in_place" freezes in-flight requests on their existing KV cache
@@ -469,7 +471,7 @@ class UpdateWeightFromTensor:
             )
 
         dist.barrier(group=get_gloo_group())
-        if rank == 0:
+        if rank == 0 and not activation_only_pause:
             ray.get([engine.continue_generation.remote() for engine in lifecycle_engines])
         dist.barrier(group=get_gloo_group())
 

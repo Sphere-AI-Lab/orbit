@@ -4,6 +4,19 @@ from argparse import Namespace
 from dataclasses import dataclass
 
 
+def overlap_oft_sync(args: Namespace) -> bool:
+    """Stage outside the pause only for the fully-async native OFT path."""
+    return (
+        getattr(args, "fully_async", False)
+        and getattr(args, "peft_method", "none") == "oft"
+        and getattr(args, "adapter_double_buffer", False)
+        and getattr(args, "peft_distributed_transport", "nccl") == "nccl"
+        and getattr(args, "pause_generation_mode", None) == "in_place"
+        and getattr(args, "sglang_oft_impl", "sibling") == "sibling"
+        and not getattr(args, "colocate", False)
+    )
+
+
 @dataclass(frozen=True)
 class PeftRuntimeMode:
     peft_method: str

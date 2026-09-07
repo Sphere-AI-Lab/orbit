@@ -114,7 +114,10 @@ class MegatronTrainRayActor(TrainRayActor):
         recv_ckpt_src_rank: int | None = None,
         indep_dp_info: IndepDPInfo,
     ) -> int | None:
-        monkey_patch_torch_dist()
+        # Resident trainers never destroy/reload their groups. Native groups also
+        # avoid PyTorch's synchronous coalesced Work lifetime issue with wrappers.
+        if args.offload_train:
+            monkey_patch_torch_dist()
 
         super().init(args, role, with_ref, with_opd_teacher=with_opd_teacher)
 

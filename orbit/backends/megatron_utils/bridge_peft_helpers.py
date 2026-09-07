@@ -323,7 +323,10 @@ def _setup_peft_model_via_bridge(args: Namespace, role: str = "actor") -> list:
 
     hf_config = load_hf_config(args.hf_checkpoint)
     bridge = AutoBridge.from_hf_pretrained(args.hf_checkpoint, trust_remote_code=True)
-    provider = bridge.to_megatron_provider(load_weights=False)
+    # Canonical OFT renames fused base parameters, so HF loading must precede
+    # adapter wrapping. Distributed checkpoints are preloaded by the hook below.
+    load_path = resolve_bridge_load_path(args, hf_config=hf_config)
+    provider = bridge.to_megatron_provider(load_weights=load_path == args.hf_checkpoint)
 
     apply_bridge_provider_overrides(
         provider,

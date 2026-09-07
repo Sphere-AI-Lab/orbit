@@ -5,6 +5,7 @@ for adapter-only transport.
 
 from __future__ import annotations
 
+import logging
 import time
 from argparse import Namespace
 from collections.abc import Iterable, Sequence
@@ -22,7 +23,9 @@ from orbit.backends.training_utils.parallel import get_parallel_state
 from .._gather import validate_adapter_weight_chunk
 from ..interface import PeftSendResult, PeftWeightTransport
 from ..registry import PeftMethodSpec
-from ..runtime import PeftRuntimeMode, resolve_peft_runtime_mode
+from ..runtime import PeftRuntimeMode, overlap_oft_sync, resolve_peft_runtime_mode
+
+logger = logging.getLogger(__name__)
 
 
 def _flatten_meta_to_json(meta) -> dict:
@@ -73,7 +76,9 @@ def _validate_staged_results(results: list[dict], requested_version: str) -> Non
                 )
             raise RuntimeError(f"SGLang adapter update failed: {result}")
         _validate_adapter_aliases(result, requested_version)
-        staged_raw = result.get("staged_adapter_version", result.get("adapter_version", result.get("weight_version")))
+        staged_raw = result.get(
+            "staged_adapter_version", result.get("adapter_version", result.get("weight_version"))
+        )
         staged = _as_version(staged_raw)
         if staged is None:
             raise RuntimeError(
@@ -130,6 +135,7 @@ class NcclBackend(PeftWeightTransport):
         # Fallback resolves the mode when the backend is constructed directly in tests;
         # production code always supplies runtime_mode via build_peft_transport().
         self.runtime_mode = runtime_mode or resolve_peft_runtime_mode(args, use_distribute=True)
+        self._overlap_generation = overlap_oft_sync(args)
 
     def connect(
         self,
@@ -152,6 +158,7 @@ class NcclBackend(PeftWeightTransport):
         named_tensors: Iterable[tuple[str, torch.Tensor]],
         weight_version: int,
     ) -> PeftSendResult:
+        stage_start = time.perf_counter()
         weight_tensors = validate_adapter_weight_chunk(named_tensors, self.method_spec)
         # Acquire the lock — same pattern as broadcast.py:84-97.
         while not ray.get(self._lock.acquire.remote()):
@@ -216,6 +223,11 @@ class NcclBackend(PeftWeightTransport):
             requested_version = str(weight_version)
             _validate_staged_results(results, requested_version)
             if self.runtime_mode.adapter_double_buffer:
+                stage_done = time.perf_counter()
+                if self._overlap_generation:
+                    # STAGE has completed on every receiver while decode continued.
+                    # Only the active-slot write needs the in-place pause.
+                    ray.get([engine.pause_generation.remote(mode="in_place") for engine in self._engines])
                 activate_refs = [
                     engine.activate_adapter_version.remote(
                         adapter_name=self.sync_spec.adapter_name,
@@ -228,6 +240,14 @@ class NcclBackend(PeftWeightTransport):
                 activate_results = ray.get(activate_refs)
                 _validate_active_results(activate_results, requested_version)
                 results = results + activate_results
+                if self._overlap_generation:
+                    ray.get([engine.continue_generation.remote() for engine in self._engines])
+                    logger.info(
+                        "event=oft_sync_overlap version=%s stage_s=%.6f pause_s=%.6f",
+                        requested_version,
+                        stage_done - stage_start,
+                        time.perf_counter() - stage_done,
+                    )
                 # activate_refs intentionally not appended to refs; they are
                 # already resolved (we awaited them via ray.get above) and the
                 # PeftSendResult.refs contract is "refs the caller may need to
