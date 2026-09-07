@@ -1,16 +1,12 @@
 [submodule "thirdparty/Megatron-LM"]
 	path = thirdparty/Megatron-LM
-	url = https://github.com/impossible-inc/Megatron-LM.git
+	url = https://github.com/radixark/Megatron-LM.git
 	branch = miles-main
 [submodule "thirdparty/sglang"]
 	path = thirdparty/sglang
-	url = https://github.com/impossible-inc/sglang.git
-	branch = sglang-miles
+	url = https://github.com/Sphere-AI-Lab/sglang.git
+	branch = submission
 [submodule "thirdparty/Megatron-Bridge"]
 	path = thirdparty/Megatron-Bridge
-	url = https://github.com/impossible-inc/Megatron-Bridge.git
-	branch = bridge
-[submodule "thirdparty/envpack"]
-	path = thirdparty/envpack
-	url = https://github.com/impossible-inc/envpack.git
-	branch = RL/arc-agi
+	url = https://github.com/Sphere-AI-Lab/Megatron-Bridge.git
+	branch = submission
