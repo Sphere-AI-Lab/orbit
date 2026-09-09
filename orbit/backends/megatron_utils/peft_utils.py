@@ -2271,7 +2271,7 @@ def save_peft_adapter_checkpoint(
     )
     exporter = _coordinated_checkpoint_call(
         "PEFT bridge exporter selection",
-        lambda: bridge.export_oft_adapter_weights if method == "oft" else bridge.export_adapter_weights,
+        lambda: megatron_bridge_utils.get_peft_adapter_exporter(bridge, method),
     )
     state_dict = _coordinated_checkpoint_call(
         "PEFT HF adapter export",

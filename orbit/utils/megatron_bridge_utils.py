@@ -1,9 +1,20 @@
 from contextlib import contextmanager
+from functools import partial
 
 try:
     from megatron.core.utils import unwrap_model
 except ImportError:
     unwrap_model = None
+
+
+def get_peft_adapter_exporter(bridge, method: str):
+    if method == "lora":
+        return bridge.export_adapter_weights
+    if method == "oft":
+        from megatron.bridge.orbit.conversion.oft_export import export_oft_adapter_weights
+
+        return partial(export_oft_adapter_weights, bridge)
+    raise ValueError(f"Unsupported PEFT method: {method!r}")
 
 
 @contextmanager

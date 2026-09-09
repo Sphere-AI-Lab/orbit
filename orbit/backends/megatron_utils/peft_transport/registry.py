@@ -24,12 +24,18 @@ class PeftMethodSpec:
     label: str  # for diagnostics — "LoRA" | "OFT"
 
 
-def _build_oft_payload_shaper():
-    # Late import — _payload imports sglang.srt.peft.oft.streamed_weight_loader, which
-    # is an optional heavy dependency that may not be present at registry-load time.
+def _oft_payload_shaper(named_tensors: list) -> PeftPayload:
+    """Shape an OFT payload, importing the sglang helper on first call.
+
+    The import is deferred because ``_payload`` pulls in
+    ``sglang.srt.oft.streamed_weight_loader``, an optional heavy dependency that
+    need not be importable when this registry is loaded. Resolving the shaper
+    eagerly defeated that: every consumer of ``PEFT_METHODS`` — LoRA included —
+    then died at import time whenever the module was absent or had moved.
+    """
     from ._payload import build_oft_flattened_payload
 
-    return build_oft_flattened_payload
+    return build_oft_flattened_payload(named_tensors)
 
 
 PEFT_METHODS: dict[str, PeftMethodSpec] = {
@@ -37,13 +43,24 @@ PEFT_METHODS: dict[str, PeftMethodSpec] = {
         name="lora",
         sglang_load_format="lora_adapter",
         weight_name_predicate=is_lora_weight_name,
-        # IPC path: single-active peft/lora via update_weights_from_tensor(
-        # load_format="lora_adapter"), symmetric to OFT. The payload_shaper is
-        # method-agnostic (dedupe-by-storage + flatten); the fork's
-        # serialize_flattened_lora_payload / normalize_lora_weight_payload
-        # consume the same deduped flattened-bucket form.
-        dedupe_by_storage=True,
-        payload_shaper=_build_oft_payload_shaper(),
+        # No payload_shaper: LoRA loads through sglang's native per-tensor
+        # adapter interface (load_lora_adapter_from_ray_tensors ->
+        # load_lora_adapter_from_tensors), the shaper-less branch every backend
+        # in this package already implements.
+        #
+        # The flattened-payload path is OFT-only by construction. sglang ships
+        # serialize_flattened_oft_payload / normalize_oft_weight_payload and has
+        # no LoRA counterpart, so shaping LoRA sent a "flattened_lora_payload"
+        # tag that nothing on the server side accepts.
+        #
+        # Upstream radixark/miles has no flattened-LoRA machinery either, but it
+        # does not use this entrypoint: it syncs adapters as "<lora_name>:<hf_name>"
+        # named tensors through the generic update_weights_from_tensor protocol
+        # (update_weight/hf_weight_iterator.py). This fork keeps a dedicated
+        # adapter transport, so it drives sglang's adapter entrypoint instead —
+        # per-tensor in both designs, never flattened.
+        dedupe_by_storage=False,
+        payload_shaper=None,
         sample_names="lora_A/lora_B",
         label="LoRA",
     ),
@@ -52,7 +69,7 @@ PEFT_METHODS: dict[str, PeftMethodSpec] = {
         sglang_load_format="oft_adapter",
         weight_name_predicate=is_oft_weight_name,
         dedupe_by_storage=True,
-        payload_shaper=_build_oft_payload_shaper(),
+        payload_shaper=_oft_payload_shaper,
         sample_names="oft_r/oft_R",
         label="OFT",
     ),

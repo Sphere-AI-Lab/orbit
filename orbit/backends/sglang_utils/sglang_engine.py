@@ -536,31 +536,30 @@ class SGLangEngine(RayActor):
         self,
         lora_name: str,
         config_dict: dict,
-        serialized_tensors: str | None = None,
-        serialized_named_tensors: list | None = None,
+        serialized_named_tensors: list,
         load_format: str | None = None,
         pinned: bool = False,
         added_tokens_config: dict | None = None,
         upsert: bool = False,
         expected_checksums: dict | None = None,
     ):
-        """Load a LoRA adapter from either transport (exactly one of the two).
+        """Load a LoRA adapter from serialized tensors.
 
-        ``serialized_named_tensors[tp_rank]`` is bytes for that TP rank; ``serialized_tensors``
-        is the whole adapter. With ``upsert``, the already-loaded ``lora_name`` is overwritten
-        in place (no unload/register).
+        ``serialized_named_tensors[tp_rank]`` is the entry for that TP rank; the
+        list must therefore hold one entry per TP-rank scheduler. sglang dropped
+        the whole-adapter ``serialized_tensors`` field, so this is the only
+        accepted form. With ``upsert``, the already-loaded ``lora_name`` is
+        overwritten in place (no unload/register) — note sglang accepts upsert
+        only on the from_distributed route.
         """
-        if (serialized_tensors is None) == (serialized_named_tensors is None):
-            raise ValueError("pass exactly one of serialized_tensors / serialized_named_tensors")
+        if not serialized_named_tensors:
+            raise ValueError("serialized_named_tensors must hold one entry per TP rank")
         payload = {
             "lora_name": lora_name,
             "config_dict": config_dict,
             "pinned": pinned,
+            "serialized_named_tensors": serialized_named_tensors,
         }
-        if serialized_tensors is not None:
-            payload["serialized_tensors"] = serialized_tensors
-        else:
-            payload["serialized_named_tensors"] = serialized_named_tensors
         if upsert:
             payload["upsert"] = True
         if load_format is not None:
@@ -605,30 +604,35 @@ class SGLangEngine(RayActor):
         inside the SGLangEngine actor that owns the server process.
 
         Serialized under the ``file_system`` sharing strategy, never the
-        ``file_descriptor`` default. The endpoint takes ONE payload and every
-        TP-rank scheduler deserializes it, but a fd-strategy DupFd is
-        redeemable exactly once: on a TP=2 engine, TP0's deserialize consumes
-        the fd and TP1 dies on EOFError in recvfds (measured on the
-        2026-08-04 B200 probe, reproduced deterministically on CPU). A
-        file_system storage is a named shm segment any process can attach
-        any number of times, which is what a broadcast payload needs.
+        ``file_descriptor`` default: a fd-strategy DupFd is redeemable exactly
+        once, so a scheduler that opens late dies on EOFError in recvfds
+        (measured on the 2026-08-04 B200 probe, reproduced deterministically on
+        CPU). A file_system storage is a named shm segment any process can
+        attach.
 
-        Attaching is not the whole story: the segment's *lifetime* still has to
-        be paid for, once per rank. See
-        ``_balance_broadcast_shm_refcounts``.
+        One serialized entry per TP-rank scheduler, matching sglang's
+        ``LoadLoRAAdapterFromTensorsReqInput.serialized_named_tensors``: each
+        rank deserializes only ``serialized_named_tensors[tp_rank]``. That is a
+        1-producer -> 1-consumer handshake per entry, so the refcount balances
+        itself and needs no pre-payment — the same shape
+        ``update_adapter_from_ray_tensor`` already uses. Sending one blob for
+        every rank to share (the older ``serialized_tensors`` field) is not an
+        option: this sglang has no such field and rejects the request with 400.
         """
         import torch.multiprocessing as torch_mp  # local: the module keeps torch off its import path
 
         old_strategy = torch_mp.get_sharing_strategy()
         torch_mp.set_sharing_strategy("file_system")
         try:
-            serialized_tensors = MultiprocessingSerializer.serialize(tensors, output_str=True)
-            _balance_broadcast_shm_refcounts(tensors, self._adapter_payload_consumers())
+            serialized_rank_payloads = [
+                MultiprocessingSerializer.serialize(tensors, output_str=True)
+                for _ in range(self._adapter_payload_consumers())
+            ]
         finally:
             torch_mp.set_sharing_strategy(old_strategy)
         return self.load_lora_adapter_from_tensors(
             lora_name=lora_name,
-            serialized_tensors=serialized_tensors,
+            serialized_named_tensors=serialized_rank_payloads,
             config_dict=config_dict,
             load_format=load_format,
             pinned=pinned,
@@ -1175,14 +1179,27 @@ def _compute_server_args(
                 "--no-offload-rollout-adapter."
             )
     if peft_method == "lora":
-        kwargs["peft_method"] = "lora"
-        kwargs["peft_target_modules"] = convert_target_modules_to_hf(args.target_modules)
-        kwargs["peft_max_lora_rank"] = max(getattr(args, "lora_rank", 0), 1)
-        kwargs["peft_double_buffer"] = bool(getattr(args, "adapter_double_buffer", False))
-        if args.lora_adapter_path is not None:
-            kwargs["peft_paths"] = {LORA_ADAPTER_NAME: args.lora_adapter_path}
+        kwargs["enable_lora"] = True
+        kwargs["max_loras_per_batch"] = 1
+        kwargs["max_lora_rank"] = max(getattr(args, "lora_rank", 0), 1)
+        if sglang_lora_target_all_sentinel(args):
+            kwargs["lora_target_modules"] = ["all"]
+        else:
+            kwargs["lora_target_modules"] = convert_target_modules_to_hf(args.target_modules)
+
+        if args.lora_adapter_path is not None and kwargs.get("load_format") != "dummy":
+            kwargs["lora_paths"] = {LORA_ADAPTER_NAME: args.lora_adapter_path}
+        elif args.lora_adapter_path is not None:
+            logger.info("dummy base load: skipping startup lora_paths; adapter comes via weight-sync")
         else:
             logger.info("No pre-trained LoRA adapter_path provided, will use random initial weights")
+
+        if lora_base_cpu_backup_enabled(args):
+            kwargs["enable_weights_cpu_backup"] = True
+            logger.info(
+                "LoRA + colocate: enabling SGLang enable_weights_cpu_backup=True; "
+                "the trainer will skip per-step base weight sync."
+            )
     elif is_multi_lora_enabled(args):
         kwargs["enable_lora"] = True
         kwargs["max_loras_per_batch"] = args.multi_lora_n_adapters
