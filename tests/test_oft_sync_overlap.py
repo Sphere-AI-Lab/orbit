@@ -1,5 +1,5 @@
-from argparse import Namespace
 import asyncio
+from argparse import Namespace
 from types import SimpleNamespace
 
 import pytest
@@ -15,13 +15,28 @@ class Remote:
         self.remote = fn
 
 
-@pytest.mark.parametrize("fully_async", [True, False])
-def test_nccl_stage_precedes_short_activation_pause(monkeypatch, fully_async):
+@pytest.mark.parametrize(
+    "fully_async,failure",
+    [
+        (True, None),
+        (False, None),
+        (True, "stage"),
+        (True, "pause"),
+        (True, "activate"),
+        (True, "version"),
+    ],
+)
+def test_nccl_stage_precedes_short_activation_pause(monkeypatch, fully_async, failure):
     events = []
+    calls = {}
+    released = []
 
     def record(name, result):
         def call(*args, **kwargs):
             events.append(name)
+            calls[name] = kwargs
+            if name == failure:
+                raise RuntimeError(f"{name} failed")
             return result
 
         return Remote(call)
@@ -30,6 +45,7 @@ def test_nccl_stage_precedes_short_activation_pause(monkeypatch, fully_async):
         update_adapter_from_distributed=record("stage", {"success": True, "staged_adapter_version": "7"}),
         activate_adapter_version=record("activate", {"success": True, "active_adapter_version": "7"}),
         pause_generation=record("pause", None),
+        update_weight_version=record("version", None),
         continue_generation=record("resume", None),
     )
     backend = nccl.NcclBackend(
@@ -38,7 +54,7 @@ def test_nccl_stage_precedes_short_activation_pause(monkeypatch, fully_async):
             adapter_double_buffer=True,
             fully_async=fully_async,
             peft_distributed_transport="nccl",
-            pause_generation_mode="in_place",
+            pause_generation_mode="retract",
         ),
         method_spec=PeftMethodSpec(
             name="oft",
@@ -54,11 +70,51 @@ def test_nccl_stage_precedes_short_activation_pause(monkeypatch, fully_async):
         ),
     )
     backend._engines = [engine]
-    backend._lock = SimpleNamespace(acquire=Remote(lambda: True), release=Remote(lambda: True))
+    backend._lock = SimpleNamespace(acquire=Remote(lambda: True), release=Remote(lambda: released.append(True)))
     monkeypatch.setattr(nccl.ray, "get", lambda refs: refs)
     monkeypatch.setattr(nccl.dist, "broadcast", lambda *a, **kw: SimpleNamespace(wait=lambda: None))
-    backend.send_adapter([("layer.oft_R", torch.ones(1))], weight_version=7)
-    assert events == (["stage", "pause", "activate", "resume"] if fully_async else ["stage", "activate"])
+    expected = ["stage", "pause", "activate", "version", "resume"] if fully_async else ["stage", "activate"]
+    if failure:
+        with pytest.raises(RuntimeError, match=f"{failure} failed"):
+            backend.send_adapter([("layer.oft_R", torch.ones(1))], weight_version=7)
+        assert events == expected[: expected.index(failure) + 1]
+        assert "resume" not in events
+    else:
+        backend.send_adapter([("layer.oft_R", torch.ones(1))], weight_version=7)
+        assert events == expected
+    assert released == [True]
+    if "pause" in calls:
+        assert calls["pause"] == {"mode": "retract"}
+    if "version" in calls:
+        assert calls["version"] == {"weight_version": "7"}
+
+
+@pytest.mark.parametrize("mode,expected", [("retract", True), ("in_place", False), ("abort", False)])
+def test_overlap_requires_retraction(mode, expected):
+    from orbit.backends.megatron_utils.peft_transport.runtime import overlap_oft_sync
+
+    args = Namespace(
+        fully_async=True,
+        peft_method="oft",
+        adapter_double_buffer=True,
+        peft_distributed_transport="nccl",
+        pause_generation_mode=mode,
+    )
+    assert overlap_oft_sync(args) is expected
+
+
+def test_unsafe_async_in_place_rejected_before_transport():
+    from orbit.backends.megatron_utils.peft_transport.runtime import resolve_peft_runtime_mode
+
+    args = Namespace(
+        fully_async=True,
+        peft_method="oft",
+        adapter_double_buffer=True,
+        peft_distributed_transport="nccl",
+        pause_generation_mode="in_place",
+    )
+    with pytest.raises(ValueError, match="pause-generation-mode retract"):
+        resolve_peft_runtime_mode(args, use_distribute=True)
 
 
 @pytest.mark.parametrize("double_buffer", [True, False])
@@ -120,7 +176,7 @@ def test_driver_preserves_next_batch_without_waiting_before_overlap_push(monkeyp
         peft_method="oft",
         adapter_double_buffer=double_buffer,
         peft_distributed_transport="nccl",
-        pause_generation_mode="in_place",
+        pause_generation_mode="retract",
         control_server_port=None,
         check_weight_update_equal=False,
         eval_interval=None,

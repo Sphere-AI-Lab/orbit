@@ -9,6 +9,16 @@ from orbit.backends.sglang_utils import sglang_engine
 from orbit.backends.sglang_utils.sglang_engine import _compute_server_args
 
 
+@pytest.fixture(autouse=True)
+def legacy_server_args(monkeypatch):
+    # Test both API generations explicitly, independent of the installed fork.
+    names = {field.name for field in dataclasses.fields(sglang_engine.ServerArgs)}
+    names.difference_update({"peft_method", "peft_target_modules", "peft_double_buffer", "peft_paths"})
+    names.update({"enable_lora", "enable_oft", "oft_target_modules", "oft_double_buffer", "oft_paths", "oft_impl"})
+    legacy = dataclasses.make_dataclass("LegacyServerArgs", [(name, object) for name in sorted(names)], kw_only=True)
+    monkeypatch.setattr(sglang_engine, "ServerArgs", legacy)
+
+
 def make_args(**overrides) -> SimpleNamespace:
     defaults = dict(
         hf_checkpoint="/fake/model",
@@ -123,14 +133,13 @@ def test_oft_preserves_unified_sglang_api(monkeypatch):
     assert server_args["peft_method"] == "oft"
     assert server_args["peft_target_modules"] == ["q_proj", "k_proj", "v_proj"]
     assert server_args["peft_double_buffer"] is True
+    assert server_args["max_ofts_per_batch"] == 2
     assert server_args["peft_paths"] == {"orbit_oft": "/fake/adapter"}
     assert "enable_oft" not in server_args
 
 
 def test_oft_submission_override_wins():
-    args = make_args(
-        peft_method="oft", oft_block_size=128, oft_type="canonical_oft", adapter_double_buffer=True
-    )
+    args = make_args(peft_method="oft", oft_block_size=128, oft_type="canonical_oft", adapter_double_buffer=True)
 
     server_args = compute(args, sglang_overrides={"oft_double_buffer": False})
 

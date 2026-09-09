@@ -159,17 +159,22 @@ def test_distributed_peft_source_failure_reaches_peer_before_next_barrier(monkey
 
 def test_overlapped_oft_does_not_pause_before_export(monkeypatch, update_mod):
     updater = _make_updater(update_mod, None)
-    updater.args = Namespace(pause_generation_mode="in_place", fully_async=True,
-                             adapter_double_buffer=True, peft_method="oft",
-                             peft_distributed_transport="nccl")
+    updater.args = Namespace(
+        pause_generation_mode="retract",
+        fully_async=True,
+        adapter_double_buffer=True,
+        peft_method="oft",
+        peft_distributed_transport="nccl",
+    )
     events = []
 
     class Remote:
         def __init__(self, name):
             self.remote = lambda **kwargs: events.append(name)
 
-    updater._all_rollout_engines = [SimpleNamespace(
-        pause_generation=Remote("pause"), continue_generation=Remote("resume"))]
+    updater._all_rollout_engines = [
+        SimpleNamespace(pause_generation=Remote("pause"), continue_generation=Remote("resume"))
+    ]
     updater._send_adapter_params = lambda tensors: ([], None, [{"success": True}])
     monkeypatch.setattr(update_mod.dist, "get_rank", lambda: 0)
     monkeypatch.setattr(update_mod.dist, "barrier", lambda **kwargs: None)

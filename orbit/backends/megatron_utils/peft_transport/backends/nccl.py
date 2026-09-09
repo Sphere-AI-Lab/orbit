@@ -76,9 +76,7 @@ def _validate_staged_results(results: list[dict], requested_version: str) -> Non
                 )
             raise RuntimeError(f"SGLang adapter update failed: {result}")
         _validate_adapter_aliases(result, requested_version)
-        staged_raw = result.get(
-            "staged_adapter_version", result.get("adapter_version", result.get("weight_version"))
-        )
+        staged_raw = result.get("staged_adapter_version", result.get("adapter_version", result.get("weight_version")))
         staged = _as_version(staged_raw)
         if staged is None:
             raise RuntimeError(
@@ -226,8 +224,9 @@ class NcclBackend(PeftWeightTransport):
                 stage_done = time.perf_counter()
                 if self._overlap_generation:
                     # STAGE has completed on every receiver while decode continued.
-                    # Only the active-slot write needs the in-place pause.
-                    ray.get([engine.pause_generation.remote(mode="in_place") for engine in self._engines])
+                    # Retraction releases old-version KV before the serving-slot
+                    # replacement. The receiver flushes and rekeys before ack.
+                    ray.get([engine.pause_generation.remote(mode="retract") for engine in self._engines])
                 activate_refs = [
                     engine.activate_adapter_version.remote(
                         adapter_name=self.sync_spec.adapter_name,
@@ -241,6 +240,12 @@ class NcclBackend(PeftWeightTransport):
                 _validate_active_results(activate_results, requested_version)
                 results = results + activate_results
                 if self._overlap_generation:
+                    ray.get(
+                        [
+                            engine.update_weight_version.remote(weight_version=requested_version)
+                            for engine in self._engines
+                        ]
+                    )
                     ray.get([engine.continue_generation.remote() for engine in self._engines])
                     logger.info(
                         "event=oft_sync_overlap version=%s stage_s=%.6f pause_s=%.6f",

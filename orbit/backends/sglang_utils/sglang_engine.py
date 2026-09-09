@@ -1253,10 +1253,10 @@ def _compute_server_args(
         # OFT loading. All slots are occupied." inside sglang's
         # oft/mem_pool.py::allocate_buffer_slot.
         kwargs["max_ofts_per_batch"] = 2
-        if getattr(args, "adapter_double_buffer", False):
+        if getattr(args, "adapter_double_buffer", False) and not unified_peft_args:
             kwargs["max_ofts_per_batch"] = max(kwargs["max_ofts_per_batch"], 3)
-        # Enable the fork's stage/activate double-buffer path (staging slot =
-        # max_ofts_per_batch-1); paired with the max_ofts_per_batch=3 bump above.
+        # PR13 hides its staging row outside the advertised serving capacity.
+        # The legacy fork instead reserves the last advertised row for staging.
         kwargs["peft_double_buffer" if unified_peft_args else "oft_double_buffer"] = bool(
             getattr(args, "adapter_double_buffer", False)
         )

@@ -11,7 +11,7 @@ def overlap_oft_sync(args: Namespace) -> bool:
         and getattr(args, "peft_method", "none") == "oft"
         and getattr(args, "adapter_double_buffer", False)
         and getattr(args, "peft_distributed_transport", "nccl") == "nccl"
-        and getattr(args, "pause_generation_mode", None) == "in_place"
+        and getattr(args, "pause_generation_mode", None) == "retract"
         and getattr(args, "sglang_oft_impl", "sibling") == "sibling"
         and not getattr(args, "colocate", False)
     )
@@ -52,6 +52,13 @@ def resolve_peft_runtime_mode(args: Namespace, *, use_distribute: bool) -> PeftR
         )
     if adapter_double_buffer and distributed_transport != "nccl":
         raise ValueError("--adapter-double-buffer requires --peft-distributed-transport nccl")
+    if (
+        peft_method == "oft"
+        and adapter_double_buffer
+        and getattr(args, "fully_async", False)
+        and getattr(args, "pause_generation_mode", None) == "in_place"
+    ):
+        raise ValueError("Fully-async OFT adapter activation requires --pause-generation-mode retract")
 
     adapter_versioning = (peft_method != "none" and use_distribute) or adapter_double_buffer
 
