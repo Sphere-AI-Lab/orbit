@@ -10,6 +10,7 @@ A few are purely demonstrative, but most are verifiable against a concrete perfo
 
 End-to-end training workflows — the place to start.
 
+- **[adapter_first](/examples/adapter-first)**: GSM8K LoRA/OFT recipes for Qwen2.5-0.5B and Qwen3-4B with BF16 or FP8 training.
 - **[disk_delta_weight_sync](/examples/disk-delta-weight-sync)**: Disk-mediated delta weight sync for trainer→rollout updates without a direct NCCL path.
 - **[geo3k_vlm](/examples/geo3k-vlm)**: Training VLMs with FSDP using GRPO on the GEO3K dataset.
   - **[multi_turn](/examples/geo3k-vlm/multi-turn)**: The same dataset over multiple turns, with the model cropping images through an interactive environment.

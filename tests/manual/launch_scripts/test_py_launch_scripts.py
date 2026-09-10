@@ -166,3 +166,47 @@ class TestDiscovery:
         import orbit.utils.external_utils.command_utils as command_utils
 
         assert command_utils.ExecuteTrainConfig().num_nodes == 1
+
+
+class TestAdapterFirstVariants:
+    @pytest.mark.parametrize("name", ["run_qwen25_05b_gsm8k", "run_qwen3_4b_fp8_gsm8k"])
+    def test_lora_commands_match_snapshot(self, monkeypatch, tmp_path, name):
+        freeze_environment(monkeypatch)
+        recording = install_command_recorder(monkeypatch)
+        rel = f"examples/adapter_first/{name}.py"
+        module = import_launch_script(REPO_ROOT / rel)
+        call_entrypoint(module, "execute", {"peft_method": "lora"}, sandbox=tmp_path)
+        assert_matches_snapshot(
+            _SNAPSHOT_DIR / rel / "execute_lora.txt",
+            format_recording(recording, sandbox=tmp_path),
+            f"{rel}::execute[lora]",
+        )
+
+    @pytest.mark.parametrize(
+        "overrides,message",
+        [
+            ({"peft_method": "lora"}, "supports OFT only"),
+            ({"num_nodes": 2}, "one disaggregated node"),
+            ({"actor_gpus": 8}, "must equal num_gpus_per_node"),
+            ({"tensor_parallel_size": 3}, "must divide actor_gpus"),
+        ],
+    )
+    def test_invalid_native_layout_does_not_issue_commands(self, monkeypatch, tmp_path, overrides, message):
+        recording = install_command_recorder(monkeypatch)
+        module = import_launch_script(
+            REPO_ROOT / "examples/adapter_first/run_qwen3_4b_fp8_native_oft_gsm8k.py"
+        )
+        with pytest.raises(ValueError, match=message):
+            call_entrypoint(module, "execute", overrides, sandbox=tmp_path)
+        assert not recording.commands
+
+    def test_wandb_entity_reaches_external_ray_workers(self, monkeypatch):
+        module = import_launch_script(REPO_ROOT / "examples/adapter_first/run_qwen25_05b_gsm8k.py")
+        submitted = []
+        monkeypatch.setenv("WANDB_ENTITY", "selected-team")
+        monkeypatch.setenv("ORBIT_SCRIPT_EXTERNAL_RAY", "1")
+        monkeypatch.setattr(module.U, "execute_train", lambda **kwargs: submitted.append(kwargs))
+
+        module.execute(module.ScriptArgs())
+
+        assert submitted[0]["extra_env_vars"]["WANDB_ENTITY"] == "selected-team"

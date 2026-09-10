@@ -31,6 +31,7 @@ _FROZEN_ENV = {
 
 CLEARED_ENV = (
     "CUDA_VISIBLE_DEVICES",
+    "WANDB_ENTITY",
     "GITHUB_COMMIT_NAME",
     "GLOO_SOCKET_IFNAME",
     "KEEP_MOE_LORA",
@@ -70,7 +71,11 @@ class PyLaunchScript:
 
 
 def iter_py_launch_scripts() -> list[PyLaunchScript]:
-    paths = sorted((REPO_ROOT / "scripts").rglob("run_*.py"))
+    paths = sorted(
+        path
+        for root in (REPO_ROOT / "scripts", REPO_ROOT / "examples" / "adapter_first")
+        for path in root.rglob("run_*.py")
+    )
     return [PyLaunchScript(path=path, entrypoints=tuple(_entrypoint_names(path))) for path in paths]
 
 
