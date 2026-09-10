@@ -205,17 +205,19 @@ async def test_recompute_samples_flushes_each_batch_and_batches_prefill_score(mo
 
 
 @pytest.mark.asyncio
-async def test_recompute_uses_per_sample_adapter_lora_path(monkeypatch):
-    """Multi-LoRA: the scoring request must go to the sample's own slot adapter,
-    not the single-adapter name (which is never registered on those engines)."""
+@pytest.mark.parametrize(
+    "adapter,expected_path",
+    [(None, "orbit_lora"), (AdapterRef(name="run-a", slot=3), "__orbit_slot_3")],
+)
+async def test_recompute_selects_lora_adapter(monkeypatch, adapter, expected_path):
+    """Scoring selects the single adapter or the sample's explicit slot."""
     sample = Sample(
         tokens=[10, 11, 20],
         response_length=1,
         status=Sample.Status.COMPLETED,
-        adapter=AdapterRef(name="run-a", slot=3),
+        adapter=adapter,
     )
-    # Multi-LoRA forces lora_rank > 0, so is_lora_enabled(args) is always true.
-    args = SimpleNamespace(recompute_logprobs_via_prefill=True, lora_rank=8)
+    args = SimpleNamespace(recompute_logprobs_via_prefill=True, peft_method="lora", lora_rank=8)
     seen = {}
 
     async def fake_post(url, payload, headers=None):
@@ -231,7 +233,7 @@ async def test_recompute_uses_per_sample_adapter_lora_path(monkeypatch):
         sampling_params={},
     )
 
-    assert seen["payload"]["lora_path"] == "__orbit_slot_3"
+    assert seen["payload"]["lora_path"] == expected_path
     assert sample.rollout_log_probs == [-0.5]
 
 

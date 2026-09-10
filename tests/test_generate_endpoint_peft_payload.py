@@ -16,7 +16,7 @@ def _args(peft_method: str) -> Namespace:
     )
 
 
-def test_compute_request_payload_omits_legacy_selector_for_unified_lora():
+def test_compute_request_payload_selects_native_lora_adapter():
     payload, halt_status = compute_request_payload(
         _args("lora"),
         input_ids=[1, 2, 3],
@@ -25,11 +25,7 @@ def test_compute_request_payload_omits_legacy_selector_for_unified_lora():
 
     assert halt_status is None
     assert payload is not None
-    # LoRA names NO adapter on the wire. It routes through the fork's
-    # single-active peft/lora, which applies the index-0 adapter
-    # unconditionally; sending an adapter key 400s in upstream's
-    # _validate_and_resolve_lora when enable_lora is unset.
-    assert "lora_path" not in payload
+    assert payload["lora_path"] == "orbit_lora"
     assert "adapter_path" not in payload
     assert "oft_path" not in payload
 

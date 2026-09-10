@@ -203,7 +203,7 @@ async def generate(args: Namespace, sample: Sample, sampling_params: dict[str, A
         payload["lora_path"] = slot_lora_name(sample.adapter.slot)
         payload["rid"] = make_rid(sample.adapter.name)
         payload["extra_key"] = f"{sample.adapter.name}:v{adapter.version}"
-    elif lora_rollout_enabled(args) and getattr(args, "peft_method", "none") != "lora":
+    elif lora_rollout_enabled(args):
         payload["lora_path"] = LORA_ADAPTER_NAME
 
     attach_peft_request_payload(args, payload)

@@ -75,7 +75,7 @@ def compute_request_payload(
         "return_routed_experts": args.use_rollout_routing_replay,
         "return_indexer_topk": args.use_rollout_indexer_replay,
     }
-    if lora_rollout_enabled(args) and get_peft_method(args) != "lora":
+    if lora_rollout_enabled(args):
         payload["lora_path"] = LORA_ADAPTER_NAME
     if image_data := (multimodal_inputs or {}).get("images"):
         payload["image_data"] = [encode_image_for_rollout_engine(image) for image in image_data]
@@ -87,11 +87,7 @@ def compute_request_payload(
 
 def attach_peft_request_payload(args, payload: dict[str, Any]) -> dict[str, Any]:
     peft_method = get_peft_method(args)
-    # LoRA is routed through the fork's SINGLE-ACTIVE peft/lora (peft_method="lora",
-    # see sglang_engine.py) -- NOT upstream's multi-tenant LoRAManager. The
-    # single-active path applies the index-0 adapter unconditionally, so the
-    # generate request must NOT name an adapter (sending lora_path 400s in
-    # upstream's _validate_and_resolve_lora when enable_lora is unset).
+    # Native LoRA selects its adapter through lora_path, attached by callers.
     # OFT runs multi-slot (base slot 0 + adapter slot 1). Submission SGLang
     # uses oft_path; other builds expose the unified adapter_path wire key.
     if peft_method == "oft" and not os.environ.get("ORBIT_DSV4_DISABLE_OFT_REQUEST"):
